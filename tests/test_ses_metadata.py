@@ -19,11 +19,17 @@ from weaver.ses import (
     parse_sql_document,
 )
 
+# Fixtures follow the layout convention: a blank line between subsections, so
+# the convention is learned by reading rather than by being told.
 TABLE_YAML = """
 Table ID: Sales.Order
+
 Description: One row per customer order.
+
 Lineage: Sales system order export.
+
 Primary key: Order id
+
 Schema:
   Order id: string
   Order date: date
@@ -32,8 +38,11 @@ Schema:
 
 FOLDER_YAML = """
 Folder ID: Sales.OrderExport
+
 Description: Raw order export files.
+
 Lineage: Nightly drop from the sales system.
+
 File key: "*.csv"
 """
 
@@ -132,6 +141,88 @@ def test_a_literal_dollar_can_be_escaped():
                                         "Description: Amounts are in $$AUD."))
     assert document.description.literal == "Amounts are in $AUD."
     assert not document.description.is_reference
+
+
+# --- notes and revision notes ----------------------------------------------
+
+
+def test_notes_are_free_range():
+    """Unpoliced by design — no reference parsing, no placeholder rules."""
+    document = parse(TABLE_YAML + "\nNotes: |\n  Amounts are $AUD.\n  TBD whether tax is included.")
+    assert document.notes.startswith("Amounts are $AUD.")
+
+
+def test_notes_must_not_be_blank_when_present():
+    with pytest.raises(MetadataError, match="Notes"):
+        parse(TABLE_YAML + "\nNotes: '   '")
+
+
+def test_revision_notes_keep_their_date_and_note():
+    document = parse(
+        TABLE_YAML + "\nRevision notes:\n  - 2026-07-23 Added the amount column."
+    )
+    assert document.revision_notes[0].date == "2026-07-23"
+    assert document.revision_notes[0].note == "Added the amount column."
+    assert document.revision_date_format == "YYYY-MM-DD"
+
+
+@pytest.mark.parametrize(
+    "entry,shape",
+    [
+        ("2026-07-23 note", "YYYY-MM-DD"),
+        ("2026/07/23 note", "YYYY/MM/DD"),
+        ("23/07/2026 note", "DD/MM/YYYY"),
+        ("23-07-2026 note", "DD-MM-YYYY"),
+        ("23.07.2026 note", "DD.MM.YYYY"),
+    ],
+)
+def test_any_consistent_date_spelling_is_accepted(entry, shape):
+    document = parse(TABLE_YAML + f"\nRevision notes:\n  - {entry}")
+    assert document.revision_date_format == shape
+
+
+def test_mixing_date_formats_within_an_object_is_refused():
+    with pytest.raises(MetadataError, match="mix date formats"):
+        parse(
+            TABLE_YAML
+            + "\nRevision notes:\n  - 2026-07-23 first\n  - 24/07/2026 second"
+        )
+
+
+def test_month_first_and_day_first_are_the_same_shape():
+    """Indistinguishable, so Weaver checks the shape rather than the reading."""
+    document = parse(
+        TABLE_YAML + "\nRevision notes:\n  - 07/23/2026 first\n  - 24/07/2026 second"
+    )
+    assert document.revision_date_format == "DD/MM/YYYY"
+
+
+def test_an_entry_without_a_date_is_refused():
+    with pytest.raises(MetadataError, match="must open with a date"):
+        parse(TABLE_YAML + "\nRevision notes:\n  - Added the amount column.")
+
+
+def test_an_entry_with_a_date_but_no_note_is_refused():
+    with pytest.raises(MetadataError, match="no note"):
+        parse(TABLE_YAML + "\nRevision notes:\n  - 2026-07-23")
+
+
+def test_an_impossible_date_is_refused():
+    with pytest.raises(MetadataError, match="real date"):
+        parse(TABLE_YAML + "\nRevision notes:\n  - 2026-13-45 nonsense")
+
+
+def test_revision_notes_must_be_a_list():
+    with pytest.raises(MetadataError, match="YAML list"):
+        parse(TABLE_YAML + "\nRevision notes: 2026-07-23 one note")
+
+
+def test_notes_and_revision_notes_apply_to_every_kind():
+    document = parse(
+        FOLDER_YAML + "\nNotes: Free text.\nRevision notes:\n  - 2026-07-23 Created."
+    )
+    assert document.notes == "Free text."
+    assert len(document.revision_notes) == 1
 
 
 # --- column set versus column list -----------------------------------------

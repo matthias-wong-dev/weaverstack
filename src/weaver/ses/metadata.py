@@ -17,6 +17,27 @@ resolved at build. :attr:`SesDocument.defers_column_validation` says so.
 Nothing here imports the module it describes, reads a file, or resolves a
 reference to another object. Reference resolution needs sibling documents and
 belongs with the repository reader.
+
+**Layout convention.** Separate each subsection with a blank line. This is not
+enforced — YAML does not care — but the header is the contract a reader meets
+first, and a wall of keys is a worse contract than a legible one::
+
+    Table ID: Sales.Order
+
+    Description: One row per confirmed customer order.
+
+    Lineage: $Sales.OrderExport
+
+    Primary key: Order id
+
+    Schema:
+      Order id: string
+      Order date: date
+
+    Revision notes:
+      - 2026-07-23 Added the amount column.
+
+Fixtures and examples follow it so the convention is learned by reading.
 """
 
 from __future__ import annotations
@@ -24,6 +45,7 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any
 
 import yaml
@@ -43,7 +65,14 @@ _ID_KEYS = {"Folder ID": FOLDER, "Table ID": TABLE, "View ID": VIEW}
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
 
 # Keys accepted per kind. Anything else is a typo and is refused by name.
-_COMMON_KEYS = {"Description", "Lineage", "Static", "Prohibit rebuild"}
+_COMMON_KEYS = {
+    "Description",
+    "Lineage",
+    "Notes",
+    "Revision notes",
+    "Static",
+    "Prohibit rebuild",
+}
 _KIND_KEYS = {
     FOLDER: {"File key", "Incremental"},
     TABLE: {
@@ -77,6 +106,18 @@ _LIST_KEYS = {"Not null"}
 _SET_KEYS = {"Primary key", "Comparison columns"}
 
 _REFERENCE = re.compile(r"^\$([^.\[\]$]+)\.([^.\[\]$]+)(?:\[([^\[\]$]+)\])?$")
+
+# A revision entry opens with a date. Which spelling is the developer's choice;
+# holding to one spelling within a document is not, because a mixed list cannot
+# be read in order at a glance. Day-first and month-first share a shape and are
+# not told apart — Weaver checks the shape, not the reading.
+_REVISION_DATE_SHAPES = (
+    ("YYYY-MM-DD", re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?=\s|$)"), True),
+    ("YYYY/MM/DD", re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})(?=\s|$)"), True),
+    ("DD/MM/YYYY", re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?=\s|$)"), False),
+    ("DD-MM-YYYY", re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{4})(?=\s|$)"), False),
+    ("DD.MM.YYYY", re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})(?=\s|$)"), False),
+)
 
 
 # --- audit columns ---------------------------------------------------------
@@ -166,6 +207,17 @@ class MetadataText:
 
 
 @dataclass(frozen=True)
+class Revision:
+    """One dated entry in the object's revision history."""
+
+    date: str
+    note: str
+
+    def __str__(self) -> str:
+        return f"{self.date} {self.note}"
+
+
+@dataclass(frozen=True)
 class Column:
     """One column of a table or view."""
 
@@ -188,6 +240,9 @@ class SesDocument:
     object_id: ObjectId
     description: MetadataText
     lineage: MetadataText
+    notes: str | None = None
+    revision_notes: tuple[Revision, ...] = ()
+    revision_date_format: str | None = None
     schema: tuple[Column, ...] = ()
     primary_key: tuple[str, ...] = ()
     declared_not_null: tuple[str, ...] = ()
@@ -352,6 +407,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 
     description = _parse_text(loaded, "Description")
     lineage = _parse_text(loaded, "Lineage")
+    notes = _parse_notes(loaded.get("Notes"))
+    revisions, revision_format = _parse_revision_notes(loaded.get("Revision notes"))
     static = _parse_bool(loaded.get("Static"), "Static")
     prohibit_rebuild = _parse_flag_with_default(
         loaded, "Prohibit rebuild", default=kind == FOLDER
@@ -370,7 +427,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     declared_not_null = _parse_column_list(loaded.get("Not null"), "Not null")
     identity = _parse_identity(loaded.get("Identity"))
     comparison = _parse_column_set(loaded.get("Comparison columns"), "Comparison columns")
-    notes = _parse_column_notes(loaded.get("Column notes"))
+    column_notes = _parse_column_notes(loaded.get("Column notes"))
 
     _validate_columns(
         kind=kind,
@@ -379,7 +436,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         declared_not_null=declared_not_null,
         identity=identity,
         comparison=comparison,
-        notes=notes,
+        notes=column_notes,
     )
 
     if kind == TABLE:
@@ -396,7 +453,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             "so there is nothing to accumulate"
         )
 
-    schema = _apply_column_details(declared_columns, notes, primary_key, declared_not_null)
+    schema = _apply_column_details(declared_columns, column_notes, primary_key, declared_not_null)
 
     return SesDocument(
         kind=kind,
@@ -404,6 +461,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         object_id=object_id,
         description=description,
         lineage=lineage,
+        notes=notes,
+        revision_notes=revisions,
+        revision_date_format=revision_format,
         schema=schema,
         primary_key=primary_key,
         declared_not_null=declared_not_null,
@@ -476,6 +536,82 @@ def _parse_text_value(value: str, key: str) -> MetadataText:
     if literal.lower() in _PLACEHOLDERS:
         raise MetadataError(f"{key} must not be a placeholder value ({literal!r})")
     return MetadataText(literal=literal)
+
+
+def _parse_notes(value: Any) -> str | None:
+    """Free-range commentary. Deliberately unpoliced.
+
+    No reference parsing and no placeholder check: this is where an author
+    writes whatever helps, including a dollar sign.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise MetadataError("Notes must be non-empty text when present")
+    return value.strip()
+
+
+def _parse_revision_notes(value: Any) -> tuple[tuple[Revision, ...], str | None]:
+    if value is None:
+        return (), None
+    if not isinstance(value, list) or not value:
+        raise MetadataError(
+            "Revision notes must be a non-empty YAML list, each entry opening with a date:\n"
+            "Revision notes:\n  - 2026-07-23 Added the amount column."
+        )
+
+    revisions: list[Revision] = []
+    shape: str | None = None
+    for entry in value:
+        if isinstance(entry, (date, datetime)):
+            # YAML resolves a bare `- 2026-07-23` to a date rather than text.
+            raise MetadataError(
+                f"Revision notes entry {entry} has a date but no note"
+            )
+        if not isinstance(entry, str) or not entry.strip():
+            raise MetadataError("Revision notes entries must be non-empty text")
+        text = entry.strip()
+        matched = _match_revision_date(text)
+        if matched is None:
+            raise MetadataError(
+                f"a Revision notes entry must open with a date, got {text!r}. "
+                "Any consistent spelling is accepted, such as 2026-07-23 or 23/07/2026."
+            )
+        entry_shape, date_text = matched
+        if shape is None:
+            shape = entry_shape
+        elif entry_shape != shape:
+            raise MetadataError(
+                f"Revision notes mix date formats — {shape} was used first, "
+                f"then {entry_shape} in {text!r}. Use one spelling throughout an object."
+            )
+        note = text[len(date_text):].strip()
+        if not note:
+            raise MetadataError(f"Revision notes entry {text!r} has a date but no note")
+        revisions.append(Revision(date=date_text, note=note))
+    return tuple(revisions), shape
+
+
+def _match_revision_date(text: str) -> tuple[str, str] | None:
+    for shape, pattern, year_first in _REVISION_DATE_SHAPES:
+        match = pattern.match(text)
+        if match is None:
+            continue
+        first, second, third = (int(part) for part in match.groups())
+        if year_first:
+            month, day = second, third
+            plausible = 1 <= month <= 12 and 1 <= day <= 31
+        else:
+            # Day-first and month-first are indistinguishable, so accept either
+            # reading rather than pretend to know which was meant.
+            plausible = (
+                1 <= first <= 31 and 1 <= second <= 31 and (first <= 12 or second <= 12)
+            )
+        if not plausible:
+            raise MetadataError(f"Revision notes entry does not open with a real date: {text!r}")
+        return shape, match.group(0)
+    return None
 
 
 def _parse_bool(value: Any, key: str) -> bool:
