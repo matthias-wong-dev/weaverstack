@@ -33,7 +33,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..errors import DiscoveryError
-from ..objects import BASE_CLASSES
+from ..objects import BASE_CLASSES, BASE_CLASS_NAMES
 from .metadata import (
     FOLDER,
     PYTHON,
@@ -212,15 +212,28 @@ def _read_python(
 
     module = ast.parse(text)
     expected_class = _stem(relative_path, PYTHON)
-    classes = [node for node in module.body if isinstance(node, ast.ClassDef)]
-    if len(classes) != 1:
-        found = ", ".join(node.name for node in classes) or "none"
+
+    # Ordinary helper classes may live alongside the object. What must be
+    # unique is the *Weaver* class — the one inheriting Folder, Table or View.
+    candidates = [
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef)
+        and any(_base_name(base) in BASE_CLASS_NAMES for base in node.bases)
+    ]
+    if not candidates:
         raise DiscoveryError(
-            f"{relative_path}: must define exactly one class named {expected_class!r}, "
-            f"found {found}"
+            f"{relative_path}: must define a class inheriting "
+            f"{BASE_CLASSES[document.kind].__name__} directly, and none does"
+        )
+    if len(candidates) > 1:
+        found = ", ".join(node.name for node in candidates)
+        raise DiscoveryError(
+            f"{relative_path}: defines more than one Weaver object class ({found}) — "
+            "one file declares one object"
         )
 
-    declared = classes[0]
+    declared = candidates[0]
     if declared.name != expected_class:
         raise DiscoveryError(
             f"{relative_path}: defines class {declared.name!r} but the file names "

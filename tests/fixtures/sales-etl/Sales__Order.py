@@ -36,6 +36,6 @@ from ._helpers.dates import parse_order_date
 
 class Sales__Order(Table):
     def read(self):
-        source = Sales__OrderExport.path()
+        source = Sales__OrderExport.folder_path()
         rows = parse_order_date(source)
         return rows, []

@@ -162,13 +162,31 @@ def _reject_duplicate_ids(documents: Iterable[SourceDocument]) -> None:
         seen[document.qualified] = document.relative_path
 
 
+def importable_module_name(relative_path: str) -> str | None:
+    """The full dotted module a repository-relative path is importable as.
+
+    ``_helpers/dates.py`` is ``_helpers.dates``, not ``dates`` — a nested module
+    lives in its package's namespace and cannot shadow a top-level one.
+    ``_helpers/__init__.py`` is the package itself, ``_helpers``.
+    """
+
+    if not relative_path.endswith(".py"):
+        return None
+    stem = relative_path[: -len(".py")]
+    if stem.endswith("/__init__"):
+        stem = stem[: -len("/__init__")]
+    return stem.replace("/", ".")
+
+
 def _reject_module_collisions(
     documents: Iterable[SourceDocument], support: Iterable[str]
 ) -> None:
-    """A helper must not share a module name with an object.
+    """A helper must not be importable under an object's module name.
 
-    Dependencies are imports, so a helper importable under an object's module
-    name would silently become a dependency on that object.
+    Dependencies are imports, so a helper reachable by an object's module name
+    would silently be read as a dependency on that object. Comparison is on the
+    *complete* dotted name: ``parsers/Sales__Order.py`` is
+    ``parsers.Sales__Order`` and collides with nothing.
     """
 
     object_modules = {
@@ -177,15 +195,12 @@ def _reject_module_collisions(
         if document.module_name is not None
     }
     for relative in support:
-        parts = relative.split("/")
-        if not parts[-1].endswith(".py"):
-            continue
-        module = parts[-1][: -len(".py")]
-        if module in object_modules:
+        module = importable_module_name(relative)
+        if module is not None and module in object_modules:
             raise DiscoveryError(
-                f"{relative} shares the module name {module!r} with the object "
-                f"{object_modules[module]} — an import of it would be read as a "
-                "dependency on that object"
+                f"{relative} is importable as {module!r}, the same module as the "
+                f"object {object_modules[module]} — an import of it would be read "
+                "as a dependency on that object"
             )
 
 

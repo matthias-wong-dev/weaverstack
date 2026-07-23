@@ -17,16 +17,22 @@ An object is a class in a file named for its ID::
       Amount: decimal(18,2)
     \"\"\"
 
-    from Sales__Customer import Sales__Customer as Customer
+    from Sales__Customer import Sales__Customer
 
     from weaver import Table
 
 
     class Sales__Order(Table):
         def read(self):
-            customers = Customer.dataframe()
+            customers = Sales__Customer.dataframe()
             ...
             return upserts, deletes
+
+An object reaches its *own* destination through ``self.path``; it reaches a
+*dependency's* through that object's classmethod — ``dataframe()`` for a table
+or view, ``folder_path()`` for a folder. The two are deliberately different
+names: a classmethod named ``path`` would replace the inherited ``self.path``
+property on every Folder.
 
 **Dependencies are imports.** Importing another object's module declares a
 dependency on it; Weaver reads that from the source without executing it. There
@@ -143,8 +149,13 @@ class Folder(WeaverObject):
     """
 
     @classmethod
-    def path(cls) -> Any:  # type: ignore[override]
-        """This folder's materialised location, for a dependent object."""
+    def folder_path(cls) -> Any:
+        """This folder's materialised location, for a dependent object.
+
+        Not ``path()``: that name belongs to the instance property every object
+        uses for its *own* destination, and a classmethod of the same name
+        would replace it — silently, since a bound method is truthy.
+        """
 
         return cls._resolve("path")
 

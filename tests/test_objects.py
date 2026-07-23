@@ -69,9 +69,22 @@ def test_a_dependency_resolves_through_the_running_workflow():
 def test_a_folder_dependency_resolves_a_path():
     token = _active_resolver.set(lambda cls, accessor: f"{cls.__name__}:{accessor}")
     try:
-        assert Sales__Export.path() == "Sales__Export:path"
+        assert Sales__Export.folder_path() == "Sales__Export:path"
     finally:
         _active_resolver.reset(token)
+
+
+def test_a_folders_own_path_is_not_shadowed_by_the_accessor():
+    """A classmethod named `path` would replace the inherited property —
+    silently, because a bound method is truthy."""
+    context = FakeContext(object_path="/srv/.local/Sales/Files/Sales/Export")
+    assert Sales__Export(context).path == "/srv/.local/Sales/Files/Sales/Export"
+
+
+def test_the_two_path_concepts_have_different_names():
+    assert "path" in vars(WeaverObject)
+    assert "path" not in vars(Folder)
+    assert "folder_path" in vars(Folder)
 
 
 def test_accessors_explain_themselves_outside_a_workflow():

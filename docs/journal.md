@@ -245,8 +245,12 @@ constraint and uses the dot. The class carries the *full* name rather than just
 the object part, so `from Sales__Order import Sales__Order` says exactly which
 object it names at the call site — explicit over short.
 
-**The read contract.** Python: exactly one class, the base matching the
-declared kind, exactly one `def read(self)`. Two `read` definitions is an error
+**The read contract.** Python: exactly one class *inheriting a Weaver base*,
+named for the file, with the base matching the declared kind and exactly one
+`def read(self)`. Ordinary helper classes may sit beside it — only the Weaver
+class must be unique. Candidates are found by direct base name, so an object
+inheriting through an intermediate class of its own is not recognised; that is
+the price of never importing the module. Two `read` definitions is an error
 rather than a shrug — the later silently replaces the earlier. SQL: exactly one
 result-producing statement.
 
@@ -273,8 +277,17 @@ wraps the body in `CREATE VIEW`, and a view definition cannot contain a script.
 A Table may do as much intermediate work as it likes.
 
 **Objects live at the root; subdirectories are support.** `_`-prefixed root
-files are not objects. A helper may not share a module name with an object,
-because an import of it would be read as a dependency on that object.
+files are not objects. A helper may not be importable *under an object's
+module name*, because an import of it would be read as a dependency on that
+object — compared on the complete dotted path, so `parsers/Sales__Order.py` is
+`parsers.Sales__Order` and collides with nothing.
+
+**`self.path` and `Folder.folder_path()` are deliberately different names.**
+The dependency accessor was first written as `Folder.path()`, which replaced
+the inherited `self.path` property on every Folder — silently, because a bound
+method is truthy, so the failure surfaced later as a confusing `TypeError`. An
+object reaches its own destination through `self.path`; it reaches a
+dependency's through that object's classmethod.
 
 **Parses are kept.** `SourceDocument` holds the Python AST and the SQL split
 beside the `SesDocument`, so later checkpoints read the repository once rather

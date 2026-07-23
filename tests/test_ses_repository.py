@@ -143,16 +143,37 @@ def test_the_class_must_carry_the_full_name(repo_dir):
         read_repository(root)
 
 
-def test_exactly_one_class_per_file(repo_dir):
-    root = write(repo_dir, "Sales__Order.py", PY_TABLE + "\n\nclass Helper:\n    pass\n")
-    with pytest.raises(DiscoveryError, match="exactly one class"):
+def test_helper_classes_may_live_beside_the_object(repo_dir):
+    """Only the Weaver class must be unique, not every class."""
+    source = PY_TABLE.replace(
+        "class Sales__Order(Table):",
+        "class OrderParser:\n    pass\n\n\nclass Sales__Order(Table):",
+    )
+    root = write(repo_dir, "Sales__Order.py", source)
+    assert read_repository(root)["Sales.Order"].class_name == "Sales__Order"
+
+
+def test_two_weaver_classes_in_one_file_are_refused(repo_dir):
+    source = PY_TABLE + "\n\nclass Sales__Other(Table):\n    def read(self):\n        return [], []\n"
+    root = write(repo_dir, "Sales__Order.py", source)
+    with pytest.raises(DiscoveryError, match="more than one Weaver object class"):
         read_repository(root)
 
 
-def test_a_file_with_no_class_is_refused(repo_dir):
-    source = PY_TABLE.split("class ")[0]
+def test_a_file_with_no_weaver_class_is_refused(repo_dir):
+    source = PY_TABLE.replace("class Sales__Order(Table):", "class Sales__Order:")
     root = write(repo_dir, "Sales__Order.py", source)
-    with pytest.raises(DiscoveryError, match="found none"):
+    with pytest.raises(DiscoveryError, match="none does"):
+        read_repository(root)
+
+
+def test_a_misnamed_weaver_class_is_refused(repo_dir):
+    source = PY_TABLE.replace(
+        "class Sales__Order(Table):",
+        "class OrderParser:\n    pass\n\n\nclass WrongName(Table):",
+    )
+    root = write(repo_dir, "Sales__Order.py", source)
+    with pytest.raises(DiscoveryError, match="all carry the same name"):
         read_repository(root)
 
 
@@ -321,13 +342,22 @@ def test_duplicate_object_ids_are_refused(repo_dir):
         read_repository(Location(str(repo_dir)))
 
 
-def test_a_helper_may_not_shadow_an_object_module(repo_dir):
-    """An import of it would be read as a dependency on that object."""
+def test_a_nested_helper_may_reuse_an_object_filename(repo_dir):
+    """`parsers.Sales__Order` is not `Sales__Order` — no collision."""
     (repo_dir / "Sales__Order.py").write_text(PY_TABLE, encoding="utf-8")
-    (repo_dir / "_helpers").mkdir()
-    (repo_dir / "_helpers" / "Sales__Order.py").write_text("x = 1\n", encoding="utf-8")
-    with pytest.raises(DiscoveryError, match="shares the module name"):
-        read_repository(Location(str(repo_dir)))
+    (repo_dir / "parsers").mkdir()
+    (repo_dir / "parsers" / "Sales__Order.py").write_text("def parse(): ...\n", encoding="utf-8")
+    repo = read_repository(Location(str(repo_dir)))
+    assert repo.support_files == ("parsers/Sales__Order.py",)
+
+
+def test_a_package_initialiser_names_its_package():
+    from weaver.ses.repository import importable_module_name
+
+    assert importable_module_name("_helpers/__init__.py") == "_helpers"
+    assert importable_module_name("_helpers/dates.py") == "_helpers.dates"
+    assert importable_module_name("Sales__Order.py") == "Sales__Order"
+    assert importable_module_name("notes.md") is None
 
 
 def test_underscore_prefixed_root_files_are_not_objects(repo_dir):
