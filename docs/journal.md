@@ -552,11 +552,30 @@ be a root *within* `Files`, and a wipe respects that scope.
 from the catalogue views, and there is no local SQL to develop it against.
 
 A wipe clears the *target*, not merely what Weaver manages — which suits a
-development loop and makes it something a CLI must gate rather than something
-safe by default. `dry_run` reports without removing, and a guard refuses any
-location outside the host root. That guard should be unreachable, since
-locations are derived rather than supplied, which is exactly why it is worth
-having.
+development loop and makes it something the CLI has to gate. `dry_run` reports
+without removing, and a guard refuses any location outside the host root. That
+guard should be unreachable, since locations are derived rather than supplied,
+which is exactly why it is worth having.
+
+**On the command line the target is a positional, so it carries no kind.**
+Rather than three kind-flags, the *shape* decides: `Sales_LH` names an item and
+clears all of it, `Sales_LH/Files/Extracts` names a folder root and clears only
+that. What an item *is* comes from the host — locally every item is
+Lakehouse-shaped, on Fabric it must be asked for, which is why a Fabric wipe
+raises until item resolution exists.
+
+```bash
+weaver wipe Sales_LH --host MyLocal --config env.yml --dry-run
+weaver wipe MyWarehouse --host MyFabric --config env.yml
+```
+
+The plan is always printed first, then acted on. Without `--yes` it asks; with
+no terminal to ask on it refuses and says so, so a script cannot destroy
+something by omission. `--root` builds a local host without a config file, since
+nothing should require a file to be expressible.
+
+`_add_host_args` and `_resolve_host` are shared, so `build` and `load` inherit
+the same `--host`/`--config`/`--root` handling.
 
 ---
 

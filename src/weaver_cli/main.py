@@ -33,7 +33,101 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
     doctor.set_defaults(handler=handle_doctor)
 
+    wipe = subcommands.add_parser(
+        "wipe", help="clear a Lakehouse, a Warehouse, or one folder root"
+    )
+    wipe.add_argument(
+        "target",
+        nargs="+",
+        help="an item (Sales_LH) or a folder root (Sales_LH/Files/Extracts)",
+    )
+    _add_host_args(wipe)
+    wipe.add_argument("--dry-run", action="store_true", help="report without removing")
+    wipe.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    wipe.set_defaults(handler=handle_wipe)
+
     return parser
+
+
+def _add_host_args(parser: argparse.ArgumentParser) -> None:
+    """Where the work happens. A host is named in a config, or given directly.
+
+    The config is a convenience, so `--root` exists to build a local host
+    without one — nothing should require a file to be expressible.
+    """
+
+    parser.add_argument("--host", help="a host named in the config file")
+    parser.add_argument("--config", help="a hosts file, e.g. env.yml")
+    parser.add_argument("--root", help="a local host root, instead of --host/--config")
+
+
+def _resolve_host(args: argparse.Namespace):
+    from weaver import LocalHost, load_hosts
+    from weaver.errors import CommandError
+
+    if args.root:
+        if args.host or args.config:
+            raise CommandError("--root builds a host directly; drop --host and --config")
+        return LocalHost(root=args.root)
+
+    if not args.config:
+        raise CommandError("give --config with --host, or --root for a local host")
+    if not args.host:
+        raise CommandError("give --host to say which host in the config to use")
+
+    hosts = load_hosts(args.config)
+    if args.host not in hosts:
+        known = ", ".join(sorted(hosts)) or "none"
+        raise CommandError(f"no host {args.host!r} in {args.config} — found: {known}")
+    return hosts[args.host]
+
+
+def handle_wipe(args: argparse.Namespace) -> int:
+    """Clear the named targets.
+
+    A wipe removes everything in a target, not only what Weaver manages, so it
+    asks before doing it unless told not to.
+    """
+
+    from weaver import wipe_selection
+
+    host = _resolve_host(args)
+    planned = wipe_selection(args.target, host, dry_run=True)
+
+    print(f"wipe on {host.alias or host.__class__.__name__}\n")
+    for report in planned:
+        print(f"  {report.target}")
+        print(f"    {report.location}")
+        for name in report.removed:
+            print(f"      - {name}")
+        if not report.removed:
+            print("      (already empty)")
+    total = sum(report.count for report in planned)
+    print()
+
+    if args.dry_run:
+        print(f"{total} item(s) would be removed. Nothing was changed.")
+        return 0
+    if total == 0:
+        print("Nothing to remove.")
+        return 0
+
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print(
+                f"Refusing to remove {total} item(s) without confirmation. "
+                "Pass --yes, or --dry-run to preview.",
+                file=sys.stderr,
+            )
+            return 1
+        answer = input(f"Remove {total} item(s)? This cannot be undone [y/N] ")
+        if answer.strip().lower() not in {"y", "yes"}:
+            print("Cancelled.")
+            return 1
+
+    for report in wipe_selection(args.target, host):
+        print(f"  {report}")
+    return 0
 
 
 def handle_doctor(args: argparse.Namespace) -> int:

@@ -34,7 +34,7 @@ from .hosts import Host, LocalHost
 from .locations import Location
 from .resolution import LocalResolver
 from .store import LocalStore, Store
-from .targets import DeltaTarget, FolderTarget, WarehouseTarget
+from .targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 
 
 @dataclass(frozen=True)
@@ -180,4 +180,75 @@ def wipe(
         reports.append(wipe_delta_target(delta_target, host, store=store, dry_run=dry_run))
     if sql_target is not None:
         reports.append(wipe_sql_target(sql_target, host, store=store, dry_run=dry_run))
+    return tuple(reports)
+
+
+def wipe_item(
+    item: ItemRef,
+    host: Host,
+    *,
+    store: Store | None = None,
+    dry_run: bool = False,
+) -> tuple[WipeReport, ...]:
+    """Clear a whole level-three item.
+
+    A Lakehouse holds both areas, so wiping one clears its Files and its
+    Tables. What an item *is* comes from the host: locally every item is
+    Lakehouse-shaped, while on Fabric it has to be asked for.
+    """
+
+    if not isinstance(host, LocalHost):
+        raise NotImplementedError(
+            f"wiping {item.name!r} on a {type(host).__name__} is not implemented — "
+            "it needs Fabric item resolution to know whether the item is a "
+            "Lakehouse or a Warehouse"
+        )
+
+    store = store or LocalStore()
+    resolver = LocalResolver(host)
+    if not store.exists(resolver.item(item)):
+        raise CommandError(
+            f"{item.name!r} does not exist under {resolver.root} — nothing to wipe"
+        )
+
+    return (
+        wipe_folder_target(
+            FolderTarget(lakehouse=item), host, store=store, dry_run=dry_run
+        ),
+        wipe_delta_target(
+            DeltaTarget(lakehouse=item), host, store=store, dry_run=dry_run
+        ),
+    )
+
+
+def wipe_selection(
+    selection: Iterable[str],
+    host: Host,
+    *,
+    store: Store | None = None,
+    dry_run: bool = False,
+) -> tuple[WipeReport, ...]:
+    """Wipe each named target, reading its kind from its shape.
+
+    ``Sales_LH`` names an item and clears all of it.
+    ``Sales_LH/Files/Extracts`` names a folder root and clears only that.
+    """
+
+    names = list(selection)
+    if not names:
+        raise CommandError("wipe needs at least one target")
+
+    store = store or LocalStore()
+    reports: list[WipeReport] = []
+    for name in names:
+        if "/" in name:
+            reports.append(
+                wipe_folder_target(
+                    FolderTarget.parse(name), host, store=store, dry_run=dry_run
+                )
+            )
+        else:
+            reports.extend(
+                wipe_item(ItemRef.parse(name), host, store=store, dry_run=dry_run)
+            )
     return tuple(reports)
