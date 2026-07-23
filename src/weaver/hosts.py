@@ -94,6 +94,11 @@ class FabricHost(Host):
 
     workspace: str
     fabric_environment: str | None = None
+    #: Where the Weaver package is shipped so a Fabric session can import it,
+    #: as ``Lakehouse/Files/path``. A development bridge: once Weaver is
+    #: installed from PyPI into ``fabric_environment``, the bootstrap's
+    #: ``import weaver`` succeeds, this goes unused, and the key can be deleted.
+    weaver_install: str | None = None
     warehouse_config: Mapping[str, WarehouseSettings] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -105,6 +110,14 @@ class FabricHost(Host):
                 "fabric_environment",
                 validate_name(self.fabric_environment, what="fabric_environment"),
             )
+        if self.weaver_install is not None:
+            install = str(self.weaver_install).strip().strip("/")
+            if not install or "/" not in install:
+                raise ConfigError(
+                    "weaver_install must name a Lakehouse and a path beneath it, "
+                    f"as 'Weaver/Files/weaver' — got {self.weaver_install!r}"
+                )
+            object.__setattr__(self, "weaver_install", install)
         settings = {
             validate_name(name, what="warehouse_config key"): value
             for name, value in dict(self.warehouse_config).items()

@@ -77,6 +77,7 @@ def test_configurable_keys_are_derived_from_the_record():
         "workspace",
         "weaver_lakehouse",
         "fabric_environment",
+        "weaver_install",
         "warehouse_config",
     }
     assert LocalHost.configurable_keys() == {"type", "root", "weaver_lakehouse"}

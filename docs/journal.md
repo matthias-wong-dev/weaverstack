@@ -636,6 +636,53 @@ The operation stays whole so an implementation inside a Fabric session can use
 `notebookutils.fs.mv` instead — the caller never learns which happened, which is
 the point of having made it one operation rather than three.
 
+### Getting Weaver into Fabric
+
+The product claim is that someone opens a Fabric notebook, installs Weaver, and
+works. Everything built so far runs Weaver *on a laptop* and reaches into a
+workspace — which proves the modules and not the claim. See the core abstraction
+in `AGENTS.md`: that is row 2, and row 3 is the promise.
+
+Until PyPI, row 3 needs the package shipped into the workspace.
+
+**`weaver_install` is a host key**, not the derived convention argued for
+earlier. The convention would have been fine as plumbing, but this is the thing
+under test — a test that says "Weaver came from here and ran there" wants the
+location visible rather than inferred. The convention remains the default when
+the key is absent.
+
+**Sync compares content hashes, not timestamps.** "Periodically" leaves a window
+where the laptop's Weaver is newer than the workspace copy and results diverge
+silently, which is the worst kind of bug because everything appears to work. At
+62 KB the comparison is cheap enough to make every time.
+
+**The bootstrap tries `import weaver` first.** The day a Fabric Environment
+carries Weaver, the fallback is dead code and the host key can be deleted with
+nothing else changing.
+
+A bug worth recording, because it is the kind that only surfaces at run time:
+`import weaver` searches `sys.path` for a *directory named weaver*, so shipping
+to `Files/weaver` means inserting `Files`, not `Files/weaver`. The first version
+inserted the package directory itself.
+
+**Livy sessions are expensive to start and cheap to reuse**, so a session is
+held open across a batch rather than paid for per statement. A submitted program
+returns a value by printing a tagged JSON line, so a result can be told from
+whatever else was logged — printed output and returned values are otherwise the
+same channel.
+
+### Two Fabric behaviours, found by running it
+
+**A Lakehouse grows a `SQLEndpoint` sibling of the same name**, a little after
+creation. So item names are unique *per type*, not across types — a weaker
+guarantee than level three appeared to rest on. Resolving a name without a type
+ignores that facet, since a SQL endpoint is not something anyone addresses
+directly.
+
+**Fabric holds a deleted item's name for minutes**, answering
+`409 ItemDisplayNameNotAvailableYet`. Neither of these was guessable, and both
+were found within an hour of actually running against a tenant.
+
 ---
 
 ## Open questions

@@ -46,6 +46,80 @@ the genuinely new part.
 Add to the journal as part of the work, not afterwards — a checkpoint that
 changes a decision and leaves the journal stale is incomplete.
 
+## The core abstraction
+
+This is the thing that is hard to hold in your head, and the thing most likely
+to be got wrong by someone reading only the code in front of them.
+
+**Weaver is a system that runs inside Microsoft Fabric.** We develop it on a
+laptop against a local proxy, and we test it at both levels. Two axes, kept
+strictly apart:
+
+```text
+    WHERE THINGS ARE                 WHERE THE CODE RUNS
+    the host                         the executor
+
+    LocalHost   a root directory     in-process, on a laptop
+    FabricHost  one workspace        in-process, inside a Fabric session
+                                     submitted from outside, over Livy
+```
+
+They are independent, and three of the combinations are real:
+
+| | host | code runs | what it is |
+|---|---|---|---|
+| 1 | Local | laptop | development, and most of the test suite |
+| 2 | Fabric | laptop | the desktop CLI reaching into a workspace |
+| 3 | Fabric | **in Fabric** | **the product** — `pip install weaverstack` in a notebook |
+
+**The same Weaver code must run unchanged in all three.** Everything that
+differs is confined to two implementations behind one shape each:
+
+| | local | Fabric |
+|---|---|---|
+| resolver | `LocalResolver` | `FabricResolver` |
+| store | `LocalStore` | `FabricStore` (OneLake DFS) |
+
+Above those, nothing knows which host it is talking to. `resolver_for(host)` and
+`store_for(host)` choose; every caller is written once. If you find yourself
+adding `if isinstance(host, …)` above that line, the abstraction is being
+broken and the fix belongs below it, not above.
+
+### The local host is a proxy, not a toy
+
+`.local/Sales_LH/Files` and `.local/Sales_LH/Tables` mirror the shape a Fabric
+Lakehouse presents through OneLake, deliberately, so the same resolution
+arithmetic serves both. It exists so that most development and most of the test
+suite need no tenant, no capacity and no credentials — not because local is a
+lesser case.
+
+### Row 3 is the claim, and it is the least tested
+
+A user should be able to open a Fabric notebook, `pip install weaverstack`, and
+work. That is the product, and it is what distinguishes Weaver from tools that
+demand an orchestration environment of their own. **A Fabric test that runs
+Weaver on the laptop and reaches into a workspace over HTTP tests row 2, not
+row 3.** Both are worth having, but only row 3 is the promise.
+
+Until Weaver is installed from PyPI into a Fabric Environment, row 3 needs the
+package shipped into the workspace and imported from there — the
+`weaver_install` host key, kept in sync during development. When the Environment
+carries Weaver, the bootstrap's `import weaver` succeeds, the fallback goes
+unused, and the key can be deleted with nothing else changing.
+
+### What this means when you add a feature
+
+Ask, in order:
+
+1. Does it work against a `LocalHost`, with a test that needs no tenant?
+2. Does it work against a `FabricHost` from the laptop?
+3. Does it work with Weaver *running inside* Fabric?
+
+Answer all three, and answer them with tests that call the real function —
+not with test code that reproduces what the function would have done. That
+mistake has already been made once here: the first Fabric suite deleted files
+through the store directly and looked like it was testing `wipe`.
+
 ## Working protocol
 
 Construction follows numbered checkpoints in

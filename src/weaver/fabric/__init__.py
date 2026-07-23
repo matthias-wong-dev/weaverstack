@@ -8,6 +8,14 @@ from __future__ import annotations
 
 from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
 from .client import FabricClient, FabricError
+from .livy import LivyError, LivySession, StatementResult, emit_source
+from .runtime import (
+    SyncReport,
+    bootstrap_source,
+    install_location,
+    mounted_package_parent,
+    sync_runtime,
+)
 from .resolution import RUNTIME_AREA, FabricResolver
 from .onelake import FabricStore, abfss_root, onelake_url, parse_onelake
 from .resources import (
@@ -28,6 +36,15 @@ __all__ = [
     "capacity_command",
     "run_capacity_action",
     "FabricResolver",
+    "LivySession",
+    "LivyError",
+    "StatementResult",
+    "emit_source",
+    "sync_runtime",
+    "mounted_package_parent",
+    "SyncReport",
+    "install_location",
+    "bootstrap_source",
     "RUNTIME_AREA",
     "FabricStore",
     "abfss_root",
