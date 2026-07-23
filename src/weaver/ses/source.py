@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import codecs
 import hashlib
+import re
 from dataclasses import dataclass, field
 
 from ..errors import DiscoveryError
@@ -125,6 +126,7 @@ class SqlAnalysis:
     result_set_count: int | None
     #: Why the result-set count could not be established, when it could not.
     undetermined_because: str | None = None
+    statements: tuple[str, ...] = ()
 
     @property
     def determined(self) -> bool:
@@ -321,6 +323,15 @@ def _read_sql(
         )
 
     analysis = analyse_sql(body)
+    _reject_generated_ddl(relative_path, analysis)
+
+    if document.kind == VIEW and analysis.statement_count > 1:
+        raise DiscoveryError(
+            f"{relative_path}: a View is one query — Weaver wraps it in the CREATE "
+            f"VIEW, and a view definition cannot carry preceding statements. Found "
+            f"{analysis.statement_count}."
+        )
+
     if analysis.determined and analysis.result_set_count != 1:
         raise DiscoveryError(
             f"{relative_path}: a SQL object must produce exactly one result set, "
@@ -343,6 +354,37 @@ def _read_sql(
 #: the check stands down rather than blocking a file it cannot read.
 _DYNAMIC_SQL = ("exec ", "execute ", "sp_executesql")
 
+#: Intermediate scratch — allowed, because it is working, not the object.
+#: ``create temp view``, ``create temporary view``, ``create table #tmp``.
+_SCRATCH_DDL = re.compile(
+    r"^\s*create\s+(or\s+replace\s+)?(temp|temporary|local\s+temporary)\b"
+    r"|^\s*create\s+table\s+#",
+    re.IGNORECASE,
+)
+_PERMANENT_DDL = re.compile(
+    r"^\s*create\s+(or\s+replace\s+)?(view|table)\b", re.IGNORECASE
+)
+
+
+def _reject_generated_ddl(relative_path: str, analysis: "SqlAnalysis") -> None:
+    """The author writes the query; Weaver writes the CREATE.
+
+    A permanent ``create view`` or ``create table`` in the body means the author
+    is writing the wrapper Weaver generates — the object would be created twice,
+    under a name Weaver does not manage. Scratch objects are working state and
+    stay allowed.
+    """
+
+    for statement in analysis.statements:
+        if _SCRATCH_DDL.match(statement):
+            continue
+        if _PERMANENT_DDL.match(statement):
+            raise DiscoveryError(
+                f"{relative_path}: write only the query — Weaver generates the "
+                "CREATE for the object it manages. Temporary scratch objects "
+                "(create temp view, create table #tmp) are fine."
+            )
+
 
 def analyse_sql(body: str) -> SqlAnalysis:
     """Count result-producing statements, or report why that is unknowable.
@@ -360,6 +402,8 @@ def analyse_sql(body: str) -> SqlAnalysis:
         if str(statement).strip() and not _is_only_comments(statement)
     ]
 
+    texts = tuple(str(statement).strip() for statement in statements)
+
     lowered = body.lower()
     for marker in _DYNAMIC_SQL:
         if marker in lowered:
@@ -367,11 +411,13 @@ def analyse_sql(body: str) -> SqlAnalysis:
                 statement_count=len(statements),
                 result_set_count=None,
                 undetermined_because=f"the body uses dynamic SQL ({marker.strip()})",
+                statements=texts,
             )
 
     return SqlAnalysis(
         statement_count=len(statements),
         result_set_count=sum(1 for statement in statements if _returns_rows(statement)),
+        statements=texts,
     )
 
 

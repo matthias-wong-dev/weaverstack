@@ -349,3 +349,82 @@ def test_caches_are_ignored_entirely(repo_dir):
 def test_a_missing_root_is_reported(tmp_path):
     with pytest.raises(DiscoveryError, match="does not exist"):
         read_repository(Location(str(tmp_path / "absent")))
+
+
+# --- Weaver writes the CREATE ------------------------------------------------
+
+
+VIEW_SQL = """/*
+View ID: Reporting.OrderView
+
+Description: Orders for reporting.
+
+Lineage: The order table.
+*/
+
+select * from Reporting.Order
+"""
+
+
+def test_a_view_is_checked_for_one_result_set_too(repo_dir):
+    root = write(repo_dir, "Reporting.OrderView.sql", VIEW_SQL.replace(
+        "select * from Reporting.Order", "select 1 as [a];\nselect 2 as [b]"))
+    with pytest.raises(DiscoveryError, match="one query|one result set"):
+        read_repository(root)
+
+
+def test_a_view_is_a_single_statement(repo_dir):
+    """A view definition cannot carry preceding statements."""
+    body = VIEW_SQL.replace(
+        "select * from Reporting.Order",
+        "create or replace temp view scratch as select 1 as [a];\nselect * from scratch",
+    )
+    root = write(repo_dir, "Reporting.OrderView.sql", body)
+    with pytest.raises(DiscoveryError, match="a View is one query"):
+        read_repository(root)
+
+
+def test_a_table_may_do_intermediate_work(repo_dir):
+    body = SQL_TABLE.replace(
+        "select 1 as [Order id]",
+        "select 1 as [Order id] into #recent;\nselect * from #recent",
+    )
+    root = write(repo_dir, "Reporting.Order.sql", body)
+    assert read_repository(root)["Reporting.Order"].sql_analysis.result_set_count == 1
+
+
+def test_writing_the_create_view_yourself_is_refused(repo_dir):
+    """Weaver generates the CREATE; the author writes the query."""
+    body = VIEW_SQL.replace(
+        "select * from Reporting.Order",
+        "create or replace view Reporting.OrderView as select * from Reporting.Order",
+    )
+    root = write(repo_dir, "Reporting.OrderView.sql", body)
+    with pytest.raises(DiscoveryError, match="write only the query"):
+        read_repository(root)
+
+
+def test_writing_the_create_table_yourself_is_refused(repo_dir):
+    body = SQL_TABLE.replace(
+        "select 1 as [Order id]",
+        "create table Reporting.Order ([Order id] int);\nselect 1 as [Order id]",
+    )
+    root = write(repo_dir, "Reporting.Order.sql", body)
+    with pytest.raises(DiscoveryError, match="write only the query"):
+        read_repository(root)
+
+
+@pytest.mark.parametrize("scratch", [
+    "create or replace temp view scratch as select 1 as [a]",
+    "create temporary view scratch as select 1 as [a]",
+    "create table #scratch ([a] int)",
+])
+def test_temporary_scratch_is_working_state_not_the_object(repo_dir, scratch):
+    body = SQL_TABLE.replace("select 1 as [Order id]", f"{scratch};\nselect 1 as [Order id]")
+    root = write(repo_dir, "Reporting.Order.sql", body)
+    assert read_repository(root)["Reporting.Order"].sql_analysis.result_set_count == 1
+
+
+def test_the_example_view_is_one_statement():
+    repo = read_repository(FIXTURE)
+    assert repo["Reporting.OrderView"].sql_analysis.statement_count == 1

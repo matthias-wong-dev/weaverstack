@@ -261,6 +261,17 @@ changed since it was certified", and a checkout with `autocrlf` is not a
 changed file. The repository signature is one hash over sorted
 `(path, content hash)` pairs, covering support files too.
 
+**The author writes the query; Weaver writes the `CREATE`.** A permanent
+`create view` or `create table` in the body means the author is writing the
+wrapper Weaver generates — the object would be created twice, under a name
+Weaver does not manage. Temporary scratch (`create temp view`,
+`create table #tmp`) is working state and stays allowed.
+
+**A View is one statement.** It is checked for a single result set like any
+other SQL object, and additionally may not carry preceding statements: Weaver
+wraps the body in `CREATE VIEW`, and a view definition cannot contain a script.
+A Table may do as much intermediate work as it likes.
+
 **Objects live at the root; subdirectories are support.** `_`-prefixed root
 files are not objects. A helper may not share a module name with an object,
 because an import of it would be read as a dependency on that object.
