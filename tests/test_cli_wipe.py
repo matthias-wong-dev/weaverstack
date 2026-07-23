@@ -137,14 +137,20 @@ def test_root_and_config_are_alternatives(hosts_file, capsys):
     assert "drop --host and --hosts" in capsys.readouterr().err
 
 
-def test_a_fabric_host_says_what_is_missing(tmp_path, capsys):
-    config = tmp_path / "env.yml"
-    config.write_text(
-        "hosts:\n  MyFabric:\n    type: Fabric\n    workspace: Analytics\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(NotImplementedError, match="Fabric item resolution"):
-        main(["wipe", "--target", "MyWarehouse", "--host", "MyFabric", "--hosts", str(config), "--yes"])
+def test_a_fabric_host_resolves_to_the_fabric_implementation(tmp_path):
+    """Dispatch happens on host type, without any network call."""
+    from weaver import FabricHost, LocalHost
+    from weaver.fabric import FabricResolver, FabricStore
+    from weaver.resolution import LocalResolver, resolver_for, store_for
+    from weaver.store import LocalStore
+
+    fabric = FabricHost(workspace="Analytics", weaver_lakehouse="Weaver")
+    assert isinstance(resolver_for(fabric), FabricResolver)
+    assert isinstance(store_for(fabric), FabricStore)
+
+    local = LocalHost(root=tmp_path)
+    assert isinstance(resolver_for(local), LocalResolver)
+    assert isinstance(store_for(local), LocalStore)
 
 
 def test_wipe_needs_a_target(populated_folders, capsys):

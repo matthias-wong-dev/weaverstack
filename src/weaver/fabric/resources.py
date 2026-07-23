@@ -15,6 +15,13 @@ from .client import FabricClient, FabricError
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
 ENVIRONMENT = "Environment"
+SQL_ENDPOINT = "SQLEndpoint"
+
+#: A Lakehouse grows a SQLEndpoint sibling of the same name, a little after it
+#: is created. That is a facet of the Lakehouse rather than an item anyone
+#: addresses, so it is ignored when a name is resolved without a type — item
+#: names are unique per type, not across types.
+FACET_TYPES = frozenset({SQL_ENDPOINT})
 
 
 @dataclass(frozen=True)
@@ -92,14 +99,17 @@ def find_item(
         for item in list_items(workspace, item_type=item_type, client=client)
         if item.name == name and (item_type is None or item.type == item_type)
     ]
+    if item_type is None and len(matches) > 1:
+        matches = [item for item in matches if item.type not in FACET_TYPES] or matches
     if not matches:
         raise CommandError(
             f"no {item_type or 'item'} named {name!r} in workspace {workspace.name!r}"
         )
     if len(matches) > 1:
+        found = ", ".join(sorted(item.type for item in matches))
         raise CommandError(
-            f"more than one {item_type or 'item'} named {name!r} in {workspace.name!r} — "
-            "item names are assumed unique within a workspace"
+            f"more than one item named {name!r} in {workspace.name!r} ({found}) — "
+            "say which type is meant"
         )
     return matches[0]
 
@@ -115,12 +125,19 @@ def create_lakehouse(
     except CommandError:
         pass
 
+    # Fabric holds a deleted item's name for some minutes and answers 409
+    # ItemDisplayNameNotAvailableYet until it is free again.
     response = client.request(
         "POST",
         f"workspaces/{workspace.id}/lakehouses",
         payload={"displayName": name},
-        expected=(200, 201, 202),
+        expected=(200, 201, 202, 409),
     )
+    if response.status_code == 409:
+        raise CommandError(
+            f"cannot create Lakehouse {name!r} in {workspace.name!r}: "
+            + (response.json().get("message") or response.text.strip()[:200])
+        )
     if response.status_code == 202:
         # Long-running create: the item exists once the operation settles.
         return _await_item(workspace, name, LAKEHOUSE, client=client)

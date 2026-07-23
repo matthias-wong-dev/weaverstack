@@ -70,6 +70,19 @@ class LocalResolver:
 
         return self.root / item.name
 
+    def item_kind(self, item: ItemRef) -> str:
+        """Everything local is Lakehouse-shaped. Raises if it is not there.
+
+        The Fabric resolver answers the same question by asking the workspace,
+        so callers never learn which host they are on.
+        """
+
+        if not self.item(item).path.exists():
+            raise CommandError(
+                f"{item.name!r} does not exist under {self.root} — nothing to resolve"
+            )
+        return "Lakehouse"
+
     def files_root(self, item: ItemRef) -> Location:
         return self.item(item) / FILES_AREA
 
@@ -152,3 +165,37 @@ class LocalResolver:
                 "or supply it explicitly"
             )
         return name
+
+
+# --- choosing an implementation for a host -----------------------------------
+
+
+def resolver_for(host):
+    """The resolver for a host: local paths, or OneLake locations.
+
+    Fabric is imported lazily, so the core stays importable without the
+    optional extra installed.
+    """
+
+    from .hosts import LocalHost
+
+    if isinstance(host, LocalHost):
+        return LocalResolver(host)
+
+    from .fabric.resolution import FabricResolver
+
+    return FabricResolver(host)
+
+
+def store_for(host):
+    """The store for a host: the filesystem, or OneLake."""
+
+    from .hosts import LocalHost
+    from .store import LocalStore
+
+    if isinstance(host, LocalHost):
+        return LocalStore()
+
+    from .fabric.onelake import FabricStore
+
+    return FabricStore()

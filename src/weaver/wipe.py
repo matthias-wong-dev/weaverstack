@@ -32,7 +32,7 @@ from typing import Iterable
 from .errors import CommandError
 from .hosts import Host, LocalHost
 from .locations import Location
-from .resolution import LocalResolver
+from .resolution import LocalResolver, resolver_for, store_for
 from .store import LocalStore, Store
 from .targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 
@@ -91,15 +91,15 @@ def _clear(
 
 def wipe_folder_target(
     target: FolderTarget,
-    host: LocalHost,
+    host: Host,
     *,
     store: Store | None = None,
     dry_run: bool = False,
 ) -> WipeReport:
     """Empty a folder target, keeping the configured root itself."""
 
-    store = store or LocalStore()
-    resolver = LocalResolver(host)
+    store = store or store_for(host)
+    resolver = resolver_for(host)
     location = resolver.folder_root(target)
     return WipeReport(
         target=f"folder:{target}",
@@ -111,7 +111,7 @@ def wipe_folder_target(
 
 def wipe_delta_target(
     target: DeltaTarget,
-    host: LocalHost,
+    host: Host,
     *,
     store: Store | None = None,
     dry_run: bool = False,
@@ -122,8 +122,8 @@ def wipe_delta_target(
     leave behind, because Weaver never registered one.
     """
 
-    store = store or LocalStore()
-    resolver = LocalResolver(host)
+    store = store or store_for(host)
+    resolver = resolver_for(host)
     location = resolver.tables_root(target.lakehouse)
     return WipeReport(
         target=f"delta:{target}",
@@ -155,7 +155,7 @@ def wipe_sql_target(
 
 
 def wipe(
-    host: LocalHost,
+    host: Host,
     *,
     folder_target: FolderTarget | None = None,
     delta_target: DeltaTarget | None = None,
@@ -172,7 +172,7 @@ def wipe(
     if not any((folder_target, delta_target, sql_target)):
         raise CommandError("wipe needs at least one target")
 
-    store = store or LocalStore()
+    store = store or store_for(host)
     reports: list[WipeReport] = []
     if folder_target is not None:
         reports.append(wipe_folder_target(folder_target, host, store=store, dry_run=dry_run))
@@ -197,18 +197,23 @@ def wipe_item(
     Lakehouse-shaped, while on Fabric it has to be asked for.
     """
 
-    if not isinstance(host, LocalHost):
-        raise NotImplementedError(
-            f"wiping {item.name!r} on a {type(host).__name__} is not implemented — "
-            "it needs Fabric item resolution to know whether the item is a "
-            "Lakehouse or a Warehouse"
-        )
+    store = store or store_for(host)
+    resolver = resolver_for(host)
 
-    store = store or LocalStore()
-    resolver = LocalResolver(host)
-    if not store.exists(resolver.item(item)):
+    # On Fabric a name could be either kind and only the workspace knows; locally
+    # everything is Lakehouse-shaped. Either way the resolver answers, and
+    # answering at all proves the item is there.
+    kind = resolver.item_kind(item)
+    if kind == "Warehouse":
+        return (
+            wipe_sql_target(
+                WarehouseTarget(warehouse=item), host, store=store, dry_run=dry_run
+            ),
+        )
+    if kind != "Lakehouse":
         raise CommandError(
-            f"{item.name!r} does not exist under {resolver.root} — nothing to wipe"
+            f"{item.name!r} is a {kind}, which Weaver does not wipe — "
+            "expected a Lakehouse or a Warehouse"
         )
 
     return (
@@ -238,7 +243,7 @@ def wipe_selection(
     if not names:
         raise CommandError("wipe needs at least one target")
 
-    store = store or LocalStore()
+    store = store or store_for(host)
     reports: list[WipeReport] = []
     for name in names:
         if "/" in name:
