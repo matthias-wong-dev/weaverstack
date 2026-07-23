@@ -65,6 +65,7 @@ def test_the_example_repository_reads():
     assert {document.qualified for document in repo} == {
         "Sales.OrderExport",
         "Sales.Order",
+        "Sales.Customer",
         "Sales.OrderSummary",
         "Reporting.OrderReport",
         "Reporting.OrderView",
@@ -86,7 +87,7 @@ def test_subdirectories_are_support_not_objects():
 def test_object_modules_are_known_by_importable_name():
     """This is what lets an import be read as a dependency."""
     repo = read_repository(FIXTURE)
-    assert set(repo.module_names) == {"Sales__Order", "Sales__OrderExport"}
+    assert set(repo.module_names) == {"Sales__Order", "Sales__Customer", "Sales__OrderExport"}
 
 
 def test_imports_are_captured_for_dependency_analysis():

@@ -353,6 +353,22 @@ Spark path reads (``delta.`abfss://…` ``) parse as two parts but are a format
 and a path, not schema and object, so those prefixes are excluded. Whether they
 could ever be resolved is left open until tested.
 
+**DML targets are relations too.** `insert into`, `update`, `merge into` and
+`delete from` all name something that must exist. The first three were missed
+entirely — `insert into` and `merge into` arrive as one keyword token or two
+depending on dialect, so the intervening `into` has to be skipped. Weaver does
+not restrict what an author writes; intermediate statements, temp tables and
+deletion against the current table are all permitted. The obligation is only to
+read them accurately.
+
+**The test suite is organised by dialect**, over realistic complete statements
+rather than snippets — `tests/test_ses_dependencies_spark.py` and
+`tests/test_ses_dependencies_tsql.py`, each ending with one full file that
+exercises everything together and asserts that nothing was invented.
+`tests/test_ses_repository_end_to_end.py` asserts the whole chain over the
+example repository: filename classification, metadata, structural checks, SQL
+analysis and discovered references.
+
 ---
 
 ## Open questions

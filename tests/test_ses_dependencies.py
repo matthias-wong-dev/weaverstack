@@ -239,52 +239,45 @@ def test_unparseable_sql_still_yields_what_it_can():
     assert "Sales.Order" in refs("select * from Sales.Order where ((((")
 
 
-# --- against the example repository -----------------------------------------
+# --- the fallback path -------------------------------------------------------
 
 
-def test_the_example_repository_extracts_across_languages():
-    from pathlib import Path
+def test_the_fallback_scanner_runs_when_tokenising_fails(monkeypatch):
+    """Proves the branch executes, rather than assuming malformed SQL reaches it."""
+    from weaver.ses import dependencies
 
-    from weaver import Location
-    from weaver.ses import read_repository
+    calls = []
 
-    repo = read_repository(Location(str(Path(__file__).parent / "fixtures" / "sales-etl")))
-    found = {
-        document.qualified: {str(r) for r in document.discovered_references}
-        for document in repo
-    }
-    assert found["Sales.Order"] == {"Sales.OrderExport"}          # python import
-    assert found["Sales.OrderSummary"] == {"Sales.Order"}         # spark sql
-    assert found["Reporting.OrderReport"] == {"Sales.Order"}      # t-sql
-    assert found["Reporting.OrderView"] == {"Reporting.OrderReport"}
-    assert found["Sales.OrderExport"] == set()
+    def exploding_flatten(sql_text):
+        calls.append(sql_text)
+        raise RecursionError("too deep")
 
+    monkeypatch.setattr(dependencies, "_flatten", exploding_flatten)
 
-def test_declared_dependencies_are_kept_beside_what_was_discovered():
-    """Declaration overrides at build; both are recorded so a lint can compare."""
-    from pathlib import Path
-
-    from weaver import Location
-    from weaver.ses import read_repository
-
-    repo = read_repository(Location(str(Path(__file__).parent / "fixtures" / "sales-etl")))
-    summary = repo["Sales.OrderSummary"]
-    assert [str(d) for d in summary.declared_dependencies] == ["Sales.Order"]
-    assert [str(r) for r in summary.discovered_references] == ["Sales.Order"]
+    found = dependencies.extract_sql_references(
+        "select * from Sales.Order join Sales.Customer c on c.Id = o.CustomerId"
+    )
+    assert calls, "the tokeniser was never reached"
+    assert {str(r) for r in found} == {"Sales.Order", "Sales.Customer"}
 
 
-def test_a_bare_apply_is_a_relation_position():
-    assert refs("select * from Sales.Order o outer apply Sales.Lines(o.Id) l") == {
-        "Sales.Order", "Sales.Lines",
-    }
+def test_the_fallback_still_excludes_single_part_names(monkeypatch):
+    from weaver.ses import dependencies
+
+    monkeypatch.setattr(
+        dependencies, "_flatten", lambda _: (_ for _ in ()).throw(RecursionError())
+    )
+    found = dependencies.extract_sql_references(
+        "with recent as (select * from Sales.Order) select * from recent"
+    )
+    assert {str(r) for r in found} == {"Sales.Order"}
 
 
-def test_apply_without_cross_or_outer_is_not_assumed():
-    """`apply` is not a sqlparse keyword, so only the join forms are trusted."""
-    assert refs("select apply from Sales.Order") == {"Sales.Order"}
+def test_the_fallback_handles_qualified_names(monkeypatch):
+    from weaver.ses import dependencies
 
-
-def test_merge_using_is_a_relation_position():
-    assert refs("merge Sales.Target t using Sales.Source s on s.Id = t.Id") == {
-        "Sales.Target", "Sales.Source",
-    }
+    monkeypatch.setattr(
+        dependencies, "_flatten", lambda _: (_ for _ in ()).throw(RecursionError())
+    )
+    found = dependencies.extract_sql_references("select * from Lakehouse.Sales.Order")
+    assert found[0].parts == ("Lakehouse", "Sales", "Order")

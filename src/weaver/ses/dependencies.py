@@ -184,13 +184,12 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
                 parts = _parse_name(sql_text, tokens[following].start)
                 if parts is not None:
                     _add(references, seen, parts)
-        elif head == "MERGE":
-            # The target follows `merge` directly rather than a relation keyword.
-            following = _next_significant(tokens, index + 1)
-            if following is not None:
-                parts = _parse_name(sql_text, tokens[following].start)
-                if parts is not None:
-                    _add(references, seen, parts)
+        elif head in {"MERGE", "INSERT", "UPDATE", "DELETE"}:
+            # A DML target is a relation too. Weaver does not restrict what an
+            # author writes; it only has to read it accurately.
+            parts = _dml_target(sql_text, tokens, index)
+            if parts is not None:
+                _add(references, seen, parts)
         elif head in {"CROSS", "OUTER"}:
             # sqlparse keywords `cross` but not `apply`, so `cross apply Schema.Fn(…)`
             # arrives as two tokens and the relation sits after the second.
@@ -203,6 +202,26 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
                         _add(references, seen, parts)
 
     return tuple(references)
+
+
+def _dml_target(
+    sql_text: str, tokens: list[_FlatToken], index: int
+) -> tuple[str, ...] | None:
+    """The relation a DML statement writes to.
+
+    ``insert into``, ``merge into`` and ``delete from`` may arrive as one
+    keyword token or two, depending on the dialect and on sqlparse, so an
+    intervening ``into``/``from`` is skipped when present.
+    """
+
+    following = _next_significant(tokens, index + 1)
+    if following is None:
+        return None
+    if tokens[following].normalized.strip() in {"INTO", "FROM"}:
+        following = _next_significant(tokens, following + 1)
+        if following is None:
+            return None
+    return _parse_name(sql_text, tokens[following].start)
 
 
 def _fallback(sql_text: str) -> tuple[RelationReference, ...]:
