@@ -22,3 +22,7 @@ class ConfigError(WeaverError):
 
 class IdentityError(WeaverError):
     """Raised when a target, item or repository identity is malformed."""
+
+
+class MetadataError(WeaverError):
+    """Raised when an SES document's metadata is missing, malformed or contradictory."""
