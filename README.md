@@ -14,7 +14,7 @@ import weaver
 weaver.initialise_weaver_lakehouse("Weaver")
 ```
 
-Folder, Delta and SQL are materialisation forms, not architectural tiers. You
+Folder, Delta and SQL Warehouse are materialisation targets. You
 describe objects in one repository; Weaver routes them to the physical targets
 you name, builds one global dependency graph across all three forms, and
 certifies each object in the central catalogue only once it has built.
