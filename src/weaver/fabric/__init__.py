@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
 from .client import FabricClient, FabricError
+from .onelake import FabricStore, abfss_root, onelake_url, parse_onelake
 from .resources import (
     LAKEHOUSE,
     WAREHOUSE,
@@ -25,6 +26,10 @@ __all__ = [
     "CapacityError",
     "capacity_command",
     "run_capacity_action",
+    "FabricStore",
+    "abfss_root",
+    "onelake_url",
+    "parse_onelake",
     "FabricClient",
     "FabricError",
     "Workspace",

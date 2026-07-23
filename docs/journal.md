@@ -577,6 +577,65 @@ nothing should require a file to be expressible.
 `_add_host_args` and `_resolve_host` are shared, so `build` and `load` inherit
 the same `--host`/`--config`/`--root` handling.
 
+### Where code runs
+
+Three positions, not two — and the third is needed far less than expected.
+
+| | | |
+|---|---|---|
+| **A** | local process, local effects | the core and Spark suites |
+| **B** | local process, remote effects | pure HTTP: ARM, Fabric REST, OneLake DFS, TDS |
+| **C** | code executing inside Fabric | a Spark session there |
+
+What actually needs **C**: Delta table creation and load, Spark SQL objects,
+and catalogue writes. Everything else — capacity, item CRUD, pushing a
+repository, creating folder destinations, folder load, Warehouse DDL and load,
+SQL endpoint refresh — is **B**, and B runs from a laptop with nothing shipped
+anywhere.
+
+**So `pytest` is not shipped to Fabric.** Testing is a development activity.
+Remote pytest gives poor feedback, most of what wants testing is position B and
+already reachable, and where a test genuinely needs code inside Fabric it can
+submit a program and assert on the JSON result — which is the mechanism build
+and load need regardless. Don't invent a second way to get code into Fabric;
+use the one build already requires, so the transport is tested by being used.
+
+**Host says where; executor says how.** "Remote Fabric" and "native Fabric" are
+not two hosts — they are the same workspace reached differently.
+
+| position | host | executor |
+|---|---|---|
+| desktop → local | `LocalHost` | in-process |
+| desktop → Fabric | `FabricHost` | Livy submit |
+| notebook → Fabric | `FabricHost` | in-process |
+
+Detected rather than declared. A host left unnamed inside Fabric means "the
+workspace I am running in", because the notebook path is meant to be primary and
+making someone name the workspace they are sitting in is friction without
+safety.
+
+The wheel is 62 KB of pure Python with two pure-Python dependencies, so getting
+Weaver into a session is not the hard part. The proven route is to copy it into
+the Weaver Lakehouse Files area and `sys.path.insert` it — the architecture
+summary already anticipated this as the bridge until PyPI.
+
+### OneLake as a Store
+
+`FabricStore` satisfies the same protocol as `LocalStore`, so everything above
+it is written once. Verified against real OneLake: write, read, exists,
+is_directory, shallow and recursive listing with sizes and timestamps, move,
+delete, idempotent make_directory.
+
+Two things OneLake does differently, both now encoded:
+
+**A write is three calls** — create the file, append the bytes, flush at the
+final offset.
+
+**There is no directory rename.** `move_within_store` copies and deletes here.
+The operation stays whole so an implementation inside a Fabric session can use
+`notebookutils.fs.mv` instead — the caller never learns which happened, which is
+the point of having made it one operation rather than three.
+
 ---
 
 ## Open questions
