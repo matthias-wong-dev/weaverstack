@@ -132,8 +132,12 @@ python3.11 -m venv .venv
 ```
 
 Spark tests are deselected by default (`addopts = ["-m", "not spark"]`) and skip
-themselves if PySpark or Java 17 is missing, so a contributor without a JVM is
-never blocked.
+themselves if PySpark or a supported JDK is missing, so a contributor without a
+JVM is never blocked. `weaver doctor` reports what is present and what to
+install; see [docs/local-setup.md](docs/local-setup.md).
+
+Versions are declared as ranges, not pins — Spark 3.5.x with delta-spark 3.2.x,
+on Java 11 or 17 — so an existing local install is not disturbed.
 
 The `spark` fixture is **session-scoped** and the `lakehouses` fixture is
 **per-test**, because those costs differ by four orders of magnitude: a session

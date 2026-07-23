@@ -32,10 +32,24 @@ pip install 'weaverstack[cli]' # plus the optional desktop CLI
 
 Requires Python 3.11 or later.
 
+## Local development
+
+Weaver runs against a local filesystem standing in for Lakehouses, so build and
+load can be developed without touching a workspace. It needs a JDK and a matched
+Spark/Delta pair — all optional, none of it required to use Weaver on Fabric.
+
+```bash
+weaver doctor
+```
+
+reports what is present and what to install. See
+[docs/local-setup.md](docs/local-setup.md).
+
 ## Documentation
 
 - [Architecture summary](backlog/weaver-architecture-summary.md)
 - [Implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md)
+- [Local development setup](docs/local-setup.md)
 - [Agent guide](AGENTS.md)
 
 ## Licence

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,22 +99,6 @@ def installed_repository(lakehouses: LocalLakehouses) -> Location:
 # --- spark -------------------------------------------------------------------
 
 
-def _java_home() -> str | None:
-    """Java 17, from the environment or from macOS's java_home."""
-
-    existing = os.environ.get("JAVA_HOME")
-    if existing and Path(existing).exists():
-        return existing
-    try:
-        found = subprocess.run(
-            ["/usr/libexec/java_home", "-v", "17"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return found or None
-
-
 @pytest.fixture(scope="session")
 def spark():
     """One Delta-enabled Spark session for the whole run.
@@ -128,9 +111,14 @@ def spark():
     pytest.importorskip("pyspark", reason="install the [spark] extra")
     pytest.importorskip("delta", reason="install the [spark] extra")
 
-    java_home = _java_home()
+    from weaver.diagnostics import SUPPORTED_JAVA, find_java_home
+
+    java_home = find_java_home()
     if java_home is None:
-        pytest.skip("Java 17 not found — local Spark needs it")
+        pytest.skip(
+            f"no JDK found — local Spark needs Java {' or '.join(SUPPORTED_JAVA)}. "
+            "Run: weaver doctor"
+        )
     os.environ["JAVA_HOME"] = java_home
 
     # The workers must run the same interpreter as the driver, or Spark fails

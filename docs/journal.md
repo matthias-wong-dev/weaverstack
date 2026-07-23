@@ -483,9 +483,22 @@ Lakehouse it is not attached to, showing up as a testing convenience.
 Two environment traps, both handled in the fixture rather than in a shell
 profile: `PYSPARK_PYTHON` defaults to the system interpreter and fails deep
 inside a task with a version mismatch, so it is pinned to `sys.executable`; and
-`JAVA_HOME` is discovered through `/usr/libexec/java_home -v 17` when unset.
-Missing PySpark or Java skips rather than fails, so the default run needs
-neither.
+`JAVA_HOME` is discovered when unset. Missing PySpark or Java skips rather than
+fails, so the default run needs neither.
+
+**Versions are ranges, not pins.** The first cut wrote
+`pyspark==3.5.1, delta-spark==3.2.0` — one machine's install mistaken for a
+requirement. Spark 3.5.x with delta-spark 3.2.x is the real compatibility
+window, since the two are released in lockstep, and Spark 3.5 runs on Java 8, 11
+or 17. The first Java discovery asked `/usr/libexec/java_home -v 17`
+specifically, which would have skipped every Spark test on a Java 11 machine —
+a working setup reported as an unsupported one.
+
+`weaver doctor` reports Python, PySpark, delta-spark and Java in one pass, with
+the command that fixes whatever is missing and a non-zero exit so it can gate a
+script. It exists because the alternative way to discover a missing JDK is a
+Java stack trace, and it is the CLI's first real command: the check lives in
+`weaver.diagnostics`, the CLI only prints it.
 
 ---
 

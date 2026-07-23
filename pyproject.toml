@@ -34,14 +34,16 @@ dependencies = [
 # Desktop CLI. Empty today because the CLI is stdlib-only; it exists so the
 # core/CLI dependency boundary is declared from the start.
 cli = []
+# Delta and Spark are released in lockstep: delta-spark 3.2.x needs Spark 3.5.x.
+# Ranges rather than pins, so an existing local install is not disturbed.
 spark = [
-    "pyspark==3.5.1",
-    "delta-spark==3.2.0",
+    "pyspark>=3.5,<3.6",
+    "delta-spark>=3.2,<3.3",
 ]
 dev = [
     "pytest>=8.4",
-    "pyspark==3.5.1",
-    "delta-spark==3.2.0",
+    "pyspark>=3.5,<3.6",
+    "delta-spark>=3.2,<3.3",
 ]
 
 [project.scripts]

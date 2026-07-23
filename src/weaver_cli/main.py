@@ -25,10 +25,44 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"weaverstack {weaver.__version__}",
     )
-    # Subcommands are added at their checkpoints. Not required yet, so that
-    # a bare `weaver` prints help rather than failing.
-    parser.add_subparsers(dest="command", metavar="command")
+    subcommands = parser.add_subparsers(dest="command", metavar="command")
+
+    doctor = subcommands.add_parser(
+        "doctor", help="check whether this machine can run local Spark and Delta"
+    )
+    doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
+    doctor.set_defaults(handler=handle_doctor)
+
     return parser
+
+
+def handle_doctor(args: argparse.Namespace) -> int:
+    """Report what a local build and load needs, and what is missing.
+
+    None of it is required to use Weaver on Fabric. It matters for local
+    development, where a missing JDK otherwise surfaces as a Java stack trace.
+    """
+
+    from weaver.diagnostics import check_local_spark, platform_summary
+
+    report = check_local_spark()
+
+    if args.json:
+        import json
+
+        print(json.dumps(report.as_dict(), indent=2))
+        return 0 if report.ok else 1
+
+    print(f"local Spark and Delta on {platform_summary()}\n")
+    for check in report.checks:
+        print(f"  {check}")
+    if report.ok:
+        print("\nReady. Run the local tests with:  pytest -m spark")
+        return 0
+    print()
+    for hint in report.hints:
+        print(f"  → {hint}")
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
