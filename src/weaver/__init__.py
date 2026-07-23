@@ -12,6 +12,9 @@ from __future__ import annotations
 from .config import load_hosts, parse_hosts
 from .errors import CommandError, ConfigError, IdentityError, WeaverError
 from .hosts import FabricHost, Host, LocalHost, WarehouseSettings
+from .locations import Location
+from .resolution import LocalResolver
+from .store import Entry, LocalStore, Store, StoreError
 from .targets import (
     DeltaTarget,
     FolderTarget,
@@ -42,4 +45,11 @@ __all__ = [
     "DeltaTarget",
     "WarehouseTarget",
     "RepositoryRef",
+    # resolved locations and transport
+    "Location",
+    "LocalResolver",
+    "Store",
+    "LocalStore",
+    "Entry",
+    "StoreError",
 ]
