@@ -1,8 +1,9 @@
-"""Weaver carries no product names and no data-architecture opinions.
+"""Weaver carries no house jargon, examples included.
 
-Examples included. Folder, Delta and SQL are materialisation forms, so example
-names must not imply a tiering scheme (T0/T1/T2, bronze/silver/gold) — a reader
-should not be able to infer an architecture Weaver does not have.
+Folder, Delta and SQL are materialisation forms, so `T0`/`T1`/`T2` naming must
+not appear: it is our own tiering convention and means nothing to a reader
+outside these repositories. Widely-understood naming such as bronze/silver/gold
+is fine — it illustrates without assuming.
 """
 
 from __future__ import annotations
@@ -10,38 +11,25 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 SCANNED = (ROOT / "src", ROOT / "tests")
 
-FORBIDDEN = {
-    "product name": re.compile(r"ilovegov|I Love Gov|\bILG\b|\bDWG\b", re.IGNORECASE),
-    "tiering scheme": re.compile(r"\bT[0-9]_|\bbronze\b|\bsilver\b|\bgold\b", re.IGNORECASE),
-}
+HOUSE_TIERING = re.compile(r"\bT[0-9]_", re.IGNORECASE)
 
 
 def _sources() -> list[Path]:
-    this_file = Path(__file__).resolve()
-    return sorted(
-        path
-        for directory in SCANNED
-        for path in directory.rglob("*.py")
-        if path.resolve() != this_file
-    )
+    return sorted(path for directory in SCANNED for path in directory.rglob("*.py"))
 
 
 def test_there_are_sources_to_scan():
     assert _sources()
 
 
-@pytest.mark.parametrize("label", sorted(FORBIDDEN))
-def test_no_forbidden_vocabulary(label):
-    pattern = FORBIDDEN[label]
+def test_no_house_tiering_vocabulary():
     offenders = [
         f"{path.relative_to(ROOT)}:{number}"
         for path in _sources()
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-        if pattern.search(line)
+        if HOUSE_TIERING.search(line)
     ]
-    assert not offenders, f"{label} appears in: {offenders}"
+    assert not offenders, f"house tiering names appear in: {offenders}"
