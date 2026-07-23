@@ -34,6 +34,11 @@ from dataclasses import dataclass, field
 
 from ..errors import DiscoveryError
 from ..objects import BASE_CLASSES, BASE_CLASS_NAMES
+from .dependencies import (
+    RelationReference,
+    extract_python_references,
+    extract_sql_references,
+)
 from .metadata import (
     FOLDER,
     PYTHON,
@@ -149,6 +154,9 @@ class SourceDocument:
     imported_modules: tuple[str, ...] = ()
     sql_body: str | None = None
     sql_analysis: SqlAnalysis | None = None
+    #: Names this file refers to, as written. Whether each resolves is a build
+    #: concern — it needs the external-dependency configuration.
+    discovered_references: tuple[RelationReference, ...] = ()
     python_ast: ast.Module | None = field(default=None, compare=False, repr=False)
 
     @property
@@ -162,6 +170,28 @@ class SourceDocument:
     @property
     def kind(self) -> str:
         return self.document.kind
+
+    @property
+    def referenced_object_ids(self) -> tuple[ObjectId, ...]:
+        """Two-part references — candidates for objects in this repository."""
+
+        return tuple(
+            reference.object_id
+            for reference in self.discovered_references
+            if reference.object_id is not None
+        )
+
+    @property
+    def qualified_references(self) -> tuple[RelationReference, ...]:
+        """Three- and four-part references — physical targets the author named."""
+
+        return tuple(
+            reference for reference in self.discovered_references if reference.is_qualified
+        )
+
+    @property
+    def declared_dependencies(self) -> tuple[ObjectId, ...]:
+        return self.document.dependencies
 
     @property
     def module_name(self) -> str | None:
@@ -245,6 +275,7 @@ def _read_python(
 
     _check_base_class(relative_path, declared, document.kind)
     _check_read_method(relative_path, declared)
+    imports = _imported_modules(module)
 
     return SourceDocument(
         relative_path=relative_path,
@@ -253,7 +284,8 @@ def _read_python(
         source_hash=source_hash,
         document=document,
         class_name=declared.name,
-        imported_modules=_imported_modules(module),
+        imported_modules=imports,
+        discovered_references=extract_python_references(imports),
         python_ast=module,
     )
 
@@ -362,6 +394,7 @@ def _read_sql(
         document=document,
         sql_body=body,
         sql_analysis=analysis,
+        discovered_references=extract_sql_references(body),
     )
 
 

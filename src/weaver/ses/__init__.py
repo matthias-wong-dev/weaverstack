@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from .dependencies import (
+    RelationReference,
+    extract_python_references,
+    extract_sql_references,
+)
 from .repository import SesRepository, read_repository
 from .source import (
     SourceDocument,
@@ -41,6 +46,9 @@ from .metadata import (
 )
 
 __all__ = [
+    "RelationReference",
+    "extract_python_references",
+    "extract_sql_references",
     "SesRepository",
     "read_repository",
     "SourceDocument",

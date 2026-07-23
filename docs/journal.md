@@ -312,6 +312,47 @@ excluded from comparison.
 Reading goes through a `Store`, so the same reader will serve a repository
 installed in the Weaver Lakehouse once the Fabric store exists.
 
+### Checkpoint 6a — dependency extraction
+
+Extraction only. Whether a name *resolves* — to an object, to a shortcut, or to
+nothing — is deferred to build, where the external-dependency configuration is
+supplied. Getting the names out accurately is its own piece of work.
+
+**Python declares a dependency by importing.** The marker is structural: one
+`__` in an absolute import name, neither side empty or underscore-prefixed. So
+`from Sales__Order import Sales__Order` is a reference to `Sales.Order`;
+`from weaver import Table` has no `__`; a helper reached as `_helpers.dates`
+contributes its package name and is likewise not one. Extraction does not care
+about case — `sales__order` extracts as `sales.order`, and whether that matches
+an object is a build-time question.
+
+**SQL declares them by relation position** — after `from`, `join`, `apply`,
+`using` or `merge`. The elegant part is inherited from weaver: **single-part
+names are never relations.** A CTE, a temp view, a temp table and a table alias
+are all single-part, so requiring two parts excludes every one of them without
+tracking scope.
+
+Part count carries the meaning:
+
+| Parts | Meaning |
+|---|---|
+| 2 | Weaver's namespace — an object or a shortcut |
+| 3 or 4 | a physical target the author named; captured, never resolved |
+
+**`Dependencies` replaces discovery** rather than adding to it. That gives the
+author a way to *remove* an edge — the phantom dependency an unused import
+creates — as well as add one. Both sets are recorded on the document, so a lint
+can later report a declaration that omits something the query plainly reads.
+
+Two things that needed changing from weaver's extractor: backticks as an
+identifier delimiter for Spark, and `cross apply` — sqlparse keywords `cross`
+but not `apply`, so the pair arrives as two tokens and the original never
+matched it. `merge` targets were not captured either.
+
+Spark path reads (``delta.`abfss://…` ``) parse as two parts but are a format
+and a path, not schema and object, so those prefixes are excluded. Whether they
+could ever be resolved is left open until tested.
+
 ---
 
 ## Open questions
@@ -323,6 +364,7 @@ installed in the Weaver Lakehouse once the Fabric store exists.
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
+| Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | due at build |
 | Does `build` move any files at all? In the central architecture, source stays central and load imports it — the case may be empty. | CP2 | due CP12 |
 
 ## Divergences from the plan
