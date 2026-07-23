@@ -65,29 +65,23 @@ class LocalResolver:
 
     # --- level three -----------------------------------------------------
 
-    def item(self, item: ItemRef) -> Location:
-        """The item root — a Lakehouse-shaped directory holding Files/ and Tables/."""
+    def lakehouse(self, item: ItemRef) -> Location:
+        """A Lakehouse root — a directory holding Files/ and Tables/.
+
+        Named ``lakehouse`` to match the Fabric resolver, where resolution is
+        typed: a bare name is never asked "what are you?".
+        """
 
         return self.root / item.name
 
-    def item_kind(self, item: ItemRef) -> str:
-        """Everything local is Lakehouse-shaped. Raises if it is not there.
-
-        The Fabric resolver answers the same question by asking the workspace,
-        so callers never learn which host they are on.
-        """
-
-        if not self.item(item).path.exists():
-            raise CommandError(
-                f"{item.name!r} does not exist under {self.root} — nothing to resolve"
-            )
-        return "Lakehouse"
+    def lakehouse_exists(self, item: ItemRef) -> bool:
+        return self.lakehouse(item).path.is_dir()
 
     def files_root(self, item: ItemRef) -> Location:
-        return self.item(item) / FILES_AREA
+        return self.lakehouse(item) / FILES_AREA
 
     def tables_root(self, item: ItemRef) -> Location:
-        return self.item(item) / TABLES_AREA
+        return self.lakehouse(item) / TABLES_AREA
 
     # --- folder targets --------------------------------------------------
 
@@ -136,7 +130,7 @@ class LocalResolver:
 
     @property
     def weaver_lakehouse(self) -> Location:
-        return self.item(ItemRef(self._weaver_lakehouse_name()))
+        return self.lakehouse(ItemRef(self._weaver_lakehouse_name()))
 
     @property
     def repos_root(self) -> Location:

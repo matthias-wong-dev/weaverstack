@@ -67,21 +67,6 @@ def test_directories_report_no_size(store, root):
     assert directory.size is None
 
 
-def test_moving_is_one_operation(store, root):
-    """Not read + write + delete — the intent has to survive for Fabric to rename."""
-    store.write(root / "Budget" / "BudgetPaper_Staging" / "a.pdf", b"pdf")
-    store.move_within_store(
-        root / "Budget" / "BudgetPaper_Staging",
-        root / "Budget" / "BudgetPaper",
-    )
-    assert store.read(root / "Budget" / "BudgetPaper" / "a.pdf") == b"pdf"
-    assert not store.exists(root / "Budget" / "BudgetPaper_Staging")
-
-
-def test_moving_creates_missing_destination_parents(store, root):
-    store.write(root / "source.txt", b"x")
-    store.move_within_store(root / "source.txt", root / "new" / "place.txt")
-    assert store.read(root / "new" / "place.txt") == b"x"
 
 
 def test_deleting_a_directory_needs_recursive(store, root):
@@ -106,10 +91,6 @@ def test_listing_a_missing_location_is_an_error(store, root):
     with pytest.raises(StoreError, match="does not exist"):
         store.list(root / "absent")
 
-
-def test_moving_something_absent_is_an_error(store, root):
-    with pytest.raises(StoreError, match="does not exist"):
-        store.move_within_store(root / "absent", root / "elsewhere")
 
 
 def test_the_local_store_refuses_url_locations(store):

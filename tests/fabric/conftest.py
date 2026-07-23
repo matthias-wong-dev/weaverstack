@@ -28,6 +28,11 @@ def fabric_workspace():
     pytest.importorskip("azure.identity", reason="install the [fabric] extra")
     pytest.importorskip("requests", reason="install the [fabric] extra")
 
+    # Credential choice is caller policy, not core's; the test infra is a caller.
+    from weaver.fabric.auth import prefer_cli_credential
+
+    prefer_cli_credential()
+
     name = os.environ.get(WORKSPACE_ENV)
     if not name:
         pytest.skip(f"set {WORKSPACE_ENV} to run Fabric tests")

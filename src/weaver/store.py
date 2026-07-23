@@ -12,21 +12,20 @@ of these primitives:
 Collapsing those into one ``sync(delete_missing=...)`` would put a data-correctness
 decision behind a transport flag, so they stay separate.
 
-Two design points that later checkpoints depend on:
-
-**Moves are first class.** ``move_within_store`` is an operation, not a
-composition of read, write and delete. Within one Lakehouse a move is a
-metadata rename — no data crosses the network — and an implementation can only
-choose that if the intent survives the call. Composing it destroys the intent.
-
 **Listing carries metadata.** :class:`Entry` reports size, modification time and
 etag, because every incremental strategy needs them. A listing of bare names
 would foreclose all of them.
+
+There is deliberately no move operation. Staging promotion, destination
+replacement and atomic publication are all real needs, but their contract comes
+from the load algorithm, not from a guess made here — and the mechanisms differ
+enough (a local rename, a OneLake copy, an in-session ``notebookutils.fs.mv``)
+that a single reassuring name would hide materially different cost. Load
+introduces whatever it actually needs, named for what it does.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,11 +57,12 @@ class Entry:
 
 @runtime_checkable
 class Store(Protocol):
-    """File transport for one host.
+    """File transport within one host.
 
-    Checkpoint 7 adds the Fabric implementation over OneLake DFS, and inside a
-    Fabric session ``move_within_store`` should use an ABFS rename rather than
-    moving bytes.
+    A store reads and writes beneath a single host — a local root, or one Fabric
+    workspace over OneLake DFS. It never reaches across hosts; moving files from
+    a laptop into Fabric is cross-host orchestration and belongs to the CLI, not
+    to this protocol.
     """
 
     def exists(self, location: Location) -> bool: ...
@@ -78,8 +78,6 @@ class Store(Protocol):
     def delete(self, location: Location, *, recursive: bool = False) -> None: ...
 
     def make_directory(self, location: Location) -> None: ...
-
-    def move_within_store(self, source: Location, destination: Location) -> None: ...
 
 
 class LocalStore:
@@ -155,15 +153,3 @@ class LocalStore:
 
     def make_directory(self, location: Location) -> None:
         self._local(location).mkdir(parents=True, exist_ok=True)
-
-    def move_within_store(self, source: Location, destination: Location) -> None:
-        source_path = self._local(source)
-        destination_path = self._local(destination)
-        if not source_path.exists():
-            raise StoreError(f"cannot move a location that does not exist: {source.value}")
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.replace(source_path, destination_path)
-        except OSError:
-            # Different filesystems cannot be renamed across.
-            shutil.move(str(source_path), str(destination_path))

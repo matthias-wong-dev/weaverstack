@@ -5,10 +5,13 @@ or a local root directory standing in for one. It is the only level that is
 written down and named, because it is the only level that cannot be identified
 from inside itself.
 
-A host determines *where work executes*, not where it was requested. Building
-``--to MyFabric`` runs in that workspace whether it was invoked from a Fabric
-notebook or from a desktop shell; only the transport differs. Building
-``--to MyLocal`` runs locally.
+A host says *where the resources are* — the workspace or root a command reads
+and mutates. It does **not** say where the code runs. Those are independent: the
+same ``FabricHost`` is the target whether Weaver reaches it from a laptop over
+HTTPS or runs against it inside a Fabric session. Where code runs is the
+*executor's* concern, and a core operation always stays within the one host it
+was given — cross-host movement (a desktop push, shipping the package into
+Fabric) is explicit orchestration owned by the CLI, not by a host or a store.
 
 Every host is constructible directly::
 

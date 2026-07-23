@@ -72,18 +72,35 @@ They are independent, and three of the combinations are real:
 | 2 | Fabric | laptop | the desktop CLI reaching into a workspace |
 | 3 | Fabric | **in Fabric** | **the product** — `pip install weaverstack` in a notebook |
 
-**The same Weaver code must run unchanged in all three.** Everything that
-differs is confined to two implementations behind one shape each:
+**A core operation works within one host and does not reach across.** A
+`LocalHost` resolves and mutates beneath one local root; a `FabricHost` within
+one workspace. No host infers, reads from, or transfers to another. Cross-host
+movement — pushing local files into OneLake, shipping the package into Fabric,
+submitting through Livy — is explicit orchestration owned by `weaver_cli` or the
+test infrastructure, and must not shape the core `Store`.
+
+**The same Weaver code runs unchanged in all three positions.** What differs is
+confined to two implementations behind one shape each:
 
 | | local | Fabric |
 |---|---|---|
 | resolver | `LocalResolver` | `FabricResolver` |
-| store | `LocalStore` | `FabricStore` (OneLake DFS) |
+| store | `LocalStore` | `FabricStore` |
+
+`FabricStore` speaks OneLake DFS over HTTPS — that is the **desktop's** way of
+reaching into a workspace, not the path Weaver should use when running *inside*
+Fabric, where native in-session mechanisms apply. So it is a cross-into-Fabric
+transport, not the canonical in-host Fabric implementation.
 
 Above those, nothing knows which host it is talking to. `resolver_for(host)` and
-`store_for(host)` choose; every caller is written once. If you find yourself
-adding `if isinstance(host, …)` above that line, the abstraction is being
-broken and the fix belongs below it, not above.
+`store_for(host)` choose; every caller is written once. An `if isinstance(host,
+…)` above that line means the abstraction is being broken, and the fix belongs
+below it.
+
+**Credential choice is a caller's policy, not the core's.** Core accepts an
+injected credential and otherwise uses the library default without pinning the
+chain. The CLI and the Fabric test infrastructure call `prefer_cli_credential()`
+themselves; importing or using the core imposes no credential choice.
 
 ### The local host is a proxy, not a toy
 
@@ -157,6 +174,12 @@ These become enforceable as the corresponding code lands:
   CRUD accounting, staging and logging.
 - **Every target root is explicit.** No destination Lakehouse is assumed to be
   attached to the notebook.
+- **Level-three identity is host + type + name.** An item name is unique per
+  *type*, not across types — a Lakehouse and its generated SQL endpoint share a
+  display name. Resolution is typed: the slot supplies the type (a `DeltaTarget`
+  is a Lakehouse, a `WarehouseTarget` a Warehouse), so core never asks the
+  workspace what a bare name "is". A destructive operation must not depend on
+  name inference.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
 - **Certification is per object.** Before a rebuild, the selected objects and

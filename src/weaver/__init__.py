@@ -21,7 +21,7 @@ from .wipe import (
     wipe,
     wipe_delta_target,
     wipe_folder_target,
-    wipe_item,
+    wipe_lakehouse,
     wipe_selection,
     wipe_sql_target,
 )
@@ -73,7 +73,7 @@ __all__ = [
     "wipe_folder_target",
     "wipe_delta_target",
     "wipe_sql_target",
-    "wipe_item",
+    "wipe_lakehouse",
     "wipe_selection",
     "WipeReport",
 ]

@@ -764,6 +764,64 @@ development tool for shipping a working tree on every change; the
 notebook-carries-everything pattern is the interim answer for users. Both
 disappear when `pip install weaverstack` works.
 
+### Review corrections
+
+A round of review corrected several places where the code proved more than it
+supported, or expressed the wrong foundation. All accepted.
+
+**Within-host is the foundation; host and executor are independent.** A core
+operation stays within the one host it was given. Cross-host movement is CLI
+orchestration and must not shape the `Store`. The claim that "a host determines
+where work executes" is removed from `hosts.py`. `FabricStore` over DFS is
+reframed as the *desktop's* transport into a workspace, not the canonical
+in-Fabric path.
+
+**Credential policy leaves the core.** `auth.credential()` no longer pins
+`AZURE_TOKEN_CREDENTIALS` as a side effect of asking for a token. The CLI and
+the Fabric test infrastructure call `prefer_cli_credential()` themselves. Using
+the core imposes no credential choice.
+
+**`move_within_store` is gone.** I added it speculatively at checkpoint 2 on the
+reasoning that a same-store move is a cheap rename — but OneLake has no directory
+rename, `LocalStore` fell back to `shutil.move` across filesystems, and
+`FabricStore` copied every byte. The name promised metadata-rename intent that
+neither implementation kept. Staging promotion, destination replacement and
+atomic publication are real needs; their contract comes from the load algorithm,
+not a guess. Load introduces what it actually needs.
+
+**OneLake listing fails loudly when paged.** It silently returned the first page,
+which would truncate a wipe, a sync or a reconciliation. It now raises on an
+`x-ms-continuation` header. Full pagination is deferred; silent truncation is
+not acceptable in the meantime. Proven by a mocked test — no tenant needed.
+
+**Identity is host + type + name, not host + name.** The earlier "unique within
+a workspace" was too strong and the code already knew it — a Lakehouse grows a
+same-named SQL endpoint. Resolution is now typed: the slot supplies the type,
+and core never asks the workspace what a bare name "is". `wipe_item` — which did
+untyped discovery and chose destructive behaviour from the answer — is replaced
+by `wipe_lakehouse`, resolved explicitly as a Lakehouse. The CLI still accepts a
+bare name as a Lakehouse convenience, but constructs the typed selection before
+calling core. `artifact_segment` is renamed `lakehouse_artifact_segment`,
+because its `.Lakehouse` suffix was always Lakehouse-specific.
+
+**The Fabric wipe test is gone; the local vertical is stronger.** The deleted
+test built files that merely *resembled* a Delta table (`part-0000.parquet`, a
+hand-written `_delta_log/*.json`) and ran wipe from the laptop over DFS — it
+looked like in-Fabric validation and was not. Real in-Fabric wipe coverage
+returns when it can create a genuine Delta table inside a session and call the
+actual implementation there. Meanwhile the **local** lifecycle is a real
+build → load → wipe → rebuild, executing saved `build.spark.sql` and
+`load.spark.sql` rather than `createDataFrame`, and asserting the environment
+recovers on a second pass.
+
+A build constraint that lifecycle surfaced: **Delta rejects spaces in column
+names** unless column mapping is enabled, and Weaver's declared schemas have
+spaced names (`Order id`). The build DDL will have to carry
+`delta.columnMapping.mode = name`. Found by running it, not by reasoning.
+
+Verified against the tenant after the refactor: 21 resource/store tests and 7
+in-Fabric Livy tests still pass under typed resolution.
+
 ---
 
 ## Open questions

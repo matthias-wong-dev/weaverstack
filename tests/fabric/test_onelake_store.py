@@ -1,6 +1,8 @@
 """The OneLake store, against real OneLake.
 
-Same protocol as LocalStore, so what sits above it is written once.
+A **desktop transport** test: it exercises FabricStore reaching into a workspace
+over DFS from the laptop, which is how the CLI pushes and inspects. It is not a
+test of Weaver running inside Fabric.
 """
 
 from __future__ import annotations
@@ -73,28 +75,7 @@ def test_listing_recursively_reaches_nested_files(store, files_root):
     assert (files_root / "deep" / "nested" / "deep.csv").value in names
 
 
-def test_a_move_relocates_a_directory(store, files_root):
-    """OneLake refuses a rename, so this copies — the caller cannot tell."""
-    store.write(files_root / "staging" / "a.csv", b"one")
-    store.write(files_root / "staging" / "b.csv", b"two")
 
-    store.move_within_store(files_root / "staging", files_root / "destination")
-
-    assert store.read(files_root / "destination" / "a.csv") == b"one"
-    assert store.read(files_root / "destination" / "b.csv") == b"two"
-    assert not store.exists(files_root / "staging")
-
-
-def test_a_move_relocates_a_single_file(store, files_root):
-    store.write(files_root / "one.csv", b"x")
-    store.move_within_store(files_root / "one.csv", files_root / "two.csv")
-    assert store.read(files_root / "two.csv") == b"x"
-    assert not store.exists(files_root / "one.csv")
-
-
-def test_moving_something_absent_is_an_error(store, files_root):
-    with pytest.raises(StoreError, match="does not exist"):
-        store.move_within_store(files_root / "absent", files_root / "elsewhere")
 
 
 def test_delete_removes_a_tree(store, files_root):

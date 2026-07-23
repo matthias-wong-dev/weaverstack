@@ -13,7 +13,10 @@ import sys
 
 import weaver
 from weaver.errors import WeaverError
-from weaver.fabric.capacity import CAPACITY_ACTIONS
+
+#: The capacity verbs, kept here so the parser needs no Fabric import — a
+#: CLI-only install without the [fabric] extra must still build its parser.
+CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +77,7 @@ def handle_capacity(args: argparse.Namespace) -> int:
     Fabric session touches.
     """
 
+    _prefer_desktop_credential()
     from weaver.fabric import run_capacity_action
 
     result = run_capacity_action(
@@ -102,6 +106,21 @@ def _add_host_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", help="a local host root, instead of --host/--hosts")
 
 
+def _prefer_desktop_credential() -> None:
+    """Pin the Azure CLI credential for desktop commands.
+
+    Credential choice is the CLI's policy, not the core's. Best-effort — if the
+    Fabric extra is not installed there is nothing to pin, and a local command
+    never needs it.
+    """
+
+    try:
+        from weaver.fabric.auth import prefer_cli_credential
+    except ImportError:
+        return
+    prefer_cli_credential()
+
+
 def _resolve_host(args: argparse.Namespace):
     from weaver import LocalHost, load_hosts
     from weaver.errors import CommandError
@@ -120,7 +139,13 @@ def _resolve_host(args: argparse.Namespace):
     if args.host not in hosts:
         known = ", ".join(sorted(hosts)) or "none"
         raise CommandError(f"no host {args.host!r} in {args.hosts_file} — found: {known}")
-    return hosts[args.host]
+
+    host = hosts[args.host]
+    from weaver import LocalHost as _LocalHost
+
+    if not isinstance(host, _LocalHost):
+        _prefer_desktop_credential()
+    return host
 
 
 def handle_wipe(args: argparse.Namespace) -> int:

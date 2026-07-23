@@ -23,7 +23,7 @@ def resolver() -> LocalResolver:
 
 def test_an_item_holds_files_and_tables(resolver):
     item = ItemRef("Sales")
-    assert resolver.item(item).value == "/srv/.local/Sales"
+    assert resolver.lakehouse(item).value == "/srv/.local/Sales"
     assert resolver.files_root(item).value == "/srv/.local/Sales/Files"
     assert resolver.tables_root(item).value == "/srv/.local/Sales/Tables"
 
@@ -81,7 +81,7 @@ def test_control_tables_live_under_the_weaver_lakehouse(resolver):
 
 
 def test_the_weaver_lakehouse_is_just_another_item(resolver):
-    assert resolver.weaver_lakehouse == resolver.item(ItemRef("Weaver"))
+    assert resolver.weaver_lakehouse == resolver.lakehouse(ItemRef("Weaver"))
 
 
 def test_a_host_without_a_weaver_lakehouse_says_so():

@@ -52,7 +52,7 @@ def test_several_targets_at_once(populated_folders, capsys):
 def test_an_unknown_item_is_reported(populated_folders, capsys):
     exit_code = main(["wipe", "--target", "Nope", "--root", str(populated_folders.root), "--yes"])
     assert exit_code == 1
-    assert "does not exist" in capsys.readouterr().err
+    assert "no Lakehouse named" in capsys.readouterr().err
 
 
 # --- safety ------------------------------------------------------------------

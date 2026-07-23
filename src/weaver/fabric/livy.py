@@ -116,7 +116,8 @@ class LivySession:
         from .runtime import abfss_package_root, bootstrap_source
 
         resolver = resolver or FabricResolver(host)
-        home = resolver.resolve(ItemRef(host.weaver_lakehouse))
+        from .resources import LAKEHOUSE
+        home = resolver.resolve(ItemRef(host.weaver_lakehouse), item_type=LAKEHOUSE)
         return cls(
             resolver.workspace.id,
             home.id,

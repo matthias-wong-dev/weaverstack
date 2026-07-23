@@ -4,10 +4,12 @@ The twin of :class:`~weaver.resolution.LocalResolver`, and deliberately the same
 surface, so everything above resolution is written once and neither build nor
 wipe learns which host it is talking to.
 
-The difference is that a Fabric name has to be *asked about*. Locally an item is
-a directory and both its areas are plainly there; on Fabric ``Sales_LH`` is a
-name that could be a Lakehouse or a Warehouse, and only the workspace knows.
-Answers are cached, because asking costs an API call.
+The difference is that a Fabric name has to be *asked about* — a name maps to a
+GUID only by consulting the workspace. It is asked about **with its type**:
+identity is ``host + type + name``, so a Lakehouse and a Warehouse may share a
+display name (indeed a Lakehouse grows a same-named SQL endpoint), and the
+caller always knows the type from the slot. Answers are cached, because asking
+costs an API call.
 """
 
 from __future__ import annotations
@@ -26,8 +28,8 @@ from ..targets import (
     validate_name,
 )
 from .client import ONELAKE_DFS, FabricClient
-from .onelake import abfss_root, artifact_segment
-from .resources import WAREHOUSE, Item, Workspace, find_item, find_workspace
+from .onelake import abfss_root, lakehouse_artifact_segment
+from .resources import LAKEHOUSE, WAREHOUSE, Item, Workspace, find_item, find_workspace
 
 #: Where the Weaver package is shipped when it is not installed in a Fabric
 #: Environment. A convention rather than configuration, like ``repos`` — the
@@ -72,37 +74,40 @@ class FabricResolver:
 
     # --- level three ------------------------------------------------------
 
-    def resolve(self, item: ItemRef, *, item_type: str | None = None) -> Item:
-        """Ask the workspace what this name is. Cached."""
+    def resolve(self, item: ItemRef, *, item_type: str) -> Item:
+        """The workspace item of this name and type. Cached.
 
-        key = f"{item.name}:{item_type or 'any'}"
+        A type is required: identity is ``host + type + name``, and asking the
+        workspace what a bare name *is* would make a caller depend on ambiguous
+        name inference. The caller knows the type from the slot — a
+        ``DeltaTarget`` is a Lakehouse, a ``WarehouseTarget`` is a Warehouse.
+        """
+
+        key = f"{item.name}:{item_type}"
         if key not in self._items:
             self._items[key] = find_item(
                 self.workspace, item.name, item_type=item_type, client=self.client
             )
         return self._items[key]
 
-    def item_kind(self, item: ItemRef) -> str:
-        """Whether a name is a Lakehouse, a Warehouse, or something else."""
-
-        return self.resolve(item).type
-
-    def item(self, item: ItemRef) -> Location:
-        return self.root / artifact_segment(self.resolve(item).id)
+    def lakehouse(self, item: ItemRef) -> Location:
+        return self.root / lakehouse_artifact_segment(
+            self.resolve(item, item_type=LAKEHOUSE).id
+        )
 
     def files_root(self, item: ItemRef) -> Location:
-        return self.item(item) / FILES_AREA
+        return self.lakehouse(item) / FILES_AREA
 
     def tables_root(self, item: ItemRef) -> Location:
-        return self.item(item) / TABLES_AREA
+        return self.lakehouse(item) / TABLES_AREA
 
     def spark_root(self, item: ItemRef) -> str:
-        """The ``abfss://`` root Spark writes through.
+        """The ``abfss://`` root Spark writes through, for a Lakehouse.
 
         Explicit, so a session never needs the item attached.
         """
 
-        return abfss_root(self.workspace.id, self.resolve(item).id)
+        return abfss_root(self.workspace.id, self.resolve(item, item_type=LAKEHOUSE).id)
 
     # --- targets ----------------------------------------------------------
 
@@ -143,7 +148,7 @@ class FabricResolver:
 
     @property
     def weaver_lakehouse(self) -> Location:
-        return self.item(self._weaver_lakehouse())
+        return self.lakehouse(self._weaver_lakehouse())
 
     @property
     def repos_root(self) -> Location:

@@ -183,47 +183,52 @@ def wipe(
     return tuple(reports)
 
 
-def wipe_item(
-    item: ItemRef,
+def wipe_lakehouse(
+    lakehouse: ItemRef,
     host: Host,
     *,
     store: Store | None = None,
     dry_run: bool = False,
 ) -> tuple[WipeReport, ...]:
-    """Clear a whole level-three item.
+    """Clear both areas of a Lakehouse — its Files and its Tables.
 
-    A Lakehouse holds both areas, so wiping one clears its Files and its
-    Tables. What an item *is* comes from the host: locally every item is
-    Lakehouse-shaped, while on Fabric it has to be asked for.
+    The item is resolved *as a Lakehouse*, so there is no untyped "what is this
+    name?" discovery: a Warehouse of the same name resolves elsewhere and is not
+    reached here. A destructive operation must not depend on name inference.
     """
 
     store = store or store_for(host)
     resolver = resolver_for(host)
-
-    # On Fabric a name could be either kind and only the workspace knows; locally
-    # everything is Lakehouse-shaped. Either way the resolver answers, and
-    # answering at all proves the item is there.
-    kind = resolver.item_kind(item)
-    if kind == "Warehouse":
-        return (
-            wipe_sql_target(
-                WarehouseTarget(warehouse=item), host, store=store, dry_run=dry_run
-            ),
-        )
-    if kind != "Lakehouse":
+    if not _lakehouse_exists(resolver, lakehouse):
         raise CommandError(
-            f"{item.name!r} is a {kind}, which Weaver does not wipe — "
-            "expected a Lakehouse or a Warehouse"
+            f"no Lakehouse named {lakehouse.name!r} on this host — nothing to wipe"
         )
-
     return (
         wipe_folder_target(
-            FolderTarget(lakehouse=item), host, store=store, dry_run=dry_run
+            FolderTarget(lakehouse=lakehouse), host, store=store, dry_run=dry_run
         ),
         wipe_delta_target(
-            DeltaTarget(lakehouse=item), host, store=store, dry_run=dry_run
+            DeltaTarget(lakehouse=lakehouse), host, store=store, dry_run=dry_run
         ),
     )
+
+
+def _lakehouse_exists(resolver, lakehouse: ItemRef) -> bool:
+    """Whether the Lakehouse is there, resolved as a Lakehouse.
+
+    Locally that is a directory check; on Fabric, resolving it as a Lakehouse
+    both proves it exists and refuses a same-named Warehouse.
+    """
+
+    if hasattr(resolver, "lakehouse_exists"):
+        return resolver.lakehouse_exists(lakehouse)
+    from .errors import CommandError as _CommandError
+
+    try:
+        resolver.lakehouse(lakehouse)
+        return True
+    except _CommandError:
+        return False
 
 
 def wipe_selection(
@@ -233,10 +238,12 @@ def wipe_selection(
     store: Store | None = None,
     dry_run: bool = False,
 ) -> tuple[WipeReport, ...]:
-    """Wipe each named target, reading its kind from its shape.
+    """Wipe each named target, taking its type from its shape.
 
-    ``Sales_LH`` names an item and clears all of it.
-    ``Sales_LH/Files/Extracts`` names a folder root and clears only that.
+    ``Sales_LH`` is a **Lakehouse** and clears both its areas.
+    ``Sales_LH/Files/Extracts`` is a folder root and clears only that. A bare
+    name is always a Lakehouse — a Warehouse must be wiped through a
+    :class:`~weaver.targets.WarehouseTarget`, never inferred from a name.
     """
 
     names = list(selection)
@@ -254,6 +261,6 @@ def wipe_selection(
             )
         else:
             reports.extend(
-                wipe_item(ItemRef.parse(name), host, store=store, dry_run=dry_run)
+                wipe_lakehouse(ItemRef.parse(name), host, store=store, dry_run=dry_run)
             )
     return tuple(reports)

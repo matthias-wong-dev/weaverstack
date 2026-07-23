@@ -1,20 +1,21 @@
-"""OneLake as a :class:`~weaver.store.Store`.
+"""OneLake as a :class:`~weaver.store.Store`, over the DFS API.
 
-OneLake speaks the ADLS Gen2 DFS API over plain HTTPS, so the same code reaches
-it from a laptop and from inside a Fabric session. That is what keeps a desktop
-push and folder work inside Fabric one implementation rather than two that
-drift.
+This is the **desktop's** way of reaching into a Fabric workspace: authenticated
+HTTPS against the ADLS Gen2 DFS endpoint. It is what the CLI uses to push
+repository files up and to inspect results from a test on the laptop. It is not
+the path Weaver should use when it is *running inside* Fabric — there the native
+in-session mechanisms (``notebookutils.fs``, Spark) apply — so this store is a
+cross-into-Fabric transport, not the canonical in-host Fabric implementation.
 
-Two things OneLake does not do, both learned the hard way:
-
-**No directory rename.** ``PUT ?resource=directory`` with ``x-ms-rename-source``
-returns ``400 UnsupportedHeader``. :meth:`FabricStore.move_within_store` is
-still one operation — the intent has to survive the call — but here it copies
-and deletes. Inside a Fabric session ``notebookutils.fs.mv`` can do better, and
-that is the implementation's business, not the caller's.
+Two things OneLake does over DFS that a plain filesystem does not:
 
 **Writing is three calls, not one.** Create the file, append the bytes, flush at
 the final offset.
+
+**Listing is paged.** A large directory returns a continuation token rather than
+everything. Pagination is not implemented yet, so a paged listing fails loudly
+(see :meth:`FabricStore.list`) rather than silently returning a first page —
+which would quietly truncate a wipe, a sync or a reconciliation.
 """
 
 from __future__ import annotations
@@ -35,10 +36,13 @@ STORAGE_API_VERSION = "2023-11-03"
 DEFAULT_TIMEOUT = 120.0
 
 
-def artifact_segment(item: str) -> str:
-    """A OneLake path segment for an item, by id or by name.
+def lakehouse_artifact_segment(item: str) -> str:
+    """A OneLake path segment for a **Lakehouse**, by id or by name.
 
     A GUID stands alone; a name needs its item type, as ``Weaver.Lakehouse``.
+    The rule is Lakehouse-specific — the ``.Lakehouse`` suffix — which is why the
+    name says so. OneLake file paths only ever address Lakehouses; a Warehouse
+    is reached over TDS, not here.
     """
 
     try:
@@ -58,7 +62,7 @@ def onelake_url(
 ) -> str:
     """A DFS URL beneath one item, e.g. ``…/{ws}/{lh}/Files/repos/x``."""
 
-    parts = [workspace, artifact_segment(item)]
+    parts = [workspace, lakehouse_artifact_segment(item)]
     parts.extend(part for part in relative_path.strip("/").split("/") if part)
     url = f"{base_url.rstrip('/')}/" + "/".join(quote(part, safe="") for part in parts)
     return f"{url}?{urlencode(query)}" if query else url
@@ -170,7 +174,7 @@ class FabricStore:
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         parsed = parse_onelake(location, base_url=self.base_url)
         directory = "/".join(
-            part for part in (artifact_segment(parsed.item), parsed.relative) if part
+            part for part in (lakehouse_artifact_segment(parsed.item), parsed.relative) if part
         )
         url = f"{self.base_url}/{quote(parsed.workspace, safe='')}?" + urlencode(
             {
@@ -183,8 +187,14 @@ class FabricStore:
         if response.status_code == 404:
             raise StoreError(f"cannot list a location that does not exist: {location}")
 
+        # A large directory pages, returning a continuation token. Until that is
+        # handled, returning only the first page would silently truncate a wipe,
+        # a sync or a reconciliation, so fail before returning anything.
+        if response.headers.get("x-ms-continuation"):
+            raise NotImplementedError("OneLake listing pagination is not implemented")
+
         entries: list[Entry] = []
-        prefix = f"{artifact_segment(parsed.item)}/"
+        prefix = f"{lakehouse_artifact_segment(parsed.item)}/"
         for path in response.json().get("paths", []):
             name = path.get("name", "")
             relative = name[len(prefix):] if name.startswith(prefix) else name
@@ -192,7 +202,7 @@ class FabricStore:
                 Entry(
                     location=Location(
                         f"{self.base_url}/{parsed.workspace}/"
-                        f"{artifact_segment(parsed.item)}/{relative}"
+                        f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
                     ),
                     is_directory=str(path.get("isDirectory", "false")).lower() == "true",
                     size=int(path["contentLength"]) if path.get("contentLength") else None,
@@ -228,32 +238,6 @@ class FabricStore:
         self._request(
             "PUT", f"{self._url(location)}?resource=directory", expected=(201, 409)
         )
-
-    def move_within_store(self, source: Location, destination: Location) -> None:
-        """Copy then delete.
-
-        OneLake refuses ``x-ms-rename-source`` with ``400 UnsupportedHeader``, so
-        a move here really does move bytes. The operation stays whole so a
-        future implementation inside a Fabric session can do better.
-        """
-
-        if not self.exists(source):
-            raise StoreError(f"cannot move a location that does not exist: {source}")
-
-        if self.is_directory(source):
-            self.make_directory(destination)
-            prefix = source.value.rstrip("/") + "/"
-            for entry in self.list(source, recursive=True):
-                if entry.is_directory:
-                    continue
-                relative = entry.location.value[len(prefix):]
-                self.write(
-                    destination.join(*relative.split("/")), self.read(entry.location)
-                )
-            self.delete(source, recursive=True)
-        else:
-            self.write(destination, self.read(source))
-            self.delete(source)
 
 
 def _parse_time(value: str | None) -> datetime | None:
