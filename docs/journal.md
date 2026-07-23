@@ -67,6 +67,22 @@ the *attached* Lakehouse, which is precisely the dependence being removed.
 weaver's `runtime/load.py:415` documents relying on it for Folder I/O; that is
 the coupling weaverstack breaks.
 
+**Nothing to learn until you need it.** Weaver should feel natural at whatever
+stage a developer is at, and must not impose a learning curve ahead of the
+problem it solves. That makes the naming story a progression, not a
+prerequisite:
+
+1. Two-part names inside one repository. Works immediately, no configuration.
+2. Three-part names across repositories and targets — a Warehouse reaching a
+   Lakehouse by naming it in full. Fabric supports this natively, so it also
+   needs no configuration. Not portable across a rename, which is fine until
+   it isn't.
+3. `_shortcuts` bindings, adopted when portability across environments starts
+   to matter.
+
+Each step is opt-in and earns its place. A guard or a config that would force
+step 3 on someone at step 1 is a design error, not rigour.
+
 **Two kinds of validation, held to different standards.**
 
 *Critical path* — if it passes, behaviour is wrong. A mistyped `Primary Key`
@@ -422,11 +438,19 @@ downstream. The file format waits for the build package, because a shortcut's
 role — an operation that creates something, and a node with no upstream — is
 only concrete once that exists.
 
-One thing this exposed and did not fix: a Warehouse query reading a bare
-`Sales.Order` that exists only as a Delta table would not *execute* without a
-shortcut or a three-part name. The data dependency is real and the edge is
-right, but the SQL as written needs a bridge nobody has declared. The shortcuts
-file is not decoration — it is how a cross-boundary read becomes expressible.
+**A cross-boundary read is written in three parts, and that is enough.** Fabric
+lets a Warehouse reference a Lakehouse table as `Lakehouse.Schema.Table`
+directly, so no shortcut is required — a repository building bronze into a
+Lakehouse and another building silver into a Warehouse can simply name the
+Lakehouse. The fixture does exactly that, and `_shortcuts` is what you reach
+for later, when the Lakehouse name should stop being hard-coded.
+
+The consequence for the graph: a three-part read *cannot* resolve at parse
+time, because whether `Sales_LH` names this repository's own Delta target is
+only known once the build is handed its targets. So those references are
+recorded as pending rather than turned into edges, and the cross-boundary edges
+appear when the build resolves them. What remains after that is genuinely
+outside — in the fixture, a table-valued function nobody defines.
 
 Cycles are refused when the repository is read. A repository whose graph cannot
 be ordered is not a repository worth handing on.

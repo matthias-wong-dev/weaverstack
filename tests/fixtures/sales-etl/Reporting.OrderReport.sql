@@ -15,6 +15,11 @@ Notes: |
   Stages the recent window into a temp table so the line-count apply runs
   against a smaller set.
 
+  Reads the order table out of the Lakehouse by its three-part name. That is
+  the plain way to do it and needs no configuration; it is not portable to a
+  Lakehouse of a different name, which is when shortcuts start to earn their
+  keep.
+
 Revision notes:
   - 2026-07-23 Created.
 */
@@ -24,7 +29,7 @@ select o.[Order id]
      , o.[Customer id]
      , o.[Amount]
   into #recent
-  from [Sales].[Order] as o
+  from [Sales_LH].[Sales].[Order] as o
  where o.[Order date] >= dateadd(month, -12, getdate());
 
 select r.[Order id]

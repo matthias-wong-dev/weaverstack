@@ -120,18 +120,20 @@ def test_the_view_is_a_single_statement(repo):
 
 
 def test_references_across_every_language(repo):
+    """Keyed by node id, because Sales.Customer exists in two targets."""
     assert {
-        document.qualified: sorted(str(r) for r in document.discovered_references)
+        document.node_id: sorted(str(r) for r in document.discovered_references)
         for document in repo
     } == {
-        "Sales.OrderExport": [],
-        "Sales.Order": ["Sales.OrderExport"],
-        "Sales.Customer": ["Sales.OrderExport"],
-        "Sales.OrderSummary": ["Sales.Cancelled", "Sales.Order"],
-        "Reporting.OrderReport": [
-            "Sales.Customer", "Sales.Order", "Sales.OrderLineCount",
+        "folder:Sales.OrderExport": [],
+        "delta:Sales.Order": ["Sales.OrderExport"],
+        "delta:Sales.Customer": ["Sales.OrderExport"],
+        "delta:Sales.OrderSummary": ["Sales.Cancelled", "Sales.Order"],
+        "sql:Sales.Customer": ["Sales_LH.Sales.Customer"],
+        "sql:Reporting.OrderReport": [
+            "Sales.Customer", "Sales.OrderLineCount", "Sales_LH.Sales.Order",
         ],
-        "Reporting.OrderView": ["Reporting.OrderReport"],
+        "sql:Reporting.OrderView": ["Reporting.OrderReport"],
     }
 
 
@@ -233,11 +235,9 @@ def test_the_repository_orders_upstream_before_downstream(repo):
 
 def test_the_layers_show_what_can_run_together(repo):
     assert repo.graph.layers() == (
-        ("folder:Sales.OrderExport",),
-        ("delta:Sales.Customer", "delta:Sales.Order"),
-        ("delta:Sales.OrderSummary", "sql:Sales.Customer"),
-        ("sql:Reporting.OrderReport",),
-        ("sql:Reporting.OrderView",),
+        ("folder:Sales.OrderExport", "sql:Sales.Customer"),
+        ("delta:Sales.Customer", "delta:Sales.Order", "sql:Reporting.OrderReport"),
+        ("delta:Sales.OrderSummary", "sql:Reporting.OrderView"),
     )
 
 
@@ -248,16 +248,26 @@ def test_a_two_part_name_resolves_in_the_writers_own_namespace():
     assert "delta:Sales.Customer" not in repo.graph.upstream_of("sql:Reporting.OrderReport")
 
 
-def test_a_unique_match_elsewhere_still_resolves_across_the_boundary():
-    """Sales.Order exists only as Delta, so the Warehouse query reaches it."""
+def test_a_cross_boundary_read_is_written_in_three_parts():
+    """A Warehouse reaches a Lakehouse table by naming it in full.
+
+    That is the plain way and needs no configuration. It cannot resolve here,
+    because whether `Sales_LH` is this repository's own Delta target is only
+    known once the build is given its targets.
+    """
     repo = read_repository(FIXTURE)
-    assert "delta:Sales.Order" in repo.graph.upstream_of("sql:Reporting.OrderReport")
+    assert "Sales_LH.Sales.Order" in repo.unresolved["sql:Reporting.OrderReport"]
+    assert not any(
+        node.startswith("delta:")
+        for node in repo.graph.upstream_of("sql:Reporting.OrderReport")
+    )
 
 
-def test_an_object_sourcing_its_namesake_does_not_depend_on_itself():
-    """sql:Sales.Customer reads Sales.Customer — meaning the Delta one."""
+def test_an_object_sourcing_its_namesake_names_it_in_full():
+    """A bare Sales.Customer inside sql:Sales.Customer would bind to itself."""
     repo = read_repository(FIXTURE)
-    assert repo.graph.upstream_of("sql:Sales.Customer") == ("delta:Sales.Customer",)
+    assert repo.graph.upstream_of("sql:Sales.Customer") == ()
+    assert repo.unresolved["sql:Sales.Customer"] == ("Sales_LH.Sales.Customer",)
 
 
 def test_a_name_declared_external_is_a_boundary_not_an_edge():
@@ -266,29 +276,31 @@ def test_a_name_declared_external_is_a_boundary_not_an_edge():
 
     repo = read_repository(FIXTURE)
     graph = build_internal_graph(repo.documents, external_names=["Sales.Order"])
-    assert graph.upstream_of("sql:Reporting.OrderReport") == ("sql:Sales.Customer",)
     assert graph.upstream_of("delta:Sales.OrderSummary") == ()
 
 
-def test_an_edge_may_cross_the_lakehouse_warehouse_boundary(repo):
-    """The Warehouse object reads a Delta table. Bridging that at build needs
-    the SQL endpoint refresh, which is why the boundary must stay visible."""
+def test_the_boundary_stays_visible_in_node_identity(repo):
+    """Node ids carry the target, so a delta -> sql edge is findable. That is
+    where the SQL endpoint refresh belongs once the build resolves the
+    three-part reads into edges."""
+    assert all(node.split(":", 1)[0] in {"folder", "delta", "sql"} for node in repo.graph.nodes)
     crossing = [
-        str(edge)
-        for edge in repo.graph.edges
-        if edge.upstream.startswith("delta:") and edge.downstream.startswith("sql:")
+        edge for edge in repo.graph.edges
+        if edge.upstream.split(":")[0] != edge.downstream.split(":")[0]
     ]
-    assert "delta:Sales.Order -> sql:Reporting.OrderReport" in crossing
+    assert [str(edge) for edge in crossing] == [
+        "folder:Sales.OrderExport -> delta:Sales.Customer",
+        "folder:Sales.OrderExport -> delta:Sales.Order",
+    ]
 
 
 def test_descendants_are_what_a_rebuild_would_uncertify(repo):
+    """Only what resolves today. The three-part reads join once the build
+    knows whether Sales_LH is this repository's own Delta target."""
     assert repo.graph.descendants("folder:Sales.OrderExport") == (
         "delta:Sales.Customer",
         "delta:Sales.Order",
         "delta:Sales.OrderSummary",
-        "sql:Sales.Customer",
-        "sql:Reporting.OrderReport",
-        "sql:Reporting.OrderView",
     )
 
 
@@ -302,10 +314,12 @@ def test_references_outside_the_repository_are_not_edges(repo):
     assert "Sales.OrderLineCount" in repo.unresolved["sql:Reporting.OrderReport"]
 
 
-def test_only_genuinely_external_names_remain_unresolved(repo):
-    """Sales.OrderLineCount is a table-valued function nobody here defines."""
+def test_what_remains_unresolved_is_pending_or_genuinely_outside(repo):
+    """Three-part reads wait for the targets; Sales.OrderLineCount is a
+    table-valued function nobody here defines and never will."""
     assert repo.unresolved == {
-        "sql:Reporting.OrderReport": ("Sales.OrderLineCount",),
+        "sql:Reporting.OrderReport": ("Sales.OrderLineCount", "Sales_LH.Sales.Order"),
+        "sql:Sales.Customer": ("Sales_LH.Sales.Customer",),
     }
 
 
