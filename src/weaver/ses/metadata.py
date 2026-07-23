@@ -59,7 +59,12 @@ OBJECT_KINDS = frozenset({FOLDER, TABLE, VIEW})
 
 PYTHON = "python"
 SQL = "sql"
-LANGUAGES = frozenset({PYTHON, SQL})
+SPARK_SQL = "spark_sql"
+LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL})
+
+#: Languages whose objects materialise as Delta rather than in a Warehouse.
+#: They declare their shape up front and use the underscored audit spelling.
+DELTA_LANGUAGES = frozenset({PYTHON, SPARK_SQL})
 
 _ID_KEYS = {"Folder ID": FOLDER, "Table ID": TABLE, "View ID": VIEW}
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
@@ -70,6 +75,7 @@ _COMMON_KEYS = {
     "Lineage",
     "Notes",
     "Revision notes",
+    "Dependencies",
     "Static",
     "Prohibit rebuild",
 }
@@ -131,11 +137,11 @@ AUDIT_UPDATE = "Row update datetime"
 AUDIT_DELETE = "Row delete datetime"
 AUDIT_COLUMNS = (AUDIT_INSERT, AUDIT_UPDATE, AUDIT_DELETE)
 
-_AUDIT_TYPES = {PYTHON: "timestamp", SQL: "datetime2(6)"}
+_AUDIT_TYPES = {PYTHON: "timestamp", SPARK_SQL: "timestamp", SQL: "datetime2(6)"}
 
 
 def audit_column_name(logical: str, language: str) -> str:
-    return logical.replace(" ", "_") if language == PYTHON else logical
+    return logical.replace(" ", "_") if language in DELTA_LANGUAGES else logical
 
 
 def _audit_columns(language: str) -> tuple["Column", ...]:
@@ -241,6 +247,7 @@ class SesDocument:
     description: MetadataText
     lineage: MetadataText
     notes: str | None = None
+    dependencies: tuple[ObjectId, ...] = ()
     revision_notes: tuple[Revision, ...] = ()
     revision_date_format: str | None = None
     schema: tuple[Column, ...] = ()
@@ -405,6 +412,14 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             "describe its columns."
         )
 
+    dependencies = _parse_dependencies(loaded.get("Dependencies"), object_id)
+    if language == SPARK_SQL and not dependencies:
+        raise MetadataError(
+            "a Spark SQL object must declare Dependencies. Its query may read by "
+            "path, which cannot be resolved back to a managed object, so the graph "
+            "is declared rather than discovered."
+        )
+
     description = _parse_text(loaded, "Description")
     lineage = _parse_text(loaded, "Lineage")
     notes = _parse_notes(loaded.get("Notes"))
@@ -420,8 +435,11 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     is_incremental = _parse_flag_with_default(loaded, "Incremental", default=kind == FOLDER)
 
     declared_columns = _parse_schema(loaded.get("Schema"))
-    if kind == TABLE and language == PYTHON and not declared_columns:
-        raise MetadataError("a Delta table must declare Schema")
+    if kind == TABLE and language in DELTA_LANGUAGES and not declared_columns:
+        raise MetadataError(
+            "a Delta table must declare Schema — it is created before it is loaded, "
+            "and the declared shape is what lets every column guard run up front"
+        )
 
     primary_key = _parse_column_set(loaded.get("Primary key"), "Primary key")
     declared_not_null = _parse_column_list(loaded.get("Not null"), "Not null")
@@ -462,6 +480,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         description=description,
         lineage=lineage,
         notes=notes,
+        dependencies=dependencies,
         revision_notes=revisions,
         revision_date_format=revision_format,
         schema=schema,
@@ -536,6 +555,39 @@ def _parse_text_value(value: str, key: str) -> MetadataText:
     if literal.lower() in _PLACEHOLDERS:
         raise MetadataError(f"{key} must not be a placeholder value ({literal!r})")
     return MetadataText(literal=literal)
+
+
+def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]:
+    """Objects this one depends on, declared rather than discovered.
+
+    Additive: whatever discovery finds is added to these, never replaced by
+    them. A missing dependency is a wrong build order, which is silent data
+    corruption, so the declared set can only ever widen the graph.
+    """
+
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise MetadataError(
+            "Dependencies must be a non-empty YAML list of Schema.Object names:\n"
+            "Dependencies:\n  - Sales.Customer"
+        )
+    seen: list[ObjectId] = []
+    for entry in value:
+        if not isinstance(entry, str) or not entry.strip():
+            raise MetadataError("Dependencies entries must be non-empty Schema.Object names")
+        parts = [part.strip() for part in entry.strip().split(".")]
+        if len(parts) != 2 or not all(parts):
+            raise MetadataError(
+                f"a Dependencies entry must be a two-part Schema.Object name, got {entry!r}"
+            )
+        dependency = ObjectId(schema=parts[0], object=parts[1])
+        if dependency == object_id:
+            raise MetadataError(f"{object_id.qualified} cannot depend on itself")
+        if dependency in seen:
+            raise MetadataError(f"Dependencies repeats {dependency.qualified}")
+        seen.append(dependency)
+    return tuple(seen)
 
 
 def _parse_notes(value: Any) -> str | None:

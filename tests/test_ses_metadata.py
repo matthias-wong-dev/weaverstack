@@ -11,6 +11,7 @@ from weaver.ses import (
     AUDIT_COLUMNS,
     FOLDER,
     PYTHON,
+    SPARK_SQL,
     SQL,
     TABLE,
     VIEW,
@@ -481,3 +482,86 @@ def test_sql_metadata_comes_from_the_opening_comment():
 def test_sql_without_a_metadata_block_is_refused():
     with pytest.raises(MetadataError, match="metadata block"):
         parse_sql_document("select 1\n")
+
+
+# --- spark sql and declared dependencies ------------------------------------
+
+
+SPARK_YAML = """
+Table ID: Sales.OrderSummary
+
+Description: Order totals by customer.
+
+Lineage: Aggregated from the order table.
+
+Primary key: Customer id
+
+Dependencies:
+  - Sales.Order
+
+Schema:
+  Customer id: string
+  Total: decimal(18,2)
+"""
+
+
+def test_a_spark_sql_table_parses():
+    document = parse(SPARK_YAML, language=SPARK_SQL)
+    assert document.language == SPARK_SQL
+    assert document.dependencies[0].qualified == "Sales.Order"
+
+
+def test_a_spark_sql_table_must_declare_schema():
+    """It materialises Delta, so its shape is declared like Python's."""
+    without = SPARK_YAML.split("Schema:")[0]
+    with pytest.raises(MetadataError, match="must declare Schema"):
+        parse(without, language=SPARK_SQL)
+
+
+def test_a_spark_sql_object_must_declare_dependencies():
+    """Its query may read by path, which cannot resolve back to an object."""
+    without = SPARK_YAML.replace("Dependencies:\n  - Sales.Order\n", "")
+    with pytest.raises(MetadataError, match="must declare Dependencies"):
+        parse(without, language=SPARK_SQL)
+
+
+def test_a_spark_sql_table_uses_the_delta_audit_spelling():
+    document = parse(SPARK_YAML, language=SPARK_SQL)
+    assert [column.name for column in document.audit_columns] == [
+        "Row_insert_datetime", "Row_update_datetime", "Row_delete_datetime",
+    ]
+
+
+def test_a_spark_sql_view_is_a_real_object():
+    """Fabric Lakehouse views persist in the metastore."""
+    document = parse(
+        "View ID: Sales.OrderView\nDescription: x\nLineage: y\n"
+        "Dependencies:\n  - Sales.Order",
+        language=SPARK_SQL,
+    )
+    assert document.kind == VIEW
+    assert document.audit_columns == ()
+
+
+def test_dependencies_are_optional_for_python_and_sql():
+    assert parse(TABLE_YAML).dependencies == ()
+
+
+def test_declared_dependencies_are_two_part_names():
+    with pytest.raises(MetadataError, match="two-part"):
+        parse(TABLE_YAML + "\nDependencies:\n  - Order")
+
+
+def test_an_object_may_not_depend_on_itself():
+    with pytest.raises(MetadataError, match="cannot depend on itself"):
+        parse(TABLE_YAML + "\nDependencies:\n  - Sales.Order")
+
+
+def test_dependencies_may_not_repeat():
+    with pytest.raises(MetadataError, match="repeats"):
+        parse(TABLE_YAML + "\nDependencies:\n  - Sales.Customer\n  - Sales.Customer")
+
+
+def test_dependencies_must_be_a_list():
+    with pytest.raises(MetadataError, match="YAML list"):
+        parse(TABLE_YAML + "\nDependencies: Sales.Customer")

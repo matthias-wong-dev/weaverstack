@@ -26,3 +26,7 @@ class IdentityError(WeaverError):
 
 class MetadataError(WeaverError):
     """Raised when an SES document's metadata is missing, malformed or contradictory."""
+
+
+class LoadError(WeaverError):
+    """Raised when an object cannot be executed or its context is unavailable."""

@@ -183,6 +183,50 @@ someone's head.
 documented and followed by fixtures — the header is the contract a reader meets
 first.
 
+### Checkpoint 4 — the authoring surface
+
+**Dependencies are imports, not string keys.** weaver used
+`self.repo["Schema.Object"]`. Weaverstack declares a dependency by importing
+the other object's module:
+
+    from Sales__Customer import Sales__Customer as Customer
+    ...
+    customers = Customer.dataframe()
+
+Discoverable from the AST without executing anything, no strings to mistype,
+and — the real gain — an IDE can autocomplete and navigate to the object being
+depended on. `self.repo` is gone entirely.
+
+**Accessors are classmethods, not properties.** A class-level property needs a
+metaclass, since Python no longer chains `classmethod` and `property`. The
+method form is the plainer construction, and being inherited from the base
+class it is visible to tooling. Under it is a registry lookup against the
+running workflow, held in a `ContextVar` so concurrent steps cannot see each
+other's dependencies, and raising clearly when called outside one.
+
+**Two consequences of import-as-dependency**, both accepted:
+
+- an unused import is a phantom dependency — a real ordering constraint with no
+  data flow. Correct-by-declaration beats trying to prove usage from the AST.
+- object module names and helper module names must not collide, or a helper
+  import silently becomes a dependency. A repository-level guard.
+
+**Spark SQL is in, not deferred.** Fabric Lakehouse views persist in the
+metastore, so `.spark.sql` with `View ID` is a real object. The ID names the
+object, not the engine, so there is no `Spark table ID`: routing is already
+`(language, kind) -> target` and Spark SQL adds rows to that table.
+
+A Spark SQL object **must declare `Dependencies`**. Its query may read by path,
+and a path cannot be resolved back to a managed object — Weaver's graph is over
+logical IDs, and reverse-mapping physical locations would be fragile and only
+work for objects already built. Discovery still runs and is additive; the
+declaration is the floor, not the ceiling. Declared dependencies can only ever
+widen the graph, because a missing edge is a wrong build order, which is silent
+data corruption.
+
+A Spark SQL table declares `Schema` like Python does, since it materialises
+Delta and the declared shape is what lets every column guard run up front.
+
 ---
 
 ## Open questions
@@ -190,7 +234,7 @@ first.
 | Question | Raised | Status |
 |---|---|---|
 | Which `weaver` revision is the port baseline — the plan's `a97ba8a` or current `fee2025`? | CP0 | open |
-| Path-like *reader* for Folder dependencies during ETL. `staging_folder()` is the write side; the read side is unresolved. Likely: materialise to temp, hand back a `Path`. | CP2 | open, due CP4/23 |
+| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.path()` on the depended-on class; materialised to a real local `Path` at load. |
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
@@ -201,4 +245,5 @@ first.
 | Checkpoint | Divergence |
 |---|---|
 | 2 | Widened to include the location type and the file-transport protocol. |
+| 4 | `self.repo` removed; dependencies become imports; Spark SQL supported rather than deferred. |
 | 3 | Substantially extended: references, `Prohibit rebuild`, `Not null`, `Identity`, `Comparison columns`, `Column notes`, `Notes`, `Revision notes`, audit columns, unknown-key rejection. `Load mode` removed. |
