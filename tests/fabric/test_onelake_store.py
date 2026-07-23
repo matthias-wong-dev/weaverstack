@@ -1,6 +1,6 @@
 """The OneLake store, against real OneLake.
 
-A **desktop transport** test: it exercises FabricStore reaching into a workspace
+A **cross-boundary** test: it exercises OneLakeDfsClient reaching into a workspace
 over DFS from the laptop, which is how the CLI pushes and inspects. It is not a
 test of Weaver running inside Fabric.
 """
@@ -11,7 +11,7 @@ import pytest
 
 from weaver import Location, Store
 from weaver.errors import CommandError
-from weaver.fabric import FabricStore, onelake_url, parse_onelake
+from weaver.fabric import OneLakeDfsClient, onelake_url, parse_onelake
 from weaver.store import StoreError
 
 pytestmark = pytest.mark.fabric
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.fabric
 
 @pytest.fixture
 def store():
-    return FabricStore()
+    return OneLakeDfsClient()
 
 
 @pytest.fixture

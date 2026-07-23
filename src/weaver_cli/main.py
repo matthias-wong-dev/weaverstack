@@ -121,6 +121,23 @@ def _prefer_desktop_credential() -> None:
     prefer_cli_credential()
 
 
+def _desktop_store(host):
+    """The store a desktop command uses to reach a host.
+
+    Local is within-host; Fabric is cross-boundary, so the CLI constructs the
+    OneLakeDfsClient here — core never turns a FabricHost into a DFS client.
+    """
+
+    from weaver import LocalHost
+    from weaver.store import LocalStore
+
+    if isinstance(host, LocalHost):
+        return LocalStore()
+    from weaver.fabric import OneLakeDfsClient
+
+    return OneLakeDfsClient()
+
+
 def _resolve_host(args: argparse.Namespace):
     from weaver import LocalHost, load_hosts
     from weaver.errors import CommandError
@@ -163,7 +180,8 @@ def handle_wipe(args: argparse.Namespace) -> int:
         raise CommandError("give at least one --target to wipe")
 
     host = _resolve_host(args)
-    planned = wipe_selection(args.target, host, dry_run=True)
+    store = _desktop_store(host)
+    planned = wipe_selection(args.target, host, store=store, dry_run=True)
 
     print(f"wipe on {host.alias or host.__class__.__name__}\n")
     for report in planned:
@@ -196,7 +214,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
             print("Cancelled.")
             return 1
 
-    for report in wipe_selection(args.target, host):
+    for report in wipe_selection(args.target, host, store=store):
         print(f"  {report}")
     return 0
 

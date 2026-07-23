@@ -137,20 +137,24 @@ def test_root_and_config_are_alternatives(hosts_file, capsys):
     assert "drop --host and --hosts" in capsys.readouterr().err
 
 
-def test_a_fabric_host_resolves_to_the_fabric_implementation(tmp_path):
-    """Dispatch happens on host type, without any network call."""
-    from weaver import FabricHost, LocalHost
-    from weaver.fabric import FabricResolver, FabricStore
+def test_local_host_has_a_within_host_store(tmp_path):
+    from weaver import LocalHost
     from weaver.resolution import LocalResolver, resolver_for, store_for
     from weaver.store import LocalStore
-
-    fabric = FabricHost(workspace="Analytics", weaver_lakehouse="Weaver")
-    assert isinstance(resolver_for(fabric), FabricResolver)
-    assert isinstance(store_for(fabric), FabricStore)
 
     local = LocalHost(root=tmp_path)
     assert isinstance(resolver_for(local), LocalResolver)
     assert isinstance(store_for(local), LocalStore)
+
+
+def test_a_fabric_host_has_no_default_store():
+    """Desktop DFS is not the default Fabric storage path — it is injected."""
+    from weaver import FabricHost
+    from weaver.errors import CommandError
+    from weaver.resolution import store_for
+
+    with pytest.raises(CommandError, match="OneLakeDfsClient"):
+        store_for(FabricHost(workspace="Analytics", weaver_lakehouse="Weaver"))
 
 
 def test_wipe_needs_a_target(populated_folders, capsys):

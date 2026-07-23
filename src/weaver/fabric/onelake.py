@@ -14,7 +14,7 @@ the final offset.
 
 **Listing is paged.** A large directory returns a continuation token rather than
 everything. Pagination is not implemented yet, so a paged listing fails loudly
-(see :meth:`FabricStore.list`) rather than silently returning a first page —
+(see :meth:`OneLakeDfsClient.list`) rather than silently returning a first page —
 which would quietly truncate a wipe, a sync or a reconciliation.
 """
 
@@ -100,11 +100,19 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
     return OneLakePath(workspace=parts[0], item=parts[1], relative="/".join(parts[2:]))
 
 
-class FabricStore:
-    """File transport over OneLake.
+class OneLakeDfsClient:
+    """An ADLS Gen2 DFS client for one workspace, used **from outside Fabric**.
 
-    Satisfies the same :class:`~weaver.store.Store` protocol as
-    :class:`~weaver.store.LocalStore`, so everything above it is written once.
+    This is how a local caller — the CLI, or a Fabric integration test — reaches
+    into a workspace: authenticated HTTPS to the OneLake DFS endpoint. It
+    satisfies the :class:`~weaver.store.Store` protocol so the CLI can hand it to
+    the same code a ``LocalStore`` drives, but it is *cross-boundary access*, not
+    the store Weaver uses when it runs inside Fabric. The in-Fabric,
+    session-native store is a separate implementation for when it exists.
+
+    Because it crosses a boundary, it is constructed explicitly by the caller
+    that crosses — never returned by a host-to-store factory, which would encode
+    desktop DFS as the default Fabric storage path.
     """
 
     def __init__(

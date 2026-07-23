@@ -17,7 +17,13 @@ from .runtime import (
     sync_runtime,
 )
 from .resolution import RUNTIME_AREA, FabricResolver
-from .onelake import FabricStore, abfss_root, lakehouse_artifact_segment, onelake_url, parse_onelake
+from .onelake import (
+    OneLakeDfsClient,
+    abfss_root,
+    lakehouse_artifact_segment,
+    onelake_url,
+    parse_onelake,
+)
 from .resources import (
     LAKEHOUSE,
     WAREHOUSE,
@@ -46,7 +52,7 @@ __all__ = [
     "install_location",
     "bootstrap_source",
     "RUNTIME_AREA",
-    "FabricStore",
+    "OneLakeDfsClient",
     "abfss_root",
     "onelake_url",
     "lakehouse_artifact_segment",

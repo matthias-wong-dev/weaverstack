@@ -22,7 +22,7 @@ from ..hosts import FabricHost
 from ..locations import Location
 from ..ses.source import content_hash
 from ..targets import FILES_AREA, FolderTarget
-from .onelake import FabricStore
+from .onelake import OneLakeDfsClient
 from .resolution import RUNTIME_AREA, FabricResolver
 
 #: Never shipped: caches, compiled files, and the optional CLI, which a session
@@ -86,7 +86,7 @@ def sync_runtime(
     host: FabricHost,
     *,
     resolver: FabricResolver | None = None,
-    store: FabricStore | None = None,
+    store: OneLakeDfsClient | None = None,
     force: bool = False,
 ) -> SyncReport:
     """Copy this machine's ``weaver`` package into the workspace.
@@ -101,7 +101,7 @@ def sync_runtime(
     """
 
     resolver = resolver or FabricResolver(host)
-    store = store or FabricStore()
+    store = store or OneLakeDfsClient()
     destination = install_location(host, resolver)
 
     root = package_root()

@@ -182,7 +182,16 @@ def resolver_for(host):
 
 
 def store_for(host):
-    """The store for a host: the filesystem, or OneLake."""
+    """The **within-host** default store for a host.
+
+    Only a :class:`~weaver.hosts.LocalHost` has an in-process store. A
+    ``FabricHost`` has no default: reaching a workspace from the desktop is
+    cross-boundary access, and the caller that crosses (the CLI, a test)
+    constructs an ``OneLakeDfsClient`` and injects it; the in-Fabric,
+    session-native store does not exist yet. Either way the store is supplied
+    explicitly rather than guessed here, so desktop DFS is never encoded as the
+    default Fabric storage path.
+    """
 
     from .hosts import LocalHost
     from .store import LocalStore
@@ -190,6 +199,8 @@ def store_for(host):
     if isinstance(host, LocalHost):
         return LocalStore()
 
-    from .fabric.onelake import FabricStore
-
-    return FabricStore()
+    raise CommandError(
+        f"{type(host).__name__} has no within-host store — cross-boundary access "
+        "from the desktop uses OneLakeDfsClient, constructed by the CLI or a test "
+        "and passed in explicitly"
+    )

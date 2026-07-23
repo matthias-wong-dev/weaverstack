@@ -72,30 +72,44 @@ They are independent, and three of the combinations are real:
 | 2 | Fabric | laptop | the desktop CLI reaching into a workspace |
 | 3 | Fabric | **in Fabric** | **the product** — `pip install weaverstack` in a notebook |
 
-**A core operation works within one host and does not reach across.** A
-`LocalHost` resolves and mutates beneath one local root; a `FabricHost` within
-one workspace. No host infers, reads from, or transfers to another. Cross-host
-movement — pushing local files into OneLake, shipping the package into Fabric,
-submitting through Livy — is explicit orchestration owned by `weaver_cli` or the
-test infrastructure, and must not shape the core `Store`.
+**The foundational rule:** *Weaver core operates within the host where it is
+executing. Only the CLI and the Fabric test infrastructure cross from one host
+into another.*
 
-**The same Weaver code runs unchanged in all three positions.** What differs is
-confined to two implementations behind one shape each:
+```text
+core running locally        → operates within LocalHost
+core running inside Fabric   → operates within FabricHost, session-native
+CLI or pytest running locally → may cross into Fabric over REST, DFS and Livy
+```
 
-| | local | Fabric |
+A `FabricHost` identifies the workspace the resources live in. It does **not**
+say whether access happens through desktop HTTP clients or inside a session.
+
+So the storage picture has two parts, and they must not be conflated:
+
+*Within-host execution* — the store Weaver uses where it runs:
+
+| execution | host | store |
 |---|---|---|
-| resolver | `LocalResolver` | `FabricResolver` |
-| store | `LocalStore` | `FabricStore` |
+| local process | `LocalHost` | `LocalStore` |
+| Fabric session | `FabricHost` | future session-native store |
 
-`FabricStore` speaks OneLake DFS over HTTPS — that is the **desktop's** way of
-reaching into a workspace, not the path Weaver should use when running *inside*
-Fabric, where native in-session mechanisms apply. So it is a cross-into-Fabric
-transport, not the canonical in-host Fabric implementation.
+*Cross-boundary access* — a local caller reaching into a workspace:
 
-Above those, nothing knows which host it is talking to. `resolver_for(host)` and
-`store_for(host)` choose; every caller is written once. An `if isinstance(host,
-…)` above that line means the abstraction is being broken, and the fix belongs
-below it.
+| caller | destination | client |
+|---|---|---|
+| CLI | Fabric workspace | `OneLakeDfsClient` |
+| Fabric integration tests | Fabric workspace | `OneLakeDfsClient` |
+
+`OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is **not** the Fabric equivalent of
+`LocalStore`. It is how the desktop crosses in, constructed explicitly by the
+caller that crosses. `store_for(host)` returns a within-host store for a
+`LocalHost` and *raises* for a `FabricHost`, precisely so desktop DFS is never
+encoded as the default Fabric storage path.
+
+Above resolution and the store, nothing knows which host it is talking to. An
+`if isinstance(host, …)` in core operation code means the abstraction is being
+broken; the fix belongs in the factories, or in the CLI that does the crossing.
 
 **Credential choice is a caller's policy, not the core's.** Core accepts an
 injected credential and otherwise uses the library default without pinning the

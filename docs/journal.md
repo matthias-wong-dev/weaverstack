@@ -822,6 +822,37 @@ spaced names (`Order id`). The build DDL will have to carry
 Verified against the tenant after the refactor: 21 resource/store tests and 7
 in-Fabric Livy tests still pass under typed resolution.
 
+### Sharpening the host boundary
+
+A follow-up review pushed on the storage naming, which still blurred within-host
+execution and desktop access into Fabric. The foundational rule, stated plainly:
+
+> Weaver core operates within the host where it is executing. Only the CLI and
+> the Fabric test infrastructure cross from one host into another.
+
+A `FabricHost` identifies the workspace the resources live in; it does not say
+whether access is a desktop HTTP client or an in-session mechanism. So storage
+has two separate pictures, and conflating them was the error:
+
+- **within-host** — `LocalHost` → `LocalStore`; `FabricHost` → a future
+  session-native store;
+- **cross-boundary** — CLI or test → workspace → the DFS client.
+
+**`FabricStore` is renamed `OneLakeDfsClient`.** The old name read like the store
+Weaver uses inside Fabric; it is specifically an ADLS Gen2 DFS client used *from
+outside* Fabric. It still satisfies the `Store` protocol so the CLI can hand it
+to the same code a `LocalStore` drives, but it is cross-boundary access, not the
+in-host Fabric store.
+
+**`store_for(FabricHost)` now raises** rather than returning the DFS client. A
+within-host factory returning a desktop transport was exactly the conflation:
+the CLI (and the test infra) construct `OneLakeDfsClient` explicitly and inject
+it, so desktop DFS is never the default Fabric storage path. Verified against the
+tenant after the rename — the DFS store and the in-Fabric Livy sync both pass.
+
+The AGENTS.md abstraction section now carries the two-table separation as the
+authoritative statement of the boundary.
+
 ---
 
 ## Open questions
