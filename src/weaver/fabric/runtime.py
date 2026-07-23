@@ -140,42 +140,56 @@ def sync_runtime(
     )
 
 
-def bootstrap_source(package_parent: str) -> str:
+#: Where the package is copied inside a session before it is imported.
+SESSION_RUNTIME_DIR = "/tmp/weaver_runtime"
+
+
+def bootstrap_source(
+    abfss_package_root: str, *, local_parent: str = SESSION_RUNTIME_DIR
+) -> str:
     """The lines a Fabric session runs before it can ``import weaver``.
 
-    ``package_parent`` is the directory *containing* the ``weaver`` package, not
-    the package itself — ``import weaver`` searches ``sys.path`` for a directory
-    of that name. Shipping to ``Files/weaver`` therefore means inserting
-    ``Files``.
+    A Livy session has **no FUSE mount** — ``/lakehouse`` exists but is empty,
+    unlike a notebook, where the default Lakehouse appears at
+    ``/lakehouse/default``. So the package cannot simply be put on ``sys.path``
+    from the Lakehouse; it is copied into the session first, with
+    ``notebookutils.fs.cp`` from the explicit ``abfss`` root.
+
+    That works in a notebook too, so there is one bootstrap rather than two.
 
     The installed package is tried first, so the day Weaver comes from a Fabric
-    Environment this becomes a no-op and the shipped copy goes unused.
+    Environment none of this runs and the shipped copy goes unused.
     """
 
+    package_dir = f"{local_parent.rstrip('/')}/weaver"
     return (
         "import sys\n"
         "try:\n"
         "    import weaver  # from a Fabric Environment, if it is there\n"
         "except ImportError:\n"
-        f"    sys.path.insert(0, {package_parent!r})\n"
+        "    import notebookutils\n"
+        f"    notebookutils.fs.cp({abfss_package_root!r}, {'file:' + package_dir!r}, recurse=True)\n"
+        f"    sys.path.insert(0, {local_parent!r})\n"
         "    import weaver\n"
     )
 
 
-def mounted_package_parent(host: FabricHost) -> str:
-    """The session-local path holding the ``weaver`` package directory.
+def abfss_package_root(host: FabricHost, resolver: FabricResolver) -> str:
+    """The ``abfss`` root of the shipped package, for the session to copy from.
 
-    A Fabric session mounts its default Lakehouse at ``/lakehouse/default``, so
-    a package shipped to ``<Lakehouse>/Files/weaver`` is importable once
-    ``/lakehouse/default/Files`` is on ``sys.path`` — provided the session's
-    default Lakehouse is the one it was shipped to.
+    Explicit, so the session needs nothing attached — the same reason every
+    destination root is explicit.
     """
 
-    install = host.weaver_install or f"{host.weaver_lakehouse}/{FILES_AREA}/{RUNTIME_AREA}"
+    from ..targets import ItemRef
+
+    install = host.weaver_install or (
+        f"{host.weaver_lakehouse}/{FILES_AREA}/{RUNTIME_AREA}"
+    )
     parts = install.strip("/").split("/")
     if len(parts) < 3:
         raise CommandError(
             f"weaver_install must name a Lakehouse and a path beneath it, got {install!r}"
         )
-    # Drop the Lakehouse (the mount stands in for it) and the package directory.
-    return "/lakehouse/default/" + "/".join(parts[1:-1])
+    lakehouse, relative = parts[0], "/".join(parts[1:])
+    return f"{resolver.spark_root(ItemRef(lakehouse))}/{relative}"

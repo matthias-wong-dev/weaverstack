@@ -660,10 +660,32 @@ silently, which is the worst kind of bug because everything appears to work. At
 carries Weaver, the fallback is dead code and the host key can be deleted with
 nothing else changing.
 
-A bug worth recording, because it is the kind that only surfaces at run time:
-`import weaver` searches `sys.path` for a *directory named weaver*, so shipping
-to `Files/weaver` means inserting `Files`, not `Files/weaver`. The first version
-inserted the package directory itself.
+**A Livy session has no FUSE mount.** This was the assumption the whole
+bootstrap rested on, and it is false: `/lakehouse` exists inside a Livy session
+but is *empty*, unlike a notebook where the default Lakehouse appears at
+`/lakehouse/default`. Putting the Lakehouse path on `sys.path` therefore cannot
+work, and the first two versions of the bootstrap both did exactly that.
+
+What does work, verified: copy the package into the session from its explicit
+`abfss` root with `notebookutils.fs.cp`, then insert the local parent.
+
+```python
+notebookutils.fs.cp(
+    "abfss://…/Files/weaver", "file:/tmp/weaver_runtime/weaver", recurse=True
+)
+sys.path.insert(0, "/tmp/weaver_runtime")
+import weaver
+```
+
+That works in a notebook too, so there is one bootstrap rather than two, and it
+needs nothing attached — the same reason every destination root is explicit.
+
+The bootstrap belongs to the session, not to its callers:
+`LivySession.for_host(host)` builds it from the host config and runs it once on
+start, so a caller submits its work and nothing else.
+
+Also fixed on the way: `import weaver` searches `sys.path` for a *directory
+named weaver*, so the parent goes on the path, not the package itself.
 
 **Livy sessions are expensive to start and cheap to reuse**, so a session is
 held open across a batch rather than paid for per statement. A submitted program

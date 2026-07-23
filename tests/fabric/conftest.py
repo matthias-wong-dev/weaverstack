@@ -81,3 +81,70 @@ def fabric_lakehouses(fabric_workspace, fabric_client):
                 delete_item(item, client=fabric_client)
             except Exception as exc:  # cleanup must not mask a test failure
                 print(f"warning: could not delete {item}: {exc}")
+
+
+# --- running Weaver inside Fabric --------------------------------------------
+#
+# Session-scoped, because a Lakehouse, a runtime sync and a Livy session are all
+# expensive to obtain and cheap to reuse. This is the third execution position:
+# not Weaver reaching into a workspace, but Weaver running there.
+
+
+@pytest.fixture(scope="session")
+def fabric_weaver_lakehouse(fabric_workspace, fabric_client):
+    """One Lakehouse standing in as the Weaver Lakehouse for the whole run."""
+
+    from weaver.fabric import create_lakehouse, delete_item
+
+    item = create_lakehouse(
+        fabric_workspace, _disposable_name("home"), client=fabric_client
+    )
+    try:
+        yield item
+    finally:
+        try:
+            delete_item(item, client=fabric_client)
+        except Exception as exc:
+            print(f"warning: could not delete {item}: {exc}")
+
+
+@pytest.fixture(scope="session")
+def fabric_host(fabric_workspace, fabric_weaver_lakehouse):
+    """A host whose Weaver Lakehouse is real, and which knows where Weaver goes."""
+
+    from weaver import FabricHost
+
+    return FabricHost(
+        workspace=fabric_workspace.name,
+        weaver_lakehouse=fabric_weaver_lakehouse.name,
+        weaver_install=f"{fabric_weaver_lakehouse.name}/Files/weaver",
+    )
+
+
+@pytest.fixture(scope="session")
+def synced_runtime(fabric_host):
+    """This machine's Weaver package, shipped into the workspace.
+
+    Paid once for the run. The upload is 62 KB of pure Python.
+    """
+
+    from weaver.fabric import sync_runtime
+
+    return sync_runtime(fabric_host)
+
+
+@pytest.fixture(scope="session")
+def livy_session(fabric_host, synced_runtime):
+    """One Spark session in Fabric, held open across the tests that need it."""
+
+    from weaver.fabric import LivyError, LivySession
+
+    session = LivySession.for_host(fabric_host)
+    try:
+        session.start()
+    except LivyError as exc:
+        pytest.skip(f"could not start a Livy session: {exc}")
+    try:
+        yield session
+    finally:
+        session.close()

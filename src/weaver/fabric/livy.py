@@ -90,12 +90,40 @@ class LivySession:
         environment_id: str | None = None,
         api_base_url: str = FABRIC_API,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
+        bootstrap: str | None = None,
     ) -> None:
         self.token = token or get_token(FABRIC_SCOPE)
         self.base = sessions_url(workspace_id, lakehouse_id, api_base_url=api_base_url)
         self.environment_id = environment_id
         self.poll_interval = poll_interval
+        self.bootstrap = bootstrap
         self.session_url: str | None = None
+
+    @classmethod
+    def for_host(cls, host, *, resolver=None, **kwargs) -> "LivySession":
+        """A session against a host's Weaver Lakehouse, ready to ``import weaver``.
+
+        The session is created against the Weaver Lakehouse, so that is its
+        default and the shipped package is reachable. Destination Lakehouses
+        need no attachment — they are addressed by explicit ``abfss`` roots.
+
+        The bootstrap runs once when the session starts, so callers submit their
+        work and nothing else.
+        """
+
+        from ..targets import ItemRef
+        from .resolution import FabricResolver
+        from .runtime import abfss_package_root, bootstrap_source
+
+        resolver = resolver or FabricResolver(host)
+        home = resolver.resolve(ItemRef(host.weaver_lakehouse))
+        return cls(
+            resolver.workspace.id,
+            home.id,
+            environment_id=kwargs.pop("environment_id", None),
+            bootstrap=bootstrap_source(abfss_package_root(host, resolver)) + emit_source(),
+            **kwargs,
+        )
 
     def __enter__(self) -> "LivySession":
         self.start()
@@ -115,6 +143,8 @@ class LivySession:
             raise LivyError(f"Livy did not return a session id: {created}")
         self.session_url = f"{self.base}/{session_id}"
         self._await("idle", timeout=timeout)
+        if self.bootstrap:
+            self.run(self.bootstrap)
 
     def _await(self, wanted: str, *, timeout: float) -> dict:
         deadline = time.time() + timeout

@@ -13,7 +13,7 @@ from .runtime import (
     SyncReport,
     bootstrap_source,
     install_location,
-    mounted_package_parent,
+    abfss_package_root,
     sync_runtime,
 )
 from .resolution import RUNTIME_AREA, FabricResolver
@@ -41,7 +41,7 @@ __all__ = [
     "StatementResult",
     "emit_source",
     "sync_runtime",
-    "mounted_package_parent",
+    "abfss_package_root",
     "SyncReport",
     "install_location",
     "bootstrap_source",

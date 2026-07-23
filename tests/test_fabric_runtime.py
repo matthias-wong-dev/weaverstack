@@ -7,12 +7,7 @@ import pytest
 from weaver import FabricHost
 from weaver.errors import ConfigError
 from weaver.fabric.livy import RESULT_PREFIX, StatementResult, _payload, sessions_url
-from weaver.fabric.runtime import (
-    _package_files,
-    bootstrap_source,
-    mounted_package_parent,
-    package_root,
-)
+from weaver.fabric.runtime import _package_files, bootstrap_source, package_root
 
 
 def host(**kwargs) -> FabricHost:
@@ -46,26 +41,20 @@ def test_the_cli_is_not_shipped():
 # --- where it lands, and what imports it -------------------------------------
 
 
-def test_sys_path_gets_the_parent_of_the_package_directory():
-    """`import weaver` searches sys.path for a directory named weaver, so
-    shipping to Files/weaver means inserting Files."""
-    parent = mounted_package_parent(host(weaver_install="Weaver/Files/weaver"))
-    assert parent == "/lakehouse/default/Files"
-
-
-def test_a_nested_install_path_keeps_its_parents():
-    parent = mounted_package_parent(host(weaver_install="Weaver/Files/runtime/weaver"))
-    assert parent == "/lakehouse/default/Files/runtime"
-
-
-def test_the_convention_applies_when_no_install_is_named():
-    assert mounted_package_parent(host()) == "/lakehouse/default/Files"
+def test_a_livy_session_copies_the_package_in_rather_than_mounting_it():
+    """A Livy session has no FUSE mount — /lakehouse exists but is empty — so
+    the package is copied from its abfss root before sys.path can see it."""
+    source = bootstrap_source("abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/weaver")
+    assert "notebookutils.fs.cp" in source
+    assert "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/weaver" in source
+    assert "file:/tmp/weaver_runtime/weaver" in source
+    assert "sys.path.insert(0, '/tmp/weaver_runtime')" in source
 
 
 def test_the_bootstrap_prefers_an_installed_package():
-    """The day Weaver comes from a Fabric Environment, the fallback is dead."""
-    source = bootstrap_source("/lakehouse/default/Files")
-    assert source.index("import weaver") < source.index("sys.path.insert")
+    """The day Weaver comes from a Fabric Environment, none of the rest runs."""
+    source = bootstrap_source("abfss://ws@host/lh/Files/weaver")
+    assert source.index("import weaver") < source.index("notebookutils")
     assert "except ImportError" in source
 
 
