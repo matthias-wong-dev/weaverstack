@@ -22,12 +22,12 @@ classifiers = [
 
 # Deliberately minimal. A dependency is declared at the checkpoint that first
 # needs it, not in advance:
-#   sqlparse        checkpoint 6  (SQL dependency extraction)
 #   azure-identity  checkpoint 7  (Fabric resource discovery)   -> [fabric]
 #   mssql-python    checkpoint 10 (Warehouse SQL)               -> [fabric]
 #   pyspark/delta   Delta execution                             -> [spark]
 dependencies = [
     "pyyaml",
+    "sqlparse",
 ]
 
 [project.optional-dependencies]

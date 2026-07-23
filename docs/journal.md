@@ -227,6 +227,52 @@ data corruption.
 A Spark SQL table declares `Schema` like Python does, since it materialises
 Delta and the declared shape is what lets every column guard run up front.
 
+### Checkpoint 5 — the repository reader
+
+Reading a folder of object files and checking the structural contract, without
+executing anything.
+
+**File, ID and class must all agree.**
+
+| Language | File | ID | Class |
+|---|---|---|---|
+| Python | `Sales__Order.py` | `Sales.Order` | `Sales__Order` |
+| Spark SQL | `Sales.Order.spark.sql` | `Sales.Order` | — |
+| T-SQL | `Reporting.Order.sql` | `Reporting.Order` | — |
+
+Python uses `__` because a module name cannot contain a dot; SQL has no such
+constraint and uses the dot. The class carries the *full* name rather than just
+the object part, so `from Sales__Order import Sales__Order` says exactly which
+object it names at the call site — explicit over short.
+
+**The read contract.** Python: exactly one class, the base matching the
+declared kind, exactly one `def read(self)`. Two `read` definitions is an error
+rather than a shrug — the later silently replaces the earlier. SQL: exactly one
+result-producing statement.
+
+**The result-set check abstains rather than guesses.** Intermediate work is
+fine — `select … into #tmp`, `create or replace temp view` — only one statement
+may return rows. But on seeing `exec` or `sp_executesql` the check stands down
+and records why. A wrong rejection blocks a legitimate object; a miss merely
+fails at build the way it does today, so the asymmetry decides the calibration.
+
+**Hashing normalises line endings and drops a BOM.** The hash answers "has this
+changed since it was certified", and a checkout with `autocrlf` is not a
+changed file. The repository signature is one hash over sorted
+`(path, content hash)` pairs, covering support files too.
+
+**Objects live at the root; subdirectories are support.** `_`-prefixed root
+files are not objects. A helper may not share a module name with an object,
+because an import of it would be read as a dependency on that object.
+
+**Parses are kept.** `SourceDocument` holds the Python AST and the SQL split
+beside the `SesDocument`, so later checkpoints read the repository once rather
+than once per question. `SesDocument` stays pure — the AST is on the wrapper,
+excluded from comparison.
+
+Reading goes through a `Store`, so the same reader will serve a repository
+installed in the Weaver Lakehouse once the Fabric store exists.
+
 ---
 
 ## Open questions
@@ -245,5 +291,6 @@ Delta and the declared shape is what lets every column guard run up front.
 | Checkpoint | Divergence |
 |---|---|
 | 2 | Widened to include the location type and the file-transport protocol. |
+| 5 | Reader goes through `Store` rather than `Path`; result-set guard added (not in the plan). |
 | 4 | `self.repo` removed; dependencies become imports; Spark SQL supported rather than deferred. |
 | 3 | Substantially extended: references, `Prohibit rebuild`, `Not null`, `Identity`, `Comparison columns`, `Column notes`, `Notes`, `Revision notes`, audit columns, unknown-key rejection. `Load mode` removed. |

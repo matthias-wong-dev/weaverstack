@@ -30,3 +30,7 @@ class MetadataError(WeaverError):
 
 class LoadError(WeaverError):
     """Raised when an object cannot be executed or its context is unavailable."""
+
+
+class DiscoveryError(WeaverError):
+    """Raised when a repository or source file breaks a structural rule."""

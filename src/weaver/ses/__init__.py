@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from .repository import SesRepository, read_repository
+from .source import (
+    SourceDocument,
+    SqlAnalysis,
+    analyse_sql,
+    content_hash,
+    language_for_filename,
+    object_id_for_filename,
+    read_source_document,
+)
 from .metadata import (
     AUDIT_COLUMNS,
     AUDIT_DELETE,
@@ -31,6 +41,15 @@ from .metadata import (
 )
 
 __all__ = [
+    "SesRepository",
+    "read_repository",
+    "SourceDocument",
+    "SqlAnalysis",
+    "analyse_sql",
+    "content_hash",
+    "language_for_filename",
+    "object_id_for_filename",
+    "read_source_document",
     "FOLDER",
     "TABLE",
     "VIEW",
