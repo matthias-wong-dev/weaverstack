@@ -500,6 +500,64 @@ script. It exists because the alternative way to discover a missing JDK is a
 Java stack trace, and it is the CLI's first real command: the check lives in
 `weaver.diagnostics`, the CLI only prints it.
 
+### The build command, as it actually works
+
+Correcting two things the plan and an earlier draft got wrong.
+
+**Checkpoints 11–16 are one piece of work, not six.** The plan's granularity
+does not match the shape of the thing.
+
+**The build package is a folder of scripts**, not a set of declarative
+operations. Generated, ordered, inspectable before anything runs, and runnable
+separately.
+
+The sequence:
+
+```text
+weaver build --from MyRepo --to LocalHost --weaver_lakehouse … \
+             --folder_target … --spark_target … --sql_target … --config env.yml
+```
+
+1. Copy the repository into the Weaver Lakehouse at `Files/repos/MyRepo`.
+   Locally a copy; on Fabric a push. After this the host holds the source.
+2. On the host — where Weaver is installed or importable — call
+   `generate_build_package(weaver_lakehouse=…, repo="MyRepo", folder_target=…, …)`.
+3. That writes a folder of scripts in dependency order, to read before running.
+4. Run it, or run it later with `install_build(package_directory)`.
+
+**Each target is independently optional**, though at least one is required. An
+absent target means those objects are assumed to exist already — deliberate
+developer latitude, possibly withdrawn later.
+
+The intricate part — incremental build driven by signature comparison — is
+explicitly deferred.
+
+### Wipe
+
+Per physical target, because the three are different places with different
+mechanics.
+
+**Delta needs no catalogue.** Weaver addresses tables by explicit path and never
+registers them, so a table is a directory and wiping is removing it. There is
+nothing to enumerate from and nothing left dangling — the same property that
+lets a Fabric notebook write to an unattached Lakehouse, showing up again as a
+simplification. On Fabric the Lakehouse auto-discovers what appears under
+`Tables/`, so removal should de-register too; worth confirming against a real
+workspace.
+
+**Folders** keep the configured root and lose its contents. A folder target may
+be a root *within* `Files`, and a wipe respects that scope.
+
+**Warehouse raises `NotImplementedError`.** It wants one dynamic statement built
+from the catalogue views, and there is no local SQL to develop it against.
+
+A wipe clears the *target*, not merely what Weaver manages — which suits a
+development loop and makes it something a CLI must gate rather than something
+safe by default. `dry_run` reports without removing, and a guard refuses any
+location outside the host root. That guard should be unreachable, since
+locations are derived rather than supplied, which is exactly why it is worth
+having.
+
 ---
 
 ## Open questions
@@ -512,6 +570,7 @@ Java stack trace, and it is the CLI's first real command: the check lives in
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
 | Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | due at build |
+| Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? In the central architecture, source stays central and load imports it — the case may be empty. | CP2 | due CP12 |
 
 ## Divergences from the plan

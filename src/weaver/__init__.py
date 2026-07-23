@@ -16,6 +16,13 @@ from .locations import Location
 from .objects import Folder, ObjectContext, Table, View, WeaverObject
 from .resolution import LocalResolver
 from .store import Entry, LocalStore, Store, StoreError
+from .wipe import (
+    WipeReport,
+    wipe,
+    wipe_delta_target,
+    wipe_folder_target,
+    wipe_sql_target,
+)
 from .targets import (
     DeltaTarget,
     FolderTarget,
@@ -59,4 +66,10 @@ __all__ = [
     "LocalStore",
     "Entry",
     "StoreError",
+    # wipe
+    "wipe",
+    "wipe_folder_target",
+    "wipe_delta_target",
+    "wipe_sql_target",
+    "WipeReport",
 ]
