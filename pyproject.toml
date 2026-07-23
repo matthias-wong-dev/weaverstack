@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "weaverstack"
+version = "0.1.0"
+description = "Central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Matthias Wong" }]
+keywords = ["fabric", "onelake", "lakehouse", "delta", "warehouse", "etl"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+]
+
+# Deliberately minimal. A dependency is declared at the checkpoint that first
+# needs it, not in advance:
+#   mssql-python    Warehouse SQL                               -> [fabric]
+#   pyspark/delta   Delta execution                             -> [spark]
+dependencies = [
+    "pyyaml",
+    "sqlparse",
+]
+
+[project.optional-dependencies]
+# Desktop CLI. Empty today because the CLI is stdlib-only; it exists so the
+# core/CLI dependency boundary is declared from the start.
+cli = []
+# Delta and Spark are released in lockstep: delta-spark 3.2.x needs Spark 3.5.x.
+# Ranges rather than pins, so an existing local install is not disturbed.
+fabric = [
+    "azure-identity>=1.23",
+    "requests>=2.31",
+]
+spark = [
+    "pyspark>=3.5,<3.6",
+    "delta-spark>=3.2,<3.3",
+]
+dev = [
+    "pytest>=8.4",
+    "azure-identity>=1.23",
+    "requests>=2.31",
+    "pyspark>=3.5,<3.6",
+    "delta-spark>=3.2,<3.3",
+]
+
+[project.scripts]
+weaver = "weaver_cli:main"
+
+[project.urls]
+Homepage = "https://github.com/matthias-wong-dev/weaverstack"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weaver", "src/weaver_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "spark: local Spark/Delta tests, need Java 17 (run with: pytest -m spark)",
+    "fabric: opt-in Fabric integration tests, need a workspace and a running capacity (run with: pytest -m fabric)",
+]
+# Default runs stay fast and need no JVM.
+addopts = ["-m", "not spark and not fabric"]
