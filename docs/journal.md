@@ -705,6 +705,57 @@ directly.
 `409 ItemDisplayNameNotAvailableYet`. Neither of these was guessable, and both
 were found within an hour of actually running against a tenant.
 
+### Build is the act of locking in
+
+Getting the SES source to Fabric looked like a delivery problem with several
+answers — a desktop push, a manual upload, or Fabric's own Git integration via
+notebook resources, which is the only place in a workspace where source files
+get versioning and pull requests, since Git integration covers *items* and not
+Lakehouse file contents.
+
+They are not competing answers, because **the copy into
+`<weaver-lakehouse>/Files/repos/<name>` is not logistics — it is certification.**
+
+That snapshot is the artifact the catalogue certifies against. The source hash
+recorded at build refers to *that copy*, so:
+
+- editing the original after a build changes nothing, and load keeps running
+  what was certified. That is the safety property the catalogue exists for: an
+  object is safe against the versions of its dependencies that were certified,
+  and its own source is one of those versions;
+- every delivery route converges at build. A local checkout, a OneLake push,
+  notebook resources — they differ only in what `--source` points at, and build
+  normalises all of them into one central snapshot;
+- load never learns where the source came from. One code path, not three.
+
+The repository `signature` becomes load-bearing here: build records it, load
+verifies the installed copy still matches, and a mismatch means somebody edited
+installed source instead of rebuilding.
+
+This also settles a question left open at checkpoint 2. Build *does* move files
+— exactly one thing, the repository snapshot — and that movement is the point
+rather than a side effect.
+
+### A notebook can carry everything
+
+A Fabric notebook holding the SES repo as resources needs no Livy: it invokes
+Weaver directly, cell by cell, and can be scheduled or triggered through the
+notebook job API. That adds a fourth executor and costs nothing, because the
+notebook is only a caller of the Python API.
+
+It carries one constraint worth stating as a rule rather than leaving as a
+habit: **in that mode there is no CLI at all**, so every command must be a
+Python function with a signature good enough to call by hand in a cell, and the
+CLI must stay a thin printer over it. The moment logic grows inside
+`weaver_cli`, notebook users lose it silently.
+
+The notebook can carry the wheel too — 62 KB beside the SES folder, `%pip
+install`ed from the resource path — which for a real user today may be a better
+story than `weaver_install`. That leaves a clean division: `weaver_install` is a
+development tool for shipping a working tree on every change; the
+notebook-carries-everything pattern is the interim answer for users. Both
+disappear when `pip install weaverstack` works.
+
 ---
 
 ## Open questions
@@ -718,7 +769,9 @@ were found within an hour of actually running against a tenant.
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
 | Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | due at build |
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
-| Does `build` move any files at all? In the central architecture, source stays central and load imports it — the case may be empty. | CP2 | due CP12 |
+| Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
+| Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
+| Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
 
 ## Divergences from the plan
 
