@@ -127,6 +127,9 @@ class SqlAnalysis:
     #: Why the result-set count could not be established, when it could not.
     undetermined_because: str | None = None
     statements: tuple[str, ...] = ()
+    #: Statements that look like they create a permanent object. Recorded for a
+    #: later lint, not refused — see _permanent_ddl.
+    permanent_ddl: tuple[str, ...] = ()
 
     @property
     def determined(self) -> bool:
@@ -336,7 +339,6 @@ def _read_sql(
         )
 
     analysis = analyse_sql(body)
-    _reject_generated_ddl(relative_path, analysis)
 
     if document.kind == VIEW and analysis.statement_count > 1:
         raise DiscoveryError(
@@ -379,24 +381,22 @@ _PERMANENT_DDL = re.compile(
 )
 
 
-def _reject_generated_ddl(relative_path: str, analysis: "SqlAnalysis") -> None:
-    """The author writes the query; Weaver writes the CREATE.
+def _permanent_ddl(statements: tuple[str, ...]) -> tuple[str, ...]:
+    """Statements that appear to create a permanent object.
 
-    A permanent ``create view`` or ``create table`` in the body means the author
-    is writing the wrapper Weaver generates — the object would be created twice,
-    under a name Weaver does not manage. Scratch objects are working state and
-    stay allowed.
+    Normally the author writes the query and Weaver writes the ``CREATE``, so
+    one of these usually means the wrapper has been written by hand. It is
+    *recorded*, not refused: this is fail-early validation, not critical-path,
+    and there may be a legitimate reason to create something durable inside a
+    body. Getting it wrong would block valid work in exchange for an error the
+    build would have produced anyway.
     """
 
-    for statement in analysis.statements:
-        if _SCRATCH_DDL.match(statement):
-            continue
-        if _PERMANENT_DDL.match(statement):
-            raise DiscoveryError(
-                f"{relative_path}: write only the query — Weaver generates the "
-                "CREATE for the object it manages. Temporary scratch objects "
-                "(create temp view, create table #tmp) are fine."
-            )
+    return tuple(
+        statement
+        for statement in statements
+        if _PERMANENT_DDL.match(statement) and not _SCRATCH_DDL.match(statement)
+    )
 
 
 def analyse_sql(body: str) -> SqlAnalysis:
@@ -425,12 +425,14 @@ def analyse_sql(body: str) -> SqlAnalysis:
                 result_set_count=None,
                 undetermined_because=f"the body uses dynamic SQL ({marker.strip()})",
                 statements=texts,
+                permanent_ddl=_permanent_ddl(texts),
             )
 
     return SqlAnalysis(
         statement_count=len(statements),
         result_set_count=sum(1 for statement in statements if _returns_rows(statement)),
         statements=texts,
+        permanent_ddl=_permanent_ddl(texts),
     )
 
 

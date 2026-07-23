@@ -423,25 +423,17 @@ def test_a_table_may_do_intermediate_work(repo_dir):
     assert read_repository(root)["Reporting.Order"].sql_analysis.result_set_count == 1
 
 
-def test_writing_the_create_view_yourself_is_refused(repo_dir):
-    """Weaver generates the CREATE; the author writes the query."""
-    body = VIEW_SQL.replace(
-        "select * from Reporting.Order",
-        "create or replace view Reporting.OrderView as select * from Reporting.Order",
-    )
-    root = write(repo_dir, "Reporting.OrderView.sql", body)
-    with pytest.raises(DiscoveryError, match="write only the query"):
-        read_repository(root)
-
-
-def test_writing_the_create_table_yourself_is_refused(repo_dir):
+def test_permanent_ddl_is_recorded_not_refused(repo_dir):
+    """Fail-early validation: noted for a later lint, but the build is the
+    authority, and a false rejection would block valid work."""
     body = SQL_TABLE.replace(
         "select 1 as [Order id]",
-        "create table Reporting.Order ([Order id] int);\nselect 1 as [Order id]",
+        "create table Reporting.Staging ([Order id] int);\nselect 1 as [Order id]",
     )
     root = write(repo_dir, "Reporting.Order.sql", body)
-    with pytest.raises(DiscoveryError, match="write only the query"):
-        read_repository(root)
+    analysis = read_repository(root)["Reporting.Order"].sql_analysis
+    assert len(analysis.permanent_ddl) == 1
+    assert analysis.result_set_count == 1
 
 
 @pytest.mark.parametrize("scratch", [
@@ -452,7 +444,18 @@ def test_writing_the_create_table_yourself_is_refused(repo_dir):
 def test_temporary_scratch_is_working_state_not_the_object(repo_dir, scratch):
     body = SQL_TABLE.replace("select 1 as [Order id]", f"{scratch};\nselect 1 as [Order id]")
     root = write(repo_dir, "Reporting.Order.sql", body)
-    assert read_repository(root)["Reporting.Order"].sql_analysis.result_set_count == 1
+    analysis = read_repository(root)["Reporting.Order"].sql_analysis
+    assert analysis.result_set_count == 1
+    assert analysis.permanent_ddl == ()
+
+
+def test_the_example_repository_creates_nothing_permanent():
+    repo = read_repository(FIXTURE)
+    assert all(
+        document.sql_analysis.permanent_ddl == ()
+        for document in repo
+        if document.sql_analysis is not None
+    )
 
 
 def test_the_example_view_is_one_statement():

@@ -67,6 +67,21 @@ the *attached* Lakehouse, which is precisely the dependence being removed.
 weaver's `runtime/load.py:415` documents relying on it for Folder I/O; that is
 the coupling weaverstack breaks.
 
+**Two kinds of validation, held to different standards.**
+
+*Critical path* — if it passes, behaviour is wrong. A mistyped `Primary Key`
+parsing as no key silently turns an upsert into a full replacement; a column
+reference that is not in the schema fails deep inside Spark. Enforce hard, and
+prefer a false rejection to a false acceptance.
+
+*Fail early* — it would fail at build anyway, just later and less clearly. The
+result-set count, permanent DDL in a body. Enforce only where a false positive
+is impossible; otherwise record the observation and let the build be the
+authority. Trading a clear build error for a wrong rejection is a bad trade.
+
+Most upfront validation is the second kind. Being thorough there is a courtesy,
+not a guarantee, and it must not cost anyone a working object.
+
 **Config is a convenience, never a layer.** Every host is constructible in
 Python. The `hosts:` file is a named lookup that can express nothing the
 constructors cannot — asserted by test.
@@ -266,10 +281,10 @@ changed file. The repository signature is one hash over sorted
 `(path, content hash)` pairs, covering support files too.
 
 **The author writes the query; Weaver writes the `CREATE`.** A permanent
-`create view` or `create table` in the body means the author is writing the
-wrapper Weaver generates — the object would be created twice, under a name
-Weaver does not manage. Temporary scratch (`create temp view`,
-`create table #tmp`) is working state and stays allowed.
+`create view` or `create table` in a body usually means the wrapper has been
+written by hand. It is *recorded* on the analysis, not refused — fail-early, and
+there may be a legitimate reason to create something durable inside a body.
+Temporary scratch (`create temp view`, `create table #tmp`) is not even noted.
 
 **A View is one statement.** It is checked for a single result set like any
 other SQL object, and additionally may not carry preceding statements: Weaver
