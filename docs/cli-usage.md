@@ -175,5 +175,7 @@ weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 
 ## See also
 
+- [Where your SES repository lives](ses-repository.md) — delivery routes, all optional
+
 - [Local development setup](local-setup.md) — Java, Spark, and the local tests
 - [Fabric integration tests](fabric-testing.md) — running the opt-in suite

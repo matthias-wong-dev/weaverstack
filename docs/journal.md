@@ -736,6 +736,14 @@ This also settles a question left open at checkpoint 2. Build *does* move files
 — exactly one thing, the repository snapshot — and that movement is the point
 rather than a side effect.
 
+**The parent directory is free.** Weaver has no opinion about where a
+repository folder sits, so authoring it *inside* a notebook's resources folder
+in a local checkout costs nothing and keeps the Fabric Git route open. Every
+delivery route is then the same command with a different `--source`. Documented
+in `docs/ses-repository.md` as a convenience rather than a requirement — the
+only argument for starting early is that starting early is free and starting
+late means a move.
+
 ### A notebook can carry everything
 
 A Fabric notebook holding the SES repo as resources needs no Livy: it invokes
