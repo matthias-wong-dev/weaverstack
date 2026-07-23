@@ -19,6 +19,20 @@ credential chain is pinned.
 You need a Fabric workspace you can create and delete items in. It can be empty;
 the tests bring their own.
 
+## Install Weaver once, whenever the code changes
+
+The Fabric suite imports Weaver from a Fabric Environment — it does **not** copy
+source into the workspace. Install (or update) that Environment whenever Weaver
+Python changes:
+
+```bash
+weaver install --workspace <workspace> --environment weaver
+```
+
+This builds a wheel from the checkout, stages it and Weaver's dependencies, and
+publishes. Publishing resolves the dependencies into the image and takes a few
+minutes; the wheel itself uploads in about a second.
+
 ## Each session
 
 Capacity is billed while it runs, so turn it on, work, turn it off.
@@ -27,7 +41,8 @@ Capacity is billed while it runs, so turn it on, work, turn it off.
 weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
 weaver capacity status  --resource-group <rg> --capacity-name <capacity>
 
-WEAVER_FABRIC_WORKSPACE=<workspace> .venv/bin/python -m pytest -m fabric
+WEAVER_FABRIC_WORKSPACE=<workspace> WEAVER_FABRIC_ENVIRONMENT=weaver \
+  .venv/bin/python -m pytest -m fabric
 
 weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 ```
@@ -36,7 +51,9 @@ Resuming takes about half a minute and `resume` returns before the capacity is
 `Active`, so `status` is the confirmation.
 
 Without `WEAVER_FABRIC_WORKSPACE` the suite skips with a message saying so,
-rather than failing.
+rather than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy
+tests skip (rather than fail) if that Environment has no Weaver installed yet,
+pointing at `weaver install`.
 
 ## What the tests do to your workspace
 

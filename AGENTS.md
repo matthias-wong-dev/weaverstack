@@ -132,11 +132,13 @@ demand an orchestration environment of their own. **A Fabric test that runs
 Weaver on the laptop and reaches into a workspace over HTTP tests row 2, not
 row 3.** Both are worth having, but only row 3 is the promise.
 
-Until Weaver is installed from PyPI into a Fabric Environment, row 3 needs the
-package shipped into the workspace and imported from there — the
-`weaver_install` host key, kept in sync during development. When the Environment
-carries Weaver, the bootstrap's `import weaver` succeeds, the fallback goes
-unused, and the key can be deleted with nothing else changing.
+Row 3 is delivered by installing Weaver into a Fabric Environment: `weaver
+install --workspace <ws> --environment <env>` builds a wheel from the checkout,
+stages it and Weaver's dependencies, and publishes. A Livy session (and a Fabric
+notebook) then attaches that Environment via `fabric_environment` on the host and
+imports the installed package — nothing is copied into the workspace. Rerun
+`weaver install` whenever Weaver Python changes; an unchanged source tree builds
+the same version and the install skips the republish.
 
 ### What this means when you add a feature
 

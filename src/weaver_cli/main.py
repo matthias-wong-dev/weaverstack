@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
 import weaver
 from weaver.errors import WeaverError
@@ -55,6 +56,26 @@ def build_parser() -> argparse.ArgumentParser:
     wipe.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     wipe.set_defaults(handler=handle_wipe)
 
+    install = subcommands.add_parser(
+        "install",
+        help="build Weaver and install it into a Fabric Environment",
+    )
+    install.add_argument("--workspace", required=True, help="the Fabric workspace display name")
+    install.add_argument(
+        "--environment",
+        required=True,
+        dest="environment_name",
+        metavar="NAME",
+        help="the Environment to create or reuse, e.g. weaver",
+    )
+    install.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="stage the wheel and dependencies but do not publish (development only)",
+    )
+    install.add_argument("--json", action="store_true", help="emit the result as JSON")
+    install.set_defaults(handler=handle_install)
+
     capacity = subcommands.add_parser(
         "capacity", help="turn a Fabric capacity on or off, or report its state"
     )
@@ -68,6 +89,62 @@ def build_parser() -> argparse.ArgumentParser:
     capacity.set_defaults(handler=handle_capacity)
 
     return parser
+
+
+def handle_install(args: argparse.Namespace) -> int:
+    """Build Weaver from this checkout and install it into a Fabric Environment.
+
+    The authoritative deployment path. Afterwards a notebook, Livy session or
+    Fabric pytest run attached to the Environment can ``import weaver`` with no
+    source shipped into a Lakehouse.
+    """
+
+    _prefer_desktop_credential()
+    from weaver.fabric import install as run_install
+
+    started = time.perf_counter()
+    result = run_install(
+        args.workspace,
+        args.environment_name,
+        publish=not args.no_publish,
+    )
+    total = time.perf_counter() - started
+
+    if args.json:
+        import json
+
+        payload = result.as_dict()
+        payload["timings"]["total"] = round(total, 2)
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_install(result, total)
+    return 0
+
+
+def _print_install(result, total: float) -> None:
+    print("Installed Weaver into Microsoft Fabric\n")
+    print("Workspace")
+    print(f"  Name: {result.workspace_name}")
+    print(f"  ID:   {result.workspace_id}\n")
+    print("Environment")
+    print(f"  Name: {result.environment_name}")
+    print(f"  ID:   {result.environment_id}\n")
+    print("Package")
+    print(f"  Distribution: {result.package_name}")
+    print(f"  Version:      {result.package_version}")
+    print(f"  Wheel:        {result.wheel_filename}\n")
+    print("Changes")
+    print(f"  Environment created:  {'yes' if result.created_environment else 'no'}")
+    print(f"  Dependencies changed: {'yes' if result.dependencies_changed else 'no'}")
+    print(f"  Wheel changed:        {'yes' if result.wheel_changed else 'no'}")
+    print(f"  Published:            {result.publish_status}\n")
+    parts = ", ".join(f"{name} {secs:.1f}s" for name, secs in result.timings.items())
+    print(f"Timing  {parts + ', ' if parts else ''}total {total:.1f}s\n")
+    print("Notebook use")
+    print(f'  1. Attach the "{result.environment_name}" Environment.')
+    print("  2. Start a new session.")
+    print("  3. Run: import weaver")
 
 
 def handle_capacity(args: argparse.Namespace) -> int:

@@ -9,14 +9,14 @@ from __future__ import annotations
 from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
 from .client import FabricClient, FabricError
 from .livy import LivyError, LivySession, StatementResult, emit_source
-from .runtime import (
-    SyncReport,
-    bootstrap_source,
-    install_location,
-    abfss_package_root,
-    sync_runtime,
+from .environment import (
+    InstallResult,
+    build_wheel,
+    find_or_create_environment,
+    install,
+    missing_from_environment,
 )
-from .resolution import RUNTIME_AREA, FabricResolver
+from .resolution import FabricResolver
 from .onelake import (
     OneLakeDfsClient,
     abfss_root,
@@ -42,16 +42,15 @@ __all__ = [
     "capacity_command",
     "run_capacity_action",
     "FabricResolver",
+    "install",
+    "InstallResult",
+    "build_wheel",
+    "find_or_create_environment",
+    "missing_from_environment",
     "LivySession",
     "LivyError",
     "StatementResult",
     "emit_source",
-    "sync_runtime",
-    "abfss_package_root",
-    "SyncReport",
-    "install_location",
-    "bootstrap_source",
-    "RUNTIME_AREA",
     "OneLakeDfsClient",
     "abfss_root",
     "onelake_url",
