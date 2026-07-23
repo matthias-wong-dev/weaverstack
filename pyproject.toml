@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "weaverstack"
+version = "0.1.0"
+description = "Central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Matthias Wong" }]
+keywords = ["fabric", "onelake", "lakehouse", "delta", "warehouse", "etl"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+]
+
+# Deliberately minimal. A dependency is declared at the checkpoint that first
+# needs it, not in advance:
+#   sqlparse        checkpoint 6  (SQL dependency extraction)
+#   azure-identity  checkpoint 7  (Fabric resource discovery)   -> [fabric]
+#   mssql-python    checkpoint 10 (Warehouse SQL)               -> [fabric]
+#   pyspark/delta   Delta execution                             -> [spark]
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# Desktop CLI. Empty today because the CLI is stdlib-only; it exists so the
+# core/CLI dependency boundary is declared from the start.
+cli = []
+dev = [
+    "pytest>=8.4",
+]
+
+[project.scripts]
+weaver = "weaver_cli:main"
+
+[project.urls]
+Homepage = "https://github.com/matthias-wong-dev/weaverstack"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weaver", "src/weaver_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
