@@ -301,21 +301,40 @@ def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
 
 
 def _resolve(
-    dependency: ObjectId, by_id: Mapping[str, list[SourceDocument]]
+    dependency: ObjectId,
+    by_id: Mapping[str, list[SourceDocument]],
+    referrer: SourceDocument,
 ) -> SourceDocument | None:
     """The object a two-part reference names, when that is unambiguous.
 
-    A reference carries no target, so it resolves by ID. One match is the
-    answer, and it may cross a target boundary — a Warehouse query reading a
-    Delta table is the ordinary case, and the one the SQL endpoint and the
-    shortcuts exist to bridge.
+    A two-part name resolves in the namespace of whoever wrote it: T-SQL
+    resolves inside the Warehouse, Spark SQL inside the Lakehouse. So the
+    referrer's own target wins when it has a candidate — `join Sales.Customer`
+    in a Warehouse query means the Warehouse's Sales.Customer, because that is
+    what the SQL would actually bind to.
 
-    More than one match is genuinely ambiguous and needs the physical targets
-    to settle, so it is left unresolved rather than guessed.
+    Failing that, a single candidate anywhere is the answer, and it may cross a
+    boundary: a Warehouse query reading a Delta table is the ordinary case, and
+    the one the SQL endpoint and the shortcuts exist to bridge.
+
+    Two candidates in neither of those positions is genuinely ambiguous and is
+    left for the build, which has the targets and the shortcut bindings.
     """
 
     candidates = by_id.get(_canonical(dependency.qualified), [])
-    return candidates[0] if len(candidates) == 1 else None
+    if not candidates:
+        return None
+    own_target = [
+        candidate for candidate in candidates
+        if candidate.target_kind == referrer.target_kind
+        and candidate.node_id != referrer.node_id
+    ]
+    if len(own_target) == 1:
+        return own_target[0]
+    elsewhere = [
+        candidate for candidate in candidates if candidate.node_id != referrer.node_id
+    ]
+    return elsewhere[0] if len(elsewhere) == 1 else None
 
 
 def _by_id(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:
@@ -325,7 +344,9 @@ def _by_id(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocum
     return grouped
 
 
-def build_internal_graph(documents: Iterable[SourceDocument]) -> Graph:
+def build_internal_graph(
+    documents: Iterable[SourceDocument], *, external_names: Iterable[str] = ()
+) -> Graph:
     """The graph over references that resolve within this repository.
 
     Nodes are ``target:Schema.Object``, because an ID alone is not unique.
@@ -337,18 +358,24 @@ def build_internal_graph(documents: Iterable[SourceDocument]) -> Graph:
 
     documents = list(documents)
     by_id = _by_id(documents)
+    known_external = {_canonical(name) for name in external_names}
 
     edges: list[tuple[str, str]] = []
     for document in documents:
         for dependency in effective_dependencies(document):
-            upstream = _resolve(dependency, by_id)
+            if _canonical(dependency.qualified) in known_external:
+                # Provided from outside — a boundary, not an edge within this graph.
+                continue
+            upstream = _resolve(dependency, by_id, document)
             if upstream is not None and upstream.node_id != document.node_id:
                 edges.append((upstream.node_id, document.node_id))
 
     return Graph((document.node_id for document in documents), edges)
 
 
-def unresolved_references(documents: Iterable[SourceDocument]) -> dict[str, tuple[str, ...]]:
+def unresolved_references(
+    documents: Iterable[SourceDocument], *, external_names: Iterable[str] = ()
+) -> dict[str, tuple[str, ...]]:
     """Per object, the references naming nothing in this repository.
 
     Recorded rather than refused: resolution needs the external-dependency
@@ -357,12 +384,14 @@ def unresolved_references(documents: Iterable[SourceDocument]) -> dict[str, tupl
 
     documents = list(documents)
     by_id = _by_id(documents)
+    known_external = {_canonical(name) for name in external_names}
     unresolved: dict[str, tuple[str, ...]] = {}
     for document in documents:
         outside = tuple(
             dependency.qualified
             for dependency in effective_dependencies(document)
-            if _resolve(dependency, by_id) is None
+            if _canonical(dependency.qualified) not in known_external
+            and _resolve(dependency, by_id, document) is None
         )
         physical = tuple(str(reference) for reference in document.qualified_references)
         if outside or physical:

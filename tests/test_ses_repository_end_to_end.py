@@ -233,11 +233,41 @@ def test_the_repository_orders_upstream_before_downstream(repo):
 
 def test_the_layers_show_what_can_run_together(repo):
     assert repo.graph.layers() == (
-        ("folder:Sales.OrderExport", "sql:Sales.Customer"),
+        ("folder:Sales.OrderExport",),
         ("delta:Sales.Customer", "delta:Sales.Order"),
-        ("delta:Sales.OrderSummary", "sql:Reporting.OrderReport"),
+        ("delta:Sales.OrderSummary", "sql:Sales.Customer"),
+        ("sql:Reporting.OrderReport",),
         ("sql:Reporting.OrderView",),
     )
+
+
+def test_a_two_part_name_resolves_in_the_writers_own_namespace():
+    """`join Sales.Customer` in a Warehouse query binds inside the Warehouse."""
+    repo = read_repository(FIXTURE)
+    assert "sql:Sales.Customer" in repo.graph.upstream_of("sql:Reporting.OrderReport")
+    assert "delta:Sales.Customer" not in repo.graph.upstream_of("sql:Reporting.OrderReport")
+
+
+def test_a_unique_match_elsewhere_still_resolves_across_the_boundary():
+    """Sales.Order exists only as Delta, so the Warehouse query reaches it."""
+    repo = read_repository(FIXTURE)
+    assert "delta:Sales.Order" in repo.graph.upstream_of("sql:Reporting.OrderReport")
+
+
+def test_an_object_sourcing_its_namesake_does_not_depend_on_itself():
+    """sql:Sales.Customer reads Sales.Customer — meaning the Delta one."""
+    repo = read_repository(FIXTURE)
+    assert repo.graph.upstream_of("sql:Sales.Customer") == ("delta:Sales.Customer",)
+
+
+def test_a_name_declared_external_is_a_boundary_not_an_edge():
+    """The seam the shortcut bindings will use once build supplies them."""
+    from weaver.ses import build_internal_graph
+
+    repo = read_repository(FIXTURE)
+    graph = build_internal_graph(repo.documents, external_names=["Sales.Order"])
+    assert graph.upstream_of("sql:Reporting.OrderReport") == ("sql:Sales.Customer",)
+    assert graph.upstream_of("delta:Sales.OrderSummary") == ()
 
 
 def test_an_edge_may_cross_the_lakehouse_warehouse_boundary(repo):
@@ -256,6 +286,7 @@ def test_descendants_are_what_a_rebuild_would_uncertify(repo):
         "delta:Sales.Customer",
         "delta:Sales.Order",
         "delta:Sales.OrderSummary",
+        "sql:Sales.Customer",
         "sql:Reporting.OrderReport",
         "sql:Reporting.OrderView",
     )
@@ -271,14 +302,11 @@ def test_references_outside_the_repository_are_not_edges(repo):
     assert "Sales.OrderLineCount" in repo.unresolved["sql:Reporting.OrderReport"]
 
 
-def test_an_ambiguous_reference_is_left_for_the_build_to_settle(repo):
-    """Reporting.OrderReport reads Sales.Customer, which exists in two targets.
-
-    Guessing would invent an edge; this is exactly what the external-dependency
-    configuration is for.
-    """
-    assert "Sales.Customer" in repo.unresolved["sql:Reporting.OrderReport"]
-    assert "delta:Sales.Customer" not in repo.graph.upstream_of("sql:Reporting.OrderReport")
+def test_only_genuinely_external_names_remain_unresolved(repo):
+    """Sales.OrderLineCount is a table-valued function nobody here defines."""
+    assert repo.unresolved == {
+        "sql:Reporting.OrderReport": ("Sales.OrderLineCount",),
+    }
 
 
 def test_a_cycle_in_a_repository_is_refused(tmp_path):

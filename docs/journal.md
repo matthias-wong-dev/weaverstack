@@ -401,14 +401,32 @@ from `delta:` to `sql:` is exactly where the refresh barrier belongs.
 produces the same plan and two plans can be diffed — which the catalogue will
 need.
 
-**A reference resolves by ID, and may cross targets.** A Warehouse query
-reading a Delta table is the ordinary case, not the exception. One match is the
-answer. *More than one* match is genuinely ambiguous — the fixture has
-`Sales.Customer` as both a Delta table and a Warehouse table — and is left
-unresolved rather than guessed, because settling it needs the physical targets
-and the shortcut bindings. This is the clearest argument yet for the
-`Another.Table_External` naming convention: a distinct shortcut name avoids the
-ambiguity entirely.
+**A two-part name resolves in the namespace of whoever wrote it.** T-SQL binds
+inside the Warehouse, Spark SQL inside the Lakehouse, a Python import against a
+file. So `join Sales.Customer` in a Warehouse query means the *Warehouse's*
+`Sales.Customer` when one exists, because that is what the SQL would actually
+bind to. Failing that, a single candidate anywhere is the answer, and it may
+cross a boundary — a Warehouse query reading a Delta table is the ordinary
+case. Two candidates in neither position is left for the build.
+
+That rule settles almost everything without any configuration. In the fixture,
+`Sales.Customer` exists as both a Delta table and a Warehouse table:
+`sql:Reporting.OrderReport` resolves it to the Warehouse one, while
+`sql:Sales.Customer` — reading its own namesake — resolves to the Delta one,
+which is the ordinary shape of surfacing a Lakehouse table into a Warehouse.
+
+`build_internal_graph(..., external_names=…)` is the seam the shortcut bindings
+will use: a name declared external is a boundary rather than an edge. The
+parameter exists now so wiring the configuration in later changes no signature
+downstream. The file format waits for the build package, because a shortcut's
+role — an operation that creates something, and a node with no upstream — is
+only concrete once that exists.
+
+One thing this exposed and did not fix: a Warehouse query reading a bare
+`Sales.Order` that exists only as a Delta table would not *execute* without a
+shortcut or a three-part name. The data dependency is real and the edge is
+right, but the SQL as written needs a bridge nobody has declared. The shortcuts
+file is not decoration — it is how a cross-boundary read becomes expressible.
 
 Cycles are refused when the repository is read. A repository whose graph cannot
 be ordered is not a repository worth handing on.
