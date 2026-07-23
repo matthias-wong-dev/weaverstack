@@ -66,6 +66,28 @@ LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL})
 #: They declare their shape up front and use the underscored audit spelling.
 DELTA_LANGUAGES = frozenset({PYTHON, SPARK_SQL})
 
+# The three physical destinations. An object ID is unique *within* one of these,
+# not across them: Sales.Order may exist as a folder, as a Delta table and as a
+# Warehouse table at the same time, because those are three different places.
+FOLDER_TARGET = "folder"
+DELTA_TARGET = "delta"
+SQL_TARGET = "sql"
+TARGET_KINDS = (FOLDER_TARGET, DELTA_TARGET, SQL_TARGET)
+
+
+def target_kind_for(language: str, kind: str) -> str:
+    """Where an object materialises, from its language and kind.
+
+    Routing is inferred, never configured — which is what removed the old
+    paired source-and-target build command.
+    """
+
+    if kind == FOLDER:
+        return FOLDER_TARGET
+    if language in DELTA_LANGUAGES:
+        return DELTA_TARGET
+    return SQL_TARGET
+
 _ID_KEYS = {"Folder ID": FOLDER, "Table ID": TABLE, "View ID": VIEW}
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
 

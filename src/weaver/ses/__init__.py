@@ -7,7 +7,14 @@ from .dependencies import (
     extract_python_references,
     extract_sql_references,
 )
-from .repository import SesRepository, read_repository
+from .graph import Edge, Graph
+from .repository import (
+    SesRepository,
+    build_internal_graph,
+    effective_dependencies,
+    read_repository,
+    unresolved_references,
+)
 from .source import (
     SourceDocument,
     SqlAnalysis,
@@ -51,6 +58,11 @@ __all__ = [
     "extract_sql_references",
     "SesRepository",
     "read_repository",
+    "Graph",
+    "Edge",
+    "build_internal_graph",
+    "effective_dependencies",
+    "unresolved_references",
     "SourceDocument",
     "SqlAnalysis",
     "analyse_sql",

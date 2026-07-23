@@ -28,6 +28,7 @@ from typing import Iterable, Mapping
 from ..errors import DiscoveryError
 from ..locations import Location
 from ..store import LocalStore, Store
+from .graph import Graph
 from .metadata import PYTHON, ObjectId
 from .source import SourceDocument, language_for_filename, read_source_document
 
@@ -50,8 +51,31 @@ class SesRepository:
     signature: str
 
     @property
+    def graph(self) -> Graph:
+        """Dependencies that resolve within this repository."""
+
+        return build_internal_graph(self.documents)
+
+    @property
+    def unresolved(self) -> dict[str, tuple[str, ...]]:
+        """References naming nothing here — settled at build."""
+
+        return unresolved_references(self.documents)
+
+    @property
     def by_id(self) -> Mapping[str, SourceDocument]:
-        return {document.qualified: document for document in self.documents}
+        """By ``target:Schema.Object``, which is the unique identity."""
+
+        return {document.node_id: document for document in self.documents}
+
+    @property
+    def by_qualified(self) -> Mapping[str, tuple[SourceDocument, ...]]:
+        """By ``Schema.Object`` — several, when one ID has several targets."""
+
+        grouped: dict[str, list[SourceDocument]] = {}
+        for document in self.documents:
+            grouped.setdefault(document.qualified, []).append(document)
+        return {key: tuple(value) for key, value in grouped.items()}
 
     @property
     def object_ids(self) -> tuple[ObjectId, ...]:
@@ -71,13 +95,24 @@ class SesRepository:
             if document.module_name is not None
         }
 
-    def __getitem__(self, qualified: str) -> SourceDocument:
-        try:
-            return self.by_id[qualified]
-        except KeyError:
+    def __getitem__(self, key: str) -> SourceDocument:
+        """By node id, or by ID alone when that names exactly one object."""
+
+        by_id = self.by_id
+        if key in by_id:
+            return by_id[key]
+        candidates = self.by_qualified.get(key, ())
+        if len(candidates) == 1:
+            return candidates[0]
+        if candidates:
+            targets = ", ".join(sorted(document.node_id for document in candidates))
             raise DiscoveryError(
-                f"{qualified!r} is not an object in repository {self.name!r}"
-            ) from None
+                f"{key!r} names more than one object in repository {self.name!r} — "
+                f"say which: {targets}"
+            )
+        raise DiscoveryError(
+            f"{key!r} is not an object in repository {self.name!r}"
+        )
 
     def __len__(self) -> int:
         return len(self.documents)
@@ -112,7 +147,9 @@ def read_repository(
 
     documents.sort(key=lambda document: document.qualified)
     _reject_duplicate_ids(documents)
+    _reject_case_only_duplicates(documents)
     _reject_module_collisions(documents, support)
+    build_internal_graph(documents)  # a repository whose graph cannot be ordered is invalid
 
     return SesRepository(
         name=name or root.name,
@@ -151,15 +188,24 @@ def _ignored(relative: str) -> bool:
 
 
 def _reject_duplicate_ids(documents: Iterable[SourceDocument]) -> None:
+    """Uniqueness is per physical target, not per ID.
+
+    ``Sales.Order`` may be a folder, a Delta table and a Warehouse table at
+    once — three different places. What cannot happen is two objects
+    materialising into the same place: a Python table and a Spark SQL table
+    with one ID would both claim ``Tables/Sales/Order``.
+    """
+
     seen: dict[str, str] = {}
     for document in documents:
-        existing = seen.get(document.qualified)
+        existing = seen.get(_canonical(document.node_id))
         if existing is not None:
             raise DiscoveryError(
-                f"{document.qualified} is declared twice: {existing} and "
+                f"{document.qualified} is declared twice for the "
+                f"{document.target_kind} target: {existing} and "
                 f"{document.relative_path}"
             )
-        seen[document.qualified] = document.relative_path
+        seen[_canonical(document.node_id)] = document.relative_path
 
 
 def importable_module_name(relative_path: str) -> str | None:
@@ -225,3 +271,114 @@ def _signature(
         digest.update(hashes[relative].encode("ascii"))
         digest.update(b"\n")
     return digest.hexdigest()
+
+
+# --- the internal dependency graph -------------------------------------------
+
+
+def _canonical(qualified: str) -> str:
+    """Object identities are compared without regard to case.
+
+    A developer may write `sales__order` where the house style is
+    `Sales__Order`, and SQL is case-insensitive by nature. Two objects whose
+    IDs differ only by case are refused, so the folding is unambiguous.
+    """
+
+    return qualified.lower()
+
+
+def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
+    """What this object depends on: declared if declared, else discovered.
+
+    A declaration replaces discovery rather than adding to it, so an author can
+    remove an edge as well as add one — the phantom dependency an unused import
+    creates has no other cure.
+    """
+
+    if document.declared_dependencies:
+        return document.declared_dependencies
+    return document.referenced_object_ids
+
+
+def _resolve(
+    dependency: ObjectId, by_id: Mapping[str, list[SourceDocument]]
+) -> SourceDocument | None:
+    """The object a two-part reference names, when that is unambiguous.
+
+    A reference carries no target, so it resolves by ID. One match is the
+    answer, and it may cross a target boundary — a Warehouse query reading a
+    Delta table is the ordinary case, and the one the SQL endpoint and the
+    shortcuts exist to bridge.
+
+    More than one match is genuinely ambiguous and needs the physical targets
+    to settle, so it is left unresolved rather than guessed.
+    """
+
+    candidates = by_id.get(_canonical(dependency.qualified), [])
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _by_id(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:
+    grouped: dict[str, list[SourceDocument]] = {}
+    for document in documents:
+        grouped.setdefault(_canonical(document.qualified), []).append(document)
+    return grouped
+
+
+def build_internal_graph(documents: Iterable[SourceDocument]) -> Graph:
+    """The graph over references that resolve within this repository.
+
+    Nodes are ``target:Schema.Object``, because an ID alone is not unique.
+    References resolving to nothing here — or to more than one thing — are left
+    out entirely. They may be shortcuts, objects of another repository, or
+    mistakes, and telling those apart needs the external-dependency
+    configuration supplied at build.
+    """
+
+    documents = list(documents)
+    by_id = _by_id(documents)
+
+    edges: list[tuple[str, str]] = []
+    for document in documents:
+        for dependency in effective_dependencies(document):
+            upstream = _resolve(dependency, by_id)
+            if upstream is not None and upstream.node_id != document.node_id:
+                edges.append((upstream.node_id, document.node_id))
+
+    return Graph((document.node_id for document in documents), edges)
+
+
+def unresolved_references(documents: Iterable[SourceDocument]) -> dict[str, tuple[str, ...]]:
+    """Per object, the references naming nothing in this repository.
+
+    Recorded rather than refused: resolution needs the external-dependency
+    configuration, and that is a build concern.
+    """
+
+    documents = list(documents)
+    by_id = _by_id(documents)
+    unresolved: dict[str, tuple[str, ...]] = {}
+    for document in documents:
+        outside = tuple(
+            dependency.qualified
+            for dependency in effective_dependencies(document)
+            if _resolve(dependency, by_id) is None
+        )
+        physical = tuple(str(reference) for reference in document.qualified_references)
+        if outside or physical:
+            unresolved[document.node_id] = outside + physical
+    return unresolved
+
+
+def _reject_case_only_duplicates(documents: Iterable[SourceDocument]) -> None:
+    seen: dict[str, str] = {}
+    for document in documents:
+        key = _canonical(document.node_id)
+        existing = seen.get(key)
+        if existing is not None and existing != document.node_id:
+            raise DiscoveryError(
+                f"{document.qualified} and {existing.split(':', 1)[1]} differ only by "
+                "case in the same target — identities are compared "
+                "case-insensitively, so one must change"
+            )
+        seen[key] = document.node_id

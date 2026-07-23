@@ -48,6 +48,7 @@ from .metadata import (
     VIEW,
     ObjectId,
     SesDocument,
+    target_kind_for,
     parse_document,
     extract_python_metadata,
     extract_sql_metadata_and_body,
@@ -170,6 +171,22 @@ class SourceDocument:
     @property
     def kind(self) -> str:
         return self.document.kind
+
+    @property
+    def target_kind(self) -> str:
+        """Which physical destination this object materialises into."""
+
+        return target_kind_for(self.language, self.document.kind)
+
+    @property
+    def node_id(self) -> str:
+        """Identity within the repository: target and ID together.
+
+        The ID alone is not unique — the same Schema.Object may exist as a
+        folder, a Delta table and a Warehouse table simultaneously.
+        """
+
+        return f"{self.target_kind}:{self.qualified}"
 
     @property
     def referenced_object_ids(self) -> tuple[ObjectId, ...]:

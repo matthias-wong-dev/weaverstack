@@ -369,6 +369,50 @@ exercises everything together and asserts that nothing was invented.
 example repository: filename classification, metadata, structural checks, SQL
 analysis and discovered references.
 
+### Checkpoint 6b — the graph
+
+**Nodes are `target:Schema.Object`, not `Schema.Object`.** An object ID is
+unique *within* a physical target, not across them: `Sales.Order` may be a
+folder, a Delta table and a Warehouse table at the same time, because those are
+three different places. Filenames already encode part of this —
+`Sales__Order.py`, `Sales.Order.spark.sql` and `Sales.Order.sql` coexist
+happily — but a Python table and a Spark SQL table sharing an ID both claim
+`Tables/Sales/Order` and collide. Uniqueness is enforced per target.
+
+Routing is inferred from language and kind: a Folder goes to the folder target,
+anything in a Delta language goes to the Delta target, and SQL goes to the
+Warehouse. Never configured, which is what removed the old paired
+source-and-target build command.
+
+**The graph knows nothing about what an edge means**, because there is more
+than one graph over the same objects. Load order follows every dependency.
+Build order is nearly flat: building a Folder is a directory and building a
+Delta table is a `CREATE` from its declared `Schema`, so neither needs a single
+upstream object to exist. Only a Warehouse object has build dependencies,
+because its shape is inferred from its query. So a build is every Folder and
+every Delta table in one parallel wave, then the Warehouse objects in order,
+with a SQL endpoint refresh where the first of them reads Delta. Same
+primitives, different edge sets.
+
+That boundary stays visible because node identity carries the target: an edge
+from `delta:` to `sql:` is exactly where the refresh barrier belongs.
+
+**Order is deterministic.** Ties break by name, so the same repository always
+produces the same plan and two plans can be diffed — which the catalogue will
+need.
+
+**A reference resolves by ID, and may cross targets.** A Warehouse query
+reading a Delta table is the ordinary case, not the exception. One match is the
+answer. *More than one* match is genuinely ambiguous — the fixture has
+`Sales.Customer` as both a Delta table and a Warehouse table — and is left
+unresolved rather than guessed, because settling it needs the physical targets
+and the shortcut bindings. This is the clearest argument yet for the
+`Another.Table_External` naming convention: a distinct shortcut name avoids the
+ambiguity entirely.
+
+Cycles are refused when the repository is read. A repository whose graph cannot
+be ordered is not a repository worth handing on.
+
 ---
 
 ## Open questions

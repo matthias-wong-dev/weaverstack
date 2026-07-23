@@ -185,3 +185,133 @@ def test_the_signature_covers_every_file(repo, tmp_path):
 
     (copy / "_helpers" / "dates.py").write_text("# changed\n", encoding="utf-8")
     assert read_repository(Location(str(copy))).signature != repo.signature
+
+
+# --- the internal graph ------------------------------------------------------
+#
+# Nodes are `target:Schema.Object`. An ID alone is not unique — the fixture has
+# Sales.Customer as both a Delta table and a Warehouse table, which is two
+# physical objects in two places and entirely legitimate.
+
+
+def test_one_id_may_occupy_several_targets(repo):
+    assert {document.node_id for document in repo.by_qualified["Sales.Customer"]} == {
+        "delta:Sales.Customer",
+        "sql:Sales.Customer",
+    }
+
+
+def test_asking_by_a_shared_id_says_which_are_meant(repo):
+    from weaver.errors import DiscoveryError
+
+    with pytest.raises(DiscoveryError, match="names more than one object"):
+        repo["Sales.Customer"]
+
+
+def test_an_unshared_id_still_resolves_on_its_own(repo):
+    assert repo["Sales.Order"].node_id == "delta:Sales.Order"
+
+
+def test_routing_is_inferred_from_language_and_kind(repo):
+    assert {document.node_id for document in repo} == {
+        "folder:Sales.OrderExport",
+        "delta:Sales.Order",
+        "delta:Sales.Customer",
+        "delta:Sales.OrderSummary",
+        "sql:Sales.Customer",
+        "sql:Reporting.OrderReport",
+        "sql:Reporting.OrderView",
+    }
+
+
+def test_the_repository_orders_upstream_before_downstream(repo):
+    order = repo.graph.order()
+    assert order.index("folder:Sales.OrderExport") < order.index("delta:Sales.Order")
+    assert order.index("delta:Sales.Order") < order.index("sql:Reporting.OrderReport")
+    assert order.index("sql:Reporting.OrderReport") < order.index("sql:Reporting.OrderView")
+
+
+def test_the_layers_show_what_can_run_together(repo):
+    assert repo.graph.layers() == (
+        ("folder:Sales.OrderExport", "sql:Sales.Customer"),
+        ("delta:Sales.Customer", "delta:Sales.Order"),
+        ("delta:Sales.OrderSummary", "sql:Reporting.OrderReport"),
+        ("sql:Reporting.OrderView",),
+    )
+
+
+def test_an_edge_may_cross_the_lakehouse_warehouse_boundary(repo):
+    """The Warehouse object reads a Delta table. Bridging that at build needs
+    the SQL endpoint refresh, which is why the boundary must stay visible."""
+    crossing = [
+        str(edge)
+        for edge in repo.graph.edges
+        if edge.upstream.startswith("delta:") and edge.downstream.startswith("sql:")
+    ]
+    assert "delta:Sales.Order -> sql:Reporting.OrderReport" in crossing
+
+
+def test_descendants_are_what_a_rebuild_would_uncertify(repo):
+    assert repo.graph.descendants("folder:Sales.OrderExport") == (
+        "delta:Sales.Customer",
+        "delta:Sales.Order",
+        "delta:Sales.OrderSummary",
+        "sql:Reporting.OrderReport",
+        "sql:Reporting.OrderView",
+    )
+
+
+def test_a_declaration_replaces_discovery_in_the_graph(repo):
+    """Sales.OrderSummary reads Sales.Cancelled but declares only Sales.Order."""
+    assert repo.graph.upstream_of("delta:Sales.OrderSummary") == ("delta:Sales.Order",)
+
+
+def test_references_outside_the_repository_are_not_edges(repo):
+    assert "sql:Sales.OrderLineCount" not in repo.graph.nodes
+    assert "Sales.OrderLineCount" in repo.unresolved["sql:Reporting.OrderReport"]
+
+
+def test_an_ambiguous_reference_is_left_for_the_build_to_settle(repo):
+    """Reporting.OrderReport reads Sales.Customer, which exists in two targets.
+
+    Guessing would invent an edge; this is exactly what the external-dependency
+    configuration is for.
+    """
+    assert "Sales.Customer" in repo.unresolved["sql:Reporting.OrderReport"]
+    assert "delta:Sales.Customer" not in repo.graph.upstream_of("sql:Reporting.OrderReport")
+
+
+def test_a_cycle_in_a_repository_is_refused(tmp_path):
+    import shutil
+
+    copy = tmp_path / "cyclic"
+    shutil.copytree(FIXTURE.value, copy)
+    export = copy / "Sales__OrderExport.py"
+    export.write_text(
+        export.read_text(encoding="utf-8").replace(
+            "from weaver import Folder",
+            "from Sales__Order import Sales__Order\n\nfrom weaver import Folder",
+        ),
+        encoding="utf-8",
+    )
+    from weaver.errors import GraphError
+
+    with pytest.raises(GraphError, match="dependency cycle"):
+        read_repository(Location(str(copy)))
+
+
+def test_two_objects_may_not_claim_the_same_physical_place(tmp_path):
+    """A Python table and a Spark SQL table with one ID both claim Tables/…."""
+    import shutil
+
+    from weaver.errors import DiscoveryError
+
+    copy = tmp_path / "clash"
+    shutil.copytree(FIXTURE.value, copy)
+    (copy / "Sales.Order.spark.sql").write_text(
+        "/*\nTable ID: Sales.Order\n\nDescription: x\n\nLineage: y\n\n"
+        "Dependencies:\n  - Sales.OrderExport\n\nSchema:\n  a: string\n*/\nselect 1 as a\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(DiscoveryError, match="declared twice for the delta target"):
+        read_repository(Location(str(copy)))

@@ -34,3 +34,7 @@ class LoadError(WeaverError):
 
 class DiscoveryError(WeaverError):
     """Raised when a repository or source file breaks a structural rule."""
+
+
+class GraphError(WeaverError):
+    """Raised for cycles or an unorderable dependency graph."""
