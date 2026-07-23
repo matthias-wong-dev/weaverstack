@@ -126,6 +126,19 @@ that first needs it, not in advance. See the comment in `pyproject.toml`.
 ```bash
 python3.11 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest              # core only — no JVM, under a second
+.venv/bin/python -m pytest -m spark     # local Spark/Delta, needs Java 17
 .venv/bin/weaver --help
 ```
+
+Spark tests are deselected by default (`addopts = ["-m", "not spark"]`) and skip
+themselves if PySpark or Java 17 is missing, so a contributor without a JVM is
+never blocked.
+
+The `spark` fixture is **session-scoped** and the `lakehouses` fixture is
+**per-test**, because those costs differ by four orders of magnitude: a session
+takes ~1.2 s plus ~4.3 s of JVM warm-up on its first Delta operation, while a
+local Lakehouse skeleton takes 0.2 ms. Only one `SparkSession` may be active per
+process in any case. Tests stay isolated through their own `tmp_path`, not
+their own session — safe because Weaver addresses Delta by explicit path rather
+than through a metastore.

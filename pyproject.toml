@@ -34,8 +34,14 @@ dependencies = [
 # Desktop CLI. Empty today because the CLI is stdlib-only; it exists so the
 # core/CLI dependency boundary is declared from the start.
 cli = []
+spark = [
+    "pyspark==3.5.1",
+    "delta-spark==3.2.0",
+]
 dev = [
     "pytest>=8.4",
+    "pyspark==3.5.1",
+    "delta-spark==3.2.0",
 ]
 
 [project.scripts]
@@ -49,3 +55,8 @@ packages = ["src/weaver", "src/weaver_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "spark: local Spark/Delta tests, need Java 17 (run with: pytest -m spark)",
+]
+# Default runs stay fast and need no JVM.
+addopts = ["-m", "not spark"]

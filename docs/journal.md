@@ -455,6 +455,38 @@ outside — in the fixture, a table-valued function nobody defines.
 Cycles are refused when the repository is read. A repository whose graph cannot
 be ordered is not a repository worth handing on.
 
+### Local test substrate
+
+Local build and load come before any Fabric work, so the suite needed a way to
+stand up Lakehouses without a JVM being mandatory.
+
+Measured, because the fixture scoping follows from it:
+
+| | cost |
+|---|---|
+| Spark session start | 1.24 s |
+| first Delta write+read (warm-up) | 4.31 s |
+| later Delta write+read | ~0.75 s |
+| a local Lakehouse skeleton | 0.0002 s |
+| session stop | 0.42 s |
+
+So the `spark` fixture is session-scoped and the `lakehouses` fixture is
+per-test. Only one `SparkSession` may be active per process anyway, and the
+warm-up is not worth paying twice; the directories are free enough that sharing
+them would only invite contamination.
+
+Sharing one session across tests is safe **because Weaver addresses Delta by
+explicit path rather than through a metastore** — a session carries no state
+between tests. That is the same property that lets a Fabric notebook write to a
+Lakehouse it is not attached to, showing up as a testing convenience.
+
+Two environment traps, both handled in the fixture rather than in a shell
+profile: `PYSPARK_PYTHON` defaults to the system interpreter and fails deep
+inside a task with a version mismatch, so it is pinned to `sys.executable`; and
+`JAVA_HOME` is discovered through `/usr/libexec/java_home -v 17` when unset.
+Missing PySpark or Java skips rather than fails, so the default run needs
+neither.
+
 ---
 
 ## Open questions
