@@ -14,3 +14,11 @@ class WeaverError(Exception):
 
 class CommandError(WeaverError):
     """Raised when an explicitly requested operation is invalid."""
+
+
+class ConfigError(WeaverError):
+    """Raised when host configuration is invalid."""
+
+
+class IdentityError(WeaverError):
+    """Raised when a target, item or repository identity is malformed."""

@@ -80,6 +80,12 @@ Warehouse, endpoint, repository or notebook names, no production endpoints and
 no local platform paths. Allowed defaults are generic technical values (Fabric
 API URLs, auth scopes, Livy version, timeouts, polling intervals, parallelism).
 
+This covers **examples, docstrings and test fixtures**, not just code paths.
+Weaver also has no opinion about data architecture: Folder, Delta and SQL are
+materialisation forms, not tiers, so examples must not imply a tiering scheme
+(`T0`/`T1`/`T2`, bronze/silver/gold). Use neutral item names — `Sales`,
+`Inventory`, `Reporting`. Enforced by `tests/test_neutrality.py`.
+
 ## Layout
 
 ```text
