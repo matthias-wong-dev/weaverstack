@@ -49,7 +49,9 @@ reports what is present and what to install. See
 
 - [Architecture summary](backlog/weaver-architecture-summary.md)
 - [Implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md)
+- [CLI usage](docs/cli-usage.md) — signing in, hosts, capacity, wipe
 - [Local development setup](docs/local-setup.md)
+- [Fabric integration tests](docs/fabric-testing.md)
 - [Agent guide](AGENTS.md)
 
 ## Licence

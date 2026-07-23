@@ -26,13 +26,13 @@ def files_root(lakehouses):
 
 
 def test_an_item_name_clears_the_whole_item(populated_folders, capsys):
-    assert main(["wipe", "Sales_LH", "--root", str(populated_folders.root), "--yes"]) == 0
+    assert main(["wipe", "--target", "Sales_LH", "--root", str(populated_folders.root), "--yes"]) == 0
     assert list(files_root(populated_folders).iterdir()) == []
 
 
 def test_a_folder_path_narrows_to_that_root(populated_folders, capsys):
     exit_code = main([
-        "wipe", "Sales_LH/Files/Sales", "--root", str(populated_folders.root), "--yes",
+        "wipe", "--target", "Sales_LH/Files/Sales", "--root", str(populated_folders.root), "--yes",
     ])
     assert exit_code == 0
     assert (files_root(populated_folders) / "notes.txt").exists()
@@ -41,7 +41,8 @@ def test_a_folder_path_narrows_to_that_root(populated_folders, capsys):
 
 def test_several_targets_at_once(populated_folders, capsys):
     exit_code = main([
-        "wipe", "Sales_LH", "Weaver", "--root", str(populated_folders.root), "--yes",
+        "wipe", "--target", "Sales_LH", "--target", "Weaver",
+        "--root", str(populated_folders.root), "--yes",
     ])
     assert exit_code == 0
     printed = capsys.readouterr().out
@@ -49,7 +50,7 @@ def test_several_targets_at_once(populated_folders, capsys):
 
 
 def test_an_unknown_item_is_reported(populated_folders, capsys):
-    exit_code = main(["wipe", "Nope", "--root", str(populated_folders.root), "--yes"])
+    exit_code = main(["wipe", "--target", "Nope", "--root", str(populated_folders.root), "--yes"])
     assert exit_code == 1
     assert "does not exist" in capsys.readouterr().err
 
@@ -58,7 +59,7 @@ def test_an_unknown_item_is_reported(populated_folders, capsys):
 
 
 def test_a_dry_run_changes_nothing(populated_folders, capsys):
-    exit_code = main(["wipe", "Sales_LH", "--root", str(populated_folders.root), "--dry-run"])
+    exit_code = main(["wipe", "--target", "Sales_LH", "--root", str(populated_folders.root), "--dry-run"])
     assert exit_code == 0
     assert "Nothing was changed" in capsys.readouterr().out
     assert (files_root(populated_folders) / "notes.txt").exists()
@@ -66,7 +67,7 @@ def test_a_dry_run_changes_nothing(populated_folders, capsys):
 
 def test_it_refuses_to_act_unattended_without_yes(populated_folders, capsys):
     """A non-interactive caller must say --yes, or nothing happens."""
-    exit_code = main(["wipe", "Sales_LH", "--root", str(populated_folders.root)])
+    exit_code = main(["wipe", "--target", "Sales_LH", "--root", str(populated_folders.root)])
     assert exit_code == 1
     assert "Refusing to remove" in capsys.readouterr().err
     assert (files_root(populated_folders) / "notes.txt").exists()
@@ -75,7 +76,7 @@ def test_it_refuses_to_act_unattended_without_yes(populated_folders, capsys):
 def test_a_declined_confirmation_changes_nothing(populated_folders, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "n")
-    exit_code = main(["wipe", "Sales_LH", "--root", str(populated_folders.root)])
+    exit_code = main(["wipe", "--target", "Sales_LH", "--root", str(populated_folders.root)])
     assert exit_code == 1
     assert "Cancelled" in capsys.readouterr().out
     assert (files_root(populated_folders) / "notes.txt").exists()
@@ -84,19 +85,19 @@ def test_a_declined_confirmation_changes_nothing(populated_folders, capsys, monk
 def test_an_accepted_confirmation_acts(populated_folders, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "y")
-    assert main(["wipe", "Sales_LH", "--root", str(populated_folders.root)]) == 0
+    assert main(["wipe", "--target", "Sales_LH", "--root", str(populated_folders.root)]) == 0
     assert list(files_root(populated_folders).iterdir()) == []
 
 
 def test_an_already_empty_target_needs_no_confirmation(lakehouses, capsys):
     """Sales_LH exists with both areas but nothing in them."""
-    exit_code = main(["wipe", "Sales_LH", "--root", str(lakehouses.root)])
+    exit_code = main(["wipe", "--target", "Sales_LH", "--root", str(lakehouses.root)])
     assert exit_code == 0
     assert "Nothing to remove" in capsys.readouterr().out
 
 
 def test_the_plan_is_printed_before_anything_is_removed(populated_folders, capsys):
-    main(["wipe", "Sales_LH", "--root", str(populated_folders.root), "--yes"])
+    main(["wipe", "--target", "Sales_LH", "--root", str(populated_folders.root), "--yes"])
     printed = capsys.readouterr().out
     assert printed.index("folder:Sales_LH/Files") < printed.index("removed")
 
@@ -106,7 +107,7 @@ def test_the_plan_is_printed_before_anything_is_removed(populated_folders, capsy
 
 def test_a_host_comes_from_the_config(hosts_file, populated_folders, capsys):
     exit_code = main([
-        "wipe", "Sales_LH", "--host", "MyLocal", "--config", str(hosts_file), "--yes",
+        "wipe", "--target", "Sales_LH", "--host", "MyLocal", "--hosts", str(hosts_file), "--yes",
     ])
     assert exit_code == 0
     assert "MyLocal" in capsys.readouterr().out
@@ -115,7 +116,7 @@ def test_a_host_comes_from_the_config(hosts_file, populated_folders, capsys):
 
 def test_an_unknown_host_lists_what_there_is(hosts_file, capsys):
     exit_code = main([
-        "wipe", "Sales_LH", "--host", "Absent", "--config", str(hosts_file), "--yes",
+        "wipe", "--target", "Sales_LH", "--host", "Absent", "--hosts", str(hosts_file), "--yes",
     ])
     assert exit_code == 1
     error = capsys.readouterr().err
@@ -123,17 +124,17 @@ def test_an_unknown_host_lists_what_there_is(hosts_file, capsys):
 
 
 def test_a_host_needs_a_config_to_be_looked_up_in(capsys):
-    assert main(["wipe", "Sales_LH", "--host", "MyLocal", "--yes"]) == 1
-    assert "--config" in capsys.readouterr().err
+    assert main(["wipe", "--target", "Sales_LH", "--host", "MyLocal", "--yes"]) == 1
+    assert "--hosts" in capsys.readouterr().err
 
 
 def test_root_and_config_are_alternatives(hosts_file, capsys):
     exit_code = main([
-        "wipe", "Sales_LH", "--root", "/tmp", "--host", "MyLocal",
-        "--config", str(hosts_file), "--yes",
+        "wipe", "--target", "Sales_LH", "--root", "/tmp", "--host", "MyLocal",
+        "--hosts", str(hosts_file), "--yes",
     ])
     assert exit_code == 1
-    assert "drop --host and --config" in capsys.readouterr().err
+    assert "drop --host and --hosts" in capsys.readouterr().err
 
 
 def test_a_fabric_host_says_what_is_missing(tmp_path, capsys):
@@ -143,4 +144,9 @@ def test_a_fabric_host_says_what_is_missing(tmp_path, capsys):
         encoding="utf-8",
     )
     with pytest.raises(NotImplementedError, match="Fabric item resolution"):
-        main(["wipe", "MyWarehouse", "--host", "MyFabric", "--config", str(config), "--yes"])
+        main(["wipe", "--target", "MyWarehouse", "--host", "MyFabric", "--hosts", str(config), "--yes"])
+
+
+def test_wipe_needs_a_target(populated_folders, capsys):
+    assert main(["wipe", "--root", str(populated_folders.root), "--yes"]) == 1
+    assert "at least one --target" in capsys.readouterr().err

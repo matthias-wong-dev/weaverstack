@@ -13,6 +13,7 @@ import sys
 
 import weaver
 from weaver.errors import WeaverError
+from weaver.fabric.capacity import CAPACITY_ACTIONS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,16 +38,54 @@ def build_parser() -> argparse.ArgumentParser:
         "wipe", help="clear a Lakehouse, a Warehouse, or one folder root"
     )
     wipe.add_argument(
-        "target",
-        nargs="+",
-        help="an item (Sales_LH) or a folder root (Sales_LH/Files/Extracts)",
+        "--target",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "an item (Sales_LH) or a folder root (Sales_LH/Files/Extracts). "
+            "Repeat the flag for several: --target A --target B"
+        ),
     )
     _add_host_args(wipe)
     wipe.add_argument("--dry-run", action="store_true", help="report without removing")
     wipe.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     wipe.set_defaults(handler=handle_wipe)
 
+    capacity = subcommands.add_parser(
+        "capacity", help="turn a Fabric capacity on or off, or report its state"
+    )
+    capacity.add_argument("action", choices=CAPACITY_ACTIONS)
+    capacity.add_argument("--resource-group", required=True)
+    capacity.add_argument("--capacity-name", required=True)
+    capacity.add_argument(
+        "--subscription-id",
+        help="only needed when az has more than one subscription",
+    )
+    capacity.set_defaults(handler=handle_capacity)
+
     return parser
+
+
+def handle_capacity(args: argparse.Namespace) -> int:
+    """Report or change a capacity's state.
+
+    Capacity is billed while it runs, so this is the first and last thing a
+    Fabric session touches.
+    """
+
+    from weaver.fabric import run_capacity_action
+
+    result = run_capacity_action(
+        args.action,
+        resource_group=args.resource_group,
+        capacity_name=args.capacity_name,
+        subscription_id=args.subscription_id,
+    )
+    print(result)
+    if args.action == "resume" and not result.running:
+        print("  (resuming takes a moment; run `capacity status` to confirm)")
+    return 0
 
 
 def _add_host_args(parser: argparse.ArgumentParser) -> None:
@@ -57,8 +96,10 @@ def _add_host_args(parser: argparse.ArgumentParser) -> None:
     """
 
     parser.add_argument("--host", help="a host named in the config file")
-    parser.add_argument("--config", help="a hosts file, e.g. env.yml")
-    parser.add_argument("--root", help="a local host root, instead of --host/--config")
+    parser.add_argument(
+        "--hosts", dest="hosts_file", help="a hosts file, e.g. env.yml"
+    )
+    parser.add_argument("--root", help="a local host root, instead of --host/--hosts")
 
 
 def _resolve_host(args: argparse.Namespace):
@@ -66,19 +107,19 @@ def _resolve_host(args: argparse.Namespace):
     from weaver.errors import CommandError
 
     if args.root:
-        if args.host or args.config:
-            raise CommandError("--root builds a host directly; drop --host and --config")
+        if args.host or args.hosts_file:
+            raise CommandError("--root builds a host directly; drop --host and --hosts")
         return LocalHost(root=args.root)
 
-    if not args.config:
-        raise CommandError("give --config with --host, or --root for a local host")
+    if not args.hosts_file:
+        raise CommandError("give --hosts with --host, or --root for a local host")
     if not args.host:
         raise CommandError("give --host to say which host in the config to use")
 
-    hosts = load_hosts(args.config)
+    hosts = load_hosts(args.hosts_file)
     if args.host not in hosts:
         known = ", ".join(sorted(hosts)) or "none"
-        raise CommandError(f"no host {args.host!r} in {args.config} — found: {known}")
+        raise CommandError(f"no host {args.host!r} in {args.hosts_file} — found: {known}")
     return hosts[args.host]
 
 
@@ -90,6 +131,11 @@ def handle_wipe(args: argparse.Namespace) -> int:
     """
 
     from weaver import wipe_selection
+
+    from weaver.errors import CommandError
+
+    if not args.target:
+        raise CommandError("give at least one --target to wipe")
 
     host = _resolve_host(args)
     planned = wipe_selection(args.target, host, dry_run=True)

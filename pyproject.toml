@@ -22,8 +22,7 @@ classifiers = [
 
 # Deliberately minimal. A dependency is declared at the checkpoint that first
 # needs it, not in advance:
-#   azure-identity  checkpoint 7  (Fabric resource discovery)   -> [fabric]
-#   mssql-python    checkpoint 10 (Warehouse SQL)               -> [fabric]
+#   mssql-python    Warehouse SQL                               -> [fabric]
 #   pyspark/delta   Delta execution                             -> [spark]
 dependencies = [
     "pyyaml",
@@ -36,12 +35,18 @@ dependencies = [
 cli = []
 # Delta and Spark are released in lockstep: delta-spark 3.2.x needs Spark 3.5.x.
 # Ranges rather than pins, so an existing local install is not disturbed.
+fabric = [
+    "azure-identity>=1.23",
+    "requests>=2.31",
+]
 spark = [
     "pyspark>=3.5,<3.6",
     "delta-spark>=3.2,<3.3",
 ]
 dev = [
     "pytest>=8.4",
+    "azure-identity>=1.23",
+    "requests>=2.31",
     "pyspark>=3.5,<3.6",
     "delta-spark>=3.2,<3.3",
 ]
@@ -59,6 +64,7 @@ packages = ["src/weaver", "src/weaver_cli"]
 testpaths = ["tests"]
 markers = [
     "spark: local Spark/Delta tests, need Java 17 (run with: pytest -m spark)",
+    "fabric: opt-in Fabric integration tests, need a workspace and a running capacity (run with: pytest -m fabric)",
 ]
 # Default runs stay fast and need no JVM.
-addopts = ["-m", "not spark"]
+addopts = ["-m", "not spark and not fabric"]
