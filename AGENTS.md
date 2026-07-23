@@ -31,6 +31,21 @@ Reference baseline: `a97ba8a0b00dd66dff1b2c5e818403694562fd30` (the plan's
 reviewed snapshot). The sibling checkout has since advanced; confirm which
 revision you are reading before treating it as the baseline.
 
+## Read this first
+
+[docs/journal.md](docs/journal.md) is the **record** of what weaverstack is and
+why. The backlog plan is the **guide**, written before construction started.
+Where they disagree, the journal is right and the plan is stale.
+
+The journal also carries the context that matters most: the underlying system
+has run in production on SQL Server for years and weaver proved it works on
+Fabric. This is implementation, not invention. Port proven algorithms rather
+than re-deriving them; spend design attention on the control plane, which is
+the genuinely new part.
+
+Add to the journal as part of the work, not afterwards — a checkpoint that
+changes a decision and leaves the journal stale is incomplete.
+
 ## Working protocol
 
 Construction follows numbered checkpoints in
