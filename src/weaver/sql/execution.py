@@ -65,9 +65,12 @@ class PooledSqlExecutor:
 
                 if query:
                     if cursor.description is None:
-                        return []
-                    columns = [column[0] for column in cursor.description]
-                    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+                        rows = []
+                    else:
+                        columns = [column[0] for column in cursor.description]
+                        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                    connection.commit()
+                    return rows
 
                 if drain:
                     _drain(cursor)

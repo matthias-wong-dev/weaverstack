@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from contextlib import contextmanager
 
 import pytest
 
@@ -94,7 +94,7 @@ def test_execute_passes_parameters_commits_and_closes_the_cursor():
     assert connection.rollbacks == 0
 
 
-def test_query_returns_dictionaries_without_committing():
+def test_query_returns_dictionaries_and_commits():
     cursor = Cursor(rows=[(1, "one"), (2, "two")], columns=["id", "name"])
     connection = Connection(cursor)
     executor, _ = _executor([connection])
@@ -103,7 +103,50 @@ def test_query_returns_dictionaries_without_committing():
 
     assert rows == [{"id": 1, "name": "one"}, {"id": 2, "name": "two"}]
     assert cursor.closed
-    assert connection.commits == 0
+    assert connection.commits == 1
+
+
+def test_query_commits_before_the_cursor_closes_and_the_lease_is_released():
+    events = []
+
+    class RecordingCursor(Cursor):
+        def fetchall(self):
+            events.append("fetch")
+            return super().fetchall()
+
+        def close(self):
+            events.append("cursor close")
+            super().close()
+
+    class RecordingConnection(Connection):
+        def commit(self):
+            events.append("commit")
+            super().commit()
+
+    connection = RecordingConnection(RecordingCursor(rows=[(1,)], columns=["value"]))
+
+    class Lease:
+        def __init__(self):
+            self.connection = connection
+
+        def discard(self):
+            events.append("discard")
+
+    class Pool:
+        endpoint = ENDPOINT
+
+        @contextmanager
+        def lease(self):
+            events.append("lease")
+            try:
+                yield Lease()
+            finally:
+                events.append("release")
+
+    rows = PooledSqlExecutor(Pool()).query("select 1 as value")
+
+    assert rows == [{"value": 1}]
+    assert events == ["lease", "fetch", "commit", "cursor close", "release"]
 
 
 def test_failure_rolls_back_normalises_the_error_and_discards_the_connection():
