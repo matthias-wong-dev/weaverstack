@@ -45,12 +45,18 @@ PLAN_FILENAME = "plan.yml"
 REPOSITORY_DIR = "repository"
 PAYLOAD_DIR = "payload"
 
-PYTHON_EXECUTOR = "python"
 SPARK_SQL_EXECUTOR = "spark_sql"
-#: Executors a bundle may carry in v1. T-SQL is deliberately not here: a bundle
-#: that reached generation with Warehouse work would already have raised.
-VALID_EXECUTORS = frozenset({PYTHON_EXECUTOR, SPARK_SQL_EXECUTOR})
-_EXECUTOR_EXTENSION = {PYTHON_EXECUTOR: ".py", SPARK_SQL_EXECUTOR: ".spark.sql"}
+FOLDER_EXECUTOR = "folder"
+PRUNE_EXECUTOR = "prune"
+#: Executors a bundle may carry in v1. ``spark_sql`` runs create DDL; ``folder``
+#: creates a directory; ``prune`` reconciles the target. All three are build,
+#: not load. T-SQL is deliberately absent: a bundle that reached generation with
+#: Warehouse work would already have raised.
+VALID_EXECUTORS = frozenset({SPARK_SQL_EXECUTOR, FOLDER_EXECUTOR, PRUNE_EXECUTOR})
+#: Executors that run a payload, and the extension that payload must carry. The
+#: others (folder, prune) act on the resolved target and carry no payload.
+_EXECUTOR_EXTENSION = {SPARK_SQL_EXECUTOR: ".spark.sql"}
+_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, PRUNE_EXECUTOR})
 
 
 @dataclass(frozen=True)
@@ -241,8 +247,16 @@ def _validate_action_shape(action, omitted_ids) -> None:
             raise BuildError(
                 f"action {action.id!r} has no payload but carries a payload hash"
             )
+        if action.executor not in _PAYLOADLESS_EXECUTORS:
+            raise BuildError(
+                f"action {action.id!r} uses executor {action.executor!r}, which needs a payload"
+            )
         return
 
+    if action.executor in _PAYLOADLESS_EXECUTORS:
+        raise BuildError(
+            f"action {action.id!r} uses executor {action.executor!r}, which takes no payload"
+        )
     _check_payload_path(action.payload)
     extension = _EXECUTOR_EXTENSION[action.executor]
     if not action.payload.endswith(extension):

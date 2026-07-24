@@ -85,6 +85,6 @@ def test_only_schemas_used_by_retained_resources_are_created(warehouse_repo):
         for _, _, a in bundle.plan.actions()
         if a.kind == "create_schema"
     }
-    # Reporting is declared but only the omitted Warehouse leaf uses it, so no
-    # schema action is synthesised for it.
-    assert created == {"Raw", "DWG"}
+    # Only DWG holds a table; Raw is folder-only (no database) and Reporting is
+    # declared but used solely by the omitted Warehouse leaf — neither is created.
+    assert created == {"DWG"}

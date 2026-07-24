@@ -81,7 +81,7 @@ def test_no_warehouse_target_or_tsql_executor(weaver_lakehouse, tmp_path):
 
     assert all(target.kind == "lakehouse" for target in plan.targets)
     executors = {action.executor for _, _, action in plan.actions()}
-    assert executors <= {"python", "spark_sql"}
+    assert executors <= {"spark_sql", "folder", "prune"}
 
 
 def test_build_order_is_folder_then_delta_then_view_on_view(weaver_lakehouse, tmp_path):
@@ -101,29 +101,36 @@ def test_each_object_action_uses_the_right_executor(weaver_lakehouse, tmp_path):
         if action.resource_node_id is not None
     }
 
-    assert executor["folder:Raw.CustomerCsv"] == "python"
-    assert executor["delta:DWG.Customer"] == "python"
+    assert executor["folder:Raw.CustomerCsv"] == "folder"
+    assert executor["delta:DWG.Customer"] == "spark_sql"
     assert executor["delta:DWG.ActiveCustomer"] == "spark_sql"
     assert executor["delta:DWG.ActiveCustomerSummary"] == "spark_sql"
 
 
-def test_declared_schemas_are_created_first(weaver_lakehouse, tmp_path):
+def test_prune_runs_first_then_schemas(weaver_lakehouse, tmp_path):
     bundle, _, _ = _generate(weaver_lakehouse, tmp_path)
     plan = bundle.plan
 
-    first = plan.sequences[0]
-    assert first.number == 10
+    # The target is reconciled before anything is created.
+    assert plan.sequences[0].number == 10
+    assert plan.sequences[0].description == "prune unmanaged objects"
+    assert {a.kind for _, _, a in plan.actions() if a.executor == "prune"} == {
+        "prune_views", "prune_delta", "prune_folders", "prune_schemas"
+    }
+    # Only schemas holding a table or view get a database — Raw is folder-only.
     created = {action.id for _, _, action in plan.actions() if action.kind == "create_schema"}
-    assert created == {"schema-Raw", "schema-DWG"}
+    assert created == {"schema-DWG"}
 
 
-def test_every_action_references_its_own_existing_payload(weaver_lakehouse, tmp_path):
+def test_payload_bearing_actions_reference_an_existing_payload(weaver_lakehouse, tmp_path):
     bundle, store, output = _generate(weaver_lakehouse, tmp_path)
 
     for _, _, action in bundle.plan.actions():
-        assert action.payload is not None
+        if action.payload is None:
+            # Only folder and prune actions are payload-less.
+            assert action.executor in {"folder", "prune"}
+            continue
         assert store.exists(output.join(*action.payload.split("/")))
-        # The payload filename carries the resource it builds.
         if action.resource_node_id is not None:
             assert action.resource_node_id.split(":", 1)[1] in action.payload
 

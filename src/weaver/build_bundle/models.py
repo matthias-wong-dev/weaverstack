@@ -24,6 +24,20 @@ from typing import Any, Mapping
 
 from .targets import BoundTarget
 
+#: Action kinds. Create kinds build structure; prune kinds reconcile the target.
+CREATE_SCHEMA = "create_schema"
+BUILD_FOLDER = "build_folder"
+BUILD_TABLE = "build_table"
+BUILD_VIEW = "build_view"
+
+#: Prune kinds, in the order a prune sequence runs them: drop views before the
+#: tables they read, and schemas last so their contents are already gone.
+PRUNE_VIEWS = "prune_views"
+PRUNE_DELTA = "prune_delta"
+PRUNE_FOLDERS = "prune_folders"
+PRUNE_SCHEMAS = "prune_schemas"
+PRUNE_KINDS = (PRUNE_VIEWS, PRUNE_DELTA, PRUNE_FOLDERS, PRUNE_SCHEMAS)
+
 #: Reasons a repository node is not in the plan. A missing target is visible,
 #: not a mysterious absence.
 OMIT_TARGET_UNBOUND = "target_unbound"
@@ -32,6 +46,42 @@ OMIT_UNSUPPORTED_EXECUTOR = "unsupported_executor"
 OMISSION_REASONS = frozenset(
     {OMIT_TARGET_UNBOUND, OMIT_DEPENDS_ON_OMITTED, OMIT_UNSUPPORTED_EXECUTOR}
 )
+
+
+@dataclass(frozen=True)
+class ManagedInventory:
+    """What a bundle manages in one target — the keep-set a prune reconciles to.
+
+    Derived from a plan's create actions, never from the source repository, so
+    the installer can drop everything in the target that is *not* here without a
+    second look at the repository. Names are two-part ``Schema.Object`` (or bare
+    schema names for ``schemas``/``folder_schemas``), compared case-insensitively.
+    """
+
+    schemas: frozenset[str] = frozenset()
+    folder_schemas: frozenset[str] = frozenset()
+    folders: frozenset[str] = frozenset()
+    tables: frozenset[str] = frozenset()
+    views: frozenset[str] = frozenset()
+
+    @staticmethod
+    def _fold(names) -> frozenset[str]:
+        return frozenset(name.lower() for name in names)
+
+    def has_schema(self, name: str) -> bool:
+        return name.lower() in self._fold(self.schemas)
+
+    def has_folder_schema(self, name: str) -> bool:
+        return name.lower() in self._fold(self.folder_schemas)
+
+    def has_folder(self, qualified: str) -> bool:
+        return qualified.lower() in self._fold(self.folders)
+
+    def has_table(self, qualified: str) -> bool:
+        return qualified.lower() in self._fold(self.tables)
+
+    def has_view(self, qualified: str) -> bool:
+        return qualified.lower() in self._fold(self.views)
 
 
 @dataclass(frozen=True)

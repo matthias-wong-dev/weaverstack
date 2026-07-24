@@ -1076,42 +1076,58 @@ Warehouse leaf installs the Lakehouse chain and records the leaf as
 `target_unbound`. A *supplied* Warehouse binding over T-SQL work raises the
 explicit v1 `NotImplementedError` instead of silently omitting.
 
-**The plan assumed a load runtime that did not exist.** The installer's Python
-executor has to actually run the Folder and Delta objects, but until now nothing
-constructed an object context, bound the dependency resolver, or wrote Delta —
-the populated-lakehouse fixture ran hand-written `build.spark.sql`. So this
-checkpoint built the minimal runtime it needs: `materialise(cls)` reads an
-ambient installation (Spark, resolver, target), constructs the context, binds
-the resolver, runs `read()`, and owns the mutation the object only proposed —
-promoting a Folder's staged directory, or writing a Delta table full-replace.
-The authoring contract holds: `read()` proposes, the runtime mutates. Scope is
-the simple slice — non-incremental, no upsert merge, no audit-column accounting,
-no delete application; those are load policy for when load is built out.
+**Build creates structure; load populates it — and build does neither twice.**
+The first cut of this work mixed the two: a Python object's payload imported the
+object and ran its `read()` to write rows. That was wrong. Build reads the
+repository *once* to freeze a bundle and then only creates structure —
+`create_ddl()` returns pure Spark DDL: a Delta table is `CREATE OR REPLACE TABLE`
+over its **declared** columns, a view is `CREATE OR REPLACE VIEW` over its query
+body, a folder is an empty directory. Nothing runs `read()`, reads a CSV, or
+writes a row; populating a table is *load*, a separate phase, and the whole load
+runtime (`materialise`, context injection, the dependency-resolver binding) was
+removed. Schema is therefore always declared, never inferred from data — which
+is deliberate, because inferring a Delta schema from a CSV or spreadsheet is too
+risky to do silently.
 
-**Local Delta is registered into the catalog.** A decision, endorsed: in Fabric,
-declaring a Lakehouse table makes `Schema.Table` queryable by name immediately,
-and local must mirror that or the whole model diverges. So the Delta
-materialisation registers a path-addressed table (`CREATE TABLE … USING delta
-LOCATION …` under a per-schema database), and a Spark SQL view reads its inputs
-by two-part name. A capability spike (`tests/spark/test_local_persisted_view.py`)
-proved table → view → view-on-view resolves in the shared session first;
-cross-process catalog persistence is deliberately *not* a prerequisite, and
-whether the local host should stand up a durable metastore is left open.
+**Local Delta is registered into the catalog, path-free.** In Fabric, declaring
+a Lakehouse table makes `Schema.Table` queryable by name immediately, and local
+must mirror that or the model diverges. The one physical path a build resolves is
+a schema's storage: the schema-create action is `CREATE DATABASE … LOCATION
+'<Tables>/<schema>'`, so a managed table created under it lands where Weaver
+addresses it while the table DDL stays a path-free `CREATE OR REPLACE TABLE
+Schema.Object (…)`. A Spark SQL view then binds its inputs by two-part name. A
+spike (`tests/spark/test_local_persisted_view.py`) proved table → view →
+view-on-view resolves in the shared session; durable cross-process catalog
+persistence is deliberately not a prerequisite.
+
+**Build is reconciliation: prune first, then create.** A build runs prune
+sequences upfront that remove anything in the target the bundle does not
+manage — an unmanaged schema, folder, table or view is dropped before the
+managed set is created. The keep-set is the bundle's own managed inventory,
+derived from its create actions, so the installer still never reads the source
+repository. Reconciliation is scoped to the one bound Lakehouse and driven by
+that Lakehouse's own storage — a table is a directory under `Tables/`, a folder a
+directory under `Files/` (never the reserved `repos`/`build_bundles` areas) — so
+it is safe even where a Spark session shares one catalog across work. The four
+kinds run in dependency order: views, tables, folders, schemas.
 
 **The installer trusts nothing it has not just checked.** It validates the
 bundle, resolves targets through an injected environment, and runs sequences as
 barriers with one recorded result per action; a failure fails its sequence and
 no later sequence starts, with skipped sequences recorded rather than omitted.
-Concurrency starts serial — one shared local Spark session gives no useful
-parallel DDL — while the manifest still models independent actions, so a Fabric
-installer can add session concurrency later without changing bundle semantics.
+Because build executes only generated DDL and folder/prune actions, the installer
+never puts the snapshot on the import path or imports object code. Concurrency
+starts serial — one shared local Spark session gives no useful parallel DDL —
+while the manifest still models independent actions, so a Fabric installer can
+add session concurrency later without changing bundle semantics.
 
 The proof is `tests/spark/test_build_bundle_install.py`: generate a bundle,
-**delete the source repository**, then install from the certified snapshot alone
-and physically verify a Folder, a populated Delta table, a persistent view, and a
-view-on-view returning the right active-customer count. A rebuilt bundle with an
-invalid summary payload (hash matching) shows the barrier: the earlier sequences
-succeed, the summary fails and is reported, and its view is never created.
+**delete the source repository**, then install from the bundle alone and verify a
+real Folder directory, an *empty* Delta table of the declared shape, a persistent
+view, and a view-on-view — structure, not data. A second test seeds the target
+with unmanaged objects and asserts a build prunes them; a third rebuilds a bundle
+with an invalid view payload (hash matching) and asserts the barrier — earlier
+sequences succeed, the bad view fails and is reported, and it is never created.
 
 ---
 
@@ -1120,10 +1136,10 @@ succeed, the summary fails and is reported, and its view is never created.
 | Question | Raised | Status |
 |---|---|---|
 | Which `weaver` revision is the port baseline — the plan's `a97ba8a` or current `fee2025`? | CP0 | open |
-| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4, delivered in the build runtime: `Folder.folder_path()` resolves to a real local `Path` during `materialise`. |
-| Should the load runtime materialise audit columns, and apply proposed deletes? | build | open — the build runtime writes exactly what `read()` proposes (non-incremental, full replace); audit accounting, upsert merge and delete application are load policy, deferred. |
-| Should the local host stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — v1 registers Delta tables into the session catalog so views bind by name; cross-process persistence is not a prerequisite. |
-| A Spark SQL *table* payload (`CREATE OR REPLACE TABLE … USING delta AS …`) creates a managed table under the database location, not at Weaver's resolved path — unlike the Python Delta path. Reconcile when a Spark SQL table is first exercised. | build | open, untested in v1 (fixture has no Spark SQL table). |
+| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.folder_path()` on the depended-on class; realised as a `Path` at load. Load itself is deferred. |
+| The whole load phase: running `read()`, upsert/incremental merge, audit-column accounting, applying proposed deletes. | build | deferred — build creates structure only; load populates it, and is the next body of work after the Fabric seam. |
+| Should the local host stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — build registers each Delta table into the session catalog (via a schema database with a `Tables/<schema>` LOCATION) so views bind by name; cross-process persistence is not a prerequisite. |
+| Build reconciliation scope: prune drops what a Lakehouse holds that the bundle does not manage, scoped to that Lakehouse's `Tables/`/`Files/` storage. Is per-Lakehouse physical scope the right boundary once Fabric catalogs are per-item? | build | open — chosen so a shared local Spark catalog cannot make a build nuke another Lakehouse's databases. |
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
@@ -1142,6 +1158,7 @@ succeed, the summary fails and is reported, and its view is never created.
 | 4 | `self.repo` removed; dependencies become imports; Spark SQL supported rather than deferred. |
 | 6b | Superseded at 6c: cross-engine two-part resolution is now an explicit `Warehouse alias`/`Lakehouse alias`, not a single-candidate inference; an unresolved two-part name is refused rather than recorded. Three-part reads and the CP6b sales-etl fixture stay valid. |
 | new | Schema SES files under `_schemas` (not in the original plan's checkpoint order) — every object and alias schema must be declared; no on-the-fly schema. |
-| build | The build-bundle checkpoint had to build a minimal load runtime the plan assumed already existed (context injection, dependency-resolver binding, Delta create-and-register, Folder staging promotion). Kept to the simple non-incremental slice; full load policy stays deferred. |
-| build | Local Delta materialisation registers into the Spark catalog (`CREATE TABLE … USING delta LOCATION …` under a per-schema database), so Spark SQL views bind their inputs by two-part name — mirroring Fabric, where a declared table is immediately queryable. |
+| build | Build is strictly structure, never load: `create_ddl()` returns Spark DDL (`CREATE OR REPLACE TABLE` over the declared schema, `CREATE OR REPLACE VIEW`, an empty folder directory) and the repository is read once into a frozen bundle. The plan's Python-payload-runs-`read()` shape is dropped; a load phase comes later. |
+| build | Build registers each Delta table into the Spark catalog by giving its schema database a `Tables/<schema>` LOCATION, so a managed table lands at Weaver's path and a Spark SQL view binds inputs by two-part name — mirroring Fabric, where a declared table is immediately queryable. |
+| build | Build reconciles: prune sequences run upfront and drop any schema/folder/table/view the bundle does not manage, scoped to the bound Lakehouse's own `Tables/`/`Files/` storage. |
 | 3 | Substantially extended: references, `Prohibit rebuild`, `Not null`, `Identity`, `Comparison columns`, `Column notes`, `Notes`, `Revision notes`, audit columns, unknown-key rejection. `Load mode` removed. |

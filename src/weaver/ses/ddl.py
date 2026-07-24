@@ -1,25 +1,28 @@
-"""Generated executable definitions — the *create* form of an SES source.
+"""Generated create DDL — the *build* form of an SES source.
 
-A :class:`~weaver.ses.source.SourceDocument` holds a validated body: a Python
-class whose ``read()`` proposes rows, or a Spark SQL query. Neither is directly
-installable — the author writes the query, and Weaver writes the ``CREATE``.
-:func:`generate_ddl` is where that wrapper is written.
+Build creates structure; it does not load data. So the create definition for a
+source is pure DDL: a Delta table becomes ``CREATE TABLE`` over its **declared**
+schema, a view becomes ``CREATE OR REPLACE VIEW`` over its query body. Nothing
+here runs an object's ``read()`` or reads a row — populating a table is *load*, a
+separate phase, and the repository is read once to freeze a bundle, never again.
 
-The source is the right place for this because it is the only thing that knows
-its own language, object kind, ID and validated body. A build planner should
-call :meth:`SourceDocument.create_ddl` and never re-derive create syntax.
+The source is the right place for this because it alone knows its language,
+object kind, ID and validated body/schema. A build planner calls
+:meth:`SourceDocument.create_ddl` and never re-derives create syntax.
 
-Despite the name, the *content* may be Spark SQL, T-SQL or Python — ``create_ddl``
-means "the generated create/materialisation definition", whatever engine runs it.
 Two invariants hold:
 
-- **deterministic.** The same validated source and bundle format version always
-  produce the same :class:`GeneratedDdl`. No timestamps, no physical paths — a
-  path is bound by the installer, not baked into the payload.
-- **path-free.** Spark SQL addresses objects by their two-part ``Schema.Object``
-  name, which binds through the catalog the installer registers; a Python payload
-  imports the object module and hands the class to the runtime, which supplies the
-  bound target. Neither embeds a Lakehouse, workspace or filesystem path.
+- **deterministic** — the same validated source and format version always produce
+  the same :class:`GeneratedDdl`.
+- **path-free** — a table or view is addressed by its two-part ``Schema.Object``
+  name and binds through the catalog the installer sets up; no Lakehouse,
+  workspace or filesystem path is baked into a payload. The one physical path a
+  build needs — a schema's storage location — is supplied by the planner in the
+  schema-create action, not here.
+
+Schema is always **declared**, never inferred. Inferring a Delta schema from a
+CSV or spreadsheet is too risky to do silently, so a Delta table without a
+declared ``Schema`` is already refused by the reader; there is no inference path.
 """
 
 from __future__ import annotations
@@ -27,31 +30,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .metadata import PYTHON, SPARK_SQL, SQL, TABLE, VIEW
+from .metadata import SPARK_SQL, SQL, TABLE, VIEW
 
 if TYPE_CHECKING:
     from .source import SourceDocument
 
-#: The bundle format version this generator targets. Part of the determinism
-#: contract: a change to the generated shape is a change to this number.
+#: The bundle format version this generator targets. A change to the generated
+#: shape is a change to this number.
 BUILD_FORMAT_VERSION = 1
 
-#: Executor names. These name a runtime dispatch key, not an engine — a Fabric
-#: Spark session and a local Spark session are both ``spark_sql``.
-PYTHON_EXECUTOR = "python"
+#: The one executor a create DDL runs through. It names a runtime dispatch key,
+#: not an engine — a Fabric Spark session and a local one are both ``spark_sql``.
 SPARK_SQL_EXECUTOR = "spark_sql"
-
-PYTHON_EXTENSION = ".py"
 SPARK_SQL_EXTENSION = ".spark.sql"
+
+#: Delta column mapping keeps declared column names with spaces (``Order id``)
+#: legal without quoting them everywhere they later appear.
+_COLUMN_MAPPING = "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
 
 
 @dataclass(frozen=True)
 class GeneratedDdl:
-    """One source's generated, installable create definition.
-
-    ``executor`` selects the runtime that will run ``content``; ``extension`` is
-    the payload file suffix a bundle writes it under, chosen to match.
-    """
+    """One source's generated, installable create definition."""
 
     executor: str
     content: str
@@ -59,82 +59,65 @@ class GeneratedDdl:
 
 
 def generate_ddl(document: "SourceDocument") -> GeneratedDdl:
-    """The installable create definition for one validated source."""
+    """The installable create DDL for one validated source.
+
+    Folders have no create DDL — a Folder is a directory, created by the
+    installer rather than by a statement — so this is never called for one.
+    """
 
     if document.language == SQL:
         raise NotImplementedError(
             "T-SQL executable generation is not supported by build bundle v1"
         )
-    if document.language == SPARK_SQL:
-        return _spark_sql_ddl(document)
-    if document.language == PYTHON:
-        return _python_ddl(document)
+    if document.kind == TABLE:
+        return _table_ddl(document)
+    if document.kind == VIEW:
+        return _view_ddl(document)
     raise NotImplementedError(
-        f"no build bundle v1 generator for language {document.language!r}"
+        f"{document.relative_path}: a {document.kind} has no create DDL"
     )
 
 
-def _spark_sql_ddl(document: "SourceDocument") -> GeneratedDdl:
-    """Wrap a Spark SQL body in its create statement, body otherwise untouched.
+def _table_ddl(document: "SourceDocument") -> GeneratedDdl:
+    """A Delta table from its declared columns — Python and Spark SQL alike.
 
-    A View becomes ``CREATE OR REPLACE VIEW``; a Table materialises Delta and
-    registers under its two-part name so a later Spark reader binds it by name,
-    the way a declared table does in a Fabric Lakehouse. Column mapping is on so
-    the audit columns' spaced logical names survive.
+    Both declare their schema (the reader requires it for a Delta table), so both
+    build the same way: an empty table of the declared shape. A Spark SQL table's
+    query body is a *load* concern and is not consulted here.
     """
+
+    columns = document.document.schema
+    if not columns:  # pragma: no cover - the reader requires a declared schema
+        raise NotImplementedError(
+            f"{document.relative_path}: a Delta table must declare its schema; "
+            "schema inference is not supported"
+        )
+    column_lines = ",\n".join(f"    {_ident(c.name)} {c.type}" for c in columns)
+    # OR REPLACE so a rebuild is idempotent: build owns structure, and a table
+    # carries no build-phase data to protect (populating it is load).
+    content = (
+        f"CREATE OR REPLACE TABLE {document.qualified} (\n"
+        f"{column_lines}\n"
+        ")\n"
+        "USING delta\n"
+        f"{_COLUMN_MAPPING}\n"
+    )
+    return GeneratedDdl(
+        executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
+    )
+
+
+def _view_ddl(document: "SourceDocument") -> GeneratedDdl:
+    """A persistent view over the validated query body, body otherwise untouched."""
 
     body = (document.sql_body or "").rstrip()
-    name = document.qualified
-
-    if document.kind == VIEW:
-        content = f"CREATE OR REPLACE VIEW {name} AS\n{body}\n"
-    elif document.kind == TABLE:
-        content = (
-            f"CREATE OR REPLACE TABLE {name}\n"
-            "USING delta\n"
-            "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')\n"
-            f"AS\n{body}\n"
-        )
-    else:  # pragma: no cover - a Folder is never Spark SQL; read() refuses it.
-        raise NotImplementedError(
-            f"Spark SQL {document.kind} is not a build bundle v1 object"
-        )
-
+    content = f"CREATE OR REPLACE VIEW {document.qualified} AS\n{body}\n"
     return GeneratedDdl(
-        executor=SPARK_SQL_EXECUTOR,
-        content=content,
-        extension=SPARK_SQL_EXTENSION,
+        executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
     )
 
 
-def _python_ddl(document: "SourceDocument") -> GeneratedDdl:
-    """A small wrapper that imports the object and hands it to the runtime.
+def _ident(name: str) -> str:
+    """Back-tick quote a column identifier so spaces and keywords are safe."""
 
-    The wrapper is deterministic in the object's module and class names alone;
-    everything physical — the Spark session, the resolved target, the store — is
-    the installer's ambient context, which ``materialise`` reads. This keeps the
-    payload independent of where the bundle is installed, and lets the object's
-    own support imports resolve against the certified snapshot on the path.
-    """
-
-    module = document.module_name
-    class_name = document.class_name
-    if module is None or class_name is None:  # pragma: no cover - guaranteed by read()
-        raise NotImplementedError(
-            f"{document.relative_path}: a Python object needs a module and class to "
-            "generate a payload"
-        )
-
-    content = (
-        f'"""Weaver build payload — {document.node_id}. Generated; do not edit."""\n'
-        f"from {module} import {class_name}\n"
-        "\n"
-        "from weaver.build_bundle.runtime import materialise\n"
-        "\n"
-        f"materialise({class_name})\n"
-    )
-    return GeneratedDdl(
-        executor=PYTHON_EXECUTOR,
-        content=content,
-        extension=PYTHON_EXTENSION,
-    )
+    return "`" + name.replace("`", "``") + "`"

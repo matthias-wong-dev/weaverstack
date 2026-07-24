@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import hashlib
 
-#: Sequence numbers for the foundational waves. Object layers follow, one
-#: sequence per dependency layer, from OBJECT_SEQUENCE_START in steps.
-SCHEMA_SEQUENCE = 10
-FOLDER_SEQUENCE = 20
-OBJECT_SEQUENCE_START = 30
+#: Sequence numbers for the foundational waves. Prune reconciles the target
+#: first; then schemas, folders, and the object layers, one sequence per
+#: dependency layer from OBJECT_SEQUENCE_START in steps.
+PRUNE_SEQUENCE = 10
+SCHEMA_SEQUENCE = 20
+FOLDER_SEQUENCE = 30
+OBJECT_SEQUENCE_START = 40
 OBJECT_SEQUENCE_STEP = 10
 
 PAYLOAD_ROOT = "payload"
