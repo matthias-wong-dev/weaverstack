@@ -121,6 +121,22 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
+def test_the_not_null_header_marks_inferred_columns_not_null():
+    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string"), ("Note", "string")])
+    _run(
+        spark,
+        _payload(
+            references=[["Primary key", "CustomerId"], ["Not null", "CustomerName"]],
+        ),
+    )
+    statement = _create_statement(spark)
+    # The primary key and the Not null column are not null; Note is nullable.
+    assert "`CustomerId` int NOT NULL" in statement
+    assert "`CustomerName` string NOT NULL" in statement
+    assert "`Note` string,\n" in statement
+    assert "`Note` string NOT NULL" not in statement
+
+
 def test_declared_table_uses_declared_types_and_nullability_not_the_query():
     spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
     _run(

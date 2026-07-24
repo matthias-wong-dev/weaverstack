@@ -15,6 +15,9 @@ $metadata_validation_sql
 ;with primary_key_columns as (
 $primary_key_columns_cte
 ),
+not_null_columns as (
+$not_null_columns_cte
+),
 described as (
     select
         c.column_id as column_ordinal,
@@ -22,8 +25,7 @@ described as (
         t.name as system_type_name,
         c.max_length,
         c.precision,
-        c.scale,
-        c.is_nullable
+        c.scale
     from tempdb.sys.columns as c
     inner join tempdb.sys.types as t on t.user_type_id = c.user_type_id
     where c.[object_id] = object_id($temp_object_literal)
@@ -33,13 +35,15 @@ mapped as (
         d.column_ordinal,
         quotename(d.column_name) as quoted_column_name,
         $type_case as warehouse_type,
+        -- Nullability is a Weaver contract from the SES header (primary key or
+        -- Not null), not the query's own nullability, so both engines agree.
         case
-            when pk.column_name is not null or d.is_nullable = 0 then N' not null'
+            when nn.column_name is not null then N' not null'
             else N' null'
         end as nullability
     from described as d
-    left join primary_key_columns as pk
-        on pk.column_name = d.column_name collate Latin1_General_BIN2
+    left join not_null_columns as nn
+        on nn.column_name = d.column_name collate Latin1_General_BIN2
     cross apply (
         select lower(d.system_type_name) as base_type
     ) as bt

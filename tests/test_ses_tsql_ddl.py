@@ -94,6 +94,31 @@ def test_every_audit_column_is_built_not_null():
         assert "[Row delete datetime] datetime2(6) not null" in content
 
 
+def test_the_not_null_header_drives_inferred_nullability():
+    source = """
+        /*
+        Table ID: Reporting.CustomerReport
+        Description: x
+        Lineage: $Sales.Customer
+        Primary key: CustomerId
+        Not null:
+          - CustomerName
+        */
+        select CustomerId, CustomerName, Note from [Sales_LH].[Sales].[Customer]
+    """
+    content = _ddl("Reporting.CustomerReport.sql", source).content
+    # The primary key and the Not null column are both in the not-null CTE the
+    # nullability CASE reads; Note is not, so it stays nullable.
+    start = content.index("not_null_columns as")
+    cte = content[start : content.index(")", content.index("names(column_name)", start))]
+    assert "N'CustomerId'" in cte
+    assert "N'CustomerName'" in cte
+    assert "N'Note'" not in cte
+    # Nullability comes from the SES header, not the query's own nullability.
+    assert "d.is_nullable" not in content
+    assert "left join not_null_columns as nn" in content
+
+
 def test_a_primary_key_constraint_is_added():
     for source in (INFERRED, DECLARED):
         content = _ddl("Reporting.CustomerReport.sql", source).content

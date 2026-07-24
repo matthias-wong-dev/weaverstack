@@ -88,6 +88,7 @@ def _render_inferred_create(
         temp_object_literal=temp_literal,
         metadata_validation_sql=_render_metadata_validation(document, temp_literal),
         primary_key_columns_cte=_render_primary_key_cte(document.primary_key),
+        not_null_columns_cte=_render_name_only_cte(document.not_null),
         type_case=_render_type_case(mapping),
         target_table=target,
         target_table_literal=_sql_literal(target),
@@ -204,6 +205,27 @@ def _render_primary_key_cte(primary_key: tuple[str, ...]) -> str:
         "    from (values\n"
         f"{values}\n"
         "    ) as pk(column_ordinal, column_name)"
+    )
+
+
+def _render_name_only_cte(names: tuple[str, ...]) -> str:
+    """A single-column ``(column_name)`` CTE, empty when there are no names."""
+
+    if not names:
+        return (
+            "    select convert(nvarchar(128), null) as column_name\n"
+            "    where 1 = 0"
+        )
+    values = _leading_comma_list(
+        [f"({_sql_literal(name)})" for name in names],
+        first_indent="        ",
+        comma_indent="      ",
+    )
+    return (
+        "    select column_name\n"
+        "    from (values\n"
+        f"{values}\n"
+        "    ) as names(column_name)"
     )
 
 
