@@ -390,9 +390,17 @@ def test_a_delta_table_must_declare_schema():
         parse("Table ID: A.B\nDescription: x\nLineage: y")
 
 
-def test_a_warehouse_table_must_not_declare_schema():
-    with pytest.raises(MetadataError, match="takes its shape from its query"):
-        parse(TABLE_YAML, language=SQL)
+def test_a_warehouse_table_may_declare_schema():
+    """T-SQL tables may declare a schema; when they do it is authoritative and
+    validated now, exactly like a Delta table's."""
+    document = parse(TABLE_YAML, language=SQL)
+    assert document.has_declared_schema is True
+    assert document.defers_column_validation is False
+    assert [column.name for column in document.schema] == [
+        "Order id",
+        "Order date",
+        "Amount",
+    ]
 
 
 def test_a_warehouse_table_defers_column_validation():
@@ -511,11 +519,22 @@ def test_a_spark_sql_table_parses():
     assert document.dependencies[0].qualified == "Sales.Order"
 
 
-def test_a_spark_sql_table_must_declare_schema():
-    """It materialises Delta, so its shape is declared like Python's."""
+def test_a_spark_sql_table_may_omit_schema():
+    """Unlike Python, a Spark SQL table has a query, so it may omit Schema and
+    take its shape from the query at build (build-philosophy §7.2)."""
     without = SPARK_YAML.split("Schema:")[0]
-    with pytest.raises(MetadataError, match="must declare Schema"):
-        parse(without, language=SPARK_SQL)
+    document = parse(without, language=SPARK_SQL)
+    assert document.has_declared_schema is False
+    assert document.defers_column_validation is True
+    # Metadata that names columns is still parsed; it is validated at build.
+    assert document.primary_key == ("Customer id",)
+
+
+def test_a_spark_sql_table_may_declare_schema():
+    """When a Spark SQL table declares a schema it is authoritative, like Python's."""
+    document = parse(SPARK_YAML, language=SPARK_SQL)
+    assert document.has_declared_schema is True
+    assert document.defers_column_validation is False
 
 
 def test_a_spark_sql_object_must_declare_dependencies():

@@ -1,0 +1,137 @@
+"""Spark SQL table build — inference and creation in one self-contained action.
+
+A Spark SQL table's shape is only settled by running its query in the session, so
+its payload is not finished SQL. It is a JSON instruction (built by
+:func:`weaver.ses.ddl._spark_table_ddl`) that this executor completes in a single
+pass, the Spark counterpart of the old T-SQL self-contained script
+(build-philosophy §7.3):
+
+1. run the query and read the resulting ``DataFrame`` schema — Spark resolves the
+   column names and types from the logical plan without running a job, so no rows
+   are read;
+2. validate the columns with the same guards a declared schema passes at parse
+   (:func:`weaver.ses.columns.validate_build_columns`), driven entirely by the
+   frozen payload — the SES source is never reopened;
+3. choose the physical business columns — declared types when declared, the
+   query's inferred types otherwise;
+4. append Weaver's audit columns;
+5. create the table with ``CREATE OR REPLACE TABLE``.
+
+Identity is validated (it must name a produced column) but not materialised on
+Delta: an identity/generated column is not portably available on the local Delta
+build, and the feature is provisional. T-SQL materialises it; here it is a no-op
+beyond validation.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from ...errors import InstallError
+from ...ses.columns import validate_build_columns
+from ...ses.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ..models import BuildAction
+from .base import InstallationContext
+
+#: Reserved audit names, in the Delta (underscored) spelling, for collision
+#: detection against an inferred query's own output columns.
+_AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
+
+
+class SparkTableExecutor:
+    name = "spark_table"
+
+    def execute(
+        self,
+        action: BuildAction,
+        payload: bytes | None,
+        context: InstallationContext,
+    ) -> dict[str, Any] | None:
+        if payload is None:
+            raise InstallError(f"spark_table action {action.id!r} has no payload")
+        if context.spark is None:
+            raise InstallError(
+                f"spark_table action {action.id!r} needs a Spark session but none "
+                "was provided"
+            )
+
+        instruction = json.loads(payload.decode("utf-8"))
+        qualified = instruction["object"]
+        query = instruction["source_query"]
+
+        frame = context.spark.sql(query)
+        query_columns = tuple(field.name for field in frame.schema.fields)
+        query_types = {
+            field.name.lower(): field.dataType.simpleString()
+            for field in frame.schema.fields
+        }
+
+        declared = instruction["declared_columns"]
+        declared_names = (
+            tuple(name for name, _type in declared) if declared is not None else None
+        )
+        references = tuple((label, column) for label, column in instruction["references"])
+
+        business_columns = validate_build_columns(
+            qualified,
+            query_columns,
+            declared_columns=declared_names,
+            references=references,
+        )
+
+        physical = self._physical_columns(
+            qualified, business_columns, declared, query_types
+        )
+        physical += [tuple(pair) for pair in instruction["audit_columns"]]
+
+        statement = _create_table_sql(
+            qualified, physical, column_mapping=instruction.get("column_mapping", True)
+        )
+        context.spark.sql(statement)
+        return {
+            "object": qualified,
+            "schema_mode": instruction["schema_mode"],
+            "columns": [name for name, _type in physical],
+        }
+
+    def _physical_columns(
+        self,
+        qualified: str,
+        business_columns: tuple[str, ...],
+        declared: list | None,
+        query_types: dict[str, str],
+    ) -> list[tuple[str, str]]:
+        """The business columns as ``(name, type)`` — declared types or inferred."""
+
+        collisions = [name for name in business_columns if name.lower() in _AUDIT_NAMES]
+        if collisions:
+            raise InstallError(
+                f"{qualified}: the query produces column(s) reserved for Weaver's "
+                "audit columns: " + ", ".join(collisions)
+            )
+
+        if declared is not None:
+            declared_types = {name.lower(): type_ for name, type_ in declared}
+            return [(name, declared_types[name.lower()]) for name in business_columns]
+        return [(name, query_types[name.lower()]) for name in business_columns]
+
+
+def _create_table_sql(
+    qualified: str, columns: list[tuple[str, str]], *, column_mapping: bool
+) -> str:
+    column_lines = ",\n".join(f"    {_ident(name)} {type_}" for name, type_ in columns)
+    mapping = (
+        "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')" if column_mapping else ""
+    )
+    return (
+        f"CREATE OR REPLACE TABLE {qualified} (\n"
+        f"{column_lines}\n"
+        ")\n"
+        "USING delta"
+        f"{mapping}\n"
+    )
+
+
+def _ident(name: str) -> str:
+    return "`" + name.replace("`", "``") + "`"

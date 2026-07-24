@@ -9,12 +9,19 @@ query body — that is load.
 
 from __future__ import annotations
 
+import json
 import textwrap
 
 import pytest
 
 from weaver.ses import read_source_document
-from weaver.ses.ddl import SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION, GeneratedDdl
+from weaver.ses.ddl import (
+    SPARK_SQL_EXECUTOR,
+    SPARK_SQL_EXTENSION,
+    SPARK_TABLE_EXECUTOR,
+    SPARK_TABLE_EXTENSION,
+    GeneratedDdl,
+)
 
 
 def _doc(relative_path: str, text: str):
@@ -111,7 +118,7 @@ select count(*) as CustomerCount from DWG.Customer
 """
 
 
-def test_python_delta_table_is_a_create_table_over_declared_columns():
+def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl()
 
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
@@ -119,18 +126,46 @@ def test_python_delta_table_is_a_create_table_over_declared_columns():
     assert "`CustomerId` integer" in ddl.content
     assert "`CustomerName` string" in ddl.content
     assert "`IsActive` boolean" in ddl.content
+    # Every built table carries the audit columns, in the Delta (underscored)
+    # spelling, as timestamps (build-philosophy §7.1, plan "Audit columns").
+    assert "`Row_insert_datetime` timestamp" in ddl.content
+    assert "`Row_update_datetime` timestamp" in ddl.content
+    assert "`Row_delete_datetime` timestamp" in ddl.content
     assert "USING delta" in ddl.content
     assert "delta.columnMapping.mode" in ddl.content
 
 
-def test_spark_sql_delta_table_builds_from_declared_schema_not_its_query():
+def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
+    """A Spark SQL table's shape is only settled by running its query, so its
+    payload is a deterministic instruction the ``spark_table`` executor completes
+    at install — not finished SQL (build-philosophy §7.3). The query therefore
+    *does* belong in the payload; it is executed at install, not at build."""
+
     ddl = _doc("DWG.CustomerCount.spark.sql", SPARK_TABLE_SOURCE).create_ddl()
 
-    assert ddl.content.startswith("CREATE OR REPLACE TABLE DWG.CustomerCount (\n")
-    assert "`CustomerCount` bigint" in ddl.content
-    # The query body is load, not build — it must not leak into the create DDL.
-    assert "count(*)" not in ddl.content
-    assert "select" not in ddl.content.lower()
+    assert (ddl.executor, ddl.extension) == (
+        SPARK_TABLE_EXECUTOR,
+        SPARK_TABLE_EXTENSION,
+    )
+    payload = json.loads(ddl.content)
+    assert payload["object"] == "DWG.CustomerCount"
+    assert payload["schema_mode"] == "declared"
+    assert payload["declared_columns"] == [["CustomerCount", "bigint"]]
+    assert payload["source_query"] == "select count(*) as CustomerCount from DWG.Customer"
+    # Audit columns are frozen into the instruction so the executor never reopens
+    # the SES source to learn them.
+    assert ["Row_insert_datetime", "timestamp"] in payload["audit_columns"]
+
+
+def test_an_inferred_spark_sql_table_carries_no_declared_columns():
+    source = SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip() + "\n*/\n" + (
+        "select count(*) as CustomerCount from DWG.Customer\n"
+    )
+    ddl = _doc("DWG.CustomerCount.spark.sql", source).create_ddl()
+
+    payload = json.loads(ddl.content)
+    assert payload["schema_mode"] == "inferred"
+    assert payload["declared_columns"] is None
 
 
 # --- folders and T-SQL: no create DDL ---------------------------------------

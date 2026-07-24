@@ -453,12 +453,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     kind, object_id = _parse_id(loaded)
     _reject_unknown_keys(loaded, kind)
 
-    if kind == TABLE and language == SQL and "Schema" in loaded:
-        raise MetadataError(
-            "Schema is not declared for SQL objects — a Warehouse table takes its "
-            "shape from its query and is validated at build. Use Column notes to "
-            "describe its columns."
-        )
+    # A Warehouse (T-SQL) table may declare Schema or omit it: with a declaration
+    # the declared types are authoritative; without one the table takes its shape
+    # from its query, inferred at build (see build-philosophy §7.2).
 
     dependencies = _parse_dependencies(loaded.get("Dependencies"), object_id)
     if language == SPARK_SQL and not dependencies:
@@ -483,10 +480,11 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     is_incremental = _parse_flag_with_default(loaded, "Incremental", default=kind == FOLDER)
 
     declared_columns = _parse_schema(loaded.get("Schema"))
-    if kind == TABLE and language in DELTA_LANGUAGES and not declared_columns:
+    if kind == TABLE and language == PYTHON and not declared_columns:
         raise MetadataError(
-            "a Delta table must declare Schema — it is created before it is loaded, "
-            "and the declared shape is what lets every column guard run up front"
+            "a Python-backed Delta table must declare Schema — it has no query to "
+            "infer a shape from, is created before it is loaded, and the declared "
+            "shape is what lets every column guard run up front"
         )
 
     primary_key = _parse_column_set(loaded.get("Primary key"), "Primary key")

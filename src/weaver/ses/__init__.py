@@ -7,6 +7,11 @@ from .dependencies import (
     extract_python_references,
     extract_sql_references,
 )
+from .columns import (
+    metadata_column_references,
+    resolve_build_columns,
+    validate_build_columns,
+)
 from .graph import Edge, Graph
 from .repository import (
     DependencyEdge,
@@ -117,4 +122,7 @@ __all__ = [
     "parse_document",
     "parse_python_document",
     "parse_sql_document",
+    "metadata_column_references",
+    "resolve_build_columns",
+    "validate_build_columns",
 ]
