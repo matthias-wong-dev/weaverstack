@@ -423,3 +423,259 @@ def populated_lakehouse(request):
     """Select a concrete populated lifecycle by indirect parameter."""
 
     return request.getfixturevalue(request.param)
+
+
+# --- host-neutral build environment -----------------------------------------
+#
+# The same shape as PopulatedLakehouse above: one dataclass hides whether a build
+# is installed in-process against a local Spark session or inside Fabric over
+# Livy, so a single behavioural test runs on both. Generation always runs on the
+# caller (position B) writing the bundle to the Weaver Lakehouse over the store;
+# only installation and catalog queries differ by host.
+
+from pathlib import Path as _Path
+
+BUILD_FIXTURE = _Path(__file__).parent.parent / "fixtures" / "build-lakehouse"
+
+
+@dataclass
+class InstallOutcome:
+    """A host-neutral view of an installation report."""
+
+    status: str
+    bundle_id: str
+    sequence_status: dict[int, str]
+    action_status: dict[str, str]
+    action_order: tuple[str, ...]
+
+
+@dataclass
+class BuildEnv:
+    """Everything a build test needs, with transport hidden behind callables."""
+
+    label: str
+    host: Any
+    weaver: ItemRef
+    target: ItemRef
+    resolver: Any
+    store: Store
+    generate_spark: Any
+    install_repo: Callable[[str], str]
+    remove_repo: Callable[[str], None]
+    generate: Callable[..., Any]
+    install: Callable[[Any], InstallOutcome]
+    query: Callable[[str], list]
+    seed_orphans: Callable[[], None]
+
+
+def _outcome_from_report(report) -> InstallOutcome:
+    return InstallOutcome(
+        status=report.status,
+        bundle_id=report.bundle_id,
+        sequence_status={s.number: s.status for s in report.sequences},
+        action_status={a.action_id: a.status for a in report.action_results()},
+        action_order=tuple(a.action_id for a in report.action_results()),
+    )
+
+
+def _upload_tree(store, source: _Path, destination) -> None:
+    for path in sorted(source.rglob("*")):
+        if path.is_file():
+            store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
+
+
+@pytest.fixture
+def local_build_env(lakehouses, spark):
+    """A build environment installed in-process against local Spark."""
+
+    from weaver import RepositoryRef
+    from weaver.build_bundle import (
+        InstallationEnvironment,
+        LakehouseBinding,
+        TargetBindings,
+        generate_build_bundle,
+        install_bundle,
+        load_bundle,
+    )
+
+    resolver, store = lakehouses.resolver, lakehouses.store
+
+    def install_repo(name: str) -> str:
+        _upload_tree(store, BUILD_FIXTURE, resolver.repository(RepositoryRef(name)))
+        return name
+
+    def remove_repo(name: str) -> None:
+        store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+
+    def generate(bundle_name: str = "buildtest", *, repository_name: str = "MyRepo", prune: bool = True):
+        return generate_build_bundle(
+            weaver_lakehouse=lakehouses.weaver,
+            repository_name=repository_name,
+            targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.target)),
+            output=resolver.build_bundle(bundle_name),
+            host=lakehouses.host,
+            store=store,
+            prune=prune,
+            spark=spark,
+        )
+
+    def install(bundle) -> InstallOutcome:
+        report = install_bundle(
+            load_bundle(bundle.location, store=store),
+            environment=InstallationEnvironment(store=store, resolver=resolver, spark=spark),
+        )
+        return _outcome_from_report(report)
+
+    def query(sql: str) -> list:
+        return [row.asDict() for row in spark.sql(sql).collect()]
+
+    def seed_orphans() -> None:
+        tables_root = resolver.tables_root(lakehouses.target).value
+        files_root = resolver.files_root(lakehouses.target)
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS DWG LOCATION '{tables_root}/DWG'")
+        spark.sql("CREATE TABLE DWG.OldTable (x int) USING delta")
+        spark.sql("CREATE OR REPLACE VIEW DWG.OldView AS SELECT 1 AS x")
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS Legacy LOCATION '{tables_root}/Legacy'")
+        spark.sql("CREATE TABLE Legacy.OldThing (x int) USING delta")
+        store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
+        store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
+
+    try:
+        yield BuildEnv(
+            label="local", host=lakehouses.host, weaver=lakehouses.weaver, target=lakehouses.target,
+            resolver=resolver, store=store, generate_spark=spark,
+            install_repo=install_repo, remove_repo=remove_repo, generate=generate,
+            install=install, query=query, seed_orphans=seed_orphans,
+        )
+    finally:
+        # The Spark catalog is shared across the run; drop what a test created.
+        for database in ("DWG", "Raw", "Legacy"):
+            spark.sql(f"DROP DATABASE IF EXISTS {database} CASCADE")
+
+
+@pytest.fixture
+def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, livy_session):
+    """A build environment installed inside Fabric over Livy.
+
+    Generation runs here on the caller, writing the bundle to OneLake over DFS;
+    installation runs *in* the Fabric session, reading that bundle through the
+    session-native store and executing DDL on the session's Spark. Both Lakehouses
+    are disposable and deleted on teardown, so no catalog cleanup is needed.
+    """
+
+    import json
+
+    from weaver import FabricHost, RepositoryRef
+    from weaver.build_bundle import (
+        LakehouseBinding,
+        TargetBindings,
+        generate_build_bundle,
+    )
+    from weaver.fabric import FabricResolver, OneLakeDfsClient, create_lakehouse, delete_item
+
+    created = []
+    try:
+        weaver_lh = create_lakehouse(fabric_workspace, _disposable_name("weaver"), client=fabric_client)
+        created.append(weaver_lh)
+        target_lh = create_lakehouse(fabric_workspace, _disposable_name("target"), client=fabric_client)
+        created.append(target_lh)
+
+        host = FabricHost(
+            workspace=fabric_workspace.name,
+            weaver_lakehouse=weaver_lh.name,
+            fabric_environment=fabric_environment_name,
+        )
+        resolver = FabricResolver(host, client=fabric_client)
+        store = OneLakeDfsClient()
+        weaver = ItemRef(weaver_lh.name)
+        target = ItemRef(target_lh.name)
+
+        def install_repo(name: str) -> str:
+            _upload_tree(store, BUILD_FIXTURE, resolver.repository(RepositoryRef(name)))
+            return name
+
+        def remove_repo(name: str) -> None:
+            store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+
+        def generate(bundle_name: str = "buildtest", *, repository_name: str = "MyRepo", prune: bool = True):
+            return generate_build_bundle(
+                weaver_lakehouse=weaver,
+                repository_name=repository_name,
+                targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=target)),
+                output=resolver.build_bundle(bundle_name),
+                host=host,
+                store=store,
+                prune=prune,
+                spark=None,  # no catalog on the caller; storage-scoped prune
+            )
+
+        def _host_literal() -> str:
+            return (
+                f"FabricHost(workspace={host.workspace!r}, "
+                f"weaver_lakehouse={host.weaver_lakehouse!r}, "
+                f"fabric_environment={host.fabric_environment!r})"
+            )
+
+        def install(bundle) -> InstallOutcome:
+            body = (
+                "from weaver import FabricHost, Location\n"
+                "from weaver.resolution import resolver_for, store_for\n"
+                "from weaver.build_bundle import install_bundle, load_bundle, "
+                "InstallationEnvironment\n"
+                f"host = {_host_literal()}\n"
+                "store = store_for(host)\n"
+                "resolver = resolver_for(host)\n"
+                "env = InstallationEnvironment(store=store, resolver=resolver, spark=spark)\n"
+                f"bundle = load_bundle(Location({bundle.location.value!r}), store=store)\n"
+                "report = install_bundle(bundle, environment=env)\n"
+                "emit({'status': report.status, 'bundle_id': report.bundle_id, "
+                "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
+                "'actions': [{'id': a.action_id, 'status': a.status} for a in report.action_results()]})\n"
+            )
+            payload = livy_session.run(body).payload
+            return InstallOutcome(
+                status=payload["status"],
+                bundle_id=payload["bundle_id"],
+                sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
+                action_status={a["id"]: a["status"] for a in payload["actions"]},
+                action_order=tuple(a["id"] for a in payload["actions"]),
+            )
+
+        def query(sql: str) -> list:
+            body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
+            return livy_session.run(body).payload
+
+        def seed_orphans() -> None:
+            tables_root = resolver.tables_root(target).value
+            body = (
+                f"spark.sql(\"CREATE DATABASE IF NOT EXISTS DWG LOCATION '{tables_root}/DWG'\")\n"
+                "spark.sql('CREATE TABLE DWG.OldTable (x int) USING delta')\n"
+                "spark.sql('CREATE OR REPLACE VIEW DWG.OldView AS SELECT 1 AS x')\n"
+                f"spark.sql(\"CREATE DATABASE IF NOT EXISTS Legacy LOCATION '{tables_root}/Legacy'\")\n"
+                "spark.sql('CREATE TABLE Legacy.OldThing (x int) USING delta')\n"
+                "emit(True)\n"
+            )
+            livy_session.run(body)
+            files_root = resolver.files_root(target)
+            store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
+            store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
+
+        yield BuildEnv(
+            label="fabric", host=host, weaver=weaver, target=target,
+            resolver=resolver, store=store, generate_spark=None,
+            install_repo=install_repo, remove_repo=remove_repo, generate=generate,
+            install=install, query=query, seed_orphans=seed_orphans,
+        )
+    finally:
+        for item in created:
+            try:
+                delete_item(item, client=fabric_client)
+            except Exception as exc:
+                print(f"warning: could not delete {item}: {exc}")
+
+
+@pytest.fixture
+def build_env(request):
+    """Select a concrete build environment by indirect parameter."""
+
+    return request.getfixturevalue(request.param)

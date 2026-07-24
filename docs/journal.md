@@ -1129,14 +1129,32 @@ starts serial — one shared local Spark session gives no useful parallel DDL �
 while the manifest still models independent actions, so a Fabric installer can
 add session concurrency later without changing bundle semantics.
 
-The proof is `tests/spark/test_build_bundle_install.py`: generate a bundle,
-**delete the source repository**, then install from the bundle alone and verify a
-real Folder directory, an *empty* Delta table of the declared shape, a persistent
-view, and a view-on-view — structure, not data. A second test seeds the target
-with unmanaged objects, asserts the build froze a drop for each, and asserts they
-are gone after install while the managed set is present; a third rebuilds a
-bundle with an invalid view payload (hash matching) and asserts the barrier —
-earlier sequences succeed, the bad view fails and is reported, never created.
+The proof is `tests/fabric/test_build_bundle.py`, written host-neutrally and run
+on both hosts. It generates a bundle, **deletes the source repository**, then
+installs from the bundle alone and verifies a real Folder directory, an *empty*
+Delta table of the declared shape, a persistent view, and a view-on-view —
+structure, not data. A second test seeds the target with unmanaged objects,
+asserts the build froze a drop for each, and asserts they are gone after install
+while the managed set is present; a third rebuilds a bundle with an invalid view
+payload (hash matching) and asserts the barrier; a fourth checks the report is
+written into the bundle.
+
+**Host and executor stay independent, and the Fabric path reuses the wipe
+harness.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides transport behind
+callables the way `PopulatedLakehouse` does for wipe: *generation* always runs on
+the caller (position B) — read the repo, freeze the prune, write the bundle to
+the Weaver Lakehouse over the store — while *installation* runs where the host
+lives. Locally that is in-process against the shared Spark session; on Fabric it
+is a Livy program that constructs the session-native store, resolver and Spark and
+calls `install_bundle`, so the installer executes *inside* Fabric (position C).
+Nothing in the manifest or the installer changed to make this work — the bundle
+is `abfss`-addressed and both `FabricStore` and the DFS client speak it, so a
+bundle written from the desktop is read in-session unchanged. The local
+parametrisation runs green; the Fabric parametrisation is wired to the proven
+pattern and skips until `WEAVER_FABRIC_WORKSPACE` and an installed Environment are
+present. One known gap: generation on the desktop has no Spark catalog, so a
+desktop-built Fabric bundle prunes tables, folders and schemas from storage but
+not catalog views — full view pruning wants an in-session generate, deferred.
 
 ---
 
