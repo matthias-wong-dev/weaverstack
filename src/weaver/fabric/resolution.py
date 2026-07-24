@@ -15,7 +15,7 @@ costs an API call.
 from __future__ import annotations
 
 from ..errors import CommandError
-from ..hosts import REPOS_AREA, FabricHost
+from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, FabricHost
 from ..locations import Location
 from ..resolution import TABLES_AREA
 from ..targets import (
@@ -174,6 +174,15 @@ class FabricResolver:
 
     def repository(self, repository: RepositoryRef) -> Location:
         return self.repos_root / repository.name
+
+    @property
+    def build_bundles_root(self) -> Location:
+        return self.files_root(self._weaver_lakehouse()) / BUILD_BUNDLES_AREA
+
+    def build_bundle(self, name: str) -> Location:
+        from ..targets import validate_name
+
+        return self.build_bundles_root / validate_name(name, what="bundle name")
 
     @property
     def control_tables_root(self) -> Location:

@@ -27,7 +27,7 @@ explicit" enforceable rather than aspirational.
 from __future__ import annotations
 
 from .errors import CommandError
-from .hosts import REPOS_AREA, LocalHost
+from .hosts import BUILD_BUNDLES_AREA, REPOS_AREA, LocalHost
 from .locations import Location
 from .targets import (
     FILES_AREA,
@@ -140,6 +140,23 @@ class LocalResolver:
 
     def repository(self, repository: RepositoryRef) -> Location:
         return self.repos_root / repository.name
+
+    @property
+    def build_bundles_root(self) -> Location:
+        """``<weaver-lakehouse>/Files/build_bundles`` — where persisted bundles live.
+
+        A generated bundle normally lands in a throwaway directory that is passed
+        straight to the installer. When one is kept — for a test, or to inspect —
+        it belongs here, under a per-build subdirectory, so bundles sit beside the
+        repositories they were built from rather than scattered across temp dirs.
+        """
+
+        return self.files_root(ItemRef(self._weaver_lakehouse_name())) / BUILD_BUNDLES_AREA
+
+    def build_bundle(self, name: str) -> Location:
+        """One persisted bundle's directory — typically named for a timestamp."""
+
+        return self.build_bundles_root / validate_name(name, what="bundle name")
 
     @property
     def control_tables_root(self) -> Location:

@@ -38,3 +38,11 @@ class DiscoveryError(WeaverError):
 
 class GraphError(WeaverError):
     """Raised for cycles or an unorderable dependency graph."""
+
+
+class BuildError(WeaverError):
+    """Raised when a build bundle cannot be planned, written or validated."""
+
+
+class InstallError(WeaverError):
+    """Raised when a build bundle cannot be installed."""
