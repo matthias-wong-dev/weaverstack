@@ -951,6 +951,78 @@ CLI completed the core Warehouse wipe, and a separate desktop catalogue query
 confirmed it remained empty afterwards. The test changed no pre-existing user
 objects.
 
+### Declared schemas, explicit aliases, and a closed repository
+
+CP6b left cross-engine access resting on two conveniences: a two-part name that
+found a single candidate anywhere resolved to it even across a boundary, and a
+three-part physical read was the sanctioned way to reach the other engine. Both
+worked, but both inferred meaning the repository never stated. This checkpoint
+replaces the inference with declaration, so the repository closes: every
+ordinary two-part reference resolves *within* it, or it is an error.
+
+**Schemas are declared, one file per schema, under `_schemas`.** `_schemas/DWG.yml`
+declares `Schema ID: DWG`; the filename must match the ID exactly, case included.
+Every schema an object ID or an alias implies must be declared — nothing is
+conjured because a two-part name happens to use it. Unused declarations are
+fine; an undeclared one is refused with the file it should live in. Schema files
+are a distinct repository resource, read separately from object files and kept
+out of the support-file set, but covered by the repository signature like
+anything else that travels with it.
+
+**Cross-engine access is an explicit alias, not an inference.** A Lakehouse
+object (a Delta table or Spark view) may publish a `Warehouse alias`; a Warehouse
+object (a SQL table or view) may publish a `Lakehouse alias`. Folders publish
+nothing — they are Files, not a table namespace — but still need a declared
+schema. The alias is a deliberate export: Weaver does not surface every object
+into both engines. It may rename — `Staging.Customer` can surface as
+`Sales.Customer` — so it is parsed through the same two-part model as an ID.
+Each published name must be unique in its destination and must not collide with a
+native object already living there, so every name in a namespace has exactly one
+owner before resolution begins. A Lakehouse-native object and its *own*
+same-named Warehouse alias are fine, because they live in different namespaces.
+
+**Resolution is namespace-strict and closes through aliases.** A Warehouse query
+naming `Sales.Customer` resolves against Warehouse natives, then Warehouse
+aliases — never against a Delta table by proximity. When it lands on an alias,
+the dependency edge points at the *native* object that declared it, and records
+how it resolved (`native`, `lakehouse_alias`, `warehouse_alias`). That provenance
+is what a later planner needs to know where an alias must be materialised. A
+Python import still resolves to the exact module it names, so a Folder and a
+Delta table of one ID stay distinguishable. The old loose-candidate rule is
+gone.
+
+**A name may still be a Folder, a Delta table and a Warehouse table at once.**
+Native identity is partitioned by target, not merged into two namespaces, so
+Fabric's freedom to reuse a name across a Lakehouse Files path, a Lakehouse
+table and a Warehouse table is preserved — the `cross-engine` fixture carries
+`Sales.Ledger` as all three. What is forbidden is *ambiguity*: an alias may not
+land on a name a native object already owns in that namespace.
+
+**Two-part names are managed; three-part names are not.** An unresolved two-part
+reference is now a repository error — a missing object, a missing alias, a typo,
+or a cross-engine read that was never published. A three-part (or four-part)
+name is left exactly as before: it addresses something physical and often
+outside the repository — genuine source data — so it is recorded as external,
+never refused. Table-valued functions read like two-part relations
+(`cross apply Sales.Split(…)`), so the extractor now tags a name abutting a `(`
+as a call and exempts it, the way CTEs and temp tables were already exempt. This
+is the one parser change the strict rule required.
+
+The `cross-engine` fixture demonstrates the whole contract with no hard-coded
+target: `Raw.Customer` (Folder) → `Sales.Customer` (Delta, publishes a Warehouse
+alias) → `Reporting.CustomerSummary` (Warehouse, publishes a Lakehouse alias) →
+`Sales.CustomerFeature` (Delta), a loop that crosses Lakehouse → Warehouse →
+Lakehouse and back. Cross-engine cycles through aliases are refused like any
+other. `schemas_by_namespace` derives which schemas each engine will eventually
+need to materialise, though creation is deferred.
+
+`build_internal_graph(..., external_names=…)` survives for the lower-level graph
+tests, but the repository reader no longer uses it: the alias-closed graph is
+built and stored during the read, and `.graph`/`.unresolved` expose it. The
+`_shortcuts` idea from CP6b is now only about reaching *another repository's*
+objects; within a repository, an alias is the answer, and the sales-etl fixture
+keeps its three-part reads to prove those are still first-class.
+
 ---
 
 ## Open questions
@@ -962,7 +1034,7 @@ objects.
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
-| Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | due at build |
+| Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | narrowed at CP6c: within a repository, cross-engine access is now an explicit alias; `_shortcuts` is only for *another repository's* objects. Still due at build. |
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
@@ -975,4 +1047,6 @@ objects.
 | 2 | Widened to include the location type and the file-transport protocol. |
 | 5 | Reader goes through `Store` rather than `Path`; result-set guard added (not in the plan). |
 | 4 | `self.repo` removed; dependencies become imports; Spark SQL supported rather than deferred. |
+| 6b | Superseded at 6c: cross-engine two-part resolution is now an explicit `Warehouse alias`/`Lakehouse alias`, not a single-candidate inference; an unresolved two-part name is refused rather than recorded. Three-part reads and the CP6b sales-etl fixture stay valid. |
+| new | Schema SES files under `_schemas` (not in the original plan's checkpoint order) — every object and alias schema must be declared; no on-the-fly schema. |
 | 3 | Substantially extended: references, `Prohibit rebuild`, `Not null`, `Identity`, `Comparison columns`, `Column notes`, `Notes`, `Revision notes`, audit columns, unknown-key rejection. `Load mode` removed. |
