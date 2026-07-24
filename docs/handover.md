@@ -34,7 +34,8 @@ authentication.
 
 ```text
 weaver capacity resume …                 turn Fabric on
-weaver wipe --target X --host MyFabric   clear a Lakehouse, remotely
+weaver wipe --lakehouse-target X --host MyFabric   clear a Lakehouse remotely
+weaver wipe --warehouse-target X --host MyFabric   clear a Warehouse remotely
 weaver capacity suspend …                turn it off
 ```
 

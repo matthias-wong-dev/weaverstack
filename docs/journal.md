@@ -557,16 +557,14 @@ without removing, and a guard refuses any location outside the host root. That
 guard should be unreachable, since locations are derived rather than supplied,
 which is exactly why it is worth having.
 
-**On the command line the target is a positional, so it carries no kind.**
-Rather than three kind-flags, the *shape* decides: `Sales_LH` names an item and
-clears all of it, `Sales_LH/Files/Extracts` names a folder root and clears only
-that. What an item *is* comes from the host — locally every item is
-Lakehouse-shaped, on Fabric it must be asked for, which is why a Fabric wipe
-raises until item resolution exists.
+**The initial command-line design used one generic target with no kind.**
+Its *shape* decided: `Sales_LH` named an item and
+`Sales_LH/Files/Extracts` named a folder root. That was later replaced by typed
+target flags when Fabric's per-type name identity became concrete.
 
 ```bash
-weaver wipe Sales_LH --host MyLocal --config env.yml --dry-run
-weaver wipe MyWarehouse --host MyFabric --config env.yml
+weaver wipe --lakehouse-target Sales_LH --host MyLocal --hosts env.yml --dry-run
+weaver wipe --warehouse-target MyWarehouse --host MyFabric --hosts env.yml
 ```
 
 The plan is always printed first, then acted on. Without `--yes` it asks; with
@@ -575,7 +573,7 @@ something by omission. `--root` builds a local host without a config file, since
 nothing should require a file to be expressible.
 
 `_add_host_args` and `_resolve_host` are shared, so `build` and `load` inherit
-the same `--host`/`--config`/`--root` handling.
+the same `--host`/`--hosts`/`--root` handling.
 
 ### Where code runs
 
@@ -799,9 +797,9 @@ a workspace" was too strong and the code already knew it — a Lakehouse grows a
 same-named SQL endpoint. Resolution is now typed: the slot supplies the type,
 and core never asks the workspace what a bare name "is". `wipe_item` — which did
 untyped discovery and chose destructive behaviour from the answer — is replaced
-by `wipe_lakehouse`, resolved explicitly as a Lakehouse. The CLI still accepts a
-bare name as a Lakehouse convenience, but constructs the typed selection before
-calling core. `artifact_segment` is renamed `lakehouse_artifact_segment`,
+by `wipe_lakehouse`, resolved explicitly as a Lakehouse. The CLI constructs the
+typed selection before calling core. `artifact_segment` is renamed
+`lakehouse_artifact_segment`,
 because its `.Lakehouse` suffix was always Lakehouse-specific.
 
 **The Fabric wipe test is gone; the local vertical is stronger.** The deleted
@@ -925,6 +923,33 @@ Weaver, and 0.29 seconds to delete. Six fixture objects were independently
 observed before wipe and none afterwards. Its total fixture lifetime was 21.80
 seconds; the whole pytest, including Livy startup, took 68.93 seconds. That
 measurement does not justify a permanent shared Warehouse fixture.
+
+### The wipe CLI exposes typed target slots
+
+The CLI no longer infers a destructive operation from a generic `--target`.
+`--lakehouse-target`, `--warehouse-target`, and `--folder-target` are repeatable
+and may be mixed. This is necessary rather than cosmetic: a Fabric workspace
+can contain a same-named Lakehouse and Warehouse, and level-three identity is
+workspace + type + name.
+
+The handler remains an adapter over core. It constructs `ItemRef`,
+`WarehouseTarget`, or `FolderTarget`, obtains desktop DFS only for Lakehouse and
+folder selections, obtains desktop SQL only for Warehouse selections, and calls
+the existing core wipe functions. A Warehouse-only CLI call never asks for a
+`Store`. Underscore aliases are accepted for shell callers while help presents
+the canonical hyphenated flags.
+
+The desktop path was then exercised through the real command:
+
+```bash
+weaver wipe --warehouse_target "Play Warehouse" \
+  --host Weaver --hosts env.yml --yes
+```
+
+`Play Warehouse` was independently inspected as empty before the command, the
+CLI completed the core Warehouse wipe, and a separate desktop catalogue query
+confirmed it remained empty afterwards. The test changed no pre-existing user
+objects.
 
 ---
 
