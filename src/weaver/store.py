@@ -59,10 +59,11 @@ class Entry:
 class Store(Protocol):
     """File transport within one host.
 
-    A store reads and writes beneath a single host — a local root, or one Fabric
-    workspace over OneLake DFS. It never reaches across hosts; moving files from
-    a laptop into Fabric is cross-host orchestration and belongs to the CLI, not
-    to this protocol.
+    A within-host store operates beneath a local root or through Fabric's
+    session-native utilities. A cross-boundary caller may also implement this
+    protocol (the desktop's OneLake DFS client) and inject it explicitly, but
+    moving files from a laptop into Fabric remains CLI orchestration rather than
+    a host default.
     """
 
     def exists(self, location: Location) -> bool: ...

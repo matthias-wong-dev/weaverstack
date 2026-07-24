@@ -92,7 +92,7 @@ So the storage picture has two parts, and they must not be conflated:
 | execution | host | store |
 |---|---|---|
 | local process | `LocalHost` | `LocalStore` |
-| Fabric session | `FabricHost` | future session-native store |
+| Fabric session | `FabricHost` | `FabricStore` over `notebookutils.fs` |
 
 *Cross-boundary access* — a local caller reaching into a workspace:
 
@@ -103,9 +103,9 @@ So the storage picture has two parts, and they must not be conflated:
 
 `OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is **not** the Fabric equivalent of
 `LocalStore`. It is how the desktop crosses in, constructed explicitly by the
-caller that crosses. `store_for(host)` returns a within-host store for a
-`LocalHost` and *raises* for a `FabricHost`, precisely so desktop DFS is never
-encoded as the default Fabric storage path.
+caller that crosses. Inside Fabric, `store_for(FabricHost)` returns the
+session-native `FabricStore`; from a desktop that construction fails rather
+than silently substituting DFS.
 
 Above resolution and the store, nothing knows which host it is talking to. An
 `if isinstance(host, …)` in core operation code means the abstraction is being

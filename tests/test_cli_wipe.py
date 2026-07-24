@@ -147,7 +147,7 @@ def test_local_host_has_a_within_host_store(tmp_path):
     assert isinstance(store_for(local), LocalStore)
 
 
-def test_a_fabric_host_has_no_default_store():
+def test_a_fabric_store_is_only_available_inside_fabric():
     """Desktop DFS is not the default Fabric storage path — it is injected."""
     from weaver import FabricHost
     from weaver.errors import CommandError

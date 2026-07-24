@@ -10,3 +10,7 @@ insert overwrite delta.`{tables}/Sales/Order` values
 insert overwrite delta.`{tables}/Sales/Customer` values
     ('C1', 'Ackland'),
     ('C2', 'Beattie');
+
+insert overwrite delta.`{tables}/Reporting/OrderSummary` values
+    ('C1', 2, 30.00),
+    ('C2', 1, 30.00);

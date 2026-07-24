@@ -18,14 +18,6 @@ def test_the_fixture_really_has_delta_tables(spark, populated_lakehouse):
     assert spark.read.format("delta").load(location.value).count() == 3
 
 
-def test_a_wipe_removes_every_table(populated_lakehouse):
-    report = wipe_delta_target(delta_target(), populated_lakehouse.host)
-    assert set(report.removed) == {"Sales", "Reporting"}
-    tables = populated_lakehouse.resolver.tables_root(populated_lakehouse.target)
-    assert tables.path.is_dir()
-    assert list(tables.path.iterdir()) == []
-
-
 def test_the_transaction_log_goes_with_the_table(populated_lakehouse):
     location = populated_lakehouse.resolver.delta_table(delta_target(), "Sales", "Order")
     assert (location / "_delta_log").path.is_dir()

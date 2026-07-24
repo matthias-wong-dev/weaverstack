@@ -165,16 +165,29 @@ class LocalResolver:
 
 
 def resolver_for(host):
-    """The resolver for a host: local paths, or OneLake locations.
+    """The resolver for a host in the current executor.
 
-    Fabric is imported lazily, so the core stays importable without the
-    optional extra installed.
+    A Fabric session resolves within its current workspace through
+    NotebookUtils. A desktop process uses the REST-backed Fabric resolver; that
+    cross-boundary caller supplies its DFS store explicitly.
     """
 
-    from .hosts import LocalHost
+    from .hosts import FabricHost, LocalHost
 
     if isinstance(host, LocalHost):
         return LocalResolver(host)
+
+    if isinstance(host, FabricHost):
+        try:
+            from notebookutils import lakehouse, runtime
+        except ImportError:
+            pass
+        else:
+            from .fabric.session import FabricSessionResolver
+
+            return FabricSessionResolver(
+                host, lakehouse=lakehouse, runtime=runtime
+            )
 
     from .fabric.resolution import FabricResolver
 
@@ -184,23 +197,22 @@ def resolver_for(host):
 def store_for(host):
     """The **within-host** default store for a host.
 
-    Only a :class:`~weaver.hosts.LocalHost` has an in-process store. A
-    ``FabricHost`` has no default: reaching a workspace from the desktop is
-    cross-boundary access, and the caller that crosses (the CLI, a test)
-    constructs an ``OneLakeDfsClient`` and injects it; the in-Fabric,
-    session-native store does not exist yet. Either way the store is supplied
-    explicitly rather than guessed here, so desktop DFS is never encoded as the
-    default Fabric storage path.
+    Local execution uses the filesystem. Fabric execution uses NotebookUtils,
+    which is available only inside a Fabric session. A desktop caller crossing
+    into Fabric still constructs ``OneLakeDfsClient`` and injects it explicitly,
+    so DFS is never mistaken for the within-host default.
     """
 
-    from .hosts import LocalHost
+    from .hosts import FabricHost, LocalHost
     from .store import LocalStore
 
     if isinstance(host, LocalHost):
         return LocalStore()
+    if isinstance(host, FabricHost):
+        from .fabric.store import FabricStore
+
+        return FabricStore()
 
     raise CommandError(
-        f"{type(host).__name__} has no within-host store — cross-boundary access "
-        "from the desktop uses OneLakeDfsClient, constructed by the CLI or a test "
-        "and passed in explicitly"
+        f"{type(host).__name__} has no within-host store"
     )

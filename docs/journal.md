@@ -865,6 +865,25 @@ Environment's published libraries maps only status 404 to the valid
 "never published" empty state; authentication, throttling and server failures
 propagate instead of triggering a restage and republish.
 
+### Wipe proves the within-host Fabric path
+
+The local populated-Lakehouse wipe test now has a Fabric parameter with the
+same body and the same saved Spark SQL DDL/DML. Its Fabric fixture creates one
+disposable target, populates it through an Environment-backed Livy session,
+runs the actual `wipe_delta_target` inside that session, and deletes the target
+in `finally`. Desktop OneLake access is used only to set up shared file content
+and independently inspect the result.
+
+That test made the deferred within-host storage path due. `FabricStore` now has
+its original, correct meaning: session-native directory operations backed by
+`notebookutils.fs`. `FabricSessionResolver` obtains the current workspace from
+NotebookUtils and resolves Lakehouse names there, producing native `abfss`
+locations. `resolver_for(FabricHost)` selects it only when NotebookUtils is
+present; desktop callers retain the REST resolver and explicitly inject
+`OneLakeDfsClient`. Binary session reads and writes remain unimplemented until
+a proven binary NotebookUtils contract is needed; wipe uses only exists, list
+and recursive delete.
+
 ---
 
 ## Open questions

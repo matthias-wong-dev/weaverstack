@@ -26,3 +26,14 @@ tblproperties (
     'delta.minReaderVersion'   = '2',
     'delta.minWriterVersion'   = '5'
 );
+
+create table if not exists delta.`{tables}/Reporting/OrderSummary` (
+    `Customer id`   string,
+    `Order count`   int,
+    `Total amount`  decimal(18,2)
+) using delta
+tblproperties (
+    'delta.columnMapping.mode' = 'name',
+    'delta.minReaderVersion'   = '2',
+    'delta.minWriterVersion'   = '5'
+);

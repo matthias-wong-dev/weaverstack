@@ -73,7 +73,7 @@ def test_wipe_removes_the_real_tables(spark, lakehouses):
     run_script(spark, "load.spark.sql", tables_root(lakehouses))
 
     report = wipe_delta_target(DeltaTarget.parse("Sales_LH"), lakehouses.host)
-    assert set(report.removed) == {"Sales"}
+    assert set(report.removed) == {"Sales", "Reporting"}
 
     tables = lakehouses.resolver.tables_root(ItemRef("Sales_LH"))
     assert tables.path.is_dir()

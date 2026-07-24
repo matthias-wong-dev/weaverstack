@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import pytest
+
+from weaver import Host, ItemRef, Store
 
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
 #: The Environment the session attaches to — installed once with `weaver install`
@@ -61,6 +66,17 @@ def _disposable_name(role: str) -> str:
     """A name no human would have chosen, so cleanup is unambiguous."""
 
     return f"{TEST_PREFIX}_{role}_{uuid.uuid4().hex[:8]}"
+
+
+@dataclass(frozen=True)
+class PopulatedLakehouse:
+    """One populated target, with transport hidden from the shared test."""
+
+    host: Host
+    target: ItemRef
+    resolver: Any
+    store: Store
+    wipe: Callable[[], tuple[str, ...]]
 
 
 @pytest.fixture
@@ -167,3 +183,103 @@ def livy_session(fabric_host):
         yield session
     finally:
         session.close()
+
+
+# --- one populated lifecycle, on either host --------------------------------
+
+
+@pytest.fixture
+def populated_local_lakehouse(populated_local_lakehouses):
+    """Adapt the preserved local lifecycle to the shared fixture result."""
+
+    from weaver import DeltaTarget, wipe_delta_target
+
+    def wipe() -> tuple[str, ...]:
+        report = wipe_delta_target(
+            DeltaTarget(lakehouse=populated_local_lakehouses.target),
+            populated_local_lakehouses.host,
+        )
+        return report.removed
+
+    return PopulatedLakehouse(
+        host=populated_local_lakehouses.host,
+        target=populated_local_lakehouses.target,
+        resolver=populated_local_lakehouses.resolver,
+        store=populated_local_lakehouses.store,
+        wipe=wipe,
+    )
+
+
+@pytest.fixture
+def populated_fabric_lakehouse(
+    fabric_workspace,
+    fabric_client,
+    fabric_host,
+    livy_session,
+    lakehouse_sql_statements,
+    populate_folder_files,
+):
+    """A disposable Fabric target populated through Environment-backed Livy."""
+
+    from weaver.fabric import (
+        FabricResolver,
+        OneLakeDfsClient,
+        create_lakehouse,
+        delete_item,
+    )
+
+    item = None
+    try:
+        item = create_lakehouse(
+            fabric_workspace,
+            _disposable_name("target"),
+            client=fabric_client,
+        )
+        target = ItemRef(item.name)
+        resolver = FabricResolver(fabric_host, client=fabric_client)
+        store = OneLakeDfsClient()
+
+        populate_folder_files(store, resolver, target)
+        tables_root = f"{resolver.spark_root(target)}/Tables"
+        statements = [
+            statement
+            for script in ("build.spark.sql", "load.spark.sql")
+            for statement in lakehouse_sql_statements(script, tables_root)
+        ]
+        body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
+        result = livy_session.run(f"{body}\nemit(True)\n")
+        assert result.payload is True
+
+        def wipe() -> tuple[str, ...]:
+            body = (
+                "from weaver import FabricHost, DeltaTarget, wipe_delta_target\n"
+                f"host = FabricHost(workspace={fabric_host.workspace!r}, "
+                f"weaver_lakehouse={fabric_host.weaver_lakehouse!r}, "
+                f"fabric_environment={fabric_host.fabric_environment!r})\n"
+                f"target = DeltaTarget.parse({target.name!r})\n"
+                "report = wipe_delta_target(target, host)\n"
+                "emit({'removed': list(report.removed)})\n"
+            )
+            result = livy_session.run(body)
+            return tuple(result.payload["removed"])
+
+        yield PopulatedLakehouse(
+            host=fabric_host,
+            target=target,
+            resolver=resolver,
+            store=store,
+            wipe=wipe,
+        )
+    finally:
+        if item is not None:
+            try:
+                delete_item(item, client=fabric_client)
+            except Exception as exc:
+                print(f"warning: could not delete {item}: {exc}")
+
+
+@pytest.fixture
+def populated_lakehouse(request):
+    """Select a concrete populated lifecycle by indirect parameter."""
+
+    return request.getfixturevalue(request.param)

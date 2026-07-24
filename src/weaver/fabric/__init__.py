@@ -17,6 +17,8 @@ from .environment import (
     missing_from_environment,
 )
 from .resolution import FabricResolver
+from .session import FabricSessionResolver
+from .store import FabricStore
 from .onelake import (
     OneLakeDfsClient,
     abfss_root,
@@ -43,6 +45,8 @@ __all__ = [
     "capacity_command",
     "run_capacity_action",
     "FabricResolver",
+    "FabricSessionResolver",
+    "FabricStore",
     "install",
     "InstallResult",
     "build_wheel",
