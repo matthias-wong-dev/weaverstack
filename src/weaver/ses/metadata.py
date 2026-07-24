@@ -74,6 +74,20 @@ DELTA_TARGET = "delta"
 SQL_TARGET = "sql"
 TARGET_KINDS = (FOLDER_TARGET, DELTA_TARGET, SQL_TARGET)
 
+# The two execution namespaces a two-part reference may bind in. A Lakehouse
+# object (Folder or Delta) resolves its references inside the Lakehouse; a
+# Warehouse object (SQL) inside the Warehouse. The two are bridged only by an
+# explicit alias, never by inference.
+LAKEHOUSE_NAMESPACE = "lakehouse"
+WAREHOUSE_NAMESPACE = "warehouse"
+NAMESPACES = (LAKEHOUSE_NAMESPACE, WAREHOUSE_NAMESPACE)
+
+
+def namespace_for_target(target_kind: str) -> str:
+    """The namespace a native object of this target binds its references in."""
+
+    return WAREHOUSE_NAMESPACE if target_kind == SQL_TARGET else LAKEHOUSE_NAMESPACE
+
 
 def target_kind_for(language: str, kind: str) -> str:
     """Where an object materialises, from its language and kind.
@@ -91,6 +105,14 @@ def target_kind_for(language: str, kind: str) -> str:
 _ID_KEYS = {"Folder ID": FOLDER, "Table ID": TABLE, "View ID": VIEW}
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
 
+# Cross-engine aliases. A Lakehouse object publishes into the Warehouse with a
+# Warehouse alias; a Warehouse object publishes into the Lakehouse with a
+# Lakehouse alias. Eligibility is by target, not just kind, so both keys are
+# accepted here and refused in _parse_aliases when they sit on the wrong object.
+WAREHOUSE_ALIAS = "Warehouse alias"
+LAKEHOUSE_ALIAS = "Lakehouse alias"
+_ALIAS_KEYS = {WAREHOUSE_ALIAS, LAKEHOUSE_ALIAS}
+
 # Keys accepted per kind. Anything else is a typo and is refused by name.
 _COMMON_KEYS = {
     "Description",
@@ -100,6 +122,8 @@ _COMMON_KEYS = {
     "Dependencies",
     "Static",
     "Prohibit rebuild",
+    WAREHOUSE_ALIAS,
+    LAKEHOUSE_ALIAS,
 }
 _KIND_KEYS = {
     FOLDER: {"File key", "Incremental"},
@@ -281,6 +305,8 @@ class SesDocument:
     is_incremental: bool = False
     prohibit_rebuild: bool = False
     static: bool = False
+    warehouse_alias: ObjectId | None = None
+    lakehouse_alias: ObjectId | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -495,6 +521,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 
     schema = _apply_column_details(declared_columns, column_notes, primary_key, declared_not_null)
 
+    warehouse_alias, lakehouse_alias = _parse_aliases(loaded, language, kind, object_id)
+
     return SesDocument(
         kind=kind,
         language=language,
@@ -514,6 +542,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         is_incremental=is_incremental,
         prohibit_rebuild=prohibit_rebuild,
         static=static,
+        warehouse_alias=warehouse_alias,
+        lakehouse_alias=lakehouse_alias,
         raw=dict(loaded),
     )
 
@@ -610,6 +640,59 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
             raise MetadataError(f"Dependencies repeats {dependency.qualified}")
         seen.append(dependency)
     return tuple(seen)
+
+
+def _parse_aliases(
+    raw: dict[str, Any], language: str, kind: str, object_id: ObjectId
+) -> tuple[ObjectId | None, ObjectId | None]:
+    """The cross-engine aliases this object publishes, checked for eligibility.
+
+    A Lakehouse object (a Delta table or Spark view) may publish a
+    ``Warehouse alias``; a Warehouse object (a SQL table or view) may publish a
+    ``Lakehouse alias``. Neither belongs on a Folder, and neither belongs on the
+    opposite engine. The alias may name a different Schema.Object from the
+    native one — a Staging table can surface as Sales.Customer — so it is parsed
+    through the same two-part model rather than assumed equal.
+    """
+
+    target = target_kind_for(language, kind)
+    warehouse_alias = _parse_alias(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
+    lakehouse_alias = _parse_alias(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
+
+    if warehouse_alias is not None and target != DELTA_TARGET:
+        raise MetadataError(
+            f"{WAREHOUSE_ALIAS} publishes a Lakehouse object into the Warehouse, so it "
+            f"belongs on a Delta table or Spark view, not on {object_id.qualified} "
+            + (
+                "(a Warehouse object uses Lakehouse alias)"
+                if target == SQL_TARGET
+                else "(a Folder is not published across engines)"
+            )
+        )
+    if lakehouse_alias is not None and target != SQL_TARGET:
+        raise MetadataError(
+            f"{LAKEHOUSE_ALIAS} publishes a Warehouse object into the Lakehouse, so it "
+            f"belongs on a SQL table or view, not on {object_id.qualified} "
+            + (
+                "(a Lakehouse object uses Warehouse alias)"
+                if target == DELTA_TARGET
+                else "(a Folder is not published across engines)"
+            )
+        )
+    return warehouse_alias, lakehouse_alias
+
+
+def _parse_alias(value: Any, key: str) -> ObjectId | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise MetadataError(f"{key} must be a non-empty Schema.Object name")
+    parts = [part.strip() for part in value.strip().split(".")]
+    if len(parts) != 2 or not all(parts):
+        raise MetadataError(
+            f"{key} must be a two-part Schema.Object name, got {value!r}"
+        )
+    return ObjectId(schema=parts[0], object=parts[1])
 
 
 def _parse_notes(value: Any) -> str | None:

@@ -49,6 +49,13 @@ select 1 as [Order id]
 
 @pytest.fixture
 def repo_dir(tmp_path: Path) -> Path:
+    # The minimal sources below use the Sales and Reporting schemas; declaring
+    # them keeps these structural cases valid now that every schema an object
+    # implies must be declared under _schemas.
+    schemas = tmp_path / "_schemas"
+    schemas.mkdir()
+    (schemas / "Sales.yml").write_text("Schema ID: Sales\n", encoding="utf-8")
+    (schemas / "Reporting.yml").write_text("Schema ID: Reporting\n", encoding="utf-8")
     return tmp_path
 
 

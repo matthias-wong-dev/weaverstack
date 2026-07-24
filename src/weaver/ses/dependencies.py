@@ -52,12 +52,21 @@ class RelationReference:
     """One name a source file refers to, with its parts as written."""
 
     parts: tuple[str, ...]
+    #: True when the name is immediately followed by ``(`` — a table-valued
+    #: function call, not a managed object. ``cross apply Sales.SplitLines(…)``
+    #: reads like a two-part relation but resolves to a function, so strict
+    #: two-part validation exempts it the way it exempts CTEs and temp tables.
+    call: bool = False
 
     @property
     def object_id(self) -> ObjectId | None:
-        """The two-part identity, or None for a physically-qualified name."""
+        """The two-part identity, or None for a call or a qualified name.
 
-        if len(self.parts) != 2:
+        A function call is not a repository object, so it yields no object
+        identity even though it has two parts.
+        """
+
+        if len(self.parts) != 2 or self.call:
             return None
         return ObjectId(schema=self.parts[0], object=self.parts[1])
 
@@ -176,20 +185,20 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
         if head == "FROM":
             if _enclosing_function(tokens, index) in _FROM_FUNCTIONS:
                 continue
-            for parts in _from_relations(sql_text, tokens, index):
-                _add(references, seen, parts)
+            for reference in _from_relations(sql_text, tokens, index):
+                _add(references, seen, reference)
         elif head in {"APPLY", "USING"} or "JOIN" in words or "APPLY" in words:
             following = _next_significant(tokens, index + 1)
             if following is not None:
-                parts = _parse_name(sql_text, tokens[following].start)
-                if parts is not None:
-                    _add(references, seen, parts)
+                reference = _relation_at(sql_text, tokens[following].start)
+                if reference is not None:
+                    _add(references, seen, reference)
         elif head in {"MERGE", "INSERT", "UPDATE", "DELETE"}:
             # A DML target is a relation too. Weaver does not restrict what an
             # author writes; it only has to read it accurately.
-            parts = _dml_target(sql_text, tokens, index)
-            if parts is not None:
-                _add(references, seen, parts)
+            reference = _dml_target(sql_text, tokens, index)
+            if reference is not None:
+                _add(references, seen, reference)
         elif head in {"CROSS", "OUTER"}:
             # sqlparse keywords `cross` but not `apply`, so `cross apply Schema.Fn(…)`
             # arrives as two tokens and the relation sits after the second.
@@ -197,16 +206,16 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
             if following is not None and tokens[following].value.lower() == "apply":
                 after = _next_significant(tokens, following + 1)
                 if after is not None:
-                    parts = _parse_name(sql_text, tokens[after].start)
-                    if parts is not None:
-                        _add(references, seen, parts)
+                    reference = _relation_at(sql_text, tokens[after].start)
+                    if reference is not None:
+                        _add(references, seen, reference)
 
     return tuple(references)
 
 
 def _dml_target(
     sql_text: str, tokens: list[_FlatToken], index: int
-) -> tuple[str, ...] | None:
+) -> RelationReference | None:
     """The relation a DML statement writes to.
 
     ``insert into``, ``merge into`` and ``delete from`` may arrive as one
@@ -221,7 +230,7 @@ def _dml_target(
         following = _next_significant(tokens, following + 1)
         if following is None:
             return None
-    return _parse_name(sql_text, tokens[following].start)
+    return _relation_at(sql_text, tokens[following].start)
 
 
 def _fallback(sql_text: str) -> tuple[RelationReference, ...]:
@@ -231,26 +240,26 @@ def _fallback(sql_text: str) -> tuple[RelationReference, ...]:
     seen: set[tuple[str, ...]] = set()
     keyword = re.compile(r"\b(from|join|apply|using)\b", flags=re.IGNORECASE)
     for match in keyword.finditer(sql_text):
-        parts = _parse_name(sql_text, match.end())
-        if parts is not None:
-            _add(references, seen, parts)
+        reference = _relation_at(sql_text, match.end())
+        if reference is not None:
+            _add(references, seen, reference)
     return tuple(references)
 
 
 def _add(
     references: list[RelationReference],
     seen: set[tuple[str, ...]],
-    parts: tuple[str, ...],
+    reference: RelationReference,
 ) -> None:
-    if parts in seen:
+    if reference.parts in seen:
         return
-    seen.add(parts)
-    references.append(RelationReference(parts=parts))
+    seen.add(reference.parts)
+    references.append(reference)
 
 
 def _from_relations(
     sql_text: str, tokens: list[_FlatToken], from_index: int
-) -> list[tuple[str, ...]]:
+) -> list[RelationReference]:
     """Every relation in one ``from`` list, including comma-separated ones."""
 
     depth = tokens[from_index].depth
@@ -258,10 +267,10 @@ def _from_relations(
     if first is None:
         return []
 
-    relations: list[tuple[str, ...]] = []
-    parts = _parse_name(sql_text, tokens[first].start)
-    if parts is not None:
-        relations.append(parts)
+    relations: list[RelationReference] = []
+    reference = _relation_at(sql_text, tokens[first].start)
+    if reference is not None:
+        relations.append(reference)
 
     for index in range(first + 1, len(tokens)):
         token = tokens[index]
@@ -276,9 +285,9 @@ def _from_relations(
         following = _next_significant(tokens, index + 1)
         if following is None or tokens[following].depth != depth:
             continue
-        parts = _parse_name(sql_text, tokens[following].start)
-        if parts is not None:
-            relations.append(parts)
+        reference = _relation_at(sql_text, tokens[following].start)
+        if reference is not None:
+            relations.append(reference)
 
     return relations
 
@@ -294,9 +303,30 @@ def _is_from_boundary(token: _FlatToken) -> bool:
     return head in _STATEMENT_START_KEYWORDS and head != "SELECT"
 
 
-def _parse_name(sql_text: str, start: int) -> tuple[str, ...] | None:
+def _relation_at(sql_text: str, start: int) -> RelationReference | None:
+    """A relation reference at ``start``, tagged if it is a function call."""
+
+    parsed = _parse_name(sql_text, start)
+    if parsed is None:
+        return None
+    parts, position = parsed
+    # A ``(`` directly abutting the name is a call, ``Sales.SplitLines(…)``.
+    # A table hint is ``… with (nolock)`` — a keyword and a space intervene —
+    # so requiring the paren to abut avoids mistaking a hinted table for one.
+    call = position < len(sql_text) and sql_text[position] == "("
+    return RelationReference(parts=parts, call=call)
+
+
+def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int] | None:
+    """The parts of a relation name and the offset just past the last part.
+
+    The returned offset is where the name ends — before any trailing whitespace
+    — so a caller can tell an abutting ``(`` (a function call) from a spaced one.
+    """
+
     position = _skip_space(sql_text, start)
     parts: list[str] = []
+    end = position
 
     while position < len(sql_text):
         parsed = _parse_identifier_part(sql_text, position)
@@ -304,10 +334,11 @@ def _parse_name(sql_text: str, start: int) -> tuple[str, ...] | None:
             break
         part, position = parsed
         parts.append(part)
-        position = _skip_space(sql_text, position)
-        if position >= len(sql_text) or sql_text[position] != ".":
+        end = position
+        after_space = _skip_space(sql_text, position)
+        if after_space >= len(sql_text) or sql_text[after_space] != ".":
             break
-        position = _skip_space(sql_text, position + 1)
+        position = _skip_space(sql_text, after_space + 1)
         if len(parts) >= 4:
             break
 
@@ -318,7 +349,7 @@ def _parse_name(sql_text: str, start: int) -> tuple[str, ...] | None:
     if len(parts) == 2 and parts[0].lower() in _PATH_FORMATS:
         # delta.`abfss://…` — a format and a path, not schema and object.
         return None
-    return tuple(parts)
+    return tuple(parts), end
 
 
 def _parse_identifier_part(sql_text: str, start: int) -> tuple[str, int] | None:

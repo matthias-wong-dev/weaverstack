@@ -48,6 +48,7 @@ from .metadata import (
     VIEW,
     ObjectId,
     SesDocument,
+    namespace_for_target,
     target_kind_for,
     parse_document,
     extract_python_metadata,
@@ -189,8 +190,30 @@ class SourceDocument:
         return f"{self.target_kind}:{self.qualified}"
 
     @property
+    def namespace(self) -> str:
+        """The execution namespace this object's references bind in."""
+
+        return namespace_for_target(self.target_kind)
+
+    @property
+    def warehouse_alias(self) -> ObjectId | None:
+        """This Lakehouse object's Warehouse-facing name, if it publishes one."""
+
+        return self.document.warehouse_alias
+
+    @property
+    def lakehouse_alias(self) -> ObjectId | None:
+        """This Warehouse object's Lakehouse-facing name, if it publishes one."""
+
+        return self.document.lakehouse_alias
+
+    @property
     def referenced_object_ids(self) -> tuple[ObjectId, ...]:
-        """Two-part references — candidates for objects in this repository."""
+        """Two-part references — candidates for objects in this repository.
+
+        Function calls are excluded: ``Sales.SplitLines(…)`` is two parts but
+        names a function, not a managed object, so it yields no object identity.
+        """
 
         return tuple(
             reference.object_id
@@ -204,6 +227,32 @@ class SourceDocument:
 
         return tuple(
             reference for reference in self.discovered_references if reference.is_qualified
+        )
+
+    @property
+    def call_references(self) -> tuple[RelationReference, ...]:
+        """Two-part function calls — named like relations, resolved as functions."""
+
+        return tuple(
+            reference
+            for reference in self.discovered_references
+            if reference.call and len(reference.parts) == 2
+        )
+
+    @property
+    def external_references(self) -> tuple[str, ...]:
+        """References that leave the repository: physical names and functions.
+
+        A valid repository resolves every ordinary two-part reference, so what
+        remains is deliberately outside: a physically-qualified name, or a
+        table-valued function. Recorded, never an error.
+        """
+
+        return tuple(
+            sorted(
+                str(reference)
+                for reference in self.qualified_references + self.call_references
+            )
         )
 
     @property
