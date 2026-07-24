@@ -27,9 +27,10 @@ from weaver.build_bundle import (
 pytestmark = pytest.mark.spark
 
 
-def _generate(lakehouses, bindings, name="20260724T000000"):
+def _generate(lakehouses, bindings, name="20260724T000000", spark=None):
     # A kept bundle lives under the Weaver Lakehouse, named for the build —
     # normally a timestamp. An install-bound bundle would use a throwaway dir.
+    # `spark` lets the build inspect the target catalog when freezing prune drops.
     output = lakehouses.resolver.build_bundle(name)
     bundle = generate_build_bundle(
         weaver_lakehouse=lakehouses.weaver,
@@ -38,6 +39,7 @@ def _generate(lakehouses, bindings, name="20260724T000000"):
         output=output,
         host=lakehouses.host,
         store=lakehouses.store,
+        spark=spark,
     )
     return bundle, output
 
@@ -167,8 +169,8 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(
 
         assert report.status == "failed"
         by_number = {s.number: s for s in report.sequences}
-        # Everything up to the summary succeeded; the summary sequence failed.
-        assert by_number[10].status == "succeeded"  # prune
+        # A clean target needs no prune; everything up to the summary succeeded.
+        assert by_number[20].status == "succeeded"  # create schema DWG
         assert by_number[40].status == "succeeded"  # DWG.Customer built
         assert by_number[50].status == "succeeded"  # ActiveCustomer built
         assert by_number[60].status == "failed"     # ActiveCustomerSummary
@@ -209,7 +211,14 @@ def test_build_prunes_unmanaged_objects_before_creating(
     spark, lakehouses, installed_build_repository, lakehouse_only_bindings, installation_environment
 ):
     _seed_orphans(spark, lakehouses)
-    bundle, output = _generate(lakehouses, lakehouse_only_bindings)
+    # The build inspects the seeded target and freezes the drops; the installer
+    # then runs exactly those, enumerating nothing itself.
+    bundle, output = _generate(lakehouses, lakehouse_only_bindings, spark=spark)
+
+    # The drops are frozen into the bundle up front — a table, a view, a schema
+    # and folders — so an install removes exactly these, enumerating nothing.
+    prune_kinds = {a.kind for _, _, a in bundle.plan.actions() if a.kind.startswith("prune")}
+    assert {"prune_table", "prune_view", "prune_schema", "prune_folder"} <= prune_kinds
 
     try:
         report = install_bundle(load_bundle(output, store=lakehouses.store),

@@ -47,16 +47,15 @@ PAYLOAD_DIR = "payload"
 
 SPARK_SQL_EXECUTOR = "spark_sql"
 FOLDER_EXECUTOR = "folder"
-PRUNE_EXECUTOR = "prune"
-#: Executors a bundle may carry in v1. ``spark_sql`` runs create DDL; ``folder``
-#: creates a directory; ``prune`` reconciles the target. All three are build,
-#: not load. T-SQL is deliberately absent: a bundle that reached generation with
-#: Warehouse work would already have raised.
-VALID_EXECUTORS = frozenset({SPARK_SQL_EXECUTOR, FOLDER_EXECUTOR, PRUNE_EXECUTOR})
-#: Executors that run a payload, and the extension that payload must carry. The
-#: others (folder, prune) act on the resolved target and carry no payload.
+#: Executors a bundle may carry in v1. ``spark_sql`` runs a create or a frozen
+#: prune DROP; ``folder`` makes or removes a directory. Both are build, not load.
+#: T-SQL is deliberately absent: a bundle that reached generation with Warehouse
+#: work would already have raised.
+VALID_EXECUTORS = frozenset({SPARK_SQL_EXECUTOR, FOLDER_EXECUTOR})
+#: Executors that run a payload, and the extension that payload must carry.
+#: ``folder`` acts on the resolved target and carries none.
 _EXECUTOR_EXTENSION = {SPARK_SQL_EXECUTOR: ".spark.sql"}
-_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, PRUNE_EXECUTOR})
+_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
 
 
 @dataclass(frozen=True)

@@ -1100,16 +1100,24 @@ spike (`tests/spark/test_local_persisted_view.py`) proved table → view →
 view-on-view resolves in the shared session; durable cross-process catalog
 persistence is deliberately not a prerequisite.
 
-**Build is reconciliation: prune first, then create.** A build runs prune
-sequences upfront that remove anything in the target the bundle does not
-manage — an unmanaged schema, folder, table or view is dropped before the
-managed set is created. The keep-set is the bundle's own managed inventory,
-derived from its create actions, so the installer still never reads the source
-repository. Reconciliation is scoped to the one bound Lakehouse and driven by
-that Lakehouse's own storage — a table is a directory under `Tables/`, a folder a
-directory under `Files/` (never the reserved `repos`/`build_bundles` areas) — so
-it is safe even where a Spark session shares one catalog across work. The four
-kinds run in dependency order: views, tables, folders, schemas.
+**Build is reconciliation, and the prune is frozen.** A build removes anything in
+the target it does not manage — an unmanaged schema, folder, table or view —
+before creating the managed set. The critical property, and a correction to a
+first cut that computed the prune *dynamically at install*: the drops are frozen
+into the bundle at **build** time. The build inspects the visible target now,
+diffs it against the managed set, and bakes a concrete drop per orphan — a `DROP
+TABLE`/`VIEW`/`DATABASE` as a Spark SQL payload, an unmanaged folder as a
+directory-removing action. The installer runs exactly those and enumerates
+nothing. This is the whole point of a frozen bundle: you can read `plan.yml` and
+the drop payloads and see precisely what an install will remove *before* it
+runs — a dynamic prune would instead delete whatever the live catalog happened to
+say at install, so a registration glitch could quietly wipe production.
+Reconciliation is scoped to the one bound Lakehouse's own storage — a table is a
+directory under `Tables/`, a folder under `Files/` (never the reserved
+`repos`/`build_bundles` areas) — so a shared Spark catalog cannot make a build
+reach into another Lakehouse. It is on by default; `generate_build_bundle(prune=
+False)` opts out when the target is not visible to inspect, and a Spark session
+lets the inspection also see catalog views.
 
 **The installer trusts nothing it has not just checked.** It validates the
 bundle, resolves targets through an injected environment, and runs sequences as
@@ -1125,9 +1133,10 @@ The proof is `tests/spark/test_build_bundle_install.py`: generate a bundle,
 **delete the source repository**, then install from the bundle alone and verify a
 real Folder directory, an *empty* Delta table of the declared shape, a persistent
 view, and a view-on-view — structure, not data. A second test seeds the target
-with unmanaged objects and asserts a build prunes them; a third rebuilds a bundle
-with an invalid view payload (hash matching) and asserts the barrier — earlier
-sequences succeed, the bad view fails and is reported, and it is never created.
+with unmanaged objects, asserts the build froze a drop for each, and asserts they
+are gone after install while the managed set is present; a third rebuilds a
+bundle with an invalid view payload (hash matching) and asserts the barrier —
+earlier sequences succeed, the bad view fails and is reported, never created.
 
 ---
 

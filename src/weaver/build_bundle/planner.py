@@ -20,10 +20,10 @@ generation builds on it at the next checkpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
 from ..errors import BuildError
-from ..hosts import Host
+from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, Host
 from ..locations import Location
 from ..resolution import resolver_for
 from ..ses.graph import Graph
@@ -40,12 +40,11 @@ from .models import (
     CREATE_SCHEMA,
     OMIT_DEPENDS_ON_OMITTED,
     OMIT_TARGET_UNBOUND,
-    PRUNE_KINDS,
+    PRUNE_FOLDER,
     BuildAction,
     BuildBatch,
     BuildPlan,
     BuildSequence,
-    ManagedInventory,
     OmittedNode,
 )
 from .payloads import (
@@ -57,6 +56,9 @@ from .payloads import (
     payload_path,
     sha256_hex,
 )
+
+#: Files areas that are never folder resources, so a prune never touches them.
+_RESERVED_FILES_AREAS = frozenset({REPOS_AREA, BUILD_BUNDLES_AREA})
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, BoundTarget, TargetBindings
 
 #: Which physical binding an SES target kind needs. Folders and Delta tables
@@ -175,12 +177,22 @@ def generate_build_bundle(
     output: Location,
     host: Host,
     store: Store,
+    prune: bool = True,
+    spark: Any = None,
 ) -> BuildBundle:
     """Read a repository once, project it, and write a fully bound bundle.
 
     This is the whole of interpretation: repository reading, target projection,
     ordering, executable generation, and certification of the snapshot. The
     returned bundle is reloaded and validated before it is handed back.
+
+    ``prune`` (default on) reconciles the target: the build inspects it *now* and
+    freezes a concrete ``DROP`` for everything it holds that this bundle does not
+    manage, so a reviewer can see exactly what an install will remove — no
+    enumeration happens at install time. It requires the target to be visible;
+    pass ``prune=False`` to opt out when it is not. ``spark`` lets the inspection
+    see catalog views; without it, prune still reconciles tables, folders and
+    schemas from storage.
     """
 
     if targets.lakehouse is None:
@@ -197,7 +209,9 @@ def generate_build_bundle(
     )
 
     bound_target = targets.lakehouse.to_bound_target()
-    sequences, payloads = _plan_sequences(repository, projection, bound_target, resolver)
+    sequences, payloads = _plan_sequences(
+        repository, projection, bound_target, resolver, store, prune, spark
+    )
 
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
@@ -238,11 +252,20 @@ def _plan_sequences(
     projection: Projection,
     target: BoundTarget,
     resolver,
+    store: Store,
+    prune: bool,
+    spark,
 ) -> tuple[tuple[BuildSequence, ...], dict[str, bytes]]:
     payloads: dict[str, bytes] = {}
     documents = {node: repository.by_id[node] for node in projection.retained}
+    managed = _managed_sets(documents)
 
-    sequences: list[BuildSequence] = [_prune_sequence(target)]
+    sequences: list[BuildSequence] = []
+
+    if prune:
+        prune_sequence = _prune_sequence(target, resolver, store, spark, managed, payloads)
+        if prune_sequence is not None:
+            sequences.append(prune_sequence)
 
     schema_sequence = _schema_sequence(repository, documents, target, resolver, payloads)
     if schema_sequence is not None:
@@ -263,29 +286,161 @@ def _plan_sequences(
     return tuple(sequences), payloads
 
 
-def _prune_sequence(target: BoundTarget) -> BuildSequence:
-    """Reconcile the target to the managed set before anything is created.
+@dataclass(frozen=True)
+class _Managed:
+    """The keep-set the build diffs the target against, folded for comparison."""
 
-    The actions carry no payload — the installer reconciles against the bundle's
-    own managed inventory, and each action drops what that inventory does not
-    keep. They run in one batch, in dependency order.
+    schemas: frozenset[str]
+    folder_schemas: frozenset[str]
+    folders: frozenset[str]
+    tables: frozenset[str]
+    views: frozenset[str]
+
+
+def _managed_sets(documents: Mapping[str, SourceDocument]) -> _Managed:
+    tables = {d.qualified for d in documents.values() if d.target_kind == DELTA_TARGET and d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.target_kind == DELTA_TARGET and d.kind == VIEW}
+    folders = {d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET}
+    return _Managed(
+        schemas=frozenset(name.split(".", 1)[0].lower() for name in tables | views),
+        folder_schemas=frozenset(name.split(".", 1)[0].lower() for name in folders),
+        folders=frozenset(name.lower() for name in folders),
+        tables=frozenset(name.lower() for name in tables),
+        views=frozenset(name.lower() for name in views),
+    )
+
+
+def _prune_sequence(
+    target: BoundTarget,
+    resolver,
+    store: Store,
+    spark,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> BuildSequence | None:
+    """Inspect the target now and freeze a concrete DROP for each unmanaged object.
+
+    The build reads the target's own storage (and, with a session, its catalog)
+    and emits visible drops — ``DROP TABLE``/``VIEW``/``DATABASE`` as Spark SQL
+    payloads, an unmanaged folder as a directory-removing action. The installer
+    runs exactly these; it never enumerates. Reconciliation is scoped to the one
+    bound Lakehouse's ``Tables``/``Files`` storage, so a shared catalog cannot
+    make a build reach into another Lakehouse.
     """
 
-    actions = tuple(
-        BuildAction(
-            id=f"{kind}-{target.id}",
-            kind=kind,
-            resource_node_id=None,
-            executor="prune",
-            payload=None,
-            payload_sha256=None,
+    lakehouse = ItemRef(target.item_id)
+    tables_root = resolver.tables_root(lakehouse)
+    files_root = resolver.files_root(lakehouse)
+
+    existing_schemas = [entry.name for entry in _child_dirs(store, tables_root)]
+    orphan_schemas = {s.lower() for s in existing_schemas if s.lower() not in managed.schemas}
+
+    actions: list[BuildAction] = []
+
+    # Views (catalog only): drop those not managed, in this Lakehouse's schemas,
+    # skipping any whole schema a DROP DATABASE below already removes.
+    if spark is not None:
+        inspectable = {s.lower() for s in existing_schemas} | set(managed.schemas)
+        for database, view in _catalog_views(spark, inspectable):
+            if database.lower() in orphan_schemas:
+                continue
+            if f"{database}.{view}".lower() in managed.views:
+                continue
+            actions.append(
+                _drop_action(target, "prune_view", "view", f"{database}.{view}",
+                             f"DROP VIEW IF EXISTS {_ident(database)}.{_ident(view)}", payloads)
+            )
+
+    # Tables: unmanaged ones in a schema that survives (an orphan schema is
+    # dropped whole below).
+    for schema_entry in _child_dirs(store, tables_root):
+        schema = schema_entry.name
+        if schema.lower() in orphan_schemas:
+            continue
+        for object_entry in _child_dirs(store, schema_entry.location):
+            qualified = f"{schema}.{object_entry.name}"
+            if qualified.lower() not in managed.tables:
+                actions.append(
+                    _drop_action(target, "prune_table", "table", qualified,
+                                 f"DROP TABLE IF EXISTS {_ident(schema)}.{_ident(object_entry.name)}",
+                                 payloads)
+                )
+
+    # Folders: an unmanaged folder object, or a whole unmanaged folder schema.
+    for schema_entry in _child_dirs(store, files_root):
+        schema = schema_entry.name
+        if schema in _RESERVED_FILES_AREAS:
+            continue
+        if schema.lower() not in managed.folder_schemas:
+            actions.append(_prune_folder_action(target, f"folder:{schema}"))
+            continue
+        for object_entry in _child_dirs(store, schema_entry.location):
+            qualified = f"{schema}.{object_entry.name}"
+            if qualified.lower() not in managed.folders:
+                actions.append(_prune_folder_action(target, f"folder:{qualified}"))
+
+    # Schemas: drop the whole orphan database, which cascades to its tables/views.
+    for schema in sorted({s for s in existing_schemas if s.lower() in orphan_schemas}):
+        actions.append(
+            _drop_action(target, "prune_schema", "schema", schema,
+                         f"DROP DATABASE IF EXISTS {_ident(schema)} CASCADE", payloads)
         )
-        for kind in PRUNE_KINDS
-    )
-    batch = BuildBatch(id=f"{PRUNE_SEQUENCE:03d}-{target.id}", target_id=target.id, actions=actions)
+
+    if not actions:
+        return None
+    batch = BuildBatch(id=f"{PRUNE_SEQUENCE:03d}-{target.id}", target_id=target.id, actions=tuple(actions))
     return BuildSequence(
         number=PRUNE_SEQUENCE, description="prune unmanaged objects", batches=(batch,)
     )
+
+
+def _drop_action(target, kind, slug, name, statement, payloads) -> BuildAction:
+    content = (statement + "\n").encode("utf-8")
+    path = payload_path(PRUNE_SEQUENCE, "prune", f"{slug}-{name}.spark.sql")
+    payloads[path] = content
+    return BuildAction(
+        id=f"prune-{slug}-{name}",
+        kind=kind,
+        resource_node_id=None,
+        executor="spark_sql",
+        payload=path,
+        payload_sha256=sha256_hex(content),
+    )
+
+
+def _prune_folder_action(target, resource: str) -> BuildAction:
+    return BuildAction(
+        id=f"prune-{resource}",
+        kind=PRUNE_FOLDER,
+        resource_node_id=resource,
+        executor="folder",
+        payload=None,
+        payload_sha256=None,
+    )
+
+
+def _child_dirs(store: Store, root) -> list:
+    if not store.exists(root) or not store.is_directory(root):
+        return []
+    return sorted(
+        (entry for entry in store.list(root) if entry.is_directory), key=lambda e: e.name
+    )
+
+
+def _catalog_views(spark, inspectable: set[str]):
+    """(`database`, `view`) pairs from the catalog, limited to inspectable schemas."""
+
+    databases = [row[0] for row in spark.sql("SHOW DATABASES").collect()]
+    for database in databases:
+        if database.lower() not in inspectable:
+            continue
+        for row in spark.sql(f"SHOW VIEWS IN {_ident(database)}").collect():
+            data = row.asDict()
+            if data.get("isTemporary"):
+                continue
+            name = data.get("viewName") or data.get("name")
+            if name:
+                yield database, name
 
 
 def _schema_sequence(
@@ -394,40 +549,6 @@ def _object_action(
         executor=ddl.executor,
         payload=path,
         payload_sha256=sha256_hex(content),
-    )
-
-
-def managed_inventory(plan: BuildPlan) -> ManagedInventory:
-    """The keep-set a prune reconciles to, derived from a plan's create actions.
-
-    Read from the plan, never from the repository, so the installer needs no
-    second look at the source. A schema is a database exactly when a table or
-    view lives in it.
-    """
-
-    folders: set[str] = set()
-    tables: set[str] = set()
-    views: set[str] = set()
-    for _, _, action in plan.actions():
-        node = action.resource_node_id
-        if node is None:
-            continue
-        qualified = node.split(":", 1)[1]
-        if action.kind == BUILD_FOLDER:
-            folders.add(qualified)
-        elif action.kind == BUILD_TABLE:
-            tables.add(qualified)
-        elif action.kind == BUILD_VIEW:
-            views.add(qualified)
-
-    folder_schemas = {folder.split(".", 1)[0] for folder in folders}
-    schemas = {name.split(".", 1)[0] for name in tables | views}
-    return ManagedInventory(
-        schemas=frozenset(schemas),
-        folder_schemas=frozenset(folder_schemas),
-        folders=frozenset(folders),
-        tables=frozenset(tables),
-        views=frozenset(views),
     )
 
 

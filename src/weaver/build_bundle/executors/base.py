@@ -18,7 +18,7 @@ from typing import Any, Protocol
 from ...locations import Location
 from ...store import Store
 from ...targets import ItemRef
-from ..models import BuildAction, ManagedInventory
+from ..models import BuildAction
 from ..targets import BoundTarget
 
 
@@ -36,15 +36,13 @@ class ResolvedTarget:
 
 @dataclass(frozen=True)
 class InstallationContext:
-    """Runtime services, the target the current batch is bound to, and the
-    managed inventory a prune reconciles against."""
+    """Runtime services and the one target the current batch is bound to."""
 
     spark: Any
     resolver: Any
     store: Store
     snapshot: Location
     target: ResolvedTarget
-    managed: ManagedInventory
 
 
 class ActionExecutor(Protocol):

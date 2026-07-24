@@ -29,8 +29,7 @@ from ..targets import ItemRef
 from .bundle import BuildBundle, load_bundle, validate_bundle
 from .executors import default_executors
 from .executors.base import ActionExecutor, InstallationContext, ResolvedTarget
-from .models import BuildAction, BuildBatch, BuildPlan, BuildSequence, ManagedInventory
-from .planner import managed_inventory
+from .models import BuildAction, BuildBatch, BuildPlan, BuildSequence
 from .report import (
     FAILED,
     SKIPPED,
@@ -87,7 +86,6 @@ def install_bundle(
 
     plan = bundle.plan
     resolved = {target.id: environment.resolve_target(target) for target in plan.targets}
-    managed = managed_inventory(plan)
 
     started = _now()
     sequence_results: list[SequenceResult] = []
@@ -97,7 +95,7 @@ def install_bundle(
         if stop:
             sequence_results.append(_skipped_sequence(sequence))
             continue
-        result = _run_sequence(sequence, resolved, managed, bundle, environment)
+        result = _run_sequence(sequence, resolved, bundle, environment)
         sequence_results.append(result)
         if result.status == FAILED:
             stop = True
@@ -119,7 +117,6 @@ def install_bundle(
 def _run_sequence(
     sequence: BuildSequence,
     resolved: dict[str, ResolvedTarget],
-    managed: ManagedInventory,
     bundle: BuildBundle,
     environment: InstallationEnvironment,
 ) -> SequenceResult:
@@ -134,7 +131,6 @@ def _run_sequence(
             store=environment.store,
             snapshot=bundle.location.join("repository"),
             target=target,
-            managed=managed,
         )
         for action in batch.actions:
             if failed:

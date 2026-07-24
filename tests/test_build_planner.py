@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
+from weaver import FolderTarget, ItemRef, LocalHost, LocalResolver, LocalStore, Location
 from weaver.build_bundle import (
     LakehouseBinding,
     TargetBindings,
@@ -107,19 +107,47 @@ def test_each_object_action_uses_the_right_executor(weaver_lakehouse, tmp_path):
     assert executor["delta:DWG.ActiveCustomerSummary"] == "spark_sql"
 
 
-def test_prune_runs_first_then_schemas(weaver_lakehouse, tmp_path):
+def test_a_clean_target_needs_no_prune(weaver_lakehouse, tmp_path):
     bundle, _, _ = _generate(weaver_lakehouse, tmp_path)
     plan = bundle.plan
 
-    # The target is reconciled before anything is created.
-    assert plan.sequences[0].number == 10
-    assert plan.sequences[0].description == "prune unmanaged objects"
-    assert {a.kind for _, _, a in plan.actions() if a.executor == "prune"} == {
-        "prune_views", "prune_delta", "prune_folders", "prune_schemas"
-    }
+    # Nothing in the target to reconcile, so no prune sequence — schemas first.
+    assert plan.sequences[0].number == 20
+    assert not any(a.kind.startswith("prune") for _, _, a in plan.actions())
     # Only schemas holding a table or view get a database — Raw is folder-only.
     created = {action.id for _, _, action in plan.actions() if action.kind == "create_schema"}
     assert created == {"schema-DWG"}
+
+
+def test_prune_freezes_a_drop_for_each_physical_orphan(weaver_lakehouse, tmp_path):
+    _, store, resolver = weaver_lakehouse
+    target = ItemRef("Sales_LH")
+    # Seed unmanaged content in the target's storage, before the build inspects it.
+    store.make_directory(resolver.tables_root(target).join("DWG", "Ghost"))     # orphan table, managed schema
+    store.make_directory(resolver.tables_root(target).join("Legacy", "Thing"))  # orphan schema
+    store.make_directory(resolver.folder_object(FolderTarget(lakehouse=target), "Raw", "OldFolder"))
+
+    bundle, _, output = _generate(weaver_lakehouse, tmp_path)
+    plan = bundle.plan
+
+    prune = plan.sequences[0]
+    assert (prune.number, prune.description) == (10, "prune unmanaged objects")
+    # No prune_view — this build had no Spark session to read the catalog.
+    assert {a.kind for _, _, a in plan.actions() if a.kind.startswith("prune")} == {
+        "prune_table", "prune_schema", "prune_folder"
+    }
+
+    # The drops are frozen, and readable up front.
+    frozen = {
+        a.id: store.read(output.join(*a.payload.split("/"))).decode()
+        for _, _, a in plan.actions()
+        if a.payload is not None and a.kind.startswith("prune")
+    }
+    assert "DROP TABLE IF EXISTS `DWG`.`Ghost`" in frozen["prune-table-DWG.Ghost"]
+    assert "DROP DATABASE IF EXISTS `Legacy` CASCADE" in frozen["prune-schema-Legacy"]
+    # The unmanaged folder is a directory-removing action, identified by resource.
+    prune_folders = [a for _, _, a in plan.actions() if a.kind == "prune_folder"]
+    assert {a.resource_node_id for a in prune_folders} == {"folder:Raw.OldFolder"}
 
 
 def test_payload_bearing_actions_reference_an_existing_payload(weaver_lakehouse, tmp_path):

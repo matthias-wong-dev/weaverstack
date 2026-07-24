@@ -1,10 +1,14 @@
-"""Executor dispatch for build actions — all build, none load."""
+"""Executor dispatch for build actions — all build, none load.
+
+Two executors do the work: ``spark_sql`` runs a create or a frozen prune ``DROP``,
+and ``folder`` makes or removes a directory. There is no prune executor — a build
+freezes its drops as payloads, so the installer never enumerates the target.
+"""
 
 from __future__ import annotations
 
 from .base import ActionExecutor, InstallationContext, ResolvedTarget
 from .folder import FolderExecutor
-from .prune import PruneExecutor
 from .spark_sql import SparkSqlExecutor
 from .tsql import TSqlExecutor
 
@@ -15,7 +19,6 @@ def default_executors() -> dict[str, ActionExecutor]:
     return {
         SparkSqlExecutor.name: SparkSqlExecutor(),
         FolderExecutor.name: FolderExecutor(),
-        PruneExecutor.name: PruneExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
     }
 
@@ -26,7 +29,6 @@ __all__ = [
     "ResolvedTarget",
     "SparkSqlExecutor",
     "FolderExecutor",
-    "PruneExecutor",
     "TSqlExecutor",
     "default_executors",
 ]
