@@ -1143,12 +1143,21 @@ written into the bundle.
 workspace.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides transport behind
 callables the way `PopulatedLakehouse` does for wipe: *generation* always runs on
 the caller (position B) — read the repo, freeze the prune, write the bundle to
-the Weaver Lakehouse over the store — while *installation* runs where the host
-lives. Locally that is in-process against the shared Spark session; on Fabric it
-is a Livy program that constructs the session-native store, resolver and Spark and
-calls `install_bundle`, so the installer executes *inside* Fabric (position C).
-The same four behavioural tests pass on both hosts (`pytest -m fabric` against the
-Weaver workspace, capacity resumed for the run and suspended after).
+the Weaver Lakehouse over the store — while both *generation and installation* run
+where the host lives. Locally that is in-process against the shared Spark session;
+on Fabric both are Livy programs against the session-native store, resolver and
+Spark, so planning and installation execute *inside* Fabric (position C) against
+the authoritative catalogue. The same four behavioural tests pass on both hosts
+(`pytest -m fabric` against the Weaver workspace, capacity resumed for the run and
+suspended after).
+
+**Fabric is the reference; local emulates it — do not invert.** A first cut
+generated the bundle on the desktop with `spark=None` and only installed
+in-session. That is a *different, lesser* architecture (row 2 dressed as row 3),
+and it silently lost catalogue view pruning: planning ran outside the Fabric Spark
+catalogue, so it could not see views to freeze a `DROP` for them. The fix was to
+move generation into the session, not to accept the gap as inherent to Fabric —
+the rule now stated plainly in `AGENTS.md`.
 
 Making the Fabric side green taught the platform's real contract, one live run
 per fact:
@@ -1174,10 +1183,14 @@ per fact:
   the resolver produces the declared case, so table existence is asserted by name
   through the catalog, not by a case-exact path; a Folder, which Weaver `mkdir`s
   itself, is still path-checked.
+- **`SHOW DATABASES` returns qualified `Workspace.Lakehouse.schema` names** on
+  Fabric, so the prune enumerates catalogue views per surviving schema with `SHOW
+  VIEWS IN <bare-schema>` (session-relative) rather than matching bare names
+  against `SHOW DATABASES` — which now freezes a `DROP VIEW` for an unmanaged
+  catalogue view on both hosts.
 
-One known gap remains: generation on the desktop has no Spark catalog, so a
-desktop-built Fabric bundle prunes tables, folders and schemas from storage but
-not catalog views — full view pruning wants an in-session generate, deferred.
+With generation in-session, prune reconciles catalogue views as well as storage,
+so nothing about the Fabric path is a lesser case than local.
 
 ---
 
