@@ -372,10 +372,10 @@ def test_a_warehouse_table_keeps_the_spaced_audit_names():
     assert [column.name for column in document.audit_columns] == list(AUDIT_COLUMNS)
 
 
-def test_a_live_row_carries_a_delete_datetime():
+def test_every_audit_column_is_not_null():
+    """Weaver populates all three on every loaded row, so none may be null."""
     document = parse(TABLE_YAML)
-    delete = document.audit_columns[-1]
-    assert delete.not_null is True
+    assert [column.not_null for column in document.audit_columns] == [True, True, True]
 
 
 def test_folders_have_no_audit_columns():

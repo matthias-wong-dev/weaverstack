@@ -51,13 +51,12 @@ def test_inferred_business_columns_are_the_query_columns():
     assert columns == ("Order id", "Amount")
 
 
-def test_inferred_reference_check_is_case_insensitive():
+def test_inferred_reference_check_is_case_sensitive():
     document = _doc(INFERRED)
-    # PK "Order id", comparison "Amount", note "Amount" all satisfied by lowercase.
-    assert resolve_build_columns(document, ("order id", "amount")) == (
-        "order id",
-        "amount",
-    )
+    # PK "Order id" is a case-sensitive contract; a lowercase query column is a
+    # different column and must not satisfy it.
+    with pytest.raises(BuildError, match="Primary key names column 'Order id'"):
+        resolve_build_columns(document, ("order id", "Amount"))
 
 
 def test_a_primary_key_naming_a_missing_column_fails_at_build():
@@ -107,11 +106,11 @@ def test_an_identity_naming_a_missing_column_fails_at_build():
         resolve_build_columns(document, ("Order id",))
 
 
-def test_duplicate_query_columns_are_refused():
+def test_columns_that_collide_only_by_case_are_ambiguous():
     document = _doc(
         "Table ID: Sales.Order\nDescription: x\nLineage: y"
     )
-    with pytest.raises(BuildError, match="duplicate output column"):
+    with pytest.raises(BuildError, match="collide by name"):
         resolve_build_columns(document, ("Amount", "amount"))
 
 
@@ -129,22 +128,30 @@ def test_declared_columns_are_authoritative_and_order_is_kept():
 
 def test_a_declared_column_missing_from_the_query_fails():
     document = _doc(DECLARED)
-    with pytest.raises(BuildError, match="not returned by the query: Amount"):
+    with pytest.raises(BuildError, match="not returned by the query under the same case: Amount"):
         resolve_build_columns(document, ("Order id",))
 
 
 def test_an_undeclared_query_column_fails():
     document = _doc(DECLARED)
-    with pytest.raises(BuildError, match="not in the declared schema: Extra"):
+    with pytest.raises(BuildError, match="not in the declared schema"):
         resolve_build_columns(document, ("Order id", "Amount", "Extra"))
 
 
-def test_declared_equivalence_ignores_case_and_order():
+def test_declared_equivalence_ignores_order_but_not_case():
     document = _doc(DECLARED)
-    assert resolve_build_columns(document, ("amount", "order id")) == (
+    # Order may differ; the declared order still wins.
+    assert resolve_build_columns(document, ("Amount", "Order id")) == (
         "Order id",
         "Amount",
     )
+
+
+def test_declared_equivalence_requires_exact_case():
+    document = _doc(DECLARED)
+    # The query spells them differently; declared "Order id"/"Amount" are not met.
+    with pytest.raises(BuildError, match="not returned by the query under the same case"):
+        resolve_build_columns(document, ("amount", "order id"))
 
 
 # --- the shared reference set ----------------------------------------------

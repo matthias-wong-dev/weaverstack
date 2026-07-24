@@ -58,9 +58,9 @@ class _FakeSpark:
 
 
 AUDIT = [
-    ["Row_insert_datetime", "timestamp"],
-    ["Row_update_datetime", "timestamp"],
-    ["Row_delete_datetime", "timestamp"],
+    ["Row_insert_datetime", "timestamp", True],
+    ["Row_update_datetime", "timestamp", True],
+    ["Row_delete_datetime", "timestamp", True],
 ]
 
 
@@ -101,33 +101,55 @@ def _create_statement(spark) -> str:
 # --- generation -------------------------------------------------------------
 
 
-def test_inferred_table_uses_query_types_and_appends_audit_columns():
+def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
     details = _run(spark, _payload())
 
     statement = _create_statement(spark)
     assert statement.startswith("CREATE OR REPLACE TABLE Sales.Customer (\n")
-    assert "`CustomerId` int" in statement
-    assert "`CustomerName` string" in statement
-    assert "`Row_insert_datetime` timestamp" in statement
-    assert "`Row_delete_datetime` timestamp" in statement
+    # CustomerId is the primary key, so it is not null even when inferred;
+    # CustomerName is not, so it stays nullable.
+    assert "`CustomerId` int NOT NULL" in statement
+    assert "`CustomerName` string,\n" in statement
+    assert "`CustomerName` string NOT NULL" not in statement
+    # Every audit column is not null.
+    assert "`Row_insert_datetime` timestamp NOT NULL" in statement
+    assert "`Row_update_datetime` timestamp NOT NULL" in statement
+    assert "`Row_delete_datetime` timestamp NOT NULL" in statement
     assert "USING delta" in statement
     assert "delta.columnMapping.mode" in statement
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
-def test_declared_table_uses_declared_types_not_the_query_types():
+def test_declared_table_uses_declared_types_and_nullability_not_the_query():
     spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
     _run(
         spark,
         _payload(
             schema_mode="declared",
-            declared_columns=[["CustomerId", "bigint"], ["CustomerName", "string"]],
+            declared_columns=[
+                ["CustomerId", "bigint", True],
+                ["CustomerName", "string", False],
+            ],
         ),
     )
     statement = _create_statement(spark)
-    # The declaration asked for bigint; the query's int is ignored.
-    assert "`CustomerId` bigint" in statement
+    # The declaration asked for bigint NOT NULL; the query's int is ignored.
+    assert "`CustomerId` bigint NOT NULL" in statement
+    assert "`CustomerName` string,\n" in statement
+
+
+def test_column_names_are_case_sensitive_against_the_declaration():
+    spark = _FakeSpark([("customerid", "int")])
+    with pytest.raises(BuildError, match="not returned by the query under the same case"):
+        _run(
+            spark,
+            _payload(
+                schema_mode="declared",
+                declared_columns=[["CustomerId", "bigint", True]],
+                references=[],
+            ),
+        )
 
 
 # --- validation failures the plan enumerates --------------------------------
@@ -135,12 +157,15 @@ def test_declared_table_uses_declared_types_not_the_query_types():
 
 def test_a_declared_column_missing_from_the_query_fails_install():
     spark = _FakeSpark([("CustomerId", "int")])
-    with pytest.raises(BuildError, match="not returned by the query: CustomerName"):
+    with pytest.raises(BuildError, match="not returned by the query under the same case: CustomerName"):
         _run(
             spark,
             _payload(
                 schema_mode="declared",
-                declared_columns=[["CustomerId", "bigint"], ["CustomerName", "string"]],
+                declared_columns=[
+                    ["CustomerId", "bigint", True],
+                    ["CustomerName", "string", False],
+                ],
                 references=[],
             ),
         )
@@ -148,20 +173,20 @@ def test_a_declared_column_missing_from_the_query_fails_install():
 
 def test_an_undeclared_extra_query_column_fails_install():
     spark = _FakeSpark([("CustomerId", "int"), ("Extra", "string")])
-    with pytest.raises(BuildError, match="not in the declared schema: Extra"):
+    with pytest.raises(BuildError, match="not in the declared schema"):
         _run(
             spark,
             _payload(
                 schema_mode="declared",
-                declared_columns=[["CustomerId", "bigint"]],
+                declared_columns=[["CustomerId", "bigint", True]],
                 references=[],
             ),
         )
 
 
-def test_duplicate_query_output_names_fail_install():
+def test_case_colliding_query_output_names_fail_install():
     spark = _FakeSpark([("CustomerId", "int"), ("customerid", "bigint")])
-    with pytest.raises(BuildError, match="duplicate output column"):
+    with pytest.raises(BuildError, match="collide by name"):
         _run(spark, _payload(references=[]))
 
 

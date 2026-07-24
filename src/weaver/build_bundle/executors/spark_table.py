@@ -62,14 +62,14 @@ class SparkTableExecutor:
 
         frame = context.spark.sql(query)
         query_columns = tuple(field.name for field in frame.schema.fields)
+        # Exact-cased: a column name is a case-sensitive Weaver contract.
         query_types = {
-            field.name.lower(): field.dataType.simpleString()
-            for field in frame.schema.fields
+            field.name: field.dataType.simpleString() for field in frame.schema.fields
         }
 
         declared = instruction["declared_columns"]
         declared_names = (
-            tuple(name for name, _type in declared) if declared is not None else None
+            tuple(name for name, _type, _nn in declared) if declared is not None else None
         )
         references = tuple((label, column) for label, column in instruction["references"])
 
@@ -81,9 +81,9 @@ class SparkTableExecutor:
         )
 
         physical = self._physical_columns(
-            qualified, business_columns, declared, query_types
+            qualified, business_columns, declared, query_types, references
         )
-        physical += [tuple(pair) for pair in instruction["audit_columns"]]
+        physical += [tuple(entry) for entry in instruction["audit_columns"]]
 
         statement = _create_table_sql(
             qualified, physical, column_mapping=instruction.get("column_mapping", True)
@@ -92,7 +92,7 @@ class SparkTableExecutor:
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
-            "columns": [name for name, _type in physical],
+            "columns": [name for name, _type, _nn in physical],
         }
 
     def _physical_columns(
@@ -101,8 +101,15 @@ class SparkTableExecutor:
         business_columns: tuple[str, ...],
         declared: list | None,
         query_types: dict[str, str],
-    ) -> list[tuple[str, str]]:
-        """The business columns as ``(name, type)`` — declared types or inferred."""
+        references: tuple[tuple[str, str], ...],
+    ) -> list[tuple[str, str, bool]]:
+        """The business columns as ``(name, type, not_null)``.
+
+        Declared columns carry their declared type and not-null. Inferred columns
+        take the query's type and are not null when the primary key or a
+        ``Not null`` names them — the same loading contract, applied to a shape
+        the query supplied rather than a declaration.
+        """
 
         collisions = [name for name in business_columns if name.lower() in _AUDIT_NAMES]
         if collisions:
@@ -112,15 +119,25 @@ class SparkTableExecutor:
             )
 
         if declared is not None:
-            declared_types = {name.lower(): type_ for name, type_ in declared}
-            return [(name, declared_types[name.lower()]) for name in business_columns]
-        return [(name, query_types[name.lower()]) for name in business_columns]
+            declared_by_name = {name: (type_, nn) for name, type_, nn in declared}
+            return [(name, *declared_by_name[name]) for name in business_columns]
+
+        not_null_names = {
+            column for label, column in references if label in ("Primary key", "Not null")
+        }
+        return [
+            (name, query_types[name], name in not_null_names)
+            for name in business_columns
+        ]
 
 
 def _create_table_sql(
-    qualified: str, columns: list[tuple[str, str]], *, column_mapping: bool
+    qualified: str, columns: list[tuple[str, str, bool]], *, column_mapping: bool
 ) -> str:
-    column_lines = ",\n".join(f"    {_ident(name)} {type_}" for name, type_ in columns)
+    column_lines = ",\n".join(
+        f"    {_ident(name)} {type_}{' NOT NULL' if not_null else ''}"
+        for name, type_, not_null in columns
+    )
     mapping = (
         "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')" if column_mapping else ""
     )

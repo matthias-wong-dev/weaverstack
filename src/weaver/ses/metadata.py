@@ -195,8 +195,10 @@ def _audit_columns(language: str) -> tuple["Column", ...]:
         Column(
             name=audit_column_name(logical, language),
             type=_AUDIT_TYPES[language],
-            # A live row carries a sentinel delete datetime, so it is not null.
-            not_null=logical == AUDIT_DELETE,
+            # Weaver populates all three on every loaded row — insert and update
+            # datetimes, and a sentinel maximum delete datetime for a live row —
+            # so none has a valid null state and all are physically not null.
+            not_null=True,
             is_audit=True,
         )
         for logical in AUDIT_COLUMNS

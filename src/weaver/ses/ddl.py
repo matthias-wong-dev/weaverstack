@@ -131,12 +131,12 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
         "object": document.qualified,
         "schema_mode": "declared" if declared else "inferred",
         "declared_columns": (
-            [[column.name, column.type] for column in ses.schema] if declared else None
+            [_column_entry(column) for column in ses.schema] if declared else None
         ),
         "source_query": (document.sql_body or "").strip(),
         "references": [list(pair) for pair in metadata_column_references(ses)],
         "identity": ses.identity,
-        "audit_columns": [[column.name, column.type] for column in ses.audit_columns],
+        "audit_columns": [_column_entry(column) for column in ses.audit_columns],
         "column_mapping": True,
     }
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -155,6 +155,17 @@ def _view_ddl(document: "SourceDocument") -> GeneratedDdl:
     )
 
 
+def _column_entry(column) -> list:
+    """A payload column triple ``[name, type, not_null]``.
+
+    Nullability travels with the column so the executor emits the same
+    constraint — the audit columns are always not null, and a declared primary
+    key or ``Not null`` column carries its constraint through too.
+    """
+
+    return [column.name, column.type, column.not_null]
+
+
 def _create_table_sql(qualified: str, columns) -> str:
     """A ``CREATE OR REPLACE TABLE`` over concrete columns.
 
@@ -162,7 +173,10 @@ def _create_table_sql(qualified: str, columns) -> str:
     carries no build-phase data to protect (populating it is load).
     """
 
-    column_lines = ",\n".join(f"    {_ident(c.name)} {c.type}" for c in columns)
+    column_lines = ",\n".join(
+        f"    {_ident(c.name)} {c.type}{' NOT NULL' if c.not_null else ''}"
+        for c in columns
+    )
     return (
         f"CREATE OR REPLACE TABLE {qualified} (\n"
         f"{column_lines}\n"

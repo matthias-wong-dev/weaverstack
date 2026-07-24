@@ -79,6 +79,10 @@ def _schema_of(spark, qualified: str) -> dict[str, str]:
     return {field.name: field.dataType.simpleString() for field in spark.table(qualified).schema}
 
 
+def _nullable_of(spark, qualified: str) -> dict[str, bool]:
+    return {field.name: field.nullable for field in spark.table(qualified).schema}
+
+
 AUDIT = ("Row_insert_datetime", "Row_update_datetime", "Row_delete_datetime")
 
 
@@ -118,15 +122,31 @@ def test_inferred_types_come_from_the_query_and_declared_from_the_declaration(
     assert _schema_of(spark, "Sales.DeclaredCustomer")["CustomerId"] == "bigint"
 
 
-def test_every_built_table_carries_the_delta_audit_columns(
+def test_every_built_table_carries_the_delta_audit_columns_all_not_null(
     lakehouses, spark, tmp_path, clean_sales_catalog
 ):
     _build_and_install(lakehouses, spark, tmp_path)
 
     for qualified in ("Sales.Customer", "Sales.InferredCustomer", "Sales.DeclaredCustomer"):
         schema = _schema_of(spark, qualified)
+        nullable = _nullable_of(spark, qualified)
         for audit in AUDIT:
             assert schema.get(audit) == "timestamp", (qualified, audit)
+            # Weaver populates all three on every loaded row, so all are not null.
+            assert nullable.get(audit) is False, (qualified, audit)
+
+
+def test_primary_key_columns_are_not_null_in_both_schema_modes(
+    lakehouses, spark, tmp_path, clean_sales_catalog
+):
+    _build_and_install(lakehouses, spark, tmp_path)
+
+    # CustomerId is the primary key of both tables, so it is not null whether the
+    # shape is inferred or declared; CustomerName is not keyed, so it stays nullable.
+    for qualified in ("Sales.InferredCustomer", "Sales.DeclaredCustomer"):
+        nullable = _nullable_of(spark, qualified)
+        assert nullable["CustomerId"] is False, qualified
+        assert nullable["CustomerName"] is True, qualified
 
 
 def test_the_build_does_not_load_any_rows(

@@ -127,10 +127,11 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     assert "`CustomerName` string" in ddl.content
     assert "`IsActive` boolean" in ddl.content
     # Every built table carries the audit columns, in the Delta (underscored)
-    # spelling, as timestamps (build-philosophy §7.1, plan "Audit columns").
-    assert "`Row_insert_datetime` timestamp" in ddl.content
-    assert "`Row_update_datetime` timestamp" in ddl.content
-    assert "`Row_delete_datetime` timestamp" in ddl.content
+    # spelling, as not-null timestamps (build-philosophy §7.1, plan "Audit
+    # columns"); Weaver populates all three on every loaded row.
+    assert "`Row_insert_datetime` timestamp NOT NULL" in ddl.content
+    assert "`Row_update_datetime` timestamp NOT NULL" in ddl.content
+    assert "`Row_delete_datetime` timestamp NOT NULL" in ddl.content
     assert "USING delta" in ddl.content
     assert "delta.columnMapping.mode" in ddl.content
 
@@ -150,11 +151,13 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     payload = json.loads(ddl.content)
     assert payload["object"] == "DWG.CustomerCount"
     assert payload["schema_mode"] == "declared"
-    assert payload["declared_columns"] == [["CustomerCount", "bigint"]]
+    # [name, type, not_null]; CustomerCount has no primary key here, so it is
+    # nullable, while every audit column is not null.
+    assert payload["declared_columns"] == [["CustomerCount", "bigint", False]]
     assert payload["source_query"] == "select count(*) as CustomerCount from DWG.Customer"
     # Audit columns are frozen into the instruction so the executor never reopens
     # the SES source to learn them.
-    assert ["Row_insert_datetime", "timestamp"] in payload["audit_columns"]
+    assert ["Row_insert_datetime", "timestamp", True] in payload["audit_columns"]
 
 
 def test_an_inferred_spark_sql_table_carries_no_declared_columns():
