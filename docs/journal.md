@@ -991,12 +991,24 @@ Python import still resolves to the exact module it names, so a Folder and a
 Delta table of one ID stay distinguishable. The old loose-candidate rule is
 gone.
 
-**A name may still be a Folder, a Delta table and a Warehouse table at once.**
-Native identity is partitioned by target, not merged into two namespaces, so
-Fabric's freedom to reuse a name across a Lakehouse Files path, a Lakehouse
-table and a Warehouse table is preserved — the `cross-engine` fixture carries
-`Sales.Ledger` as all three. What is forbidden is *ambiguity*: an alias may not
-land on a name a native object already owns in that namespace.
+**A name may be shared across targets, but a Folder and a Delta table may not
+share one.** Native identity is partitioned by target, not merged into two
+namespaces, so a Delta table and a Warehouse table of one name — the ordinary
+cross-engine case — coexist; the `cross-engine` fixture carries `Sales.Ledger`
+as both. What is refused is a Folder and a Delta table of one name: both are
+Lakehouse, and a Python Folder and a Python Delta table of that ID would be the
+very same `.py` file, so the pairing cannot even be written. It is rejected
+explicitly rather than left as an impossible case a reader must reason out, or a
+silent resolution ambiguity. What is also forbidden is *alias ambiguity*: an
+alias may not land on a name a native object already owns in that namespace.
+
+**One spelling per name, one spelling per schema.** Identities are compared
+case-insensitively, so the same name written two ways — `Sales.Ledger` as a
+Delta table and `sales.ledger` as a Warehouse table, or `_schemas/Abc.yml`
+beside `_schemas/abc.yml` — is two names for one thing that the model cannot
+tell apart. A repository must not contain such a pair; whichever it is, one must
+change. (The schema pair is only reachable on a case-sensitive file system,
+which is exactly where it must be caught.)
 
 **Two-part names are managed; three-part names are not.** An unresolved two-part
 reference is now a repository error — a missing object, a missing alias, a typo,

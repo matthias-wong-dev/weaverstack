@@ -168,3 +168,34 @@ def test_the_error_names_the_expected_schema_file(tmp_path):
     )
     with pytest.raises(DiscoveryError, match=r"_schemas/Widget\.yml"):
         read_repository(root)
+
+
+# --- case-only duplicate schemas ---------------------------------------------
+#
+# A case-insensitive file system cannot hold both Abc.yml and abc.yml, so the
+# rejection is driven through the reader directly with a stub store rather than
+# real files — it is a case-sensitive file system this guards against.
+
+
+class _StubStore:
+    def __init__(self, contents: dict[str, bytes]) -> None:
+        self._contents = contents
+
+    def read(self, location) -> bytes:
+        for relative, data in self._contents.items():
+            if location.value.endswith(relative):
+                return data
+        raise KeyError(location.value)
+
+
+def test_two_schema_files_differing_only_by_case_are_refused():
+    from weaver.ses.repository import _read_schemas
+
+    store = _StubStore(
+        {
+            "_schemas/Abc.yml": b"Schema ID: Abc",
+            "_schemas/abc.yml": b"Schema ID: abc",
+        }
+    )
+    with pytest.raises(DiscoveryError, match="differ only by case"):
+        _read_schemas(["_schemas/Abc.yml", "_schemas/abc.yml"], store, Location("/repo"))

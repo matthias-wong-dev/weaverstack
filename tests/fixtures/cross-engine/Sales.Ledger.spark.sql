@@ -16,8 +16,9 @@ Schema:
   Amount: decimal(18,2)
 
 Notes: |
-  A Delta table that shares the name Sales.Ledger with a Folder and a Warehouse
-  table. It carries no alias, so nothing publishes this name across engines.
+  A Delta table that shares the name Sales.Ledger with a Warehouse table of the
+  same name. Different engine, different object; it carries no alias, so nothing
+  publishes this name across engines.
 
 Revision notes:
   - 2026-07-24 Created.

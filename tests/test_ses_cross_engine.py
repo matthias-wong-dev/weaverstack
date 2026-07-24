@@ -23,7 +23,7 @@ def repo():
 
 
 def test_objects_sort_into_their_native_partitions(repo):
-    assert set(repo.folder_native) == {ObjectId("Raw", "Customer"), ObjectId("Sales", "Ledger")}
+    assert set(repo.folder_native) == {ObjectId("Raw", "Customer")}
     assert set(repo.lakehouse_native) == {
         ObjectId("Sales", "Customer"),
         ObjectId("Sales", "CustomerFeature"),
@@ -35,11 +35,11 @@ def test_objects_sort_into_their_native_partitions(repo):
     }
 
 
-def test_one_name_may_be_a_folder_a_delta_and_a_warehouse_object(repo):
+def test_one_name_may_be_a_delta_and_a_warehouse_object(repo):
     ledger = ObjectId("Sales", "Ledger")
-    assert ledger in repo.folder_native
     assert ledger in repo.lakehouse_native
     assert ledger in repo.warehouse_native
+    assert ledger not in repo.folder_native
 
 
 def test_aliases_map_the_published_name_to_the_declaring_object(repo):
@@ -89,7 +89,6 @@ def test_nothing_is_left_unresolved(repo):
 def test_every_object_is_a_node(repo):
     assert set(repo.graph.nodes) == {
         "folder:Raw.Customer",
-        "folder:Sales.Ledger",
         "delta:Sales.Customer",
         "delta:Sales.CustomerFeature",
         "delta:Sales.Ledger",
@@ -295,6 +294,88 @@ def test_a_function_call_is_external_not_refused(tmp_path):
     repo = read_repository(root)
     assert repo.external_references["sql:Reporting.R"] == ("Reporting.Split",)
     assert "sql:Reporting.Split" not in repo.graph.nodes
+
+
+def folder(name: str) -> str:
+    schema, obj = name.split(".")
+    return textwrap.dedent(
+        f'''"""
+Folder ID: {name}
+
+Description: x
+
+Lineage: y
+
+File key: "*.csv"
+"""
+
+from weaver import Folder
+
+
+class {schema}__{obj}(Folder):
+    def read(self):
+        return self.staging_folder(), []
+'''
+    )
+
+
+def test_a_folder_and_a_delta_table_may_not_share_a_name(tmp_path):
+    root = build(
+        tmp_path,
+        schemas=["Sales"],
+        objects={
+            "Sales__Ledger.py": folder("Sales.Ledger"),
+            "Sales.Ledger.spark.sql": textwrap.dedent(
+                """/*
+Table ID: Sales.Ledger
+
+Description: x
+
+Lineage: y
+
+Dependencies:
+  - Sales.Source
+
+Primary key: Id
+
+Schema:
+  Id: string
+*/
+
+select 1 as `Id`
+"""
+            ),
+        },
+    )
+    with pytest.raises(DiscoveryError, match="both a Folder .* and a Delta table"):
+        read_repository(root)
+
+
+def test_a_name_spelled_two_ways_across_targets_is_refused(tmp_path):
+    root = build(
+        tmp_path,
+        schemas=["Sales"],
+        objects={
+            "Sales__Ledger.py": delta("Sales.Ledger"),
+            "sales.ledger.sql": sql_table("sales.ledger"),
+        },
+    )
+    with pytest.raises(DiscoveryError, match="differ only by case"):
+        read_repository(root)
+
+
+def test_a_delta_and_a_warehouse_table_may_share_a_name(tmp_path):
+    root = build(
+        tmp_path,
+        schemas=["Sales"],
+        objects={
+            "Sales__Ledger.py": delta("Sales.Ledger"),
+            "Sales.Ledger.sql": sql_table("Sales.Ledger"),
+        },
+    )
+    repo = read_repository(root)
+    assert ObjectId("Sales", "Ledger") in repo.lakehouse_native
+    assert ObjectId("Sales", "Ledger") in repo.warehouse_native
 
 
 # --- cycles ------------------------------------------------------------------

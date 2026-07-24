@@ -212,6 +212,7 @@ def read_repository(
 
     schemas = _read_schemas(schema_files, store, root)
     lakehouse_native, warehouse_native, folder_native = _classify_native(documents)
+    _reject_folder_delta_collision(folder_native, lakehouse_native)
     lakehouse_aliases, warehouse_aliases = _register_aliases(
         documents, lakehouse_native, warehouse_native
     )
@@ -384,15 +385,25 @@ def _read_schemas(
     """Parse every ``_schemas/*.yml`` file, keyed by its Schema ID."""
 
     schemas: dict[str, SchemaSes] = {}
+    seen: dict[str, str] = {}  # canonical id -> declared id
     for relative in sorted(schema_files):
         schema = read_schema_document(relative, store.read(root.join(*relative.split("/"))))
-        # Filename == Schema ID is enforced per file and filenames are unique in
-        # a directory, so a duplicate ID cannot arise; the guard is cheap insurance.
-        if schema.schema_id in schemas:
+        canonical = schema.schema_id.lower()
+        existing = seen.get(canonical)
+        if existing == schema.schema_id:
+            # Same declared id twice — only reachable on a case-sensitive file
+            # system, since filenames must match the id and are unique per folder.
             raise DiscoveryError(
                 f"schema {schema.schema_id!r} is declared twice: "
-                f"{schemas[schema.schema_id].relative_path} and {relative}"
+                f"{schemas[existing].relative_path} and {relative}"
             )
+        if existing is not None:
+            raise DiscoveryError(
+                f"schemas {existing!r} and {schema.schema_id!r} differ only by case — "
+                "schema identity is case-insensitive, so one must change "
+                f"({schemas[existing].relative_path} and {relative})"
+            )
+        seen[canonical] = schema.schema_id
         schemas[schema.schema_id] = schema
     return schemas
 
@@ -418,6 +429,31 @@ def _classify_native(
     for document in documents:
         partition[document.target_kind][document.object_id] = document
     return lakehouse, warehouse, folder
+
+
+def _reject_folder_delta_collision(
+    folder_native: Mapping[ObjectId, SourceDocument],
+    lakehouse_native: Mapping[ObjectId, SourceDocument],
+) -> None:
+    """A Lakehouse name is a Folder or a Delta table, never both.
+
+    Both live in the Lakehouse, and a Python Folder and a Python Delta table of
+    one ID would be the very same file on disk — so the pairing cannot even be
+    written. It is refused explicitly rather than left as an impossible case a
+    reader has to reason out, or as a silent resolution ambiguity.
+    """
+
+    folder_by_canonical = {_canonical(object_id.qualified): object_id for object_id in folder_native}
+    for object_id in lakehouse_native:
+        collision = folder_by_canonical.get(_canonical(object_id.qualified))
+        if collision is not None:
+            folder = folder_native[collision]
+            delta = lakehouse_native[object_id]
+            raise DiscoveryError(
+                f"{object_id.qualified} is declared as both a Folder ({folder.relative_path}) "
+                f"and a Delta table ({delta.relative_path}) — a Lakehouse name is one or the "
+                "other, never both"
+            )
 
 
 def _canonical_index(objects: Mapping[ObjectId, SourceDocument]) -> dict[str, SourceDocument]:
@@ -797,14 +833,23 @@ def unresolved_references(
 
 
 def _reject_case_only_duplicates(documents: Iterable[SourceDocument]) -> None:
+    """One spelling per name across the whole repository.
+
+    The same Schema.Object may live in more than one target — a Delta table and
+    a Warehouse table of one name is the ordinary cross-engine case — but it must
+    be written identically in each. Two spellings that differ only by case are
+    two names for one thing, which the case-insensitive identity model cannot
+    tell apart, so one must change. (A genuine duplicate within one target is
+    already refused as declared-twice.)
+    """
+
     seen: dict[str, str] = {}
-    for document in documents:
-        key = _canonical(document.node_id)
-        existing = seen.get(key)
-        if existing is not None and existing != document.node_id:
+    for document in sorted(documents, key=lambda document: (document.qualified, document.relative_path)):
+        canonical = _canonical(document.qualified)
+        existing = seen.get(canonical)
+        if existing is not None and existing != document.qualified:
             raise DiscoveryError(
-                f"{document.qualified} and {existing.split(':', 1)[1]} differ only by "
-                "case in the same target — identities are compared "
-                "case-insensitively, so one must change"
+                f"{document.qualified} and {existing} differ only by case — a name is "
+                "spelled one way across the repository, so one must change"
             )
-        seen[key] = document.node_id
+        seen.setdefault(canonical, document.qualified)
