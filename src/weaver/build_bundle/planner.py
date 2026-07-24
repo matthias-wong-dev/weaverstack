@@ -348,19 +348,21 @@ def _prune_sequence(
 
     actions: list[BuildAction] = []
 
-    # Views (catalog only): drop those not managed, in this Lakehouse's schemas,
-    # skipping any whole schema a DROP DATABASE below already removes.
+    # Views (catalog only): drop those not managed, per schema that survives (an
+    # orphan schema is dropped whole below, taking its views with it). Enumerated
+    # by bare schema name so it resolves in the session's own Lakehouse — Fabric's
+    # SHOW DATABASES returns qualified `Workspace.Lakehouse.schema` names.
     if spark is not None:
-        inspectable = {s.lower() for s in existing_schemas} | set(managed.schemas)
-        for database, view in _catalog_views(spark, inspectable):
-            if database.lower() in orphan_schemas or database.lower() in _RESERVED_SCHEMAS:
+        for schema in existing_schemas:
+            if schema.lower() in orphan_schemas:
                 continue
-            if f"{database}.{view}".lower() in managed.views:
-                continue
-            actions.append(
-                _drop_action(target, "prune_view", "view", f"{database}.{view}",
-                             f"DROP VIEW IF EXISTS {_ident(database)}.{_ident(view)}", payloads)
-            )
+            for view in _views_in_schema(spark, schema):
+                if f"{schema}.{view}".lower() in managed.views:
+                    continue
+                actions.append(
+                    _drop_action(target, "prune_view", "view", f"{schema}.{view}",
+                                 f"DROP VIEW IF EXISTS {_ident(schema)}.{_ident(view)}", payloads)
+                )
 
     # Tables: unmanaged ones in a schema that survives (an orphan schema is
     # dropped whole below).
@@ -440,20 +442,22 @@ def _child_dirs(store: Store, root) -> list:
     )
 
 
-def _catalog_views(spark, inspectable: set[str]):
-    """(`database`, `view`) pairs from the catalog, limited to inspectable schemas."""
+def _views_in_schema(spark, schema: str) -> list[str]:
+    """Persistent view names in one schema, by bare name (session-relative)."""
 
-    databases = [row[0] for row in spark.sql("SHOW DATABASES").collect()]
-    for database in databases:
-        if database.lower() not in inspectable:
+    try:
+        rows = spark.sql(f"SHOW VIEWS IN {_ident(schema)}").collect()
+    except Exception:  # the schema may not exist yet; nothing to prune there
+        return []
+    names: list[str] = []
+    for row in rows:
+        data = row.asDict()
+        if data.get("isTemporary"):
             continue
-        for row in spark.sql(f"SHOW VIEWS IN {_ident(database)}").collect():
-            data = row.asDict()
-            if data.get("isTemporary"):
-                continue
-            name = data.get("viewName") or data.get("name")
-            if name:
-                yield database, name
+        name = data.get("viewName") or data.get("name")
+        if name:
+            names.append(name)
+    return names
 
 
 def _schema_sequence(

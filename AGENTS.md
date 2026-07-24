@@ -124,6 +124,28 @@ arithmetic serves both. It exists so that most development and most of the test
 suite need no tenant, no capacity and no credentials — not because local is a
 lesser case.
 
+### Fabric is the reference; local emulates it — never the reverse
+
+This is the direction of the whole system, and the mistake most worth naming
+because it has already been made once. **Weaver is Fabric-first.** The behaviour
+that must be right is the behaviour *inside* Fabric; the local host exists so that
+behaviour can be developed and tested quickly on a laptop, by emulating it. Design
+against what Fabric does, then make local reproduce it. Do not design against what
+is convenient locally and then contort Fabric to fit — if local and Fabric
+disagree, Fabric is right and local is the thing to fix.
+
+Concretely, for anything with two phases (as the build bundle has *generate* then
+*install*): **both phases run where the host lives.** Inside Fabric that means in
+the session, against the native Spark catalogue; locally it means in-process
+against the local catalogue. A workflow that plans on the desktop and only
+executes in Fabric is a *different, lesser* architecture (row 2 dressed as row 3),
+and it silently loses capabilities the authoritative catalogue provides — build
+bundle generation, done on the desktop with `spark=None`, could not see catalogue
+views and so could not prune them. The fix was to move generation into the
+session, not to accept the gap as inherent to Fabric. When a Fabric behaviour is
+awkward, the question is "how does local emulate this?", never "how does Fabric
+bend to what local already does?".
+
 ### Row 3 is the claim, and it is the least tested
 
 A user should be able to open a Fabric notebook, `pip install weaverstack`, and
