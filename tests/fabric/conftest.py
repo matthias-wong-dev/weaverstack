@@ -586,22 +586,19 @@ def local_build_env(lakehouses, spark):
 
 @pytest.fixture
 def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
-    """A build environment installed inside Fabric over Livy.
+    """A build environment run entirely inside Fabric over Livy.
 
-    Generation runs on the caller, writing the bundle to OneLake over DFS.
-    Installation runs *in* a Fabric session whose **default Lakehouse is the
-    target** — so the create DDL's two-part ``Schema.Object`` names land there —
-    and the target Lakehouse is **schema-enabled**, so a managed table appears
-    under ``Tables/<schema>/<table>`` and views bind by name. Both Lakehouses are
-    disposable and deleted on teardown.
+    Weaver is Fabric-first: both **generation and installation** run in the
+    session, against the native Spark catalogue, so planning sees catalogue views
+    and nothing is contorted to fit a desktop planner. The session defaults to the
+    **target** Lakehouse (so two-part ``Schema.Object`` names land there), which is
+    **schema-enabled** (so a managed table appears under ``Tables/<schema>/<table>``
+    and views bind by name). The desktop only pushes the repository and reads back
+    results. Both Lakehouses are disposable and deleted on teardown.
     """
 
     from weaver import FabricHost, RepositoryRef
-    from weaver.build_bundle import (
-        LakehouseBinding,
-        TargetBindings,
-        generate_build_bundle,
-    )
+    from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import (
         FabricResolver,
         LivySession,
@@ -647,24 +644,38 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
         def remove_repo(name: str) -> None:
             store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
 
-        def generate(bundle_name: str = "buildtest", *, repository_name: str = "MyRepo", prune: bool = True):
-            return generate_build_bundle(
-                weaver_lakehouse=weaver,
-                repository_name=repository_name,
-                targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=target)),
-                output=resolver.build_bundle(bundle_name),
-                host=host,
-                store=store,
-                prune=prune,
-                spark=None,  # no catalog on the caller; storage-scoped prune
-            )
-
         def _host_literal() -> str:
             return (
                 f"FabricHost(workspace={host.workspace!r}, "
                 f"weaver_lakehouse={host.weaver_lakehouse!r}, "
                 f"fabric_environment={host.fabric_environment!r})"
             )
+
+        def generate(bundle_name: str = "buildtest", *, repository_name: str = "MyRepo", prune: bool = True):
+            # Generation runs IN the session, against the native Spark catalogue —
+            # so prune sees catalogue views, matching how a notebook would build.
+            body = (
+                "from weaver import ItemRef, FabricHost\n"
+                "from weaver.resolution import resolver_for, store_for\n"
+                "from weaver.build_bundle import generate_build_bundle, TargetBindings, "
+                "LakehouseBinding\n"
+                f"host = {_host_literal()}\n"
+                "store = store_for(host)\n"
+                "resolver = resolver_for(host)\n"
+                "bundle = generate_build_bundle(\n"
+                f"    weaver_lakehouse=ItemRef({weaver.name!r}),\n"
+                f"    repository_name={repository_name!r},\n"
+                f"    targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef({target.name!r}))),\n"
+                f"    output=resolver.build_bundle({bundle_name!r}),\n"
+                f"    host=host, store=store, prune={prune!r}, spark=spark)\n"
+                "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
+                "'plan': bundle.plan.to_mapping()})\n"
+            )
+            payload = session.run(body).payload
+            plan = BuildPlan.from_mapping(payload["plan"])
+            # A desktop-addressed (https) handle to the same physical bundle, so the
+            # test can read it and the install can re-resolve it by name in-session.
+            return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
 
         def install(bundle) -> InstallOutcome:
             # The desktop wrote the bundle at a https OneLake location; the
@@ -723,7 +734,7 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
 
         yield BuildEnv(
             label="fabric", host=host, weaver=weaver, target=target,
-            resolver=resolver, store=store, generate_spark=None,
+            resolver=resolver, store=store, generate_spark=True,  # in-session catalogue
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
             install=install, query=query, seed_orphans=seed_orphans,
         )
