@@ -59,6 +59,10 @@ from .payloads import (
 
 #: Files areas that are never folder resources, so a prune never touches them.
 _RESERVED_FILES_AREAS = frozenset({REPOS_AREA, BUILD_BUNDLES_AREA})
+
+#: Schemas a prune never touches. A schema-enabled Fabric Lakehouse has a default
+#: ``dbo`` schema that cannot be dropped and that Weaver does not manage.
+_RESERVED_SCHEMAS = frozenset({"dbo"})
 from .targets import LAKEHOUSE_TARGET, LOCAL_HOST, WAREHOUSE_TARGET, BoundTarget, TargetBindings
 
 #: Which physical binding an SES target kind needs. Folders and Delta tables
@@ -335,7 +339,11 @@ def _prune_sequence(
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)
 
-    existing_schemas = [entry.name for entry in _child_dirs(store, tables_root)]
+    existing_schemas = [
+        entry.name
+        for entry in _child_dirs(store, tables_root)
+        if entry.name.lower() not in _RESERVED_SCHEMAS
+    ]
     orphan_schemas = {s.lower() for s in existing_schemas if s.lower() not in managed.schemas}
 
     actions: list[BuildAction] = []
@@ -345,7 +353,7 @@ def _prune_sequence(
     if spark is not None:
         inspectable = {s.lower() for s in existing_schemas} | set(managed.schemas)
         for database, view in _catalog_views(spark, inspectable):
-            if database.lower() in orphan_schemas:
+            if database.lower() in orphan_schemas or database.lower() in _RESERVED_SCHEMAS:
                 continue
             if f"{database}.{view}".lower() in managed.views:
                 continue
@@ -358,7 +366,7 @@ def _prune_sequence(
     # dropped whole below).
     for schema_entry in _child_dirs(store, tables_root):
         schema = schema_entry.name
-        if schema.lower() in orphan_schemas:
+        if schema.lower() in orphan_schemas or schema.lower() in _RESERVED_SCHEMAS:
             continue
         for object_entry in _child_dirs(store, schema_entry.location):
             qualified = f"{schema}.{object_entry.name}"

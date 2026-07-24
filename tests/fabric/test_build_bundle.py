@@ -65,9 +65,11 @@ def test_generate_and_install_lakehouse_bundle(build_env):
     assert all(status == "succeeded" for status in outcome.action_status.values())
     assert outcome.bundle_id == bundle.bundle_id
 
-    # Build creates structure, not data.
+    # Build creates structure, not data. A Folder is a directory Weaver makes at
+    # an exact path; a Delta table is a catalog object (Fabric stores it at a
+    # host-chosen path), so it is checked by name.
     assert build_env.store.exists(_folder(build_env, "Raw", "CustomerCsv"))
-    assert build_env.store.exists(_table(build_env, "DWG", "Customer"))
+    assert "customer" in {r["tableName"].lower() for r in build_env.query("SHOW TABLES IN DWG")}
 
     columns = {
         row["col_name"].lower()
@@ -190,5 +192,5 @@ def test_build_prunes_unmanaged_objects_before_creating(build_env):
     assert "oldtable" not in dwg_tables
 
     # The managed set is present.
-    assert build_env.store.exists(_table(build_env, "DWG", "Customer"))
+    assert "customer" in {r["tableName"].lower() for r in build_env.query("SHOW TABLES IN DWG")}
     assert build_env.store.exists(_folder(build_env, "Raw", "CustomerCsv"))

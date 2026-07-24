@@ -447,6 +447,7 @@ class InstallOutcome:
     sequence_status: dict[int, str]
     action_status: dict[str, str]
     action_order: tuple[str, ...]
+    action_error: dict[str, str] = None  # action_id -> "Type: message", failures only
 
 
 @dataclass
@@ -475,6 +476,11 @@ def _outcome_from_report(report) -> InstallOutcome:
         sequence_status={s.number: s.status for s in report.sequences},
         action_status={a.action_id: a.status for a in report.action_results()},
         action_order=tuple(a.action_id for a in report.action_results()),
+        action_error={
+            a.action_id: f"{a.error_type}: {a.error_message}"
+            for a in report.action_results()
+            if a.error_type
+        },
     )
 
 
@@ -678,16 +684,22 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
                 "report = install_bundle(bundle, environment=env)\n"
                 "emit({'status': report.status, 'bundle_id': report.bundle_id, "
                 "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
-                "'actions': [{'id': a.action_id, 'status': a.status} for a in report.action_results()]})\n"
+                "'actions': [{'id': a.action_id, 'status': a.status, "
+                "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
+                "for a in report.action_results()]})\n"
             )
             payload = session.run(body).payload
-            return InstallOutcome(
+            outcome = InstallOutcome(
                 status=payload["status"],
                 bundle_id=payload["bundle_id"],
                 sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
                 action_status={a["id"]: a["status"] for a in payload["actions"]},
                 action_order=tuple(a["id"] for a in payload["actions"]),
+                action_error={a["id"]: a["error"] for a in payload["actions"] if a["error"]},
             )
+            if outcome.status != "succeeded":
+                print("INSTALL ACTION ERRORS:", outcome.action_error)
+            return outcome
 
         def query(sql: str) -> list:
             body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
