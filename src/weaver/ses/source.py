@@ -267,6 +267,18 @@ class SourceDocument:
             return None
         return self.relative_path[: -len(PYTHON_SUFFIX)]
 
+    def create_ddl(self) -> "GeneratedDdl":
+        """The generated, installable create definition for this source.
+
+        Delegates to :mod:`weaver.ses.ddl`. The source owns this because it is
+        the only thing that knows its language, kind, ID and validated body;
+        a build planner calls it and never re-derives create syntax.
+        """
+
+        from .ddl import generate_ddl
+
+        return generate_ddl(self)
+
 
 def read_source_document(relative_path: str, data: bytes) -> SourceDocument:
     """Parse and structurally validate one object file."""
