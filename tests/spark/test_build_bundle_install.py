@@ -10,10 +10,19 @@ snapshot rather than quietly re-reading the source.
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
+
 import pytest
 
 from weaver import DeltaTarget, FolderTarget, RepositoryRef
-from weaver.build import generate_build_bundle, install_bundle, load_bundle
+from weaver.build import (
+    compute_bundle_id,
+    generate_build_bundle,
+    install_bundle,
+    load_bundle,
+    write_bundle,
+)
 
 pytestmark = pytest.mark.spark
 
@@ -90,6 +99,84 @@ def test_generate_and_install_lakehouse_bundle(
         spark.sql("DROP VIEW DWG.ActiveCustomer")
         with pytest.raises(Exception):
             spark.sql("SELECT * FROM DWG.ActiveCustomerSummary").collect()
+    finally:
+        spark.sql("DROP DATABASE IF EXISTS DWG CASCADE")
+        spark.sql("DROP DATABASE IF EXISTS Raw CASCADE")
+
+
+def _rebuild_with_broken_summary(lakehouses, bundle, output):
+    """A copy of the bundle whose summary view payload is invalid, hash matching.
+
+    Not corruption — a deliberately rebuilt bundle that passes preflight and only
+    fails when Spark analyses the bad view, so the barrier can be observed.
+    """
+
+    store = lakehouses.store
+    payloads = {}
+    for _, _, action in bundle.plan.actions():
+        payloads[action.payload] = store.read(output.join(*action.payload.split("/")))
+
+    broken = (
+        b"CREATE OR REPLACE VIEW DWG.ActiveCustomerSummary AS\n"
+        b"select count(*) as CustomerCount from DWG.ActiveCustomer where NoSuchColumn = 1\n"
+    )
+
+    def fix_action(action):
+        if action.id == "view-DWG.ActiveCustomerSummary":
+            payloads[action.payload] = broken
+            return replace(action, payload_sha256=hashlib.sha256(broken).hexdigest())
+        return action
+
+    sequences = tuple(
+        replace(
+            sequence,
+            batches=tuple(
+                replace(batch, actions=tuple(fix_action(a) for a in batch.actions))
+                for batch in sequence.batches
+            ),
+        )
+        for sequence in bundle.plan.sequences
+    )
+    plan = replace(bundle.plan, sequences=sequences, bundle_id="")
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+
+    repo_root = output.join("repository")
+    snapshot = {}
+    for entry in store.list(repo_root, recursive=True):
+        if entry.is_directory:
+            continue
+        relative = entry.location.value[len(repo_root.value) + 1 :]
+        snapshot[relative] = store.read(entry.location)
+
+    broken_location = lakehouses.location("_broken_bundle")
+    return write_bundle(broken_location, plan=plan, payloads=payloads, snapshot=snapshot, store=store)
+
+
+def test_a_failing_view_stops_the_build_and_leaves_no_final_view(
+    spark, lakehouses, installed_build_repository, lakehouse_only_bindings, installation_environment
+):
+    bundle, output = _generate(lakehouses, lakehouse_only_bindings)
+    broken = _rebuild_with_broken_summary(lakehouses, bundle, output)
+
+    try:
+        report = install_bundle(broken, environment=installation_environment)
+
+        assert report.status == "failed"
+        by_number = {s.number: s for s in report.sequences}
+        # Everything up to the summary succeeded; the summary sequence failed.
+        assert by_number[10].status == "succeeded"
+        assert by_number[30].status == "succeeded"  # DWG.Customer built
+        assert by_number[40].status == "succeeded"  # ActiveCustomer built
+        assert by_number[50].status == "failed"
+
+        failing = [r for r in report.action_results() if r.status == "failed"]
+        assert len(failing) == 1
+        assert failing[0].action_id == "view-DWG.ActiveCustomerSummary"
+
+        # The first view was built; the failing one was not.
+        views = {r["viewName"].lower() for r in spark.sql("SHOW VIEWS IN DWG").collect()}
+        assert "activecustomer" in views
+        assert "activecustomersummary" not in views
     finally:
         spark.sql("DROP DATABASE IF EXISTS DWG CASCADE")
         spark.sql("DROP DATABASE IF EXISTS Raw CASCADE")

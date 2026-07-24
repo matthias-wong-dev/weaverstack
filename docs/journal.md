@@ -1035,6 +1035,80 @@ built and stored during the read, and `.graph`/`.unresolved` expose it. The
 objects; within a repository, an alias is the answer, and the sales-etl fixture
 keeps its three-part reads to prove those are still first-class.
 
+### The build bundle — plan once, install anywhere
+
+The first complete build vertical: an installed repository is read and
+validated, projected onto the supplied physical targets, and turned into a
+**fully bound bundle** that a separate installer runs without ever re-reading or
+re-planning the source. The whole of interpretation lives in
+`generate_build_bundle`; the whole of execution lives in `install_bundle`. That
+separation is the point — the same bundle can later run locally, through Fabric
+Livy, or from a notebook, and no installer surface gets to reinterpret the
+repository.
+
+`weaver.build` carries it. The manifest is a flat, ordered hierarchy — plan →
+sequence → batch → action — serialised to a canonical `plan.yml`. **Sequences
+are barriers**, run in order; **a batch is bound to exactly one target**, so a
+physical destination is named once rather than repeated inside actions;
+**actions are independent units**, each with its own payload, hash and result.
+`bundle_id` is a content hash over the manifest and its payload hashes, no
+timestamp, so equal inputs give equal identity. Loading validates structure
+first (ids, targets, executors, ordering, omissions, payload paths) then payload
+presence and hashes, before any action can run.
+
+**The source owns its create syntax.** `SourceDocument.create_ddl()` generates
+the installable definition: a Spark SQL view wraps in `CREATE OR REPLACE VIEW`, a
+Python object becomes a small deterministic wrapper that imports the object and
+hands the class to the runtime, T-SQL raises at a deliberate v1 boundary. The
+payload embeds no physical path — Spark SQL binds by two-part name, Python reads
+the installer's ambient context — so a bundle is independent of where it installs.
+
+**Projection is maximal and coherent.** Keep every node whose target kind is
+bound, drop the unbound, then drop to a fixpoint anything stranded above a
+dropped producer, so no retained node is ever planned with a missing dependency.
+Every omission carries a typed reason, so a missing Warehouse binding is visible
+rather than a mysterious absence — a Lakehouse-only build of a repo with a
+Warehouse leaf installs the Lakehouse chain and records the leaf as
+`target_unbound`. A *supplied* Warehouse binding over T-SQL work raises the
+explicit v1 `NotImplementedError` instead of silently omitting.
+
+**The plan assumed a load runtime that did not exist.** The installer's Python
+executor has to actually run the Folder and Delta objects, but until now nothing
+constructed an object context, bound the dependency resolver, or wrote Delta —
+the populated-lakehouse fixture ran hand-written `build.spark.sql`. So this
+checkpoint built the minimal runtime it needs: `materialise(cls)` reads an
+ambient installation (Spark, resolver, target), constructs the context, binds
+the resolver, runs `read()`, and owns the mutation the object only proposed —
+promoting a Folder's staged directory, or writing a Delta table full-replace.
+The authoring contract holds: `read()` proposes, the runtime mutates. Scope is
+the simple slice — non-incremental, no upsert merge, no audit-column accounting,
+no delete application; those are load policy for when load is built out.
+
+**Local Delta is registered into the catalog.** A decision, endorsed: in Fabric,
+declaring a Lakehouse table makes `Schema.Table` queryable by name immediately,
+and local must mirror that or the whole model diverges. So the Delta
+materialisation registers a path-addressed table (`CREATE TABLE … USING delta
+LOCATION …` under a per-schema database), and a Spark SQL view reads its inputs
+by two-part name. A capability spike (`tests/spark/test_local_persisted_view.py`)
+proved table → view → view-on-view resolves in the shared session first;
+cross-process catalog persistence is deliberately *not* a prerequisite, and
+whether the local host should stand up a durable metastore is left open.
+
+**The installer trusts nothing it has not just checked.** It validates the
+bundle, resolves targets through an injected environment, and runs sequences as
+barriers with one recorded result per action; a failure fails its sequence and
+no later sequence starts, with skipped sequences recorded rather than omitted.
+Concurrency starts serial — one shared local Spark session gives no useful
+parallel DDL — while the manifest still models independent actions, so a Fabric
+installer can add session concurrency later without changing bundle semantics.
+
+The proof is `tests/spark/test_build_bundle_install.py`: generate a bundle,
+**delete the source repository**, then install from the certified snapshot alone
+and physically verify a Folder, a populated Delta table, a persistent view, and a
+view-on-view returning the right active-customer count. A rebuilt bundle with an
+invalid summary payload (hash matching) shows the barrier: the earlier sequences
+succeed, the summary fails and is reported, and its view is never created.
+
 ---
 
 ## Open questions
@@ -1042,7 +1116,10 @@ keeps its three-part reads to prove those are still first-class.
 | Question | Raised | Status |
 |---|---|---|
 | Which `weaver` revision is the port baseline — the plan's `a97ba8a` or current `fee2025`? | CP0 | open |
-| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.path()` on the depended-on class; materialised to a real local `Path` at load. |
+| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4, delivered in the build runtime: `Folder.folder_path()` resolves to a real local `Path` during `materialise`. |
+| Should the load runtime materialise audit columns, and apply proposed deletes? | build | open — the build runtime writes exactly what `read()` proposes (non-incremental, full replace); audit accounting, upsert merge and delete application are load policy, deferred. |
+| Should the local host stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — v1 registers Delta tables into the session catalog so views bind by name; cross-process persistence is not a prerequisite. |
+| A Spark SQL *table* payload (`CREATE OR REPLACE TABLE … USING delta AS …`) creates a managed table under the database location, not at Weaver's resolved path — unlike the Python Delta path. Reconcile when a Spark SQL table is first exercised. | build | open, untested in v1 (fixture has no Spark SQL table). |
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
@@ -1061,4 +1138,6 @@ keeps its three-part reads to prove those are still first-class.
 | 4 | `self.repo` removed; dependencies become imports; Spark SQL supported rather than deferred. |
 | 6b | Superseded at 6c: cross-engine two-part resolution is now an explicit `Warehouse alias`/`Lakehouse alias`, not a single-candidate inference; an unresolved two-part name is refused rather than recorded. Three-part reads and the CP6b sales-etl fixture stay valid. |
 | new | Schema SES files under `_schemas` (not in the original plan's checkpoint order) — every object and alias schema must be declared; no on-the-fly schema. |
+| build | The build-bundle checkpoint had to build a minimal load runtime the plan assumed already existed (context injection, dependency-resolver binding, Delta create-and-register, Folder staging promotion). Kept to the simple non-incremental slice; full load policy stays deferred. |
+| build | Local Delta materialisation registers into the Spark catalog (`CREATE TABLE … USING delta LOCATION …` under a per-schema database), so Spark SQL views bind their inputs by two-part name — mirroring Fabric, where a declared table is immediately queryable. |
 | 3 | Substantially extended: references, `Prohibit rebuild`, `Not null`, `Identity`, `Comparison columns`, `Column notes`, `Notes`, `Revision notes`, audit columns, unknown-key rejection. `Load mode` removed. |

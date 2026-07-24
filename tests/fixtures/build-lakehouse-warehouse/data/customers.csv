@@ -1,0 +1,5 @@
+CustomerId,CustomerName,IsActive
+1,Ada,true
+2,Bo,false
+3,Cy,true
+4,Di,true
