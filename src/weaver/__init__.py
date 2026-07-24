@@ -16,6 +16,15 @@ from .locations import Location
 from .objects import Folder, ObjectContext, Table, View, WeaverObject
 from .resolution import LocalResolver
 from .store import Entry, LocalStore, Store, StoreError
+from .sql import (
+    PooledSqlExecutor,
+    SqlConnectionPool,
+    SqlEndpoint,
+    SqlError,
+    SqlExecutor,
+    SqlExecutionError,
+    generate_warehouse_wipe_sql,
+)
 from .wipe import (
     WipeReport,
     wipe,
@@ -85,6 +94,14 @@ __all__ = [
     "LocalStore",
     "Entry",
     "StoreError",
+    # SQL
+    "SqlEndpoint",
+    "SqlExecutor",
+    "PooledSqlExecutor",
+    "SqlConnectionPool",
+    "SqlError",
+    "SqlExecutionError",
+    "generate_warehouse_wipe_sql",
     # wipe
     "wipe",
     "wipe_folder_target",

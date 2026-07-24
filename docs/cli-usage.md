@@ -66,8 +66,8 @@ root the work happens in.
 A hosts file is a convenience, never a requirement — see
 [`examples/env.yml`](../examples/env.yml). It holds only level four, the
 workspace or root. Lakehouses, Warehouses and Environments are named directly
-wherever they are used, because their names are already unique inside a
-workspace.
+wherever they are used. Item identity is typed: a Lakehouse and Warehouse may
+share a display name, and the command flag says which one is meant.
 
 ```yaml
 hosts:
@@ -115,7 +115,7 @@ Clears a target. **It removes everything there, not only what Weaver
 manages**, so it prints the plan first and asks before acting.
 
 ```bash
-weaver wipe --target Sales_LH --host MyLocal --hosts env.yml --dry-run
+weaver wipe --lakehouse-target Sales_LH --host MyLocal --hosts env.yml --dry-run
 ```
 
 ```text
@@ -131,18 +131,29 @@ wipe on MyLocal
 2 item(s) would be removed. Nothing was changed.
 ```
 
-The target's *shape* says what it is. A bare name is an item and clears all of
-it; a path narrows to one folder root:
+Target type is explicit because a Fabric workspace may contain a Lakehouse and
+a Warehouse with the same display name:
 
 ```bash
-weaver wipe --target Sales_LH                     # the whole Lakehouse
-weaver wipe --target Sales_LH/Files/Extracts      # only that folder root
-weaver wipe --target A --target B                 # several, repeat the flag
+weaver wipe --lakehouse-target Sales_LH
+weaver wipe --warehouse-target "Play Warehouse"
+weaver wipe --folder-target Sales_LH/Files/Extracts
+
+# Repeat or mix typed flags.
+weaver wipe --lakehouse-target A --lakehouse-target B \
+  --warehouse-target Reporting
 ```
+
+The underscore spellings (`--lakehouse_target`, `--warehouse_target`, and
+`--folder_target`) are accepted aliases. The hyphenated forms are canonical in
+help and documentation.
 
 Add `--yes` to skip the confirmation. Without a terminal to ask on — in a script
 or CI — the command **refuses** rather than proceeding, so nothing is destroyed
 by omission.
+
+`--dry-run` prints a selected Warehouse but does not connect to SQL or enumerate
+its catalogue. There is no Warehouse dry-run operation in core.
 
 ---
 

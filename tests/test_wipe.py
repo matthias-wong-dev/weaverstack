@@ -6,6 +6,7 @@ import pytest
 
 from weaver import DeltaTarget, FolderTarget, WarehouseTarget, wipe, wipe_folder_target
 from weaver.errors import CommandError
+from weaver.sql import SqlExecutionError
 
 
 def folder_target(name: str = "Sales_LH/Files") -> FolderTarget:
@@ -71,9 +72,53 @@ def test_a_wipe_takes_everything_not_only_what_weaver_manages(populated_folders)
 # --- warehouse ---------------------------------------------------------------
 
 
-def test_wiping_a_warehouse_says_it_is_not_implemented(lakehouses):
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        wipe(lakehouses.host, sql_target=WarehouseTarget.parse("Reporting_WH"))
+def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(lakehouses, monkeypatch):
+    import importlib
+
+    class Sql:
+        scripts = []
+
+        def execute_script(self, script):
+            self.scripts.append(script)
+
+    sql = Sql()
+
+    def forbidden_store(_host):
+        raise AssertionError("Warehouse-only wipe asked for a Store")
+
+    monkeypatch.setattr(importlib.import_module("weaver.wipe"), "store_for", forbidden_store)
+    reports = wipe(
+        lakehouses.host,
+        sql_target=WarehouseTarget.parse("Reporting_WH"),
+        sql=sql,
+    )
+
+    assert reports == ()
+    assert len(sql.scripts) == 1
+    assert "drop table" in sql.scripts[0].lower()
+
+
+def test_a_warehouse_sql_failure_names_the_selected_warehouse(lakehouses):
+    class BrokenSql:
+        def execute_script(self, script):
+            raise RuntimeError("driver broke")
+
+    with pytest.raises(SqlExecutionError, match="Reporting_WH.*driver broke"):
+        wipe(
+            lakehouses.host,
+            sql_target=WarehouseTarget.parse("Reporting_WH"),
+            sql=BrokenSql(),
+        )
+
+
+def test_a_warehouse_wipe_has_no_dry_run_mode(lakehouses):
+    with pytest.raises(CommandError, match="does not support dry_run"):
+        wipe(
+            lakehouses.host,
+            sql_target=WarehouseTarget.parse("Reporting_WH"),
+            sql=object(),
+            dry_run=True,
+        )
 
 
 # --- composition and safety --------------------------------------------------

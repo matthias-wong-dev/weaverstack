@@ -42,14 +42,31 @@ def build_parser() -> argparse.ArgumentParser:
         "wipe", help="clear a Lakehouse, a Warehouse, or one folder root"
     )
     wipe.add_argument(
-        "--target",
+        "--lakehouse-target",
+        "--lakehouse_target",
+        dest="lakehouse_targets",
         action="append",
         default=[],
         metavar="NAME",
-        help=(
-            "an item (Sales_LH) or a folder root (Sales_LH/Files/Extracts). "
-            "Repeat the flag for several: --target A --target B"
-        ),
+        help="a Lakehouse to clear completely; repeat for several",
+    )
+    wipe.add_argument(
+        "--warehouse-target",
+        "--warehouse_target",
+        dest="warehouse_targets",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="a Fabric Warehouse to clear completely; repeat for several",
+    )
+    wipe.add_argument(
+        "--folder-target",
+        "--folder_target",
+        dest="folder_targets",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="a Lakehouse Files root to clear; repeat for several",
     )
     _add_host_args(wipe)
     wipe.add_argument("--dry-run", action="store_true", help="report without removing")
@@ -249,16 +266,47 @@ def handle_wipe(args: argparse.Namespace) -> int:
     asks before doing it unless told not to.
     """
 
-    from weaver import wipe_selection
-
+    from weaver import (
+        FabricHost,
+        FolderTarget,
+        ItemRef,
+        WarehouseTarget,
+        wipe_folder_target,
+        wipe_lakehouse,
+        wipe_sql_target,
+    )
     from weaver.errors import CommandError
 
-    if not args.target:
-        raise CommandError("give at least one --target to wipe")
+    if not any(
+        (args.lakehouse_targets, args.warehouse_targets, args.folder_targets)
+    ):
+        raise CommandError(
+            "give at least one --lakehouse-target, --warehouse-target, "
+            "or --folder-target to wipe"
+        )
 
     host = _resolve_host(args)
-    store = _desktop_store(host)
-    planned = wipe_selection(args.target, host, store=store, dry_run=True)
+    lakehouses = tuple(ItemRef.parse(name) for name in args.lakehouse_targets)
+    warehouses = tuple(
+        WarehouseTarget.parse(name) for name in args.warehouse_targets
+    )
+    folders = tuple(FolderTarget.parse(path) for path in args.folder_targets)
+
+    if warehouses and not isinstance(host, FabricHost):
+        raise CommandError(
+            "Warehouse targets require a Fabric host; a local root has no SQL"
+        )
+
+    store = _desktop_store(host) if lakehouses or folders else None
+    planned = []
+    for lakehouse in lakehouses:
+        planned.extend(
+            wipe_lakehouse(lakehouse, host, store=store, dry_run=True)
+        )
+    for folder in folders:
+        planned.append(
+            wipe_folder_target(folder, host, store=store, dry_run=True)
+        )
 
     print(f"wipe on {host.alias or host.__class__.__name__}\n")
     for report in planned:
@@ -268,7 +316,10 @@ def handle_wipe(args: argparse.Namespace) -> int:
             print(f"      - {name}")
         if not report.removed:
             print("      (already empty)")
-    total = sum(report.count for report in planned)
+    for warehouse in warehouses:
+        print(f"  warehouse:{warehouse}")
+        print("    all user-created SQL objects")
+    total = sum(report.count for report in planned) + len(warehouses)
     print()
 
     if args.dry_run:
@@ -291,8 +342,18 @@ def handle_wipe(args: argparse.Namespace) -> int:
             print("Cancelled.")
             return 1
 
-    for report in wipe_selection(args.target, host, store=store):
-        print(f"  {report}")
+    for lakehouse in lakehouses:
+        for report in wipe_lakehouse(lakehouse, host, store=store):
+            print(f"  {report}")
+    for folder in folders:
+        print(f"  {wipe_folder_target(folder, host, store=store)}")
+    if warehouses:
+        from weaver.fabric import desktop_sql_executor
+
+        for warehouse in warehouses:
+            with desktop_sql_executor(warehouse, host) as sql:
+                wipe_sql_target(warehouse, host, sql=sql)
+            print(f"  warehouse:{warehouse}: wiped")
     return 0
 
 

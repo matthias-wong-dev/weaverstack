@@ -11,9 +11,11 @@ leftover from an interrupted run is recognisable.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -28,6 +30,8 @@ DEFAULT_ENVIRONMENT = "weaver"
 
 #: Disposable items carry this prefix so an abandoned one is obvious.
 TEST_PREFIX = "weavertest"
+WAREHOUSE_READY_TIMEOUT = 600.0
+WAREHOUSE_POLL_INTERVAL = 5.0
 
 
 @pytest.fixture(scope="session")
@@ -66,6 +70,11 @@ def _disposable_name(role: str) -> str:
     """A name no human would have chosen, so cleanup is unambiguous."""
 
     return f"{TEST_PREFIX}_{role}_{uuid.uuid4().hex[:8]}"
+
+
+def _warehouse_name() -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"Weaver_Pytest_{timestamp}_{uuid.uuid4().hex[:4]}"
 
 
 @dataclass(frozen=True)
@@ -175,14 +184,145 @@ def livy_session(fabric_host):
         session = LivySession.for_host(fabric_host)
     except CommandError as exc:
         pytest.skip(f"{exc}; run `weaver install` into the Environment first")
+    started = time.monotonic()
     try:
         session.start()
     except LivyError as exc:
         pytest.skip(f"could not start a Livy session (Environment installed?): {exc}")
+    session.weaver_startup_seconds = time.monotonic() - started
+    print(f"Fabric Livy session startup: {session.weaver_startup_seconds:.2f}s")
     try:
         yield session
     finally:
         session.close()
+
+
+# --- disposable Warehouse ----------------------------------------------------
+
+
+@dataclass
+class DisposableWarehouse:
+    item: Any
+    host: Host
+    target: Any
+    endpoint: Any
+    executor: Any
+    timings: dict[str, float]
+    started: float
+
+
+@pytest.fixture
+def disposable_warehouse(fabric_workspace, fabric_client, fabric_host):
+    """Create, await, expose, and always delete one disposable Warehouse."""
+
+    from weaver import WarehouseTarget
+    from weaver.fabric import (
+        FabricResolver,
+        create_warehouse,
+        delete_item,
+        desktop_sql_executor,
+    )
+
+    started = time.monotonic()
+    timings: dict[str, float] = {}
+    item = None
+    executor = None
+    name = _warehouse_name()
+    try:
+        stage = time.monotonic()
+        item = create_warehouse(fabric_workspace, name, client=fabric_client)
+        timings["item creation"] = time.monotonic() - stage
+        print(f"Warehouse {name} item creation: {timings['item creation']:.2f}s")
+
+        target = WarehouseTarget.parse(name)
+        deadline = time.monotonic() + WAREHOUSE_READY_TIMEOUT
+        last_error: Exception | None = None
+        endpoint = None
+
+        stage = time.monotonic()
+        while time.monotonic() < deadline:
+            try:
+                resolver = FabricResolver(fabric_host, client=fabric_client)
+                endpoint = resolver.sql_endpoint(target)
+                break
+            except Exception as exc:  # provisioning returns several transient shapes
+                last_error = exc
+                time.sleep(WAREHOUSE_POLL_INTERVAL)
+        if endpoint is None:
+            raise RuntimeError(
+                f"Warehouse {name!r} ({item.id}) exposed no SQL endpoint within "
+                f"{int(WAREHOUSE_READY_TIMEOUT)}s; last error: {last_error}"
+            )
+        timings["endpoint readiness"] = time.monotonic() - stage
+        print(
+            f"Warehouse {name} endpoint readiness: "
+            f"{timings['endpoint readiness']:.2f}s"
+        )
+
+        stage = time.monotonic()
+        while time.monotonic() < deadline:
+            candidate = None
+            try:
+                candidate = desktop_sql_executor(
+                    target,
+                    fabric_host,
+                    resolver=FabricResolver(fabric_host, client=fabric_client),
+                )
+                connection_started = time.monotonic()
+                with candidate.pool.lease():
+                    pass
+                timings["first SQL connection"] = (
+                    time.monotonic() - connection_started
+                )
+                query_started = time.monotonic()
+                assert candidate.query("select 1 as ready")[0]["ready"] == 1
+                timings["first select 1"] = time.monotonic() - query_started
+                executor = candidate
+                break
+            except Exception as exc:
+                last_error = exc
+                if candidate is not None:
+                    candidate.close()
+                time.sleep(WAREHOUSE_POLL_INTERVAL)
+        if executor is None:
+            raise RuntimeError(
+                f"Warehouse {name!r} ({item.id}) was not SQL-queryable within "
+                f"{int(WAREHOUSE_READY_TIMEOUT)}s; last error: {last_error}"
+            )
+        timings["SQL readiness"] = time.monotonic() - stage
+        print(
+            f"Warehouse {name} first SQL connection: "
+            f"{timings['first SQL connection']:.2f}s; "
+            f"first select 1: {timings['first select 1']:.2f}s"
+        )
+
+        yield DisposableWarehouse(
+            item=item,
+            host=fabric_host,
+            target=target,
+            endpoint=endpoint,
+            executor=executor,
+            timings=timings,
+            started=started,
+        )
+    finally:
+        if executor is not None:
+            executor.close()
+        if item is not None:
+            deletion_started = time.monotonic()
+            try:
+                delete_item(item, client=fabric_client)
+                deletion = time.monotonic() - deletion_started
+                total = time.monotonic() - started
+                print(
+                    f"Warehouse {name} deletion: {deletion:.2f}s; "
+                    f"total fixture lifetime: {total:.2f}s"
+                )
+            except Exception as exc:
+                print(
+                    f"warning: leaked Warehouse {name!r} ({item.id}); "
+                    f"cleanup failed: {exc}"
+                )
 
 
 # --- one populated lifecycle, on either host --------------------------------

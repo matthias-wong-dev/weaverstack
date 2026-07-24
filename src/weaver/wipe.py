@@ -16,8 +16,8 @@ on it.
 **Folders.** The configured root is kept and its contents removed, so the target
 survives and only what it held goes.
 
-**Warehouse.** Not implemented. It needs a single dynamic statement built from
-the catalogue views, and there is no local SQL to develop it against.
+**Warehouse.** One dynamic statement enumerates and removes user objects in
+dependency-safe order while preserving the Warehouse item and system schemas.
 
 Nothing here is scoped to Weaver-managed objects: a wipe clears the target. That
 suits a development loop, and makes the function something a CLI must gate
@@ -137,21 +137,34 @@ def wipe_sql_target(
     target: WarehouseTarget,
     host: Host,
     *,
-    store: Store | None = None,
-    dry_run: bool = False,
-) -> WipeReport:
-    """Not implemented.
+    sql=None,
+) -> None:
+    """Clear a Warehouse through the common SQL capability.
 
-    A Warehouse wipe is one dynamic statement generated from the catalogue
-    views — droppable objects in dependency order. There is no local SQL to
-    develop it against, so it waits for the Fabric vertical rather than being
-    guessed at now.
+    The default is deliberately Fabric-native.  A desktop caller crossing into
+    Fabric constructs and injects ``desktop_sql_executor`` explicitly.
     """
 
-    raise NotImplementedError(
-        f"wiping the Warehouse target {target.warehouse.name!r} is not implemented — "
-        "it needs a Warehouse to develop against, and a local host has no SQL"
-    )
+    from .sql import SqlError, SqlExecutionError, generate_warehouse_wipe_sql
+
+    owns_sql = sql is None
+    if sql is None:
+        from .fabric.sql import fabric_sql_executor
+
+        sql = fabric_sql_executor(target, host)
+    try:
+        sql.execute_script(generate_warehouse_wipe_sql())
+    except SqlError as exc:
+        raise SqlExecutionError(
+            f"failed to wipe Warehouse {target.warehouse.name!r}: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise SqlExecutionError(
+            f"failed to wipe Warehouse {target.warehouse.name!r}: {exc}"
+        ) from exc
+    finally:
+        if owns_sql and hasattr(sql, "close"):
+            sql.close()
 
 
 def wipe(
@@ -161,6 +174,7 @@ def wipe(
     delta_target: DeltaTarget | None = None,
     sql_target: WarehouseTarget | None = None,
     store: Store | None = None,
+    sql=None,
     dry_run: bool = False,
 ) -> tuple[WipeReport, ...]:
     """Wipe each supplied target. At least one is required.
@@ -172,14 +186,22 @@ def wipe(
     if not any((folder_target, delta_target, sql_target)):
         raise CommandError("wipe needs at least one target")
 
-    store = store or store_for(host)
     reports: list[WipeReport] = []
+    storage = store
     if folder_target is not None:
-        reports.append(wipe_folder_target(folder_target, host, store=store, dry_run=dry_run))
+        storage = storage or store_for(host)
+        reports.append(
+            wipe_folder_target(folder_target, host, store=storage, dry_run=dry_run)
+        )
     if delta_target is not None:
-        reports.append(wipe_delta_target(delta_target, host, store=store, dry_run=dry_run))
+        storage = storage or store_for(host)
+        reports.append(
+            wipe_delta_target(delta_target, host, store=storage, dry_run=dry_run)
+        )
     if sql_target is not None:
-        reports.append(wipe_sql_target(sql_target, host, store=store, dry_run=dry_run))
+        if dry_run:
+            raise CommandError("Warehouse wipe does not support dry_run")
+        wipe_sql_target(sql_target, host, sql=sql)
     return tuple(reports)
 
 
