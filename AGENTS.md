@@ -51,47 +51,49 @@ changes a decision and leaves the journal stale is incomplete.
 This is the thing that is hard to hold in your head, and the thing most likely
 to be got wrong by someone reading only the code in front of them.
 
-**Weaver is a system that runs inside Microsoft Fabric.** We develop it on a
-laptop against a local proxy, and we test it at both levels. Two axes, kept
-strictly apart:
+**Weaver is a system that runs inside Microsoft Fabric.** Fabric is its one real
+host. We develop it on a laptop against a local emulator, and test it at both
+levels. Resource location and code execution are separate axes:
 
 ```text
-    WHERE THINGS ARE                 WHERE THE CODE RUNS
-    the host                         the executor
+    WHERE RESOURCES ARE              WHERE THE CODE RUNS
 
-    LocalHost   a root directory     in-process, on a laptop
-    FabricHost  one workspace        in-process, inside a Fabric session
+    local emulator root              in-process, on a laptop
+    Fabric workspace                 in-process, inside a Fabric session
                                      submitted from outside, over Livy
 ```
 
-They are independent, and three of the combinations are real:
+These give three useful execution paths:
 
-| | host | code runs | what it is |
+| | resources | code runs | what it is |
 |---|---|---|---|
-| 1 | Local | laptop | development, and most of the test suite |
+| 1 | local emulator | laptop | development, and most of the test suite |
 | 2 | Fabric | laptop | the desktop CLI reaching into a workspace |
 | 3 | Fabric | **in Fabric** | **the product** — `pip install weaverstack` in a notebook |
 
-**The foundational rule:** *Weaver core operates within the host where it is
-executing. Only the CLI and the Fabric test infrastructure cross from one host
-into another.*
+**The foundational rule:** *Weaver core operates within the environment where it
+is executing. Only the CLI and Fabric test infrastructure cross into Fabric.*
 
 ```text
-core running locally        → operates within LocalHost
+core running locally        → operates against the local emulator
 core running inside Fabric   → operates within FabricHost, session-native
 CLI or pytest running locally → may cross into Fabric over REST, DFS and Livy
 ```
 
 A `FabricHost` identifies the workspace the resources live in. It does **not**
 say whether access happens through desktop HTTP clients or inside a session.
+`LocalHost` remains the name of the in-process emulator configuration in Python;
+it is not a second deployment host and must not leak into durable contracts.
+In particular, a build bundle binds target kind and item identifiers, never a
+`host_kind`.
 
 So the storage picture has two parts, and they must not be conflated:
 
-*Within-host execution* — the store Weaver uses where it runs:
+*In-environment execution* — the store Weaver uses where it runs:
 
-| execution | host | store |
+| execution | environment configuration | store |
 |---|---|---|
-| local process | `LocalHost` | `LocalStore` |
+| local process | `LocalHost` emulator | `LocalStore` |
 | Fabric session | `FabricHost` | `FabricStore` over `notebookutils.fs` |
 
 *Cross-boundary access* — a local caller reaching into a workspace:
@@ -107,7 +109,7 @@ caller that crosses. Inside Fabric, `store_for(FabricHost)` returns the
 session-native `FabricStore`; from a desktop that construction fails rather
 than silently substituting DFS.
 
-Above resolution and the store, nothing knows which host it is talking to. An
+Above resolution and the store, nothing knows which environment it is using. An
 `if isinstance(host, …)` in core operation code means the abstraction is being
 broken; the fix belongs in the factories, or in the CLI that does the crossing.
 
@@ -116,13 +118,34 @@ injected credential and otherwise uses the library default without pinning the
 chain. The CLI and the Fabric test infrastructure call `prefer_cli_credential()`
 themselves; importing or using the core imposes no credential choice.
 
-### The local host is a proxy, not a toy
+### The local environment is an emulator, not a peer host
 
 `.local/Sales_LH/Files` and `.local/Sales_LH/Tables` mirror the shape a Fabric
 Lakehouse presents through OneLake, deliberately, so the same resolution
 arithmetic serves both. It exists so that most development and most of the test
-suite need no tenant, no capacity and no credentials — not because local is a
-lesser case.
+suite need no tenant, no capacity and no credentials.
+
+### Fabric is the reference; local emulates it — never the reverse
+
+This is the direction of the whole system, and the mistake most worth naming
+because it has already been made once. **Weaver is Fabric-first.** The behaviour
+that must be right is the behaviour *inside* Fabric; the local emulator exists so
+that behaviour can be developed and tested quickly on a laptop. Design against
+what Fabric does, then make local reproduce it. Do not design against what is
+convenient locally and then contort Fabric to fit — if local and Fabric disagree,
+Fabric is right and local is the thing to fix.
+
+Concretely, for anything with two phases (as the build bundle has *generate* then
+*install*): **both phases run in the target environment.** Inside Fabric that
+means in the session, against the native Spark catalogue; in the emulator it
+means in-process against the local catalogue. A workflow that plans on the
+desktop and only executes in Fabric is a *different, lesser* architecture (row 2
+dressed as row 3), and it silently loses capabilities the authoritative
+catalogue provides — build bundle generation, done on the desktop with
+`spark=None`, could not see catalogue views and so could not prune them. The fix
+was to move generation into the session, not to accept the gap as inherent to
+Fabric. When a Fabric behaviour is awkward, the question is "how does local
+emulate this?", never "how does Fabric bend to what local already does?".
 
 ### Row 3 is the claim, and it is the least tested
 
@@ -144,7 +167,7 @@ the same version and the install skips the republish.
 
 Ask, in order:
 
-1. Does it work against a `LocalHost`, with a test that needs no tenant?
+1. Does it work in the `LocalHost` emulator, with a test that needs no tenant?
 2. Does it work against a `FabricHost` from the laptop?
 3. Does it work with Weaver *running inside* Fabric?
 

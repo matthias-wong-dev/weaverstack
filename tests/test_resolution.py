@@ -58,6 +58,12 @@ def test_a_delta_table_lands_under_tables(resolver):
     )
 
 
+def test_local_schema_location_emulates_fabric_managed_table_placement(resolver):
+    assert resolver.schema_location(ItemRef("Sales"), "Budget") == (
+        "/srv/.local/Sales/Tables/Budget"
+    )
+
+
 def test_schema_and_object_are_separate_segments(resolver):
     """Never joined into one dotted directory name."""
     location = resolver.delta_table(DeltaTarget.parse("Sales"), "Budget", "Expense")

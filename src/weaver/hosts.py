@@ -37,6 +37,11 @@ from .targets import validate_name
 #: becomes an installed repository.
 REPOS_AREA = "repos"
 
+#: Persisted build bundles live beneath the Weaver Lakehouse Files area here,
+#: each under a per-build subdirectory. A bundle bound for immediate execution
+#: may instead sit in a throwaway directory; this is where a kept one belongs.
+BUILD_BUNDLES_AREA = "build_bundles"
+
 
 @dataclass(frozen=True)
 class WarehouseSettings:

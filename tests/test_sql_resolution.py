@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from weaver import FabricHost, WarehouseTarget
+from weaver import FabricHost, ItemRef, WarehouseTarget
 from weaver.fabric import FabricResolver, FabricSessionResolver
 
 
@@ -32,6 +32,12 @@ class Client:
                 "Encrypt=yes;TrustServerCertificate=no;"
             )
         }
+
+
+def test_fabric_schema_location_is_managed_by_the_lakehouse():
+    resolver = FabricResolver(FabricHost(workspace="Analytics"), client=Client())
+
+    assert resolver.schema_location(ItemRef("Sales"), "DWG") is None
 
 
 def test_desktop_resolution_uses_the_typed_connection_string_endpoint():

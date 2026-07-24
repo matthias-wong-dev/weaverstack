@@ -1035,6 +1035,173 @@ built and stored during the read, and `.graph`/`.unresolved` expose it. The
 objects; within a repository, an alias is the answer, and the sales-etl fixture
 keeps its three-part reads to prove those are still first-class.
 
+### The build bundle — plan once, install anywhere
+
+The first complete build vertical: an installed repository is read and
+validated, projected onto the supplied physical targets, and turned into a
+**fully bound bundle** that a separate installer runs without ever re-reading or
+re-planning the source. The whole of interpretation lives in
+`generate_build_bundle`; the whole of execution lives in `install_bundle`. That
+separation is the point — the same bundle can later run locally, through Fabric
+Livy, or from a notebook, and no installer surface gets to reinterpret the
+repository.
+
+`weaver.build_bundle` carries it — named for the subsystem, and to sidestep the
+conventional `build/` gitignore rule that would otherwise swallow the package. A
+kept bundle lands under `<weaver-lakehouse>/Files/build_bundles/<name>` (normally
+a timestamp); a bundle bound straight for the installer can instead use a
+throwaway directory. The manifest is a flat, ordered hierarchy — plan →
+sequence → batch → action — serialised to a canonical `plan.yml`. **Sequences
+are barriers**, run in order; **a batch is bound to exactly one target**, so a
+physical destination is named once rather than repeated inside actions;
+**actions are independent units**, each with its own payload, hash and result.
+`bundle_id` is a content hash over the manifest and its payload hashes, no
+timestamp, so equal inputs give equal identity. Loading validates structure
+first (ids, targets, executors, ordering, omissions, payload paths) then payload
+presence and hashes, before any action can run.
+
+**The source owns its create syntax.** `SourceDocument.create_ddl()` generates
+the installable definition: a Spark SQL view wraps in `CREATE OR REPLACE VIEW`, a
+Python object becomes a small deterministic wrapper that imports the object and
+hands the class to the runtime, T-SQL raises at a deliberate v1 boundary. The
+payload embeds no physical path — Spark SQL binds by two-part name, Python reads
+the installer's ambient context — so a bundle is independent of where it installs.
+
+**Projection is maximal and coherent.** Keep every node whose target kind is
+bound, drop the unbound, then drop to a fixpoint anything stranded above a
+dropped producer, so no retained node is ever planned with a missing dependency.
+Every omission carries a typed reason, so a missing Warehouse binding is visible
+rather than a mysterious absence — a Lakehouse-only build of a repo with a
+Warehouse leaf installs the Lakehouse chain and records the leaf as
+`target_unbound`. A *supplied* Warehouse binding over T-SQL work raises the
+explicit v1 `NotImplementedError` instead of silently omitting.
+
+**Build creates structure; load populates it — and build does neither twice.**
+The first cut of this work mixed the two: a Python object's payload imported the
+object and ran its `read()` to write rows. That was wrong. Build reads the
+repository *once* to freeze a bundle and then only creates structure —
+`create_ddl()` returns pure Spark DDL: a Delta table is `CREATE OR REPLACE TABLE`
+over its **declared** columns, a view is `CREATE OR REPLACE VIEW` over its query
+body, a folder is an empty directory. Nothing runs `read()`, reads a CSV, or
+writes a row; populating a table is *load*, a separate phase, and the whole load
+runtime (`materialise`, context injection, the dependency-resolver binding) was
+removed. Schema is therefore always declared, never inferred from data — which
+is deliberate, because inferring a Delta schema from a CSV or spreadsheet is too
+risky to do silently.
+
+**Local Delta is registered into the catalog, path-free.** In Fabric, declaring
+a Lakehouse table makes `Schema.Table` queryable by name immediately, and local
+must mirror that or the model diverges. The one physical path a build resolves is
+a schema's storage: the schema-create action is `CREATE DATABASE … LOCATION
+'<Tables>/<schema>'`, so a managed table created under it lands where Weaver
+addresses it while the table DDL stays a path-free `CREATE OR REPLACE TABLE
+Schema.Object (…)`. A Spark SQL view then binds its inputs by two-part name. A
+spike (`tests/spark/test_local_persisted_view.py`) proved table → view →
+view-on-view resolves in the shared session; durable cross-process catalog
+persistence is deliberately not a prerequisite.
+
+**Build is reconciliation, and the prune is frozen.** A build removes anything in
+the target it does not manage — an unmanaged schema, folder, table or view —
+before creating the managed set. The critical property, and a correction to a
+first cut that computed the prune *dynamically at install*: the drops are frozen
+into the bundle at **build** time. The build inspects the visible target now,
+diffs it against the managed set, and bakes a concrete drop per orphan — a `DROP
+TABLE`/`VIEW`/`DATABASE` as a Spark SQL payload, an unmanaged folder as a
+directory-removing action. The installer runs exactly those and enumerates
+nothing. This is the whole point of a frozen bundle: you can read `plan.yml` and
+the drop payloads and see precisely what an install will remove *before* it
+runs — a dynamic prune would instead delete whatever the live catalog happened to
+say at install, so a registration glitch could quietly wipe production.
+Reconciliation is scoped to the one bound Lakehouse's own storage — a table is a
+directory under `Tables/`, a folder under `Files/` (never the reserved
+`repos`/`build_bundles` areas) — so a shared Spark catalog cannot make a build
+reach into another Lakehouse. It is on by default; `generate_build_bundle(prune=
+False)` opts out when the target is not visible to inspect, and a Spark session
+lets the inspection also see catalog views.
+
+**The installer trusts nothing it has not just checked.** It validates the
+bundle, resolves targets through an injected environment, and runs sequences as
+barriers with one recorded result per action; a failure fails its sequence and
+no later sequence starts, with skipped sequences recorded rather than omitted.
+Because build executes only generated DDL and folder/prune actions, the installer
+never puts the snapshot on the import path or imports object code. Concurrency
+starts serial — one shared local Spark session gives no useful parallel DDL —
+while the manifest still models independent actions, so a Fabric installer can
+add session concurrency later without changing bundle semantics.
+
+The proof is `tests/fabric/test_build_bundle.py`, written environment-neutrally
+and run in Fabric and its local emulator. It generates a bundle, **deletes the
+source repository**, then installs from the bundle alone and verifies a real
+Folder directory, an *empty* Delta table of the declared shape, a persistent view,
+and a view-on-view — structure, not data. A second test seeds the target with
+unmanaged objects, asserts the build froze a drop for each, and asserts they are
+gone after install while the managed set is present; a third rebuilds a bundle
+with an invalid view payload (hash matching) and asserts the barrier; a fourth
+checks the report is written into the bundle.
+
+**Execution environment and executor stay independent, and the Fabric path is
+proven on a real workspace.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides
+transport behind callables the way `PopulatedLakehouse` does for wipe. Generation
+and installation both run in the target environment: in-process against the
+shared Spark session for the emulator, and as Livy programs against the
+session-native store, resolver and Spark for Fabric. The desktop only stages the
+repository and reads results. Thus Fabric planning and installation execute
+*inside* Fabric (position C) against the authoritative catalogue. The same four
+behavioural tests pass in the emulator and Fabric (`pytest -m fabric` against the
+Weaver workspace, capacity resumed for the run and suspended after).
+
+**Fabric is the reference; local emulates it — do not invert.** A first cut
+generated the bundle on the desktop with `spark=None` and only installed
+in-session. That is a *different, lesser* architecture (row 2 dressed as row 3),
+and it silently lost catalogue view pruning: planning ran outside the Fabric Spark
+catalogue, so it could not see views to freeze a `DROP` for them. The fix was to
+move generation into the session, not to accept the gap as inherent to Fabric —
+the rule now stated plainly in `AGENTS.md`.
+
+Making the Fabric side green taught the platform's real contract, one live run
+per fact:
+
+- **Trident Spark refuses `CREATE DATABASE` on a Lakehouse** — use `CREATE
+  SCHEMA` (and `DROP SCHEMA`). Local keeps a `LOCATION` clause so a managed table
+  lands under the resolver's Tables path; a **schema-enabled** Fabric Lakehouse
+  manages the location itself, so a managed `CREATE TABLE Schema.Object` lands at
+  `Tables/<schema>/<table>` and views bind by two-part name. Path-addressed
+  ``delta.`…` `` table creation, which works locally, is *rejected* on Fabric —
+  the reverse of the initial guess.
+- **The bundle is one physical place under two URL schemes**: generation writes
+  it in-session through `FabricStore` as `abfss://…`; the desktop test handle
+  addresses that same place over OneLake DFS (`https://…dfs…`). The installer
+  re-resolves the bundle by name in-session, so it reads the abfss form.
+- **`FabricStore` gained byte `read`/`write`** (over `notebookutils.fs`
+  head/put) — the installer reads `plan.yml` and payloads from OneLake and writes
+  the report back. UTF-8 text, which a bundle is.
+- **`dbo` is a reserved schema** — a schema-enabled Lakehouse's default `dbo`
+  cannot be dropped, so a prune never touches it, as it never touches
+  `repos`/`build_bundles` under Files.
+- **A Fabric managed table's physical path is host-chosen (lower-cased)** while
+  the resolver produces the declared case, so table existence is asserted by name
+  through the catalog, not by a case-exact path; a Folder, which Weaver `mkdir`s
+  itself, is still path-checked.
+- **`SHOW DATABASES` returns qualified `Workspace.Lakehouse.schema` names** on
+  Fabric, so the prune enumerates catalogue views per surviving schema with `SHOW
+  VIEWS IN <bare-schema>` (session-relative) rather than matching bare names
+  against `SHOW DATABASES` — which now freezes a `DROP VIEW` for an unmanaged
+  catalogue view in Fabric and the local emulator.
+
+With generation in-session, prune reconciles catalogue views as well as storage,
+so nothing about the Fabric path is a lesser case than local.
+
+**A bundle binds destinations, not hosts.** `BoundTarget` retains the target
+kind and the workspace, item and SQL endpoint identifiers an installer may need,
+but no longer carries `host_kind`. Fabric is Weaver's real host; local execution
+emulates it for development and testing. The resolver, store and Spark supplied
+to generation or installation already define that runtime context, so serialising
+`local` or `fabric` into the bundle was redundant and misleading. The
+`LOCAL_HOST`/`FABRIC_HOST` bundle constants and installer validation based on
+them were removed. Resolver-owned `schema_location` preserves the only behavior
+that had depended on the field: the emulator emits an explicit schema
+`LOCATION`, while Fabric lets the Lakehouse manage it.
+
 ---
 
 ## Open questions
@@ -1042,7 +1209,10 @@ keeps its three-part reads to prove those are still first-class.
 | Question | Raised | Status |
 |---|---|---|
 | Which `weaver` revision is the port baseline — the plan's `a97ba8a` or current `fee2025`? | CP0 | open |
-| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.path()` on the depended-on class; materialised to a real local `Path` at load. |
+| Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.folder_path()` on the depended-on class; realised as a `Path` at load. Load itself is deferred. |
+| The whole load phase: running `read()`, upsert/incremental merge, audit-column accounting, applying proposed deletes. | build | deferred — build creates structure only; load populates it, and is the next body of work after the Fabric seam. |
+| Should the local emulator stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — build registers each Delta table into the session catalog (via a schema database with a `Tables/<schema>` LOCATION) so views bind by name; cross-process persistence is not a prerequisite. |
+| Build reconciliation scope: prune drops what a Lakehouse holds that the bundle does not manage, scoped to that Lakehouse's `Tables/`/`Files/` storage. Is per-Lakehouse physical scope the right boundary once Fabric catalogs are per-item? | build | open — chosen so a shared local Spark catalog cannot make a build nuke another Lakehouse's databases. |
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
@@ -1061,4 +1231,7 @@ keeps its three-part reads to prove those are still first-class.
 | 4 | `self.repo` removed; dependencies become imports; Spark SQL supported rather than deferred. |
 | 6b | Superseded at 6c: cross-engine two-part resolution is now an explicit `Warehouse alias`/`Lakehouse alias`, not a single-candidate inference; an unresolved two-part name is refused rather than recorded. Three-part reads and the CP6b sales-etl fixture stay valid. |
 | new | Schema SES files under `_schemas` (not in the original plan's checkpoint order) — every object and alias schema must be declared; no on-the-fly schema. |
+| build | Build is strictly structure, never load: `create_ddl()` returns Spark DDL (`CREATE OR REPLACE TABLE` over the declared schema, `CREATE OR REPLACE VIEW`, an empty folder directory) and the repository is read once into a frozen bundle. The plan's Python-payload-runs-`read()` shape is dropped; a load phase comes later. |
+| build | Build registers each Delta table into the Spark catalog by giving its schema database a `Tables/<schema>` LOCATION, so a managed table lands at Weaver's path and a Spark SQL view binds inputs by two-part name — mirroring Fabric, where a declared table is immediately queryable. |
+| build | Build reconciles: prune sequences run upfront and drop any schema/folder/table/view the bundle does not manage, scoped to the bound Lakehouse's own `Tables/`/`Files/` storage. |
 | 3 | Substantially extended: references, `Prohibit rebuild`, `Not null`, `Identity`, `Comparison columns`, `Column notes`, `Notes`, `Revision notes`, audit columns, unknown-key rejection. `Load mode` removed. |
