@@ -916,6 +916,16 @@ item survived the wipe, and deletes it in fixture cleanup. Capacity remains an
 external prerequisite. The fixture prints stage timings so the disposable
 approach can be judged from measured provisioning cost.
 
+The first complete run against the `Weaver` test workspace passed. The
+Environment-backed Livy session started in 42.03 seconds. The disposable
+Warehouse then took 7.68 seconds to create, 0.70 seconds to expose its endpoint,
+2.01 seconds for the first SQL connection, 0.05 seconds for the first
+`select 1`, 5.37 seconds to populate, 4.61 seconds to wipe from installed
+Weaver, and 0.29 seconds to delete. Six fixture objects were independently
+observed before wipe and none afterwards. Its total fixture lifetime was 21.80
+seconds; the whole pytest, including Livy startup, took 68.93 seconds. That
+measurement does not justify a permanent shared Warehouse fixture.
+
 ---
 
 ## Open questions
