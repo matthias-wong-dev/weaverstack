@@ -1139,20 +1139,43 @@ while the managed set is present; a third rebuilds a bundle with an invalid view
 payload (hash matching) and asserts the barrier; a fourth checks the report is
 written into the bundle.
 
-**Host and executor stay independent, and the Fabric path reuses the wipe
-harness.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides transport behind
+**Host and executor stay independent, and the Fabric path is proven on a real
+workspace.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides transport behind
 callables the way `PopulatedLakehouse` does for wipe: *generation* always runs on
 the caller (position B) — read the repo, freeze the prune, write the bundle to
 the Weaver Lakehouse over the store — while *installation* runs where the host
 lives. Locally that is in-process against the shared Spark session; on Fabric it
 is a Livy program that constructs the session-native store, resolver and Spark and
 calls `install_bundle`, so the installer executes *inside* Fabric (position C).
-Nothing in the manifest or the installer changed to make this work — the bundle
-is `abfss`-addressed and both `FabricStore` and the DFS client speak it, so a
-bundle written from the desktop is read in-session unchanged. The local
-parametrisation runs green; the Fabric parametrisation is wired to the proven
-pattern and skips until `WEAVER_FABRIC_WORKSPACE` and an installed Environment are
-present. One known gap: generation on the desktop has no Spark catalog, so a
+The same four behavioural tests pass on both hosts (`pytest -m fabric` against the
+Weaver workspace, capacity resumed for the run and suspended after).
+
+Making the Fabric side green taught the platform's real contract, one live run
+per fact:
+
+- **Trident Spark refuses `CREATE DATABASE` on a Lakehouse** — use `CREATE
+  SCHEMA` (and `DROP SCHEMA`). Local keeps a `LOCATION` clause so a managed table
+  lands under the resolver's Tables path; a **schema-enabled** Fabric Lakehouse
+  manages the location itself, so a managed `CREATE TABLE Schema.Object` lands at
+  `Tables/<schema>/<table>` and views bind by two-part name. Path-addressed
+  ``delta.`…` `` table creation, which works locally, is *rejected* on Fabric —
+  the reverse of the initial guess.
+- **The bundle is one physical place under two URL schemes**: the desktop writes
+  it over OneLake DFS (`https://…dfs…`), the in-session `FabricStore` reads it as
+  `abfss://…`. The installer re-resolves the bundle by name in-session, so it
+  reads the abfss form.
+- **`FabricStore` gained byte `read`/`write`** (over `notebookutils.fs`
+  head/put) — the installer reads `plan.yml` and payloads from OneLake and writes
+  the report back. UTF-8 text, which a bundle is.
+- **`dbo` is a reserved schema** — a schema-enabled Lakehouse's default `dbo`
+  cannot be dropped, so a prune never touches it, as it never touches
+  `repos`/`build_bundles` under Files.
+- **A Fabric managed table's physical path is host-chosen (lower-cased)** while
+  the resolver produces the declared case, so table existence is asserted by name
+  through the catalog, not by a case-exact path; a Folder, which Weaver `mkdir`s
+  itself, is still path-checked.
+
+One known gap remains: generation on the desktop has no Spark catalog, so a
 desktop-built Fabric bundle prunes tables, folders and schemas from storage but
 not catalog views — full view pruning wants an in-session generate, deferred.
 
