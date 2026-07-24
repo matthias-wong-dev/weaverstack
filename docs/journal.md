@@ -853,6 +853,18 @@ tenant after the rename — the DFS store and the in-Fabric Livy sync both pass.
 The AGENTS.md abstraction section now carries the two-table separation as the
 authoritative statement of the boundary.
 
+### Fabric absence is explicit
+
+Environment installation now distinguishes absence from failure at both
+lookups that can legitimately return nothing. A zero-match item lookup raises
+`ItemNotFoundError`; only that error permits creation of a missing Environment.
+Other lookup failures — including ambiguity and Fabric API errors — propagate.
+
+`FabricError` retains the HTTP status returned by Fabric. Reading an
+Environment's published libraries maps only status 404 to the valid
+"never published" empty state; authentication, throttling and server failures
+propagate instead of triggering a restage and republish.
+
 ---
 
 ## Open questions

@@ -8,15 +8,23 @@ ever removes ``weaverstack`` wheels.
 
 from __future__ import annotations
 
+import types
+from pathlib import Path
+
 import pytest
 
+from weaver.fabric import environment as env_mod
 from weaver.fabric.environment import (
     _version_from_wheel,
     delete_stale_wheels,
+    find_or_create_environment,
     is_weaver_wheel,
+    read_published,
     staged_wheels,
 )
-from weaver.fabric.resources import Item
+from weaver.errors import CommandError
+from weaver.fabric.client import FabricClient, FabricError
+from weaver.fabric.resources import Item, ItemNotFoundError, Workspace
 
 
 def test_only_weaver_wheels_are_recognised():
@@ -75,13 +83,82 @@ def test_unrelated_custom_libraries_are_never_deleted():
     assert client.deleted == []
 
 
+class _NeverCreateClient:
+    def request(self, *args, **kwargs):
+        pytest.fail("must not create an Environment after an unexpected lookup failure")
+
+
+def test_environment_creation_only_follows_item_not_found(monkeypatch):
+    def fail_lookup(*args, **kwargs):
+        raise CommandError("duplicate Environment matches")
+
+    monkeypatch.setattr(env_mod, "find_item", fail_lookup)
+
+    with pytest.raises(CommandError, match="duplicate"):
+        find_or_create_environment(
+            Workspace("ws1", "WS"), "weaver", client=_NeverCreateClient()
+        )
+
+
+class _CreatedResponse:
+    status_code = 201
+
+    def json(self):
+        return {"id": "env1"}
+
+
+class _CreateClient:
+    def __init__(self):
+        self.created = False
+
+    def request(self, method, path, *, payload, expected):
+        self.created = True
+        return _CreatedResponse()
+
+
+def test_environment_creation_follows_item_not_found(monkeypatch):
+    def missing(*args, **kwargs):
+        raise ItemNotFoundError("missing")
+
+    monkeypatch.setattr(env_mod, "find_item", missing)
+    client = _CreateClient()
+
+    item, created = find_or_create_environment(
+        Workspace("ws1", "WS"), "weaver", client=client
+    )
+
+    assert (item.id, created, client.created) == ("env1", True, True)
+
+
+class _PublishedClient:
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+    def get_json(self, path):
+        raise FabricError("published-library lookup failed", status_code=self.status_code)
+
+
+def test_never_published_environment_is_empty():
+    assert read_published(_env(), client=_PublishedClient(404)) == {}
+
+
+@pytest.mark.parametrize("status_code", [401, 429, 500, None])
+def test_published_library_failures_other_than_404_are_re_raised(status_code):
+    with pytest.raises(FabricError, match="lookup failed"):
+        read_published(_env(), client=_PublishedClient(status_code))
+
+
+def test_fabric_client_preserves_failure_status(monkeypatch):
+    response = types.SimpleNamespace(status_code=429, text="slow down", content=b"")
+    monkeypatch.setattr("requests.request", lambda *args, **kwargs: response)
+
+    with pytest.raises(FabricError) as info:
+        FabricClient(token="token").get_json("workspaces")
+
+    assert info.value.status_code == 429
+
+
 # --- install() diff-and-skip decisions, without touching Fabric --------------
-
-import types
-
-from pathlib import Path
-
-from weaver.fabric import environment as env_mod
 
 
 def _wire(monkeypatch, *, published: dict, staged: dict, state: str, wheel_name: str):

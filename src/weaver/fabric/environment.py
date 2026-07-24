@@ -22,7 +22,14 @@ from pathlib import Path
 
 from ..errors import CommandError
 from .client import FabricClient, FabricError
-from .resources import ENVIRONMENT, Item, Workspace, find_item, find_workspace
+from .resources import (
+    ENVIRONMENT,
+    Item,
+    ItemNotFoundError,
+    Workspace,
+    find_item,
+    find_workspace,
+)
 
 #: The wheel filenames this deployment owns. Stale copies matching it are
 #: replaced; anything else in the Environment is left untouched.
@@ -162,7 +169,7 @@ def find_or_create_environment(
 
     try:
         return find_item(workspace, name, item_type=ENVIRONMENT, client=client), False
-    except CommandError:
+    except ItemNotFoundError:
         pass
 
     response = client.request(
@@ -186,7 +193,7 @@ def _await_environment(
     while time.time() < deadline:
         try:
             return find_item(workspace, name, item_type=ENVIRONMENT, client=client)
-        except CommandError:
+        except ItemNotFoundError:
             time.sleep(3.0)
     raise FabricError(f"Environment {name!r} did not appear within {int(timeout)}s")
 
@@ -214,8 +221,10 @@ def read_published(env: Item, *, client: FabricClient) -> dict:
         return client.get_json(
             f"workspaces/{env.workspace_id}/environments/{env.id}/libraries"
         )
-    except FabricError:
-        return {}
+    except FabricError as exc:
+        if exc.status_code == 404:
+            return {}
+        raise
 
 
 def library_wheels(libraries: dict) -> list[str]:
@@ -250,7 +259,8 @@ def upload_wheel(env: Item, wheel: Path, *, client: FabricClient) -> None:
     if response.status_code not in (200, 201):
         raise FabricError(
             f"uploading {wheel.name} returned {response.status_code}: "
-            f"{response.text.strip()[:400] or 'no body'}"
+            f"{response.text.strip()[:400] or 'no body'}",
+            status_code=response.status_code,
         )
 
 
@@ -269,7 +279,8 @@ def upload_environment_yml(env: Item, definition: Path, *, client: FabricClient)
     if response.status_code not in (200, 201):
         raise FabricError(
             f"uploading environment.yml returned {response.status_code}: "
-            f"{response.text.strip()[:400] or 'no body'}"
+            f"{response.text.strip()[:400] or 'no body'}",
+            status_code=response.status_code,
         )
 
 
