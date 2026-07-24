@@ -28,7 +28,7 @@ from weaver.build_bundle import (
 from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
 from weaver.errors import BuildError
 
-TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", host_kind="local", item_id="Sales_LH")
+TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 
 
 class Recorder:
@@ -152,16 +152,3 @@ def test_preflight_rejects_a_corrupt_bundle_before_running(tmp_path):
     with pytest.raises(BuildError, match="hash mismatch"):
         install_bundle(bundle, environment=env)
     assert recorder.calls == []  # nothing ran
-
-
-def test_installing_against_a_non_local_host_is_refused(tmp_path):
-    location, store = _bundle(tmp_path)
-    bundle = load_bundle(location, store=store)
-    fabric_plan = replace(
-        bundle.plan, targets=(replace(TARGET, host_kind="fabric"),)
-    )
-    fabric_bundle = replace(bundle, plan=fabric_plan)
-    env = InstallationEnvironment(store=store, resolver=None, executors={"spark_sql": Recorder()})
-
-    with pytest.raises(NotImplementedError, match="fabric"):
-        install_bundle(fabric_bundle, environment=env)

@@ -1,10 +1,11 @@
-"""The same build-and-install lifecycle on local and Fabric hosts.
+"""The same build-and-install lifecycle in Fabric and its local emulator.
 
-Generation runs on the caller and writes a frozen bundle to the Weaver Lakehouse;
-installation runs where the host lives — in-process for local, inside Fabric over
-Livy — and creates a Folder, an empty declared-shape Delta table, a persistent
-view and a view-on-view. The test body is transport-neutral: it drives a
-``BuildEnv`` (see ``conftest``) and asserts through its store and query callables.
+Both phases run in the target environment — in-process for the local emulator,
+inside Fabric over Livy for the product path — and create a Folder, an empty
+declared-shape Delta table, a persistent view and a view-on-view. The desktop
+only stages the repository and reads results for the Fabric fixture. The test
+body is transport-neutral: it drives a ``BuildEnv`` (see ``conftest``) and
+asserts through its store and query callables.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import pytest
 
 from weaver import DeltaTarget, FolderTarget, RepositoryRef
 
-build_hosts = pytest.mark.parametrize(
+build_environments = pytest.mark.parametrize(
     "build_env",
     [
         pytest.param("local_build_env", id="local", marks=pytest.mark.spark),
@@ -42,7 +43,7 @@ def _scalar(rows):
     return next(iter(rows[0].values()))
 
 
-@build_hosts
+@build_environments
 def test_generate_and_install_lakehouse_bundle(build_env):
     build_env.install_repo("MyRepo")
     bundle = build_env.generate()
@@ -85,7 +86,7 @@ def test_generate_and_install_lakehouse_bundle(build_env):
     assert _scalar(build_env.query("SELECT CustomerCount FROM DWG.ActiveCustomerSummary")) == 0
 
 
-@build_hosts
+@build_environments
 def test_install_report_is_written_into_the_bundle(build_env):
     build_env.install_repo("MyRepo")
     bundle = build_env.generate()
@@ -142,7 +143,7 @@ def _rebuild_with_broken_summary(build_env, bundle):
     )
 
 
-@build_hosts
+@build_environments
 def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
     build_env.install_repo("MyRepo")
     bundle = build_env.generate()
@@ -163,7 +164,7 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
     assert "activecustomersummary" not in views
 
 
-@build_hosts
+@build_environments
 def test_build_prunes_unmanaged_objects_before_creating(build_env):
     build_env.seed_orphans()
     build_env.install_repo("MyRepo")
@@ -190,6 +191,8 @@ def test_build_prunes_unmanaged_objects_before_creating(build_env):
     assert "legacy" not in databases
     dwg_tables = {row["tableName"].lower() for row in build_env.query("SHOW TABLES IN DWG")}
     assert "oldtable" not in dwg_tables
+    dwg_views = {row["viewName"].lower() for row in build_env.query("SHOW VIEWS IN DWG")}
+    assert "oldview" not in dwg_views
 
     # The managed set is present.
     assert "customer" in {r["tableName"].lower() for r in build_env.query("SHOW TABLES IN DWG")}

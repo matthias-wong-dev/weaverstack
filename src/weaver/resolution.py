@@ -112,6 +112,18 @@ class LocalResolver:
             validate_name(name, what="object name"),
         )
 
+    def schema_location(self, lakehouse: ItemRef, schema: str) -> str | None:
+        """Where a managed schema's tables must be pinned, or None if the platform
+        pins them itself.
+
+        Local Spark drops a managed table in its own warehouse directory unless the
+        schema carries an explicit ``LOCATION``, so a build gives it the Lakehouse
+        Tables path — emulating what a Fabric Lakehouse does natively (which returns
+        None, meaning no ``LOCATION`` clause).
+        """
+
+        return self.tables_root(lakehouse).join(validate_name(schema, what="schema")).value
+
     # --- warehouse targets -----------------------------------------------
 
     def warehouse(self, target: WarehouseTarget) -> Location:

@@ -557,9 +557,9 @@ Cause an action to fail and prove dependent later sequences do not execute.
 Install equivalent logical names into distinct targets and prove that neither
 installation can mutate the other.
 
-Tests should be written against both local and Fabric hosts wherever the host
-capability exists. The test's behavioural assertion should remain the same; only
-the fixture and transport should differ.
+Tests should exercise Fabric behavior through the local emulator and in Fabric
+wherever the capability exists. The behavioural assertion should remain the
+same; only the fixture and transport should differ.
 
 ---
 

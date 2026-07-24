@@ -184,6 +184,12 @@ class FabricResolver:
 
         return self.build_bundles_root / validate_name(name, what="bundle name")
 
+    def schema_location(self, lakehouse: ItemRef, schema: str) -> str | None:
+        """None: a schema-enabled Fabric Lakehouse pins a managed table under
+        ``Tables/<schema>`` itself, so no ``LOCATION`` clause is generated."""
+
+        return None
+
     @property
     def control_tables_root(self) -> Location:
         return self.tables_root(self._weaver_lakehouse())

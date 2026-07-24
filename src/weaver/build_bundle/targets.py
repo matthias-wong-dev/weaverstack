@@ -5,10 +5,11 @@ converts each supplied binding into a :class:`BoundTarget` — a flat, stable
 descriptor carrying exactly what an installer needs to resolve the physical
 destination, and nothing that ties the bundle to the process that wrote it.
 
-For a local target ``item_id`` is the logical Lakehouse name and there is no
-``workspace_id``; for Fabric it will carry the concrete workspace and item IDs
-the executor addresses. Either way the descriptor is plain data — no Python host
-object is ever serialised into a bundle.
+There is no host kind here. Weaver has one real host, Fabric; local execution is
+an emulation of it for development, not a second kind the bundle contract records.
+A target names an item — a Lakehouse or a Warehouse — by the identifiers the
+installer resolves it with; where the installer is running (in a Fabric session,
+or in-process locally) is supplied by its environment, not frozen into the bundle.
 """
 
 from __future__ import annotations
@@ -23,24 +24,19 @@ from ..targets import ItemRef
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
 
-#: Host kinds a descriptor may carry.
-LOCAL_HOST = "local"
-FABRIC_HOST = "fabric"
-
 
 @dataclass(frozen=True)
 class BoundTarget:
     """One physical destination, as flat serialisable data.
 
     ``id`` is the manifest-local identifier a batch names. ``kind`` says whether
-    it is a Lakehouse or a Warehouse; ``host_kind`` whether it is local or
-    Fabric. The remaining fields address the item, with those that only Fabric
-    needs left absent locally.
+    it is a Lakehouse or a Warehouse. ``item_id`` names the item, with the
+    optional Fabric identifiers alongside; the installer resolves the item
+    through its own environment.
     """
 
     id: str
     kind: str
-    host_kind: str
     item_id: str
     workspace_id: str | None = None
     sql_endpoint_id: str | None = None
@@ -49,7 +45,6 @@ class BoundTarget:
         mapping: dict[str, Any] = {
             "id": self.id,
             "kind": self.kind,
-            "host_kind": self.host_kind,
             "item_id": self.item_id,
         }
         if self.workspace_id is not None:
@@ -63,7 +58,6 @@ class BoundTarget:
         return cls(
             id=mapping["id"],
             kind=mapping["kind"],
-            host_kind=mapping["host_kind"],
             item_id=mapping["item_id"],
             workspace_id=mapping.get("workspace_id"),
             sql_endpoint_id=mapping.get("sql_endpoint_id"),
@@ -82,7 +76,6 @@ class LakehouseBinding:
     """A bound destination Lakehouse for Folder and Delta materialisation."""
 
     lakehouse: ItemRef
-    host_kind: str = LOCAL_HOST
     workspace_id: str | None = None
     #: The concrete Fabric item id; locally the logical Lakehouse name serves.
     item_id: str | None = None
@@ -91,7 +84,6 @@ class LakehouseBinding:
         return BoundTarget(
             id=f"{LAKEHOUSE_TARGET}-{self.lakehouse.name}",
             kind=LAKEHOUSE_TARGET,
-            host_kind=self.host_kind,
             item_id=self.item_id or self.lakehouse.name,
             workspace_id=self.workspace_id,
         )
@@ -103,7 +95,6 @@ class WarehouseBinding:
     installation of Warehouse work is not supported and raises."""
 
     warehouse: ItemRef
-    host_kind: str = FABRIC_HOST
     workspace_id: str | None = None
     item_id: str | None = None
     sql_endpoint_id: str | None = None
@@ -112,7 +103,6 @@ class WarehouseBinding:
         return BoundTarget(
             id=f"{WAREHOUSE_TARGET}-{self.warehouse.name}",
             kind=WAREHOUSE_TARGET,
-            host_kind=self.host_kind,
             item_id=self.item_id or self.warehouse.name,
             workspace_id=self.workspace_id,
             sql_endpoint_id=self.sql_endpoint_id,

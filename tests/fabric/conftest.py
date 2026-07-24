@@ -425,13 +425,13 @@ def populated_lakehouse(request):
     return request.getfixturevalue(request.param)
 
 
-# --- host-neutral build environment -----------------------------------------
+# --- Fabric-first build environment -----------------------------------------
 #
 # The same shape as PopulatedLakehouse above: one dataclass hides whether a build
-# is installed in-process against a local Spark session or inside Fabric over
-# Livy, so a single behavioural test runs on both. Generation always runs on the
-# caller (position B) writing the bundle to the Weaver Lakehouse over the store;
-# only installation and catalog queries differ by host.
+# runs in-process against the local emulator or inside Fabric over Livy, so one
+# behavioural test covers both execution paths. Generation and installation both
+# run in that environment. For Fabric, the desktop only stages the repository and
+# reads results.
 
 from pathlib import Path as _Path
 
@@ -440,7 +440,7 @@ BUILD_FIXTURE = _Path(__file__).parent.parent / "fixtures" / "build-lakehouse"
 
 @dataclass
 class InstallOutcome:
-    """A host-neutral view of an installation report."""
+    """An environment-neutral view of an installation report."""
 
     status: str
     bundle_id: str
@@ -678,9 +678,9 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
             return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
 
         def install(bundle) -> InstallOutcome:
-            # The desktop wrote the bundle at a https OneLake location; the
-            # in-session FabricStore needs the abfss form of the same path, so
-            # re-resolve it by name through the session resolver.
+            # Generation wrote the bundle through the session's abfss path. The
+            # desktop handle names the same physical place over https, so install
+            # re-resolves the name to the session-native path.
             bundle_name = bundle.location.name
             body = (
                 "from weaver import FabricHost\n"

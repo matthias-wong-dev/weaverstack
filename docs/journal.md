@@ -1129,27 +1129,26 @@ starts serial — one shared local Spark session gives no useful parallel DDL �
 while the manifest still models independent actions, so a Fabric installer can
 add session concurrency later without changing bundle semantics.
 
-The proof is `tests/fabric/test_build_bundle.py`, written host-neutrally and run
-on both hosts. It generates a bundle, **deletes the source repository**, then
-installs from the bundle alone and verifies a real Folder directory, an *empty*
-Delta table of the declared shape, a persistent view, and a view-on-view —
-structure, not data. A second test seeds the target with unmanaged objects,
-asserts the build froze a drop for each, and asserts they are gone after install
-while the managed set is present; a third rebuilds a bundle with an invalid view
-payload (hash matching) and asserts the barrier; a fourth checks the report is
-written into the bundle.
+The proof is `tests/fabric/test_build_bundle.py`, written environment-neutrally
+and run in Fabric and its local emulator. It generates a bundle, **deletes the
+source repository**, then installs from the bundle alone and verifies a real
+Folder directory, an *empty* Delta table of the declared shape, a persistent view,
+and a view-on-view — structure, not data. A second test seeds the target with
+unmanaged objects, asserts the build froze a drop for each, and asserts they are
+gone after install while the managed set is present; a third rebuilds a bundle
+with an invalid view payload (hash matching) and asserts the barrier; a fourth
+checks the report is written into the bundle.
 
-**Host and executor stay independent, and the Fabric path is proven on a real
-workspace.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides transport behind
-callables the way `PopulatedLakehouse` does for wipe: *generation* always runs on
-the caller (position B) — read the repo, freeze the prune, write the bundle to
-the Weaver Lakehouse over the store — while both *generation and installation* run
-where the host lives. Locally that is in-process against the shared Spark session;
-on Fabric both are Livy programs against the session-native store, resolver and
-Spark, so planning and installation execute *inside* Fabric (position C) against
-the authoritative catalogue. The same four behavioural tests pass on both hosts
-(`pytest -m fabric` against the Weaver workspace, capacity resumed for the run and
-suspended after).
+**Execution environment and executor stay independent, and the Fabric path is
+proven on a real workspace.** A `BuildEnv` (in `tests/fabric/conftest.py`) hides
+transport behind callables the way `PopulatedLakehouse` does for wipe. Generation
+and installation both run in the target environment: in-process against the
+shared Spark session for the emulator, and as Livy programs against the
+session-native store, resolver and Spark for Fabric. The desktop only stages the
+repository and reads results. Thus Fabric planning and installation execute
+*inside* Fabric (position C) against the authoritative catalogue. The same four
+behavioural tests pass in the emulator and Fabric (`pytest -m fabric` against the
+Weaver workspace, capacity resumed for the run and suspended after).
 
 **Fabric is the reference; local emulates it — do not invert.** A first cut
 generated the bundle on the desktop with `spark=None` and only installed
@@ -1169,10 +1168,10 @@ per fact:
   `Tables/<schema>/<table>` and views bind by two-part name. Path-addressed
   ``delta.`…` `` table creation, which works locally, is *rejected* on Fabric —
   the reverse of the initial guess.
-- **The bundle is one physical place under two URL schemes**: the desktop writes
-  it over OneLake DFS (`https://…dfs…`), the in-session `FabricStore` reads it as
-  `abfss://…`. The installer re-resolves the bundle by name in-session, so it
-  reads the abfss form.
+- **The bundle is one physical place under two URL schemes**: generation writes
+  it in-session through `FabricStore` as `abfss://…`; the desktop test handle
+  addresses that same place over OneLake DFS (`https://…dfs…`). The installer
+  re-resolves the bundle by name in-session, so it reads the abfss form.
 - **`FabricStore` gained byte `read`/`write`** (over `notebookutils.fs`
   head/put) — the installer reads `plan.yml` and payloads from OneLake and writes
   the report back. UTF-8 text, which a bundle is.
@@ -1187,10 +1186,21 @@ per fact:
   Fabric, so the prune enumerates catalogue views per surviving schema with `SHOW
   VIEWS IN <bare-schema>` (session-relative) rather than matching bare names
   against `SHOW DATABASES` — which now freezes a `DROP VIEW` for an unmanaged
-  catalogue view on both hosts.
+  catalogue view in Fabric and the local emulator.
 
 With generation in-session, prune reconciles catalogue views as well as storage,
 so nothing about the Fabric path is a lesser case than local.
+
+**A bundle binds destinations, not hosts.** `BoundTarget` retains the target
+kind and the workspace, item and SQL endpoint identifiers an installer may need,
+but no longer carries `host_kind`. Fabric is Weaver's real host; local execution
+emulates it for development and testing. The resolver, store and Spark supplied
+to generation or installation already define that runtime context, so serialising
+`local` or `fabric` into the bundle was redundant and misleading. The
+`LOCAL_HOST`/`FABRIC_HOST` bundle constants and installer validation based on
+them were removed. Resolver-owned `schema_location` preserves the only behavior
+that had depended on the field: the emulator emits an explicit schema
+`LOCATION`, while Fabric lets the Lakehouse manage it.
 
 ---
 
@@ -1201,7 +1211,7 @@ so nothing about the Fabric path is a lesser case than local.
 | Which `weaver` revision is the port baseline — the plan's `a97ba8a` or current `fee2025`? | CP0 | open |
 | Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.folder_path()` on the depended-on class; realised as a `Path` at load. Load itself is deferred. |
 | The whole load phase: running `read()`, upsert/incremental merge, audit-column accounting, applying proposed deletes. | build | deferred — build creates structure only; load populates it, and is the next body of work after the Fabric seam. |
-| Should the local host stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — build registers each Delta table into the session catalog (via a schema database with a `Tables/<schema>` LOCATION) so views bind by name; cross-process persistence is not a prerequisite. |
+| Should the local emulator stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — build registers each Delta table into the session catalog (via a schema database with a `Tables/<schema>` LOCATION) so views bind by name; cross-process persistence is not a prerequisite. |
 | Build reconciliation scope: prune drops what a Lakehouse holds that the bundle does not manage, scoped to that Lakehouse's `Tables/`/`Files/` storage. Is per-Lakehouse physical scope the right boundary once Fabric catalogs are per-item? | build | open — chosen so a shared local Spark catalog cannot make a build nuke another Lakehouse's databases. |
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | deferred until identity is implemented |

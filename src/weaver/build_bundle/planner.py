@@ -63,7 +63,7 @@ _RESERVED_FILES_AREAS = frozenset({REPOS_AREA, BUILD_BUNDLES_AREA})
 #: Schemas a prune never touches. A schema-enabled Fabric Lakehouse has a default
 #: ``dbo`` schema that cannot be dropped and that Weaver does not manage.
 _RESERVED_SCHEMAS = frozenset({"dbo"})
-from .targets import LAKEHOUSE_TARGET, LOCAL_HOST, WAREHOUSE_TARGET, BoundTarget, TargetBindings
+from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, BoundTarget, TargetBindings
 
 #: Which physical binding an SES target kind needs. Folders and Delta tables
 #: both live in a Lakehouse; Warehouse SQL needs a Warehouse.
@@ -393,8 +393,8 @@ def _prune_sequence(
                 actions.append(_prune_folder_action(target, f"folder:{qualified}"))
 
     # Schemas: drop the whole orphan schema, which cascades to its tables/views.
-    # SCHEMA (not DATABASE) so it works on both hosts — Fabric's Trident Spark
-    # refuses CREATE/DROP DATABASE on a Lakehouse, but accepts SCHEMA.
+    # SCHEMA (not DATABASE) works in Fabric and its local emulator — Fabric's
+    # Trident Spark refuses CREATE/DROP DATABASE on a Lakehouse, but accepts SCHEMA.
     for schema in sorted({s for s in existing_schemas if s.lower() in orphan_schemas}):
         actions.append(
             _drop_action(target, "prune_schema", "schema", schema,
@@ -493,12 +493,12 @@ def _schema_sequence(
     lakehouse = ItemRef(target.item_id)
     actions: list[BuildAction] = []
     for schema in schemas:
-        # CREATE SCHEMA (not DATABASE) works on both hosts. Local Spark needs an
-        # explicit LOCATION so a managed table lands under the Lakehouse's Tables
-        # area; a schema-enabled Fabric Lakehouse manages the location itself, and
-        # rejects an explicit one.
-        if target.host_kind == LOCAL_HOST:
-            location = resolver.tables_root(lakehouse).join(schema).value
+        # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
+        # the local emulator does, so a managed table lands under the Lakehouse
+        # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
+        # None.
+        location = resolver.schema_location(lakehouse, schema)
+        if location is not None:
             statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
         else:
             statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"

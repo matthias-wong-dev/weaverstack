@@ -31,9 +31,7 @@ from weaver.build_bundle import (
 )
 from weaver.errors import BuildError
 
-TARGET = BoundTarget(
-    id="lakehouse-Sales_LH", kind="lakehouse", host_kind="local", item_id="Sales_LH"
-)
+TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 
 VIEW_PAYLOAD = b"CREATE OR REPLACE VIEW DWG.ActiveCustomer AS\nselect 1\n"
 VIEW_PATH = "payload/040-build-view/view-DWG.ActiveCustomer.spark.sql"
@@ -101,6 +99,25 @@ def _payloads() -> dict[str, bytes]:
 def test_plan_round_trips_through_yaml():
     plan = _identified_plan()
     assert plan_from_yaml(plan_to_yaml(plan)) == plan
+
+
+def test_bound_target_serialises_item_identity_without_runtime_identity():
+    target = BoundTarget(
+        id="warehouse-Reporting",
+        kind="warehouse",
+        workspace_id="workspace-id",
+        item_id="warehouse-id",
+        sql_endpoint_id="endpoint-id",
+    )
+
+    assert target.to_mapping() == {
+        "id": "warehouse-Reporting",
+        "kind": "warehouse",
+        "workspace_id": "workspace-id",
+        "item_id": "warehouse-id",
+        "sql_endpoint_id": "endpoint-id",
+    }
+    assert BoundTarget.from_mapping(target.to_mapping()) == target
 
 
 def test_bundle_id_is_stable_and_content_addressed():

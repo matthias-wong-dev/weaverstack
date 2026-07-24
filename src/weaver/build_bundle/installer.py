@@ -38,7 +38,7 @@ from .report import (
     InstallationReport,
     SequenceResult,
 )
-from .targets import BoundTarget, LOCAL_HOST
+from .targets import BoundTarget
 
 REPORT_FILENAME = "install-report.yml"
 
@@ -58,11 +58,8 @@ class InstallationEnvironment:
     executors: dict[str, ActionExecutor] = field(default_factory=default_executors)
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
-        if bound.host_kind != LOCAL_HOST:
-            raise NotImplementedError(
-                f"installing against a {bound.host_kind!r} host is not supported by "
-                "build bundle v1"
-            )
+        # The resolver, store and Spark already define the environment the
+        # installer is running in, so a target is just its item to address.
         return ResolvedTarget(bound=bound, lakehouse=ItemRef(bound.item_id))
 
 

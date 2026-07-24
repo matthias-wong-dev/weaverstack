@@ -71,7 +71,7 @@ def test_generated_plan_has_the_expected_shape(weaver_lakehouse, tmp_path):
     assert plan.repository_signature
     assert len(plan.targets) == 1
     target = plan.targets[0]
-    assert (target.kind, target.host_kind, target.item_id) == ("lakehouse", "local", "Sales_LH")
+    assert (target.kind, target.item_id) == ("lakehouse", "Sales_LH")
     assert plan.omitted_nodes == ()
 
 

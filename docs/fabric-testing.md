@@ -91,16 +91,17 @@ Warehouse deletion, and total fixture lifetime.
 
 ## The build bundle runs entirely in Fabric
 
-`tests/fabric/test_build_bundle.py` runs the same four behavioural tests on both
-hosts, selected by an indirect `build_env` parameter (`local`/`fabric`). It is
-the reference for the Fabric-first rule: **both phases of a build — *generate* and
-*install* — run where the host lives.** On Fabric that is inside the Livy session,
-against the native Spark catalogue: the test uploads the repository to the Weaver
-Lakehouse (the push), then a Livy program calls `generate_build_bundle` in-session
-and another calls `install_bundle`, so planning and installation both use the
-authoritative catalogue. Locally the same two calls run in-process against the
-local Spark session. The desktop's only job on Fabric is to push the repository
-and read results back for assertions — it never plans.
+`tests/fabric/test_build_bundle.py` runs the same four behavioural tests in
+Fabric and its local emulator, selected by an indirect `build_env` parameter
+(`local`/`fabric`). It is the reference for the Fabric-first rule: **both phases
+of a build — *generate* and *install* — run in the target environment.** On
+Fabric that is inside the Livy session, against the native Spark catalogue: the
+test uploads the repository to the Weaver Lakehouse (the push), then a Livy
+program calls `generate_build_bundle` in-session and another calls
+`install_bundle`, so planning and installation both use the authoritative
+catalogue. In the emulator the same two calls run in-process against local Spark.
+The desktop's only job on Fabric is to push the repository and read results back
+for assertions — it never plans.
 
 The target Lakehouse is created **schema-enabled** so a managed
 `CREATE TABLE Schema.Object` lands at `Tables/<schema>/<table>` and views bind by
