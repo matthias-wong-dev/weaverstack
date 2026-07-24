@@ -59,7 +59,7 @@ from .payloads import (
 
 #: Files areas that are never folder resources, so a prune never touches them.
 _RESERVED_FILES_AREAS = frozenset({REPOS_AREA, BUILD_BUNDLES_AREA})
-from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, BoundTarget, TargetBindings
+from .targets import LAKEHOUSE_TARGET, LOCAL_HOST, WAREHOUSE_TARGET, BoundTarget, TargetBindings
 
 #: Which physical binding an SES target kind needs. Folders and Delta tables
 #: both live in a Lakehouse; Warehouse SQL needs a Warehouse.
@@ -382,11 +382,13 @@ def _prune_sequence(
             if qualified.lower() not in managed.folders:
                 actions.append(_prune_folder_action(target, f"folder:{qualified}"))
 
-    # Schemas: drop the whole orphan database, which cascades to its tables/views.
+    # Schemas: drop the whole orphan schema, which cascades to its tables/views.
+    # SCHEMA (not DATABASE) so it works on both hosts — Fabric's Trident Spark
+    # refuses CREATE/DROP DATABASE on a Lakehouse, but accepts SCHEMA.
     for schema in sorted({s for s in existing_schemas if s.lower() in orphan_schemas}):
         actions.append(
             _drop_action(target, "prune_schema", "schema", schema,
-                         f"DROP DATABASE IF EXISTS {_ident(schema)} CASCADE", payloads)
+                         f"DROP SCHEMA IF EXISTS {_ident(schema)} CASCADE", payloads)
         )
 
     if not actions:
@@ -479,10 +481,16 @@ def _schema_sequence(
     lakehouse = ItemRef(target.item_id)
     actions: list[BuildAction] = []
     for schema in schemas:
-        location = resolver.tables_root(lakehouse).join(schema).value
-        content = (
-            f"CREATE DATABASE IF NOT EXISTS {_ident(schema)} LOCATION '{location}'\n"
-        ).encode("utf-8")
+        # CREATE SCHEMA (not DATABASE) works on both hosts. Local Spark needs an
+        # explicit LOCATION so a managed table lands under the Lakehouse's Tables
+        # area; a schema-enabled Fabric Lakehouse manages the location itself, and
+        # rejects an explicit one.
+        if target.host_kind == LOCAL_HOST:
+            location = resolver.tables_root(lakehouse).join(schema).value
+            statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
+        else:
+            statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
+        content = (statement + "\n").encode("utf-8")
         path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}.spark.sql")
         payloads[path] = content
         actions.append(

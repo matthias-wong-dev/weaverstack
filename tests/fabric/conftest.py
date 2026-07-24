@@ -484,6 +484,31 @@ def _upload_tree(store, source: _Path, destination) -> None:
             store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
 
 
+def _create_schema_enabled_lakehouse(client, workspace, name):
+    """A Lakehouse with schemas enabled, so `schema.table` resolves and a managed
+    table lands under Tables/<schema>/<table> — which plain create_lakehouse omits."""
+
+    import time as _time
+
+    from weaver.fabric.resources import LAKEHOUSE, Item, find_item
+
+    resp = client.request(
+        "POST",
+        f"workspaces/{workspace.id}/lakehouses",
+        payload={"displayName": name, "creationPayload": {"enableSchemas": True}},
+        expected=(200, 201, 202, 409),
+    )
+    if resp.status_code == 202:
+        for _ in range(40):
+            try:
+                return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
+            except Exception:
+                _time.sleep(3)
+        raise RuntimeError(f"schema-enabled Lakehouse {name!r} never appeared")
+    body = resp.json()
+    return Item(id=body["id"], name=name, type=LAKEHOUSE, workspace_id=workspace.id)
+
+
 @pytest.fixture
 def local_build_env(lakehouses, spark):
     """A build environment installed in-process against local Spark."""
@@ -554,16 +579,16 @@ def local_build_env(lakehouses, spark):
 
 
 @pytest.fixture
-def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, livy_session):
+def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
     """A build environment installed inside Fabric over Livy.
 
-    Generation runs here on the caller, writing the bundle to OneLake over DFS;
-    installation runs *in* the Fabric session, reading that bundle through the
-    session-native store and executing DDL on the session's Spark. Both Lakehouses
-    are disposable and deleted on teardown, so no catalog cleanup is needed.
+    Generation runs on the caller, writing the bundle to OneLake over DFS.
+    Installation runs *in* a Fabric session whose **default Lakehouse is the
+    target** — so the create DDL's two-part ``Schema.Object`` names land there —
+    and the target Lakehouse is **schema-enabled**, so a managed table appears
+    under ``Tables/<schema>/<table>`` and views bind by name. Both Lakehouses are
+    disposable and deleted on teardown.
     """
-
-    import json
 
     from weaver import FabricHost, RepositoryRef
     from weaver.build_bundle import (
@@ -571,13 +596,22 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, l
         TargetBindings,
         generate_build_bundle,
     )
-    from weaver.fabric import FabricResolver, OneLakeDfsClient, create_lakehouse, delete_item
+    from weaver.fabric import (
+        FabricResolver,
+        LivySession,
+        OneLakeDfsClient,
+        create_lakehouse,
+        delete_item,
+    )
 
     created = []
+    session = None
     try:
         weaver_lh = create_lakehouse(fabric_workspace, _disposable_name("weaver"), client=fabric_client)
         created.append(weaver_lh)
-        target_lh = create_lakehouse(fabric_workspace, _disposable_name("target"), client=fabric_client)
+        target_lh = _create_schema_enabled_lakehouse(
+            fabric_client, fabric_workspace, _disposable_name("target")
+        )
         created.append(target_lh)
 
         host = FabricHost(
@@ -589,6 +623,16 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, l
         store = OneLakeDfsClient()
         weaver = ItemRef(weaver_lh.name)
         target = ItemRef(target_lh.name)
+
+        # One session, defaulted to the target Lakehouse, with the Weaver
+        # Environment attached so the install program can import weaver.build_bundle.
+        session_host = FabricHost(
+            workspace=fabric_workspace.name,
+            weaver_lakehouse=target_lh.name,
+            fabric_environment=fabric_environment_name,
+        )
+        session = LivySession.for_host(session_host)
+        session.start()
 
         def install_repo(name: str) -> str:
             _upload_tree(store, BUILD_FIXTURE, resolver.repository(RepositoryRef(name)))
@@ -617,8 +661,12 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, l
             )
 
         def install(bundle) -> InstallOutcome:
+            # The desktop wrote the bundle at a https OneLake location; the
+            # in-session FabricStore needs the abfss form of the same path, so
+            # re-resolve it by name through the session resolver.
+            bundle_name = bundle.location.name
             body = (
-                "from weaver import FabricHost, Location\n"
+                "from weaver import FabricHost\n"
                 "from weaver.resolution import resolver_for, store_for\n"
                 "from weaver.build_bundle import install_bundle, load_bundle, "
                 "InstallationEnvironment\n"
@@ -626,13 +674,13 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, l
                 "store = store_for(host)\n"
                 "resolver = resolver_for(host)\n"
                 "env = InstallationEnvironment(store=store, resolver=resolver, spark=spark)\n"
-                f"bundle = load_bundle(Location({bundle.location.value!r}), store=store)\n"
+                f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
                 "report = install_bundle(bundle, environment=env)\n"
                 "emit({'status': report.status, 'bundle_id': report.bundle_id, "
                 "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
                 "'actions': [{'id': a.action_id, 'status': a.status} for a in report.action_results()]})\n"
             )
-            payload = livy_session.run(body).payload
+            payload = session.run(body).payload
             return InstallOutcome(
                 status=payload["status"],
                 bundle_id=payload["bundle_id"],
@@ -643,19 +691,20 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, l
 
         def query(sql: str) -> list:
             body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
-            return livy_session.run(body).payload
+            return session.run(body).payload
 
         def seed_orphans() -> None:
-            tables_root = resolver.tables_root(target).value
+            # Schema-enabled Lakehouse: CREATE SCHEMA + a managed table lands at
+            # Tables/<schema>/<table>; no CREATE DATABASE / LOCATION.
             body = (
-                f"spark.sql(\"CREATE DATABASE IF NOT EXISTS DWG LOCATION '{tables_root}/DWG'\")\n"
-                "spark.sql('CREATE TABLE DWG.OldTable (x int) USING delta')\n"
+                "spark.sql('CREATE SCHEMA IF NOT EXISTS DWG')\n"
+                "spark.sql('CREATE TABLE IF NOT EXISTS DWG.OldTable (x int) USING delta')\n"
                 "spark.sql('CREATE OR REPLACE VIEW DWG.OldView AS SELECT 1 AS x')\n"
-                f"spark.sql(\"CREATE DATABASE IF NOT EXISTS Legacy LOCATION '{tables_root}/Legacy'\")\n"
-                "spark.sql('CREATE TABLE Legacy.OldThing (x int) USING delta')\n"
+                "spark.sql('CREATE SCHEMA IF NOT EXISTS Legacy')\n"
+                "spark.sql('CREATE TABLE IF NOT EXISTS Legacy.OldThing (x int) USING delta')\n"
                 "emit(True)\n"
             )
-            livy_session.run(body)
+            session.run(body)
             files_root = resolver.files_root(target)
             store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
             store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
@@ -667,6 +716,11 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, l
             install=install, query=query, seed_orphans=seed_orphans,
         )
     finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception as exc:
+                print(f"warning: could not close Livy session: {exc}")
         for item in created:
             try:
                 delete_item(item, client=fabric_client)

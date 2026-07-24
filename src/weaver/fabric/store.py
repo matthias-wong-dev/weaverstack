@@ -4,9 +4,12 @@ This is the within-host counterpart to :class:`OneLakeDfsClient`.  It uses the
 ``notebookutils.fs`` object already present in a Fabric Spark session and never
 authenticates back across the workspace boundary.
 
-Only directory operations are implemented at this checkpoint because wipe is
-the first core operation to need the in-session store. Byte reads and writes
-remain explicit errors until a session-native binary contract is proven.
+Directory operations came first, for wipe. Byte reads and writes came next, for
+installing a build bundle in-session — the installer reads ``plan.yml`` and the
+generated payloads from OneLake and writes an install report back. They go
+through ``notebookutils.fs.head``/``put``, which exchange UTF-8 text: a build
+bundle's manifest and payloads are UTF-8, so this is exact for them. A
+byte-accurate binary contract (for arbitrary file content) is still future work.
 """
 
 from __future__ import annotations
@@ -16,6 +19,10 @@ from typing import Any
 from ..errors import CommandError
 from ..locations import Location
 from ..store import Entry, StoreError
+
+#: notebookutils.fs.head reads up to this many bytes. Bundle files are tiny; this
+#: ceiling is only a guard against an unexpectedly large one.
+_MAX_READ_BYTES = 256 * 1024 * 1024
 
 
 class FabricStore:
@@ -103,10 +110,25 @@ class FabricStore:
         return entries
 
     def read(self, location: Location) -> bytes:
-        raise StoreError("FabricStore byte reads are not implemented")
+        """The file's bytes, decoded as the UTF-8 text a bundle is made of."""
+
+        path = self._path(location)
+        if not self.fs.exists(path):
+            raise StoreError(f"cannot read a location that does not exist: {path}")
+        try:
+            text = self.fs.head(path, _MAX_READ_BYTES)
+        except Exception as exc:  # notebookutils raises a bare Py4J error
+            raise StoreError(f"cannot read {location.value}: {exc}") from exc
+        return text.encode("utf-8")
 
     def write(self, location: Location, data: bytes) -> None:
-        raise StoreError("FabricStore byte writes are not implemented")
+        """Write UTF-8 text (a bundle manifest, a payload, an install report)."""
+
+        path = self._path(location)
+        try:
+            self.fs.put(path, data.decode("utf-8"), True)
+        except Exception as exc:
+            raise StoreError(f"cannot write {location.value}: {exc}") from exc
 
     def delete(self, location: Location, *, recursive: bool = False) -> None:
         if not self.fs.rm(self._path(location), recurse=recursive):

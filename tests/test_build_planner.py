@@ -144,7 +144,7 @@ def test_prune_freezes_a_drop_for_each_physical_orphan(weaver_lakehouse, tmp_pat
         if a.payload is not None and a.kind.startswith("prune")
     }
     assert "DROP TABLE IF EXISTS `DWG`.`Ghost`" in frozen["prune-table-DWG.Ghost"]
-    assert "DROP DATABASE IF EXISTS `Legacy` CASCADE" in frozen["prune-schema-Legacy"]
+    assert "DROP SCHEMA IF EXISTS `Legacy` CASCADE" in frozen["prune-schema-Legacy"]
     # The unmanaged folder is a directory-removing action, identified by resource.
     prune_folders = [a for _, _, a in plan.actions() if a.kind == "prune_folder"]
     assert {a.resource_node_id for a in prune_folders} == {"folder:Raw.OldFolder"}
