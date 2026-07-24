@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.build.models import OMIT_DEPENDS_ON_OMITTED, OMIT_TARGET_UNBOUND
-from weaver.build.planner import project
-from weaver.build.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
+from weaver.build_bundle.models import OMIT_DEPENDS_ON_OMITTED, OMIT_TARGET_UNBOUND
+from weaver.build_bundle.planner import project
+from weaver.build_bundle.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 from weaver.errors import BuildError
 from weaver.ses.graph import Graph
 

@@ -13,7 +13,7 @@ from dataclasses import replace
 import pytest
 
 from weaver import LocalStore, Location
-from weaver.build import (
+from weaver.build_bundle import (
     BoundTarget,
     BuildAction,
     BuildBatch,
@@ -25,7 +25,7 @@ from weaver.build import (
     load_bundle,
     write_bundle,
 )
-from weaver.build.report import FAILED, SKIPPED, SUCCEEDED
+from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
 from weaver.errors import BuildError
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", host_kind="local", item_id="Sales_LH")

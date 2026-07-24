@@ -13,7 +13,7 @@ import hashlib
 import pytest
 
 from weaver import LocalStore, Location
-from weaver.build import (
+from weaver.build_bundle import (
     BoundTarget,
     BuildAction,
     BuildBatch,
@@ -36,7 +36,7 @@ TARGET = BoundTarget(
 )
 
 VIEW_PAYLOAD = b"CREATE OR REPLACE VIEW DWG.ActiveCustomer AS\nselect 1\n"
-PY_PAYLOAD = b"from weaver.build.runtime import materialise\n"
+PY_PAYLOAD = b"from weaver.build_bundle.runtime import materialise\n"
 
 
 def _view_action() -> BuildAction:
@@ -249,7 +249,7 @@ def test_validate_rejects_a_batch_with_unknown_target():
 
     with pytest.raises(BuildError, match="unknown target"):
         plan_from_yaml(plan_to_yaml(bad))  # parses fine
-        from weaver.build.bundle import validate_bundle
+        from weaver.build_bundle.bundle import validate_bundle
 
         validate_bundle(Location("/tmp/none"), bad, store=LocalStore())
 
@@ -257,7 +257,7 @@ def test_validate_rejects_a_batch_with_unknown_target():
 def test_validate_rejects_duplicate_action_ids():
     from dataclasses import replace
 
-    from weaver.build.bundle import validate_bundle
+    from weaver.build_bundle.bundle import validate_bundle
 
     plan = _identified_plan()
     dup = replace(_python_action(), id="a-view")  # collides with the view action id
@@ -271,7 +271,7 @@ def test_validate_rejects_duplicate_action_ids():
 def test_validate_rejects_payload_executor_extension_mismatch():
     from dataclasses import replace
 
-    from weaver.build.bundle import validate_bundle
+    from weaver.build_bundle.bundle import validate_bundle
 
     plan = _identified_plan()
     # A python executor pointing at a .spark.sql payload.
@@ -286,7 +286,7 @@ def test_validate_rejects_payload_executor_extension_mismatch():
 def test_validate_rejects_payload_outside_the_bundle():
     from dataclasses import replace
 
-    from weaver.build.bundle import validate_bundle
+    from weaver.build_bundle.bundle import validate_bundle
 
     plan = _identified_plan()
     bad_action = replace(_python_action(), payload="../escape.py")
@@ -300,7 +300,7 @@ def test_validate_rejects_payload_outside_the_bundle():
 def test_validate_rejects_an_action_targeting_an_omitted_node():
     from dataclasses import replace
 
-    from weaver.build.bundle import validate_bundle
+    from weaver.build_bundle.bundle import validate_bundle
 
     plan = _identified_plan()
     bad_action = replace(_python_action(), resource_node_id="sql:Reporting.Report")

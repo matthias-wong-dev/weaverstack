@@ -159,7 +159,7 @@ def installed_build_repository(lakehouses: LocalLakehouses) -> str:
 def lakehouse_only_bindings(lakehouses: LocalLakehouses):
     """A Lakehouse binding to the target Lakehouse, no Warehouse."""
 
-    from weaver.build import LakehouseBinding, TargetBindings
+    from weaver.build_bundle import LakehouseBinding, TargetBindings
 
     return TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.target))
 
@@ -168,7 +168,7 @@ def lakehouse_only_bindings(lakehouses: LocalLakehouses):
 def installation_environment(spark, lakehouses: LocalLakehouses):
     """A local installer environment: shared Spark, local resolver and store."""
 
-    from weaver.build import InstallationEnvironment
+    from weaver.build_bundle import InstallationEnvironment
 
     return InstallationEnvironment(
         store=lakehouses.store, resolver=lakehouses.resolver, spark=spark

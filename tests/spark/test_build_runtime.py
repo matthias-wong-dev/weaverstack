@@ -1,6 +1,6 @@
 """The load runtime — a Python payload materialises its object for real.
 
-This exercises ``weaver.build.runtime.materialise`` the way a generated payload
+This exercises ``weaver.build_bundle.runtime.materialise`` the way a generated payload
 does: with an installation bound, it promotes a Folder's staged files and writes
 and registers a Delta table from the object's proposed rows. It proves the
 enabling piece the build bundle depends on before the installer is wired up.
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from weaver import DeltaTarget, FolderTarget, ItemRef
-from weaver.build.runtime import Installation, installing
+from weaver.build_bundle.runtime import Installation, installing
 
 pytestmark = pytest.mark.spark
 
@@ -44,7 +44,7 @@ def test_materialise_builds_folder_then_delta(spark, lakehouses, snapshot):
     try:
         with installing(installation):
             folder_cls = importlib.import_module("Raw__CustomerCsv").Raw__CustomerCsv
-            from weaver.build.runtime import materialise
+            from weaver.build_bundle.runtime import materialise
 
             materialise(folder_cls)
 

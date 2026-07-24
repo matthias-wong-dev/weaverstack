@@ -129,7 +129,7 @@ def _python_ddl(document: "SourceDocument") -> GeneratedDdl:
         f'"""Weaver build payload — {document.node_id}. Generated; do not edit."""\n'
         f"from {module} import {class_name}\n"
         "\n"
-        "from weaver.build.runtime import materialise\n"
+        "from weaver.build_bundle.runtime import materialise\n"
         "\n"
         f"materialise({class_name})\n"
     )

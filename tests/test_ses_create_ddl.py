@@ -161,7 +161,7 @@ def test_python_folder_generates_a_runtime_wrapper_payload():
     assert ddl.executor == PYTHON_EXECUTOR
     assert ddl.extension == PYTHON_EXTENSION
     assert "from Raw__CustomerCsv import Raw__CustomerCsv" in ddl.content
-    assert "from weaver.build.runtime import materialise" in ddl.content
+    assert "from weaver.build_bundle.runtime import materialise" in ddl.content
     assert "materialise(Raw__CustomerCsv)" in ddl.content
 
 

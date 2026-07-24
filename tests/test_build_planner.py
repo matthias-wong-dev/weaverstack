@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
-from weaver.build import (
+from weaver.build_bundle import (
     LakehouseBinding,
     TargetBindings,
     generate_build_bundle,

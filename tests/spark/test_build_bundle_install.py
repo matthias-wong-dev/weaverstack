@@ -16,7 +16,7 @@ from dataclasses import replace
 import pytest
 
 from weaver import DeltaTarget, FolderTarget, RepositoryRef
-from weaver.build import (
+from weaver.build_bundle import (
     compute_bundle_id,
     generate_build_bundle,
     install_bundle,
@@ -27,8 +27,10 @@ from weaver.build import (
 pytestmark = pytest.mark.spark
 
 
-def _generate(lakehouses, bindings):
-    output = lakehouses.location("_bundle_output")
+def _generate(lakehouses, bindings, name="20260724T000000"):
+    # A kept bundle lives under the Weaver Lakehouse, named for the build —
+    # normally a timestamp. An install-bound bundle would use a throwaway dir.
+    output = lakehouses.resolver.build_bundle(name)
     bundle = generate_build_bundle(
         weaver_lakehouse=lakehouses.weaver,
         repository_name="MyRepo",

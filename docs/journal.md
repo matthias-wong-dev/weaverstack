@@ -1046,7 +1046,11 @@ separation is the point — the same bundle can later run locally, through Fabri
 Livy, or from a notebook, and no installer surface gets to reinterpret the
 repository.
 
-`weaver.build` carries it. The manifest is a flat, ordered hierarchy — plan →
+`weaver.build_bundle` carries it — named for the subsystem, and to sidestep the
+conventional `build/` gitignore rule that would otherwise swallow the package. A
+kept bundle lands under `<weaver-lakehouse>/Files/build_bundles/<name>` (normally
+a timestamp); a bundle bound straight for the installer can instead use a
+throwaway directory. The manifest is a flat, ordered hierarchy — plan →
 sequence → batch → action — serialised to a canonical `plan.yml`. **Sequences
 are barriers**, run in order; **a batch is bound to exactly one target**, so a
 physical destination is named once rather than repeated inside actions;

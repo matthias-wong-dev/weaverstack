@@ -14,13 +14,13 @@ from pathlib import Path
 import pytest
 
 from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
-from weaver.build import (
+from weaver.build_bundle import (
     LakehouseBinding,
     TargetBindings,
     WarehouseBinding,
     generate_build_bundle,
 )
-from weaver.build.models import OMIT_TARGET_UNBOUND
+from weaver.build_bundle.models import OMIT_TARGET_UNBOUND
 
 WAREHOUSE_FIXTURE = Path(__file__).parent / "fixtures" / "build-lakehouse-warehouse"
 
