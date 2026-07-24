@@ -83,16 +83,50 @@ def _render_inferred_create(
 ) -> str:
     target = _quote_multipart(document.qualified)
     temp_literal = _sql_literal(f"tempdb..{temp_table}")
+    identity = document.identity_column
     return render_sql_template(
         "ddl/infer_create_table",
         temp_object_literal=temp_literal,
         metadata_validation_sql=_render_metadata_validation(document, temp_literal),
+        identity_guard_sql=_render_identity_guard(identity, temp_literal),
+        identity_column_sql=_render_identity_union(identity),
+        first_ordinal="0" if identity else "1",
         primary_key_columns_cte=_render_primary_key_cte(document.primary_key),
         not_null_columns_cte=_render_name_only_cte(document.not_null),
         type_case=_render_type_case(mapping),
         target_table=target,
         target_table_literal=_sql_literal(target),
         pk_constraint=_pk_constraint_name(document.qualified),
+    )
+
+
+def _render_identity_union(column) -> str:
+    """A leading ``all_columns`` entry (ordinal 0) for the identity column."""
+
+    if column is None:
+        return ""
+    definition = f"{_quote_part(column.name)} {column.type}{_nullability(column.not_null)}"
+    return f"    select 0, {_sql_literal(definition)}\n    union all\n\n"
+
+
+def _render_identity_guard(column, temp_literal: str) -> str:
+    """Refuse an inferred query that already produces the identity column's name.
+
+    The identity column is Weaver's own; if the query also produces it the create
+    would carry two same-named columns. Checked case-insensitively, like Spark.
+    """
+
+    if column is None:
+        return ""
+    return (
+        "if exists (\n"
+        "    select 1 from tempdb.sys.columns\n"
+        f"    where [object_id] = object_id({temp_literal})\n"
+        f"        and lower(name) = lower({_sql_literal(column.name)})\n"
+        ")\n"
+        "begin\n"
+        f"    throw 51006, {_sql_literal(f'Identity {column.name} collides with a query column')}, 1;\n"
+        "end;\n"
     )
 
 
@@ -115,15 +149,11 @@ def _render_declared_create(document: SesDocument, temp_table: str) -> str:
 
 
 def _render_declared_definitions(document: SesDocument) -> str:
-    """Static column definitions: declared business columns, then audit columns."""
+    """Static column definitions: identity, declared business, then audit columns."""
 
     lines = [
         f"{_quote_part(column.name)} {column.type}{_nullability(column.not_null)}"
-        for column in document.schema
-    ]
-    lines += [
-        f"{_quote_part(column.name)} {column.type}{_nullability(column.not_null)}"
-        for column in document.audit_columns
+        for column in document.effective_schema
     ]
     return _leading_comma_list(lines, first_indent="        ", comma_indent="      ")
 

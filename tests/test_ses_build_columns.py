@@ -93,17 +93,35 @@ def test_a_column_note_naming_a_missing_column_fails_at_build():
         resolve_build_columns(document, ("Order id",))
 
 
-def test_an_identity_naming_a_missing_column_fails_at_build():
+def test_an_identity_not_produced_by_the_query_is_fine_weaver_adds_it():
     document = _doc(
         """
         Table ID: Sales.Order
         Description: x
         Lineage: y
-        Identity: Surrogate
+        Primary key: OrderKey
+        Identity: OrderKey
         """
     )
-    with pytest.raises(BuildError, match="Identity names column 'Surrogate'"):
-        resolve_build_columns(document, ("Order id",))
+    # OrderKey is Weaver's surrogate, not a query column, and the primary key may
+    # name it — so the query need not produce it.
+    assert resolve_build_columns(document, ("Order id", "Amount")) == (
+        "Order id",
+        "Amount",
+    )
+
+
+def test_an_identity_colliding_with_a_query_column_is_refused():
+    document = _doc(
+        """
+        Table ID: Sales.Order
+        Description: x
+        Lineage: y
+        Identity: Amount
+        """
+    )
+    with pytest.raises(BuildError, match="Identity 'Amount' collides"):
+        resolve_build_columns(document, ("Order id", "Amount"))
 
 
 def test_columns_that_collide_only_by_case_are_ambiguous():

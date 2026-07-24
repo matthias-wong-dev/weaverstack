@@ -72,18 +72,23 @@ class SparkTableExecutor:
             tuple(name for name, _type, _nn in declared) if declared is not None else None
         )
         references = tuple((label, column) for label, column in instruction["references"])
+        identity = instruction.get("identity_column")
+        identity_name = identity[0] if identity else None
 
         business_columns = validate_build_columns(
             qualified,
             query_columns,
             declared_columns=declared_names,
             references=references,
+            identity=identity_name,
         )
 
-        physical = self._physical_columns(
+        business = self._physical_columns(
             qualified, business_columns, declared, query_types, references
         )
-        physical += [tuple(entry) for entry in instruction["audit_columns"]]
+        # The identity column leads, the audit columns trail — both Weaver's own.
+        leading = [tuple(identity)] if identity else []
+        physical = leading + business + [tuple(entry) for entry in instruction["audit_columns"]]
 
         statement = _create_table_sql(
             qualified, physical, column_mapping=instruction.get("column_mapping", True)

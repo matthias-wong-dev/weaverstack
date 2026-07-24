@@ -137,6 +137,31 @@ def test_the_not_null_header_marks_inferred_columns_not_null():
     assert "`Note` string NOT NULL" not in statement
 
 
+def test_the_identity_column_leads_as_a_not_null_bigint():
+    spark = _FakeSpark([("CustomerName", "string")])
+    _run(
+        spark,
+        _payload(
+            identity_column=["CustomerKey", "bigint", True],
+            references=[["Primary key", "CustomerKey"]],
+        ),
+    )
+    statement = _create_statement(spark)
+    # The Weaver-managed surrogate is created first, as a plain not-null bigint —
+    # no GENERATED/identity keyword; a later load populates it.
+    assert statement.startswith(
+        "CREATE OR REPLACE TABLE Sales.Customer (\n    `CustomerKey` bigint NOT NULL,\n"
+    )
+    assert "generated" not in statement.lower()
+    assert "identity" not in statement.lower()
+
+
+def test_an_identity_colliding_with_a_query_column_fails_install():
+    spark = _FakeSpark([("CustomerId", "int"), ("CustomerKey", "int")])
+    with pytest.raises(BuildError, match="Identity 'CustomerKey' collides"):
+        _run(spark, _payload(identity_column=["CustomerKey", "bigint", True], references=[]))
+
+
 def test_declared_table_uses_declared_types_and_nullability_not_the_query():
     spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
     _run(

@@ -12,6 +12,8 @@ end;
 
 $metadata_validation_sql
 
+$identity_guard_sql
+
 ;with primary_key_columns as (
 $primary_key_columns_cte
 ),
@@ -49,7 +51,7 @@ mapped as (
     ) as bt
 ),
 all_columns as (
-    select
+$identity_column_sql    select
         column_ordinal,
         quoted_column_name + N' ' + warehouse_type + nullability as column_definition
     from mapped
@@ -68,7 +70,7 @@ select
             N'create table $target_table (' + char(10)
             + string_agg(
                 case
-                    when column_ordinal = 1 then N'    ' + column_definition
+                    when column_ordinal = $first_ordinal then N'    ' + column_definition
                     else N'  , ' + column_definition
                 end,
                 char(10)

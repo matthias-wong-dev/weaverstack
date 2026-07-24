@@ -24,30 +24,23 @@ engine would fold case. The rules:
   same spelling, no undeclared column produced — while types, order, width,
   precision and nullability are not compared, so a declaration may deliberately
   be wider or more stable;
-- every column named by ``Primary key``, ``Not null``, ``Identity``,
-  ``Comparison columns`` or ``Column notes`` must exist among the business
-  columns **under exactly its declared spelling**.
+- every column named by ``Primary key``, ``Not null``, ``Comparison columns`` or
+  ``Column notes`` must exist among the business columns **under exactly its
+  declared spelling** (the ``Identity`` column counts as present here — see below).
 
-Case is thus exact for identity and equivalence, but case-insensitive for the
+Case is thus exact for naming and equivalence, but case-insensitive for the
 ambiguity guard — a name that only sometimes matches is not a name Weaver can
 rely on.
+
+``Identity`` is not in that list: it names a **Weaver-managed** surrogate column
+build adds, not a business column, so it must *not* clash with the query's output
+— but the primary key may name it when the surrogate is the key.
 """
 
 from __future__ import annotations
 
 from ..errors import BuildError
 from .metadata import SesDocument
-
-#: The metadata fields that name columns, paired with the label an error uses.
-#: One definition, shared by the Python guard and mirrored by the T-SQL template,
-#: so "which metadata references a column" has a single source of truth.
-_REFERENCE_LABELS = (
-    "Primary key",
-    "Not null",
-    "Identity",
-    "Comparison columns",
-    "Column notes",
-)
 
 
 def metadata_column_references(document: SesDocument) -> tuple[tuple[str, str], ...]:
@@ -60,8 +53,6 @@ def metadata_column_references(document: SesDocument) -> tuple[tuple[str, str], 
     references: list[tuple[str, str]] = []
     references.extend(("Primary key", column) for column in document.primary_key)
     references.extend(("Not null", column) for column in document.declared_not_null)
-    if document.identity is not None:
-        references.append(("Identity", document.identity))
     references.extend(
         ("Comparison columns", column)
         for column in document.declared_comparison_columns
@@ -101,6 +92,7 @@ def resolve_build_columns(
         query_columns,
         declared_columns=declared,
         references=metadata_column_references(document),
+        identity=document.identity,
     )
 
 
@@ -110,15 +102,19 @@ def validate_build_columns(
     *,
     declared_columns: tuple[str, ...] | None,
     references: tuple[tuple[str, str], ...],
+    identity: str | None = None,
 ) -> tuple[str, ...]:
     """The rule core, over plain data so the frozen payload can drive it.
 
     ``query_columns`` are what the engine reported for the object's query.
     ``declared_columns`` are the declared business-column names, or ``None`` when
     the table is inferred. ``references`` are the ``(label, column)`` pairs from
-    :func:`metadata_column_references`. Returns the physical business columns in
-    order — declared names when declared (authoritative), else the query's own —
-    and raises :class:`BuildError` on any violation.
+    :func:`metadata_column_references`. ``identity`` names the Weaver-managed
+    surrogate column, when one is declared: it is not a business column, so it may
+    not clash with the query's output, but the primary key may name it. Returns
+    the physical business columns in order — declared names when declared
+    (authoritative), else the query's own — and raises :class:`BuildError` on any
+    violation.
     """
 
     _reject_duplicate_query_columns(qualified, query_columns)
@@ -129,8 +125,25 @@ def validate_build_columns(
     else:
         business_columns = tuple(query_columns)
 
-    _require_references_exist(qualified, business_columns, references)
+    _reject_identity_collision(qualified, identity, business_columns)
+    # The identity column is Weaver's own, so the primary key may name it even
+    # though it is not a business column.
+    available = business_columns + ((identity,) if identity is not None else ())
+    _require_references_exist(qualified, available, references)
     return business_columns
+
+
+def _reject_identity_collision(
+    qualified: str, identity: str | None, business_columns: tuple[str, ...]
+) -> None:
+    if identity is None:
+        return
+    if any(identity.lower() == name.lower() for name in business_columns):
+        raise BuildError(
+            f"{qualified}: Identity {identity!r} collides with a business column — "
+            "the identity column is Weaver-managed and must not be one the query "
+            "produces or the schema declares."
+        )
 
 
 def _reject_duplicate_query_columns(
