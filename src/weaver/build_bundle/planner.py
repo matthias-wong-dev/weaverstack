@@ -230,11 +230,14 @@ def generate_build_bundle(
 
 def _repository_location(resolver, weaver_lakehouse: ItemRef, repository_name: str) -> Location:
     # A resolver knows its own Weaver Lakehouse; a caller-named one must agree,
-    # so a build cannot silently read a repository from a different Lakehouse.
-    configured = getattr(resolver, "weaver_lakehouse", None)
-    if configured is not None and configured.name != weaver_lakehouse.name:
+    # so a build cannot silently read a repository from a different Lakehouse. The
+    # host carries the configured *name*; a resolved location would carry a path
+    # segment (a display name locally, an item id on Fabric), which is not it.
+    host = getattr(resolver, "host", None)
+    configured = getattr(host, "weaver_lakehouse", None)
+    if configured is not None and configured != weaver_lakehouse.name:
         raise BuildError(
-            f"the host's Weaver Lakehouse {configured.name!r} does not match the "
+            f"the host's Weaver Lakehouse {configured!r} does not match the "
             f"requested {weaver_lakehouse.name!r}"
         )
     return resolver.repository(RepositoryRef(repository_name))
