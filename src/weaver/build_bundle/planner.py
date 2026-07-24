@@ -199,20 +199,24 @@ def generate_build_bundle(
     schemas from storage.
     """
 
-    if targets.lakehouse is None:
-        raise BuildError("build bundle v1 requires a Lakehouse binding")
+    binding = _single_binding(targets)
 
     resolver = resolver_for(host)
     repo_location = _repository_location(resolver, weaver_lakehouse, repository_name)
     repository = read_repository(repo_location, store=store, name=repository_name)
 
-    _reject_unsupported(repository, targets)
+    bound_target = binding.to_bound_target()
+    if bound_target.kind == WAREHOUSE_TARGET and prune:
+        raise NotImplementedError(
+            "Warehouse prune is not yet supported — reconciling a Warehouse needs "
+            "SQL-endpoint inspection, which lands with cross-database chaining. Pass "
+            "prune=False to build the Warehouse without reconciliation."
+        )
 
     projection = project(
         repository.dependency_graph, bound_target_kinds=targets.bound_target_kinds
     )
 
-    bound_target = targets.lakehouse.to_bound_target()
     sequences, payloads = _plan_sequences(
         repository, projection, bound_target, resolver, store, prune, spark
     )
@@ -247,11 +251,27 @@ def _repository_location(resolver, weaver_lakehouse: ItemRef, repository_name: s
     return resolver.repository(RepositoryRef(repository_name))
 
 
-def _reject_unsupported(repository: SesRepository, targets: TargetBindings) -> None:
-    if targets.warehouse is not None and repository.warehouse_native:
-        raise NotImplementedError(
-            "T-SQL and Warehouse installation are not supported by build bundle v1"
+def _single_binding(targets: TargetBindings):
+    """The one physical side this bundle builds.
+
+    The signature accepts every physical binding (at least one supplied), but a
+    single bundle materialises a single side: folders and Delta/Spark objects
+    into the Lakehouse, or T-SQL objects into the Warehouse. Crossing the boundary
+    in one build — a Warehouse object reading a Lakehouse table it also builds —
+    needs a SQL-endpoint refresh and lands with cross-database chaining, so until
+    then the two sides are built in separate calls.
+    """
+
+    if targets.lakehouse is not None and targets.warehouse is not None:
+        raise BuildError(
+            "a build targets one physical side at a time: build the Lakehouse and "
+            "the Warehouse in separate calls until cross-database chaining lands"
         )
+    if targets.lakehouse is not None:
+        return targets.lakehouse
+    if targets.warehouse is not None:
+        return targets.warehouse
+    raise BuildError("a build requires at least one physical target binding")
 
 
 def _plan_sequences(
@@ -469,19 +489,22 @@ def _schema_sequence(
 ) -> BuildSequence | None:
     """Create the catalog databases the retained tables and views need.
 
-    Only schemas that hold a Delta table or view get a database, and it is given
-    an explicit ``LOCATION`` in the Lakehouse ``Tables`` area — the one physical
-    path a build resolves — so a managed table created under it lands where Weaver
-    addresses it. Folder-only schemas are directories, not catalog databases, and
-    get none. A schema is created only because a bound resource uses it; none is
-    inferred from a ``Schema.Object`` name.
+    Only schemas that hold a materialised object get a database. On the Lakehouse
+    a Delta schema is given an explicit ``LOCATION`` in the ``Tables`` area — the
+    one physical path a build resolves — so a managed table lands where Weaver
+    addresses it; on the Warehouse a T-SQL ``CREATE SCHEMA`` needs no location.
+    Folder-only schemas are directories, not catalog databases, and get none. A
+    schema is created only because a bound resource uses it; none is inferred from
+    a ``Schema.Object`` name.
     """
 
+    is_warehouse = target.kind == WAREHOUSE_TARGET
+    object_target_kind = SQL_TARGET if is_warehouse else DELTA_TARGET
     schemas = sorted(
         {
             document.object_id.schema
             for document in documents.values()
-            if document.target_kind == DELTA_TARGET
+            if document.target_kind == object_target_kind
         }
     )
     undeclared = [schema for schema in schemas if schema not in repository.schemas]
@@ -493,24 +516,35 @@ def _schema_sequence(
     lakehouse = ItemRef(target.item_id)
     actions: list[BuildAction] = []
     for schema in schemas:
-        # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
-        # the local emulator does, so a managed table lands under the Lakehouse
-        # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
-        # None.
-        location = resolver.schema_location(lakehouse, schema)
-        if location is not None:
-            statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
+        if is_warehouse:
+            # A Warehouse schema is a plain T-SQL CREATE SCHEMA — no storage path,
+            # run through the SQL executor. T-SQL has no CREATE SCHEMA IF NOT
+            # EXISTS, so guard it with a catalogue check.
+            statement = (
+                f"if not exists (select 1 from sys.schemas where name = "
+                f"{_sql_literal(schema)})\n    exec('create schema {_tsql_ident(schema)}');"
+            )
+            executor, extension = "tsql", ".sql"
         else:
-            statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
+            # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
+            # the local emulator does, so a managed table lands under the Lakehouse
+            # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
+            # None.
+            location = resolver.schema_location(lakehouse, schema)
+            if location is not None:
+                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
+            else:
+                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
+            executor, extension = "spark_sql", ".spark.sql"
         content = (statement + "\n").encode("utf-8")
-        path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}.spark.sql")
+        path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}{extension}")
         payloads[path] = content
         actions.append(
             BuildAction(
                 id=f"schema-{schema}",
                 kind=CREATE_SCHEMA,
                 resource_node_id=None,
-                executor="spark_sql",
+                executor=executor,
                 payload=path,
                 payload_sha256=sha256_hex(content),
             )
@@ -602,3 +636,15 @@ def _with_identity(plan: BuildPlan) -> BuildPlan:
 
 def _ident(name: str) -> str:
     return "`" + name.replace("`", "``") + "`"
+
+
+def _sql_literal(value: str) -> str:
+    """A single-quoted T-SQL string literal for a Warehouse schema statement."""
+
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _tsql_ident(name: str) -> str:
+    """A bracket-quoted T-SQL identifier."""
+
+    return "[" + name.replace("]", "]]") + "]"

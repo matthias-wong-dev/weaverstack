@@ -1,8 +1,9 @@
 """Failure and boundary paths in generation — no Spark needed.
 
-A missing Warehouse binding must yield a coherent Lakehouse plan with the
-Warehouse leaf transparently omitted; a *supplied* Warehouse binding for T-SQL
-work must raise the explicit v1 boundary rather than silently omit; and the
+A build targets one physical side at a time: a Lakehouse-only binding yields a
+coherent Lakehouse plan with the Warehouse leaf transparently omitted; a
+Warehouse-only binding yields a T-SQL plan with the Lakehouse objects omitted;
+binding both at once is refused until cross-database chaining lands; and the
 planner must never invent a schema action for a schema no resource declares.
 """
 
@@ -38,7 +39,7 @@ def warehouse_repo(tmp_path):
     return host, store, resolver, tmp_path
 
 
-def _generate(warehouse_repo, targets):
+def _generate(warehouse_repo, targets, *, prune=True):
     host, store, resolver, tmp_path = warehouse_repo
     return generate_build_bundle(
         weaver_lakehouse=ItemRef("Weaver"),
@@ -47,6 +48,7 @@ def _generate(warehouse_repo, targets):
         output=Location(str(tmp_path / "bundle")),
         host=host,
         store=store,
+        prune=prune,
     )
 
 
@@ -64,14 +66,45 @@ def test_lakehouse_only_omits_the_warehouse_leaf_but_stays_coherent(warehouse_re
     assert omitted == {"sql:Reporting.CustomerReport": OMIT_TARGET_UNBOUND}
 
 
-def test_supplying_a_warehouse_binding_for_tsql_raises_the_v1_boundary(warehouse_repo):
+def test_binding_both_sides_at_once_is_refused(warehouse_repo):
+    from weaver.errors import BuildError
+
     targets = TargetBindings(
         lakehouse=LakehouseBinding(lakehouse=ItemRef("Sales_LH")),
         warehouse=WarehouseBinding(warehouse=ItemRef("Sales_WH")),
     )
-
-    with pytest.raises(NotImplementedError, match="Warehouse installation"):
+    with pytest.raises(BuildError, match="separate calls"):
         _generate(warehouse_repo, targets)
+
+
+def test_warehouse_only_builds_the_tsql_objects_and_omits_the_lakehouse(warehouse_repo):
+    bundle = _generate(
+        warehouse_repo,
+        TargetBindings(warehouse=WarehouseBinding(warehouse=ItemRef("Sales_WH"))),
+        prune=False,
+    )
+    plan = bundle.plan
+
+    # The one Warehouse target, and the Warehouse object built through the T-SQL
+    # executor; the Lakehouse objects are omitted as unbound.
+    assert [t.kind for t in plan.targets] == ["warehouse"]
+    built = {a.resource_node_id for _, _, a in plan.actions() if a.resource_node_id}
+    assert built == {"sql:Reporting.CustomerReport"}
+    executors = {a.executor for _, _, a in plan.actions()}
+    assert executors == {"tsql"}
+
+    omitted = {node.node_id: node.reason for node in plan.omitted_nodes}
+    assert omitted == {
+        "folder:Raw.CustomerCsv": OMIT_TARGET_UNBOUND,
+        "delta:DWG.Customer": OMIT_TARGET_UNBOUND,
+    }
+
+    # The Warehouse schema is created through a plain T-SQL CREATE SCHEMA.
+    schema_actions = [a for _, _, a in plan.actions() if a.kind == "create_schema"]
+    assert [a.id for a in schema_actions] == ["schema-Reporting"]
+    schema_sql = bundle.location.join(*schema_actions[0].payload.split("/"))
+    body = warehouse_repo[1].read(schema_sql).decode("utf-8")
+    assert "create schema [Reporting]" in body
 
 
 def test_only_schemas_used_by_retained_resources_are_created(warehouse_repo):

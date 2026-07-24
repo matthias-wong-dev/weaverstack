@@ -55,6 +55,7 @@ class InstallationEnvironment:
     store: Store
     resolver: Any
     spark: Any = None
+    sql: Any = None
     executors: dict[str, ActionExecutor] = field(default_factory=default_executors)
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
@@ -128,6 +129,7 @@ def _run_sequence(
             store=environment.store,
             snapshot=bundle.location.join("repository"),
             target=target,
+            sql=environment.sql,
         )
         for action in batch.actions:
             if failed:

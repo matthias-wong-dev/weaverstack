@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .columns import metadata_column_references
-from .metadata import PYTHON, SPARK_SQL, SQL, TABLE, VIEW
+from .metadata import SPARK_SQL, SQL, TABLE, VIEW
 
 if TYPE_CHECKING:
     from .source import SourceDocument
@@ -55,6 +55,12 @@ SPARK_SQL_EXTENSION = ".spark.sql"
 #: query's shape is known in the session.
 SPARK_TABLE_EXECUTOR = "spark_table"
 SPARK_TABLE_EXTENSION = ".spark-table.json"
+
+#: The executor that runs a T-SQL script against the Warehouse. Its payload is a
+#: finished, self-contained script — a table build materialises and inspects its
+#: own query shape server-side, so no round-trip is needed.
+TSQL_EXECUTOR = "tsql"
+TSQL_EXTENSION = ".sql"
 
 #: Delta column mapping keeps declared column names with spaces (``Order id``)
 #: legal without quoting them everywhere they later appear.
@@ -78,9 +84,7 @@ def generate_ddl(document: "SourceDocument") -> GeneratedDdl:
     """
 
     if document.language == SQL:
-        raise NotImplementedError(
-            "T-SQL executable generation is not supported by build bundle v1"
-        )
+        return _tsql_ddl(document)
     if document.kind == TABLE:
         if document.language == SPARK_SQL:
             return _spark_table_ddl(document)
@@ -89,6 +93,29 @@ def generate_ddl(document: "SourceDocument") -> GeneratedDdl:
         return _view_ddl(document)
     raise NotImplementedError(
         f"{document.relative_path}: a {document.kind} has no create DDL"
+    )
+
+
+def _tsql_ddl(document: "SourceDocument") -> GeneratedDdl:
+    """A Warehouse object's build: a self-contained T-SQL script.
+
+    A table materialises and inspects its own query shape server-side and creates
+    only its main table; a view is a ``CREATE OR ALTER VIEW`` over its body.
+    """
+
+    from .tsql_ddl import generate_tsql_table_script, generate_tsql_view_script
+
+    body = document.sql_body or ""
+    if document.kind == TABLE:
+        content = generate_tsql_table_script(document.document, body)
+    elif document.kind == VIEW:
+        content = generate_tsql_view_script(document.document, body)
+    else:  # pragma: no cover - a SQL Folder is impossible (reader refuses it)
+        raise NotImplementedError(
+            f"{document.relative_path}: a {document.kind} has no create DDL"
+        )
+    return GeneratedDdl(
+        executor=TSQL_EXECUTOR, content=content, extension=TSQL_EXTENSION
     )
 
 

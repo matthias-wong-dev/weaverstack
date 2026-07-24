@@ -47,18 +47,21 @@ PAYLOAD_DIR = "payload"
 
 SPARK_SQL_EXECUTOR = "spark_sql"
 SPARK_TABLE_EXECUTOR = "spark_table"
+TSQL_EXECUTOR = "tsql"
 FOLDER_EXECUTOR = "folder"
-#: Executors a bundle may carry in v1. ``spark_sql`` runs a create or a frozen
-#: prune DROP; ``spark_table`` completes a Spark SQL table's deferred build by
-#: running its query and creating the table; ``folder`` makes or removes a
-#: directory. All are build, not load. T-SQL is deliberately absent: a bundle
-#: that reached generation with Warehouse work would already have raised.
-VALID_EXECUTORS = frozenset({SPARK_SQL_EXECUTOR, SPARK_TABLE_EXECUTOR, FOLDER_EXECUTOR})
+#: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
+#: DROP; ``spark_table`` completes a Spark SQL table's deferred build by running
+#: its query and creating the table; ``tsql`` runs a self-contained Warehouse
+#: script; ``folder`` makes or removes a directory. All are build, not load.
+VALID_EXECUTORS = frozenset(
+    {SPARK_SQL_EXECUTOR, SPARK_TABLE_EXECUTOR, TSQL_EXECUTOR, FOLDER_EXECUTOR}
+)
 #: Executors that run a payload, and the extension that payload must carry.
 #: ``folder`` acts on the resolved target and carries none.
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
+    TSQL_EXECUTOR: ".sql",
 }
 _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
 

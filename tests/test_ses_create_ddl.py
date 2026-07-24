@@ -2,9 +2,9 @@
 
 Build creates structure, not data. A Delta table (Python or Spark SQL) becomes a
 ``CREATE TABLE`` over its declared columns; a view becomes ``CREATE OR REPLACE
-VIEW`` over its query body. A Folder has no DDL (it is a directory), and T-SQL is
-refused at a v1 boundary. Nothing here runs ``read()`` or consults a table's
-query body — that is load.
+VIEW`` over its query body. A Folder has no DDL (it is a directory). T-SQL
+generation has its own test module (``test_ses_tsql_ddl``); here we only assert a
+SQL object routes to the ``tsql`` executor. Nothing here runs ``read()``.
 """
 
 from __future__ import annotations
@@ -208,9 +208,11 @@ def test_folder_has_no_create_ddl():
         _doc("Raw__CustomerCsv.py", FOLDER_SOURCE).create_ddl()
 
 
-def test_tsql_generation_is_refused_at_the_v1_boundary():
-    with pytest.raises(NotImplementedError, match="T-SQL"):
-        _doc("Reporting.CustomerReport.sql", TSQL_SOURCE).create_ddl()
+def test_tsql_object_routes_to_the_tsql_executor():
+    from weaver.ses.ddl import TSQL_EXECUTOR, TSQL_EXTENSION
+
+    ddl = _doc("Reporting.CustomerReport.sql", TSQL_SOURCE).create_ddl()
+    assert (ddl.executor, ddl.extension) == (TSQL_EXECUTOR, TSQL_EXTENSION)
 
 
 # --- determinism -------------------------------------------------------------
