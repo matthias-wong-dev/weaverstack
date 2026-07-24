@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
+from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location, RepositoryRef
 
 WEAVER_LAKEHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
@@ -139,6 +139,40 @@ def installed_repository(lakehouses: LocalLakehouses) -> Location:
     destination = lakehouses.resolver.repos_root / source.name
     shutil.copytree(source, destination.path)
     return destination
+
+
+@pytest.fixture
+def installed_build_repository(lakehouses: LocalLakehouses) -> str:
+    """The build-lakehouse fixture, installed under a deliberately different name.
+
+    The installed name is what the build reads, not the fixture directory name,
+    so ``MyRepo`` proves the input chooses the installed repository.
+    """
+
+    source = Path(__file__).parent / "fixtures" / "build-lakehouse"
+    destination = lakehouses.resolver.repository(RepositoryRef("MyRepo"))
+    shutil.copytree(source, destination.path)
+    return "MyRepo"
+
+
+@pytest.fixture
+def lakehouse_only_bindings(lakehouses: LocalLakehouses):
+    """A Lakehouse binding to the target Lakehouse, no Warehouse."""
+
+    from weaver.build import LakehouseBinding, TargetBindings
+
+    return TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.target))
+
+
+@pytest.fixture
+def installation_environment(spark, lakehouses: LocalLakehouses):
+    """A local installer environment: shared Spark, local resolver and store."""
+
+    from weaver.build import InstallationEnvironment
+
+    return InstallationEnvironment(
+        store=lakehouses.store, resolver=lakehouses.resolver, spark=spark
+    )
 
 
 # --- spark -------------------------------------------------------------------
