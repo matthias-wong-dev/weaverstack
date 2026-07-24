@@ -21,6 +21,10 @@ DEFAULT_TIMEOUT = 60.0
 class FabricError(WeaverError):
     """Raised when a Fabric API call fails."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class FabricClient:
     """Authenticated access to the Fabric REST API."""
@@ -66,7 +70,8 @@ class FabricClient:
         if response.status_code not in expected:
             raise FabricError(
                 f"{method} {url} returned {response.status_code}: "
-                f"{response.text.strip()[:400] or 'no body'}"
+                f"{response.text.strip()[:400] or 'no body'}",
+                status_code=response.status_code,
             )
         return response
 

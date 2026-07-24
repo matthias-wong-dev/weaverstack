@@ -24,6 +24,10 @@ SQL_ENDPOINT = "SQLEndpoint"
 FACET_TYPES = frozenset({SQL_ENDPOINT})
 
 
+class ItemNotFoundError(CommandError):
+    """Raised when an item lookup returns no match."""
+
+
 @dataclass(frozen=True)
 class Workspace:
     id: str
@@ -102,7 +106,7 @@ def find_item(
     if item_type is None and len(matches) > 1:
         matches = [item for item in matches if item.type not in FACET_TYPES] or matches
     if not matches:
-        raise CommandError(
+        raise ItemNotFoundError(
             f"no {item_type or 'item'} named {name!r} in workspace {workspace.name!r}"
         )
     if len(matches) > 1:

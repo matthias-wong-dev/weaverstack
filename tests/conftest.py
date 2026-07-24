@@ -32,6 +32,51 @@ from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
 
 WEAVER_LAKEHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
+LAKEHOUSE_SQL = Path(__file__).parent / "fixtures" / "local-lakehouse"
+
+
+def _sql_statements(name: str, tables_root: str) -> tuple[str, ...]:
+    """The saved Spark SQL fixture, rendered for one explicit Tables root."""
+
+    raw = (LAKEHOUSE_SQL / name).read_text(encoding="utf-8").format(tables=tables_root)
+    code = "\n".join(
+        line for line in raw.splitlines() if not line.lstrip().startswith("--")
+    )
+    return tuple(
+        statement
+        for statement in (part.strip() for part in code.split(";"))
+        if statement
+    )
+
+
+@pytest.fixture
+def lakehouse_sql_statements():
+    """Shared DDL/DML renderer for local Spark and Fabric Livy fixtures."""
+
+    return _sql_statements
+
+
+def _populate_folder_files(store, resolver, target: ItemRef) -> None:
+    """The file side of the populated-Lakehouse fixture, transport-neutral."""
+
+    from weaver import FolderTarget
+
+    folder_target = FolderTarget(lakehouse=target)
+    export = resolver.folder_object(folder_target, "Sales", "OrderExport")
+    for day in ("20260721", "20260722", "20260723"):
+        store.write(export / f"order_{day}.csv", b"id,amount\n1,10\n2,20\n")
+
+    invoices = resolver.folder_object(folder_target, "Sales", "InvoicePdf")
+    store.write(invoices / "INV-001.pdf", b"%PDF-1.4 fake\n")
+    store.write(invoices / "archive" / "INV-000.pdf", b"%PDF-1.4 older\n")
+    store.write(resolver.files_root(target) / "notes.txt", b"scratch\n")
+
+
+@pytest.fixture
+def populate_folder_files():
+    """Shared fixture setup through LocalStore or desktop OneLake access."""
+
+    return _populate_folder_files
 
 
 # --- local lakehouses --------------------------------------------------------
@@ -153,58 +198,44 @@ def spark():
 
 
 @pytest.fixture
-def populated_folders(lakehouses: LocalLakehouses) -> LocalLakehouses:
+def populated_folders(
+    lakehouses: LocalLakehouses, populate_folder_files
+) -> LocalLakehouses:
     """Folder materialisations with files in them. Needs no JVM.
 
     Two managed folders and a stray file beside them, so a wipe has something
     to clear and something to be careless with.
     """
 
-    from weaver import FolderTarget
-
-    store = lakehouses.store
-    resolver = lakehouses.resolver
-    target = FolderTarget.parse(f"{TARGET_LAKEHOUSE}/Files")
-
-    export = resolver.folder_object(target, "Sales", "OrderExport")
-    for day in ("20260721", "20260722", "20260723"):
-        store.write(export / f"order_{day}.csv", b"id,amount\n1,10\n2,20\n")
-
-    invoices = resolver.folder_object(target, "Sales", "InvoicePdf")
-    store.write(invoices / "INV-001.pdf", b"%PDF-1.4 fake\n")
-    store.write(invoices / "archive" / "INV-000.pdf", b"%PDF-1.4 older\n")
-
-    # Not a Weaver materialisation — something a person left in the Files area.
-    store.write(resolver.files_root(lakehouses.target) / "notes.txt", b"scratch\n")
+    populate_folder_files(
+        lakehouses.store, lakehouses.resolver, lakehouses.target
+    )
 
     return lakehouses
 
 
 @pytest.fixture
-def populated_lakehouse(spark, populated_folders: LocalLakehouses) -> LocalLakehouses:
-    """Folders as above, plus real Delta tables with rows. Needs Spark."""
+def populated_local_lakehouses(
+    spark,
+    populated_folders: LocalLakehouses,
+    lakehouse_sql_statements,
+) -> LocalLakehouses:
+    """The local populated lifecycle, driven by the shared saved Spark SQL."""
 
-    from weaver import DeltaTarget
-
-    target = DeltaTarget.parse(TARGET_LAKEHOUSE)
-    resolver = populated_folders.resolver
-
-    orders = resolver.delta_table(target, "Sales", "Order")
-    spark.createDataFrame(
-        [("A1", "C1", 10.0), ("A2", "C1", 20.0), ("A3", "C2", 30.0)],
-        "Order_id string, Customer_id string, Amount double",
-    ).write.format("delta").mode("overwrite").save(orders.value)
-
-    customers = resolver.delta_table(target, "Sales", "Customer")
-    spark.createDataFrame(
-        [("C1", "Ackland"), ("C2", "Beattie")],
-        "Customer_id string, Customer_name string",
-    ).write.format("delta").mode("overwrite").save(customers.value)
-
-    summary = resolver.delta_table(target, "Reporting", "OrderSummary")
-    spark.createDataFrame(
-        [("C1", 2, 30.0), ("C2", 1, 30.0)],
-        "Customer_id string, Order_count int, Total_amount double",
-    ).write.format("delta").mode("overwrite").save(summary.value)
+    tables_root = populated_folders.resolver.tables_root(
+        populated_folders.target
+    ).value
+    for script in ("build.spark.sql", "load.spark.sql"):
+        for statement in lakehouse_sql_statements(script, tables_root):
+            spark.sql(statement)
 
     return populated_folders
+
+
+@pytest.fixture
+def populated_lakehouse(
+    populated_local_lakehouses: LocalLakehouses,
+) -> LocalLakehouses:
+    """Backwards-compatible name for the local populated Lakehouse."""
+
+    return populated_local_lakehouses

@@ -12,10 +12,19 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
+from weaver import Host, ItemRef, Store
+
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
+#: The Environment the session attaches to — installed once with `weaver install`
+#: and consumed by the suite, never uploaded by it.
+ENVIRONMENT_ENV = "WEAVER_FABRIC_ENVIRONMENT"
+DEFAULT_ENVIRONMENT = "weaver"
 
 #: Disposable items carry this prefix so an abandoned one is obvious.
 TEST_PREFIX = "weavertest"
@@ -59,6 +68,17 @@ def _disposable_name(role: str) -> str:
     return f"{TEST_PREFIX}_{role}_{uuid.uuid4().hex[:8]}"
 
 
+@dataclass(frozen=True)
+class PopulatedLakehouse:
+    """One populated target, with transport hidden from the shared test."""
+
+    host: Host
+    target: ItemRef
+    resolver: Any
+    store: Store
+    wipe: Callable[[], tuple[str, ...]]
+
+
 @pytest.fixture
 def fabric_lakehouses(fabric_workspace, fabric_client):
     """A Weaver Lakehouse and a target Lakehouse, created and then deleted.
@@ -90,14 +110,22 @@ def fabric_lakehouses(fabric_workspace, fabric_client):
 
 # --- running Weaver inside Fabric --------------------------------------------
 #
-# Session-scoped, because a Lakehouse, a runtime sync and a Livy session are all
-# expensive to obtain and cheap to reuse. This is the third execution position:
-# not Weaver reaching into a workspace, but Weaver running there.
+# Session-scoped, because a Lakehouse and a Livy session are expensive to obtain
+# and cheap to reuse. This is the third execution position: not Weaver reaching
+# into a workspace, but Weaver running there.
+#
+# Weaver is *installed* into a Fabric Environment beforehand with `weaver
+# install`; the suite attaches that Environment and imports it. It never uploads
+# Weaver source, copies it into /tmp, or edits sys.path.
 
 
 @pytest.fixture(scope="session")
 def fabric_weaver_lakehouse(fabric_workspace, fabric_client):
-    """One Lakehouse standing in as the Weaver Lakehouse for the whole run."""
+    """One Lakehouse standing in as the Weaver Lakehouse for the whole run.
+
+    The Livy session is created against it; Weaver itself comes from the
+    attached Environment, not from here.
+    """
 
     from weaver.fabric import create_lakehouse, delete_item
 
@@ -114,42 +142,144 @@ def fabric_weaver_lakehouse(fabric_workspace, fabric_client):
 
 
 @pytest.fixture(scope="session")
-def fabric_host(fabric_workspace, fabric_weaver_lakehouse):
-    """A host whose Weaver Lakehouse is real, and which knows where Weaver goes."""
+def fabric_environment_name():
+    return os.environ.get(ENVIRONMENT_ENV, DEFAULT_ENVIRONMENT)
+
+
+@pytest.fixture(scope="session")
+def fabric_host(fabric_workspace, fabric_weaver_lakehouse, fabric_environment_name):
+    """A host that names the Environment Weaver was installed into."""
 
     from weaver import FabricHost
 
     return FabricHost(
         workspace=fabric_workspace.name,
         weaver_lakehouse=fabric_weaver_lakehouse.name,
-        weaver_install=f"{fabric_weaver_lakehouse.name}/Files/weaver",
+        fabric_environment=fabric_environment_name,
     )
 
 
 @pytest.fixture(scope="session")
-def synced_runtime(fabric_host):
-    """This machine's Weaver package, shipped into the workspace.
+def livy_session(fabric_host):
+    """One Spark session in Fabric with the Weaver Environment attached.
 
-    Paid once for the run. The upload is 62 KB of pure Python.
+    Skips — rather than fails — when the Environment is missing or carries no
+    usable Weaver, because that means ``weaver install`` has not been run, which
+    is a setup step, not a defect in what is under test.
     """
 
-    from weaver.fabric import sync_runtime
-
-    return sync_runtime(fabric_host)
-
-
-@pytest.fixture(scope="session")
-def livy_session(fabric_host, synced_runtime):
-    """One Spark session in Fabric, held open across the tests that need it."""
-
+    from weaver.errors import CommandError
     from weaver.fabric import LivyError, LivySession
 
-    session = LivySession.for_host(fabric_host)
+    try:
+        session = LivySession.for_host(fabric_host)
+    except CommandError as exc:
+        pytest.skip(f"{exc}; run `weaver install` into the Environment first")
     try:
         session.start()
     except LivyError as exc:
-        pytest.skip(f"could not start a Livy session: {exc}")
+        pytest.skip(f"could not start a Livy session (Environment installed?): {exc}")
     try:
         yield session
     finally:
         session.close()
+
+
+# --- one populated lifecycle, on either host --------------------------------
+
+
+@pytest.fixture
+def populated_local_lakehouse(populated_local_lakehouses):
+    """Adapt the preserved local lifecycle to the shared fixture result."""
+
+    from weaver import DeltaTarget, wipe_delta_target
+
+    def wipe() -> tuple[str, ...]:
+        report = wipe_delta_target(
+            DeltaTarget(lakehouse=populated_local_lakehouses.target),
+            populated_local_lakehouses.host,
+        )
+        return report.removed
+
+    return PopulatedLakehouse(
+        host=populated_local_lakehouses.host,
+        target=populated_local_lakehouses.target,
+        resolver=populated_local_lakehouses.resolver,
+        store=populated_local_lakehouses.store,
+        wipe=wipe,
+    )
+
+
+@pytest.fixture
+def populated_fabric_lakehouse(
+    fabric_workspace,
+    fabric_client,
+    fabric_host,
+    livy_session,
+    lakehouse_sql_statements,
+    populate_folder_files,
+):
+    """A disposable Fabric target populated through Environment-backed Livy."""
+
+    from weaver.fabric import (
+        FabricResolver,
+        OneLakeDfsClient,
+        create_lakehouse,
+        delete_item,
+    )
+
+    item = None
+    try:
+        item = create_lakehouse(
+            fabric_workspace,
+            _disposable_name("target"),
+            client=fabric_client,
+        )
+        target = ItemRef(item.name)
+        resolver = FabricResolver(fabric_host, client=fabric_client)
+        store = OneLakeDfsClient()
+
+        populate_folder_files(store, resolver, target)
+        tables_root = f"{resolver.spark_root(target)}/Tables"
+        statements = [
+            statement
+            for script in ("build.spark.sql", "load.spark.sql")
+            for statement in lakehouse_sql_statements(script, tables_root)
+        ]
+        body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
+        result = livy_session.run(f"{body}\nemit(True)\n")
+        assert result.payload is True
+
+        def wipe() -> tuple[str, ...]:
+            body = (
+                "from weaver import FabricHost, DeltaTarget, wipe_delta_target\n"
+                f"host = FabricHost(workspace={fabric_host.workspace!r}, "
+                f"weaver_lakehouse={fabric_host.weaver_lakehouse!r}, "
+                f"fabric_environment={fabric_host.fabric_environment!r})\n"
+                f"target = DeltaTarget.parse({target.name!r})\n"
+                "report = wipe_delta_target(target, host)\n"
+                "emit({'removed': list(report.removed)})\n"
+            )
+            result = livy_session.run(body)
+            return tuple(result.payload["removed"])
+
+        yield PopulatedLakehouse(
+            host=fabric_host,
+            target=target,
+            resolver=resolver,
+            store=store,
+            wipe=wipe,
+        )
+    finally:
+        if item is not None:
+            try:
+                delete_item(item, client=fabric_client)
+            except Exception as exc:
+                print(f"warning: could not delete {item}: {exc}")
+
+
+@pytest.fixture
+def populated_lakehouse(request):
+    """Select a concrete populated lifecycle by indirect parameter."""
+
+    return request.getfixturevalue(request.param)

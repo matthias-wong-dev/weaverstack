@@ -92,7 +92,7 @@ So the storage picture has two parts, and they must not be conflated:
 | execution | host | store |
 |---|---|---|
 | local process | `LocalHost` | `LocalStore` |
-| Fabric session | `FabricHost` | future session-native store |
+| Fabric session | `FabricHost` | `FabricStore` over `notebookutils.fs` |
 
 *Cross-boundary access* — a local caller reaching into a workspace:
 
@@ -103,9 +103,9 @@ So the storage picture has two parts, and they must not be conflated:
 
 `OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is **not** the Fabric equivalent of
 `LocalStore`. It is how the desktop crosses in, constructed explicitly by the
-caller that crosses. `store_for(host)` returns a within-host store for a
-`LocalHost` and *raises* for a `FabricHost`, precisely so desktop DFS is never
-encoded as the default Fabric storage path.
+caller that crosses. Inside Fabric, `store_for(FabricHost)` returns the
+session-native `FabricStore`; from a desktop that construction fails rather
+than silently substituting DFS.
 
 Above resolution and the store, nothing knows which host it is talking to. An
 `if isinstance(host, …)` in core operation code means the abstraction is being
@@ -132,11 +132,13 @@ demand an orchestration environment of their own. **A Fabric test that runs
 Weaver on the laptop and reaches into a workspace over HTTP tests row 2, not
 row 3.** Both are worth having, but only row 3 is the promise.
 
-Until Weaver is installed from PyPI into a Fabric Environment, row 3 needs the
-package shipped into the workspace and imported from there — the
-`weaver_install` host key, kept in sync during development. When the Environment
-carries Weaver, the bootstrap's `import weaver` succeeds, the fallback goes
-unused, and the key can be deleted with nothing else changing.
+Row 3 is delivered by installing Weaver into a Fabric Environment: `weaver
+install --workspace <ws> --environment <env>` builds a wheel from the checkout,
+stages it and Weaver's dependencies, and publishes. A Livy session (and a Fabric
+notebook) then attaches that Environment via `fabric_environment` on the host and
+imports the installed package — nothing is copied into the workspace. Rerun
+`weaver install` whenever Weaver Python changes; an unchanged source tree builds
+the same version and the install skips the republish.
 
 ### What this means when you add a feature
 

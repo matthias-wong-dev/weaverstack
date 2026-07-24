@@ -33,7 +33,24 @@ from .targets import (
     WarehouseTarget,
 )
 
-__version__ = "0.1.0"
+def _resolve_version() -> str:
+    """The installed version, read from distribution metadata.
+
+    The wheel's version is git-derived at build time (see ``hatch_build.py``),
+    so an installed Weaver — in a notebook or a Fabric Environment — reports the
+    exact checkout it was built from. A raw source tree that has never been
+    installed falls back to a marker rather than crashing the import.
+    """
+
+    try:
+        from importlib.metadata import version
+
+        return version("weaverstack")
+    except Exception:  # pragma: no cover - never worth crashing an import over
+        return "0.0.0+unknown"
+
+
+__version__ = _resolve_version()
 
 __all__ = [
     "__version__",

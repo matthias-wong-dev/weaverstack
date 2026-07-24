@@ -9,38 +9,37 @@ from __future__ import annotations
 
 import pytest
 
-import weaver
 pytestmark = pytest.mark.fabric
-
-
-# --- shipping ----------------------------------------------------------------
-
-
-def test_the_runtime_syncs_into_the_workspace(synced_runtime):
-    assert synced_runtime.total > 0
-    shipped = set(synced_runtime.uploaded) | set(synced_runtime.unchanged)
-    assert "__init__.py" in shipped
-    assert "fabric/onelake.py" in shipped
-
-
-def test_a_second_sync_uploads_nothing(fabric_host, synced_runtime):
-    """Content hashes, so an unchanged package is not re-shipped."""
-    from weaver.fabric import sync_runtime
-
-    again = sync_runtime(fabric_host)
-    assert again.uploaded == ()
-    assert again.total == synced_runtime.total
 
 
 # --- importing ---------------------------------------------------------------
 
 
 def test_weaver_imports_inside_a_fabric_session(livy_session):
-    """The claim: a Fabric session can import Weaver and use it."""
+    """The claim: a Fabric session imports the installed Weaver and uses it.
 
-    result = livy_session.run("emit(weaver.__version__)\n")
+    The version is whatever ``weaver install`` published into the Environment —
+    not necessarily this checkout's — so we assert a real version came back, not
+    that it equals the laptop's.
+    """
+
+    result = livy_session.run(
+        "from importlib.metadata import version\n"
+        "emit({'attr': weaver.__version__, 'dist': version('weaverstack')})\n"
+    )
     assert result.returned
-    assert result.payload == weaver.__version__
+    assert result.payload["attr"] == result.payload["dist"]
+    assert result.payload["dist"]  # a real, non-empty version string
+
+
+def test_the_environment_carries_weavers_dependencies(livy_session):
+    """mssql-python and the rest resolve inside the session, from the Environment."""
+
+    result = livy_session.run(
+        "import yaml, sqlparse, mssql_python\n"
+        "emit(sorted(['yaml', 'sqlparse', 'mssql_python']))\n"
+    )
+    assert result.payload == ["mssql_python", "sqlparse", "yaml"]
 
 
 def test_the_core_public_surface_is_importable_there(livy_session):

@@ -9,14 +9,16 @@ from __future__ import annotations
 from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
 from .client import FabricClient, FabricError
 from .livy import LivyError, LivySession, StatementResult, emit_source
-from .runtime import (
-    SyncReport,
-    bootstrap_source,
-    install_location,
-    abfss_package_root,
-    sync_runtime,
+from .environment import (
+    InstallResult,
+    build_wheel,
+    find_or_create_environment,
+    install,
+    missing_from_environment,
 )
-from .resolution import RUNTIME_AREA, FabricResolver
+from .resolution import FabricResolver
+from .session import FabricSessionResolver
+from .store import FabricStore
 from .onelake import (
     OneLakeDfsClient,
     abfss_root,
@@ -28,6 +30,7 @@ from .resources import (
     LAKEHOUSE,
     WAREHOUSE,
     Item,
+    ItemNotFoundError,
     Workspace,
     create_lakehouse,
     delete_item,
@@ -42,16 +45,17 @@ __all__ = [
     "capacity_command",
     "run_capacity_action",
     "FabricResolver",
+    "FabricSessionResolver",
+    "FabricStore",
+    "install",
+    "InstallResult",
+    "build_wheel",
+    "find_or_create_environment",
+    "missing_from_environment",
     "LivySession",
     "LivyError",
     "StatementResult",
     "emit_source",
-    "sync_runtime",
-    "abfss_package_root",
-    "SyncReport",
-    "install_location",
-    "bootstrap_source",
-    "RUNTIME_AREA",
     "OneLakeDfsClient",
     "abfss_root",
     "onelake_url",
@@ -61,6 +65,7 @@ __all__ = [
     "FabricError",
     "Workspace",
     "Item",
+    "ItemNotFoundError",
     "LAKEHOUSE",
     "WAREHOUSE",
     "find_workspace",

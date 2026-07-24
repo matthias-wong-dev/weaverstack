@@ -103,26 +103,39 @@ class LivySession:
     def for_host(cls, host, *, resolver=None, **kwargs) -> "LivySession":
         """A session against a host's Weaver Lakehouse, ready to ``import weaver``.
 
-        The session is created against the Weaver Lakehouse, so that is its
-        default and the shipped package is reachable. Destination Lakehouses
-        need no attachment — they are addressed by explicit ``abfss`` roots.
+        The session is created against the Weaver Lakehouse (its default), and
+        the host's ``fabric_environment`` is attached so a plain ``import
+        weaver`` finds the installed package — put there by ``weaver install``.
+        Nothing is copied into the workspace.
 
-        The bootstrap runs once when the session starts, so callers submit their
+        The Environment is required: a host without one, or an unresolvable one,
+        is an error rather than a silent fall back to copied source. The
+        bootstrap runs once when the session starts, so callers submit their
         work and nothing else.
         """
 
+        from ..errors import CommandError
         from ..targets import ItemRef
         from .resolution import FabricResolver
-        from .runtime import abfss_package_root, bootstrap_source
+        from .resources import LAKEHOUSE
 
         resolver = resolver or FabricResolver(host)
-        from .resources import LAKEHOUSE
         home = resolver.resolve(ItemRef(host.weaver_lakehouse), item_type=LAKEHOUSE)
+
+        environment_id = kwargs.pop("environment_id", None)
+        if environment_id is None:
+            if not getattr(host, "fabric_environment", None):
+                raise CommandError(
+                    "this host names no fabric_environment; set one and run "
+                    "`weaver install --workspace <ws> --environment <env>`"
+                )
+            environment_id = _resolve_environment_id(host, resolver)
+
         return cls(
             resolver.workspace.id,
             home.id,
-            environment_id=kwargs.pop("environment_id", None),
-            bootstrap=bootstrap_source(abfss_package_root(host, resolver)) + emit_source(),
+            environment_id=environment_id,
+            bootstrap=environment_bootstrap() + emit_source(),
             **kwargs,
         )
 
@@ -137,7 +150,12 @@ class LivySession:
     def start(self, *, timeout: float = DEFAULT_SESSION_TIMEOUT) -> None:
         payload: dict[str, Any] = {"name": "weaver"}
         if self.environment_id:
-            payload["environmentId"] = self.environment_id
+            # Fabric attaches an Environment to a Livy session through a Spark
+            # conf, not a top-level field — the published libraries (Weaver and
+            # its dependencies) are loaded only when this is set.
+            payload["conf"] = {
+                "spark.fabric.environmentDetails": json.dumps({"id": self.environment_id})
+            }
         created = _call("POST", self.base, self.token, payload)
         session_id = created.get("id") or created.get("livyId")
         if session_id is None:
@@ -222,4 +240,41 @@ def emit_source() -> str:
         "import json as _json\n"
         f"def emit(value):\n"
         f"    print({RESULT_PREFIX!r} + _json.dumps(value, default=str))\n"
+    )
+
+
+def _resolve_environment_id(host, resolver) -> str:
+    """The item id of the host's named Environment.
+
+    Resolved by type, so a same-named Lakehouse or Warehouse cannot be picked up
+    by mistake — identity is ``workspace + type + name``.
+    """
+
+    from .resources import ENVIRONMENT, find_item
+
+    item = find_item(
+        resolver.workspace,
+        host.fabric_environment,
+        item_type=ENVIRONMENT,
+        client=resolver.client,
+    )
+    return item.id
+
+
+def environment_bootstrap() -> str:
+    """The bootstrap for a session whose Weaver comes from an Environment.
+
+    A plain ``import weaver`` — no source copied, no ``sys.path`` change. If the
+    attached Environment has no usable Weaver, the error says so and names the
+    fix rather than silently falling back to a shipped copy.
+    """
+
+    return (
+        "try:\n"
+        "    import weaver\n"
+        "except ImportError as _exc:\n"
+        "    raise ImportError(\n"
+        "        'the attached Fabric Environment has no usable Weaver install; run '\n"
+        "        'weaver install --workspace <ws> --environment-item-name <env>'\n"
+        "    ) from _exc\n"
     )

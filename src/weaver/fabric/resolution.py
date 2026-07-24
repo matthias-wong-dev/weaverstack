@@ -31,12 +31,6 @@ from .client import ONELAKE_DFS, FabricClient
 from .onelake import abfss_root, lakehouse_artifact_segment
 from .resources import LAKEHOUSE, WAREHOUSE, Item, Workspace, find_item, find_workspace
 
-#: Where the Weaver package is shipped when it is not installed in a Fabric
-#: Environment. A convention rather than configuration, like ``repos`` — the
-#: common case needs no host key, and the key exists for anyone who needs it
-#: somewhere else.
-RUNTIME_AREA = "weaver"
-
 
 class FabricResolver:
     """Resolves level-three names against one Fabric workspace."""
@@ -156,16 +150,6 @@ class FabricResolver:
 
     def repository(self, repository: RepositoryRef) -> Location:
         return self.repos_root / repository.name
-
-    @property
-    def runtime_root(self) -> Location:
-        """Where the Weaver package is shipped for a session to import.
-
-        Unused once Weaver is installed in a Fabric Environment, which is the
-        intended end state — a bootstrap tries ``import weaver`` first.
-        """
-
-        return self.files_root(self._weaver_lakehouse()) / RUNTIME_AREA
 
     @property
     def control_tables_root(self) -> Location:

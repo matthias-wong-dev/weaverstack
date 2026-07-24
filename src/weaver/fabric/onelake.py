@@ -111,8 +111,8 @@ class OneLakeDfsClient:
     session-native store is a separate implementation for when it exists.
 
     Because it crosses a boundary, it is constructed explicitly by the caller
-    that crosses — never returned by a host-to-store factory, which would encode
-    desktop DFS as the default Fabric storage path.
+    that crosses — never returned by a host-to-store factory, which returns the
+    NotebookUtils-backed ``FabricStore`` only inside a Fabric session.
     """
 
     def __init__(

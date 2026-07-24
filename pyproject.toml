@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weaverstack"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,19 +20,26 @@ classifiers = [
     "Topic :: Database",
 ]
 
-# Deliberately minimal. A dependency is declared at the checkpoint that first
-# needs it, not in advance:
-#   mssql-python    Warehouse SQL                               -> [fabric]
-#   pyspark/delta   Delta execution                             -> [spark]
+# What *installed* Weaver needs to run — the packages a Fabric Environment must
+# carry. Kept in step with deployment/fabric/environment.yml (a test enforces it)
+# so the two definitions cannot drift. Local-only tooling stays in the extras:
+#   pyspark/delta   local Delta execution                       -> [spark]
+#   pytest          the test suite                              -> [dev]
 dependencies = [
     "pyyaml",
     "sqlparse",
+    "mssql-python",
 ]
 
 [project.optional-dependencies]
-# Desktop CLI. Empty today because the CLI is stdlib-only; it exists so the
-# core/CLI dependency boundary is declared from the start.
-cli = []
+# Desktop CLI. `weaver install` builds a wheel and talks to Fabric over HTTP, so
+# the installer pulls the build frontend and the Fabric HTTP stack. This is the
+# one command a friend tester needs: `pip install ".[cli]"`.
+cli = [
+    "azure-identity>=1.23",
+    "requests>=2.31",
+    "build>=1.2",
+]
 # Delta and Spark are released in lockstep: delta-spark 3.2.x needs Spark 3.5.x.
 # Ranges rather than pins, so an existing local install is not disturbed.
 fabric = [
@@ -56,6 +63,17 @@ weaver = "weaver_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/matthias-wong-dev/weaverstack"
+
+# Version comes from Git, not a hand-edited string, so every changed checkout
+# builds an identifiable wheel. The scheme (see hatch_build.py) is a public
+# timestamped dev version — unique per build and free of the PEP 440 '+' local
+# segment that Fabric's Environment upload rejects.
+#   clean at tag v0.1.0        -> 0.1.0
+#   ahead of / dirtier than it -> 0.1.1.dev<UTC-seconds>
+[tool.hatch.version]
+source = "code"
+path = "hatch_build.py"
+expression = "compute_version()"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/weaver", "src/weaver_cli"]
