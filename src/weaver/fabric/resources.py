@@ -149,6 +149,34 @@ def create_lakehouse(
     return Item(id=body["id"], name=name, type=LAKEHOUSE, workspace_id=workspace.id)
 
 
+def create_warehouse(
+    workspace: Workspace, name: str, *, client: FabricClient | None = None
+) -> Item:
+    """Create a disposable Warehouse, returning an existing typed match."""
+
+    client = client or FabricClient()
+    try:
+        return find_item(workspace, name, item_type=WAREHOUSE, client=client)
+    except ItemNotFoundError:
+        pass
+
+    response = client.request(
+        "POST",
+        f"workspaces/{workspace.id}/warehouses",
+        payload={"displayName": name},
+        expected=(200, 201, 202, 409),
+    )
+    if response.status_code == 409:
+        raise CommandError(
+            f"cannot create Warehouse {name!r} in {workspace.name!r}: "
+            + (response.json().get("message") or response.text.strip()[:200])
+        )
+    if response.status_code == 202:
+        return _await_item(workspace, name, WAREHOUSE, client=client)
+    body = response.json()
+    return Item(id=body["id"], name=name, type=WAREHOUSE, workspace_id=workspace.id)
+
+
 def delete_item(item: Item, *, client: FabricClient | None = None) -> None:
     client = client or FabricClient()
     client.request(

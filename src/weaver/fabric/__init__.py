@@ -33,10 +33,18 @@ from .resources import (
     ItemNotFoundError,
     Workspace,
     create_lakehouse,
+    create_warehouse,
     delete_item,
     find_item,
     find_workspace,
     list_items,
+)
+from .sql import (
+    FABRIC_SQL_AUDIENCE,
+    desktop_sql_executor,
+    desktop_sql_pool,
+    fabric_sql_executor,
+    fabric_sql_pool,
 )
 
 __all__ = [
@@ -72,5 +80,11 @@ __all__ = [
     "find_item",
     "list_items",
     "create_lakehouse",
+    "create_warehouse",
     "delete_item",
+    "desktop_sql_executor",
+    "desktop_sql_pool",
+    "fabric_sql_executor",
+    "fabric_sql_pool",
+    "FABRIC_SQL_AUDIENCE",
 ]

@@ -129,6 +129,30 @@ class FabricResolver:
 
         return self.resolve(target.warehouse, item_type=WAREHOUSE)
 
+    def sql_endpoint(self, target: WarehouseTarget):
+        """Resolve a typed Warehouse to the common SQL endpoint record."""
+
+        from ..sql import SqlEndpoint
+
+        warehouse = self.warehouse(target)
+        payload = self.client.get_json(
+            f"workspaces/{self.workspace.id}/warehouses/"
+            f"{warehouse.id}/connectionString"
+        )
+        value = payload.get("connectionString")
+        if not isinstance(value, str) or not value.strip():
+            raise CommandError(
+                f"Fabric returned no SQL connection string for Warehouse "
+                f"{warehouse.name!r}"
+            )
+        return SqlEndpoint(
+            server=_server_name(value),
+            database=warehouse.name,
+            workspace_id=self.workspace.id,
+            warehouse_id=warehouse.id,
+            warehouse_name=warehouse.name,
+        )
+
     # --- the weaver lakehouse ---------------------------------------------
 
     def _weaver_lakehouse(self) -> ItemRef:
@@ -154,3 +178,34 @@ class FabricResolver:
     @property
     def control_tables_root(self) -> Location:
         return self.tables_root(self._weaver_lakehouse())
+
+
+def _server_name(value: str) -> str:
+    """Extract a server from Fabric's endpoint response.
+
+    The current Warehouse API returns a bare FQDN.  Accepting the familiar full
+    connection-string form as well makes the boundary tolerant without keeping
+    a credential-bearing connection string as endpoint identity.
+    """
+
+    text = value.strip().strip(";")
+    if ";" in text or "=" in text:
+        fields = {}
+        for part in text.split(";"):
+            if "=" in part:
+                key, item = part.split("=", 1)
+                fields[key.strip().lower()] = item.strip()
+        text = (
+            fields.get("server")
+            or fields.get("data source")
+            or fields.get("address")
+            or fields.get("addr")
+            or fields.get("network address")
+            or ""
+        )
+    text = text.removeprefix("tcp:").strip()
+    if "," in text:
+        text = text.rsplit(",", 1)[0].strip()
+    if not text:
+        raise CommandError("Fabric returned an invalid Warehouse SQL endpoint")
+    return text

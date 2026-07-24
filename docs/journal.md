@@ -884,6 +884,38 @@ present; desktop callers retain the REST resolver and explicitly inject
 a proven binary NotebookUtils contract is needed; wipe uses only exists, list
 and recursive delete.
 
+### Warehouse SQL keeps the two caller boundaries separate
+
+Warehouse wipe is the first consumer of the installed SQL runtime. One common
+`PooledSqlExecutor` now owns parameters, result sets, cursor lifecycle, commit,
+rollback, and error translation. It is backed by small endpoint-specific pools;
+every replacement physical connection requests current authentication material.
+
+The authentication paths remain intentionally different. Desktop callers
+inject an Azure credential and request `SQL_SCOPE`; installed Weaver uses
+`notebookutils.credentials` for the SQL resource audience. A `FabricHost` alone
+never selects desktop SQL from inside Fabric or Fabric-native SQL from a laptop.
+The desktop factory is explicit, and the production factory fails outside a
+Fabric session.
+
+The Fabric resolver obtains the typed Warehouse item and its dedicated
+connection-string endpoint. Both execution positions converge on a
+`SqlEndpoint` carrying workspace ID, Warehouse item ID, server, and database;
+the full connection string is not used as pool identity.
+
+The legacy dynamic wipe was ported as the pure
+`generate_warehouse_wipe_sql()`. Its sources and the two proven connection
+patterns are recorded in [`sql-execution.md`](sql-execution.md). Warehouse wipe
+does not acquire a `Store`, return a wipe report, or offer dry-run behaviour.
+
+The opt-in vertical creates a uniquely named disposable Warehouse, waits
+separately for its REST endpoint and successful SQL query, populates it through
+desktop `mssql-python`, invokes installed Weaver through Environment-backed
+Livy, independently verifies the catalogue is empty, confirms the Warehouse
+item survived the wipe, and deletes it in fixture cleanup. Capacity remains an
+external prerequisite. The fixture prints stage timings so the disposable
+approach can be judged from measured provisioning cost.
+
 ---
 
 ## Open questions

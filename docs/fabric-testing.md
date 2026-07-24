@@ -16,8 +16,10 @@ pip install -e '.[dev]'
 [CLI usage](cli-usage.md#signing-in-to-azure) for what it does and why the
 credential chain is pinned.
 
-You need a Fabric workspace you can create and delete items in. It can be empty;
-the tests bring their own.
+You need a Fabric workspace where the test identity can create and delete
+Lakehouses and Warehouses and connect to Warehouse SQL. It can be empty; the
+tests bring their own. The workspace capacity must already be running and
+usable. Pytest never starts, resumes, suspends, or waits for capacity.
 
 ## Install Weaver once, whenever the code changes
 
@@ -55,14 +57,37 @@ rather than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy
 tests skip (rather than fail) if that Environment has no Weaver installed yet,
 pointing at `weaver install`.
 
+To run only the Warehouse SQL vertical and see its stage timings:
+
+```bash
+WEAVER_FABRIC_WORKSPACE=<workspace> WEAVER_FABRIC_ENVIRONMENT=weaver \
+  .venv/bin/python -m pytest -m fabric -s tests/fabric/test_warehouse_wipe.py
+```
+
 ## What the tests do to your workspace
 
-They create their own Lakehouses, named `weavertest_<role>_<random>`, and delete
-them in a `finally`. Nothing pre-existing is touched.
+They create their own Lakehouses, named `weavertest_<role>_<random>`, and a
+disposable Warehouse named `Weaver_Pytest_<UTC timestamp>_<random>`. Every item
+is deleted in a `finally`. Nothing pre-existing is touched.
 
 If a run is interrupted, the prefix makes leftovers obvious and they can be
-deleted from the workspace by hand. Cleanup failures print a warning rather than
-raising, so a tidy-up problem never masks a real test failure.
+deleted from the workspace by hand. A Warehouse cleanup warning includes both
+its name and item ID. Cleanup failures print a warning rather than raising, so a
+tidy-up problem never masks a real test failure.
+
+The Warehouse test deliberately crosses the boundary twice:
+
+```text
+desktop pytest creates and populates through mssql-python
+→ installed Weaver wipes inside Environment-backed Livy
+→ desktop pytest independently inspects the catalogue
+```
+
+Fixture population and catalogue inspection live under `tests/fabric`; they do
+not select Fabric-native identity or duplicate the production wipe SQL.
+Terminal output records item creation, endpoint readiness, first SQL
+connection, first `select 1`, fixture population, Livy startup, Fabric wipe,
+Warehouse deletion, and total fixture lifetime.
 
 ## The three test suites
 

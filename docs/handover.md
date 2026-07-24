@@ -19,16 +19,16 @@ Spark session — was the open question, and it is answered.
 
 ## What is proven
 
-**Row 1.** 473 tests, under a second, no JVM and no tenant. Plus 15 local
+**Row 1.** 510 tests, under a second, no JVM and no tenant. Plus 15 local
 Spark/Delta tests behind `-m spark`.
 
-**Row 2.** 34 Fabric tests behind `-m fabric`: capacity, workspace and item
-resolution, OneLake as a `Store`, and `weaver.wipe` itself clearing a real
-Lakehouse.
+**Row 2.** Fabric tests behind `-m fabric`: capacity, workspace and item
+resolution, OneLake as a `Store`, desktop `mssql-python`, and independent
+inspection of disposable Lakehouses and Warehouses.
 
 **Row 3.** Weaver shipped into a workspace, imported inside a Livy session, and
-used there — the SES contract parsed in Fabric, returning the same audit columns
-it returns locally.
+used there — including the actual Warehouse wipe through Fabric-session
+authentication.
 
 ## The vertical slice that exists
 
@@ -59,18 +59,14 @@ it. Done: 0 to 6, plus much of 7 and 9 from the plan's numbering, out of order.
 | 7 | Fabric resources, OneLake, Livy | done, ahead of order |
 | 9 | capacity, sync | done, ahead of order |
 | 8 | generic program execution | partly — `LivySession` exists |
-| 10 | `mssql-python` | **next** |
+| 10 | `mssql-python` | done |
 | 11–16 | the build package | one piece of work, not six |
 
 ## Next
 
-**1. `mssql-python`.** The resolver picks up a Warehouse name, resolves its SQL
-endpoint, and the suite creates a Warehouse, populates it from pre-generated
-SQL, and wipes it. `wipe_sql_target` currently raises `NotImplementedError` and
-is the natural first consumer.
-
-**2. Confirm the desktop CLI against a remote host.** Trivial once the above
-works, since it is the same calls with argument parsing in front.
+**1. Confirm the desktop CLI against a remote host.** The SQL and storage
+capability boundaries are now in place, so this is the same calls with argument
+parsing in front.
 
 That leaves three foundations in place: a local Lakehouse for testing, a
 standard way of installing Weaver remotely, and a suite that creates, populates

@@ -15,7 +15,7 @@ from ..locations import Location
 from ..targets import ItemRef
 from .onelake import abfss_root
 from .resolution import FabricResolver
-from .resources import LAKEHOUSE, Item, Workspace
+from .resources import LAKEHOUSE, WAREHOUSE, Item, Workspace, find_item
 
 
 def _value(record: Any, name: str) -> Any:
@@ -33,6 +33,8 @@ class FabricSessionResolver(FabricResolver):
         *,
         runtime: Any | None = None,
         lakehouse: Any | None = None,
+        credentials: Any | None = None,
+        client: Any | None = None,
     ) -> None:
         if not isinstance(host, FabricHost):
             raise CommandError(
@@ -65,6 +67,8 @@ class FabricSessionResolver(FabricResolver):
         self.host = host
         self._workspace = Workspace(id=str(workspace_id), name=str(workspace_name))
         self._lakehouse_utils = lakehouse
+        self._credentials = credentials
+        self.client = client
         self._items: dict[str, Item] = {}
 
     @property
@@ -78,6 +82,16 @@ class FabricSessionResolver(FabricResolver):
         )
 
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
+        if item_type == WAREHOUSE:
+            key = f"{item.name}:{item_type}"
+            if key not in self._items:
+                self._items[key] = find_item(
+                    self.workspace,
+                    item.name,
+                    item_type=WAREHOUSE,
+                    client=self._rest_client(),
+                )
+            return self._items[key]
         if item_type != LAKEHOUSE:
             raise CommandError(
                 f"session-native resolution for {item_type} is not implemented"
@@ -105,3 +119,25 @@ class FabricSessionResolver(FabricResolver):
     def lakehouse(self, item: ItemRef) -> Location:
         resolved = self.resolve(item, item_type=LAKEHOUSE)
         return Location(abfss_root(self.workspace.id, resolved.id))
+
+    def sql_endpoint(self, target):
+        self.client = self._rest_client()
+        return super().sql_endpoint(target)
+
+    def _rest_client(self):
+        """Fabric REST using the identity of this Fabric session."""
+
+        if self.client is None:
+            credentials = self._credentials
+            if credentials is None:
+                try:
+                    from notebookutils import credentials as notebook_credentials
+                except ImportError as exc:
+                    raise CommandError(
+                        "Warehouse resolution is available only inside a Fabric session"
+                    ) from exc
+                credentials = notebook_credentials
+            from .client import FabricClient
+
+            self.client = FabricClient(token=credentials.getToken("pbi"))
+        return self.client
