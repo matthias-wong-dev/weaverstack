@@ -54,8 +54,9 @@ injects for the step, so this module is importable anywhere.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Iterator, Protocol, runtime_checkable
 
 from .errors import LoadError
 
@@ -63,6 +64,22 @@ from .errors import LoadError
 #: duration of a step; a ContextVar rather than a global so concurrent steps
 #: cannot see each other's dependencies.
 _active_resolver: ContextVar[Any] = ContextVar("weaver_dependency_resolver", default=None)
+
+
+@contextmanager
+def active_resolver(resolver: Any) -> Iterator[None]:
+    """Bind the dependency resolver for the duration of one executing object.
+
+    A dependency accessor — ``Customer.dataframe()``, ``Export.folder_path()`` —
+    resolves through whatever is bound here. The runtime sets it around a
+    ``read()``; a ContextVar keeps concurrent steps from seeing each other's.
+    """
+
+    token = _active_resolver.set(resolver)
+    try:
+        yield
+    finally:
+        _active_resolver.reset(token)
 
 
 @runtime_checkable
