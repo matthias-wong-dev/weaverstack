@@ -225,6 +225,13 @@ The governing rule is:
 
 Every destructive action must already exist in the certified bundle.
 
+Because the order is frozen too, it must be dependency-safe *by construction*
+rather than by relying on the engine to cascade. Where a target offers no
+cascading drop — a Warehouse has no `DROP SCHEMA … CASCADE` — the planner emits
+dependants before dependencies: views, then the tables they read, then the schema
+once it is empty. An engine capability may shorten the plan; it may not be the
+reason the plan is correct.
+
 ---
 
 ## 6. Target inspection is a planning concern
