@@ -24,14 +24,24 @@ pytestmark = [
 AUDIT = {"Row insert datetime", "Row update datetime", "Row delete datetime"}
 
 
+#: Schemas Weaver never manages, excluded so the catalogue view shows exactly the
+#: user objects — including any orphan schema a prune is expected to remove.
+SYSTEM_SCHEMAS = {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
+
+
 def _catalogue(env):
     # Fabric Warehouses use a case-sensitive collation — INFORMATION_SCHEMA and
-    # its columns must be referenced in their exact (upper) case.
+    # its columns must be referenced in their exact (upper) case. Everything
+    # non-system is returned, so an orphan schema is visible before and after a
+    # prune rather than filtered out of the assertion.
     rows = env.query(
-        "select TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE from INFORMATION_SCHEMA.TABLES "
-        "where TABLE_SCHEMA in (N'Wh', N'Rpt')"
+        "select TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE from INFORMATION_SCHEMA.TABLES"
     )
-    return {(r["TABLE_SCHEMA"], r["TABLE_NAME"], r["TABLE_TYPE"].strip()) for r in rows}
+    return {
+        (r["TABLE_SCHEMA"], r["TABLE_NAME"], r["TABLE_TYPE"].strip())
+        for r in rows
+        if r["TABLE_SCHEMA"].lower() not in SYSTEM_SCHEMAS
+    }
 
 
 def _by_name(columns):
