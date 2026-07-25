@@ -36,6 +36,17 @@ class Location:
         value = self.value.strip()
         if not value:
             raise IdentityError("location must not be empty")
+        # One separator, everywhere. A Windows caller reaches this with
+        # backslashes — `LocalHost` normalises its root through `Path`, and
+        # `str()` of a `WindowsPath` uses them — while everything downstream
+        # treats "/" as the only separator: `join`, `name`, and the segment
+        # splitting in the SES reader. Left alone, a repository read from a
+        # Windows checkout takes its whole path as its catalogue name.
+        #
+        # Safe against real names: "\" is rejected in object and schema names
+        # (see targets._ILLEGAL_IN_NAME), so a backslash here is always a
+        # separator. URLs never carry one either.
+        value = value.replace("\\", "/")
         if len(value) > 1:
             value = value.rstrip("/")
         object.__setattr__(self, "value", value)
