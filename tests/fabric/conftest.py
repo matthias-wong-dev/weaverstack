@@ -917,18 +917,19 @@ def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) 
         schema-level reconciliation, in a dependency-safe order.
         """
 
-        sql.execute_script(
-            "if not exists (select 1 from sys.schemas where name = N'Wh')\n"
-            "    exec('create schema [Wh]');\n"
-            "if not exists (select 1 from sys.schemas where name = N'Legacy')\n"
-            "    exec('create schema [Legacy]');\n"
-        )
-        sql.execute_script(
-            "create table [Wh].[OldTable] ([x] int not null);\n"
-            "create view [Wh].[OldView] as select 1 as [x];\n"
-            "create table [Legacy].[Thing] ([x] int not null);\n"
-            "create view [Legacy].[ThingView] as select [x] from [Legacy].[Thing];\n"
-        )
+        # One statement per call: T-SQL requires CREATE VIEW to be the first
+        # statement in its batch, so these cannot be bundled into one script.
+        for statement in (
+            "if not exists (select 1 from sys.schemas where name = N'Wh')"
+            " exec('create schema [Wh]');",
+            "if not exists (select 1 from sys.schemas where name = N'Legacy')"
+            " exec('create schema [Legacy]');",
+            "create table [Wh].[OldTable] ([x] int not null);",
+            "create view [Wh].[OldView] as select 1 as [x];",
+            "create table [Legacy].[Thing] ([x] int not null);",
+            "create view [Legacy].[ThingView] as select [x] from [Legacy].[Thing];",
+        ):
+            sql.execute_script(statement)
 
     return BuildEnv(
         label="warehouse", host=fabric_host, weaver=weaver, target=warehouse_ref,
