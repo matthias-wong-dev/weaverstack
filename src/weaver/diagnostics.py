@@ -94,11 +94,27 @@ def find_java_home() -> str | None:
     return None
 
 
-def java_version(java_home: str | None) -> str | None:
+def java_launcher(java_home: str | None) -> Path | None:
+    """The ``java`` binary inside a JAVA_HOME, whatever the platform names it.
+
+    Windows ships ``bin/java.exe``; everywhere else it is ``bin/java``. Both
+    names are tried rather than branching on the platform, so the lookup cannot
+    be wrong about the machine it is running on.
+    """
+
     if java_home is None:
         return None
-    java = Path(java_home) / "bin" / "java"
-    if not java.exists():
+    bin_dir = Path(java_home) / "bin"
+    for name in ("java", "java.exe"):
+        candidate = bin_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def java_version(java_home: str | None) -> str | None:
+    java = java_launcher(java_home)
+    if java is None:
         return None
     try:
         result = subprocess.run(
@@ -127,6 +143,30 @@ def _installed(package: str) -> str | None:
         return version(package)
     except PackageNotFoundError:
         return None
+
+
+#: How to install a package, per platform. A hint naming the wrong package
+#: manager is worse than no hint — it sends someone to a command they do not
+#: have. Keyed by `sys.platform`, with a fallback for everything else.
+INSTALL_COMMANDS = {
+    "jdk": {
+        "darwin": "brew install openjdk@17",
+        "win32": "winget install Microsoft.OpenJDK.17",
+        None: "sudo apt install openjdk-17-jdk   (or your distribution's JDK)",
+    },
+    "azure-cli": {
+        "darwin": "brew install azure-cli",
+        "win32": "winget install Microsoft.AzureCLI",
+        None: "see https://learn.microsoft.com/cli/azure/install-azure-cli",
+    },
+}
+
+
+def install_command(what: str) -> str:
+    """The command that installs ``what`` on this platform."""
+
+    choices = INSTALL_COMMANDS[what]
+    return choices.get(sys.platform, choices[None])
 
 
 def check_local_spark() -> LocalSparkReport:
@@ -169,7 +209,7 @@ def check_local_spark() -> LocalSparkReport:
             found=f"{found} ({home})" if found else None,
             ok=major in SUPPORTED_JAVA,
             hint=(
-                "install a JDK Spark 3.5 supports:  brew install openjdk@17"
+                f"install a JDK Spark 3.5 supports:  {install_command('jdk')}"
                 if found is None
                 else f"Spark 3.5 runs on Java {', '.join(SUPPORTED_JAVA)}; "
                 f"found {major}. Set JAVA_HOME to a supported JDK."

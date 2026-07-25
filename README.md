@@ -30,7 +30,8 @@ pip install weaverstack        # core, for a Fabric Environment or notebook
 pip install 'weaverstack[cli]' # plus the optional desktop CLI
 ```
 
-Requires Python 3.11 or later.
+Requires Python 3.11 or later. Runs on macOS, Linux and Windows; local Spark
+development additionally needs a JDK, and on Windows runs under WSL.
 
 ## Local development
 

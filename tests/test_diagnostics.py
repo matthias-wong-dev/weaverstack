@@ -5,9 +5,12 @@ from __future__ import annotations
 import pytest
 
 from weaver.diagnostics import (
+    INSTALL_COMMANDS,
     SUPPORTED_JAVA,
     check_local_spark,
     find_java_home,
+    install_command,
+    java_launcher,
     java_version,
 )
 
@@ -80,6 +83,39 @@ def test_an_unreadable_banner_is_missing_rather_than_wrong(tmp_path):
     """Better to report no JDK than to report nonsense as its version."""
 
     assert java_version(_fake_jdk(tmp_path, "not a version banner")) is None
+
+
+def test_the_launcher_is_found_under_either_platform_name(tmp_path):
+    """Windows ships bin/java.exe; looking only for bin/java finds no JDK.
+
+    The check is not run on the platform it describes, so both names are tried
+    everywhere rather than branched on `os.name`.
+    """
+
+    for name in ("java", "java.exe"):
+        home = tmp_path / name
+        launcher = home / "bin" / name
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("", encoding="utf-8")
+        assert java_launcher(str(home)) == launcher
+
+
+def test_a_java_home_without_a_launcher_is_nothing(tmp_path):
+    assert java_launcher(str(tmp_path)) is None
+    assert java_launcher(None) is None
+
+
+def test_every_install_hint_covers_every_platform():
+    """A hint naming a package manager the machine lacks is worse than none."""
+
+    for what, choices in INSTALL_COMMANDS.items():
+        assert None in choices, f"{what} has no fallback for unlisted platforms"
+        assert all(command for command in choices.values())
+
+
+def test_an_unlisted_platform_still_gets_a_command(monkeypatch):
+    monkeypatch.setattr("sys.platform", "sunos5")
+    assert install_command("jdk") == INSTALL_COMMANDS["jdk"][None]
 
 
 def test_spark_supports_more_than_one_jdk():

@@ -1,9 +1,13 @@
-# Local development on macOS
+# Local development
 
 Everything Weaver does on Fabric, it can also do against a local filesystem
 standing in for Lakehouses. That is optional — the core installs and imports
 without any of this — but it is how build and load are developed and tested
 without touching a workspace.
+
+Weaver is developed on macOS and tested on macOS, Linux and Windows. The core
+runs on all three; local Spark runs on macOS and Linux, and on Windows through
+WSL — see [Windows](#windows) below.
 
 ## What you need
 
@@ -21,14 +25,46 @@ still picks a documented release first.
 
 ## Setting it up
 
+Install a JDK and Python 3.11 or later.
+
+**macOS**
+
 ```bash
 brew install openjdk@17 python@3.11
 ```
 
+**Linux** (Debian or Ubuntu; use your distribution's equivalent elsewhere)
+
+```bash
+sudo apt install openjdk-17-jdk python3.11 python3.11-venv
+```
+
+**Windows**
+
+```powershell
+winget install Microsoft.OpenJDK.17
+winget install Python.Python.3.11
+```
+
+Then, on any of them:
+
 ```bash
 cd weaverstack
 python3.11 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+.venv/bin/pip install -e '.[dev]'      # Windows: .venv\Scripts\pip
+```
+
+Install **editable** (`-e`). `weaver install` finds the checkout by walking up
+from the installed package to its `pyproject.toml`, so a plain copy into a
+site-packages directory outside the tree cannot locate it.
+
+If `pip install` fails building PySpark with `AttributeError: install_layout`,
+the interpreter is a distribution-patched Python whose bundled setuptools cannot
+build PySpark's source distribution. A virtual environment with current
+packaging tools builds it:
+
+```bash
+.venv/bin/pip install -U pip setuptools wheel
 ```
 
 Then check the machine rather than guessing:
@@ -48,12 +84,26 @@ local Spark and Delta on Darwin arm64
 Ready. Run the local tests with:  pytest -m spark
 ```
 
-Anything missing is named with the command that fixes it, and the exit status
-is non-zero so it can gate a script.
+Anything missing is named with the command that fixes it — in this platform's
+package manager, not another's — and the exit status is non-zero so it can gate
+a script.
 
 `JAVA_HOME` does not need setting by hand. When it is unset, Weaver asks
-`/usr/libexec/java_home` for a supported JDK, newest first. When it *is* set,
-it is respected — a deliberately configured machine is never second-guessed.
+`/usr/libexec/java_home` for a supported JDK on macOS, newest first, and falls
+back to whatever `java` is on `PATH` elsewhere. When it *is* set, it is
+respected — a deliberately configured machine is never second-guessed.
+
+## Windows
+
+The core suite runs natively, and CI covers it on every push. Local **Spark**
+does not: Spark writes to the local filesystem through Hadoop's native IO, which
+needs a `winutils.exe` and a matching `HADOOP_HOME`. That is a Spark-on-Windows
+limitation rather than a Weaver one.
+
+Use [WSL](https://learn.microsoft.com/windows/wsl/install) for local Spark work
+and follow the Linux instructions inside it. Everything that does not need a JVM
+— the catalogue, dependency graph, SQL generation, Warehouse targets — works
+natively on Windows.
 
 ## Running the tests
 
@@ -63,8 +113,13 @@ it is respected — a deliberately configured machine is never second-guessed.
 ```
 
 Spark tests are deselected by default and skip themselves when PySpark or a JDK
-is absent, so a contributor without a JVM is never blocked and CI needs no
-special casing.
+is absent, so a contributor without a JVM is never blocked.
+
+CI runs both: the core suite on macOS, Linux and Windows across Python 3.11 and
+3.12, and the Spark suite on macOS and Linux across Java 17 and 21. See
+[.github/workflows/tests.yml](../.github/workflows/tests.yml). Fabric tests need
+a workspace and a running capacity, so they stay opt-in and local — see
+[fabric-testing.md](fabric-testing.md).
 
 ## Why the fixtures are scoped as they are
 
