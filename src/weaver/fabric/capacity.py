@@ -96,8 +96,7 @@ def run_capacity_action(
         from ..diagnostics import install_command
 
         raise CapacityError(
-            "the Azure CLI is not installed — install it with: "
-            f"{install_command('azure-cli')}"
+            f"the Azure CLI is not installed. Install it:  {install_command('azure-cli')}"
         )
 
     command = capacity_command(

@@ -58,6 +58,18 @@ Install **editable** (`-e`). `weaver install` finds the checkout by walking up
 from the installed package to its `pyproject.toml`, so a plain copy into a
 site-packages directory outside the tree cannot locate it.
 
+Which extra:
+
+| | installs | for |
+|---|---|---|
+| `.[test]` | the suite, no JVM | core tests, and [Fabric tests](fabric-testing.md) against a workspace |
+| `.[dev]` | `[test]` plus PySpark and Delta | local Spark work as well |
+| `.[cli]` | the desktop CLI | `weaver install`, `weaver capacity` |
+
+`[dev]` is a few hundred megabytes and PySpark builds from source, so take
+`[test]` if you are not doing local Spark. `requirements-dev.txt` in the root is
+a pinned set for CI only — you never need it to install, use or test Weaver.
+
 If `pip install` fails building PySpark with `AttributeError: install_layout`,
 the interpreter is a distribution-patched Python whose bundled setuptools cannot
 build PySpark's source distribution. A virtual environment with current

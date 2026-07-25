@@ -52,7 +52,17 @@ class LocalSparkReport:
 
     @property
     def hints(self) -> tuple[str, ...]:
-        return tuple(check.hint for check in self.checks if not check.ok and check.hint)
+        """What to do about the failures, each said once.
+
+        PySpark and Delta are installed by the same extra, so a machine missing
+        both would otherwise be told to run the same command twice.
+        """
+
+        seen: dict[str, None] = {}
+        for check in self.checks:
+            if not check.ok and check.hint:
+                seen.setdefault(check.hint)
+        return tuple(seen)
 
     def as_dict(self) -> dict:
         return {
@@ -192,7 +202,10 @@ def check_local_spark() -> LocalSparkReport:
                 found=found,
                 ok=found is not None and found.rsplit(".", 1)[0] in supported,
                 hint=(
-                    "install the optional extra:  pip install -e '.[spark]'"
+                    # Not `-e '.[spark]'`: someone who installed from PyPI has
+                    # no checkout for `.` to mean, and this is exactly the
+                    # person who has not got Spark.
+                    "install the optional extra:  pip install 'weaverstack[spark]'"
                     if found is None
                     else f"{package} {'/'.join(supported)}.x is expected; "
                     "Spark and Delta are released in lockstep"

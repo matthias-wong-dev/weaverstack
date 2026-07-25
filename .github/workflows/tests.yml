@@ -48,7 +48,8 @@ jobs:
       # Editable: `weaver install` locates the checkout by walking up from the
       # installed package to its pyproject.toml, so a copy into site-packages
       # outside the tree cannot find it.
-      - run: pip install -e ".[dev]"
+      - run: pip install -r requirements-dev.txt
+      - run: pip install -e . --no-deps
       - run: pytest -m "not spark and not fabric"
 
   # Local Spark and Delta. The JDK is the axis that matters: Spark 3.5
@@ -79,8 +80,34 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
-      - run: pip install -e ".[dev]"
+      - run: pip install -r requirements-dev.txt
+      - run: pip install -e . --no-deps
       # The report and the suite must agree — a doctor that passes while the
       # tests fail (or the reverse) is the bug this job exists to catch.
       - run: weaver doctor
       - run: pytest -m spark
+
+  # The matrix above installs pinned versions, which is what makes a green run
+  # reproducible — and what would hide an upstream release breaking the ranges
+  # in pyproject.toml. This job resolves fresh, the way a contributor's
+  # `pip install -e '.[dev]'` does. It is advisory: a dependency published this
+  # morning should not turn someone's pull request red.
+  floating:
+    name: floating deps (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pip install -e ".[dev]"
+      - run: pip list
+      - run: pytest -m "not fabric"

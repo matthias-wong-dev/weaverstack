@@ -15,7 +15,14 @@ def test_the_workspace_resolves_to_an_id(fabric_workspace):
     assert fabric_workspace.name
 
 
-def test_an_unknown_workspace_lists_what_there_is():
+def test_an_unknown_workspace_lists_what_there_is(fabric_workspace):
+    """Takes the fixture it does not read, to inherit its skip.
+
+    Listing what there is needs a reachable tenant, so without one this cannot
+    run — and unguarded it failed on the credential lookup instead of skipping,
+    which is the one thing the opt-in suite promises not to do.
+    """
+
     from weaver.fabric import find_workspace
 
     with pytest.raises(CommandError, match="no workspace named"):
