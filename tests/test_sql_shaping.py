@@ -45,6 +45,7 @@ def test_render_sql_template_fills_a_ddl_template():
         "ddl/metadata_column_validation",
         temp_object_literal="N'tempdb..#weaver_shape'",
         metadata_columns_cte="    select N'Primary key' as metadata_kind, N'Id' as column_name",
+        identity_available_sql="",
     )
     assert "object_id(N'tempdb..#weaver_shape')" in rendered
     assert "N'Primary key' as metadata_kind" in rendered

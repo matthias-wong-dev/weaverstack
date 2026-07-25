@@ -205,7 +205,22 @@ def _render_metadata_validation(document: SesDocument, temp_literal: str) -> str
         "ddl/metadata_column_validation",
         temp_object_literal=temp_literal,
         metadata_columns_cte=_render_metadata_columns_cte(references),
+        identity_available_sql=_render_identity_available(document.identity),
     ).rstrip()
+
+
+def _render_identity_available(identity: str | None) -> str:
+    """Make the identity column an *available* column for the metadata check.
+
+    The identity is Weaver's own column, not one the query produces, so the
+    primary key may name it — but the query-shape temp table does not contain it.
+    Union it into the ``described`` set so a primary key on the surrogate resolves
+    (mirrors the Python validator's available-set in ``weaver.ses.columns``).
+    """
+
+    if identity is None:
+        return ""
+    return f"\n\n    union all\n\n    select {_sql_literal(identity)} as column_name"
 
 
 def _render_metadata_columns_cte(references: tuple[tuple[str, str], ...]) -> str:

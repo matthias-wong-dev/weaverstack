@@ -215,6 +215,9 @@ def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     # Guarded so a query producing the same name is refused, not silently doubled.
     assert "throw 51006" in content
     assert " identity" not in content.lower()
+    # The identity is an available column for the metadata check, so a primary key
+    # on the surrogate resolves even though the query does not produce it.
+    assert "union all\n\n    select N'CustomerKey' as column_name" in content
 
 
 # --- determinism ------------------------------------------------------------

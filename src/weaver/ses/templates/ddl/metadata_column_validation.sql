@@ -4,7 +4,7 @@ declare @weaver_missing_metadata_column nvarchar(2048);
     select
         coalesce(nullif(c.name, ''), concat('Column', c.column_id)) as column_name
     from tempdb.sys.columns as c
-    where c.[object_id] = object_id($temp_object_literal)
+    where c.[object_id] = object_id($temp_object_literal)$identity_available_sql
 ),
 metadata_columns as (
 $metadata_columns_cte
