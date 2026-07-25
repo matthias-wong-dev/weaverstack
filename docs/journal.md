@@ -1230,9 +1230,17 @@ one explicit T-SQL drop per unmanaged table, view and schema. Two differences
 from the Lakehouse are worth holding onto. T-SQL has no `DROP SCHEMA … CASCADE`,
 so the frozen order has to be dependency-safe by construction — views before the
 tables they read, a schema only once it is empty — rather than relying on the
-engine to cascade. And reconciliation **fails closed**: pruning without a SQL
-executor raises rather than emitting drops from an inventory nobody could read
-(§6), while `prune=False` remains the explicit opt-out.
+engine to cascade. And the catalogue reading is **Fabric-native by default**,
+exactly as `wipe_sql_target` already was: Weaver runs in Fabric, so it inspects
+the target through its own session identity (`fabric_sql_executor`), and only a
+desktop caller crossing in injects `desktop_sql_executor` explicitly. The first
+cut had this backwards — it *required* injection, which made the only usable path
+a desktop-compiled bundle uploaded to Fabric. That inverts the architecture:
+Weaver is installed in Fabric and does the work there, so reading target state
+and compiling the bundle belong in the same place as the install. Reconciliation
+still fails closed — off a Fabric session there is no identity to read the
+catalogue with, so generation raises rather than emitting drops from an inventory
+nobody could read (§6) — and `prune=False` remains the explicit opt-out.
 
 **Identity is treated separately.** The `Identity` header names a Weaver-managed
 surrogate — a plain not-null `bigint` build creates and a later load populates,

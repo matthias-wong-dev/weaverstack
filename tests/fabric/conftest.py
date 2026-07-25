@@ -835,34 +835,38 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, s
         yield env
 
 
-def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) -> "BuildEnv":
-    """A Warehouse BuildEnv: desktop generation, T-SQL install over the live SQL
-    endpoint of a disposable Fabric Warehouse.
+def _warehouse_build_env(
+    fabric_host, weaver_lakehouse, warehouse, ses_fixture, session
+) -> "BuildEnv":
+    """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
 
-    A Warehouse build is single-target and Lakehouse-free here: generation is pure
-    T-SQL text (no Spark), and installation runs the self-contained scripts through
-    the pooled SQL executor the disposable Warehouse exposes. That same executor
-    inspects the catalogue at plan time, so ``prune=True`` reconciles. Its
-    ``query`` is T-SQL, so behavioural assertions read the Warehouse catalogue,
-    not a Spark session.
+    Weaver is a Fabric tool: it is installed into the Environment and does the
+    work there. So both phases run in the Livy session — generation reads the
+    target Warehouse's system schema through Weaver's *own* Fabric-native mssql
+    connector (``fabric_sql_executor``, the session identity) to compile the prune
+    into the bundle, and installation runs the frozen T-SQL through that same
+    connector. The desktop uploads only the SES repository and reads results back
+    for assertions; it never plans and never compiles a bundle locally.
     """
 
     from weaver import ItemRef as _ItemRef, RepositoryRef
-    from weaver.build_bundle import (
-        InstallationEnvironment,
-        TargetBindings,
-        WarehouseBinding,
-        generate_build_bundle,
-        install_bundle,
-        load_bundle,
-    )
+    from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     resolver = FabricResolver(fabric_host, client=None)
     store = OneLakeDfsClient()
     weaver = _ItemRef(weaver_lakehouse.name)
     warehouse_ref = _ItemRef(warehouse.item.name)
+    # Desktop SQL is test infrastructure only: it stages fixtures and inspects the
+    # catalogue for assertions. Weaver itself never uses it here.
     sql = warehouse.executor
+
+    def _host_literal() -> str:
+        return (
+            f"FabricHost(workspace={fabric_host.workspace!r}, "
+            f"weaver_lakehouse={fabric_host.weaver_lakehouse!r}, "
+            f"fabric_environment={fabric_host.fabric_environment!r})"
+        )
 
     def install_repo(name: str) -> str:
         _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
@@ -872,24 +876,60 @@ def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) 
         store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
 
     def generate(bundle_name: str = "whtest", *, repository_name: str = "MyRepo", prune: bool = False):
-        return generate_build_bundle(
-            weaver_lakehouse=weaver,
-            repository_name=repository_name,
-            targets=TargetBindings(warehouse=WarehouseBinding(warehouse=warehouse_ref)),
-            output=resolver.build_bundle(bundle_name),
-            host=fabric_host,
-            store=store,
-            prune=prune,
-            # Reconciliation reads the Warehouse catalogue at plan time.
-            sql=sql,
+        # Generation runs IN Fabric. With prune on, Weaver reads the Warehouse
+        # catalogue there through its own Fabric-native SQL — no sql= injection.
+        body = (
+            "from weaver import ItemRef, FabricHost\n"
+            "from weaver.resolution import resolver_for, store_for\n"
+            "from weaver.build_bundle import generate_build_bundle, TargetBindings, "
+            "WarehouseBinding\n"
+            f"host = {_host_literal()}\n"
+            "store = store_for(host)\n"
+            "resolver = resolver_for(host)\n"
+            "bundle = generate_build_bundle(\n"
+            f"    weaver_lakehouse=ItemRef({weaver.name!r}),\n"
+            f"    repository_name={repository_name!r},\n"
+            f"    targets=TargetBindings(warehouse=WarehouseBinding("
+            f"warehouse=ItemRef({warehouse_ref.name!r}))),\n"
+            f"    output=resolver.build_bundle({bundle_name!r}),\n"
+            f"    host=host, store=store, prune={prune!r})\n"
+            "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
+            "'plan': bundle.plan.to_mapping()})\n"
         )
+        payload = session.run(body).payload
+        plan = BuildPlan.from_mapping(payload["plan"])
+        return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
 
     def install(bundle) -> InstallOutcome:
-        report = install_bundle(
-            load_bundle(bundle.location, store=store),
-            environment=InstallationEnvironment(store=store, resolver=resolver, sql=sql),
+        # Installation runs IN Fabric too; the Warehouse SQL comes from the
+        # session identity, so no executor is injected.
+        bundle_name = bundle.location.name
+        body = (
+            "from weaver import FabricHost\n"
+            "from weaver.resolution import resolver_for, store_for\n"
+            "from weaver.build_bundle import install_bundle, load_bundle, "
+            "InstallationEnvironment\n"
+            f"host = {_host_literal()}\n"
+            "store = store_for(host)\n"
+            "resolver = resolver_for(host)\n"
+            "env = InstallationEnvironment(store=store, resolver=resolver, host=host)\n"
+            f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
+            "report = install_bundle(bundle, environment=env)\n"
+            "emit({'status': report.status, 'bundle_id': report.bundle_id, "
+            "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
+            "'actions': [{'id': a.action_id, 'status': a.status, "
+            "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
+            "for a in report.action_results()]})\n"
         )
-        outcome = _outcome_from_report(report)
+        payload = session.run(body).payload
+        outcome = InstallOutcome(
+            status=payload["status"],
+            bundle_id=payload["bundle_id"],
+            sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
+            action_status={a["id"]: a["status"] for a in payload["actions"]},
+            action_order=tuple(a["id"] for a in payload["actions"]),
+            action_error={a["id"]: a["error"] for a in payload["actions"] if a["error"]},
+        )
         if outcome.status != "succeeded":
             print("WAREHOUSE INSTALL ACTION ERRORS:", outcome.action_error)
         return outcome
@@ -982,14 +1022,24 @@ def lakehouse_estate(request, ses_fixture):
 
 
 @pytest.fixture(scope="module")
-def warehouse_estate(fabric_host, fabric_weaver_lakehouse, disposable_warehouse, ses_fixture):
-    """The Warehouse estate, provisioned and installed **once per module** — one
-    disposable Warehouse and one install for the whole module's checks."""
+def warehouse_estate(
+    fabric_host, fabric_weaver_lakehouse, disposable_warehouse, ses_fixture, livy_session
+):
+    """The Warehouse estate, built **in Fabric** and installed once per module.
+
+    One disposable Warehouse and one install for the whole module's checks. Prune
+    is on: reconciliation is part of a normal build, and Weaver reads the target's
+    system schema in-session through its own Fabric-native connector.
+    """
 
     env = _warehouse_build_env(
-        fabric_host, fabric_weaver_lakehouse, disposable_warehouse, ses_fixture
+        fabric_host,
+        fabric_weaver_lakehouse,
+        disposable_warehouse,
+        ses_fixture,
+        livy_session,
     )
-    yield _install_estate(env, prune=False)
+    yield _install_estate(env, prune=True)
 
 
 @pytest.fixture

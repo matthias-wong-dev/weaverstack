@@ -216,7 +216,7 @@ def generate_build_bundle(
     )
 
     sequences, payloads = _plan_sequences(
-        repository, projection, bound_target, resolver, store, prune, spark, sql
+        repository, projection, bound_target, resolver, store, prune, spark, sql, host
     )
 
     plan = BuildPlan(
@@ -281,6 +281,7 @@ def _plan_sequences(
     prune: bool,
     spark,
     sql=None,
+    host: Host | None = None,
 ) -> tuple[tuple[BuildSequence, ...], dict[str, bytes]]:
     payloads: dict[str, bytes] = {}
     documents = {node: repository.by_id[node] for node in projection.retained}
@@ -291,7 +292,7 @@ def _plan_sequences(
 
     if prune:
         if is_warehouse:
-            prune_sequence = _warehouse_prune_sequence(target, sql, managed, payloads)
+            prune_sequence = _warehouse_prune_sequence(target, sql, host, managed, payloads)
         else:
             prune_sequence = _prune_sequence(target, resolver, store, spark, managed, payloads)
         if prune_sequence is not None:
@@ -445,6 +446,7 @@ _RESERVED_SQL_SCHEMAS = frozenset(
 def _warehouse_prune_sequence(
     target: BoundTarget,
     sql,
+    host: Host,
     managed: _Managed,
     payloads: dict[str, bytes],
 ) -> BuildSequence | None:
@@ -459,15 +461,37 @@ def _warehouse_prune_sequence(
     Order is dependency-safe and matters more than on the Lakehouse: T-SQL has no
     ``DROP SCHEMA … CASCADE``, so views are dropped before the tables they read,
     and a schema only after everything in it has gone.
+
+    Reading the target is **Fabric-native by default**, like
+    :func:`weaver.wipe.wipe_sql_target`: Weaver runs in Fabric, so it inspects the
+    Warehouse through its own session identity. A desktop caller crossing into
+    Fabric — a developer, or the CLI — injects ``desktop_sql_executor``
+    explicitly. Either way the inventory is read where the build is planned, and
+    the drops are frozen into the bundle from there.
     """
 
+    owns_sql = sql is None
     if sql is None:
-        # Fail closed: no trustworthy inventory means no destructive actions.
-        raise BuildError(
-            "pruning a Warehouse needs a SQL executor to inspect its catalogue; "
-            "pass sql=... to generate a reconciling bundle, or prune=False to skip "
-            "reconciliation"
+        from ..fabric.sql import fabric_sql_executor
+        from ..targets import WarehouseTarget
+
+        sql = fabric_sql_executor(
+            WarehouseTarget(warehouse=ItemRef(target.item_id)), host
         )
+    try:
+        return _warehouse_prune_actions(target, sql, managed, payloads)
+    finally:
+        if owns_sql and hasattr(sql, "close"):
+            sql.close()
+
+
+def _warehouse_prune_actions(
+    target: BoundTarget,
+    sql,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> BuildSequence | None:
+    """Compile the frozen drops from one catalogue reading."""
 
     rows = sql.query(
         """

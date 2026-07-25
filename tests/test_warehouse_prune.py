@@ -137,9 +137,17 @@ def test_a_clean_warehouse_needs_no_prune_sequence(estate):
     assert _prune_scripts(estate, _generate(estate, sql)) == []
 
 
-def test_pruning_without_a_catalogue_fails_closed(estate):
-    # No SQL executor means no trustworthy inventory, so no destructive actions.
-    with pytest.raises(BuildError, match="needs a SQL executor"):
+def test_pruning_off_a_fabric_session_fails_closed(estate):
+    """Reading the target is Fabric-native by default, like wipe_sql_target.
+
+    Off a Fabric session there is no session identity to read the catalogue with,
+    so generation raises rather than emitting drops from an inventory nobody
+    could read. A desktop caller injects ``desktop_sql_executor`` explicitly.
+    """
+
+    from weaver.errors import CommandError
+
+    with pytest.raises((CommandError, BuildError)):
         _generate(estate, None)
 
 

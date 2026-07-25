@@ -124,7 +124,16 @@ Spark or ODBC. Three environments implement it:
 |---|---|---|---|
 | `local_build_env` | in-process | in-process | local Spark |
 | `fabric_build_env` | in the Livy session | in the Livy session | in-session Spark |
-| `warehouse_build_env` | on the desktop | T-SQL over the SQL endpoint | T-SQL |
+| `warehouse_estate` | in the Livy session | in the Livy session, over Weaver's Fabric-native SQL | desktop T-SQL (assertions only) |
+
+Weaver is a Fabric tool, so **every** environment runs both phases where the code
+is installed — there is no desktop-planned build. For a Warehouse that means
+generation reads the target's system schema in-session through Weaver's own
+`fabric_sql_executor` (the session identity) and compiles the prune into the
+bundle there; installation runs the frozen T-SQL through the same connector. The
+desktop's only jobs are uploading the SES repository and reading the catalogue
+back for assertions — the latter through `desktop_sql_executor`, which is test
+infrastructure and never part of what is under test.
 
 Two rules keep the cost down and the setup in one place:
 
@@ -146,16 +155,17 @@ Two rules keep the cost down and the setup in one place:
 body against both Spark transports, so `-m spark` and `-m fabric` each select
 their half.
 
-### Which tests need `weaver install`
+### `weaver install` is a precondition of the Fabric suite
 
-Only the ones that execute **in** Fabric. `test_build_bundle`,
-`test_sql_table_build` and `test_mixed_estate` run generation and installation
-inside the Livy session, which imports Weaver from the Environment — so they test
-whatever wheel was last published, and Weaver Python changes need a re-publish to
-be exercised. `test_warehouse_build` is desktop-driven (local generation, T-SQL
-over the SQL endpoint), so it tests the working tree directly and needs no
-install. That makes Warehouse iteration cheap: resume, run, suspend, about five
-minutes, no publish.
+Every Fabric build test — Lakehouse and Warehouse alike — runs inside the Livy
+session, which imports Weaver from the Environment. **The suite therefore tests
+the wheel that was last published, not your working tree**, so any Weaver Python
+change needs `weaver install` before it is exercised on Fabric. That is the point:
+what is under test is Weaver-on-Fabric doing the job.
+
+The one thing that legitimately skips a publish is a change whose effect is fully
+determined *before* Fabric runs — nothing in the current build suite qualifies,
+because generation itself happens in Fabric.
 
 ## The three test suites
 
