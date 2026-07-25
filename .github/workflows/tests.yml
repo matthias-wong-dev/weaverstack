@@ -30,14 +30,6 @@ jobs:
   core:
     name: core / ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    # Windows is advisory until the separator handling is settled. Its first run
-    # found a real defect rather than a flake: LocalHost normalises its root
-    # through Path, so on Windows a Location carries backslashes, and
-    # Location.name splits on "/" alone — an SES repository's catalogue name
-    # comes out as its entire path. Eleven tests fail on that one cause. The
-    # job stays in the matrix so the gap is visible and measurable, but it does
-    # not redden a pull request for a platform not yet claimed to work.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:

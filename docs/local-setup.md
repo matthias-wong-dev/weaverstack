@@ -107,24 +107,21 @@ respected — a deliberately configured machine is never second-guessed.
 
 ## Windows
 
-**Use [WSL](https://learn.microsoft.com/windows/wsl/install)** and follow the
-Linux instructions inside it. Native Windows is not yet supported, for two
-separate reasons.
+The core suite runs natively and CI covers it on every push, across Python 3.11
+and 3.12. The CLI, the catalogue, the dependency graph, SQL generation and
+Warehouse targets all work without anything special.
 
-*Paths.* `LocalHost` normalises its root through `Path`, so on Windows a
-`Location` carries backslashes — while `Location.name` and the segment handling
-around it split on `/` alone. An SES repository read from a Windows checkout
-therefore takes its entire path as its catalogue name. Eleven tests fail on that
-one cause. CI runs the Windows job as advisory so the gap stays measured rather
-than forgotten.
+Local **Spark** does not: Spark writes to the local filesystem through Hadoop's
+native IO, which needs a `winutils.exe` and a matching `HADOOP_HOME`. That is a
+Spark-on-Windows limitation rather than a Weaver one. For local Spark work, use
+[WSL](https://learn.microsoft.com/windows/wsl/install) and follow the Linux
+instructions inside it.
 
-*Spark.* Independently, Spark writes to the local filesystem through Hadoop's
-native IO, which needs a `winutils.exe` and a matching `HADOOP_HOME`. That one
-is a Spark-on-Windows limitation rather than a Weaver one, and WSL settles it
-too.
-
-The CLI itself is fine on Windows — `weaver doctor`, `weaver capacity` and
-`weaver install` neither read SES repositories nor need a JVM.
+One thing to know if you are working on Weaver itself: a `Location` normalises
+`\` to `/` at construction, so its value is POSIX whatever the platform. Every
+consumer — `join`, `name`, the SES reader's segment splitting — assumes a single
+separator, and `LocalHost` normalises its root through `Path`, which on Windows
+yields backslashes. Read paths back through `Location`, not by string surgery.
 
 ## Running the tests
 
