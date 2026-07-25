@@ -456,10 +456,15 @@ def ses_fixture(request):
 
 @dataclass
 class InstalledEstate:
-    """One estate provisioned and installed once, for read-only assertions."""
+    """One estate provisioned and installed once, for read-only assertions.
+
+    ``repo`` is the installed repository name, so a test that rebuilds (e.g. to
+    exercise prune) names the same repository rather than guessing it.
+    """
 
     env: "BuildEnv"
     bundle: Any
+    repo: str
 
 
 @dataclass
@@ -946,7 +951,7 @@ def _install_estate(env, repo: str = "Estate", *, prune: bool = True) -> Install
     bundle = env.generate(repository_name=repo, prune=prune)
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
-    return InstalledEstate(env=env, bundle=bundle)
+    return InstalledEstate(env=env, bundle=bundle, repo=repo)
 
 
 @pytest.fixture(

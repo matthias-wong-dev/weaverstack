@@ -113,7 +113,9 @@ def test_prune_reconciles_unmanaged_objects_and_spares_the_managed_set(warehouse
     assert ("Legacy", "Thing", "BASE TABLE") in seeded
 
     # The build inspects the catalogue now and freezes one drop per orphan.
-    bundle = env.generate(bundle_name="whprune", repository_name="WhEstate", prune=True)
+    bundle = env.generate(
+        bundle_name="whprune", repository_name=warehouse_estate.repo, prune=True
+    )
     prune_kinds = {a.kind for _, _, a in bundle.plan.actions() if a.kind.startswith("prune")}
     assert {"prune_table", "prune_view", "prune_schema"} <= prune_kinds
 
