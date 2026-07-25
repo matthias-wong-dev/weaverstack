@@ -890,16 +890,18 @@ def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) 
         return list(sql.query(statement))
 
     def columns(table: str) -> list:
+        # Fabric Warehouses use a case-sensitive collation, so INFORMATION_SCHEMA
+        # and its columns must be referenced in their exact (upper) case.
         schema, name = table.split(".", 1)
         rows = sql.query(
-            "select column_name, data_type, is_nullable from information_schema.columns "
-            f"where table_schema = N'{schema}' and table_name = N'{name}'"
+            "select COLUMN_NAME, DATA_TYPE, IS_NULLABLE from INFORMATION_SCHEMA.COLUMNS "
+            f"where TABLE_SCHEMA = N'{schema}' and TABLE_NAME = N'{name}'"
         )
         return [
             {
-                "name": row["column_name"],
-                "type": row["data_type"],
-                "nullable": str(row["is_nullable"]).upper() == "YES",
+                "name": row["COLUMN_NAME"],
+                "type": row["DATA_TYPE"],
+                "nullable": str(row["IS_NULLABLE"]).upper() == "YES",
             }
             for row in rows
         ]

@@ -25,11 +25,13 @@ AUDIT = {"Row insert datetime", "Row update datetime", "Row delete datetime"}
 
 
 def _catalogue(env):
+    # Fabric Warehouses use a case-sensitive collation — INFORMATION_SCHEMA and
+    # its columns must be referenced in their exact (upper) case.
     rows = env.query(
-        "select table_schema, table_name, table_type from information_schema.tables "
-        "where table_schema in (N'Wh', N'Rpt')"
+        "select TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE from INFORMATION_SCHEMA.TABLES "
+        "where TABLE_SCHEMA in (N'Wh', N'Rpt')"
     )
-    return {(r["table_schema"], r["table_name"], r["table_type"].strip()) for r in rows}
+    return {(r["TABLE_SCHEMA"], r["TABLE_NAME"], r["TABLE_TYPE"].strip()) for r in rows}
 
 
 def _by_name(columns):
