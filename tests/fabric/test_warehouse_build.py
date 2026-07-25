@@ -1,12 +1,11 @@
 """The self-contained Warehouse estate, built and installed against Fabric.
 
-The ``warehouse-estate`` fixture (wired in ``conftest`` as
+The ``warehouse-estate`` fixture (wired in ``build_envs`` as
 ``WAREHOUSE_ESTATE_FIXTURE``) is a closed Warehouse graph: its base tables seed
-themselves from literal ``VALUES``, so no Lakehouse is needed. This drives the
-``warehouse_build_env`` — desktop generation, T-SQL install over the disposable
-Warehouse's live SQL endpoint — and reads the Warehouse catalogue back to prove
-the self-contained scripts really run: base tables, a dependent table, a
-Weaver-managed identity dimension and a reporting view, each an empty structure.
+themselves from literal ``VALUES``, so no Lakehouse is needed. It is provisioned
+and installed **once per module** (``warehouse_estate``) — one disposable
+Warehouse, one install — and every assertion reads the Warehouse catalogue back
+to prove the self-contained scripts really run.
 
 Fabric-only: a Warehouse cannot be exercised locally, so the local coverage of
 these same scripts is the generation-level ``tests/test_warehouse_estate.py``.
@@ -22,44 +21,29 @@ pytestmark = [
     pytest.mark.parametrize("ses_fixture", [WAREHOUSE_ESTATE_FIXTURE], indirect=True),
 ]
 
-REPO = "WhEstate"
+AUDIT = {"Row insert datetime", "Row update datetime", "Row delete datetime"}
 
 
-def _catalogue(build_env) -> set[tuple[str, str, str]]:
-    rows = build_env.query(
+def _catalogue(env):
+    rows = env.query(
         "select table_schema, table_name, table_type from information_schema.tables "
         "where table_schema in (N'Wh', N'Rpt')"
     )
-    return {
-        (r["table_schema"], r["table_name"], r["table_type"].strip()) for r in rows
-    }
+    return {(r["table_schema"], r["table_name"], r["table_type"].strip()) for r in rows}
 
 
-def _columns(build_env, schema, name) -> dict[str, str]:
-    rows = build_env.query(
-        "select column_name, data_type from information_schema.columns "
-        f"where table_schema = N'{schema}' and table_name = N'{name}'"
-    )
-    return {r["column_name"]: r["data_type"] for r in rows}
+def _by_name(columns):
+    return {column["name"]: column for column in columns}
 
 
-def _count(build_env, qualified) -> int:
-    return build_env.query(f"select count(*) as n from {qualified}")[0]["n"]
+def _count(env, qualified):
+    return env.query(f"select count(*) as n from {qualified}")[0]["n"]
 
 
-@pytest.fixture
-def installed_estate(warehouse_build_env):
-    warehouse_build_env.install_repo(REPO)
-    bundle = warehouse_build_env.generate(repository_name=REPO)
-    outcome = warehouse_build_env.install(bundle)
-    assert outcome.status == "succeeded", outcome.action_error
-    return warehouse_build_env, bundle
+def test_every_object_is_built_in_dependency_order(warehouse_estate):
+    env, bundle = warehouse_estate.env, warehouse_estate.bundle
 
-
-def test_every_object_is_built_in_dependency_order(installed_estate):
-    build_env, bundle = installed_estate
-
-    catalogue = _catalogue(build_env)
+    catalogue = _catalogue(env)
     tables = {(s, n) for s, n, kind in catalogue if kind == "BASE TABLE"}
     views = {(s, n) for s, n, kind in catalogue if kind == "VIEW"}
     assert {("Wh", "Customer"), ("Wh", "Product"), ("Wh", "CustomerOrder"),
@@ -75,27 +59,30 @@ def test_every_object_is_built_in_dependency_order(installed_estate):
     assert at["sql:Wh.CustomerOrder"] < at["sql:Rpt.CustomerSummary"]
 
 
-def test_tables_are_built_empty_with_audit_columns(installed_estate):
-    build_env, _ = installed_estate
-
+def test_tables_are_built_empty(warehouse_estate):
+    env = warehouse_estate.env
     for qualified in ("Wh.Customer", "Wh.Product", "Wh.CustomerOrder", "Wh.CustomerDim"):
-        assert _count(build_env, qualified) == 0
-
-    audit = {"Row insert datetime", "Row update datetime", "Row delete datetime"}
-    assert audit <= set(_columns(build_env, "Wh", "Customer"))
+        assert _count(env, qualified) == 0
 
 
-def test_a_declared_table_carries_its_declared_types(installed_estate):
-    build_env, _ = installed_estate
-    columns = _columns(build_env, "Wh", "Product")
-    assert columns["ProductId"] == "int"
-    assert columns["ProductName"] == "varchar"
-    assert columns["Price"] == "decimal"
+def test_a_declared_table_carries_its_declared_types(warehouse_estate):
+    columns = _by_name(warehouse_estate.env.columns("Wh.Product"))
+    assert columns["ProductId"]["type"] == "int"
+    assert columns["ProductName"]["type"] == "varchar"
+    assert columns["Price"]["type"] == "decimal"
 
 
-def test_the_dimension_has_a_weaver_managed_bigint_surrogate(installed_estate):
-    build_env, _ = installed_estate
-    columns = _columns(build_env, "Wh", "CustomerDim")
-    # The surrogate is a plain bigint Weaver adds; a later load populates it.
-    assert columns["CustomerKey"] == "bigint"
+def test_the_dimension_has_a_weaver_managed_bigint_surrogate(warehouse_estate):
+    columns = _by_name(warehouse_estate.env.columns("Wh.CustomerDim"))
+    # A plain bigint Weaver adds; a later load populates it.
+    assert columns["CustomerKey"]["type"] == "bigint"
     assert {"CustomerId", "CustomerName"} <= set(columns)
+
+
+def test_primary_key_and_audit_columns_are_physically_not_nullable(warehouse_estate):
+    # The Warehouse equivalent of the Spark nullability check, read from the
+    # catalogue: the primary key and all three audit columns are NOT NULL.
+    columns = _by_name(warehouse_estate.env.columns("Wh.Customer"))
+    assert columns["CustomerId"]["nullable"] is False
+    for audit in AUDIT:
+        assert columns[audit]["nullable"] is False

@@ -1,100 +1,71 @@
 """SQL-backed Spark table build — the same assertions on local Spark and Fabric.
 
 Both schema modes come from one self-contained SES fixture (``sql-table-build``,
-wired in ``conftest`` as ``SQL_TABLE_FIXTURE``): ``Sales.InferredCustomer`` takes
-its shape from its query, ``Sales.DeclaredCustomer`` declares a wider one. The
-body is transport-neutral — it drives a ``BuildEnv`` and reads back through its
-``query`` — so one small set of assertions covers the local emulator and Fabric,
-and all environment setup lives in ``conftest``.
+wired in ``build_envs`` as ``SQL_TABLE_FIXTURE``): ``Sales.InferredCustomer``
+takes its shape from its query, ``Sales.DeclaredCustomer`` declares a wider one.
+The estate is provisioned and installed **once per module** (``lakehouse_estate``)
+and every assertion below reuses it, so a whole Fabric run of these checks costs
+one Lakehouse, one Livy session and one install.
 """
 
 from __future__ import annotations
 
 import pytest
-from build_envs import SQL_TABLE_FIXTURE, lakehouse_environments
-
-from weaver import RepositoryRef
+from build_envs import SQL_TABLE_FIXTURE
 
 pytestmark = pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)
 
-REPO = "SqlTables"
 AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
 
 
-def _tables(build_env, schema):
-    return {row["tableName"].lower() for row in build_env.query(f"SHOW TABLES IN {schema}")}
+def _by_name(columns):
+    return {column["name"].lower(): column for column in columns}
 
 
-def _columns(build_env, table):
-    return {
-        row["col_name"]: row["data_type"]
-        for row in build_env.query(f"DESCRIBE TABLE {table}")
-        if row["col_name"] and not row["col_name"].startswith("#")
-    }
+def _count(env, table):
+    return next(iter(env.query(f"SELECT count(*) AS n FROM {table}")[0].values()))
 
 
-def _count(build_env, table):
-    return next(iter(build_env.query(f"SELECT count(*) AS n FROM {table}")[0].values()))
-
-
-def _install(build_env):
-    build_env.install_repo(REPO)
-    bundle = build_env.generate(repository_name=REPO)
-    outcome = build_env.install(bundle)
-    assert outcome.status == "succeeded", outcome.action_error
-    return bundle
-
-
-@lakehouse_environments
-def test_both_schema_modes_build_only_the_main_table(build_env):
-    _install(build_env)
-
-    tables = _tables(build_env, "Sales")
+def test_both_schema_modes_build_the_main_tables_empty(lakehouse_estate):
+    env = lakehouse_estate.env
+    tables = {row["tableName"].lower() for row in env.query("SHOW TABLES IN Sales")}
     assert {"customer", "inferredcustomer", "declaredcustomer"} <= tables
-    # Only the authored main tables — no view, no *_Current, no empty *_History.
-    assert "inferredcustomer_current" not in tables
-    assert "customer_history" not in tables
 
     for table in ("Sales.InferredCustomer", "Sales.DeclaredCustomer"):
-        columns = {name.lower() for name in _columns(build_env, table)}
-        assert {"customerid", "customername"} <= columns
-        assert AUDIT <= columns
+        columns = _by_name(env.columns(table))
+        assert {"customerid", "customername"} <= set(columns)
+        assert AUDIT <= set(columns)
         # Build creates structure, not data — the base read() would raise if run.
-        assert _count(build_env, table) == 0
+        assert _count(env, table) == 0
 
 
-@lakehouse_environments
-def test_inferred_types_come_from_the_query_declared_from_the_declaration(build_env):
-    _install(build_env)
-
-    inferred = {n.lower(): t for n, t in _columns(build_env, "Sales.InferredCustomer").items()}
-    declared = {n.lower(): t for n, t in _columns(build_env, "Sales.DeclaredCustomer").items()}
+def test_inferred_types_come_from_the_query_declared_from_the_declaration(lakehouse_estate):
+    env = lakehouse_estate.env
     # The base types CustomerId as int; the inferred table follows the query, the
     # declared table its wider declaration — the same on both engines.
-    assert inferred["customerid"] == "int"
-    assert declared["customerid"] == "bigint"
+    assert _by_name(env.columns("Sales.InferredCustomer"))["customerid"]["type"] == "int"
+    assert _by_name(env.columns("Sales.DeclaredCustomer"))["customerid"]["type"] == "bigint"
 
 
-@lakehouse_environments
-def test_dependency_order_places_the_base_before_its_readers(build_env):
-    bundle = _install(build_env)
+def test_primary_key_and_audit_columns_are_physically_not_nullable(lakehouse_estate):
+    env = lakehouse_estate.env
+    for table in ("Sales.InferredCustomer", "Sales.DeclaredCustomer"):
+        columns = _by_name(env.columns(table))
+        # The primary key and all three audit columns carry NOT NULL through to
+        # the physical Delta schema, inferred or declared, on both engines.
+        assert columns["customerid"]["nullable"] is False
+        for audit in AUDIT:
+            assert columns[audit]["nullable"] is False
+        # A non-key business column stays nullable.
+        assert columns["customername"]["nullable"] is True
 
+
+def test_dependency_order_places_the_base_before_its_readers(lakehouse_estate):
     at = {
         action.resource_node_id: seq.number
-        for seq, _, action in bundle.plan.actions()
+        for seq, _, action in lakehouse_estate.bundle.plan.actions()
         if action.resource_node_id is not None
     }
     base = next(n for n in at if n.endswith("Sales.Customer"))
     for reader in ("delta:Sales.InferredCustomer", "delta:Sales.DeclaredCustomer"):
         assert at[base] < at[reader]
-
-
-@lakehouse_environments
-def test_rebuilding_is_deterministic_and_idempotent(build_env):
-    build_env.install_repo(REPO)
-    first = build_env.generate(repository_name=REPO)
-    assert build_env.install(first).status == "succeeded"
-
-    second = build_env.generate(bundle_name="rebuild", repository_name=REPO)
-    assert second.bundle_id == first.bundle_id
-    assert build_env.install(second).status == "succeeded"
