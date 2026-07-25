@@ -88,3 +88,34 @@ def test_primary_key_and_audit_columns_are_physically_not_nullable(warehouse_est
     assert columns["CustomerId"]["nullable"] is False
     for audit in AUDIT:
         assert columns[audit]["nullable"] is False
+
+
+def test_prune_reconciles_unmanaged_objects_and_spares_the_managed_set(warehouse_estate):
+    """Runs last in this module, so it reuses the installed estate: seed orphans
+    beside it, rebuild with reconciliation on, and prove the frozen T-SQL drops
+    remove exactly the unmanaged objects."""
+
+    env = warehouse_estate.env
+    env.seed_orphans()
+
+    seeded = _catalogue(env)
+    assert ("Wh", "OldTable", "BASE TABLE") in seeded
+    assert ("Legacy", "Thing", "BASE TABLE") in seeded
+
+    # The build inspects the catalogue now and freezes one drop per orphan.
+    bundle = env.generate(bundle_name="whprune", repository_name="WhEstate", prune=True)
+    prune_kinds = {a.kind for _, _, a in bundle.plan.actions() if a.kind.startswith("prune")}
+    assert {"prune_table", "prune_view", "prune_schema"} <= prune_kinds
+
+    outcome = env.install(bundle)
+    assert outcome.status == "succeeded", outcome.action_error
+
+    after = _catalogue(env)
+    # Every orphan is gone, including the whole orphan schema.
+    assert not [row for row in after if row[0] == "Legacy"]
+    assert ("Wh", "OldTable", "BASE TABLE") not in after
+    assert ("Wh", "OldView", "VIEW") not in after
+    # And the managed estate is untouched.
+    assert {("Wh", "Customer"), ("Wh", "Product"), ("Wh", "CustomerOrder"),
+            ("Wh", "CustomerDim")} <= {(s, n) for s, n, _ in after}
+    assert ("Rpt", "CustomerSummary", "VIEW") in after

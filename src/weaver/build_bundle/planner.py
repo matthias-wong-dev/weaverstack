@@ -41,6 +41,9 @@ from .models import (
     OMIT_DEPENDS_ON_OMITTED,
     OMIT_TARGET_UNBOUND,
     PRUNE_FOLDER,
+    PRUNE_SCHEMA,
+    PRUNE_TABLE,
+    PRUNE_VIEW,
     BuildAction,
     BuildBatch,
     BuildPlan,
@@ -183,6 +186,7 @@ def generate_build_bundle(
     store: Store,
     prune: bool = True,
     spark: Any = None,
+    sql: Any = None,
 ) -> BuildBundle:
     """Read a repository once, project it, and write a fully bound bundle.
 
@@ -206,19 +210,13 @@ def generate_build_bundle(
     repository = read_repository(repo_location, store=store, name=repository_name)
 
     bound_target = binding.to_bound_target()
-    if bound_target.kind == WAREHOUSE_TARGET and prune:
-        raise NotImplementedError(
-            "Warehouse prune is not yet supported — reconciling a Warehouse needs "
-            "SQL-endpoint inspection, which lands with cross-database chaining. Pass "
-            "prune=False to build the Warehouse without reconciliation."
-        )
 
     projection = project(
         repository.dependency_graph, bound_target_kinds=targets.bound_target_kinds
     )
 
     sequences, payloads = _plan_sequences(
-        repository, projection, bound_target, resolver, store, prune, spark
+        repository, projection, bound_target, resolver, store, prune, spark, sql
     )
 
     plan = BuildPlan(
@@ -282,15 +280,20 @@ def _plan_sequences(
     store: Store,
     prune: bool,
     spark,
+    sql=None,
 ) -> tuple[tuple[BuildSequence, ...], dict[str, bytes]]:
     payloads: dict[str, bytes] = {}
     documents = {node: repository.by_id[node] for node in projection.retained}
-    managed = _managed_sets(documents)
+    is_warehouse = target.kind == WAREHOUSE_TARGET
+    managed = _managed_sets(documents, SQL_TARGET if is_warehouse else DELTA_TARGET)
 
     sequences: list[BuildSequence] = []
 
     if prune:
-        prune_sequence = _prune_sequence(target, resolver, store, spark, managed, payloads)
+        if is_warehouse:
+            prune_sequence = _warehouse_prune_sequence(target, sql, managed, payloads)
+        else:
+            prune_sequence = _prune_sequence(target, resolver, store, spark, managed, payloads)
         if prune_sequence is not None:
             sequences.append(prune_sequence)
 
@@ -324,9 +327,13 @@ class _Managed:
     views: frozenset[str]
 
 
-def _managed_sets(documents: Mapping[str, SourceDocument]) -> _Managed:
-    tables = {d.qualified for d in documents.values() if d.target_kind == DELTA_TARGET and d.kind == TABLE}
-    views = {d.qualified for d in documents.values() if d.target_kind == DELTA_TARGET and d.kind == VIEW}
+def _managed_sets(
+    documents: Mapping[str, SourceDocument], object_target_kind: str = DELTA_TARGET
+) -> _Managed:
+    """The keep-set for one physical side: Delta objects, or Warehouse ones."""
+
+    tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == VIEW}
     folders = {d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET}
     return _Managed(
         schemas=frozenset(name.split(".", 1)[0].lower() for name in tables | views),
@@ -429,15 +436,130 @@ def _prune_sequence(
     )
 
 
-def _drop_action(target, kind, slug, name, statement, payloads) -> BuildAction:
+#: Warehouse schemas Weaver never manages, so a prune never drops them.
+_RESERVED_SQL_SCHEMAS = frozenset(
+    {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
+)
+
+
+def _warehouse_prune_sequence(
+    target: BoundTarget,
+    sql,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> BuildSequence | None:
+    """Inspect the Warehouse catalogue now and freeze a concrete DROP per orphan.
+
+    The Warehouse counterpart of :func:`_prune_sequence`: reconciliation reads
+    ``sys.objects``/``sys.schemas`` at *plan* time (target inspection is a
+    planning concern — build-philosophy §6) and compiles each unmanaged table,
+    view and schema into an explicit T-SQL drop. The installer runs exactly these
+    and enumerates nothing.
+
+    Order is dependency-safe and matters more than on the Lakehouse: T-SQL has no
+    ``DROP SCHEMA … CASCADE``, so views are dropped before the tables they read,
+    and a schema only after everything in it has gone.
+    """
+
+    if sql is None:
+        # Fail closed: no trustworthy inventory means no destructive actions.
+        raise BuildError(
+            "pruning a Warehouse needs a SQL executor to inspect its catalogue; "
+            "pass sql=... to generate a reconciling bundle, or prune=False to skip "
+            "reconciliation"
+        )
+
+    rows = sql.query(
+        """
+        select
+            schema_name(objects.schema_id) as schema_name
+          , objects.name                  as object_name
+          , objects.type                  as object_type
+        from sys.objects as objects
+        where objects.is_ms_shipped = 0
+          and objects.type in (N'U', N'V')
+        order by schema_name(objects.schema_id), objects.name
+        """
+    )
+    existing = [
+        (str(row["schema_name"]), str(row["object_name"]), str(row["object_type"]).strip())
+        for row in rows
+        if str(row["schema_name"]).lower() not in _RESERVED_SQL_SCHEMAS
+    ]
+
+    schema_rows = sql.query("select name from sys.schemas")
+    existing_schemas = [
+        str(row["name"])
+        for row in schema_rows
+        if str(row["name"]).lower() not in _RESERVED_SQL_SCHEMAS
+    ]
+
+    def unmanaged(schema: str, name: str, keep: frozenset[str]) -> bool:
+        return f"{schema}.{name}".lower() not in keep
+
+    actions: list[BuildAction] = []
+
+    # Views first — a view may read a table this same prune drops.
+    for schema, name, kind in existing:
+        if kind == "V" and unmanaged(schema, name, managed.views):
+            actions.append(
+                _drop_action(
+                    target, PRUNE_VIEW, "view", f"{schema}.{name}",
+                    f"drop view if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
+                    payloads, executor="tsql", extension=".sql",
+                )
+            )
+
+    for schema, name, kind in existing:
+        if kind == "U" and unmanaged(schema, name, managed.tables):
+            actions.append(
+                _drop_action(
+                    target, PRUNE_TABLE, "table", f"{schema}.{name}",
+                    f"drop table if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
+                    payloads, executor="tsql", extension=".sql",
+                )
+            )
+
+    # Schemas last, and only those the bundle does not manage: by now everything
+    # inside an orphan schema has been dropped above, so the schema is empty.
+    for schema in sorted({s for s in existing_schemas if s.lower() not in managed.schemas}):
+        actions.append(
+            _drop_action(
+                target, PRUNE_SCHEMA, "schema", schema,
+                f"drop schema if exists {_tsql_ident(schema)};",
+                payloads, executor="tsql", extension=".sql",
+            )
+        )
+
+    if not actions:
+        return None
+    batch = BuildBatch(
+        id=f"{PRUNE_SEQUENCE:03d}-{target.id}", target_id=target.id, actions=tuple(actions)
+    )
+    return BuildSequence(
+        number=PRUNE_SEQUENCE, description="prune unmanaged objects", batches=(batch,)
+    )
+
+
+def _drop_action(
+    target,
+    kind,
+    slug,
+    name,
+    statement,
+    payloads,
+    *,
+    executor: str = "spark_sql",
+    extension: str = ".spark.sql",
+) -> BuildAction:
     content = (statement + "\n").encode("utf-8")
-    path = payload_path(PRUNE_SEQUENCE, "prune", f"{slug}-{name}.spark.sql")
+    path = payload_path(PRUNE_SEQUENCE, "prune", f"{slug}-{name}{extension}")
     payloads[path] = content
     return BuildAction(
         id=f"prune-{slug}-{name}",
         kind=kind,
         resource_node_id=None,
-        executor="spark_sql",
+        executor=executor,
         payload=path,
         payload_sha256=sha256_hex(content),
     )

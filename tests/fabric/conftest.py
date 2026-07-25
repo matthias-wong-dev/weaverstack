@@ -835,10 +835,11 @@ def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) 
     endpoint of a disposable Fabric Warehouse.
 
     A Warehouse build is single-target and Lakehouse-free here: generation is pure
-    T-SQL text (no Spark, ``prune=False`` — Warehouse reconciliation is a later
-    branch), and installation runs the self-contained scripts through the pooled
-    SQL executor the disposable Warehouse exposes. Its ``query`` is T-SQL, so
-    behavioural assertions read the Warehouse catalogue, not a Spark session.
+    T-SQL text (no Spark), and installation runs the self-contained scripts through
+    the pooled SQL executor the disposable Warehouse exposes. That same executor
+    inspects the catalogue at plan time, so ``prune=True`` reconciles. Its
+    ``query`` is T-SQL, so behavioural assertions read the Warehouse catalogue,
+    not a Spark session.
     """
 
     from weaver import ItemRef as _ItemRef, RepositoryRef
@@ -874,6 +875,8 @@ def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) 
             host=fabric_host,
             store=store,
             prune=prune,
+            # Reconciliation reads the Warehouse catalogue at plan time.
+            sql=sql,
         )
 
     def install(bundle) -> InstallOutcome:
@@ -906,8 +909,26 @@ def _warehouse_build_env(fabric_host, weaver_lakehouse, warehouse, ses_fixture) 
             for row in rows
         ]
 
-    def seed_orphans() -> None:  # Warehouse prune is a later branch; nothing to seed.
-        raise NotImplementedError("Warehouse prune is not supported yet")
+    def seed_orphans() -> None:
+        """Objects the bundle does not manage, for prune to reconcile away.
+
+        An orphan table and view inside a managed schema, plus a whole orphan
+        schema holding both — so the frozen drops must cover object-level and
+        schema-level reconciliation, in a dependency-safe order.
+        """
+
+        sql.execute_script(
+            "if not exists (select 1 from sys.schemas where name = N'Wh')\n"
+            "    exec('create schema [Wh]');\n"
+            "if not exists (select 1 from sys.schemas where name = N'Legacy')\n"
+            "    exec('create schema [Legacy]');\n"
+        )
+        sql.execute_script(
+            "create table [Wh].[OldTable] ([x] int not null);\n"
+            "create view [Wh].[OldView] as select 1 as [x];\n"
+            "create table [Legacy].[Thing] ([x] int not null);\n"
+            "create view [Legacy].[ThingView] as select [x] from [Legacy].[Thing];\n"
+        )
 
     return BuildEnv(
         label="warehouse", host=fabric_host, weaver=weaver, target=warehouse_ref,
