@@ -24,8 +24,10 @@ from pathlib import Path
 SUPPORTED_PYTHON = (3, 11)
 SUPPORTED_PYSPARK = ("3.5",)
 SUPPORTED_DELTA = ("3.2",)
-#: Spark 3.5 runs on Java 8, 11 or 17. Later JDKs are not supported by it.
-SUPPORTED_JAVA = ("17", "11")
+#: Spark 3.5 documents Java 8, 11 and 17; 21 is not documented but runs the
+#: local Delta suite, so it is accepted rather than preferred. The order is the
+#: discovery preference — `find_java_home` takes the first release it can find.
+SUPPORTED_JAVA = ("17", "11", "21")
 
 
 @dataclass(frozen=True)
@@ -105,11 +107,19 @@ def java_version(java_home: str | None) -> str | None:
     except (OSError, subprocess.CalledProcessError):
         return None
     # `java -version` writes to stderr: openjdk version "17.0.19" 2026-01-20
-    first = (result.stderr or result.stdout).splitlines()[0] if (result.stderr or result.stdout) else ""
-    for part in first.split('"'):
-        if part and part[0].isdigit():
-            return part
-    return first or None
+    #
+    # The banner is not reliably the first line. A JVM started with
+    # JAVA_TOOL_OPTIONS or _JAVA_OPTIONS set — a proxy's truststore, a
+    # container's defaults — announces those first, so match the banner itself
+    # rather than trusting its position.
+    output = result.stderr or result.stdout or ""
+    for line in output.splitlines():
+        if 'version "' not in line:
+            continue
+        for part in line.split('"'):
+            if part and part[0].isdigit():
+                return part
+    return None
 
 
 def _installed(package: str) -> str | None:

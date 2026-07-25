@@ -10,13 +10,14 @@ without touching a workspace.
 | | version | why |
 |---|---|---|
 | Python | 3.11 or later | the package baseline |
-| A JDK | **11 or 17** | Spark runs on the JVM |
+| A JDK | **11 or 17**, or 21 | Spark runs on the JVM |
 | PySpark | 3.5.x | |
 | delta-spark | 3.2.x | Delta and Spark are released in lockstep |
 
-Spark 3.5 does **not** support Java 21 or later. If `java -version` reports one
-of those, install a supported JDK alongside it and point `JAVA_HOME` at that;
-nothing needs uninstalling.
+Spark 3.5 documents Java 8, 11 and 17. Java 21 is undocumented but runs the
+local suite, so `weaver doctor` accepts it — a machine that only ships 21 is not
+blocked. It is accepted, not preferred: where several are installed, Weaver
+still picks a documented release first.
 
 ## Setting it up
 
