@@ -106,7 +106,13 @@ def _render_identity_union(column) -> str:
     if column is None:
         return ""
     definition = f"{_quote_part(column.name)} {column.type}{_nullability(column.not_null)}"
-    return f"    select 0, {_sql_literal(definition)}\n    union all\n\n"
+    # This is the leading SELECT of the all_columns CTE, so it must name both
+    # columns — a CTE takes its column names from its first SELECT, and an
+    # unnamed literal there is a T-SQL error ("No column name was specified").
+    return (
+        f"    select 0 as column_ordinal, {_sql_literal(definition)} as column_definition\n"
+        "    union all\n\n"
+    )
 
 
 def _render_identity_guard(column, temp_literal: str) -> str:

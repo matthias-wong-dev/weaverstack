@@ -205,8 +205,13 @@ def test_declared_identity_leads_as_a_plain_not_null_bigint():
 
 def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     content = _ddl("Reporting.CustomerReport.sql", IDENTITY_INFERRED).content
-    # Added as the leading column of the dynamically built table.
-    assert "select 0, N'[CustomerKey] bigint not null'" in content
+    # Added as the leading column of the dynamically built table. It leads the
+    # all_columns CTE, so it must name both columns — an unnamed literal there is
+    # a T-SQL error ("No column name was specified for column 1 of 'all_columns'").
+    assert (
+        "select 0 as column_ordinal, N'[CustomerKey] bigint not null' as column_definition"
+        in content
+    )
     # Guarded so a query producing the same name is refused, not silently doubled.
     assert "throw 51006" in content
     assert " identity" not in content.lower()
