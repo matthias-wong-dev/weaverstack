@@ -12,6 +12,7 @@ from weaver.diagnostics import (
     install_command,
     java_launcher,
     java_version,
+    parse_java_version,
 )
 
 
@@ -50,19 +51,7 @@ def test_java_version_of_nothing_is_nothing():
     assert java_version(None) is None
 
 
-def _fake_jdk(tmp_path, stderr: str):
-    """A JAVA_HOME whose `java -version` writes exactly the given stderr."""
-
-    java = tmp_path / "bin" / "java"
-    java.parent.mkdir(parents=True)
-    java.write_text(
-        "#!/bin/sh\ncat >&2 <<'BANNER'\n" + stderr + "\nBANNER\n", encoding="utf-8"
-    )
-    java.chmod(0o755)
-    return str(tmp_path)
-
-
-def test_java_version_reads_the_banner_not_the_first_line(tmp_path):
+def test_java_version_reads_the_banner_not_the_first_line():
     """A JVM told to pick up options announces them before its own version.
 
     JAVA_TOOL_OPTIONS is set by proxies and container images, so the banner is
@@ -70,19 +59,25 @@ def test_java_version_reads_the_banner_not_the_first_line(tmp_path):
     announcement as the version.
     """
 
-    home = _fake_jdk(
-        tmp_path,
-        "Picked up JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=127.0.0.1\n"
-        'openjdk version "17.0.19" 2026-01-20\n'
-        "OpenJDK Runtime Environment (build 17.0.19+7)",
+    assert (
+        parse_java_version(
+            "Picked up JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=127.0.0.1\n"
+            'openjdk version "17.0.19" 2026-01-20\n'
+            "OpenJDK Runtime Environment (build 17.0.19+7)"
+        )
+        == "17.0.19"
     )
-    assert java_version(home) == "17.0.19"
 
 
-def test_an_unreadable_banner_is_missing_rather_than_wrong(tmp_path):
+def test_a_plain_banner_still_reads():
+    assert parse_java_version('openjdk version "21.0.10" 2026-01-20') == "21.0.10"
+
+
+def test_an_unreadable_banner_is_missing_rather_than_wrong():
     """Better to report no JDK than to report nonsense as its version."""
 
-    assert java_version(_fake_jdk(tmp_path, "not a version banner")) is None
+    assert parse_java_version("not a version banner") is None
+    assert parse_java_version("") is None
 
 
 def test_the_launcher_is_found_under_either_platform_name(tmp_path):

@@ -107,15 +107,24 @@ respected — a deliberately configured machine is never second-guessed.
 
 ## Windows
 
-The core suite runs natively, and CI covers it on every push. Local **Spark**
-does not: Spark writes to the local filesystem through Hadoop's native IO, which
-needs a `winutils.exe` and a matching `HADOOP_HOME`. That is a Spark-on-Windows
-limitation rather than a Weaver one.
+**Use [WSL](https://learn.microsoft.com/windows/wsl/install)** and follow the
+Linux instructions inside it. Native Windows is not yet supported, for two
+separate reasons.
 
-Use [WSL](https://learn.microsoft.com/windows/wsl/install) for local Spark work
-and follow the Linux instructions inside it. Everything that does not need a JVM
-— the catalogue, dependency graph, SQL generation, Warehouse targets — works
-natively on Windows.
+*Paths.* `LocalHost` normalises its root through `Path`, so on Windows a
+`Location` carries backslashes — while `Location.name` and the segment handling
+around it split on `/` alone. An SES repository read from a Windows checkout
+therefore takes its entire path as its catalogue name. Eleven tests fail on that
+one cause. CI runs the Windows job as advisory so the gap stays measured rather
+than forgotten.
+
+*Spark.* Independently, Spark writes to the local filesystem through Hadoop's
+native IO, which needs a `winutils.exe` and a matching `HADOOP_HOME`. That one
+is a Spark-on-Windows limitation rather than a Weaver one, and WSL settles it
+too.
+
+The CLI itself is fine on Windows — `weaver doctor`, `weaver capacity` and
+`weaver install` neither read SES repositories nor need a JVM.
 
 ## Running the tests
 

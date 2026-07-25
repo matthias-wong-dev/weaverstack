@@ -122,23 +122,19 @@ def java_launcher(java_home: str | None) -> Path | None:
     return None
 
 
-def java_version(java_home: str | None) -> str | None:
-    java = java_launcher(java_home)
-    if java is None:
-        return None
-    try:
-        result = subprocess.run(
-            [str(java), "-version"], capture_output=True, text=True, check=True
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    # `java -version` writes to stderr: openjdk version "17.0.19" 2026-01-20
-    #
-    # The banner is not reliably the first line. A JVM started with
-    # JAVA_TOOL_OPTIONS or _JAVA_OPTIONS set — a proxy's truststore, a
-    # container's defaults — announces those first, so match the banner itself
-    # rather than trusting its position.
-    output = result.stderr or result.stdout or ""
+def parse_java_version(output: str) -> str | None:
+    """The release from `java -version` output: openjdk version "17.0.19" ...
+
+    The banner is not reliably the first line. A JVM started with
+    JAVA_TOOL_OPTIONS or _JAVA_OPTIONS set — a proxy's truststore, a container's
+    defaults — announces those first, so match the banner itself rather than
+    trusting its position. Output that carries no banner is no version at all,
+    not a line to be reported as one.
+
+    Kept apart from the subprocess so the parsing can be tested on every
+    platform, rather than only where a fake `java` script can be executed.
+    """
+
     for line in output.splitlines():
         if 'version "' not in line:
             continue
@@ -146,6 +142,20 @@ def java_version(java_home: str | None) -> str | None:
             if part and part[0].isdigit():
                 return part
     return None
+
+
+def java_version(java_home: str | None) -> str | None:
+    java = java_launcher(java_home)
+    if java is None:
+        return None
+    try:
+        # `java -version` writes to stderr.
+        result = subprocess.run(
+            [str(java), "-version"], capture_output=True, text=True, check=True
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return parse_java_version(result.stderr or result.stdout or "")
 
 
 def _installed(package: str) -> str | None:
