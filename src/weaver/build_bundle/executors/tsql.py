@@ -1,14 +1,18 @@
-"""T-SQL execution — the future Warehouse seam, deliberately refused in v1.
+"""T-SQL execution — run a generated Warehouse script through the SQL stack.
 
-The class and its registry entry exist so the architecture shows the shape a
-Warehouse installer will take, but executing raises: v1 plans never carry a
-T-SQL action (generation refuses it), and this is the second, defensive line.
+The payload is a finished, self-contained T-SQL script (built by
+:mod:`weaver.ses.tsql_ddl`): a table build materialises and inspects its own
+query shape server-side and creates only its main table; a view is a
+``CREATE OR ALTER VIEW``. The executor runs it as one multi-statement script
+through the pooled SQL executor the environment supplies — it adds no logic of
+its own, exactly the mechanical executor the build philosophy calls for.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from ...errors import InstallError
 from ..models import BuildAction
 from .base import InstallationContext
 
@@ -22,6 +26,15 @@ class TSqlExecutor:
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:
-        raise NotImplementedError(
-            "T-SQL and Warehouse installation are not supported by build bundle v1"
-        )
+        if payload is None:
+            raise InstallError(f"tsql action {action.id!r} has no payload")
+        if context.sql is None:
+            raise InstallError(
+                f"tsql action {action.id!r} needs a SQL executor but none was "
+                "provided — a Warehouse install must supply one"
+            )
+        script = payload.decode("utf-8")
+        context.sql.execute_script(script)
+        return {
+            "statement_first_line": script.splitlines()[0] if script.strip() else ""
+        }

@@ -225,6 +225,13 @@ The governing rule is:
 
 Every destructive action must already exist in the certified bundle.
 
+Because the order is frozen too, it must be dependency-safe *by construction*
+rather than by relying on the engine to cascade. Where a target offers no
+cascading drop — a Warehouse has no `DROP SCHEMA … CASCADE` — the planner emits
+dependants before dependencies: views, then the tables they read, then the schema
+once it is empty. An engine capability may shorten the plan; it may not be the
+reason the plan is correct.
+
 ---
 
 ## 6. Target inspection is a planning concern
@@ -264,14 +271,13 @@ Silently falling back to installation-time discovery is not acceptable.
 
 ---
 
-## 7. Declared structure is authoritative
+## 7. Structure comes from declaration or from query shape, never from source data
 
-Build structure comes from declarations, not from observing source data.
+Build structure has exactly two authoritative sources: an explicit **declared
+schema**, or the **output shape of an object's own query**. Both are stable,
+reviewable properties of the frozen repository. Neither reads business data.
 
-For a Delta table, the schema used to create the table must be supplied by the
-SES declaration or by another explicitly supported compile-time declaration.
-
-The builder must not infer a production table schema by reading:
+The builder must never infer a production table schema by reading:
 
 - CSV files;
 - Excel workbooks;
@@ -280,23 +286,73 @@ The builder must not infer a production table schema by reading:
 - API responses;
 - arbitrary Python return values.
 
-Those sources are operationally unstable. Inference makes deployment behaviour
-depend on whichever sample happens to be available during planning or
-installation.
+Those sources are operationally unstable. Inference from them makes deployment
+behaviour depend on whichever sample happens to be available during planning or
+installation. That inference is forbidden.
 
-The default rule is:
+### 7.1 Declared schema
+
+For a Python-backed Delta table, the schema used to create the table must be
+supplied by the SES declaration or another explicitly supported compile-time
+declaration. There is no query to consult:
 
 ```text
 declared schema
 → compile empty table DDL
 
-no declared schema
+no declared schema (Python-backed Delta)
 → explicit unsupported/not-implemented result
 ```
 
-Future schema inference may be introduced as an explicit, dependency-aware
-feature, but it must never masquerade as declaration and must never occur
-silently inside installation.
+### 7.2 Query-shape inference is declared structure, not source-data inference
+
+A SQL-backed table — Spark SQL against the Lakehouse, or T-SQL against the
+Warehouse — may **declare** its schema or **omit** it. When it omits it, the
+physical business columns are the output columns of its own query.
+
+This is not the forbidden inference of §7's opening. The line is exact:
+
+> **Query-shape inference reads a query's output *types*. Source-data inference
+> reads operational *rows*.**
+
+A query's result shape is a deterministic function of frozen repository text and
+of the ancestor tables built earlier in the same bundle's barrier order. It does
+not vary with whichever CSV or API response happens to be present. Running the
+query in shape-only form — every `SELECT` guarded so it returns its columns and
+no rows — reads structure, never data.
+
+When a schema is declared on a SQL-backed table, the declaration controls the
+physical types and the query is analysed only to validate case-insensitive
+column-set equivalence. Declared types are deliberately allowed to be wider or
+more stable than the query currently infers.
+
+### 7.3 Inference is deferred into one self-contained install action
+
+Query-shape inference happens **at install time, inside a single self-contained
+action** — never at plan time, and never as a multi-round-trip exchange.
+
+Not at plan time, because inferring a table's shape requires running its query,
+which requires its ancestors to exist. Plan time has no built target; forcing
+ancestors to be materialised before a bundle can be produced would destroy the
+self-contained bundle the rest of this document depends on.
+
+Not as a round-trip, because an installer that did build-shape → fetch-types →
+generate-DDL → execute as separate exchanges would be doing planning work it is
+forbidden to do (§4). Instead the action is one unit that carries its own
+inference: the target engine — which alone authoritatively knows the query's
+result types — is the *type oracle* that renders and executes the create in a
+single pass. In T-SQL this is one script that shapes a `WHERE 1=0` temp table,
+reads its column metadata back through a frozen type mapping, and executes the
+generated `CREATE TABLE` server-side. Spark carries the same magic: one
+executor resolves the query's `DataFrame` schema and creates the table without
+returning to the planner. Different transports, identical contract.
+
+The payload for such an action stays frozen and deterministic — the same query
+text and schema mode always render the same table. The engine supplies types;
+it makes no decision about *which* object is built or *what* it means. That is
+still fixed in the bundle. A payload that let the installer choose scope, target
+or meaning would be the forbidden template of §16; a payload that uses the
+engine only as a type oracle for its one named table is not.
 
 ---
 
@@ -584,7 +640,9 @@ source-data availability.
 
 ### Inferring schema from current source data
 
-This makes infrastructure vary according to transient operational input.
+This makes infrastructure vary according to transient operational input. It is
+distinct from query-shape inference (§7.2), which reads a query's output types,
+not its rows, and is deterministic across operational data.
 
 ### Dynamic prune inside the installer
 
@@ -611,7 +669,10 @@ schema source, target or language.
 
 Payloads that require the installer to fill in semantic decisions are not
 frozen payloads. Runtime substitution is acceptable only for strictly
-transport-level values whose meaning was already bound and validated.
+transport-level values whose meaning was already bound and validated. A
+self-contained query-shape action (§7.3) is not a template: it fixes the object,
+its query and its schema mode, and uses the engine only as a type oracle for the
+one table it names.
 
 ---
 

@@ -1,0 +1,93 @@
+fallback_type: varchar(max)
+preserve_nullability: true
+default_varchar_length: 8000
+default_varbinary_length: 8000
+max_length_token: max
+identity_type: bigint identity not null
+
+mappings:
+  bigint:
+    target: bigint
+  binary:
+    target: varbinary
+    length: source
+  bit:
+    target: bit
+  char:
+    target: varchar
+    length: source
+  date:
+    target: date
+  datetime:
+    target: datetime2
+    scale: 6
+  datetime2:
+    target: datetime2
+    scale: min_source_6
+  datetimeoffset:
+    target: datetime2
+    scale: min_source_6
+  decimal:
+    target: decimal
+    precision: source
+    scale: source
+  float:
+    target: float
+  image:
+    target: varbinary
+    length: max
+  int:
+    target: int
+  money:
+    target: decimal
+    precision: 19
+    scale: 4
+  nchar:
+    target: varchar
+    length: source
+  ntext:
+    target: varchar
+    length: max
+  numeric:
+    target: decimal
+    precision: source
+    scale: source
+  nvarchar:
+    target: varchar
+    length: source
+  real:
+    target: real
+  rowversion:
+    target: varbinary
+    length: 8
+  smalldatetime:
+    target: datetime2
+    scale: 0
+  smallint:
+    target: smallint
+  smallmoney:
+    target: decimal
+    precision: 10
+    scale: 4
+  text:
+    target: varchar
+    length: max
+  time:
+    target: time
+    scale: min_source_6
+  timestamp:
+    target: varbinary
+    length: 8
+  tinyint:
+    target: smallint
+  uniqueidentifier:
+    target: uniqueidentifier
+  varbinary:
+    target: varbinary
+    length: source
+  varchar:
+    target: varchar
+    length: source
+  xml:
+    target: varchar
+    length: max

@@ -110,6 +110,63 @@ See the journal's build-bundle log for the full Fabric contract these tests
 established (`CREATE SCHEMA` over `CREATE DATABASE`, the reserved `dbo` schema, the
 https/abfss bundle re-resolution, and `FabricStore` byte reads/writes).
 
+## One environment fixture, two transports
+
+The build tests share a single reusable harness so the same assertions run
+locally and on Fabric, and so a Fabric run costs as little as possible.
+
+`BuildEnv` (in `tests/fabric/conftest.py`) is a small record of callables —
+`install_repo`, `generate`, `install`, `query`, `columns`, `seed_orphans` — with
+the transport hidden behind them. A test body drives it and never mentions Livy,
+Spark or ODBC. Three environments implement it:
+
+| fixture | generation | installation | reads back with |
+|---|---|---|---|
+| `local_build_env` | in-process | in-process | local Spark |
+| `fabric_build_env` | in the Livy session | in the Livy session | in-session Spark |
+| `warehouse_estate` | in the Livy session | in the Livy session, over Weaver's Fabric-native SQL | desktop T-SQL (assertions only) |
+
+Weaver is a Fabric tool, so **every** environment runs both phases where the code
+is installed — there is no desktop-planned build. For a Warehouse that means
+generation reads the target's system schema in-session through Weaver's own
+`fabric_sql_executor` (the session identity) and compiles the prune into the
+bundle there; installation runs the frozen T-SQL through the same connector. The
+desktop's only jobs are uploading the SES repository and reading the catalogue
+back for assertions — the latter through `desktop_sql_executor`, which is test
+infrastructure and never part of what is under test.
+
+Two rules keep the cost down and the setup in one place:
+
+- **Environment setup lives only in `conftest`.** Tests never build a host,
+  create a Lakehouse, start a session or clean a catalog. Which SES repository an
+  environment installs is the `ses_fixture` parameter (paths in
+  `tests/fabric/build_envs.py`), so one body can be pointed at another estate:
+  `@pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.
+- **An estate is provisioned and installed once per module.** The module-scoped
+  `lakehouse_estate` and `warehouse_estate` fixtures install one estate and hand
+  every test in the module the same `InstalledEstate`, so a whole module of Fabric
+  assertions costs one Lakehouse (or one Warehouse) and one install rather than
+  one per test. `disposable_warehouse` is module-scoped for the same reason — a
+  Warehouse takes minutes to provision. Use the function-scoped
+  `fabric_build_env` only where a test genuinely needs a fresh target, as the
+  prune and failure-path cases in `test_build_bundle.py` do.
+
+`lakehouse_environments` (also in `build_envs.py`) is the marker that runs one
+body against both Spark transports, so `-m spark` and `-m fabric` each select
+their half.
+
+### `weaver install` is a precondition of the Fabric suite
+
+Every Fabric build test — Lakehouse and Warehouse alike — runs inside the Livy
+session, which imports Weaver from the Environment. **The suite therefore tests
+the wheel that was last published, not your working tree**, so any Weaver Python
+change needs `weaver install` before it is exercised on Fabric. That is the point:
+what is under test is Weaver-on-Fabric doing the job.
+
+The one thing that legitimately skips a publish is a change whose effect is fully
+determined *before* Fabric runs — nothing in the current build suite qualifies,
+because generation itself happens in Fabric.
+
 ## The three test suites
 
 | | command | needs |

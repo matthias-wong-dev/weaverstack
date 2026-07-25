@@ -41,6 +41,9 @@ from .models import (
     OMIT_DEPENDS_ON_OMITTED,
     OMIT_TARGET_UNBOUND,
     PRUNE_FOLDER,
+    PRUNE_SCHEMA,
+    PRUNE_TABLE,
+    PRUNE_VIEW,
     BuildAction,
     BuildBatch,
     BuildPlan,
@@ -183,6 +186,7 @@ def generate_build_bundle(
     store: Store,
     prune: bool = True,
     spark: Any = None,
+    sql: Any = None,
 ) -> BuildBundle:
     """Read a repository once, project it, and write a fully bound bundle.
 
@@ -199,22 +203,20 @@ def generate_build_bundle(
     schemas from storage.
     """
 
-    if targets.lakehouse is None:
-        raise BuildError("build bundle v1 requires a Lakehouse binding")
+    binding = _single_binding(targets)
 
     resolver = resolver_for(host)
     repo_location = _repository_location(resolver, weaver_lakehouse, repository_name)
     repository = read_repository(repo_location, store=store, name=repository_name)
 
-    _reject_unsupported(repository, targets)
+    bound_target = binding.to_bound_target()
 
     projection = project(
         repository.dependency_graph, bound_target_kinds=targets.bound_target_kinds
     )
 
-    bound_target = targets.lakehouse.to_bound_target()
     sequences, payloads = _plan_sequences(
-        repository, projection, bound_target, resolver, store, prune, spark
+        repository, projection, bound_target, resolver, store, prune, spark, sql, host
     )
 
     plan = BuildPlan(
@@ -247,11 +249,27 @@ def _repository_location(resolver, weaver_lakehouse: ItemRef, repository_name: s
     return resolver.repository(RepositoryRef(repository_name))
 
 
-def _reject_unsupported(repository: SesRepository, targets: TargetBindings) -> None:
-    if targets.warehouse is not None and repository.warehouse_native:
-        raise NotImplementedError(
-            "T-SQL and Warehouse installation are not supported by build bundle v1"
+def _single_binding(targets: TargetBindings):
+    """The one physical side this bundle builds.
+
+    The signature accepts every physical binding (at least one supplied), but a
+    single bundle materialises a single side: folders and Delta/Spark objects
+    into the Lakehouse, or T-SQL objects into the Warehouse. Crossing the boundary
+    in one build — a Warehouse object reading a Lakehouse table it also builds —
+    needs a SQL-endpoint refresh and lands with cross-database chaining, so until
+    then the two sides are built in separate calls.
+    """
+
+    if targets.lakehouse is not None and targets.warehouse is not None:
+        raise BuildError(
+            "a build targets one physical side at a time: build the Lakehouse and "
+            "the Warehouse in separate calls until cross-database chaining lands"
         )
+    if targets.lakehouse is not None:
+        return targets.lakehouse
+    if targets.warehouse is not None:
+        return targets.warehouse
+    raise BuildError("a build requires at least one physical target binding")
 
 
 def _plan_sequences(
@@ -262,15 +280,21 @@ def _plan_sequences(
     store: Store,
     prune: bool,
     spark,
+    sql=None,
+    host: Host | None = None,
 ) -> tuple[tuple[BuildSequence, ...], dict[str, bytes]]:
     payloads: dict[str, bytes] = {}
     documents = {node: repository.by_id[node] for node in projection.retained}
-    managed = _managed_sets(documents)
+    is_warehouse = target.kind == WAREHOUSE_TARGET
+    managed = _managed_sets(documents, SQL_TARGET if is_warehouse else DELTA_TARGET)
 
     sequences: list[BuildSequence] = []
 
     if prune:
-        prune_sequence = _prune_sequence(target, resolver, store, spark, managed, payloads)
+        if is_warehouse:
+            prune_sequence = _warehouse_prune_sequence(target, sql, host, managed, payloads)
+        else:
+            prune_sequence = _prune_sequence(target, resolver, store, spark, managed, payloads)
         if prune_sequence is not None:
             sequences.append(prune_sequence)
 
@@ -304,9 +328,13 @@ class _Managed:
     views: frozenset[str]
 
 
-def _managed_sets(documents: Mapping[str, SourceDocument]) -> _Managed:
-    tables = {d.qualified for d in documents.values() if d.target_kind == DELTA_TARGET and d.kind == TABLE}
-    views = {d.qualified for d in documents.values() if d.target_kind == DELTA_TARGET and d.kind == VIEW}
+def _managed_sets(
+    documents: Mapping[str, SourceDocument], object_target_kind: str = DELTA_TARGET
+) -> _Managed:
+    """The keep-set for one physical side: Delta objects, or Warehouse ones."""
+
+    tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == VIEW}
     folders = {d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET}
     return _Managed(
         schemas=frozenset(name.split(".", 1)[0].lower() for name in tables | views),
@@ -409,15 +437,153 @@ def _prune_sequence(
     )
 
 
-def _drop_action(target, kind, slug, name, statement, payloads) -> BuildAction:
+#: Warehouse schemas Weaver never manages, so a prune never drops them.
+_RESERVED_SQL_SCHEMAS = frozenset(
+    {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
+)
+
+
+def _warehouse_prune_sequence(
+    target: BoundTarget,
+    sql,
+    host: Host,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> BuildSequence | None:
+    """Inspect the Warehouse catalogue now and freeze a concrete DROP per orphan.
+
+    The Warehouse counterpart of :func:`_prune_sequence`: reconciliation reads
+    ``sys.objects``/``sys.schemas`` at *plan* time (target inspection is a
+    planning concern — build-philosophy §6) and compiles each unmanaged table,
+    view and schema into an explicit T-SQL drop. The installer runs exactly these
+    and enumerates nothing.
+
+    Order is dependency-safe and matters more than on the Lakehouse: T-SQL has no
+    ``DROP SCHEMA … CASCADE``, so views are dropped before the tables they read,
+    and a schema only after everything in it has gone.
+
+    Reading the target is **Fabric-native by default**, like
+    :func:`weaver.wipe.wipe_sql_target`: Weaver runs in Fabric, so it inspects the
+    Warehouse through its own session identity. A desktop caller crossing into
+    Fabric — a developer, or the CLI — injects ``desktop_sql_executor``
+    explicitly. Either way the inventory is read where the build is planned, and
+    the drops are frozen into the bundle from there.
+    """
+
+    owns_sql = sql is None
+    if sql is None:
+        from ..fabric.sql import fabric_sql_executor
+        from ..targets import WarehouseTarget
+
+        sql = fabric_sql_executor(
+            WarehouseTarget(warehouse=ItemRef(target.item_id)), host
+        )
+    try:
+        return _warehouse_prune_actions(target, sql, managed, payloads)
+    finally:
+        if owns_sql and hasattr(sql, "close"):
+            sql.close()
+
+
+def _warehouse_prune_actions(
+    target: BoundTarget,
+    sql,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> BuildSequence | None:
+    """Compile the frozen drops from one catalogue reading."""
+
+    rows = sql.query(
+        """
+        select
+            schema_name(objects.schema_id) as schema_name
+          , objects.name                  as object_name
+          , objects.type                  as object_type
+        from sys.objects as objects
+        where objects.is_ms_shipped = 0
+          and objects.type in (N'U', N'V')
+        order by schema_name(objects.schema_id), objects.name
+        """
+    )
+    existing = [
+        (str(row["schema_name"]), str(row["object_name"]), str(row["object_type"]).strip())
+        for row in rows
+        if str(row["schema_name"]).lower() not in _RESERVED_SQL_SCHEMAS
+    ]
+
+    schema_rows = sql.query("select name from sys.schemas")
+    existing_schemas = [
+        str(row["name"])
+        for row in schema_rows
+        if str(row["name"]).lower() not in _RESERVED_SQL_SCHEMAS
+    ]
+
+    def unmanaged(schema: str, name: str, keep: frozenset[str]) -> bool:
+        return f"{schema}.{name}".lower() not in keep
+
+    actions: list[BuildAction] = []
+
+    # Views first — a view may read a table this same prune drops.
+    for schema, name, kind in existing:
+        if kind == "V" and unmanaged(schema, name, managed.views):
+            actions.append(
+                _drop_action(
+                    target, PRUNE_VIEW, "view", f"{schema}.{name}",
+                    f"drop view if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
+                    payloads, executor="tsql", extension=".sql",
+                )
+            )
+
+    for schema, name, kind in existing:
+        if kind == "U" and unmanaged(schema, name, managed.tables):
+            actions.append(
+                _drop_action(
+                    target, PRUNE_TABLE, "table", f"{schema}.{name}",
+                    f"drop table if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
+                    payloads, executor="tsql", extension=".sql",
+                )
+            )
+
+    # Schemas last, and only those the bundle does not manage: by now everything
+    # inside an orphan schema has been dropped above, so the schema is empty.
+    for schema in sorted({s for s in existing_schemas if s.lower() not in managed.schemas}):
+        actions.append(
+            _drop_action(
+                target, PRUNE_SCHEMA, "schema", schema,
+                f"drop schema if exists {_tsql_ident(schema)};",
+                payloads, executor="tsql", extension=".sql",
+            )
+        )
+
+    if not actions:
+        return None
+    batch = BuildBatch(
+        id=f"{PRUNE_SEQUENCE:03d}-{target.id}", target_id=target.id, actions=tuple(actions)
+    )
+    return BuildSequence(
+        number=PRUNE_SEQUENCE, description="prune unmanaged objects", batches=(batch,)
+    )
+
+
+def _drop_action(
+    target,
+    kind,
+    slug,
+    name,
+    statement,
+    payloads,
+    *,
+    executor: str = "spark_sql",
+    extension: str = ".spark.sql",
+) -> BuildAction:
     content = (statement + "\n").encode("utf-8")
-    path = payload_path(PRUNE_SEQUENCE, "prune", f"{slug}-{name}.spark.sql")
+    path = payload_path(PRUNE_SEQUENCE, "prune", f"{slug}-{name}{extension}")
     payloads[path] = content
     return BuildAction(
         id=f"prune-{slug}-{name}",
         kind=kind,
         resource_node_id=None,
-        executor="spark_sql",
+        executor=executor,
         payload=path,
         payload_sha256=sha256_hex(content),
     )
@@ -469,19 +635,22 @@ def _schema_sequence(
 ) -> BuildSequence | None:
     """Create the catalog databases the retained tables and views need.
 
-    Only schemas that hold a Delta table or view get a database, and it is given
-    an explicit ``LOCATION`` in the Lakehouse ``Tables`` area — the one physical
-    path a build resolves — so a managed table created under it lands where Weaver
-    addresses it. Folder-only schemas are directories, not catalog databases, and
-    get none. A schema is created only because a bound resource uses it; none is
-    inferred from a ``Schema.Object`` name.
+    Only schemas that hold a materialised object get a database. On the Lakehouse
+    a Delta schema is given an explicit ``LOCATION`` in the ``Tables`` area — the
+    one physical path a build resolves — so a managed table lands where Weaver
+    addresses it; on the Warehouse a T-SQL ``CREATE SCHEMA`` needs no location.
+    Folder-only schemas are directories, not catalog databases, and get none. A
+    schema is created only because a bound resource uses it; none is inferred from
+    a ``Schema.Object`` name.
     """
 
+    is_warehouse = target.kind == WAREHOUSE_TARGET
+    object_target_kind = SQL_TARGET if is_warehouse else DELTA_TARGET
     schemas = sorted(
         {
             document.object_id.schema
             for document in documents.values()
-            if document.target_kind == DELTA_TARGET
+            if document.target_kind == object_target_kind
         }
     )
     undeclared = [schema for schema in schemas if schema not in repository.schemas]
@@ -493,24 +662,35 @@ def _schema_sequence(
     lakehouse = ItemRef(target.item_id)
     actions: list[BuildAction] = []
     for schema in schemas:
-        # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
-        # the local emulator does, so a managed table lands under the Lakehouse
-        # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
-        # None.
-        location = resolver.schema_location(lakehouse, schema)
-        if location is not None:
-            statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
+        if is_warehouse:
+            # A Warehouse schema is a plain T-SQL CREATE SCHEMA — no storage path,
+            # run through the SQL executor. T-SQL has no CREATE SCHEMA IF NOT
+            # EXISTS, so guard it with a catalogue check.
+            statement = (
+                f"if not exists (select 1 from sys.schemas where name = "
+                f"{_sql_literal(schema)})\n    exec('create schema {_tsql_ident(schema)}');"
+            )
+            executor, extension = "tsql", ".sql"
         else:
-            statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
+            # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
+            # the local emulator does, so a managed table lands under the Lakehouse
+            # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
+            # None.
+            location = resolver.schema_location(lakehouse, schema)
+            if location is not None:
+                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
+            else:
+                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
+            executor, extension = "spark_sql", ".spark.sql"
         content = (statement + "\n").encode("utf-8")
-        path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}.spark.sql")
+        path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}{extension}")
         payloads[path] = content
         actions.append(
             BuildAction(
                 id=f"schema-{schema}",
                 kind=CREATE_SCHEMA,
                 resource_node_id=None,
-                executor="spark_sql",
+                executor=executor,
                 payload=path,
                 payload_sha256=sha256_hex(content),
             )
@@ -602,3 +782,15 @@ def _with_identity(plan: BuildPlan) -> BuildPlan:
 
 def _ident(name: str) -> str:
     return "`" + name.replace("`", "``") + "`"
+
+
+def _sql_literal(value: str) -> str:
+    """A single-quoted T-SQL string literal for a Warehouse schema statement."""
+
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _tsql_ident(name: str) -> str:
+    """A bracket-quoted T-SQL identifier."""
+
+    return "[" + name.replace("]", "]]") + "]"

@@ -10,6 +10,7 @@ from __future__ import annotations
 from .base import ActionExecutor, InstallationContext, ResolvedTarget
 from .folder import FolderExecutor
 from .spark_sql import SparkSqlExecutor
+from .spark_table import SparkTableExecutor
 from .tsql import TSqlExecutor
 
 
@@ -18,6 +19,7 @@ def default_executors() -> dict[str, ActionExecutor]:
 
     return {
         SparkSqlExecutor.name: SparkSqlExecutor(),
+        SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
     }
@@ -28,6 +30,7 @@ __all__ = [
     "InstallationContext",
     "ResolvedTarget",
     "SparkSqlExecutor",
+    "SparkTableExecutor",
     "FolderExecutor",
     "TSqlExecutor",
     "default_executors",

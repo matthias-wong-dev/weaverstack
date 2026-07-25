@@ -36,13 +36,18 @@ class ResolvedTarget:
 
 @dataclass(frozen=True)
 class InstallationContext:
-    """Runtime services and the one target the current batch is bound to."""
+    """Runtime services and the one target the current batch is bound to.
+
+    ``spark`` runs Lakehouse work; ``sql`` runs Warehouse (T-SQL) work. A bundle
+    is single-target, so only the one its actions need has to be present.
+    """
 
     spark: Any
     resolver: Any
     store: Store
     snapshot: Location
     target: ResolvedTarget
+    sql: Any = None
 
 
 class ActionExecutor(Protocol):

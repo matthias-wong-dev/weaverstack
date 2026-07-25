@@ -38,7 +38,7 @@ from .report import (
     InstallationReport,
     SequenceResult,
 )
-from .targets import BoundTarget
+from .targets import WAREHOUSE_TARGET, BoundTarget
 
 REPORT_FILENAME = "install-report.yml"
 
@@ -48,19 +48,52 @@ class InstallationEnvironment:
     """Runtime services the installer executes against — no planning inputs.
 
     ``spark`` is optional so a Folder-only bundle needs no session; a bundle
-    with Spark work supplies one. ``executors`` defaults to the built-in
-    registry.
+    with Spark work supplies one. ``sql`` is likewise optional: a Warehouse
+    install acquires it **Fabric-natively** from the session identity, and only a
+    desktop caller crossing into Fabric injects ``desktop_sql_executor``
+    explicitly (``host`` is then unnecessary). ``executors`` defaults to the
+    built-in registry.
     """
 
     store: Store
     resolver: Any
     spark: Any = None
+    sql: Any = None
+    host: Any = None
     executors: dict[str, ActionExecutor] = field(default_factory=default_executors)
+    #: Set when this environment opened its own Fabric-native SQL, so it closes it.
+    _owned_sql: Any = field(default=None, init=False, repr=False)
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
         # The resolver, store and Spark already define the environment the
         # installer is running in, so a target is just its item to address.
         return ResolvedTarget(bound=bound, lakehouse=ItemRef(bound.item_id))
+
+    def sql_for(self, bound: BoundTarget) -> Any:
+        """The SQL capability for a Warehouse batch — injected, or Fabric-native.
+
+        Weaver runs in Fabric, so an install against a Warehouse authenticates
+        through the session's own identity rather than a desktop connection. The
+        executor is opened once per installation and closed with it.
+        """
+
+        if self.sql is not None:
+            return self.sql
+        if bound.kind != WAREHOUSE_TARGET:
+            return None
+        if self._owned_sql is None:
+            from ..fabric.sql import fabric_sql_executor
+            from ..targets import WarehouseTarget
+
+            self._owned_sql = fabric_sql_executor(
+                WarehouseTarget(warehouse=ItemRef(bound.item_id)), self.host
+            )
+        return self._owned_sql
+
+    def close(self) -> None:
+        if self._owned_sql is not None and hasattr(self._owned_sql, "close"):
+            self._owned_sql.close()
+            self._owned_sql = None
 
 
 def _now() -> datetime:
@@ -88,14 +121,18 @@ def install_bundle(
     sequence_results: list[SequenceResult] = []
     stop = False
 
-    for sequence in plan.sequences:
-        if stop:
-            sequence_results.append(_skipped_sequence(sequence))
-            continue
-        result = _run_sequence(sequence, resolved, bundle, environment)
-        sequence_results.append(result)
-        if result.status == FAILED:
-            stop = True
+    try:
+        for sequence in plan.sequences:
+            if stop:
+                sequence_results.append(_skipped_sequence(sequence))
+                continue
+            result = _run_sequence(sequence, resolved, bundle, environment)
+            sequence_results.append(result)
+            if result.status == FAILED:
+                stop = True
+    finally:
+        # Release any SQL connection this installation opened for itself.
+        environment.close()
 
     finished = _now()
     report = InstallationReport(
@@ -128,6 +165,7 @@ def _run_sequence(
             store=environment.store,
             snapshot=bundle.location.join("repository"),
             target=target,
+            sql=environment.sql_for(target.bound),
         )
         for action in batch.actions:
             if failed:
