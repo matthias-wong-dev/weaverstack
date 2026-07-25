@@ -433,9 +433,20 @@ def populated_lakehouse(request):
 # run in that environment. For Fabric, the desktop only stages the repository and
 # reads results.
 
-from pathlib import Path as _Path
+from build_envs import BUILD_FIXTURE  # the default fixture a build env installs
 
-BUILD_FIXTURE = _Path(__file__).parent.parent / "fixtures" / "build-lakehouse"
+
+@pytest.fixture
+def ses_fixture(request):
+    """Which SES repository a build env installs — the default, or a test's choice.
+
+    Parametrise indirectly (with a fixture from ``build_envs``) to point an
+    environment at another fixture without changing the environment fixtures::
+
+        @pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)
+    """
+
+    return getattr(request, "param", BUILD_FIXTURE)
 
 
 @dataclass
@@ -484,7 +495,7 @@ def _outcome_from_report(report) -> InstallOutcome:
     )
 
 
-def _upload_tree(store, source: _Path, destination) -> None:
+def _upload_tree(store, source: Path, destination) -> None:
     for path in sorted(source.rglob("*")):
         if path.is_file():
             store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
@@ -516,7 +527,7 @@ def _create_schema_enabled_lakehouse(client, workspace, name):
 
 
 @pytest.fixture
-def local_build_env(lakehouses, spark):
+def local_build_env(lakehouses, spark, ses_fixture):
     """A build environment installed in-process against local Spark."""
 
     from weaver import RepositoryRef
@@ -532,7 +543,7 @@ def local_build_env(lakehouses, spark):
     resolver, store = lakehouses.resolver, lakehouses.store
 
     def install_repo(name: str) -> str:
-        _upload_tree(store, BUILD_FIXTURE, resolver.repository(RepositoryRef(name)))
+        _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
         return name
 
     def remove_repo(name: str) -> None:
@@ -579,13 +590,15 @@ def local_build_env(lakehouses, spark):
             install=install, query=query, seed_orphans=seed_orphans,
         )
     finally:
-        # The Spark catalog is shared across the run; drop what a test created.
-        for database in ("DWG", "Raw", "Legacy"):
+        # The Spark catalog is shared across the run; drop every schema any build
+        # fixture registers, so nothing a test created leaks into the next. This
+        # is the one place catalog cleanup lives — tests never do it themselves.
+        for database in ("DWG", "Raw", "Legacy", "Sales", "Reporting", "Wh", "Rpt"):
             spark.sql(f"DROP DATABASE IF EXISTS {database} CASCADE")
 
 
 @pytest.fixture
-def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
+def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, ses_fixture):
     """A build environment run entirely inside Fabric over Livy.
 
     Weaver is Fabric-first: both **generation and installation** run in the
@@ -638,7 +651,7 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
         session.start()
 
         def install_repo(name: str) -> str:
-            _upload_tree(store, BUILD_FIXTURE, resolver.repository(RepositoryRef(name)))
+            _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
             return name
 
         def remove_repo(name: str) -> None:
@@ -752,7 +765,85 @@ def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name):
 
 
 @pytest.fixture
-def build_env(request):
-    """Select a concrete build environment by indirect parameter."""
+def warehouse_build_env(fabric_host, fabric_weaver_lakehouse, disposable_warehouse, ses_fixture):
+    """A Warehouse build environment: desktop generation, T-SQL install over the
+    live SQL endpoint of a disposable Fabric Warehouse.
+
+    A Warehouse build is single-target and Lakehouse-free here: generation is pure
+    T-SQL text (no Spark, ``prune=False`` — Warehouse reconciliation is a later
+    branch), and installation runs the self-contained scripts through the pooled
+    SQL executor the disposable Warehouse exposes. Its ``query`` is T-SQL, so
+    behavioural assertions read the Warehouse catalogue, not a Spark session.
+    """
+
+    from weaver import ItemRef as _ItemRef, RepositoryRef
+    from weaver.build_bundle import (
+        InstallationEnvironment,
+        TargetBindings,
+        WarehouseBinding,
+        generate_build_bundle,
+        install_bundle,
+        load_bundle,
+    )
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
+
+    resolver = FabricResolver(fabric_host, client=None)
+    store = OneLakeDfsClient()
+    weaver = _ItemRef(fabric_weaver_lakehouse.name)
+    warehouse = _ItemRef(disposable_warehouse.item.name)
+    sql = disposable_warehouse.executor
+
+    def install_repo(name: str) -> str:
+        _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
+        return name
+
+    def remove_repo(name: str) -> None:
+        store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+
+    def generate(bundle_name: str = "whtest", *, repository_name: str = "MyRepo", prune: bool = False):
+        return generate_build_bundle(
+            weaver_lakehouse=weaver,
+            repository_name=repository_name,
+            targets=TargetBindings(warehouse=WarehouseBinding(warehouse=warehouse)),
+            output=resolver.build_bundle(bundle_name),
+            host=fabric_host,
+            store=store,
+            prune=prune,
+        )
+
+    def install(bundle) -> InstallOutcome:
+        report = install_bundle(
+            load_bundle(bundle.location, store=store),
+            environment=InstallationEnvironment(store=store, resolver=resolver, sql=sql),
+        )
+        outcome = _outcome_from_report(report)
+        if outcome.status != "succeeded":
+            print("WAREHOUSE INSTALL ACTION ERRORS:", outcome.action_error)
+        return outcome
+
+    def query(statement: str) -> list:
+        return list(sql.query(statement))
+
+    def seed_orphans() -> None:  # Warehouse prune is a later branch; nothing to seed.
+        raise NotImplementedError("Warehouse prune is not supported yet")
+
+    yield BuildEnv(
+        label="warehouse", host=fabric_host, weaver=weaver, target=warehouse,
+        resolver=resolver, store=store, generate_spark=None,
+        install_repo=install_repo, remove_repo=remove_repo, generate=generate,
+        install=install, query=query, seed_orphans=seed_orphans,
+    )
+
+
+@pytest.fixture
+def build_env(request, ses_fixture):
+    """Select a concrete build environment by indirect parameter.
+
+    Requesting ``ses_fixture`` here (though the concrete env fixture is the one
+    that uses it) anchors it in the test's static fixture closure, so a test can
+    point the environment at another repository with
+    ``@pytest.mark.parametrize("ses_fixture", [...], indirect=True)`` even though
+    the environment itself is resolved dynamically.
+    """
 
     return request.getfixturevalue(request.param)

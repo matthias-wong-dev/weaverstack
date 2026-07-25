@@ -13,18 +13,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 
-import pytest
+from build_envs import lakehouse_environments as build_environments
 
 from weaver import DeltaTarget, FolderTarget, RepositoryRef
-
-build_environments = pytest.mark.parametrize(
-    "build_env",
-    [
-        pytest.param("local_build_env", id="local", marks=pytest.mark.spark),
-        pytest.param("fabric_build_env", id="fabric", marks=pytest.mark.fabric),
-    ],
-    indirect=True,
-)
 
 
 def _folder(build_env, schema, name):
