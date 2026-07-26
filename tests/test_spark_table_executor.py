@@ -58,9 +58,9 @@ class _FakeSpark:
 
 
 AUDIT = [
-    ["Row_insert_datetime", "timestamp", True],
-    ["Row_update_datetime", "timestamp", True],
-    ["Row_delete_datetime", "timestamp", True],
+    ["row_insert_datetime", "timestamp", True],
+    ["row_update_datetime", "timestamp", True],
+    ["row_delete_datetime", "timestamp", True],
 ]
 
 
@@ -113,9 +113,9 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert "`CustomerName` string,\n" in statement
     assert "`CustomerName` string NOT NULL" not in statement
     # Every audit column is not null.
-    assert "`Row_insert_datetime` timestamp NOT NULL" in statement
-    assert "`Row_update_datetime` timestamp NOT NULL" in statement
-    assert "`Row_delete_datetime` timestamp NOT NULL" in statement
+    assert "`row_insert_datetime` timestamp NOT NULL" in statement
+    assert "`row_update_datetime` timestamp NOT NULL" in statement
+    assert "`row_delete_datetime` timestamp NOT NULL" in statement
     assert "USING delta" in statement
     assert "delta.columnMapping.mode" in statement
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
@@ -238,7 +238,7 @@ def test_a_primary_key_naming_a_missing_column_fails_install():
 
 
 def test_a_query_column_colliding_with_an_audit_column_is_refused():
-    spark = _FakeSpark([("CustomerId", "int"), ("Row_insert_datetime", "string")])
+    spark = _FakeSpark([("CustomerId", "int"), ("row_insert_datetime", "string")])
     with pytest.raises(InstallError, match="reserved for Weaver's audit columns"):
         _run(spark, _payload(references=[]))
 

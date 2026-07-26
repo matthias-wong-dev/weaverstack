@@ -1280,6 +1280,82 @@ vacuously** whether or not prune ever dropped it. It now excludes system schemas
 instead of naming user ones. A reconciliation test that cannot see the thing it
 expects to be absent is not testing anything.
 
+### Catalogue checkpoint 0 — the SES gaps the catalogue exposed
+
+Before the central catalogue could project anything, the authoring model had to
+be able to say what the catalogue records. Planning the projection found four
+oversights and two rules that were broader than their reason.
+
+**Logical keys were missing.** SES had `Primary key` and nothing else, so a
+catalogue's key and relationship dictionaries would have been empty by
+construction. Added: `Unique keys`, a YAML list of comma-separated column sets;
+and `Foreign keys`, a list of `- Col A, Col B: Parent.Object[P A, P B]`.
+
+Both are **semantic, not physical** — nearer an ER diagram than DDL. Nothing is
+built and nothing is enforced. That decision is what removes their names: a
+relationship is identified by its own columns and its parent, so several may run
+between the same pair of objects and an object may reference itself (a hierarchy
+in one table). A row in the catalogue *is* the edge.
+
+**Views declare logical keys too.** A view stores no rows, so a key on one
+describes the shape of its result. `Primary key`, `Unique keys` and `Foreign
+keys` are now accepted on a view; everything implying storage — `Identity`,
+`Not null`, `Incremental`, `Comparison columns` — is still refused.
+
+**The Delta audit columns are snake case.** `row_insert_datetime`, not
+`Row_insert_datetime`. The Warehouse keeps the spaced `Row insert datetime` the
+SQL backend has always used, so the divergence stays exactly where it was
+justified — spaces in Spark column names need quoting everywhere they appear.
+Every spelling, retired ones included, stays reserved against a declaration.
+
+**Two rules were over-broad, and the catalogue is what proved it.**
+
+Weaver's own catalogue lives in schema `_`, declared as ordinary SES and built by
+the ordinary build path — that recursion is the point of it (plan §4). Two rules
+made it unauthorable:
+
+1. *A root file beginning with `_` was support, never an object.* The underscore
+   convention is about **directories** — `_schemas`, `_helpers` — and
+   subdirectories were already excluded a line earlier. So the rule now demotes
+   an underscored root file only when its stem does not name a schema and an
+   object: `_scratch.py` is still private, `_.Registry.spark.sql` is an object.
+   A file *without* an underscore is still judged on its suffix alone, so
+   `Sales.Order.py` remains a reported error rather than a silent demotion —
+   that distinction is the whole value of the guard.
+
+2. *A Spark SQL object had to declare a non-empty `Dependencies`.* The rule's
+   reason is that a Spark query may read by path, which cannot be resolved back
+   to a managed object, so the graph is declared rather than discovered. What it
+   actually wants is for the author to be **explicit**, and `Dependencies: []`
+   is explicit. A catalogue table's body is literals and depends on nothing.
+   An empty declaration also *suppresses* discovery, because a declaration has
+   always replaced discovery rather than adding to it — otherwise
+   `Dependencies: []` would quietly mean "discover them for me".
+
+Note that Python cannot express schema `_` at all: the separator is `__`, so
+`_.Registry` would be `___Registry`, whose first part is empty. The catalogue
+tables are therefore Spark SQL, which is also what gives them a declared schema
+and a body that returns no rows.
+
+**A metadata reference is not a dependency.** `Description: $Sales.Order` means
+*the text over there is the text here* — one sentence, written once, pointed at
+from everywhere it applies. Resolving it is a copy, and `weaver.ses.references`
+performs it: chains are followed to the literal at the end, and a cycle is an
+error because it can never produce text.
+
+Resolution deliberately does **not** work like dependency resolution. A
+dependency binds in its consumer's execution namespace, because that is what the
+SQL will bind to. A reference is a logical pointer, and the case it exists for is
+the cross-target one — `tests/fixtures/sales-etl/Sales.Customer.sql` is a
+Warehouse table whose `Lineage: $Sales.Customer` means the *Delta* table sharing
+its ID. It cannot sensibly mean itself, so resolution excludes the referrer and
+prefers its namespace only to break a tie.
+
+An unresolved reference is **not** an error: it may legitimately name another
+repository's object, and refusing it would cost someone a working object over a
+documentation nicety. The pointer is recorded and the text is absent, which is
+why the catalogue keeps `description` and `description_reference` side by side.
+
 ---
 
 ## Open questions

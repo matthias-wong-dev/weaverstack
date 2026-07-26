@@ -22,7 +22,7 @@ object folder, and declaring one does not create anything physical.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import yaml
@@ -46,6 +46,10 @@ class SchemaSes:
     schema_id: str
     description: str | None
     relative_path: str
+    #: The declaration's content hash, on the same terms as an object's — it is
+    #: what the catalogue records as the signature of a schema row. Empty for a
+    #: schema parsed from text rather than read from a file.
+    source_hash: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -76,8 +80,11 @@ def read_schema_document(relative_path: str, data: bytes) -> SchemaSes:
     except UnicodeDecodeError as exc:
         raise DiscoveryError(f"{relative_path}: must be UTF-8 text ({exc})") from exc
 
+    from .source import content_hash
+
     filename_id = schema_id_for_filename(relative_path)
     schema = parse_schema_document(text, relative_path)
+    schema = replace(schema, source_hash=content_hash(data))
     if schema.schema_id != filename_id:
         raise DiscoveryError(
             f"{relative_path}: declares Schema ID {schema.schema_id!r} but the filename "

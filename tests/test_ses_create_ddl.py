@@ -129,9 +129,9 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     # Every built table carries the audit columns, in the Delta (underscored)
     # spelling, as not-null timestamps (build-philosophy §7.1, plan "Audit
     # columns"); Weaver populates all three on every loaded row.
-    assert "`Row_insert_datetime` timestamp NOT NULL" in ddl.content
-    assert "`Row_update_datetime` timestamp NOT NULL" in ddl.content
-    assert "`Row_delete_datetime` timestamp NOT NULL" in ddl.content
+    assert "`row_insert_datetime` timestamp NOT NULL" in ddl.content
+    assert "`row_update_datetime` timestamp NOT NULL" in ddl.content
+    assert "`row_delete_datetime` timestamp NOT NULL" in ddl.content
     assert "USING delta" in ddl.content
     assert "delta.columnMapping.mode" in ddl.content
 
@@ -157,7 +157,7 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     assert payload["source_query"] == "select count(*) as CustomerCount from DWG.Customer"
     # Audit columns are frozen into the instruction so the executor never reopens
     # the SES source to learn them.
-    assert ["Row_insert_datetime", "timestamp", True] in payload["audit_columns"]
+    assert ["row_insert_datetime", "timestamp", True] in payload["audit_columns"]
 
 
 def test_an_inferred_spark_sql_table_carries_no_declared_columns():

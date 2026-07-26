@@ -43,6 +43,7 @@ from .source import (
     PYTHON_ID_SEPARATOR,
     SourceDocument,
     language_for_filename,
+    object_id_for_filename,
     read_source_document,
 )
 
@@ -264,9 +265,29 @@ def read_repository(
 
 
 def _is_object_filename(filename: str) -> bool:
-    if filename.startswith("_"):
+    """True for a root file that names an object, rather than supporting one.
+
+    A leading underscore marks a root file as private — ``_scratch.py`` is
+    working material, not a declaration. But it cannot disqualify on its own,
+    because a *schema* may be called ``_``: that is where Weaver's own catalogue
+    lives, and ``_.Registry.spark.sql`` is an ordinary object file.
+
+    So an underscored root file is an object exactly when its stem still names a
+    schema and an object. A file with no underscore is judged on its suffix alone
+    and any mistake in its stem is then reported rather than quietly demoted —
+    ``Sales.Order.py`` is a misnamed object, not a support file.
+    """
+
+    language = language_for_filename(filename)
+    if language is None:
         return False
-    return language_for_filename(filename) is not None
+    if not filename.startswith("_"):
+        return True
+    try:
+        object_id_for_filename(filename, language)
+    except DiscoveryError:
+        return False
+    return True
 
 
 def _repository_files(store: Store, root: Location) -> list[str]:
@@ -725,10 +746,11 @@ def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
 
     A declaration replaces discovery rather than adding to it, so an author can
     remove an edge as well as add one — the phantom dependency an unused import
-    creates has no other cure.
+    creates has no other cure. ``Dependencies: []`` is such a declaration, so an
+    explicit none suppresses discovery rather than falling back to it.
     """
 
-    if document.declared_dependencies:
+    if document.document.declares_dependencies:
         return document.declared_dependencies
     return document.referenced_object_ids
 

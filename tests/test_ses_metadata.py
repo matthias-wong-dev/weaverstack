@@ -376,7 +376,7 @@ def test_declared_schema_stays_exactly_what_was_written():
 def test_the_effective_schema_adds_the_audit_columns():
     document = parse(TABLE_YAML)
     assert [column.name for column in document.effective_schema][-3:] == [
-        "Row_insert_datetime", "Row_update_datetime", "Row_delete_datetime",
+        "row_insert_datetime", "row_update_datetime", "row_delete_datetime",
     ]
 
 
@@ -563,7 +563,7 @@ def test_a_spark_sql_object_must_declare_dependencies():
 def test_a_spark_sql_table_uses_the_delta_audit_spelling():
     document = parse(SPARK_YAML, language=SPARK_SQL)
     assert [column.name for column in document.audit_columns] == [
-        "Row_insert_datetime", "Row_update_datetime", "Row_delete_datetime",
+        "row_insert_datetime", "row_update_datetime", "row_delete_datetime",
     ]
 
 
