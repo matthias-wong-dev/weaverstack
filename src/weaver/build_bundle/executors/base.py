@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ...locations import Location
+from ...locations import LakehouseSparkLocation, Location
 from ...store import Store
 from ...targets import ItemRef
 from ..models import BuildAction
@@ -26,12 +26,24 @@ from ..targets import BoundTarget
 class ResolvedTarget:
     """A manifest target resolved to what the executor addresses.
 
-    Locally that is the destination Lakehouse ``ItemRef``; Fabric will add the
-    concrete session handles alongside, through the same type.
+    ``lakehouse`` is the logical item the bundle named. ``location`` is that item
+    resolved to the physical roots Spark writes through, which is how a
+    destination is reached: the session is attached to the *Weaver* Lakehouse — the
+    fixed control plane — so a destination is never the current catalogue and must
+    be addressed explicitly.
+
+    Resolution happens here, once per target, rather than in each executor. An
+    executor that derived its own paths would be re-deciding where an action
+    lands, which is a planning decision it is not allowed to make. It is also what
+    lets one session build several destinations without switching catalogues.
+
+    ``location`` is None for a Warehouse target, which has no OneLake roots, and
+    for a host that cannot resolve them.
     """
 
     bound: BoundTarget
     lakehouse: ItemRef
+    location: LakehouseSparkLocation | None = None
 
 
 @dataclass(frozen=True)

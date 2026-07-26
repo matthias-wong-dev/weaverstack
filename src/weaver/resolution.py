@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from .errors import CommandError
 from .hosts import BUILD_BUNDLES_AREA, REPOS_AREA, LocalHost
-from .locations import Location
+from .locations import LakehouseSparkLocation, Location
 from .targets import (
     FILES_AREA,
     DeltaTarget,
@@ -110,6 +110,21 @@ class LocalResolver:
         return self.tables_root(target.lakehouse).join(
             validate_name(schema, what="schema"),
             validate_name(name, what="object name"),
+        )
+
+    def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
+        """One destination Lakehouse's physical roots, for Spark to address.
+
+        The local counterpart of the Fabric ``abfss://`` roots: same contract,
+        filesystem transport. Resolving a target once here is what keeps the
+        session's attached Lakehouse (Weaver) separate from the destinations a
+        build writes to — see :class:`~weaver.locations.LakehouseSparkLocation`.
+        """
+
+        return LakehouseSparkLocation(
+            item=item.name,
+            tables_root=self.tables_root(item).value,
+            files_root=self.files_root(item).value,
         )
 
     def schema_location(self, lakehouse: ItemRef, schema: str) -> str | None:

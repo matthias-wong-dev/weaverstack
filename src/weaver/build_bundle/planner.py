@@ -399,6 +399,11 @@ def _prune_sequence(
     make a build reach into another Lakehouse.
     """
 
+    # Store addressing, not Spark addressing: inspection *lists* the target, and
+    # on Fabric that is the DFS location, while a LakehouseSparkLocation carries
+    # the `abfss://` roots Spark writes through. Same Lakehouse, two transports —
+    # conflating them would have prune listing a URL Spark cannot read a directory
+    # from.
     lakehouse = ItemRef(target.item_id)
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)

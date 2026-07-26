@@ -66,8 +66,29 @@ class InstallationEnvironment:
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
         # The resolver, store and Spark already define the environment the
-        # installer is running in, so a target is just its item to address.
-        return ResolvedTarget(bound=bound, lakehouse=ItemRef(bound.item_id))
+        # installer is running in, so a target is its item plus that item's
+        # physical roots. Resolving here, once, is what stops an executor deriving
+        # a path for itself — and what would let one installation address several
+        # destination Lakehouses without ever changing the session's own.
+        item = ItemRef(bound.item_id)
+        return ResolvedTarget(
+            bound=bound, lakehouse=item, location=self._location_for(bound, item)
+        )
+
+    def _location_for(self, bound: BoundTarget, item: ItemRef):
+        """The destination's Spark roots, where the host can resolve them.
+
+        A Warehouse has no OneLake roots, and a resolver may not implement the
+        method; neither is a failure, because the actions that need roots are
+        Lakehouse actions and they will fail explicitly if it is missing.
+        """
+
+        if bound.kind == WAREHOUSE_TARGET:
+            return None
+        resolve = getattr(self.resolver, "lakehouse_spark_location", None)
+        if resolve is None:
+            return None
+        return resolve(item)
 
     def sql_for(self, bound: BoundTarget) -> Any:
         """The SQL capability for a Warehouse batch — injected, or Fabric-native.

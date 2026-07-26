@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from ..errors import CommandError
 from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, FabricHost
-from ..locations import Location
+from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
 from ..targets import (
     FILES_AREA,
@@ -183,6 +183,21 @@ class FabricResolver:
         from ..targets import validate_name
 
         return self.build_bundles_root / validate_name(name, what="bundle name")
+
+    def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
+        """One destination Lakehouse's ``abfss://`` roots, for Spark to address.
+
+        Built from :meth:`spark_root`, which exists precisely so a session never
+        needs the item attached. The session stays attached to the Weaver
+        Lakehouse — the control plane — and destinations are reached explicitly.
+        """
+
+        root = self.spark_root(item).rstrip("/")
+        return LakehouseSparkLocation(
+            item=item.name,
+            tables_root=f"{root}/{TABLES_AREA}",
+            files_root=f"{root}/{FILES_AREA}",
+        )
 
     def schema_location(self, lakehouse: ItemRef, schema: str) -> str | None:
         """None: a schema-enabled Fabric Lakehouse pins a managed table under

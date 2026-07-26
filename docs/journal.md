@@ -1564,14 +1564,19 @@ prunes: the Weaver Lakehouse belongs to the installation, not to this repository
 so a reconciling build would treat a user's own schema there as an orphan. There
 is a test that a user's schema survives.
 
-**No `weaver setup` CLI command, deliberately.** The obvious adapter needs a Spark
-session, and `tests/test_core_boundary.py` forbids the CLI from naming PySpark —
-`[cli]` does not install it. That rule is right, and the gap it exposes is real:
-Weaver has no production session factory anywhere, only the test fixture.
-Constructing a session is the caller's job, and in the product the caller is a
-Fabric notebook that already has one. Adding a session factory is a decision about
-where that seam lives, not something to slip into this branch;
-`weaver.initialise_weaver_lakehouse` is the API and takes the session it is given.
+**No `weaver setup` CLI command, and no local session factory needed.** The obvious
+adapter would construct a Spark session, and `tests/test_core_boundary.py` forbids
+the CLI from naming PySpark — `[cli]` does not install it. That boundary is correct
+and stays. The CLI, when it lands, will *submit* the operation to Fabric rather than
+run Spark locally:
+
+```text
+local CLI → Fabric submission → remote session attached to the Weaver Lakehouse
+          → initialise_weaver_lakehouse(...)
+```
+
+So the callable function is the whole of what this branch needs.
+`weaver.initialise_weaver_lakehouse` takes the session it is given.
 
 ### Two things only running it on Delta could find
 
@@ -1603,26 +1608,70 @@ can vary with the state of the thing being written.
 Both are the kind of defect local Spark exists to catch: neither is visible in
 generated text, and both would have surfaced first in a workspace.
 
-### The catalogue is the first thing Weaver addresses by name
+### The execution model: the session is attached to Weaver
 
-`tests/conftest.py` justifies its session-scoped Spark fixture like this:
+This was recorded as an open question — whether the catalogue should be addressed
+by explicit path — and the question was based on a wrong model. Matthias settled
+it, and it is worth writing down properly because everything about addressing
+follows from it.
 
-> Sharing one session across tests is safe here because Weaver addresses Delta by
-> explicit path rather than through a metastore, so a session carries no state
-> between tests.
+**The Spark session is attached to the Weaver Lakehouse.** That is the fixed
+control-plane context, not an accident of whatever a notebook happened to open. So
+`_.Registry`, `_.Installation` and the rest being reached as ordinary two-part
+names in schema `_` is the *defined* execution context — not the ambient-catalogue
+anti-pattern of build-philosophy §16, which is about a destination resolving
+through whatever context happens to be current.
 
-The catalogue is the first thing that breaks that premise. Schema `_` is a *name*
-in the session catalog, registered once with a `LOCATION`, and `CREATE SCHEMA IF
-NOT EXISTS` is a no-op the second time — so a test that leaves `_` registered sends
-the next test's catalogue tables into the previous test's directory. Every catalogue
-suite therefore drops `_` on the way out, and two tests in `test_catalogue_setup`
-are pinned last because they must own it outright.
+Destination Lakehouses are the **variable data plane**. They are reached through
+roots resolved from their target bindings, and a build never switches the session's
+current catalogue to reach one:
 
-This is the same fact as the Fabric gap, seen from the other side. The catalogue is
-reached by two-part name rather than by path, which is what makes it convenient to
-query and exactly what makes "which Lakehouse does `_` mean?" a real question. Both
-belong to the same decision, and it is worth taking deliberately rather than
-inheriting: **should the catalogue be addressed by path?**
+```text
+Spark session
+└── attached: Weaver            control plane, fixed
+    ├── _.Installation
+    ├── _.Registry
+    └── …
+Build targets                   data plane, resolved explicitly
+├── Lakehouse A → tables_root, files_root
+├── Lakehouse B → tables_root, files_root
+└── Lakehouse C → tables_root, files_root
+```
+
+That separation is what makes one invocation building several Lakehouses possible.
+Switching the current catalogue between targets would make `Sales` in Lakehouse A
+and `Sales` in Lakehouse B indistinguishable; resolved roots keep them apart by
+construction.
+
+`LakehouseSparkLocation` is that resolution, provided by the host adapter —
+`resolver.lakehouse_spark_location(item)` — with `table_path()` and
+`folder_path()` on it. The responsibilities stay separated: `ItemRef` identifies
+the logical item, the host resolves the physical roots, the plan carries the item,
+the installation context resolves it once per target, and the executor uses it. An
+executor deriving its own path would be re-deciding where an action lands, which is
+a planning decision it is not allowed to make.
+
+**One distinction nearly got conflated, and it matters.** On Fabric a Lakehouse has
+*two* addresses: the DFS location the store lists through, and the `abfss://` root
+Spark reads and writes through. `LakehouseSparkLocation` carries the second. Prune
+inspection *lists* a target, so it keeps using the store's DFS location — a first
+attempt at routing everything through one type would have had inspection trying to
+enumerate a URL Spark cannot walk.
+
+**A resolved root is deliberately not in the bundle.** On Fabric it embeds
+workspace and item ids; locally it embeds a temporary directory. A bundle whose
+identity moved with a temporary path would not be comparable between environments
+(§10), and one carrying a stale root would install somewhere the caller no longer
+means. The bundle names the item; the installer resolves it.
+
+**The local `_` fixture churn is not evidence about production.** The local fixture
+runs one long-lived session while presenting a succession of temporary directories
+as though each were *the* Weaver Lakehouse, so `CREATE SCHEMA IF NOT EXISTS _` is a
+no-op after the first and the next test's tables would land in the previous test's
+directory. That is a session-isolation problem in the harness, which the catalogue
+suites handle by dropping `_`. Production has one Weaver Lakehouse attached for the
+life of the session and reaches destinations through resolved roots. The
+architecture does not follow the lifecycle of a test fixture.
 
 ### The Spark suite no longer fits one process here
 
@@ -1637,13 +1686,16 @@ three `test_catalogue_setup` assertions; in the next it was
 that only starts a session and cannot be affected by catalogue code. All seven of
 those pass in 39 seconds when run alone.
 
-So this is resource exhaustion in one long-lived JVM, not a defect, but it does mean
-**the suite as it stands cannot be run in a single process on a modest machine**.
+This is **a test-harness limitation**, recorded as such: cumulative degradation of
+one shared JVM and its session state. The catalogue increased the total Spark
+workload enough to expose it; that does not make the catalogue the cause, and the
+catalogue design must not be distorted to work around it. Process isolation, or a
+session per test group, can be considered on its own.
+
 Costs were cut where it was free to do so — the reconcile fixture creates its tables
 directly instead of building a bundle per test, and the bootstrap is shared by every
-read-only assertion, taking that file from 5:13 to 1:39 — and the run now completes
-in ~17 minutes rather than timing out. That is not a fix, though. Splitting `-m
-spark` per file, or giving it process isolation, is the thing to decide.
+read-only assertion, taking that file from 5:13 to 1:39 — so the run completes in
+~17 minutes rather than timing out. That is mitigation, not a fix.
 
 ---
 
@@ -1662,9 +1714,8 @@ spark` per file, or giving it process isolation, is the thing to decide.
 | Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | narrowed at CP6c: within a repository, cross-engine access is now an explicit alias; `_shortcuts` is only for *another repository's* objects. Still due at build. |
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
-| How does schema `_` resolve to the **Weaver** Lakehouse in a Fabric session attached to a *destination* Lakehouse? Locally the schema is pinned with an explicit `LOCATION` under the Weaver Lakehouse's `Tables`, so a two-part `` `_`.`Registry` `` is unambiguous. On Fabric the platform manages schemas per item and `schema_location()` returns None, so catalogue reads and writes would lean on ambient catalogue context — which build-philosophy §16 names as an anti-pattern. Local Delta is fully green; this is the one catalogue behaviour local cannot answer. Likely needs the catalogue addressed by explicit `abfss://` path, or the Weaver Lakehouse attached deliberately. | catalogue | **open, and the first thing to settle on Fabric** |
-| Should the catalogue be addressed by explicit path rather than by two-part name? It is the first thing Weaver reaches through the session catalog rather than by path, which is both why `_` must be dropped between tests and why "which Lakehouse does `_` mean?" is open on Fabric. One decision, two symptoms. | catalogue | open |
-| How should `-m spark` run now that it is ~93 tests? Every file passes alone; one long-lived JVM fails late in a combined run on a modest machine. Per-file, or process isolation. | catalogue | open |
+| Should the catalogue be addressed by explicit path rather than by two-part name? | catalogue | **settled: no.** The Spark session is attached to the Weaver Lakehouse — that is the fixed control-plane context, so two-part names in schema `_` are the defined execution context rather than ambient resolution. Destination Lakehouses are the data plane and are addressed through roots resolved from their bindings (`LakehouseSparkLocation`). The local `_` churn is fixture isolation, not architecture. |
+| How should `-m spark` run now that it is ~93 tests? | catalogue | open, and a **harness** question: every file passes alone, and one long-lived JVM degrades late in a combined run. Process isolation or a session per group. Not a reason to change catalogue design. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
 

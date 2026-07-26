@@ -197,18 +197,55 @@ and once drop policy lands, that is a licence to remove an estate. So absence is
 recognised only by Spark's own `TABLE_OR_VIEW_NOT_FOUND` error class, never by
 message text.
 
-## Known gap on Fabric
+## The execution model
 
-Locally, schema `_` is pinned with an explicit `LOCATION` under the Weaver
-Lakehouse's `Tables` area, so a two-part `` `_`.`Registry` `` is unambiguous. On
-Fabric the platform manages schemas per item, and a session attached to a
-*destination* Lakehouse resolving `` `_`.`Registry` `` would be leaning on ambient
-catalogue context — which build-philosophy §16 names as an anti-pattern.
+**The Spark session is attached to the Weaver Lakehouse.** That is the fixed
+control-plane context, which is why the catalogue is reached as ordinary two-part
+names — `` `_`.`Registry` `` means the Weaver Lakehouse's Registry because the
+Weaver Lakehouse is what the session is attached to.
 
-Everything here is green on local Spark and Delta, and this is the one catalogue
-behaviour local cannot answer. It is the first thing to settle when this reaches a
-workspace; the likely answers are addressing the catalogue by explicit `abfss://`
-path, or attaching the Weaver Lakehouse deliberately rather than incidentally.
+Destination Lakehouses are the **variable data plane**. They are addressed through
+roots resolved from their target bindings, and a build never switches the session's
+current catalogue to reach one:
+
+```text
+Spark session
+└── attached: Weaver              control plane, fixed
+    ├── _.Installation
+    ├── _.Registry
+    └── …
+Build targets                     data plane, resolved explicitly
+├── Lakehouse A → tables_root, files_root
+├── Lakehouse B → tables_root, files_root
+└── Lakehouse C → tables_root, files_root
+```
+
+That separation is what makes one invocation building several Lakehouses possible.
+Switching the current catalogue between targets would make `Sales` in Lakehouse A
+indistinguishable from `Sales` in Lakehouse B; resolved roots keep them apart by
+construction.
+
+```python
+location = resolver.lakehouse_spark_location(target)
+location.table_path("Sales", "Customer")
+location.folder_path("Sales", "Export")
+```
+
+Responsibilities stay separated. `ItemRef` identifies the logical item; the host
+adapter resolves the physical roots; the plan carries the item; the installation
+context resolves it once per target; the executor uses it. An executor deriving its
+own path would be re-deciding where an action lands, which is a planning decision.
+
+Two things worth knowing:
+
+- On Fabric a Lakehouse has **two** addresses — the DFS location the store lists
+  through, and the `abfss://` root Spark reads and writes through.
+  `LakehouseSparkLocation` carries the second; target *inspection* lists through
+  the first.
+- A resolved root is deliberately **not** in the bundle. It embeds workspace and
+  item ids on Fabric and a temporary directory locally, so a bundle carrying one
+  would not be comparable between environments (build-philosophy §10). The bundle
+  names the item; the installer resolves it.
 
 ## What this branch does not do yet
 
