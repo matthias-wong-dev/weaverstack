@@ -600,6 +600,10 @@ def _local_build_context(root, spark, ses_fixture):
             host=host,
             store=store,
             prune=prune,
+            # These environments build into a Lakehouse that has never had setup
+            # run, and catalogue DML needs its tables to exist. Their subject is
+            # physical build behaviour; catalogue reconciliation has its own suites.
+            catalogue=False,
             spark=spark,
         )
 
@@ -733,7 +737,10 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
                 f"    repository_name={repository_name!r},\n"
                 f"    targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef({target.name!r}))),\n"
                 f"    output=resolver.build_bundle({bundle_name!r}),\n"
-                f"    host=host, store=store, prune={prune!r}, spark=spark)\n"
+                # catalogue=False: this workspace has had no setup, and how schema
+                # `_` resolves from a session attached elsewhere is still open.
+                f"    host=host, store=store, prune={prune!r}, catalogue=False, "
+                "spark=spark)\n"
                 "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
                 "'plan': bundle.plan.to_mapping()})\n"
             )
@@ -892,7 +899,10 @@ def _warehouse_build_env(
             f"    targets=TargetBindings(warehouse=WarehouseBinding("
             f"warehouse=ItemRef({warehouse_ref.name!r}))),\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
-            f"    host=host, store=store, prune={prune!r})\n"
+            # catalogue=False for the same reason as the Lakehouse harness: no
+            # setup has run in this workspace, and a Warehouse build's catalogue
+            # work is Spark against the Weaver Lakehouse.
+            f"    host=host, store=store, prune={prune!r}, catalogue=False)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )

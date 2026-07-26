@@ -7,10 +7,13 @@ appear. Nothing in the path knows it is building a catalogue — there is no
 catalogue-specific create, no privileged executor and no special-cased schema.
 
 What is asserted is the *shape* the catalogue representation claims: the tables
-exist, their columns and types match the definitions column for column, the
-declared keys are physically not null, and they hold no rows. A build creates
-structure; populating these tables is catalogue DML, which arrives at a later
-checkpoint.
+exist, their columns and types match the definitions column for column, and the
+declared keys are physically not null.
+
+The build here is generated with ``catalogue=False``, so the subject stays the
+physical creation of the tables — a build creates structure. Populating them is
+catalogue DML, and the whole bootstrap (create *and* populate, in one bundle) is
+``test_catalogue_setup``.
 """
 
 from __future__ import annotations
@@ -49,6 +52,10 @@ def built_catalogue(lakehouses, spark):
         host=lakehouses.host,
         store=store,
         prune=False,
+        # Structure only. With the catalogue on, this same bundle would go on to
+        # populate the tables it just created — which is the bootstrap, and is
+        # tested as such in test_catalogue_setup.
+        catalogue=False,
         spark=spark,
     )
     report = install_bundle(
@@ -140,7 +147,11 @@ def test_the_audit_columns_are_not_null_so_a_live_row_needs_its_sentinel(
 
 
 def test_a_freshly_built_catalogue_holds_no_rows(built_catalogue, spark):
-    """Build creates structure. Populating the catalogue is catalogue DML."""
+    """Build creates structure. Populating the catalogue is separate DML.
+
+    Which is why the tables are empty here and populated in test_catalogue_setup:
+    the difference between the two is exactly the catalogue sequences.
+    """
 
     for table in CATALOGUE_TABLES:
         assert spark.table(f"`_`.`{table.name}`").count() == 0, table.name
@@ -149,7 +160,13 @@ def test_a_freshly_built_catalogue_holds_no_rows(built_catalogue, spark):
 def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     built_catalogue,
 ):
-    """No privileged path: every action is one the planner emits for any repository."""
+    """No privileged path: every action is one the planner emits for any repository.
+
+    The catalogue tables are created by ``create_schema`` and ``build_table``,
+    through ``spark_sql`` and ``spark_table`` — the same actions and the same
+    executors an application repository gets. Nothing here knows it is building a
+    catalogue.
+    """
 
     bundle, _report = built_catalogue
     kinds = {action.kind for _s, _b, action in bundle.plan.actions()}
@@ -174,7 +191,7 @@ def test_the_tables_land_under_the_weaver_lakehouse_tables_area(
 
 
 def test_rebuilding_the_unchanged_repository_succeeds_again(built_catalogue, lakehouses, spark):
-    """Re-running the bootstrap is safe.
+    """Re-building the unchanged repository is safe and identical.
 
     Note what this does *not* yet claim: build still emits
     ``CREATE OR REPLACE TABLE``, so a rebuild empties the tables. That is
@@ -193,6 +210,10 @@ def test_rebuilding_the_unchanged_repository_succeeds_again(built_catalogue, lak
         host=lakehouses.host,
         store=store,
         prune=False,
+        # Structure only. With the catalogue on, this same bundle would go on to
+        # populate the tables it just created — which is the bootstrap, and is
+        # tested as such in test_catalogue_setup.
+        catalogue=False,
         spark=spark,
     )
     report = install_bundle(
