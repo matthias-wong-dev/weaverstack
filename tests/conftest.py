@@ -177,6 +177,49 @@ def installation_environment(spark, lakehouses: LocalLakehouses):
 
 # --- spark -------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _release_spark_caches():
+    """Let the session forget the Lakehouses each test throws away.
+
+    A combined ``-m spark`` run used to exhaust the driver's default 1 GB heap
+    partway through, and the failure looked like anything: a `Py4JJavaError` whose
+    own `str()` failed, attributed to whichever test happened to run when the JVM
+    gave out. Every file passed alone, so it read as flakiness.
+
+    It is not. Measured with a forced collection before each reading — which
+    separates garbage from retention — the live heap climbs by about 5.6 MB per
+    test and never comes down. A class histogram says what is being kept: Catalyst
+    expression trees of exactly the shape an `ExpressionEncoder` builds, plus the
+    bytecode generated for them.
+
+    They belong to Delta. `DeltaLog` caches one instance per table *path*, each
+    holding a `Snapshot` whose state is a `Dataset` — and therefore a whole query
+    execution and its encoder. Every test builds its tables under a fresh
+    `tmp_path`, so every table is a new path, and the cache keeps the snapshot of
+    each one alive long after the directory it describes has been deleted. The
+    tests are isolated; the session's memory of them was not.
+
+    So the harness releases it. Both caches here are caches — dropping them costs
+    a re-read of a transaction log and never changes an answer — and clearing them
+    between tests turns unbounded growth into a bounded sawtooth. This is the fix;
+    raising the heap would only have moved the ceiling.
+
+    Autouse across the whole suite, and free when no session was started: the
+    core tests never begin one, so this is a single attribute check for them.
+    """
+
+    yield
+
+    try:
+        from pyspark.sql import SparkSession
+    except ImportError:  # no [spark] extra installed — nothing to release
+        return
+    session = SparkSession._instantiatedSession
+    if session is None:
+        return
+    session._jvm.org.apache.spark.sql.delta.DeltaLog.clearCache()
+    session.catalog.clearCache()
+
 
 @pytest.fixture(scope="session")
 def spark():
