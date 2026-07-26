@@ -1603,6 +1603,48 @@ can vary with the state of the thing being written.
 Both are the kind of defect local Spark exists to catch: neither is visible in
 generated text, and both would have surfaced first in a workspace.
 
+### The catalogue is the first thing Weaver addresses by name
+
+`tests/conftest.py` justifies its session-scoped Spark fixture like this:
+
+> Sharing one session across tests is safe here because Weaver addresses Delta by
+> explicit path rather than through a metastore, so a session carries no state
+> between tests.
+
+The catalogue is the first thing that breaks that premise. Schema `_` is a *name*
+in the session catalog, registered once with a `LOCATION`, and `CREATE SCHEMA IF
+NOT EXISTS` is a no-op the second time — so a test that leaves `_` registered sends
+the next test's catalogue tables into the previous test's directory. Every catalogue
+suite therefore drops `_` on the way out, and two tests in `test_catalogue_setup`
+are pinned last because they must own it outright.
+
+This is the same fact as the Fabric gap, seen from the other side. The catalogue is
+reached by two-part name rather than by path, which is what makes it convenient to
+query and exactly what makes "which Lakehouse does `_` mean?" a real question. Both
+belong to the same decision, and it is worth taking deliberately rather than
+inheriting: **should the catalogue be addressed by path?**
+
+### The Spark suite no longer fits one process here
+
+The catalogue roughly doubled the Spark suite, from 41 tests to ~93. Every file
+passes on its own — built-in build 9/9, tolerant reader 14/14, reconciliation 19/19,
+bootstrap 18/18, and the physical build set 26/26. The *combined* run does not: at
+around stage 7000 the shared JVM starts failing with `Py4JJavaError: <exception
+str() failed>`, and whatever runs last collects the failures. In one run that was
+three `test_catalogue_setup` assertions; in the next it was
+`test_local_lifecycle`, `test_local_persisted_view` and
+`test_diagnostics::test_the_report_agrees_with_a_session_actually_starting` — a test
+that only starts a session and cannot be affected by catalogue code. All seven of
+those pass in 39 seconds when run alone.
+
+So this is resource exhaustion in one long-lived JVM, not a defect, but it does mean
+**the suite as it stands cannot be run in a single process on a modest machine**.
+Costs were cut where it was free to do so — the reconcile fixture creates its tables
+directly instead of building a bundle per test, and the bootstrap is shared by every
+read-only assertion, taking that file from 5:13 to 1:39 — and the run now completes
+in ~17 minutes rather than timing out. That is not a fix, though. Splitting `-m
+spark` per file, or giving it process isolation, is the thing to decide.
+
 ---
 
 ## Open questions
@@ -1621,6 +1663,8 @@ generated text, and both would have surfaced first in a workspace.
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
 | How does schema `_` resolve to the **Weaver** Lakehouse in a Fabric session attached to a *destination* Lakehouse? Locally the schema is pinned with an explicit `LOCATION` under the Weaver Lakehouse's `Tables`, so a two-part `` `_`.`Registry` `` is unambiguous. On Fabric the platform manages schemas per item and `schema_location()` returns None, so catalogue reads and writes would lean on ambient catalogue context — which build-philosophy §16 names as an anti-pattern. Local Delta is fully green; this is the one catalogue behaviour local cannot answer. Likely needs the catalogue addressed by explicit `abfss://` path, or the Weaver Lakehouse attached deliberately. | catalogue | **open, and the first thing to settle on Fabric** |
+| Should the catalogue be addressed by explicit path rather than by two-part name? It is the first thing Weaver reaches through the session catalog rather than by path, which is both why `_` must be dropped between tests and why "which Lakehouse does `_` mean?" is open on Fabric. One decision, two symptoms. | catalogue | open |
+| How should `-m spark` run now that it is ~93 tests? Every file passes alone; one long-lived JVM fails late in a combined run on a modest machine. Per-file, or process isolation. | catalogue | open |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
 
