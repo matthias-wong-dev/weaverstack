@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
 from ..ses.metadata import AUDIT_LIVE_DELETE_DATETIME
+from ..spark.tokens import object_token
 from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,
@@ -82,7 +83,17 @@ def identifier(name: str) -> str:
 
 
 def qualified_name(table: CatalogueTable) -> str:
-    return f"{identifier(CATALOGUE_SCHEMA)}.{identifier(table.name)}"
+    """How a rendered statement names one catalogue table.
+
+    Not ``_.Registry``. The catalogue lives in the Weaver Lakehouse, and a build's
+    other statements are aimed at a destination Lakehouse — one session, two
+    places — so a name that resolved through the session's current catalogue
+    would put the record of the build wherever the session happened to be
+    pointed. The statement names the object; the batch names the Weaver
+    Lakehouse; the executor puts the two together (:mod:`weaver.spark.tokens`).
+    """
+
+    return object_token(CATALOGUE_SCHEMA, table.name)
 
 
 def literal(value: object) -> str:

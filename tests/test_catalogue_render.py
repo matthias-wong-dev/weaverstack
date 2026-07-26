@@ -302,7 +302,7 @@ def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
         REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE
     )
     lines = statement.splitlines()
-    assert lines[0].startswith("DELETE FROM `_`.`Registry`")
+    assert lines[0].startswith("DELETE FROM {{object:_.Registry}}")
     assert lines[1].strip().startswith("WHERE `repository` =")
 
 

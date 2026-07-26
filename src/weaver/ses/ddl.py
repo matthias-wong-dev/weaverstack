@@ -14,9 +14,26 @@ Two invariants hold:
 
 - **deterministic** — the same validated source and format version always produce
   the same :class:`GeneratedDdl`.
-- **path-free** — a table or view is addressed by its two-part ``Schema.Object``
-  name and binds through the catalog the installer sets up; no Lakehouse,
-  workspace or filesystem path is baked into a payload.
+- **destination-free** — a table or view is named ``{{object:Schema.Object}}`` and
+  the executor resolves that against whichever Lakehouse the batch is bound to.
+  No Lakehouse, workspace or filesystem path is baked into a payload, so the same
+  repository generates the same bytes in every environment (build-philosophy §10)
+  and two bundles can be diffed for what actually differs.
+
+The second used to read "path-free", and a bare ``Schema.Object`` was taken to
+satisfy it. It does not. A two-part name is not free of a destination — it
+silently *takes* one, from whatever catalogue the session is currently attached
+to, which is the Weaver Lakehouse. Locally that was masked by pinning each schema
+to the one destination's storage; on Fabric it put the object in the control
+plane. The name has to say which Lakehouse it means, and only the installer knows
+how that Lakehouse is spelled, so the payload names the object and defers the
+spelling (see :mod:`weaver.spark.tokens`).
+
+**Bodies are rewritten, not reformatted.** A view's query is the author's text
+with each managed two-part reference replaced in place — same whitespace, same
+comments, same casing, same delimiters. Three- and four-part references are left
+exactly as written: the author named a physical thing deliberately, and Weaver
+does not second-guess it.
 
 Schema is **declared or inferred** (build-philosophy §7). A Python-backed Delta
 table has no query and must declare its schema; the generated DDL is a concrete
@@ -33,7 +50,9 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..spark.tokens import object_token
 from .columns import metadata_column_references
+from .dependencies import rewrite_sql_references
 from .metadata import SPARK_SQL, SQL, TABLE, VIEW
 
 if TYPE_CHECKING:
@@ -119,6 +138,32 @@ def _tsql_ddl(document: "SourceDocument") -> GeneratedDdl:
     )
 
 
+def _object_name(document: "SourceDocument") -> str:
+    """How a payload names the object it builds."""
+
+    return object_token(document.object_id.schema, document.object_id.object)
+
+
+def _addressed(body: str) -> str:
+    """One SQL body with its managed references named for a destination.
+
+    Only ordinary two-part references are rewritten, and that is exactly the set
+    the reader guarantees resolves inside the repository: a valid repository
+    resolves every one of them, so what is left over is deliberately outside — a
+    physically-qualified three- or four-part name, or a table-valued function.
+    Both are the author naming something Weaver does not manage, and both are
+    left alone.
+    """
+
+    def rewrite(reference):
+        object_id = reference.object_id
+        if object_id is None:  # a call, or a qualified physical name
+            return None
+        return object_token(object_id.schema, object_id.object)
+
+    return rewrite_sql_references(body, rewrite)
+
+
 def _python_table_ddl(document: "SourceDocument") -> GeneratedDdl:
     """A Delta table from its declared columns, plus the audit columns.
 
@@ -134,7 +179,7 @@ def _python_table_ddl(document: "SourceDocument") -> GeneratedDdl:
             f"{document.relative_path}: a Python-backed Delta table must declare "
             "its schema; schema inference needs a query"
         )
-    content = _create_table_sql(document.qualified, columns)
+    content = _create_table_sql(_object_name(document), columns)
     return GeneratedDdl(
         executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
     )
@@ -155,12 +200,12 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
     ses = document.document
     declared = ses.has_declared_schema
     payload = {
-        "object": document.qualified,
+        "object": _object_name(document),
         "schema_mode": "declared" if declared else "inferred",
         "declared_columns": (
             [_column_entry(column) for column in ses.schema] if declared else None
         ),
-        "source_query": (document.sql_body or "").strip(),
+        "source_query": _addressed((document.sql_body or "").strip()),
         "references": [list(pair) for pair in metadata_column_references(ses)],
         # The Weaver-managed surrogate column, when declared: a not-null bigint
         # the executor adds and a later load populates. None when absent.
@@ -177,10 +222,16 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
 
 
 def _view_ddl(document: "SourceDocument") -> GeneratedDdl:
-    """A persistent view over the validated query body, body otherwise untouched."""
+    """A persistent view over the validated body, its managed names addressed.
 
-    body = (document.sql_body or "").rstrip()
-    content = f"CREATE OR REPLACE VIEW {document.qualified} AS\n{body}\n"
+    The body is otherwise untouched. What changes is that every reference to
+    another managed object now says which Lakehouse it means — without which a
+    view built in one destination would read its inputs from whichever Lakehouse
+    the session happened to be attached to.
+    """
+
+    body = _addressed((document.sql_body or "").rstrip())
+    content = f"CREATE OR REPLACE VIEW {_object_name(document)} AS\n{body}\n"
     return GeneratedDdl(
         executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
     )

@@ -426,7 +426,13 @@ def _install(estate, bundle, *, fail_on=()):
             resolver=resolver,
             executors={
                 name: recorder
-                for name in ("spark_sql", "spark_table", "folder", "tsql")
+                for name in (
+                    "spark_sql",
+                    "spark_schema",
+                    "spark_table",
+                    "folder",
+                    "tsql",
+                )
             },
         ),
     )

@@ -164,8 +164,63 @@ class _FlatToken:
     depth: int
 
 
+@dataclass(frozen=True)
+class LocatedReference:
+    """One relation reference, and where in the text it was written.
+
+    Extraction reports what a file says; a *span* additionally lets a caller
+    rewrite it. Build needs that: a two-part name in a view body resolves through
+    whatever catalogue the session is currently pointed at, so the planner
+    replaces each managed reference with a name that says which Lakehouse it
+    means (see :mod:`weaver.spark.tokens`).
+    """
+
+    reference: RelationReference
+    start: int
+    end: int
+
+
 def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
     """Ordered, de-duplicated relation references from a SQL body."""
+
+    references: list[RelationReference] = []
+    seen: set[tuple[str, ...]] = set()
+    for located in locate_sql_references(sql_text):
+        if located.reference.parts in seen:
+            continue
+        seen.add(located.reference.parts)
+        references.append(located.reference)
+    return tuple(references)
+
+
+def rewrite_sql_references(sql_text: str, rewrite) -> str:
+    """One body with each relation reference the caller claims replaced.
+
+    ``rewrite`` receives a :class:`RelationReference` and returns the text to put
+    in its place, or None to leave it exactly as written. Everything else in the
+    body — whitespace, comments, casing, the author's own delimiters — is
+    untouched, because a build must not quietly reformat a query it is going to
+    freeze and execute.
+
+    Replacements are applied last-first so an earlier span's offsets stay valid.
+    """
+
+    replacements = []
+    for located in locate_sql_references(sql_text):
+        replacement = rewrite(located.reference)
+        if replacement is not None:
+            replacements.append((located.start, located.end, replacement))
+
+    for start, end, replacement in sorted(replacements, reverse=True):
+        sql_text = sql_text[:start] + replacement + sql_text[end:]
+    return sql_text
+
+
+def locate_sql_references(sql_text: str) -> tuple[LocatedReference, ...]:
+    """Every relation reference in a SQL body, in order, with its span.
+
+    Not de-duplicated: a name written three times is three places to rewrite.
+    """
 
     from sqlparse.exceptions import SQLParseError
 
@@ -174,8 +229,8 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
     except (SQLParseError, RecursionError):
         return _fallback(sql_text)
 
-    references: list[RelationReference] = []
-    seen: set[tuple[str, ...]] = set()
+    references: list[LocatedReference] = []
+    seen: set[int] = set()
 
     for index, token in enumerate(tokens):
         if not _is_keyword(token):
@@ -215,7 +270,7 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
 
 def _dml_target(
     sql_text: str, tokens: list[_FlatToken], index: int
-) -> RelationReference | None:
+) -> LocatedReference | None:
     """The relation a DML statement writes to.
 
     ``insert into``, ``merge into`` and ``delete from`` may arrive as one
@@ -233,33 +288,40 @@ def _dml_target(
     return _relation_at(sql_text, tokens[following].start)
 
 
-def _fallback(sql_text: str) -> tuple[RelationReference, ...]:
+def _fallback(sql_text: str) -> tuple[LocatedReference, ...]:
     """Scanner for bodies sqlparse cannot tokenise."""
 
-    references: list[RelationReference] = []
-    seen: set[tuple[str, ...]] = set()
+    references: list[LocatedReference] = []
+    seen: set[int] = set()
     keyword = re.compile(r"\b(from|join|apply|using)\b", flags=re.IGNORECASE)
     for match in keyword.finditer(sql_text):
-        reference = _relation_at(sql_text, match.end())
-        if reference is not None:
-            _add(references, seen, reference)
+        located = _relation_at(sql_text, match.end())
+        if located is not None:
+            _add(references, seen, located)
     return tuple(references)
 
 
 def _add(
-    references: list[RelationReference],
-    seen: set[tuple[str, ...]],
-    reference: RelationReference,
+    references: list[LocatedReference],
+    seen: set[int],
+    located: LocatedReference,
 ) -> None:
-    if reference.parts in seen:
+    """Record one occurrence, by position.
+
+    Position, not name: extraction de-duplicates by name afterwards, but a
+    rewrite needs every place the name was written — and two rules can reach the
+    same place, which is the one duplicate to drop here.
+    """
+
+    if located.start in seen:
         return
-    seen.add(reference.parts)
-    references.append(reference)
+    seen.add(located.start)
+    references.append(located)
 
 
 def _from_relations(
     sql_text: str, tokens: list[_FlatToken], from_index: int
-) -> list[RelationReference]:
+) -> list[LocatedReference]:
     """Every relation in one ``from`` list, including comma-separated ones."""
 
     depth = tokens[from_index].depth
@@ -267,7 +329,7 @@ def _from_relations(
     if first is None:
         return []
 
-    relations: list[RelationReference] = []
+    relations: list[LocatedReference] = []
     reference = _relation_at(sql_text, tokens[first].start)
     if reference is not None:
         relations.append(reference)
@@ -303,28 +365,32 @@ def _is_from_boundary(token: _FlatToken) -> bool:
     return head in _STATEMENT_START_KEYWORDS and head != "SELECT"
 
 
-def _relation_at(sql_text: str, start: int) -> RelationReference | None:
+def _relation_at(sql_text: str, start: int) -> LocatedReference | None:
     """A relation reference at ``start``, tagged if it is a function call."""
 
     parsed = _parse_name(sql_text, start)
     if parsed is None:
         return None
-    parts, position = parsed
+    parts, begin, position = parsed
     # A ``(`` directly abutting the name is a call, ``Sales.SplitLines(…)``.
     # A table hint is ``… with (nolock)`` — a keyword and a space intervene —
     # so requiring the paren to abut avoids mistaking a hinted table for one.
     call = position < len(sql_text) and sql_text[position] == "("
-    return RelationReference(parts=parts, call=call)
+    return LocatedReference(
+        reference=RelationReference(parts=parts, call=call), start=begin, end=position
+    )
 
 
-def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int] | None:
-    """The parts of a relation name and the offset just past the last part.
+def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int, int] | None:
+    """The parts of a relation name, where it begins, and where it ends.
 
-    The returned offset is where the name ends — before any trailing whitespace
-    — so a caller can tell an abutting ``(`` (a function call) from a spaced one.
+    The end offset is where the name stops — before any trailing whitespace — so
+    a caller can tell an abutting ``(`` (a function call) from a spaced one. The
+    begin offset is what makes the name replaceable.
     """
 
     position = _skip_space(sql_text, start)
+    begin = position
     parts: list[str] = []
     end = position
 
@@ -349,7 +415,7 @@ def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int] | None
     if len(parts) == 2 and parts[0].lower() in _PATH_FORMATS:
         # delta.`abfss://…` — a format and a path, not schema and object.
         return None
-    return tuple(parts), end
+    return tuple(parts), begin, end
 
 
 def _parse_identifier_part(sql_text: str, start: int) -> tuple[str, int] | None:

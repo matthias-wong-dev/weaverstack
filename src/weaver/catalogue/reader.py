@@ -22,6 +22,13 @@ Spark's own ``TABLE_OR_VIEW_NOT_FOUND`` is absence. Everything else propagates.
 
 That asymmetry is the whole design of this module. Tolerance is cheap when it is
 specific and dangerous when it is a bare ``except``.
+
+**A read names the Lakehouse it reads from.** The catalogue lives in the Weaver
+Lakehouse; a build's other work is aimed at a destination Lakehouse; one session
+serves both. So a read takes a :class:`~weaver.spark.catalogue.SparkCatalogue`
+rather than a bare session — asking "the catalogue" of whatever the session is
+attached to would answer for the wrong Lakehouse, and answer *plausibly*, which
+is the failure mode this whole area exists to remove.
 """
 
 from __future__ import annotations
@@ -58,12 +65,16 @@ def _is_absent(exception: Exception) -> bool:
 
 
 def read_table(
-    spark: Any,
+    catalogue: Any,
     table: CatalogueTable,
     *,
     scope: InstallationScope | None = None,
 ) -> tuple[Row, ...]:
     """Every row of one catalogue table, projected through its expected schema.
+
+    ``catalogue`` is a :class:`~weaver.spark.catalogue.SparkCatalogue` bound to
+    the Weaver Lakehouse — the read has to say where the catalogue is, because
+    the session is not necessarily pointed at it.
 
     ``scope`` narrows the read to one installation, which is what a build wants:
     it compares and writes within one ``(repository, target_type)`` and has no
@@ -73,15 +84,16 @@ def read_table(
     projection produces, so the two can be compared directly.
     """
 
-    if spark is None:
+    if catalogue is None:
         raise ValueError(
-            f"reading {table.qualified} needs a Spark session — the catalogue lives "
-            "in the Weaver Lakehouse, which is always present"
+            f"reading {table.qualified} needs a Spark catalogue bound to the Weaver "
+            "Lakehouse — the catalogue lives there, and a session alone does not "
+            "say which Lakehouse that is"
         )
 
-    name = qualified_name(table)
+    name = catalogue.expand(qualified_name(table))
     try:
-        existing = spark.table(name).columns
+        existing = catalogue.spark.table(name).columns
     except Exception as exception:
         if _is_absent(exception):
             return ()
@@ -99,7 +111,7 @@ def read_table(
     if scope is not None:
         where = f" WHERE {scope.predicate}"
 
-    rows = spark.sql(f"SELECT {projected} FROM {name}{where}").collect()
+    rows = catalogue.spark.sql(f"SELECT {projected} FROM {name}{where}").collect()
     return tuple(row.asDict() for row in rows)
 
 
@@ -124,7 +136,7 @@ def _projected_column(column, actual: str | None) -> str:
 
 
 def read_installation(
-    spark: Any, *, scope: InstallationScope, tables=None
+    catalogue: Any, *, scope: InstallationScope, tables=None
 ) -> dict[str, tuple[Row, ...]]:
     """Every catalogue table, read for one installation.
 
@@ -135,6 +147,6 @@ def read_installation(
     from .tables import CATALOGUE_TABLES
 
     return {
-        table.name: read_table(spark, table, scope=scope)
+        table.name: read_table(catalogue, table, scope=scope)
         for table in (tables if tables is not None else CATALOGUE_TABLES)
     }

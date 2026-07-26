@@ -19,6 +19,7 @@ generation builds on it at the next checkpoint.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -26,6 +27,7 @@ from ..errors import BuildError
 from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, Host
 from ..locations import Location
 from ..resolution import resolver_for
+from ..spark import SparkCatalogue, object_token, schema_token
 from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..ses.graph import Graph
 from ..ses.metadata import TABLE, VIEW, DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
@@ -391,12 +393,16 @@ def _prune_sequence(
 ) -> BuildSequence | None:
     """Inspect the target now and freeze a concrete DROP for each unmanaged object.
 
-    The build reads the target's own storage (and, with a session, its catalog)
-    and emits visible drops — ``DROP TABLE``/``VIEW``/``DATABASE`` as Spark SQL
+    The build reads the target's own storage (and, with a session, its catalogue)
+    and emits visible drops — ``DROP TABLE``/``VIEW``/``SCHEMA`` as Spark SQL
     payloads, an unmanaged folder as a directory-removing action. The installer
     runs exactly these; it never enumerates. Reconciliation is scoped to the one
-    bound Lakehouse's ``Tables``/``Files`` storage, so a shared catalog cannot
+    bound Lakehouse's ``Tables``/``Files`` storage, so a shared catalogue cannot
     make a build reach into another Lakehouse.
+
+    Both halves of the inspection now name the Lakehouse being reconciled, which
+    is what makes reconciling a Lakehouse other than the attached one correct
+    rather than lucky.
     """
 
     # Store addressing, not Spark addressing: inspection *lists* the target, and
@@ -404,9 +410,15 @@ def _prune_sequence(
     # the `abfss://` roots Spark writes through. Same Lakehouse, two transports —
     # conflating them would have prune listing a URL Spark cannot read a directory
     # from.
+    #
+    # Schemas come from storage on both hosts, and have to: Fabric refuses
+    # `SHOW SCHEMAS IN `workspace`.`lakehouse`` — a bare `SHOW SCHEMAS` answers
+    # only for the *attached* Lakehouse — so asking the catalogue would have
+    # reconciled the destination against the control plane's inventory.
     lakehouse = ItemRef(target.item_id)
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)
+    catalogue = _catalogue_for(resolver, lakehouse, spark)
 
     existing_schemas = [
         entry.name
@@ -421,16 +433,16 @@ def _prune_sequence(
     # orphan schema is dropped whole below, taking its views with it). Enumerated
     # by bare schema name so it resolves in the session's own Lakehouse — Fabric's
     # SHOW DATABASES returns qualified `Workspace.Lakehouse.schema` names.
-    if spark is not None:
+    if catalogue is not None:
         for schema in existing_schemas:
             if schema.lower() in orphan_schemas:
                 continue
-            for view in _views_in_schema(spark, schema):
+            for view in catalogue.views(schema):
                 if f"{schema}.{view}".lower() in managed.views:
                     continue
                 actions.append(
                     _drop_action(target, "prune_view", "view", f"{schema}.{view}",
-                                 f"DROP VIEW IF EXISTS {_ident(schema)}.{_ident(view)}", payloads)
+                                 f"DROP VIEW IF EXISTS {object_token(schema, view)}", payloads)
                 )
 
     # Tables: unmanaged ones in a schema that survives (an orphan schema is
@@ -444,7 +456,7 @@ def _prune_sequence(
             if qualified.lower() not in managed.tables:
                 actions.append(
                     _drop_action(target, "prune_table", "table", qualified,
-                                 f"DROP TABLE IF EXISTS {_ident(schema)}.{_ident(object_entry.name)}",
+                                 f"DROP TABLE IF EXISTS {object_token(schema, object_entry.name)}",
                                  payloads)
                 )
 
@@ -467,7 +479,7 @@ def _prune_sequence(
     for schema in sorted({s for s in existing_schemas if s.lower() in orphan_schemas}):
         actions.append(
             _drop_action(target, "prune_schema", "schema", schema,
-                         f"DROP SCHEMA IF EXISTS {_ident(schema)} CASCADE", payloads)
+                         f"DROP SCHEMA IF EXISTS {schema_token(schema)} CASCADE", payloads)
         )
 
     if not actions:
@@ -649,22 +661,20 @@ def _child_dirs(store: Store, root) -> list:
     )
 
 
-def _views_in_schema(spark, schema: str) -> list[str]:
-    """Persistent view names in one schema, by bare name (session-relative)."""
+def _catalogue_for(resolver, lakehouse: ItemRef, spark) -> "SparkCatalogue | None":
+    """Catalogue operations against the Lakehouse being reconciled.
 
-    try:
-        rows = spark.sql(f"SHOW VIEWS IN {_ident(schema)}").collect()
-    except Exception:  # the schema may not exist yet; nothing to prune there
-        return []
-    names: list[str] = []
-    for row in rows:
-        data = row.asDict()
-        if data.get("isTemporary"):
-            continue
-        name = data.get("viewName") or data.get("name")
-        if name:
-            names.append(name)
-    return names
+    None without a session — prune still reconciles tables, folders and schemas
+    from storage, and simply cannot see views, which is the documented cost of
+    generating without one.
+    """
+
+    if spark is None:
+        return None
+    resolve = getattr(resolver, "spark_destination", None)
+    if resolve is None:  # pragma: no cover - both shipped resolvers provide it
+        return None
+    return SparkCatalogue(spark, resolve(lakehouse))
 
 
 def _schema_sequence(
@@ -674,15 +684,24 @@ def _schema_sequence(
     resolver,
     payloads: dict[str, bytes],
 ) -> BuildSequence | None:
-    """Create the catalog databases the retained tables and views need.
+    """Create the schemas the retained tables and views need, in the destination.
 
-    Only schemas that hold a materialised object get a database. On the Lakehouse
-    a Delta schema is given an explicit ``LOCATION`` in the ``Tables`` area — the
-    one physical path a build resolves — so a managed table lands where Weaver
-    addresses it; on the Warehouse a T-SQL ``CREATE SCHEMA`` needs no location.
-    Folder-only schemas are directories, not catalog databases, and get none. A
-    schema is created only because a bound resource uses it; none is inferred from
-    a ``Schema.Object`` name.
+    Only schemas that hold a materialised object get one. Folder-only schemas are
+    directories, not catalogue objects, and get none. A schema is created only
+    because a bound resource uses it; none is inferred from a ``Schema.Object``
+    name.
+
+    On the Lakehouse the action names the schema and stops there. It used to
+    freeze the whole statement, and doing so froze a *resolved path*: local Spark
+    needs a ``LOCATION`` for a managed table to land under the Lakehouse's
+    ``Tables`` area, so a bundle generated by a test carried its own temporary
+    directory in the hashed plan (build-philosophy §10), and a Fabric bundle
+    carried a bare two-part name that created the schema in the attached Lakehouse
+    instead of the destination. How to make a schema is the destination's
+    business; which schema, and where, is the manifest's.
+
+    On the Warehouse a T-SQL ``CREATE SCHEMA`` needs no location and stays a
+    frozen script.
     """
 
     is_warehouse = target.kind == WAREHOUSE_TARGET
@@ -700,7 +719,6 @@ def _schema_sequence(
     if not schemas:
         return None
 
-    lakehouse = ItemRef(target.item_id)
     actions: list[BuildAction] = []
     for schema in schemas:
         if is_warehouse:
@@ -711,19 +729,11 @@ def _schema_sequence(
                 f"if not exists (select 1 from sys.schemas where name = "
                 f"{_sql_literal(schema)})\n    exec('create schema {_tsql_ident(schema)}');"
             )
+            content = (statement + "\n").encode("utf-8")
             executor, extension = "tsql", ".sql"
         else:
-            # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
-            # the local emulator does, so a managed table lands under the Lakehouse
-            # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
-            # None.
-            location = resolver.schema_location(lakehouse, schema)
-            if location is not None:
-                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
-            else:
-                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
-            executor, extension = "spark_sql", ".spark.sql"
-        content = (statement + "\n").encode("utf-8")
+            content = (json.dumps({"schema": schema}, sort_keys=True) + "\n").encode("utf-8")
+            executor, extension = "spark_schema", ".schema.json"
         path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}{extension}")
         payloads[path] = content
         actions.append(
