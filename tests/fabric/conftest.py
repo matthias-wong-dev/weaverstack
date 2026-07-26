@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from weaver import Host, ItemRef, Store
+from weaver.spark import SparkCatalogue
 
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
 #: The Environment the session attaches to — installed once with `weaver install`
@@ -481,7 +482,16 @@ class InstallOutcome:
 
 @dataclass
 class BuildEnv:
-    """Everything a build test needs, with transport hidden behind callables."""
+    """Everything a build test needs, with transport hidden behind callables.
+
+    Assertions are written in the same logical names a payload uses —
+    ``{{object:DWG.Customer}}`` — and resolved against a named destination before
+    they run. That is not sugar. A test that asked for ``DWG.Customer`` would
+    resolve it through the session's own catalogue, which is exactly the mistake
+    the build no longer makes: it would read back from the Lakehouse the object
+    was wrongly written to and pass. Naming the destination in the assertion is
+    what makes the assertion able to see the thing it claims about.
+    """
 
     label: str
     host: Any
@@ -494,11 +504,56 @@ class BuildEnv:
     remove_repo: Callable[[str], None]
     generate: Callable[..., Any]
     install: Callable[[Any], InstallOutcome]
-    query: Callable[[str], list]
+    #: Raw SQL, run wherever this environment runs. Prefer ``query``.
+    run_query: Callable[[str], list]
     #: ``[{"name", "type", "nullable"}]`` for a table — schema with nullability,
     #: which ``query``/DESCRIBE cannot give. Warehouse reads it from the catalogue.
-    columns: Callable[[str], list]
+    run_columns: Callable[[str], list]
     seed_orphans: Callable[[], None]
+    #: Whether a fully-qualified schema exists. Asked rather than listed, because
+    #: an absent schema is the answer a prune assertion wants and both hosts raise
+    #: for `SHOW TABLES` in one.
+    run_schema_exists: Callable[[str], bool] = None
+    #: Install Weaver's own catalogue into the Weaver Lakehouse. Not done by
+    #: default: it costs a full extra build, and only the tests that assert on
+    #: catalogue DML need it.
+    setup_weaver: Callable[[], None] = None
+    #: The destination Lakehouse being built, and the Weaver Lakehouse holding the
+    #: catalogue. Two, always — even the simplest install writes to both.
+    destination: Any = None
+    weaver_destination: Any = None
+
+    def at(self, destination=None):
+        return destination or self.destination
+
+    def _addressed(self, text: str, destination) -> str:
+        """Resolve object tokens, where there is a Spark destination to resolve to.
+
+        A Warehouse environment has none — it is reached over TDS and its names
+        are ordinary T-SQL — so its statements pass through untouched.
+        """
+
+        from weaver.spark import expand
+
+        place = self.at(destination)
+        return text if place is None else expand(text, place)
+
+    def query(self, sql: str, *, destination=None) -> list:
+        """Run a query, resolving its object tokens against one destination."""
+
+        return self.run_query(self._addressed(sql, destination))
+
+    def columns(self, table: str, *, destination=None) -> list:
+        return self.run_columns(self._addressed(table, destination))
+
+    def name(self, schema: str, obj: str, *, destination=None) -> str:
+        return self.at(destination).qualify(schema, obj)
+
+    def schema_name(self, schema: str, *, destination=None) -> str:
+        return self.at(destination).qualified_schema(schema)
+
+    def schema_exists(self, schema: str, *, destination=None) -> bool:
+        return self.run_schema_exists(self.schema_name(schema, destination=destination))
 
 
 def _outcome_from_report(report) -> InstallOutcome:
@@ -547,10 +602,12 @@ def _create_schema_enabled_lakehouse(client, workspace, name):
     return Item(id=body["id"], name=name, type=LAKEHOUSE, workspace_id=workspace.id)
 
 
-#: Every schema any build fixture registers. Dropped on local-env teardown, so a
-#: shared Spark catalog never leaks one test's objects into the next — the one
-#: place catalog cleanup lives; tests never do it themselves.
-_LOCAL_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting", "Wh", "Rpt")
+#: Every schema any build fixture registers, in either Lakehouse. Dropped on
+#: local-env teardown, so a shared Spark catalogue never leaks one test's objects
+#: into the next — the one place catalogue cleanup lives; tests never do it
+#: themselves. They are dropped through the destination, because a local schema's
+#: real database name carries the Lakehouse it belongs to.
+_LOCAL_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting", "Wh", "Rpt", "_")
 
 
 def _local_lakehouse_setup(root):
@@ -583,6 +640,8 @@ def _local_build_context(root, spark, ses_fixture):
     )
 
     host, weaver, target, resolver, store = _local_lakehouse_setup(root)
+    destination = resolver.spark_destination(target)
+    weaver_destination = resolver.spark_destination(weaver)
 
     def install_repo(name: str) -> str:
         _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
@@ -591,7 +650,17 @@ def _local_build_context(root, spark, ses_fixture):
     def remove_repo(name: str) -> None:
         store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
 
-    def generate(bundle_name: str = "buildtest", *, repository_name: str = "MyRepo", prune: bool = True):
+    def generate(
+        bundle_name: str = "buildtest",
+        *,
+        repository_name: str = "MyRepo",
+        prune: bool = True,
+        catalogue: bool = False,
+    ):
+        # `catalogue` is off by default because these environments build into a
+        # Lakehouse that has never had setup run, and catalogue DML needs its
+        # tables to exist. Their subject is physical build behaviour. A test that
+        # wants the catalogue calls `setup_weaver()` first and passes it on.
         return generate_build_bundle(
             weaver_lakehouse=weaver,
             repository_name=repository_name,
@@ -600,12 +669,19 @@ def _local_build_context(root, spark, ses_fixture):
             host=host,
             store=store,
             prune=prune,
-            # These environments build into a Lakehouse that has never had setup
-            # run, and catalogue DML needs its tables to exist. Their subject is
-            # physical build behaviour; catalogue reconciliation has its own suites.
-            catalogue=False,
+            catalogue=catalogue,
             spark=spark,
         )
+
+    def setup_weaver() -> None:
+        """Install Weaver's own catalogue into the Weaver Lakehouse."""
+
+        from weaver.setup import initialise_weaver_lakehouse
+
+        result = initialise_weaver_lakehouse(
+            weaver_lakehouse=weaver, host=host, store=store, spark=spark
+        )
+        assert result.succeeded, result.report.status
 
     def install(bundle) -> InstallOutcome:
         report = install_bundle(
@@ -623,14 +699,19 @@ def _local_build_context(root, spark, ses_fixture):
             for f in spark.table(table).schema
         ]
 
+    def schema_exists(qualified: str) -> bool:
+        return bool(spark.catalog.databaseExists(qualified))
+
     def seed_orphans() -> None:
-        tables_root = resolver.tables_root(target).value
+        # Seeded *in the destination*, through the same addressing the build uses,
+        # so what prune has to find is genuinely in the Lakehouse under test.
+        catalogue = SparkCatalogue(spark, destination)
+        for schema in ("DWG", "Legacy"):
+            catalogue.create_schema(schema)
+        catalogue.sql("CREATE TABLE {{object:DWG.OldTable}} (x int) USING delta")
+        catalogue.sql("CREATE OR REPLACE VIEW {{object:DWG.OldView}} AS SELECT 1 AS x")
+        catalogue.sql("CREATE TABLE {{object:Legacy.OldThing}} (x int) USING delta")
         files_root = resolver.files_root(target)
-        spark.sql(f"CREATE DATABASE IF NOT EXISTS DWG LOCATION '{tables_root}/DWG'")
-        spark.sql("CREATE TABLE DWG.OldTable (x int) USING delta")
-        spark.sql("CREATE OR REPLACE VIEW DWG.OldView AS SELECT 1 AS x")
-        spark.sql(f"CREATE DATABASE IF NOT EXISTS Legacy LOCATION '{tables_root}/Legacy'")
-        spark.sql("CREATE TABLE Legacy.OldThing (x int) USING delta")
         store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
         store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
 
@@ -639,11 +720,17 @@ def _local_build_context(root, spark, ses_fixture):
             label="local", host=host, weaver=weaver, target=target,
             resolver=resolver, store=store, generate_spark=spark,
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
-            install=install, query=query, columns=columns, seed_orphans=seed_orphans,
+            install=install, run_query=query, run_columns=columns,
+            seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+            setup_weaver=setup_weaver,
+            destination=destination, weaver_destination=weaver_destination,
         )
     finally:
-        for database in _LOCAL_SCHEMAS:
-            spark.sql(f"DROP DATABASE IF EXISTS {database} CASCADE")
+        for schema in _LOCAL_SCHEMAS:
+            for place in (destination, weaver_destination):
+                spark.sql(
+                    f"DROP SCHEMA IF EXISTS {place.qualified_schema(schema)} CASCADE"
+                )
 
 
 @pytest.fixture
@@ -660,11 +747,21 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
 
     Weaver is Fabric-first: both **generation and installation** run in the
     session, against the native Spark catalogue, so planning sees catalogue views
-    and nothing is contorted to fit a desktop planner. The session defaults to the
-    **target** Lakehouse (so two-part ``Schema.Object`` names land there), which is
-    **schema-enabled** (so a managed table appears under ``Tables/<schema>/<table>``
-    and views bind by name). The desktop only pushes the repository and reads back
-    results. Both Lakehouses are disposable and deleted on teardown.
+    and nothing is contorted to fit a desktop planner. The desktop only pushes the
+    repository and reads back results. Both Lakehouses are disposable and deleted
+    on teardown.
+
+    **The session attaches to the Weaver Lakehouse**, which is the production
+    model: the control plane is the fixed attachment and destinations are the
+    variable data plane. It used to attach to the *target*, so that a two-part
+    ``Schema.Object`` happened to land in the right place — which made the whole
+    suite blind to the thing it most needed to check. Under the real model an
+    unqualified name lands in the control plane, and every statement therefore has
+    to name its Lakehouse.
+
+    **Both Lakehouses are schema-enabled.** The target so a managed table appears
+    under ``Tables/<schema>/<table>``; the Weaver Lakehouse because the catalogue
+    lives in a schema called ``_`` and a Lakehouse without schemas cannot hold one.
     """
 
     from weaver import FabricHost, RepositoryRef
@@ -680,7 +777,9 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
     created = []
     session = None
     try:
-        weaver_lh = create_lakehouse(fabric_workspace, _disposable_name("weaver"), client=fabric_client)
+        weaver_lh = _create_schema_enabled_lakehouse(
+            fabric_client, fabric_workspace, _disposable_name("weaver")
+        )
         created.append(weaver_lh)
         target_lh = _create_schema_enabled_lakehouse(
             fabric_client, fabric_workspace, _disposable_name("target")
@@ -697,15 +796,15 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
         weaver = ItemRef(weaver_lh.name)
         target = ItemRef(target_lh.name)
 
-        # One session, defaulted to the target Lakehouse, with the Weaver
-        # Environment attached so the install program can import weaver.build_bundle.
-        session_host = FabricHost(
-            workspace=fabric_workspace.name,
-            weaver_lakehouse=target_lh.name,
-            fabric_environment=fabric_environment_name,
-        )
-        session = LivySession.for_host(session_host)
+        # One session, attached to the *Weaver* Lakehouse — the control plane, as
+        # in production — with the Weaver Environment attached so the install
+        # program can import weaver.build_bundle. Every destination statement names
+        # its Lakehouse rather than relying on this attachment.
+        session = LivySession.for_host(host)
         session.start()
+
+        destination = resolver.spark_destination(target)
+        weaver_destination = resolver.spark_destination(weaver)
 
         def install_repo(name: str) -> str:
             _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
@@ -721,9 +820,18 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
                 f"fabric_environment={host.fabric_environment!r})"
             )
 
-        def generate(bundle_name: str = "buildtest", *, repository_name: str = "MyRepo", prune: bool = True):
+        def generate(
+            bundle_name: str = "buildtest",
+            *,
+            repository_name: str = "MyRepo",
+            prune: bool = True,
+            catalogue: bool = False,
+        ):
             # Generation runs IN the session, against the native Spark catalogue —
             # so prune sees catalogue views, matching how a notebook would build.
+            # `catalogue` is off by default because the catalogue's tables have to
+            # exist before its DML can run; a test that wants it calls
+            # `setup_weaver()` first.
             body = (
                 "from weaver import ItemRef, FabricHost\n"
                 "from weaver.resolution import resolver_for, store_for\n"
@@ -737,9 +845,7 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
                 f"    repository_name={repository_name!r},\n"
                 f"    targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef({target.name!r}))),\n"
                 f"    output=resolver.build_bundle({bundle_name!r}),\n"
-                # catalogue=False: this workspace has had no setup, and how schema
-                # `_` resolves from a session attached elsewhere is still open.
-                f"    host=host, store=store, prune={prune!r}, catalogue=False, "
+                f"    host=host, store=store, prune={prune!r}, catalogue={catalogue!r}, "
                 "spark=spark)\n"
                 "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
                 "'plan': bundle.plan.to_mapping()})\n"
@@ -796,17 +902,45 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
             )
             return session.run(body).payload
 
-        def seed_orphans() -> None:
-            # Schema-enabled Lakehouse: CREATE SCHEMA + a managed table lands at
-            # Tables/<schema>/<table>; no CREATE DATABASE / LOCATION.
+        def schema_exists(qualified: str) -> bool:
+            body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
+            return session.run(body).payload
+
+        def setup_weaver() -> None:
+            """Install Weaver's own catalogue into the Weaver Lakehouse, in-session."""
+
             body = (
-                "spark.sql('CREATE SCHEMA IF NOT EXISTS DWG')\n"
-                "spark.sql('CREATE TABLE IF NOT EXISTS DWG.OldTable (x int) USING delta')\n"
-                "spark.sql('CREATE OR REPLACE VIEW DWG.OldView AS SELECT 1 AS x')\n"
-                "spark.sql('CREATE SCHEMA IF NOT EXISTS Legacy')\n"
-                "spark.sql('CREATE TABLE IF NOT EXISTS Legacy.OldThing (x int) USING delta')\n"
-                "emit(True)\n"
+                "from weaver import ItemRef, FabricHost\n"
+                "from weaver.resolution import resolver_for, store_for\n"
+                "from weaver.setup import initialise_weaver_lakehouse\n"
+                f"host = {_host_literal()}\n"
+                "result = initialise_weaver_lakehouse(\n"
+                f"    weaver_lakehouse=ItemRef({weaver.name!r}), host=host,\n"
+                "    store=store_for(host), spark=spark)\n"
+                "emit({'status': result.report.status, 'tables': list(result.tables), "
+                "'errors': [a.action_id + ': ' + str(a.error_message) "
+                "for s in result.report.sequences for a in s.actions "
+                "if a.status == 'failed']})\n"
             )
+            payload = session.run(body).payload
+            assert payload["status"] == "succeeded", payload["errors"]
+
+        def seed_orphans() -> None:
+            # Seeded in the *destination*, by its four-part name — the session is
+            # attached to the Weaver Lakehouse, so an unqualified create here would
+            # put the orphans in the control plane and prune would rightly not find
+            # them.
+            statements = [
+                f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('DWG')}",
+                f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('Legacy')}",
+                f"CREATE TABLE IF NOT EXISTS {destination.qualify('DWG', 'OldTable')} "
+                "(x int) USING delta",
+                f"CREATE OR REPLACE VIEW {destination.qualify('DWG', 'OldView')} "
+                "AS SELECT 1 AS x",
+                f"CREATE TABLE IF NOT EXISTS {destination.qualify('Legacy', 'OldThing')} "
+                "(x int) USING delta",
+            ]
+            body = "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n"
             session.run(body)
             files_root = resolver.files_root(target)
             store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
@@ -816,7 +950,10 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
             label="fabric", host=host, weaver=weaver, target=target,
             resolver=resolver, store=store, generate_spark=True,  # in-session catalogue
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
-            install=install, query=query, columns=columns, seed_orphans=seed_orphans,
+            install=install, run_query=query, run_columns=columns,
+            seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+            setup_weaver=setup_weaver,
+            destination=destination, weaver_destination=weaver_destination,
         )
     finally:
         if session is not None:
@@ -990,7 +1127,8 @@ def _warehouse_build_env(
         label="warehouse", host=fabric_host, weaver=weaver, target=warehouse_ref,
         resolver=resolver, store=store, generate_spark=None,
         install_repo=install_repo, remove_repo=remove_repo, generate=generate,
-        install=install, query=query, columns=columns, seed_orphans=seed_orphans,
+        install=install, run_query=query, run_columns=columns,
+        seed_orphans=seed_orphans,
     )
 
 

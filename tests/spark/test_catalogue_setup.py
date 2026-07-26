@@ -29,6 +29,7 @@ from weaver.catalogue import (
     InstallationScope,
 )
 from weaver.catalogue.reader import read_installation, read_table
+from weaver.spark import SparkCatalogue, local_destination
 from weaver.setup import BUNDLE_NAME, initialise_weaver_lakehouse
 
 pytestmark = pytest.mark.spark
@@ -44,6 +45,8 @@ class Bootstrapped:
     host: object
     resolver: object
     store: object
+    #: How this bootstrap's Weaver Lakehouse is addressed in the shared session.
+    catalogue: object
 
 
 def _environment(root):
@@ -65,7 +68,25 @@ def _bootstrap(spark, root) -> Bootstrapped:
     result = initialise_weaver_lakehouse(
         weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
     )
-    return Bootstrapped(result=result, host=host, resolver=resolver, store=store)
+    return Bootstrapped(
+        result=result,
+        host=host,
+        resolver=resolver,
+        store=store,
+        catalogue=SparkCatalogue(spark, resolver.spark_destination(ItemRef("Weaver"))),
+    )
+
+
+def _drop_catalogue_schema(spark) -> None:
+    """Forget the shared session's registration of a Weaver Lakehouse now gone.
+
+    Harness isolation, not product behaviour: production has one Weaver Lakehouse
+    for the life of the session, while this file presents a succession of
+    temporary directories under that one logical name.
+    """
+
+    destination = local_destination(item="Weaver", tables_root="/unused")
+    spark.sql(f"DROP SCHEMA IF EXISTS {destination.qualified_schema('_')} CASCADE")
 
 
 @pytest.fixture(scope="module")
@@ -78,11 +99,11 @@ def setup(spark, tmp_path_factory):
     two tests that mutate anything run their own setup instead.
     """
 
-    spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+    _drop_catalogue_schema(spark)
     try:
         yield _bootstrap(spark, tmp_path_factory.mktemp("weaver-setup"))
     finally:
-        spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+        _drop_catalogue_schema(spark)
 
 
 def _failures(report) -> str:
@@ -116,7 +137,7 @@ def test_the_bundle_is_kept_where_bundles_belong(setup):
 
 def test_every_catalogue_table_exists_and_matches_the_representation(setup, spark):
     for table in CATALOGUE_TABLES:
-        fields = spark.table(f"`_`.`{table.name}`").schema.fields
+        fields = spark.table(setup.catalogue.qualify("_", table.name)).schema.fields
         assert [field.name for field in fields] == list(table.physical_columns), table.name
 
 
@@ -126,7 +147,7 @@ def test_every_catalogue_table_exists_and_matches_the_representation(setup, spar
 def test_the_catalogue_registers_its_own_tables(setup, spark):
     """The recursion, made visible: ten tables, each certified in its own Registry."""
 
-    rows = read_table(spark, REGISTRY, scope=SCOPE)
+    rows = read_table(setup.catalogue, REGISTRY, scope=SCOPE)
     assert {row["object_name"] for row in rows} == {
         table.name for table in CATALOGUE_TABLES
     }
@@ -138,21 +159,21 @@ def test_the_catalogue_registers_its_own_tables(setup, spark):
 
 
 def test_the_catalogue_records_its_own_installation(setup, spark):
-    (row,) = read_table(spark, INSTALLATION, scope=SCOPE)
+    (row,) = read_table(setup.catalogue, INSTALLATION, scope=SCOPE)
     assert row["target_name"] == "Weaver"
     assert row["weaver_version"]
     assert row["signature"]
 
 
 def test_the_catalogue_describes_its_own_schema(setup, spark):
-    (row,) = read_table(spark, SCHEMA_DICTIONARY, scope=SCOPE)
+    (row,) = read_table(setup.catalogue, SCHEMA_DICTIONARY, scope=SCOPE)
     assert row["schema_name"] == "_"
     assert "control plane" in row["description"]
 
 
 def test_the_catalogue_describes_its_own_tables_and_their_keys(setup, spark):
     rows = {
-        row["object_name"]: row for row in read_table(spark, TABLE_DICTIONARY, scope=SCOPE)
+        row["object_name"]: row for row in read_table(setup.catalogue, TABLE_DICTIONARY, scope=SCOPE)
     }
     for table in CATALOGUE_TABLES:
         row = rows[table.name]
@@ -168,7 +189,7 @@ def test_the_catalogue_describes_its_own_tables_and_their_keys(setup, spark):
 def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
     from weaver.catalogue import COLUMN_DICTIONARY
 
-    rows = read_table(spark, COLUMN_DICTIONARY, scope=SCOPE)
+    rows = read_table(setup.catalogue, COLUMN_DICTIONARY, scope=SCOPE)
     described = {(row["object_name"], row["column_name"]) for row in rows}
     for table in CATALOGUE_TABLES:
         for column in table.columns:
@@ -178,7 +199,7 @@ def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
 def test_the_catalogue_records_its_own_logical_keys(setup, spark):
     from weaver.catalogue import INDEX_DICTIONARY
 
-    rows = read_table(spark, INDEX_DICTIONARY, scope=SCOPE)
+    rows = read_table(setup.catalogue, INDEX_DICTIONARY, scope=SCOPE)
     keys = {(row["object_name"], row["column_set"]) for row in rows}
     for table in CATALOGUE_TABLES:
         assert (table.name, ", ".join(table.key)) in keys, table.name
@@ -188,17 +209,17 @@ def test_the_catalogue_records_its_own_logical_keys(setup, spark):
 def test_the_catalogue_declares_no_dependencies_and_records_none(setup, spark):
     """`Dependencies: []` all the way through — the bodies are literals."""
 
-    assert read_table(spark, DEPENDENCY, scope=SCOPE) == ()
+    assert read_table(setup.catalogue, DEPENDENCY, scope=SCOPE) == ()
 
 
 def test_no_alias_or_relationship_rows_are_invented(setup, spark):
-    read = read_installation(spark, scope=SCOPE)
+    read = read_installation(setup.catalogue, scope=SCOPE)
     assert read["Alias"] == ()
     assert read["ForeignKeyDictionary"] == ()
 
 
 def test_no_folder_rows_since_the_catalogue_has_no_folders(setup, spark):
-    read = read_installation(spark, scope=SCOPE)
+    read = read_installation(setup.catalogue, scope=SCOPE)
     assert read["FolderDictionary"] == ()
 
 
@@ -238,20 +259,20 @@ def test_setup_prunes_nothing(setup):
 def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(spark, tmp_path):
     """The consequence of not pruning, asserted rather than assumed."""
 
-    spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+    _drop_catalogue_schema(spark)
     host, resolver, store = _environment(tmp_path)
-    tables_root = resolver.tables_root(ItemRef("Weaver")).value
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS `Scratch` LOCATION '{tables_root}/Scratch'")
-    spark.sql("CREATE OR REPLACE TABLE `Scratch`.`Notes` (x int) USING delta")
+    weaver = SparkCatalogue(spark, resolver.spark_destination(ItemRef("Weaver")))
+    weaver.create_schema("Scratch")
+    weaver.sql("CREATE OR REPLACE TABLE {{object:Scratch.Notes}} (x int) USING delta")
     try:
         result = initialise_weaver_lakehouse(
             weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
         )
         assert result.succeeded, _failures(result.report)
-        assert spark.table("`Scratch`.`Notes`").count() == 0  # still there
+        assert weaver.sql("SELECT * FROM {{object:Scratch.Notes}}").count() == 0
     finally:
-        spark.sql("DROP DATABASE IF EXISTS `Scratch` CASCADE")
-        spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+        spark.sql(f"DROP SCHEMA IF EXISTS {weaver.qualified_schema('Scratch')} CASCADE")
+        _drop_catalogue_schema(spark)
 
 
 def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_path):
@@ -263,13 +284,13 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
     drop policy reads the signatures this catalogue now holds.
     """
 
-    spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+    _drop_catalogue_schema(spark)
     try:
         first = _bootstrap(spark, tmp_path)
         assert first.result.succeeded, _failures(first.result.report)
         before = {
             name: tuple(sorted(map(repr, rows)))
-            for name, rows in read_installation(spark, scope=SCOPE).items()
+            for name, rows in read_installation(first.catalogue, scope=SCOPE).items()
         }
         assert before["Registry"], "the first run must have catalogued something"
 
@@ -284,11 +305,11 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
 
         after = {
             name: tuple(sorted(map(repr, rows)))
-            for name, rows in read_installation(spark, scope=SCOPE).items()
+            for name, rows in read_installation(first.catalogue, scope=SCOPE).items()
         }
         assert after == before
     finally:
-        spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+        _drop_catalogue_schema(spark)
 
 
 def test_the_result_serialises_for_a_cli_without_owning_any_semantics(setup):

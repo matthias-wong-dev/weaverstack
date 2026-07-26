@@ -43,7 +43,7 @@ def test_the_folder_and_tables_are_built_empty_with_audit_columns(lakehouse_esta
 
     # The Python base table and the inferred Spark table exist, empty, with audit
     # columns — build creates structure, never data (the base read() would raise).
-    for table in ("Sales.Customer", "Sales.CustomerEnriched"):
+    for table in ("{{object:Sales.Customer}}", "{{object:Sales.CustomerEnriched}}"):
         columns = {column["name"].lower() for column in env.columns(table)}
         assert {"customerid", "customername"} <= columns
         assert AUDIT <= columns
@@ -52,7 +52,13 @@ def test_the_folder_and_tables_are_built_empty_with_audit_columns(lakehouse_esta
 
 def test_the_spark_view_resolves_through_the_chain(lakehouse_estate):
     env = lakehouse_estate.env
-    view_columns = {column["name"].lower() for column in env.columns("Sales.ActiveCustomer")}
+    view_columns = {
+        column["name"].lower()
+        for column in env.columns("{{object:Sales.ActiveCustomer}}")
+    }
     assert {"customerid", "customername"} <= view_columns
-    views = {row["viewName"].lower() for row in env.query("SHOW VIEWS IN Sales")}
+    views = {
+        row["viewName"].lower()
+        for row in env.query(f"SHOW VIEWS IN {env.schema_name('Sales')}")
+    }
     assert "activecustomer" in views

@@ -32,7 +32,7 @@ pytestmark = pytest.mark.spark
 
 
 @pytest.fixture
-def built_catalogue(lakehouses, spark):
+def built_catalogue(lakehouses, spark, weaver_catalogue):
     """The built-in repository, installed into the Weaver Lakehouse itself.
 
     The Weaver Lakehouse is both the control plane and, uniquely for this one
@@ -63,14 +63,11 @@ def built_catalogue(lakehouses, spark):
         environment=InstallationEnvironment(store=store, resolver=resolver, spark=spark),
     )
     assert report.status == "succeeded", _failures(report)
-    try:
-        yield bundle, report
-    finally:
-        # One Spark catalog is shared by every test while each gets its own
-        # Lakehouse directory, so a schema left registered would make the next
-        # test's CREATE SCHEMA IF NOT EXISTS a no-op and send its tables to this
-        # test's tmp_path. Dropping it is the established convention here.
-        spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+    # `weaver_catalogue` created schema `_` and drops it again afterwards: one
+    # Spark catalogue is shared by every test while each gets its own Lakehouse
+    # directory, so a schema left registered would make the next test's create a
+    # no-op and send its tables here.
+    return bundle, report
 
 
 def _failures(report) -> str:
@@ -82,7 +79,9 @@ def _failures(report) -> str:
     )
 
 
-def test_the_ordinary_build_path_creates_all_ten_catalogue_tables(built_catalogue, spark):
+def test_the_ordinary_build_path_creates_all_ten_catalogue_tables(
+    built_catalogue, weaver_catalogue
+):
     """Names are compared case-insensitively, because the local metastore folds them.
 
     Fabric preserves the case of a Lakehouse table; the local Hive metastore
@@ -92,23 +91,23 @@ def test_the_ordinary_build_path_creates_all_ten_catalogue_tables(built_catalogu
     refuses two names differing only by case.
     """
 
-    existing = {row["tableName"].lower() for row in spark.sql("SHOW TABLES IN `_`").collect()}
+    existing = {name.lower() for name in weaver_catalogue.tables("_")}
     assert existing == {table.name.lower() for table in CATALOGUE_TABLES}
 
 
 def test_each_table_has_exactly_the_columns_the_representation_declares(
-    built_catalogue, spark
+    built_catalogue, spark, weaver_catalogue
 ):
     for table in CATALOGUE_TABLES:
-        fields = spark.table(f"`_`.`{table.name}`").schema.fields
+        fields = spark.table(weaver_catalogue.qualify("_", table.name)).schema.fields
         assert [field.name for field in fields] == list(table.physical_columns), table.name
 
 
-def test_each_column_has_the_declared_type(built_catalogue, spark):
+def test_each_column_has_the_declared_type(built_catalogue, spark, weaver_catalogue):
     for table in CATALOGUE_TABLES:
         types = {
             field.name: field.dataType.simpleString()
-            for field in spark.table(f"`_`.`{table.name}`").schema.fields
+            for field in spark.table(weaver_catalogue.qualify("_", table.name)).schema.fields
         }
         for column in table.columns:
             assert types[column.name] == column.type, f"{table.name}.{column.name}"
@@ -116,7 +115,7 @@ def test_each_column_has_the_declared_type(built_catalogue, spark):
             assert types[audit] == "timestamp"
 
 
-def test_the_declared_key_is_physically_not_null(built_catalogue, spark):
+def test_the_declared_key_is_physically_not_null(built_catalogue, spark, weaver_catalogue):
     """The representation asserts key columns are not null; the built table proves it.
 
     Nullability comes from the SES ``Primary key`` declaration, so this closes the
@@ -127,7 +126,7 @@ def test_the_declared_key_is_physically_not_null(built_catalogue, spark):
     for table in CATALOGUE_TABLES:
         nullable = {
             field.name: field.nullable
-            for field in spark.table(f"`_`.`{table.name}`").schema.fields
+            for field in spark.table(weaver_catalogue.qualify("_", table.name)).schema.fields
         }
         for column in table.columns:
             assert nullable[column.name] is not column.not_null, (
@@ -136,17 +135,17 @@ def test_the_declared_key_is_physically_not_null(built_catalogue, spark):
 
 
 def test_the_audit_columns_are_not_null_so_a_live_row_needs_its_sentinel(
-    built_catalogue, spark
+    built_catalogue, spark, weaver_catalogue
 ):
     for table in CATALOGUE_TABLES:
         nullable = {
             field.name: field.nullable
-            for field in spark.table(f"`_`.`{table.name}`").schema.fields
+            for field in spark.table(weaver_catalogue.qualify("_", table.name)).schema.fields
         }
         assert nullable["row_delete_datetime"] is False, table.name
 
 
-def test_a_freshly_built_catalogue_holds_no_rows(built_catalogue, spark):
+def test_a_freshly_built_catalogue_holds_no_rows(built_catalogue, spark, weaver_catalogue):
     """Build creates structure. Populating the catalogue is separate DML.
 
     Which is why the tables are empty here and populated in test_catalogue_setup:
@@ -154,7 +153,7 @@ def test_a_freshly_built_catalogue_holds_no_rows(built_catalogue, spark):
     """
 
     for table in CATALOGUE_TABLES:
-        assert spark.table(f"`_`.`{table.name}`").count() == 0, table.name
+        assert spark.table(weaver_catalogue.qualify("_", table.name)).count() == 0, table.name
 
 
 def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
@@ -163,7 +162,7 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     """No privileged path: every action is one the planner emits for any repository.
 
     The catalogue tables are created by ``create_schema`` and ``build_table``,
-    through ``spark_sql`` and ``spark_table`` — the same actions and the same
+    through ``spark_schema`` and ``spark_table`` — the same actions and the same
     executors an application repository gets. Nothing here knows it is building a
     catalogue.
     """
@@ -172,7 +171,7 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     kinds = {action.kind for _s, _b, action in bundle.plan.actions()}
     assert kinds == {"create_schema", "build_table"}
     executors = {action.executor for _s, _b, action in bundle.plan.actions()}
-    assert executors == {"spark_sql", "spark_table"}
+    assert executors == {"spark_schema", "spark_table"}
 
 
 def test_the_tables_land_under_the_weaver_lakehouse_tables_area(

@@ -35,6 +35,7 @@ from weaver.catalogue.reconcile import (
     summarise,
 )
 from weaver.ses import read_repository
+from weaver.spark import SparkCatalogue
 
 pytestmark = pytest.mark.spark
 
@@ -60,21 +61,23 @@ def catalogue(lakehouses, spark):
     build produces would not go unnoticed.
     """
 
-    tables_root = lakehouses.resolver.tables_root(lakehouses.weaver).value
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS `_` LOCATION '{tables_root}/_'")
+    catalogue = SparkCatalogue(
+        spark, lakehouses.resolver.spark_destination(lakehouses.weaver)
+    )
+    catalogue.create_schema("_")
     for table in CATALOGUE_TABLES:
         columns = ", ".join(
             f"`{column.name}` {column.type}{' NOT NULL' if column.not_null else ''}"
             for column in table.columns
         ) + ", " + ", ".join(f"`{name}` timestamp NOT NULL" for name in AUDIT_COLUMN_NAMES)
-        spark.sql(
-            f"CREATE OR REPLACE TABLE `_`.`{table.name}` ({columns}) USING delta "
+        catalogue.sql(
+            f"CREATE OR REPLACE TABLE {{{{object:_.{table.name}}}}} ({columns}) USING delta "
             "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
         )
     try:
-        yield spark
+        yield catalogue
     finally:
-        spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+        spark.sql(f"DROP SCHEMA IF EXISTS {catalogue.qualified_schema('_')} CASCADE")
 
 
 @pytest.fixture(scope="module")
@@ -99,9 +102,9 @@ def _projection(estate, scope: InstallationScope, *, target_name: str = "Sales_L
     )
 
 
-def _run(spark, statements) -> None:
+def _run(catalogue, statements) -> None:
     for statement in statements:
-        spark.sql(statement)
+        catalogue.sql(statement)
 
 
 # --- the round trip -----------------------------------------------------------
@@ -115,9 +118,8 @@ def test_projected_rows_survive_a_round_trip_through_delta(catalogue, estate):
     string, or a null that arrived as the word "None".
     """
 
-    spark = catalogue
     projection = _projection(estate, LAKEHOUSE)
-    _run(spark, reconcile(projection).statements)
+    _run(catalogue, reconcile(projection).statements)
 
     for table in CATALOGUE_TABLES:
         expected = {
@@ -126,17 +128,16 @@ def test_projected_rows_survive_a_round_trip_through_delta(catalogue, estate):
         }
         actual = {
             tuple(row.get(name) for name in table.column_names)
-            for row in read_table(spark, table, scope=LAKEHOUSE)
+            for row in read_table(catalogue, table, scope=LAKEHOUSE)
         }
         assert actual == expected, table.name
 
 
 def test_a_null_round_trips_as_a_null_not_as_prose(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     (row,) = [
         row
-        for row in read_table(spark, TABLE_DICTIONARY, scope=LAKEHOUSE)
+        for row in read_table(catalogue, TABLE_DICTIONARY, scope=LAKEHOUSE)
         if row["object_name"] == "Region"
     ]
     assert row["identity_column"] is None
@@ -144,22 +145,20 @@ def test_a_null_round_trips_as_a_null_not_as_prose(catalogue, estate):
 
 
 def test_booleans_round_trip_as_booleans(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     rows = {
         row["object_name"]: row
-        for row in read_table(spark, TABLE_DICTIONARY, scope=LAKEHOUSE)
+        for row in read_table(catalogue, TABLE_DICTIONARY, scope=LAKEHOUSE)
     }
     assert rows["Region"]["is_static"] is True
     assert rows["Customer"]["is_static"] is False
 
 
 def test_the_audit_columns_are_stamped_on_insert(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
-    rows = spark.sql(
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    rows = catalogue.sql(
         "SELECT row_insert_datetime, row_update_datetime, row_delete_datetime "
-        "FROM `_`.`Registry`"
+        "FROM {{object:_.Registry}}"
     ).collect()
     assert rows
     for row in rows:
@@ -180,38 +179,36 @@ def test_running_the_same_reconciliation_twice_changes_nothing(catalogue, estate
     non-destructive of history.
     """
 
-    spark = catalogue
     statements = reconcile(_projection(estate, LAKEHOUSE)).statements
-    _run(spark, statements)
+    _run(catalogue, statements)
     before = {
         (row["schema_name"], row["object_name"]): row["row_update_datetime"]
-        for row in spark.sql(
-            "SELECT schema_name, object_name, row_update_datetime FROM `_`.`Registry`"
+        for row in catalogue.sql(
+            "SELECT schema_name, object_name, row_update_datetime FROM {{object:_.Registry}}"
         ).collect()
     }
-    _run(spark, statements)
+    _run(catalogue, statements)
     after = {
         (row["schema_name"], row["object_name"]): row["row_update_datetime"]
-        for row in spark.sql(
-            "SELECT schema_name, object_name, row_update_datetime FROM `_`.`Registry`"
+        for row in catalogue.sql(
+            "SELECT schema_name, object_name, row_update_datetime FROM {{object:_.Registry}}"
         ).collect()
     }
     assert before == after
 
 
 def test_a_changed_row_is_updated_in_place_and_keeps_its_insert_stamp(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
-    (original,) = spark.sql(
-        "SELECT row_insert_datetime FROM `_`.`Installation`"
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    (original,) = catalogue.sql(
+        "SELECT row_insert_datetime FROM {{object:_.Installation}}"
     ).collect()
 
     # Rebinding to a different Lakehouse: same key, different target_name.
     rebound = _projection(estate, LAKEHOUSE, target_name="Sales_LH_v2")
-    _run(spark, reconcile(rebound).statements)
+    _run(catalogue, reconcile(rebound).statements)
 
-    rows = spark.sql(
-        "SELECT target_name, row_insert_datetime FROM `_`.`Installation`"
+    rows = catalogue.sql(
+        "SELECT target_name, row_insert_datetime FROM {{object:_.Installation}}"
     ).collect()
     assert len(rows) == 1, "rebinding must update the installation, not add one"
     assert rows[0]["target_name"] == "Sales_LH_v2"
@@ -219,10 +216,9 @@ def test_a_changed_row_is_updated_in_place_and_keeps_its_insert_stamp(catalogue,
 
 
 def test_a_row_no_longer_projected_is_deleted(catalogue, estate):
-    spark = catalogue
     projection = _projection(estate, LAKEHOUSE)
-    _run(spark, reconcile(projection).statements)
-    assert len(read_table(spark, REGISTRY, scope=LAKEHOUSE)) == 5
+    _run(catalogue, reconcile(projection).statements)
+    assert len(read_table(catalogue, REGISTRY, scope=LAKEHOUSE)) == 5
 
     # A repository that now declares fewer objects.
     reduced = project_installation(
@@ -232,8 +228,8 @@ def test_a_row_no_longer_projected_is_deleted(catalogue, estate):
         target_name="Sales_LH",
         weaver_version="9.9.9",
     )
-    _run(spark, reconcile(reduced).statements)
-    assert {row["object_name"] for row in read_table(spark, REGISTRY, scope=LAKEHOUSE)} == {
+    _run(catalogue, reconcile(reduced).statements)
+    assert {row["object_name"] for row in read_table(catalogue, REGISTRY, scope=LAKEHOUSE)} == {
         "Region",
         "CustomerCsv",
     }
@@ -242,8 +238,7 @@ def test_a_row_no_longer_projected_is_deleted(catalogue, estate):
 def test_child_rows_of_a_removed_object_go_with_it(catalogue, estate):
     """No cascade mechanism needed: each table's delete is scoped the same way."""
 
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     reduced = project_installation(
         estate,
         retained=["delta:Sales.Region"],
@@ -251,8 +246,8 @@ def test_child_rows_of_a_removed_object_go_with_it(catalogue, estate):
         target_name="Sales_LH",
         weaver_version="9.9.9",
     )
-    _run(spark, reconcile(reduced).statements)
-    read = read_installation(spark, scope=LAKEHOUSE)
+    _run(catalogue, reconcile(reduced).statements)
+    read = read_installation(catalogue, scope=LAKEHOUSE)
     assert {row["object_name"] for row in read["ColumnDictionary"]} == {"Region"}
     assert read["ForeignKeyDictionary"] == ()
     assert read["Alias"] == ()
@@ -270,17 +265,16 @@ def test_a_lakehouse_reconciliation_leaves_the_warehouse_rows_untouched(catalogu
     in both.
     """
 
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     _run(
-        spark,
+        catalogue,
         reconcile(_projection(estate, WAREHOUSE, target_name="Sales_WH")).statements,
     )
 
     def warehouse_rows():
         return {
             name: tuple(sorted(map(repr, rows)))
-            for name, rows in read_installation(spark, scope=WAREHOUSE).items()
+            for name, rows in read_installation(catalogue, scope=WAREHOUSE).items()
         }
 
     before = warehouse_rows()
@@ -293,34 +287,32 @@ def test_a_lakehouse_reconciliation_leaves_the_warehouse_rows_untouched(catalogu
         target_name="Sales_LH",
         weaver_version="9.9.9",
     )
-    _run(spark, reconcile(reduced).statements)
+    _run(catalogue, reconcile(reduced).statements)
 
     assert warehouse_rows() == before
 
 
 def test_the_same_object_name_coexists_in_both_installations(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     _run(
-        spark,
+        catalogue,
         reconcile(_projection(estate, WAREHOUSE, target_name="Sales_WH")).statements,
     )
-    rows = spark.sql(
-        "SELECT target_type FROM `_`.`Registry` "
+    rows = catalogue.sql(
+        "SELECT target_type FROM {{object:_.Registry}} "
         "WHERE schema_name = 'Sales' AND object_name = 'Customer' ORDER BY target_type"
     ).collect()
     assert [row["target_type"] for row in rows] == ["lakehouse", "warehouse"]
 
 
 def test_a_dependency_that_leaves_the_repository_is_stored_as_such(catalogue, estate):
-    spark = catalogue
     _run(
-        spark,
+        catalogue,
         reconcile(_projection(estate, WAREHOUSE, target_name="Sales_WH")).statements,
     )
     external = [
         row
-        for row in read_table(spark, DEPENDENCY, scope=WAREHOUSE)
+        for row in read_table(catalogue, DEPENDENCY, scope=WAREHOUSE)
         if row["is_within_repository"] is False
     ]
     assert [
@@ -332,16 +324,15 @@ def test_a_dependency_that_leaves_the_repository_is_stored_as_such(catalogue, es
 
 
 def test_the_summary_reports_inserts_then_no_ops(catalogue, estate):
-    spark = catalogue
     projection = _projection(estate, LAKEHOUSE)
 
-    first = summarise(projection, read_installation(spark, scope=LAKEHOUSE))
+    first = summarise(projection, read_installation(catalogue, scope=LAKEHOUSE))
     assert sum(change.inserted for change in first) == projection.total
     assert all(change.updated == 0 and change.deleted == 0 for change in first)
 
-    _run(spark, reconcile(projection).statements)
+    _run(catalogue, reconcile(projection).statements)
 
-    second = summarise(projection, read_installation(spark, scope=LAKEHOUSE))
+    second = summarise(projection, read_installation(catalogue, scope=LAKEHOUSE))
     assert all(change.is_noop for change in second)
     assert sum(change.unchanged for change in second) == projection.total
 
@@ -349,13 +340,12 @@ def test_the_summary_reports_inserts_then_no_ops(catalogue, estate):
 def test_the_summary_reports_an_update_when_only_a_non_key_column_changed(
     catalogue, estate
 ):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     rebound = _projection(estate, LAKEHOUSE, target_name="Sales_LH_v2")
     change = compare(
         INSTALLATION,
         rebound.for_table(INSTALLATION),
-        read_table(spark, INSTALLATION, scope=LAKEHOUSE),
+        read_table(catalogue, INSTALLATION, scope=LAKEHOUSE),
     )
     assert (change.inserted, change.updated, change.deleted) == (0, 1, 0)
 
@@ -370,8 +360,7 @@ def test_the_summary_reports_deletes_without_the_statements_depending_on_it(
     summary is a wrong report and never a wrong mutation.
     """
 
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     reduced = project_installation(
         estate,
         retained=["delta:Sales.Region"],
@@ -380,7 +369,7 @@ def test_the_summary_reports_deletes_without_the_statements_depending_on_it(
         weaver_version="9.9.9",
     )
     change = compare(
-        REGISTRY, reduced.for_table(REGISTRY), read_table(spark, REGISTRY, scope=LAKEHOUSE)
+        REGISTRY, reduced.for_table(REGISTRY), read_table(catalogue, REGISTRY, scope=LAKEHOUSE)
     )
     assert change.deleted == 4
 
@@ -398,57 +387,54 @@ def test_the_summary_reports_deletes_without_the_statements_depending_on_it(
 
 
 def test_installation_prune_removes_one_scope_and_leaves_the_other(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     _run(
-        spark,
+        catalogue,
         reconcile(_projection(estate, WAREHOUSE, target_name="Sales_WH")).statements,
     )
 
-    _run(spark, prune_installation(LAKEHOUSE))
+    _run(catalogue, prune_installation(LAKEHOUSE))
 
-    assert all(rows == () for rows in read_installation(spark, scope=LAKEHOUSE).values())
-    warehouse = read_installation(spark, scope=WAREHOUSE)
+    assert all(rows == () for rows in read_installation(catalogue, scope=LAKEHOUSE).values())
+    warehouse = read_installation(catalogue, scope=WAREHOUSE)
     assert warehouse["Registry"]
     assert warehouse["Installation"]
 
 
 def test_repository_prune_removes_both_scopes(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     _run(
-        spark,
+        catalogue,
         reconcile(_projection(estate, WAREHOUSE, target_name="Sales_WH")).statements,
     )
 
-    _run(spark, prune_repository("catalogue-estate"))
+    _run(catalogue, prune_repository("catalogue-estate"))
 
     for scope in (LAKEHOUSE, WAREHOUSE):
-        assert all(rows == () for rows in read_installation(spark, scope=scope).values())
+        assert all(rows == () for rows in read_installation(catalogue, scope=scope).values())
 
 
 def test_pruning_one_repository_leaves_another_alone(catalogue, estate):
-    spark = catalogue
-    _run(spark, reconcile(_projection(estate, LAKEHOUSE)).statements)
+    _run(catalogue, reconcile(_projection(estate, LAKEHOUSE)).statements)
     other = InstallationScope(repository="OtherRepo", target_type="lakehouse")
-    spark.sql(
-        "INSERT INTO `_`.`Registry` VALUES ('OtherRepo', 'lakehouse', 'X', 'Y', "
+    catalogue.sql(
+        "INSERT INTO {{object:_.Registry}} VALUES ('OtherRepo', 'lakehouse', 'X', 'Y', "
         "'table', 'data', 'sig', current_timestamp(), current_timestamp(), "
         "current_timestamp())"
     )
 
-    _run(spark, prune_repository("catalogue-estate"))
+    _run(catalogue, prune_repository("catalogue-estate"))
 
-    assert len(read_table(spark, REGISTRY, scope=other)) == 1
+    assert len(read_table(catalogue, REGISTRY, scope=other)) == 1
 
 
 def test_prune_uncertifies_before_it_removes_the_descriptions(catalogue):
     """Registry first, so nothing is left certified while what described it is gone."""
 
     order = [statement.splitlines()[0] for statement in prune_installation(LAKEHOUSE)]
-    assert "`Registry`" in order[0]
-    assert "`Installation`" in order[1]
-    assert order[-1].endswith("`_`.`SchemaDictionary`")
+    assert "{{object:_.Registry}}" in order[0]
+    assert "{{object:_.Installation}}" in order[1]
+    assert order[-1].endswith("{{object:_.SchemaDictionary}}")
 
 
 def test_partial_dictionary_state_is_repaired_by_the_next_successful_build(
@@ -462,21 +448,20 @@ def test_partial_dictionary_state_is_repaired_by_the_next_successful_build(
     Registry never ran.
     """
 
-    spark = catalogue
     projection = _projection(estate, LAKEHOUSE)
     plan = reconcile(projection)
 
     # Simulate the interrupted build: the first two dictionary tables only.
     for reconciliation in plan.dictionaries[:2]:
-        _run(spark, reconciliation.statements)
+        _run(catalogue, reconciliation.statements)
 
-    read = read_installation(spark, scope=LAKEHOUSE)
+    read = read_installation(catalogue, scope=LAKEHOUSE)
     assert read[plan.dictionaries[0].table.name]
     assert read["Registry"] == (), "nothing may be certified by a failed build"
     assert read["Installation"] == ()
 
     # And now a successful build.
-    _run(spark, plan.statements)
+    _run(catalogue, plan.statements)
 
     for table in CATALOGUE_TABLES:
         expected = {
@@ -485,6 +470,6 @@ def test_partial_dictionary_state_is_repaired_by_the_next_successful_build(
         }
         actual = {
             tuple(row.get(name) for name in table.column_names)
-            for row in read_table(spark, table, scope=LAKEHOUSE)
+            for row in read_table(catalogue, table, scope=LAKEHOUSE)
         }
         assert actual == expected, table.name
