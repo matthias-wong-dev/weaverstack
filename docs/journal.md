@@ -1356,6 +1356,53 @@ repository's object, and refusing it would cost someone a working object over a
 documentation nicety. The pointer is recorded and the text is absent, which is
 why the catalogue keeps `description` and `description_reference` side by side.
 
+### Catalogue checkpoint 1 — one authority for the catalogue's shape
+
+`weaver.catalogue` now owns the fixed representation of all ten tables and the
+rendering of their DML. The point of concentrating it is that the schema is a
+contract between four things that must agree — the built-in SES that materialises
+the tables, the tolerant reader, the projection that fills them, and the SQL that
+writes them. Four independent lists would drift, and drift here fails subtly
+rather than loudly.
+
+**Installation scope is in the key, not beside it.** Every table opens its key
+with `repository` and `target_type`. That is not a convention; it is what makes a
+partial-target build safe *by construction*. There is no way to name a row without
+naming the installation it belongs to, so a comparison or a delete cannot span
+both target types by omission. `CatalogueTable.__post_init__` refuses a definition
+whose key does not open with the scope, and the renderer refuses rows from an
+installation other than the one it was given.
+
+**The one thing not frozen is the clock.** `current_timestamp()` is rendered as a
+call rather than as an instant. A rendered time would change the payload — and so
+the bundle id — on every run, destroying the identity that review and
+certification rest on (§10). The engine supplies the moment; the payload stays
+stable. Rows are sorted by key before rendering for the same reason: a mapping's
+iteration order must not be able to change a bundle.
+
+**Values are typed, and the reason is a Spark detail worth recording.** A `MERGE`
+source is a `SELECT … UNION ALL SELECT …` whose schema comes from its first
+branch, so an uncast `NULL` would type a column by accident and a later branch
+could then fail to match the target. Every value is therefore cast to its declared
+type. Strings escape the backslash as well as the quote, because Spark's default
+parser treats a backslash as an escape.
+
+**Two shapes fell out of the decisions rather than being designed.** A logical key
+has no name — nothing physical is built, so a name would have to be invented — so
+`index_type` and `column_set` are part of its identity. A relationship has no name
+either, and *every* column of `ForeignKeyDictionary` is therefore key: the row is
+the edge. Its only comparison column is the signature, which is right, because an
+edge that points somewhere else is a different edge, not a changed one.
+
+**A live row's delete datetime is a sentinel, not a null.** All three audit
+columns are physically not null, so catalogue DML has to supply
+`9999-12-31 23:59:59.999999`. `AUDIT_LIVE_DELETE_DATETIME` lives with the audit
+columns in `weaver.ses.metadata` rather than in the catalogue, because it is the
+row convention and load will need the same one. It is the SQL Server original's
+choice, and its merit is that "as at" becomes one range predicate instead of a
+null check. Worth revisiting deliberately when load lands rather than inheriting
+by accident.
+
 ---
 
 ## Open questions
