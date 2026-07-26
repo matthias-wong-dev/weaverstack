@@ -14,13 +14,9 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import LocalStore, Location, RepositoryRef
-from weaver.build_bundle.bundle import load_bundle
-from weaver.build_bundle.installer import InstallationEnvironment, install_bundle
-from weaver.build_bundle.planner import generate_build_bundle
-from weaver.build_bundle.targets import LakehouseBinding, TargetBindings
+from weaver import LocalStore, Location
 from weaver.catalogue import (
-    CATALOGUE_REPOSITORY,
+    AUDIT_COLUMN_NAMES,
     CATALOGUE_TABLES,
     DEPENDENCY,
     INSTALLATION,
@@ -29,7 +25,6 @@ from weaver.catalogue import (
     InstallationScope,
     target_type_for_ses_target,
 )
-from weaver.catalogue.builtin import repository_files
 from weaver.catalogue.projection import project_installation
 from weaver.catalogue.reader import read_installation, read_table
 from weaver.catalogue.reconcile import (
@@ -50,27 +45,32 @@ WAREHOUSE = InstallationScope(repository="catalogue-estate", target_type="wareho
 
 @pytest.fixture
 def catalogue(lakehouses, spark):
-    """A real, empty catalogue, built by the ordinary build path."""
+    """Empty catalogue tables of exactly the declared shape.
 
-    resolver, store = lakehouses.resolver, lakehouses.store
-    repository = resolver.repository(RepositoryRef(CATALOGUE_REPOSITORY))
-    for relative, data in repository_files().items():
-        store.write(repository.join(*relative.split("/")), data)
-    bundle = generate_build_bundle(
-        weaver_lakehouse=lakehouses.weaver,
-        repository_name=CATALOGUE_REPOSITORY,
-        targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.weaver)),
-        output=resolver.build_bundle("bootstrap"),
-        host=lakehouses.host,
-        store=store,
-        prune=False,
-        spark=spark,
-    )
-    report = install_bundle(
-        load_bundle(bundle.location, store=store),
-        environment=InstallationEnvironment(store=store, resolver=resolver, spark=spark),
-    )
-    assert report.status == "succeeded"
+    Created directly from the representation rather than through a build, and the
+    distinction matters for what this file is testing. That the *ordinary build
+    path* produces these tables is proved by ``test_catalogue_builtin_build`` and
+    ``test_catalogue_setup``; here the subject is what the DML does to tables of
+    that shape. Going through a full bundle per test cost about forty Spark
+    statements each and pushed the suite past its timeout, for no assertion these
+    tests make.
+
+    ``test_projected_rows_survive_a_round_trip_through_delta`` still pins the shape
+    against the representation, so a table created here that did not match what a
+    build produces would not go unnoticed.
+    """
+
+    tables_root = lakehouses.resolver.tables_root(lakehouses.weaver).value
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS `_` LOCATION '{tables_root}/_'")
+    for table in CATALOGUE_TABLES:
+        columns = ", ".join(
+            f"`{column.name}` {column.type}{' NOT NULL' if column.not_null else ''}"
+            for column in table.columns
+        ) + ", " + ", ".join(f"`{name}` timestamp NOT NULL" for name in AUDIT_COLUMN_NAMES)
+        spark.sql(
+            f"CREATE OR REPLACE TABLE `_`.`{table.name}` ({columns}) USING delta "
+            "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
+        )
     try:
         yield spark
     finally:
@@ -383,10 +383,15 @@ def test_the_summary_reports_deletes_without_the_statements_depending_on_it(
         REGISTRY, reduced.for_table(REGISTRY), read_table(spark, REGISTRY, scope=LAKEHOUSE)
     )
     assert change.deleted == 4
-    # The rendered statements mention no key that is being removed — they name only
-    # what is kept, and delete the complement within the scope.
-    statements = "\n".join(reconcile(reduced).statements)
-    assert "CustomerCsv" not in statements
+
+    # The delete names only what is *kept*, and removes the complement within the
+    # scope — so a row being removed appears nowhere in it. Asserted on the delete
+    # statement rather than on the whole set, because a retained row may mention a
+    # removed object perfectly legitimately: Sales.Region's lineage is
+    # `$Sales.CustomerCsv`, and that is a description, not a key.
+    delete = reconcile(reduced).registry.delete
+    assert "CustomerCsv" not in delete
+    assert "`object_name` <=> CAST('Region' AS STRING)" in delete
 
 
 # --- explicit prune scopes ----------------------------------------------------
