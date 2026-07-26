@@ -24,8 +24,10 @@ from pathlib import Path
 SUPPORTED_PYTHON = (3, 11)
 SUPPORTED_PYSPARK = ("3.5",)
 SUPPORTED_DELTA = ("3.2",)
-#: Spark 3.5 runs on Java 8, 11 or 17. Later JDKs are not supported by it.
-SUPPORTED_JAVA = ("17", "11")
+#: Spark 3.5 documents Java 8, 11 and 17; 21 is not documented but runs the
+#: local Delta suite, so it is accepted rather than preferred. The order is the
+#: discovery preference — `find_java_home` takes the first release it can find.
+SUPPORTED_JAVA = ("17", "11", "21")
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,17 @@ class LocalSparkReport:
 
     @property
     def hints(self) -> tuple[str, ...]:
-        return tuple(check.hint for check in self.checks if not check.ok and check.hint)
+        """What to do about the failures, each said once.
+
+        PySpark and Delta are installed by the same extra, so a machine missing
+        both would otherwise be told to run the same command twice.
+        """
+
+        seen: dict[str, None] = {}
+        for check in self.checks:
+            if not check.ok and check.hint:
+                seen.setdefault(check.hint)
+        return tuple(seen)
 
     def as_dict(self) -> dict:
         return {
@@ -92,24 +104,58 @@ def find_java_home() -> str | None:
     return None
 
 
-def java_version(java_home: str | None) -> str | None:
+def java_launcher(java_home: str | None) -> Path | None:
+    """The ``java`` binary inside a JAVA_HOME, whatever the platform names it.
+
+    Windows ships ``bin/java.exe``; everywhere else it is ``bin/java``. Both
+    names are tried rather than branching on the platform, so the lookup cannot
+    be wrong about the machine it is running on.
+    """
+
     if java_home is None:
         return None
-    java = Path(java_home) / "bin" / "java"
-    if not java.exists():
+    bin_dir = Path(java_home) / "bin"
+    for name in ("java", "java.exe"):
+        candidate = bin_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def parse_java_version(output: str) -> str | None:
+    """The release from `java -version` output: openjdk version "17.0.19" ...
+
+    The banner is not reliably the first line. A JVM started with
+    JAVA_TOOL_OPTIONS or _JAVA_OPTIONS set — a proxy's truststore, a container's
+    defaults — announces those first, so match the banner itself rather than
+    trusting its position. Output that carries no banner is no version at all,
+    not a line to be reported as one.
+
+    Kept apart from the subprocess so the parsing can be tested on every
+    platform, rather than only where a fake `java` script can be executed.
+    """
+
+    for line in output.splitlines():
+        if 'version "' not in line:
+            continue
+        for part in line.split('"'):
+            if part and part[0].isdigit():
+                return part
+    return None
+
+
+def java_version(java_home: str | None) -> str | None:
+    java = java_launcher(java_home)
+    if java is None:
         return None
     try:
+        # `java -version` writes to stderr.
         result = subprocess.run(
             [str(java), "-version"], capture_output=True, text=True, check=True
         )
     except (OSError, subprocess.CalledProcessError):
         return None
-    # `java -version` writes to stderr: openjdk version "17.0.19" 2026-01-20
-    first = (result.stderr or result.stdout).splitlines()[0] if (result.stderr or result.stdout) else ""
-    for part in first.split('"'):
-        if part and part[0].isdigit():
-            return part
-    return first or None
+    return parse_java_version(result.stderr or result.stdout or "")
 
 
 def _installed(package: str) -> str | None:
@@ -117,6 +163,30 @@ def _installed(package: str) -> str | None:
         return version(package)
     except PackageNotFoundError:
         return None
+
+
+#: How to install a package, per platform. A hint naming the wrong package
+#: manager is worse than no hint — it sends someone to a command they do not
+#: have. Keyed by `sys.platform`, with a fallback for everything else.
+INSTALL_COMMANDS = {
+    "jdk": {
+        "darwin": "brew install openjdk@17",
+        "win32": "winget install Microsoft.OpenJDK.17",
+        None: "sudo apt install openjdk-17-jdk   (or your distribution's JDK)",
+    },
+    "azure-cli": {
+        "darwin": "brew install azure-cli",
+        "win32": "winget install Microsoft.AzureCLI",
+        None: "see https://learn.microsoft.com/cli/azure/install-azure-cli",
+    },
+}
+
+
+def install_command(what: str) -> str:
+    """The command that installs ``what`` on this platform."""
+
+    choices = INSTALL_COMMANDS[what]
+    return choices.get(sys.platform, choices[None])
 
 
 def check_local_spark() -> LocalSparkReport:
@@ -142,7 +212,10 @@ def check_local_spark() -> LocalSparkReport:
                 found=found,
                 ok=found is not None and found.rsplit(".", 1)[0] in supported,
                 hint=(
-                    "install the optional extra:  pip install -e '.[spark]'"
+                    # Not `-e '.[spark]'`: someone who installed from PyPI has
+                    # no checkout for `.` to mean, and this is exactly the
+                    # person who has not got Spark.
+                    "install the optional extra:  pip install 'weaverstack[spark]'"
                     if found is None
                     else f"{package} {'/'.join(supported)}.x is expected; "
                     "Spark and Delta are released in lockstep"
@@ -159,7 +232,7 @@ def check_local_spark() -> LocalSparkReport:
             found=f"{found} ({home})" if found else None,
             ok=major in SUPPORTED_JAVA,
             hint=(
-                "install a JDK Spark 3.5 supports:  brew install openjdk@17"
+                f"install a JDK Spark 3.5 supports:  {install_command('jdk')}"
                 if found is None
                 else f"Spark 3.5 runs on Java {', '.join(SUPPORTED_JAVA)}; "
                 f"found {major}. Set JAVA_HOME to a supported JDK."

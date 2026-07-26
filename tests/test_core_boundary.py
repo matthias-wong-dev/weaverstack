@@ -54,3 +54,50 @@ def test_the_cli_depends_on_the_core():
     cli_main = importlib.import_module("weaver_cli.main")
 
     assert cli_main.weaver.__version__
+
+
+# --- the CLI is usable without Spark -----------------------------------------
+#
+# `pip install 'weaverstack[cli]'` is the one command a friend tester runs, and
+# it installs no PySpark. The core is held to this above; the CLI is the surface
+# that person actually touches, so it is held to it too.
+
+CLI = Path(__file__).resolve().parents[1] / "src" / "weaver_cli"
+
+
+def test_the_cli_source_never_names_spark():
+    offenders = []
+    for module in sorted(CLI.rglob("*.py")):
+        source = module.read_text(encoding="utf-8")
+        for name in ("pyspark", "delta"):
+            if f"import {name}" in source or f"from {name}" in source:
+                offenders.append(f"{module.name}: {name}")
+    assert not offenders, f"the CLI imports Spark, which [cli] does not install: {offenders}"
+
+
+def test_the_cli_builds_and_runs_with_spark_unimportable():
+    """The CLI parses and dispatches on a machine where PySpark cannot import.
+
+    Blocking the import is stronger than merely not installing it: the suite
+    runs where PySpark *is* present, so absence has to be simulated. (It does
+    not make `doctor` report Spark missing — that reads package metadata by
+    design, and the package is still installed here. What it proves is that no
+    command path reaches for the module.)
+    """
+
+    probe = (
+        "import sys;"
+        "sys.modules['pyspark'] = None;"  # any `import pyspark` now raises
+        "sys.modules['delta'] = None;"
+        "from weaver_cli.main import build_parser, main;"
+        # Every subcommand's parser is constructed, not just the one dispatched.
+        "build_parser();"
+        "main(['doctor', '--json']);"
+        "print('dispatched')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("dispatched")
+    assert '"pyspark"' in result.stdout

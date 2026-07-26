@@ -263,7 +263,7 @@ that first needs it, not in advance. See the comment in `pyproject.toml`.
 python3.11 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest              # core only — no JVM, under a second
-.venv/bin/python -m pytest -m spark     # local Spark/Delta, needs Java 17
+.venv/bin/python -m pytest -m spark     # local Spark/Delta, needs a JDK
 .venv/bin/weaver --help
 ```
 

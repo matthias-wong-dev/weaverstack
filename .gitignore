@@ -219,3 +219,7 @@ __marimo__/
 
 # Generated build bundles for local inspection
 .sample-bundle/
+
+# Spark's default warehouse directory, created in the working directory by any
+# local Spark run — including `pytest -m spark`
+spark-warehouse/

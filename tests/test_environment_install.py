@@ -204,7 +204,7 @@ def _published_body(wheel: str, yml: str) -> dict:
 
 
 def test_unchanged_source_skips_publish(monkeypatch):
-    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text()
+    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
     wheel = "weaverstack-0.1.1.dev999-py3-none-any.whl"
     events = _wire(
         monkeypatch,
@@ -221,7 +221,7 @@ def test_unchanged_source_skips_publish(monkeypatch):
 
 
 def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
-    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text()
+    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
     old_wheel = "weaverstack-0.1.1.dev111-py3-none-any.whl"
     new_wheel = "weaverstack-0.1.1.dev222-py3-none-any.whl"
     events = _wire(
@@ -240,7 +240,7 @@ def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
 
 
 def test_no_publish_flag_never_publishes(monkeypatch):
-    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text()
+    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
     events = _wire(
         monkeypatch,
         published=_published_body("weaverstack-0.1.1.dev111-py3-none-any.whl", yml),

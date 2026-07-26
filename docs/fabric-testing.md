@@ -7,10 +7,18 @@ and nobody without a tenant is blocked.
 ## Once
 
 ```bash
-brew install azure-cli
+brew install azure-cli                  # macOS
+# Linux:   curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+# Windows: winget install Microsoft.AzureCLI
 az login
-pip install -e '.[dev]'
+pip install -e '.[test,cli]'
 ```
+
+`[test]` is the suite without a JVM — core tests plus these Fabric ones, which
+need credentials and HTTP but no Spark. `[cli]` adds `weaver install`, needed
+below to publish the Environment. Use `[dev]` instead only if you also want
+local Spark; it pulls in PySpark, which is a few hundred megabytes, builds from
+source and does nothing without a JDK.
 
 `az login` is the only authentication Weaver needs — see
 [CLI usage](cli-usage.md#signing-in-to-azure) for what it does and why the

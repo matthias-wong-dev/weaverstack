@@ -49,6 +49,24 @@ def test_the_filesystem_root_survives_normalisation():
     assert Location("/").value == "/"
 
 
+def test_backslashes_are_separators_like_any_other():
+    """A Windows caller arrives with them, and everything here splits on "/".
+
+    `LocalHost` normalises its root through `Path`, so on Windows `str()` of it
+    uses backslashes. Left alone they are not separators to `join` or `name`,
+    and an SES repository read from a Windows checkout takes its whole path as
+    its catalogue name.
+    """
+
+    assert Location("D:\\a\\weaverstack\\sales-etl").value == "D:/a/weaverstack/sales-etl"
+    assert Location("D:\\a\\weaverstack\\sales-etl").name == "sales-etl"
+    assert (Location("\\srv\\.local") / "Sales").value == "/srv/.local/Sales"
+
+
+def test_a_windows_root_still_becomes_a_path():
+    assert Location("C:\\data\\Weaver").path == Path("C:/data/Weaver")
+
+
 def test_name_is_the_final_segment():
     assert (Location(ABFSS) / "Files" / "Budget").name == "Budget"
 

@@ -23,7 +23,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "sql"
 
 
 def _fixture_sql(name):
-    return (FIXTURE_DIR / name).read_text()
+    return (FIXTURE_DIR / name).read_text(encoding="utf-8")
 
 
 def _select_count(sql):

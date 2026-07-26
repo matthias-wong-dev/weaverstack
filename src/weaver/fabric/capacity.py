@@ -93,8 +93,10 @@ def run_capacity_action(
     """Run a capacity action and report the resulting state."""
 
     if shutil.which("az") is None:
+        from ..diagnostics import install_command
+
         raise CapacityError(
-            "the Azure CLI is not installed — install it with: brew install azure-cli"
+            f"the Azure CLI is not installed. Install it:  {install_command('azure-cli')}"
         )
 
     command = capacity_command(

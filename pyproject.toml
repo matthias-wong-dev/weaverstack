@@ -50,12 +50,20 @@ spark = [
     "pyspark>=3.5,<3.6",
     "delta-spark>=3.2,<3.3",
 ]
-dev = [
+# The suite without a JVM: core tests and the Fabric integration tests, which
+# need credentials and HTTP but no Spark. A friend testing against a workspace
+# wants this rather than [dev] — PySpark is a few hundred megabytes, builds from
+# source, and is useless without a JDK.
+#   pytest                      core suite
+#   pytest -m fabric            plus a workspace, a capacity and `az login`
+test = [
     "pytest>=8.4",
     "azure-identity>=1.23",
     "requests>=2.31",
-    "pyspark>=3.5,<3.6",
-    "delta-spark>=3.2,<3.3",
+]
+# Everything: the suite, the Fabric stack and local Spark.
+dev = [
+    "weaverstack[test,spark]",
 ]
 
 [project.scripts]
@@ -81,7 +89,7 @@ packages = ["src/weaver", "src/weaver_cli"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "spark: local Spark/Delta tests, need Java 17 (run with: pytest -m spark)",
+    "spark: local Spark/Delta tests, need a JDK (run with: pytest -m spark)",
     "fabric: opt-in Fabric integration tests, need a workspace and a running capacity (run with: pytest -m fabric)",
 ]
 # Default runs stay fast and need no JVM.
