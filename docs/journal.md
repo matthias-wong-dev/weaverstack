@@ -1457,6 +1457,54 @@ TABLE`, so re-running the bootstrap is idempotent in *shape* and destructive of
 built to hold, plus the drop policy that reads them — the next branch. Only setup
 rebuilds schema `_`, so the exposure is a setup re-run, not an ordinary build.
 
+### Catalogue checkpoint 3 — tolerant reading, and the projection boundary
+
+**The reader's tolerance is deliberately asymmetric.** Two absences are ordinary
+and read as data: a table that does not exist yet (the build that writes the
+catalogue is the build that creates it) and a column an older Weaver never wrote.
+An unexpected extra column is ignored, which is the mirror — a newer catalogue must
+not break an older Weaver. But a permission error, a corrupt Delta log or a broken
+session must **propagate**, because read as "no rows" it would tell the next build
+that nothing is catalogued, and once drop policy lands that is a licence to remove
+an estate. So absence is recognised only by Spark's own
+`TABLE_OR_VIEW_NOT_FOUND` error class — not by message text, which a Spark upgrade
+could reword into a catastrophe. Tolerance is cheap when it is specific and
+dangerous when it is a bare `except`.
+
+A present column is cast to its expected type as well as a missing one, which is
+not obvious: an older catalogue may have stored a boolean as a string, and an
+uncast comparison would rewrite an unchanged row on every build.
+
+**The reader names no Spark API.** `tests/test_core_boundary.py` forbids the core
+from even mentioning `pyspark` in source, lazily or not, and it caught the first
+draft using `pyspark.sql.functions`. The projection is rendered as SQL text
+instead, and the session is duck-typed — which is the existing convention in the
+executors and has the side benefit that a tolerant read is inspectable as a
+statement.
+
+**Projection reads nothing physical.** Every value comes from the validated
+declaration or the repository's own resolved graph. The consequence worth naming:
+because `ColumnDictionary` is descriptive rather than a physical column list, an
+*inferred* Spark SQL or T-SQL table projects completely at plan time even though
+its columns are not known until install. That is what allows the whole catalogue
+to be frozen into the bundle rather than half of it waiting on the engine — and it
+is why keeping ordinals and types out of that table was the right call rather than
+a simplification.
+
+**A cross-engine alias is not a dependency, and the fixture proves it.** Where an
+edge resolved through a `Lakehouse alias`, the dependency row records the *alias*
+name — the name that binds in the consumer's own namespace — and `_.Alias` records
+what it points at. Dependency rows are therefore same-namespace by construction,
+and crossing engines requires the join. `tests/fixtures/catalogue-estate` carries
+the awkward cases together: `Sales.Customer` as both a Delta and a Warehouse
+table, an alias-resolved edge, a three-part physical reference, a
+self-referencing relationship, an identity column, and a column note that points
+at another object's note.
+
+**Schema rows are projected only for schemas the installation uses.** A schema the
+repository declares but this side never created would otherwise be claimed as part
+of an installation that does not contain it.
+
 ---
 
 ## Open questions
