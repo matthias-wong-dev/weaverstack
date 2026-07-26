@@ -155,13 +155,29 @@ So `spark` is **session-scoped** — built once for the whole run — and
 anyway, and the warm-up is not worth paying twice. Lakehouse directories are
 free enough that reusing them would only invite cross-test contamination.
 
-Sharing a session is safe because Weaver addresses Delta by explicit path rather
-than through a metastore, so no catalogue state accumulates between tests.
-Isolation comes from each test's own `tmp_path`.
+Isolation comes from each test's own `tmp_path`, and one shared session needs help
+with that. Delta caches a `DeltaLog` per table **path** — and through it a
+`Snapshot`, a query execution and its encoder — so a suite that builds every table
+under a fresh directory keeps the retained state of every Lakehouse it has already
+deleted. Measured, that is about 5.6 MB of live heap per test, which exhausted the
+default 1 GB driver heap partway through the run. An autouse fixture clears Delta's
+log cache and Spark's plan cache after each test; both are caches, so the cost is
+re-reading a transaction log.
+
+A test that registers a *schema* still has to drop it, because a schema is not a
+cache: two tests present different temporary directories under the same logical
+Lakehouse name, and a schema left registered would send the second test's tables
+into the first test's directory.
 
 ## If a Spark test fails oddly
 
-Almost always one of two things:
+Almost always one of three things:
+
+**The heap.** If a long `-m spark` run starts failing late with a
+`Py4JJavaError` whose message is `<exception str() failed>`, or attributes a
+failure to a test that only starts a session, the driver has run out of heap and
+the named test is a bystander. Check that whatever built a session did not bypass
+the shared `spark` fixture and its cache release.
 
 **A Python version mismatch inside a task.** Spark launches workers with
 `PYSPARK_PYTHON`, which defaults to whatever `python3` resolves to — often the

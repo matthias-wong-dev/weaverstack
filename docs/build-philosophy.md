@@ -660,6 +660,25 @@ runtime catalogue failures to broaden deletion scope.
 This permits identically named schemas or objects to resolve to the wrong
 physical target.
 
+A two-part `Schema.Object` in a generated statement is this anti-pattern, even
+though it looks like the opposite of one. It carries no path and names no
+Lakehouse — and therefore takes whichever Lakehouse the session happens to be
+attached to. Since the session is attached to the Weaver Lakehouse, every
+destination statement written that way aims at the control plane.
+
+An object is instead named logically in the payload and resolved against the
+batch's target at install time:
+
+```sql
+CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS
+SELECT * FROM {{object:DWG.Customer}} WHERE IsActive
+```
+
+On Fabric that resolves to the native four-part name,
+`workspace.lakehouse.schema.object`; the local emulator folds the Lakehouse into
+its one namespace level. Either way the destination is stated, not inherited, and
+one session can build several Lakehouses without switching what it is attached to.
+
 ### Hiding unsupported behaviour behind fallback
 
 A clear `NotImplementedError` is safer than silently switching execution model,
@@ -673,6 +692,20 @@ transport-level values whose meaning was already bound and validated. A
 self-contained query-shape action (§7.3) is not a template: it fixes the object,
 its query and its schema mode, and uses the engine only as a type oracle for the
 one table it names.
+
+Resolving `{{object:Schema.Name}}` against the batch's target is likewise not a
+template. The object, its schema, the statement and the item the batch targets are
+all fixed before the bundle is written; what the installer supplies is only how
+that already-chosen destination spells a name. Freezing the spelling instead would
+cost §10: a Fabric name carries workspace and Lakehouse display names, so two
+bundles of one repository generated against different environments would differ in
+every payload rather than only in their target block — and comparison between
+environments is one of the things canonical hashing exists for.
+
+The same reasoning forbids freezing a schema's `LOCATION`. It is a *resolved
+path*: on Fabric it embeds workspace and item ids, and locally it embeds whichever
+directory the caller was using. A schema-creating action therefore names the
+schema, and the destination decides how to make one.
 
 ---
 

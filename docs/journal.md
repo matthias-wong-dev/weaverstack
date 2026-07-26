@@ -1736,6 +1736,188 @@ directly instead of building a bundle per test, and the bootstrap is shared by e
 read-only assertion, taking that file from 5:13 to 1:39 — so the run completes in
 ~17 minutes rather than timing out. That is mitigation, not a fix.
 
+### It was not the harness: Delta was keeping every Lakehouse the tests threw away
+
+The entry above recorded the combined `-m spark` failure as a harness limitation —
+cumulative degradation of one shared JVM — and proposed process isolation. That
+was a guess, and it was wrong in an instructive way.
+
+Measure the heap *after a forced collection* and the guess collapses. A reading
+taken without one shows garbage, which proves nothing; taken after one it shows
+retention, and the live set climbs about 5.6 MB per test and never comes down.
+Under the default 1 GB driver heap the run reaches the ceiling around test 50,
+after which everything is GC thrash until the JVM gives out — which is why the
+failure attached itself to whichever test happened to be running, including one
+that only starts a session.
+
+A class histogram named it. The heap is Catalyst expression trees of exactly the
+shape an `ExpressionEncoder` builds — `Invoke`, `GetExternalRowField`,
+`ValidateExternalType`, `AssertNotNull` — plus the bytecode generated for them.
+Those belong to Delta: `DeltaLog` caches one instance per table **path**, each
+holding a `Snapshot` whose state is a `Dataset`, and therefore a whole query
+execution and its encoder. Every test builds under a fresh `tmp_path`, so every
+table is a new path, and the cache keeps the snapshot of each one alive long
+after the directory it describes has been deleted.
+
+So the tests were isolated and the session's memory of them was not. The harness
+now clears Delta's log cache and Spark's plan cache after each test. Both are
+caches; the cost is re-reading a transaction log and no answer changes.
+
+| | result | wall clock | live heap |
+|---|---|---|---|
+| before | 2 failed, 6 errors | 5:04 | pinned at the 1 GB ceiling |
+| after | 92 passed | 3:42 | 68–219 MB |
+
+Two things were tried and are *not* in the fix, which is worth recording so they
+are not tried again. Turning Spark's status retention down to the minimum
+(`spark.sql.ui.retainedExecutions` and friends, whose defaults are sized for a
+long-lived cluster with someone watching it) looked like the answer because live
+heap tracked retained executions almost exactly — and made no measurable
+difference, because the correlation was with work done, not with what the
+listeners kept. Raising the heap was never the fix; it moves the ceiling.
+
+### What Fabric actually does with a four-part name
+
+Everything below rests on Fabric's namespace, so it was asked rather than
+recalled. One Livy session, attached to `Play_Lakehouse_1`, driving both
+Lakehouses:
+
+```text
+current_catalog()   spark_catalog
+current_database()  chimcobldhq2alr5c5r6ash5a1m62uav9hgmmpb8dtqn6pav64im8ojf
+SHOW SCHEMAS        Weaver.Play_Lakehouse_1.TestSchema
+                    Weaver.Play_Lakehouse_1.dbo
+```
+
+A Fabric schema is a **three-level name under `spark_catalog`**, so an object is
+four parts. Against a Lakehouse the session was *not* attached to, all of these
+work: `CREATE SCHEMA`, `CREATE OR REPLACE TABLE`, `INSERT`, `SELECT`,
+`CREATE OR REPLACE VIEW` (including a view in one Lakehouse over a table in
+another), `MERGE`, `DELETE`, `DROP TABLE`/`VIEW`/`SCHEMA … CASCADE`,
+`SHOW TABLES IN`, `SHOW VIEWS IN`, `DESCRIBE`, and
+`spark.catalog.tableExists`/`databaseExists`. Nothing needs attaching and nothing
+needs switching.
+
+Three findings shaped the design rather than merely confirming it:
+
+- **`SHOW SCHEMAS IN `ws`.`lh`` is refused.** It encodes the pair and looks it up
+  as a schema. A bare `SHOW SCHEMAS` answers for the attached Lakehouse only. So
+  there is *no* SQL way to enumerate another Lakehouse's schemas, and schema
+  discovery must read storage — which prune already did, and which the journal
+  had already defended for a different reason.
+- **`SHOW TABLES` returns views too.** Tables are `SHOW TABLES` minus
+  `SHOW VIEWS`.
+- **The anticipated failure is real and exact.** An unqualified
+  `CREATE TABLE WvProbe2.Stray` landed in `Weaver.Play_Lakehouse_1.WvProbe2` — the
+  attached Lakehouse — with no error.
+
+`spark.catalog.listDatabases()` and `listTables(...)` are broken in Fabric (they
+re-encode an already-qualified name and fail), so nothing uses them.
+
+### Local Spark cannot be given a catalogue per Lakehouse
+
+The obvious local proxy is one Spark catalogue per Lakehouse:
+`spark.sql.catalog.Sales_LH`. It does not work, and it fails deep rather than
+cleanly. Delta's `DeltaCatalog` extends `DelegatingCatalogExtension`, whose
+delegate is only ever set for `spark_catalog`; registered as an ordinary named
+catalogue its delegate is null, and every statement dies inside the analyzer with
+`INTERNAL_ERROR` or a bare `NullPointerException`. Tried, and recorded so it is
+not tried again.
+
+Local Spark therefore has exactly one namespace level, and the proxy folds the
+Lakehouse into it:
+
+```text
+Fabric   `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`
+local    `Sales_LH__Sales`.`Customer`
+```
+
+That is not Fabric syntax and is not meant to be. What it reproduces is the one
+property Fabric's namespace provides and a bare `Sales.Customer` does not: two
+destinations declaring a schema of the same name stay apart. The fold is in the
+*name* only — the local database still carries an explicit `LOCATION` of
+`<lakehouse>/Tables/<schema>`, so a managed table lands exactly where the Fabric
+layout puts it and the emulator keeps mirroring OneLake. Local simplification does
+not reach the Fabric model.
+
+### The payload names the object; the installer says which Lakehouse
+
+The open question this branch inherited was how destination DDL should be
+addressed. Two answers were available and both are wrong.
+
+Freezing the qualified name into the payload — `CREATE TABLE
+`Weaver`.`Play_LH`.`Sales`.`Customer`` — loses §10. Two bundles of one repository
+generated against dev and prod would then differ in *every payload*, and
+comparison between environments is one of the four things canonical hashing
+exists for. Keeping the bare two-part name loses §9 and §16, which is what was
+already happening.
+
+So the payload names the object logically and the executor resolves it against
+the batch's target:
+
+```sql
+CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS
+SELECT * FROM {{object:DWG.Customer}} WHERE IsActive
+```
+
+This is the substitution §16 permits — "strictly transport-level values whose
+meaning was already bound and validated" — and not the template it forbids. The
+object, its schema, the statement, and which item the batch targets are all fixed
+before the bundle is written. What is supplied late is only how that
+already-chosen destination spells a name, which is the one thing generation
+cannot know without tying the bundle to the environment it ran in. A reviewer
+reading the payload sees the object; the manifest's target block says where it
+goes. A bare two-part name said neither.
+
+View bodies are rewritten in place, so a view built in one destination reads its
+inputs from the same one. Only ordinary two-part references are touched, which is
+exactly the set the reader guarantees resolves inside the repository — anything
+left is a physically-qualified name or a table-valued function, both of them the
+author naming something Weaver does not manage. Nothing else about the text moves:
+same whitespace, same comments, same casing, same delimiters.
+
+### Freezing a schema create was freezing a temporary directory
+
+Following the addressing through turned up a §10 violation that had been sitting
+in every local bundle. `CREATE SCHEMA` needs a `LOCATION` on local Spark, the
+planner asked the resolver for one, and the resolved path went into the payload:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS `Sales` LOCATION '/var/folders/…/pytest-42/Sales_LH/Tables/Sales'
+```
+
+A temporary directory, inside the hashed plan, deciding where a managed table
+lands. On Fabric the same code froze the opposite mistake — no clause and a bare
+two-part name, so the schema was created in the attached Lakehouse.
+
+The action now names the schema and nothing else, and the destination decides how
+to make one. That is not the installer filling in a semantic decision: which
+schema, in which Lakehouse, is settled and in the manifest. It is the same
+transport-level resolution every other action gets, applied to a clause that is
+purely about storage.
+
+### The Fabric build tests were structurally unable to fail
+
+The previous entry predicted this and it held. The fixture attached its Livy
+session to the **target** Lakehouse, so a two-part name happened to land in the
+right place; the write and the read then went through one session catalogue, and
+a table written to the wrong Lakehouse would have been read back from the wrong
+Lakehouse with the assertion passing.
+
+The fixture now attaches to the **Weaver** Lakehouse, which is the production
+model, and both Lakehouses are schema-enabled — the Weaver one because the
+catalogue lives in a schema called `_` and a Lakehouse without schemas cannot
+hold one. Every assertion names the Lakehouse it is about, and the build-bundle
+test checks the resolved *path* as well as the name.
+
+Two tests make the whole claim directly. One session builds the destination,
+writes the catalogue into the Weaver Lakehouse, reads `_.Registry` and
+`_.Installation` back through their fully-qualified names, and checks schema `_`
+is *not* in the destination. Locally, two Lakehouses each declaring `DWG` get two
+separate tables — a row written to one is not in the other, which is precisely
+what `CREATE SCHEMA IF NOT EXISTS DWG` could not deliver when the first Lakehouse
+to register the name won.
+
 ---
 
 ## Open questions
@@ -1754,8 +1936,10 @@ read-only assertion, taking that file from 5:13 to 1:39 — so the run completes
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
 | Should the catalogue be addressed by explicit path rather than by two-part name? | catalogue | **settled: no.** The Spark session is attached to the Weaver Lakehouse — that is the fixed control-plane context, so two-part names in schema `_` are the defined execution context rather than ambient resolution. Destination Lakehouses are the data plane and are addressed through roots resolved from their bindings (`LakehouseSparkLocation`). The local `_` churn is fixture isolation, not architecture. |
-| Destination Delta objects are still built as two-part names, which resolve through the session's catalogue — and the session is attached to Weaver. Locally that works for one destination (the schema carries an explicit `LOCATION`) and breaks for two; on Fabric `schema_location()` is None by design, so the table lands in the attached Lakehouse rather than the destination. `LakehouseSparkLocation` is the seam; using it in the schema sequence and the Lakehouse executors is the work. The Fabric build tests cannot currently see this, because they write and read through the same session catalogue. | catalogue | **open — the next piece of work this implies** |
-| How should `-m spark` run now that it is ~93 tests? | catalogue | open, and a **harness** question: every file passes alone, and one long-lived JVM degrades late in a combined run. Process isolation or a session per group. Not a reason to change catalogue design. |
+| Destination Delta objects are still built as two-part names, which resolve through the session's catalogue — and the session is attached to Weaver. | catalogue | **settled: a payload names its object, the installer names the Lakehouse.** A generated statement carries `{{object:Schema.Name}}` and the executor resolves it against the batch's target — Fabric's four-part name, or the local proxy's folded database name. Freezing the qualified name would have made two bundles of one repository differ in every payload between environments (§10); keeping the two-part name kept the defect. Schema creation stopped being frozen SQL for the same reason: its `LOCATION` was a resolved temporary directory inside the hashed plan. |
+| How should `-m spark` run now that it is ~93 tests? | catalogue | **settled, and it was not a harness limitation.** Delta's `DeltaLog` cache holds a `Snapshot`, and therefore a query execution and its encoder, per table *path*; every test builds under a fresh `tmp_path`, so the cache kept every Lakehouse the suite had thrown away. Clearing it between tests took the run from failing at the 1 GB ceiling in 5:04 to 92 passing in 3:42 with live heap between 68 and 219 MB. No process isolation needed. |
+| Can a destination Lakehouse's schemas be enumerated through Spark? | multi-target | **settled: no, and storage answers instead.** Fabric refuses `SHOW SCHEMAS IN `ws`.`lh`` and a bare `SHOW SCHEMAS` answers only for the attached Lakehouse, so schema discovery reads the destination's `Tables/` area through the store — which prune already did. Views are catalogue-only and are asked of the destination by its four-part name. |
+| Should the local emulator give each Lakehouse its own Spark catalogue? | multi-target | **settled: it cannot.** `DeltaCatalog` extends `DelegatingCatalogExtension` and its delegate is only set for `spark_catalog`; registered as a named catalogue every statement dies in the analyzer. The proxy folds the Lakehouse into the one namespace level Spark offers (`Sales_LH__Sales`), keeping the isolation and leaving storage layout untouched. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
 

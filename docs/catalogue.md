@@ -200,52 +200,85 @@ message text.
 ## The execution model
 
 **The Spark session is attached to the Weaver Lakehouse.** That is the fixed
-control-plane context, which is why the catalogue is reached as ordinary two-part
-names — `` `_`.`Registry` `` means the Weaver Lakehouse's Registry because the
-Weaver Lakehouse is what the session is attached to.
+control-plane context: it is where the session lives, and it is a useful execution
+attachment. It is not what makes an operation land in the right place.
 
-Destination Lakehouses are the **variable data plane**. They are addressed through
-roots resolved from their target bindings, and a build never switches the session's
-current catalogue to reach one:
+Correctness does not depend on it. Every statement names the Lakehouse it is
+about, including the catalogue's own — `` `_`.`Registry` `` would mean "the
+Registry of whatever the session is attached to", which is true today and would
+stop being true the moment anything changed the attachment. Destination Lakehouses
+are the **variable data plane**, and one session addresses all of them:
 
 ```text
-Spark session
-└── attached: Weaver              control plane, fixed
-    ├── _.Installation
-    ├── _.Registry
-    └── …
-Build targets                     data plane, resolved explicitly
-├── Lakehouse A → tables_root, files_root
-├── Lakehouse B → tables_root, files_root
-└── Lakehouse C → tables_root, files_root
+Spark session                      attached to Weaver, for execution
+Weaver Lakehouse                   control plane, named explicitly
+├── _.Installation
+├── _.Registry
+└── …
+Build targets                      data plane, named explicitly
+├── Lakehouse A
+├── Lakehouse B
+└── Lakehouse C
 ```
 
-That separation is what makes one invocation building several Lakehouses possible.
-Switching the current catalogue between targets would make `Sales` in Lakehouse A
-indistinguishable from `Sales` in Lakehouse B; resolved roots keep them apart by
-construction.
+That is what makes one invocation building several Lakehouses possible. Relying on
+the current catalogue would make `Sales` in Lakehouse A indistinguishable from
+`Sales` in Lakehouse B.
+
+### A Lakehouse has two addresses, and a build needs both
 
 ```python
-location = resolver.lakehouse_spark_location(target)
+location = resolver.lakehouse_spark_location(target)   # where the bytes are
 location.table_path("Sales", "Customer")
 location.folder_path("Sales", "Export")
+
+destination = resolver.spark_destination(target)       # what it is called
+destination.qualify("Sales", "Customer")
 ```
 
+On Fabric the second is the native four-part name:
+
+```sql
+CREATE TABLE `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer` …
+--            ^workspace ^lakehouse       ^schema ^object
+```
+
+One session can create, read and drop through that name in any Lakehouse in the
+workspace, and can build a view in one over a table in another. The local
+emulator has one namespace level and cannot be given another, so it folds the
+Lakehouse into that level — `` `Sales_LH__Sales`.`Customer` `` — which is not
+Fabric syntax and is not meant to be. What it reproduces is the property: two
+destinations declaring a schema of the same name stay apart. Storage is untouched
+by the folding.
+
+Both are needed and neither substitutes for the other: a folder is created at a
+path and has no catalogue name, while a view exists only as a name and has no path
+of its own.
+
+`SparkCatalogue` binds a session to one destination and is how every catalogue
+operation is performed — execute, create a schema, list views, ask whether an
+object exists. Enumerating a destination's *schemas* is deliberately not among
+them: Fabric refuses `SHOW SCHEMAS IN `workspace`.`lakehouse``, and a bare
+`SHOW SCHEMAS` answers for the attached Lakehouse only, so schema discovery reads
+the destination's `Tables/` area through the store instead.
+
 Responsibilities stay separated. `ItemRef` identifies the logical item; the host
-adapter resolves the physical roots; the plan carries the item; the installation
-context resolves it once per target; the executor uses it. An executor deriving its
-own path would be re-deciding where an action lands, which is a planning decision.
+adapter resolves both addresses; the plan carries the item; the installation
+context resolves it once per target; the executor uses it. An executor deriving
+either for itself would be re-deciding where an action lands, which is a planning
+decision.
 
 Two things worth knowing:
 
-- On Fabric a Lakehouse has **two** addresses — the DFS location the store lists
-  through, and the `abfss://` root Spark reads and writes through.
+- On Fabric a Lakehouse has two *storage* addresses as well — the DFS location the
+  store lists through, and the `abfss://` root Spark reads and writes through.
   `LakehouseSparkLocation` carries the second; target *inspection* lists through
   the first.
-- A resolved root is deliberately **not** in the bundle. It embeds workspace and
-  item ids on Fabric and a temporary directory locally, so a bundle carrying one
-  would not be comparable between environments (build-philosophy §10). The bundle
-  names the item; the installer resolves it.
+- Neither address is in the bundle. Both embed workspace and item ids on Fabric,
+  and a temporary directory locally, so a bundle carrying one would not be
+  comparable between environments (build-philosophy §10). The bundle names the
+  item; the installer resolves it. That is why a payload says
+  `{{object:_.Registry}}` and not the qualified name.
 
 ## What this branch does not do yet
 
