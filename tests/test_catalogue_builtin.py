@@ -245,3 +245,36 @@ def test_the_query_column_order_matches_the_declared_order(builtin):
         body = builtin[table.qualified].sql_body or ""
         positions = [body.index(f"`{column.name}`") for column in table.columns]
         assert positions == sorted(positions), table.name
+
+
+# --- the resources reach an installed wheel -----------------------------------
+
+
+def test_the_ses_resources_are_packaged_into_a_built_wheel(tmp_path):
+    """Built, not assumed. A Fabric Environment installs a wheel, not this checkout.
+
+    Hatch includes package data by default, so nothing declares these files
+    explicitly — which is exactly why it is worth a test: a change to the build
+    configuration could drop them and every other test here would still pass, since
+    they read from the source tree.
+    """
+
+    import subprocess
+    import sys
+    import zipfile
+    from pathlib import Path
+
+    project = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(tmp_path)],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"wheel build unavailable here: {result.stderr.strip()[-200:]}")
+
+    (wheel,) = tmp_path.glob("*.whl")
+    packaged = set(zipfile.ZipFile(wheel).namelist())
+    for relative in render_sources():
+        assert f"weaver/builtin/catalogue/{relative}" in packaged, relative
