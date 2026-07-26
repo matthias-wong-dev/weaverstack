@@ -1,0 +1,308 @@
+"""Addressing a *named* Spark destination — no session, no JVM.
+
+The behaviour under test is the one the whole multi-target change rests on: a
+statement says which Lakehouse it means, instead of inheriting one from whatever
+the session is attached to.
+
+The two hosts answer differently, and the difference is data:
+
+===========  ==================================================
+Fabric       ```Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer```
+local        ```Sales_LH__Sales`.`Customer```
+===========  ==================================================
+
+Fabric's shape was confirmed against a real workspace before it was built on:
+four-part DDL, DML, ``MERGE``, cross-Lakehouse views and drops all work from one
+session, and a bare two-part name lands in the attached Lakehouse. The local
+shape is a proxy, not an imitation — local Spark cannot be given a catalogue per
+Lakehouse, because Delta's catalogue can only be the session catalogue.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from weaver.errors import IdentityError, InstallError
+from weaver.spark import (
+    SparkCatalogue,
+    expand,
+    fabric_destination,
+    local_destination,
+    object_token,
+    schema_token,
+)
+
+
+@pytest.fixture
+def fabric():
+    return fabric_destination(workspace="Weaver", lakehouse="Play_Lakehouse_1")
+
+
+@pytest.fixture
+def local():
+    return local_destination(item="Sales_LH", tables_root="/root/Sales_LH/Tables")
+
+
+# --- Fabric: the native namespace ---------------------------------------------
+
+
+def test_fabric_qualifies_an_object_with_all_four_parts(fabric):
+    assert fabric.qualify("Sales", "Customer") == (
+        "`Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`"
+    )
+
+
+def test_fabric_qualifies_a_schema_with_the_three_that_name_it(fabric):
+    """A Fabric schema *is* a three-level name under ``spark_catalog``."""
+
+    assert fabric.qualified_schema("Sales") == "`Weaver`.`Play_Lakehouse_1`.`Sales`"
+
+
+def test_a_fabric_schema_needs_no_location(fabric):
+    """A schema-enabled Lakehouse pins its own managed tables.
+
+    Which is as well: a location would be an ``abfss://`` root carrying workspace
+    and item ids, and that cannot go anywhere near a payload.
+    """
+
+    assert fabric.schema_location("Sales") is None
+
+
+def test_two_fabric_lakehouses_are_different_places(fabric):
+    other = fabric_destination(workspace="Weaver", lakehouse="Play_Lakehouse_2")
+    assert fabric.qualify("Sales", "Customer") != other.qualify("Sales", "Customer")
+
+
+# --- local: the proxy ----------------------------------------------------------
+
+
+def test_local_folds_the_lakehouse_into_the_one_namespace_level_it_has(local):
+    assert local.qualify("Sales", "Customer") == "`Sales_LH__Sales`.`Customer`"
+    assert local.qualified_schema("Sales") == "`Sales_LH__Sales`"
+
+
+def test_a_local_schema_is_pinned_under_the_lakehouse_tables_area(local):
+    """The fold is in the name only — storage still mirrors OneLake."""
+
+    assert local.schema_location("Sales") == "/root/Sales_LH/Tables/Sales"
+
+
+def test_two_local_lakehouses_sharing_a_schema_name_stay_apart(local):
+    """The defect the fold exists to remove.
+
+    Before it, both destinations declared a database called ``Sales`` and
+    ``CREATE SCHEMA IF NOT EXISTS`` meant the first one to register it won —
+    silently, taking the second Lakehouse's tables with it.
+    """
+
+    other = local_destination(item="Inventory_LH", tables_root="/root/Inventory_LH/Tables")
+
+    assert local.qualify("Sales", "Customer") != other.qualify("Sales", "Customer")
+    assert local.schema_location("Sales") != other.schema_location("Sales")
+
+
+def test_a_lakehouse_name_local_spark_cannot_hold_is_refused():
+    """Refused rather than sanitised: a silently altered name could collide again."""
+
+    with pytest.raises(IdentityError, match="letters, digits and underscores"):
+        local_destination(item="Sales LH", tables_root="/root/x")
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "a.b", "a/b", "a\\b"])
+def test_a_name_carrying_a_separator_is_refused(local, bad):
+    with pytest.raises(IdentityError):
+        local.qualify(bad, "Customer")
+    with pytest.raises(IdentityError):
+        local.qualify("Sales", bad)
+
+
+def test_a_backtick_in_a_name_is_doubled_not_dropped():
+    destination = local_destination(item="Sales_LH", tables_root="/root")
+    assert destination.qualify("Sales", "Odd`Name") == "`Sales_LH__Sales`.`Odd``Name`"
+
+
+# --- tokens: what a payload carries instead of a destination -------------------
+
+
+def test_a_payload_names_the_object_and_nothing_about_where_it_lives():
+    assert object_token("Sales", "Customer") == "{{object:Sales.Customer}}"
+    assert schema_token("Sales") == "{{schema:Sales}}"
+
+
+def test_the_same_payload_resolves_differently_per_destination(fabric, local):
+    """The property that keeps a bundle comparable between environments.
+
+    One set of bytes, generated once; the destination decides how it reads. Had
+    the qualified name been frozen instead, two bundles of the same repository
+    would differ in every payload merely for having been generated in different
+    workspaces (build-philosophy §10).
+    """
+
+    payload = (
+        "CREATE OR REPLACE VIEW {{object:Sales.ActiveCustomer}} AS\n"
+        "SELECT * FROM {{object:Sales.Customer}} WHERE IsActive"
+    )
+
+    assert expand(payload, fabric) == (
+        "CREATE OR REPLACE VIEW `Weaver`.`Play_Lakehouse_1`.`Sales`.`ActiveCustomer` AS\n"
+        "SELECT * FROM `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer` WHERE IsActive"
+    )
+    assert expand(payload, local) == (
+        "CREATE OR REPLACE VIEW `Sales_LH__Sales`.`ActiveCustomer` AS\n"
+        "SELECT * FROM `Sales_LH__Sales`.`Customer` WHERE IsActive"
+    )
+
+
+def test_a_schema_token_resolves_too(fabric):
+    assert expand("DROP SCHEMA IF EXISTS {{schema:Legacy}} CASCADE", fabric) == (
+        "DROP SCHEMA IF EXISTS `Weaver`.`Play_Lakehouse_1`.`Legacy` CASCADE"
+    )
+
+
+def test_an_unknown_token_is_refused_rather_than_passed_through(fabric):
+    """It would reach Spark as either a syntax error or, worse, a valid name."""
+
+    with pytest.raises(InstallError, match=r"\{\{lakehouse:Other\}\}"):
+        expand("SELECT * FROM {{lakehouse:Other}}", fabric)
+
+
+def test_text_with_no_tokens_is_returned_unchanged(fabric):
+    assert expand("SELECT 1", fabric) == "SELECT 1"
+
+
+# --- catalogue operations, against a fake session ------------------------------
+
+
+class _Row:
+    def __init__(self, **data):
+        self._data = data
+
+    def asDict(self):
+        return dict(self._data)
+
+
+class _Frame:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def collect(self):
+        return self._rows
+
+
+class _Catalog:
+    def __init__(self, databases=(), tables=()):
+        self.databases = set(databases)
+        self.tables = set(tables)
+
+    def databaseExists(self, name):
+        return name in self.databases
+
+    def tableExists(self, name):
+        return name in self.tables
+
+
+class _Spark:
+    """Records what it was asked, and answers listings from a fixed inventory."""
+
+    def __init__(self, listings=None, catalog=None):
+        self.executed = []
+        self._listings = listings or {}
+        self.catalog = catalog or _Catalog()
+
+    def sql(self, statement):
+        self.executed.append(statement)
+        if statement in self._listings:
+            return _Frame(self._listings[statement])
+        if statement.startswith(("SHOW VIEWS", "SHOW TABLES")):
+            raise RuntimeError("[SCHEMA_NOT_FOUND] no such schema")
+        return None
+
+
+def test_creating_a_schema_locally_pins_its_storage(local):
+    spark = _Spark()
+    statement = SparkCatalogue(spark, local).create_schema("Sales")
+
+    assert statement == (
+        "CREATE SCHEMA IF NOT EXISTS `Sales_LH__Sales` "
+        "LOCATION '/root/Sales_LH/Tables/Sales'"
+    )
+    assert spark.executed == [statement]
+
+
+def test_creating_a_schema_on_fabric_names_the_lakehouse_and_no_path(fabric):
+    spark = _Spark()
+    statement = SparkCatalogue(spark, fabric).create_schema("Sales")
+
+    assert statement == "CREATE SCHEMA IF NOT EXISTS `Weaver`.`Play_Lakehouse_1`.`Sales`"
+    assert "LOCATION" not in statement
+
+
+def test_a_statement_run_through_the_catalogue_is_addressed_first(local):
+    spark = _Spark()
+    SparkCatalogue(spark, local).sql("DROP TABLE IF EXISTS {{object:Sales.Old}}")
+
+    assert spark.executed == ["DROP TABLE IF EXISTS `Sales_LH__Sales`.`Old`"]
+
+
+def test_listing_views_asks_the_destination_not_the_session(fabric):
+    spark = _Spark(
+        listings={
+            "SHOW VIEWS IN `Weaver`.`Play_Lakehouse_1`.`Sales`": [
+                _Row(viewName="active", isTemporary=False),
+                _Row(viewName="scratch", isTemporary=True),
+            ]
+        }
+    )
+    assert SparkCatalogue(spark, fabric).views("Sales") == ("active",)
+
+
+def test_listing_tables_takes_the_views_back_out(fabric):
+    """``SHOW TABLES`` returns views as well — confirmed in a real workspace."""
+
+    spark = _Spark(
+        listings={
+            "SHOW TABLES IN `Weaver`.`Play_Lakehouse_1`.`Sales`": [
+                _Row(tableName="customer", isTemporary=False),
+                _Row(tableName="active", isTemporary=False),
+            ],
+            "SHOW VIEWS IN `Weaver`.`Play_Lakehouse_1`.`Sales`": [
+                _Row(viewName="active", isTemporary=False)
+            ],
+        }
+    )
+    assert SparkCatalogue(spark, fabric).tables("Sales") == ("customer",)
+
+
+def test_a_schema_that_is_not_there_holds_nothing(fabric):
+    """Both hosts raise for an absent schema; an inventory wants "empty"."""
+
+    assert SparkCatalogue(_Spark(), fabric).views("Sales") == ()
+
+
+def test_a_failure_that_is_not_absence_still_propagates(fabric):
+    class Angry(_Spark):
+        def sql(self, statement):
+            raise RuntimeError("the cluster is on fire")
+
+    with pytest.raises(RuntimeError, match="on fire"):
+        SparkCatalogue(Angry(), fabric).views("Sales")
+
+
+def test_existence_is_asked_of_the_qualified_name(fabric):
+    spark = _Spark(
+        catalog=_Catalog(
+            databases={"`Weaver`.`Play_Lakehouse_1`.`Sales`"},
+            tables={"`Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`"},
+        )
+    )
+    catalogue = SparkCatalogue(spark, fabric)
+
+    assert catalogue.schema_exists("Sales")
+    assert catalogue.exists("Sales", "Customer")
+    assert not catalogue.exists("Sales", "Missing")
+    assert not catalogue.schema_exists("Missing")
+
+
+def test_a_catalogue_without_a_session_is_refused_at_construction(fabric):
+    with pytest.raises(InstallError, match="Play_Lakehouse_1"):
+        SparkCatalogue(None, fabric)
