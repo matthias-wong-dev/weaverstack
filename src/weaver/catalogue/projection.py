@@ -125,8 +125,9 @@ def project_installation(
             _external_dependency_rows(document, scope, signature)
         )
 
-    rows[DEPENDENCY.name].extend(
-        _managed_dependency_rows(repository, retained, scope)
+    rows[DEPENDENCY.name] = _merged_dependency_rows(
+        managed=_managed_dependency_rows(repository, retained, scope),
+        external=rows[DEPENDENCY.name],
     )
     rows[SCHEMA_DICTIONARY.name].extend(
         _schema_rows(repository, documents, scope)
@@ -397,6 +398,35 @@ def _external_dependency_rows(
             }
         )
     return rows
+
+
+def _merged_dependency_rows(
+    *, managed: list[Row], external: list[Row]
+) -> list[Row]:
+    """Managed and physically-named dependencies, with one row per edge.
+
+    The two can collide, narrowly: the first part of a three-part name is a
+    physical item, and an item may happen to share its name with the repository. A
+    repository called ``Sales_LH`` reading ``Sales_LH.Sales.Customer`` would then
+    project the same key twice, and a Delta merge fails when two source rows match
+    one target row.
+
+    The managed row wins, because it says more: it was resolved against the
+    repository graph, so ``is_within_repository`` is true and the edge is one
+    Weaver orders builds by.
+    """
+
+    by_key: dict[tuple, Row] = {}
+    for row in managed + external:
+        key = (
+            row["schema_name"],
+            row["object_name"],
+            row["dependency_repository"],
+            row["dependency_schema_name"],
+            row["dependency_object_name"],
+        )
+        by_key.setdefault(key, row)
+    return list(by_key.values())
 
 
 def _managed_dependency_rows(

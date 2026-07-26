@@ -839,7 +839,6 @@ def _catalogue_sequences(
     build that pruned it here would read a missing Warehouse binding as a deletion.
     """
 
-    from ..catalogue import target_type_for_ses_target
     from ..catalogue.projection import project_installation
     from ..catalogue.reconcile import reconcile, summarise
     from ..catalogue.render import InstallationScope
@@ -850,11 +849,12 @@ def _catalogue_sequences(
         # materialised nothing has not installed the repository.
         return ()
 
+    # The installation's target type is the bound target's kind — the two
+    # vocabularies are the same two words, deliberately. Taking it from the
+    # binding rather than inferring it from a retained node means the scope comes
+    # from what the caller actually bound, which is the thing that decides it.
     scope = InstallationScope(
-        repository=repository.name,
-        target_type=target_type_for_ses_target(
-            target_kind_of_node(projection.retained[0])
-        ),
+        repository=repository.name, target_type=target.kind
     )
     installation = project_installation(
         repository,

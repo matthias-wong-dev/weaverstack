@@ -395,3 +395,23 @@ def test_a_nullable_key_column_cannot_be_declared():
                 CatalogueColumn("signature", not_null=True, description="x"),
             ),
         )
+
+
+def test_a_signature_in_the_key_cannot_be_declared():
+    """It must compare, because that is what makes a changed source file a changed row.
+
+    In the key it would leave the table with nothing to compare and the merge's
+    MATCHED guard empty.
+    """
+
+    with pytest.raises(ValueError, match="never part of the key"):
+        CatalogueTable(
+            name="Bad",
+            description="x",
+            key=("repository", "target_type", "signature"),
+            columns=(
+                CatalogueColumn("repository", not_null=True, description="x"),
+                CatalogueColumn("target_type", not_null=True, description="x"),
+                CatalogueColumn("signature", not_null=True, description="x"),
+            ),
+        )

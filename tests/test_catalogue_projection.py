@@ -521,3 +521,95 @@ def test_projecting_twice_produces_identical_rows(repository):
         assert sorted(map(repr, first.rows[table_name])) == sorted(
             map(repr, second.rows[table_name])
         ), table_name
+
+
+# --- the narrow collision between a managed and a physical dependency ----------
+
+
+def test_a_repository_named_like_the_item_it_reads_projects_one_edge_not_two(tmp_path):
+    """The first part of a three-part name is an item, and an item may share a name.
+
+    A repository called ``Sales_LH`` reading ``Sales_LH.Sales.Customer`` would
+    otherwise project one key twice, and a Delta merge fails when two source rows
+    match one target row. The managed row wins because it says more.
+    """
+
+    import shutil
+
+    from weaver.catalogue import DEPENDENCY
+
+    root = tmp_path / "Sales_LH"
+    shutil.copytree(FIXTURE, root)
+    named = read_repository(Location(value=str(root)), store=LocalStore(), name="Sales_LH")
+    scope = InstallationScope(repository="Sales_LH", target_type="warehouse")
+    projection = project_installation(
+        named,
+        retained=[
+            document.node_id
+            for document in named.documents
+            if document.target_kind == "sql"
+        ],
+        scope=scope,
+        target_name="Sales_WH",
+        weaver_version="9.9.9",
+    )
+    keys = [
+        (
+            row["object_name"],
+            row["dependency_repository"],
+            row["dependency_schema_name"],
+            row["dependency_object_name"],
+        )
+        for row in projection.for_table(DEPENDENCY)
+    ]
+    assert len(keys) == len(set(keys)), keys
+    # Here the physical reference stands alone — the Warehouse Sales.Customer has
+    # no managed edge to a "Customer" — so it is recorded as leaving the repository
+    # even though the item and the repository now share a name.
+    row = _row(
+        projection, DEPENDENCY, object_name="Customer", dependency_object_name="Customer"
+    )
+    assert row["is_within_repository"] is False
+
+
+def test_the_managed_reading_wins_when_the_two_do_collide():
+    """The preference, tested directly, since the collision needs a contrived name.
+
+    A managed row says more: it was resolved against the repository graph, so it is
+    an edge Weaver orders builds by rather than a name it merely noticed.
+    """
+
+    from weaver.catalogue.projection import _merged_dependency_rows
+
+    base = {
+        "repository": "Sales_LH",
+        "target_type": "warehouse",
+        "schema_name": "Rpt",
+        "object_name": "Report",
+        "dependency_repository": "Sales_LH",
+        "dependency_schema_name": "Sales",
+        "dependency_object_name": "Customer",
+        "signature": "abc",
+    }
+    merged = _merged_dependency_rows(
+        managed=[{**base, "is_within_repository": True}],
+        external=[{**base, "is_within_repository": False}],
+    )
+    assert len(merged) == 1
+    assert merged[0]["is_within_repository"] is True
+
+
+def test_duplicate_keys_are_refused_at_generation_not_discovered_at_install(repository):
+    from weaver.catalogue import REGISTRY, render_merge
+
+    row = {
+        "repository": "catalogue-estate",
+        "target_type": "lakehouse",
+        "schema_name": "Sales",
+        "object_name": "Customer",
+        "object_type": "table",
+        "object_role": "data",
+        "signature": "abc",
+    }
+    with pytest.raises(ValueError, match="duplicated key"):
+        render_merge(REGISTRY, [row, {**row, "signature": "def"}], scope=LAKEHOUSE)

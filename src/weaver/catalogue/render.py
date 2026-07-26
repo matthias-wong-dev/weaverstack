@@ -163,6 +163,7 @@ def render_merge(
     if not rows:
         return None
     _check_scope(table, rows, scope)
+    _check_unique_keys(table, rows)
 
     columns = table.column_names
     source = "\n        UNION ALL ".join(
@@ -287,6 +288,31 @@ def render_delete_repository(table: CatalogueTable, *, repository: str) -> str:
         f"DELETE FROM {qualified_name(table)}\n"
         f" WHERE {identifier(SCOPE_REPOSITORY)} = {literal(repository)}\n"
     )
+
+
+def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
+    """Refuse a merge whose source holds two rows with one key.
+
+    Delta fails a ``MERGE`` when several source rows match one target row, and it
+    fails at *install* time — long after the bundle was reviewed. Catching it here
+    turns a late, obscure runtime error into a generation error naming the table
+    and the key, and it means a duplicate can only be a projection fault rather
+    than a mystery.
+    """
+
+    seen: dict[tuple, int] = {}
+    for row in rows:
+        key = tuple(row.get(name) for name in table.key)
+        seen[key] = seen.get(key, 0) + 1
+    duplicated = [key for key, count in seen.items() if count > 1]
+    if duplicated:
+        shown = "; ".join(
+            ", ".join(str(part) for part in key) for key in duplicated[:3]
+        )
+        raise ValueError(
+            f"{table.qualified}: {len(duplicated)} duplicated key(s) in the projected "
+            f"rows ({shown}) — a merge source must hold one row per key"
+        )
 
 
 def _check_scope(

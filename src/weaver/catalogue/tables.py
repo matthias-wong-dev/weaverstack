@@ -136,6 +136,13 @@ class CatalogueTable:
         missing = [name for name in self.key if name not in not_nullable]
         if missing:
             raise ValueError(f"{self.name}: key columns must be not null: {missing}")
+        if SIGNATURE in self.key:
+            # It must be a comparison column, because that is what makes a changed
+            # source file a changed row. In the key it would leave a table with
+            # nothing to compare, and the merge's MATCHED guard would be empty.
+            raise ValueError(
+                f"{self.name}: signature is a comparison column, never part of the key"
+            )
 
     @property
     def qualified(self) -> str:
