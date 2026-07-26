@@ -444,3 +444,42 @@ def test_prune_uncertifies_before_it_removes_the_descriptions(catalogue):
     assert "`Registry`" in order[0]
     assert "`Installation`" in order[1]
     assert order[-1].endswith("`_`.`SchemaDictionary`")
+
+
+def test_partial_dictionary_state_is_repaired_by_the_next_successful_build(
+    catalogue, estate
+):
+    """Why the dictionaries need no all-or-nothing transaction.
+
+    A build that failed midway through the dictionaries leaves some tables written
+    and others not. The next successful build converges them by ordinary row
+    comparison — there is nothing to roll back, and nothing was certified, because
+    Registry never ran.
+    """
+
+    spark = catalogue
+    projection = _projection(estate, LAKEHOUSE)
+    plan = reconcile(projection)
+
+    # Simulate the interrupted build: the first two dictionary tables only.
+    for reconciliation in plan.dictionaries[:2]:
+        _run(spark, reconciliation.statements)
+
+    read = read_installation(spark, scope=LAKEHOUSE)
+    assert read[plan.dictionaries[0].table.name]
+    assert read["Registry"] == (), "nothing may be certified by a failed build"
+    assert read["Installation"] == ()
+
+    # And now a successful build.
+    _run(spark, plan.statements)
+
+    for table in CATALOGUE_TABLES:
+        expected = {
+            tuple(row.get(name) for name in table.column_names)
+            for row in projection.for_table(table)
+        }
+        actual = {
+            tuple(row.get(name) for name in table.column_names)
+            for row in read_table(spark, table, scope=LAKEHOUSE)
+        }
+        assert actual == expected, table.name
