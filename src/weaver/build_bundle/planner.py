@@ -429,10 +429,11 @@ def _prune_sequence(
 
     actions: list[BuildAction] = []
 
-    # Views (catalog only): drop those not managed, per schema that survives (an
-    # orphan schema is dropped whole below, taking its views with it). Enumerated
-    # by bare schema name so it resolves in the session's own Lakehouse — Fabric's
-    # SHOW DATABASES returns qualified `Workspace.Lakehouse.schema` names.
+    # Views (catalogue only, since a view is not a directory): drop those not
+    # managed, per schema that survives — an orphan schema is dropped whole below
+    # and takes its views with it. Asked of the *destination's* catalogue, so a
+    # build reconciling a Lakehouse the session is not attached to sees that
+    # Lakehouse's views rather than the control plane's.
     if catalogue is not None:
         for schema in existing_schemas:
             if schema.lower() in orphan_schemas:
@@ -985,10 +986,6 @@ def _with_identity(plan: BuildPlan) -> BuildPlan:
     from dataclasses import replace
 
     return replace(plan, bundle_id=compute_bundle_id(plan))
-
-
-def _ident(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"
 
 
 def _sql_literal(value: str) -> str:
