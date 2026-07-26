@@ -19,6 +19,7 @@ generation builds on it at the next checkpoint.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -26,6 +27,8 @@ from ..errors import BuildError
 from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, Host
 from ..locations import Location
 from ..resolution import resolver_for
+from ..spark import SparkCatalogue, object_token, schema_token
+from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..ses.graph import Graph
 from ..ses.metadata import TABLE, VIEW, DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from ..ses.repository import SesRepository, read_repository
@@ -44,6 +47,9 @@ from .models import (
     PRUNE_SCHEMA,
     PRUNE_TABLE,
     PRUNE_VIEW,
+    PUBLISH_REGISTRY,
+    RECONCILE_CATALOGUE,
+    RECORD_INSTALLATION,
     BuildAction,
     BuildBatch,
     BuildPlan,
@@ -51,11 +57,15 @@ from .models import (
     OmittedNode,
 )
 from .payloads import (
+    CATALOGUE_SEQUENCE,
     FOLDER_SEQUENCE,
+    INSTALLATION_SEQUENCE,
     OBJECT_SEQUENCE_START,
     OBJECT_SEQUENCE_STEP,
     PRUNE_SEQUENCE,
+    REGISTRY_SEQUENCE,
     SCHEMA_SEQUENCE,
+    check_sequence_headroom,
     payload_path,
     sha256_hex,
 )
@@ -64,8 +74,13 @@ from .payloads import (
 _RESERVED_FILES_AREAS = frozenset({REPOS_AREA, BUILD_BUNDLES_AREA})
 
 #: Schemas a prune never touches. A schema-enabled Fabric Lakehouse has a default
-#: ``dbo`` schema that cannot be dropped and that Weaver does not manage.
-_RESERVED_SCHEMAS = frozenset({"dbo"})
+#: ``dbo`` schema that cannot be dropped and that Weaver does not manage; ``_``
+#: holds Weaver's own catalogue, which no application repository owns. An
+#: application build normally cannot see `_` at all — it lives in the Weaver
+#: Lakehouse and prune is scoped to the bound destination's own storage — but a
+#: repository built *into* the Weaver Lakehouse would, and a prune that dropped
+#: the catalogue would take the record of every installation with it.
+_RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, BoundTarget, TargetBindings
 
 #: Which physical binding an SES target kind needs. Folders and Delta tables
@@ -185,6 +200,7 @@ def generate_build_bundle(
     host: Host,
     store: Store,
     prune: bool = True,
+    catalogue: bool = True,
     spark: Any = None,
     sql: Any = None,
 ) -> BuildBundle:
@@ -201,6 +217,12 @@ def generate_build_bundle(
     pass ``prune=False`` to opt out when it is not. ``spark`` lets the inspection
     see catalog views; without it, prune still reconciles tables, folders and
     schemas from storage.
+
+    ``catalogue`` (default on) appends the central catalogue's reconciliation after
+    all physical work, against the Weaver Lakehouse rather than the destination.
+    Pass ``catalogue=False`` for a build that must not record itself — the tables
+    have to exist for the statements to run, so a repository built before setup
+    would otherwise fail at the last barrier.
     """
 
     binding = _single_binding(targets)
@@ -210,6 +232,7 @@ def generate_build_bundle(
     repository = read_repository(repo_location, store=store, name=repository_name)
 
     bound_target = binding.to_bound_target()
+    control_target = _control_target(weaver_lakehouse, bound_target)
 
     projection = project(
         repository.dependency_graph, bound_target_kinds=targets.bound_target_kinds
@@ -219,12 +242,26 @@ def generate_build_bundle(
         repository, projection, bound_target, resolver, store, prune, spark, sql, host
     )
 
+    bound_targets = (bound_target,)
+    if catalogue:
+        catalogue_sequences = _catalogue_sequences(
+            repository=repository,
+            projection=projection,
+            target=bound_target,
+            control_target=control_target,
+            payloads=payloads,
+            spark=spark,
+        )
+        sequences = sequences + catalogue_sequences
+        if control_target.id != bound_target.id:
+            bound_targets = bound_targets + (control_target,)
+
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name=repository_name,
         repository_signature=repository.signature,
-        targets=(bound_target,),
+        targets=bound_targets,
         sequences=sequences,
         omitted_nodes=projection.omitted,
     )
@@ -310,6 +347,7 @@ def _plan_sequences(
     object_graph = projection.graph.subgraph(object_nodes)
     for index, layer in enumerate(object_graph.layers()):
         number = OBJECT_SEQUENCE_START + index * OBJECT_SEQUENCE_STEP
+        check_sequence_headroom(number)
         sequences.append(
             _object_layer_sequence(number, list(layer), documents, target, payloads)
         )
@@ -355,17 +393,32 @@ def _prune_sequence(
 ) -> BuildSequence | None:
     """Inspect the target now and freeze a concrete DROP for each unmanaged object.
 
-    The build reads the target's own storage (and, with a session, its catalog)
-    and emits visible drops — ``DROP TABLE``/``VIEW``/``DATABASE`` as Spark SQL
+    The build reads the target's own storage (and, with a session, its catalogue)
+    and emits visible drops — ``DROP TABLE``/``VIEW``/``SCHEMA`` as Spark SQL
     payloads, an unmanaged folder as a directory-removing action. The installer
     runs exactly these; it never enumerates. Reconciliation is scoped to the one
-    bound Lakehouse's ``Tables``/``Files`` storage, so a shared catalog cannot
+    bound Lakehouse's ``Tables``/``Files`` storage, so a shared catalogue cannot
     make a build reach into another Lakehouse.
+
+    Both halves of the inspection now name the Lakehouse being reconciled, which
+    is what makes reconciling a Lakehouse other than the attached one correct
+    rather than lucky.
     """
 
+    # Store addressing, not Spark addressing: inspection *lists* the target, and
+    # on Fabric that is the DFS location, while a LakehouseSparkLocation carries
+    # the `abfss://` roots Spark writes through. Same Lakehouse, two transports —
+    # conflating them would have prune listing a URL Spark cannot read a directory
+    # from.
+    #
+    # Schemas come from storage on both hosts, and have to: Fabric refuses
+    # `SHOW SCHEMAS IN `workspace`.`lakehouse`` — a bare `SHOW SCHEMAS` answers
+    # only for the *attached* Lakehouse — so asking the catalogue would have
+    # reconciled the destination against the control plane's inventory.
     lakehouse = ItemRef(target.item_id)
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)
+    catalogue = _catalogue_for(resolver, lakehouse, spark)
 
     existing_schemas = [
         entry.name
@@ -376,20 +429,21 @@ def _prune_sequence(
 
     actions: list[BuildAction] = []
 
-    # Views (catalog only): drop those not managed, per schema that survives (an
-    # orphan schema is dropped whole below, taking its views with it). Enumerated
-    # by bare schema name so it resolves in the session's own Lakehouse — Fabric's
-    # SHOW DATABASES returns qualified `Workspace.Lakehouse.schema` names.
-    if spark is not None:
+    # Views (catalogue only, since a view is not a directory): drop those not
+    # managed, per schema that survives — an orphan schema is dropped whole below
+    # and takes its views with it. Asked of the *destination's* catalogue, so a
+    # build reconciling a Lakehouse the session is not attached to sees that
+    # Lakehouse's views rather than the control plane's.
+    if catalogue is not None:
         for schema in existing_schemas:
             if schema.lower() in orphan_schemas:
                 continue
-            for view in _views_in_schema(spark, schema):
+            for view in catalogue.views(schema):
                 if f"{schema}.{view}".lower() in managed.views:
                     continue
                 actions.append(
                     _drop_action(target, "prune_view", "view", f"{schema}.{view}",
-                                 f"DROP VIEW IF EXISTS {_ident(schema)}.{_ident(view)}", payloads)
+                                 f"DROP VIEW IF EXISTS {object_token(schema, view)}", payloads)
                 )
 
     # Tables: unmanaged ones in a schema that survives (an orphan schema is
@@ -403,7 +457,7 @@ def _prune_sequence(
             if qualified.lower() not in managed.tables:
                 actions.append(
                     _drop_action(target, "prune_table", "table", qualified,
-                                 f"DROP TABLE IF EXISTS {_ident(schema)}.{_ident(object_entry.name)}",
+                                 f"DROP TABLE IF EXISTS {object_token(schema, object_entry.name)}",
                                  payloads)
                 )
 
@@ -426,7 +480,7 @@ def _prune_sequence(
     for schema in sorted({s for s in existing_schemas if s.lower() in orphan_schemas}):
         actions.append(
             _drop_action(target, "prune_schema", "schema", schema,
-                         f"DROP SCHEMA IF EXISTS {_ident(schema)} CASCADE", payloads)
+                         f"DROP SCHEMA IF EXISTS {schema_token(schema)} CASCADE", payloads)
         )
 
     if not actions:
@@ -437,7 +491,9 @@ def _prune_sequence(
     )
 
 
-#: Warehouse schemas Weaver never manages, so a prune never drops them.
+#: Warehouse schemas Weaver never manages, so a prune never drops them. The
+#: schemas owned by fixed database roles are excluded separately, by ownership —
+#: see :func:`_warehouse_prune_actions`.
 _RESERVED_SQL_SCHEMAS = frozenset(
     {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
 )
@@ -511,7 +567,21 @@ def _warehouse_prune_actions(
         if str(row["schema_name"]).lower() not in _RESERVED_SQL_SCHEMAS
     ]
 
-    schema_rows = sql.query("select name from sys.schemas")
+    # A fixed database role owns a schema of its own — `db_owner`, `db_datareader`
+    # and seven more — and those are not Weaver's to drop, or anyone's: `DROP
+    # SCHEMA` on one fails. They are excluded by *ownership* rather than by adding
+    # nine more names to the reserved list, because the reserved list is a
+    # statement about Weaver's conventions and this is a statement about SQL's.
+    schema_rows = sql.query(
+        """
+        select schemas.name as name
+        from sys.schemas as schemas
+        left join sys.database_principals as owners
+          on owners.principal_id = schemas.principal_id
+        where owners.is_fixed_role is null
+           or owners.is_fixed_role = 0
+        """
+    )
     existing_schemas = [
         str(row["name"])
         for row in schema_rows
@@ -608,22 +678,20 @@ def _child_dirs(store: Store, root) -> list:
     )
 
 
-def _views_in_schema(spark, schema: str) -> list[str]:
-    """Persistent view names in one schema, by bare name (session-relative)."""
+def _catalogue_for(resolver, lakehouse: ItemRef, spark) -> "SparkCatalogue | None":
+    """Catalogue operations against the Lakehouse being reconciled.
 
-    try:
-        rows = spark.sql(f"SHOW VIEWS IN {_ident(schema)}").collect()
-    except Exception:  # the schema may not exist yet; nothing to prune there
-        return []
-    names: list[str] = []
-    for row in rows:
-        data = row.asDict()
-        if data.get("isTemporary"):
-            continue
-        name = data.get("viewName") or data.get("name")
-        if name:
-            names.append(name)
-    return names
+    None without a session — prune still reconciles tables, folders and schemas
+    from storage, and simply cannot see views, which is the documented cost of
+    generating without one.
+    """
+
+    if spark is None:
+        return None
+    resolve = getattr(resolver, "spark_destination", None)
+    if resolve is None:  # pragma: no cover - both shipped resolvers provide it
+        return None
+    return SparkCatalogue(spark, resolve(lakehouse))
 
 
 def _schema_sequence(
@@ -633,15 +701,24 @@ def _schema_sequence(
     resolver,
     payloads: dict[str, bytes],
 ) -> BuildSequence | None:
-    """Create the catalog databases the retained tables and views need.
+    """Create the schemas the retained tables and views need, in the destination.
 
-    Only schemas that hold a materialised object get a database. On the Lakehouse
-    a Delta schema is given an explicit ``LOCATION`` in the ``Tables`` area — the
-    one physical path a build resolves — so a managed table lands where Weaver
-    addresses it; on the Warehouse a T-SQL ``CREATE SCHEMA`` needs no location.
-    Folder-only schemas are directories, not catalog databases, and get none. A
-    schema is created only because a bound resource uses it; none is inferred from
-    a ``Schema.Object`` name.
+    Only schemas that hold a materialised object get one. Folder-only schemas are
+    directories, not catalogue objects, and get none. A schema is created only
+    because a bound resource uses it; none is inferred from a ``Schema.Object``
+    name.
+
+    On the Lakehouse the action names the schema and stops there. It used to
+    freeze the whole statement, and doing so froze a *resolved path*: local Spark
+    needs a ``LOCATION`` for a managed table to land under the Lakehouse's
+    ``Tables`` area, so a bundle generated by a test carried its own temporary
+    directory in the hashed plan (build-philosophy §10), and a Fabric bundle
+    carried a bare two-part name that created the schema in the attached Lakehouse
+    instead of the destination. How to make a schema is the destination's
+    business; which schema, and where, is the manifest's.
+
+    On the Warehouse a T-SQL ``CREATE SCHEMA`` needs no location and stays a
+    frozen script.
     """
 
     is_warehouse = target.kind == WAREHOUSE_TARGET
@@ -659,7 +736,6 @@ def _schema_sequence(
     if not schemas:
         return None
 
-    lakehouse = ItemRef(target.item_id)
     actions: list[BuildAction] = []
     for schema in schemas:
         if is_warehouse:
@@ -670,19 +746,11 @@ def _schema_sequence(
                 f"if not exists (select 1 from sys.schemas where name = "
                 f"{_sql_literal(schema)})\n    exec('create schema {_tsql_ident(schema)}');"
             )
+            content = (statement + "\n").encode("utf-8")
             executor, extension = "tsql", ".sql"
         else:
-            # The resolver says whether CREATE SCHEMA needs an explicit LOCATION:
-            # the local emulator does, so a managed table lands under the Lakehouse
-            # Tables area; a schema-enabled Fabric Lakehouse manages it and returns
-            # None.
-            location = resolver.schema_location(lakehouse, schema)
-            if location is not None:
-                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)} LOCATION '{location}'"
-            else:
-                statement = f"CREATE SCHEMA IF NOT EXISTS {_ident(schema)}"
-            executor, extension = "spark_sql", ".spark.sql"
-        content = (statement + "\n").encode("utf-8")
+            content = (json.dumps({"schema": schema}, sort_keys=True) + "\n").encode("utf-8")
+            executor, extension = "spark_schema", ".schema.json"
         path = payload_path(SCHEMA_SEQUENCE, "create-schemas", f"create-{schema}{extension}")
         payloads[path] = content
         actions.append(
@@ -755,6 +823,162 @@ def _object_action(
     )
 
 
+# --- the central catalogue ---------------------------------------------------
+
+
+def _control_target(weaver_lakehouse: ItemRef, bound_target: BoundTarget) -> BoundTarget:
+    """The Weaver Lakehouse, as a bound target the catalogue's batches name.
+
+    The catalogue lives in the control plane, not in the destination, so writing it
+    is work against a *different* item — and a bundle must name every physical
+    destination it touches (build-philosophy §9). Hence a second bound target
+    rather than an implicit "wherever the installer happens to be pointed".
+
+    When the destination *is* the Weaver Lakehouse — which is exactly the case
+    when Weaver builds its own catalogue — the existing binding is reused rather
+    than duplicated, so one item never appears twice in a manifest.
+    """
+
+    if bound_target.kind == LAKEHOUSE_TARGET and bound_target.name == weaver_lakehouse.name:
+        return bound_target
+    return BoundTarget(
+        id=f"control-{LAKEHOUSE_TARGET}-{weaver_lakehouse.name}",
+        kind=LAKEHOUSE_TARGET,
+        item_id=weaver_lakehouse.name,
+        item_name=weaver_lakehouse.name,
+    )
+
+
+def _catalogue_sequences(
+    *,
+    repository: SesRepository,
+    projection: Projection,
+    target: BoundTarget,
+    control_target: BoundTarget,
+    payloads: dict[str, bytes],
+    spark,
+) -> tuple[BuildSequence, ...]:
+    """The catalogue's reconciliation, appended after every physical action.
+
+    Three barriers, in one fixed order: the dictionaries describe what was built,
+    Installation records which item the repository is now bound to, and Registry
+    certifies. Registry is a barrier of its own so that any earlier failure — a
+    physical build, a dictionary statement, the installation record — stops the
+    install before anything is certified.
+
+    Catalogue rows are projected from the *retained* subgraph. An object omitted
+    because its target was not bound is outside this installation's scope, and a
+    build that pruned it here would read a missing Warehouse binding as a deletion.
+    """
+
+    from ..catalogue.projection import project_installation
+    from ..catalogue.reconcile import reconcile
+    from ..catalogue.render import InstallationScope
+
+    if projection.is_empty:
+        # Nothing was retained, so there is nothing this build could certify. The
+        # installation record is deliberately not written either: a build that
+        # materialised nothing has not installed the repository.
+        return ()
+
+    # The installation's target type is the bound target's kind — the two
+    # vocabularies are the same two words, deliberately. Taking it from the
+    # binding rather than inferring it from a retained node means the scope comes
+    # from what the caller actually bound, which is the thing that decides it.
+    scope = InstallationScope(
+        repository=repository.name, target_type=target.kind
+    )
+    installation = project_installation(
+        repository,
+        retained=projection.retained,
+        scope=scope,
+        target_name=target.name,
+        weaver_version=_weaver_version(),
+    )
+    plan = reconcile(installation)
+
+    # Deliberately *not* read here. The statements never depended on the existing
+    # rows — see weaver.catalogue.reconcile — so the only use for a read was a row
+    # count in the sequence description, and a description is part of the hashed
+    # plan. That made two runs of the same repository produce different bundle
+    # identities purely because the catalogue's state had changed, which breaks the
+    # property review and environment comparison rest on (§10). Counting rows is a
+    # report about state, not part of a frozen contract.
+    #
+    # `weaver.catalogue.reconcile.summarise` and the tolerant reader remain the API
+    # for asking what a build would change; they are what the drop policy will run
+    # its signature comparison through.
+
+    numbers = (CATALOGUE_SEQUENCE, INSTALLATION_SEQUENCE, REGISTRY_SEQUENCE)
+    kinds = (RECONCILE_CATALOGUE, RECORD_INSTALLATION, PUBLISH_REGISTRY)
+    slugs = ("catalogue", "catalogue-installation", "catalogue-registry")
+
+    sequences: list[BuildSequence] = []
+    for number, kind, slug, (description, group) in zip(
+        numbers, kinds, slugs, plan.groups
+    ):
+        actions: list[BuildAction] = []
+        for reconciliation in group:
+            # Named from what the statement *is*, not from its position: a table
+            # whose key is the installation scope has no obsolete row to delete,
+            # so its one statement is a merge and must not be labelled otherwise.
+            for verb, statement in (
+                ("delete", reconciliation.delete),
+                ("merge", reconciliation.merge),
+            ):
+                if statement is None:
+                    continue
+                actions.append(
+                    _catalogue_action(
+                        number=number,
+                        kind=kind,
+                        slug=slug,
+                        name=f"{reconciliation.table.name}-{verb}",
+                        statement=statement,
+                        payloads=payloads,
+                    )
+                )
+        if not actions:  # pragma: no cover - every group renders at least a delete
+            continue
+        batch = BuildBatch(
+            id=f"{number:03d}-{control_target.id}",
+            target_id=control_target.id,
+            actions=tuple(actions),
+        )
+        sequences.append(
+            BuildSequence(number=number, description=description, batches=(batch,))
+        )
+    return tuple(sequences)
+
+
+def _catalogue_action(
+    *,
+    number: int,
+    kind: str,
+    slug: str,
+    name: str,
+    statement: str,
+    payloads: dict[str, bytes],
+) -> BuildAction:
+    content = statement.encode("utf-8")
+    path = payload_path(number, slug, f"{name}.spark.sql")
+    payloads[path] = content
+    return BuildAction(
+        id=f"catalogue-{name}",
+        kind=kind,
+        resource_node_id=None,
+        executor="spark_sql",
+        payload=path,
+        payload_sha256=sha256_hex(content),
+    )
+
+
+def _weaver_version() -> str:
+    from .. import __version__
+
+    return __version__
+
+
 def _snapshot(
     repository: SesRepository, repo_location: Location, store: Store
 ) -> dict[str, bytes]:
@@ -778,10 +1002,6 @@ def _with_identity(plan: BuildPlan) -> BuildPlan:
     from dataclasses import replace
 
     return replace(plan, bundle_id=compute_bundle_id(plan))
-
-
-def _ident(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"
 
 
 def _sql_literal(value: str) -> str:

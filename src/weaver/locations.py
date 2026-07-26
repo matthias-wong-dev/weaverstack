@@ -90,3 +90,75 @@ class Location:
 
     def __str__(self) -> str:
         return self.value
+
+
+@dataclass(frozen=True)
+class LakehouseSparkLocation:
+    """One destination Lakehouse's physical roots, resolved once.
+
+    The Spark session is attached to the **Weaver Lakehouse** — that is the fixed
+    control-plane context, and it is why Weaver's own catalogue tables are reached
+    as ordinary two-part names in schema ``_``. Destination Lakehouses are the
+    variable data plane, so they are reached through explicit roots instead, and
+    never by making the session point somewhere else.
+
+    That distinction is what lets one session build several Lakehouses in one
+    invocation. Switching the current catalogue between targets would make two
+    destinations that share a schema name indistinguishable; resolving each
+    target's roots keeps them separate by construction::
+
+        locations = {
+            target: resolver.lakehouse_spark_location(target)
+            for target in bound_lakehouse_targets
+        }
+
+    Roots are plain strings rather than :class:`Location` values because this is
+    what *Spark* addresses: an ``abfss://`` URL on Fabric, a filesystem path in
+    the local emulator. Same contract, different transport.
+
+    A resolved location is deliberately **not** carried in a build bundle. It is
+    derived from the item at install time, because on Fabric it embeds workspace
+    and item ids and locally it embeds a temporary directory — and a bundle whose
+    identity moved with a temporary path would not be comparable between
+    environments (build-philosophy §10).
+    """
+
+    #: The Lakehouse this resolves, by its logical name.
+    item: str
+    tables_root: str
+    files_root: str
+
+    def schema_root(self, schema: str) -> str:
+        """Where a schema's managed tables live."""
+
+        return f"{self.tables_root.rstrip('/')}/{_segment(schema)}"
+
+    def table_path(self, schema: str, name: str) -> str:
+        """Where one managed Delta table lives."""
+
+        return f"{self.schema_root(schema)}/{_segment(name)}"
+
+    def folder_path(self, schema: str, name: str) -> str:
+        """Where one managed folder lives, under the Files area."""
+
+        return (
+            f"{self.files_root.rstrip('/')}/{_segment(schema)}/{_segment(name)}"
+        )
+
+    def __str__(self) -> str:
+        return f"{self.item} (tables={self.tables_root}, files={self.files_root})"
+
+
+def _segment(value: str) -> str:
+    """One path segment, checked rather than trusted.
+
+    These strings are concatenated into paths Spark writes through, so a segment
+    that escaped its parent would write outside the Lakehouse it names.
+    """
+
+    segment = value.strip().strip("/")
+    if not segment or segment in (".", ".."):
+        raise IdentityError(f"path segment must be a real name, got {value!r}")
+    if "/" in segment or "\\" in segment:
+        raise IdentityError(f"path segment must not contain a separator: {value!r}")
+    return segment

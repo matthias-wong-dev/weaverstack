@@ -111,12 +111,33 @@ catalogue. In the emulator the same two calls run in-process against local Spark
 The desktop's only job on Fabric is to push the repository and read results back
 for assertions — it never plans.
 
-The target Lakehouse is created **schema-enabled** so a managed
-`CREATE TABLE Schema.Object` lands at `Tables/<schema>/<table>` and views bind by
-name, and the session defaults to that target so two-part names resolve there.
+Both Lakehouses are created **schema-enabled**: the target so a managed table
+lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver
+Lakehouse because the catalogue lives in a schema called `_` and a Lakehouse
+without schemas cannot hold one.
+
+**The session attaches to the Weaver Lakehouse**, which is the production model —
+the control plane is the fixed attachment, destinations are the variable data
+plane. It used to attach to the *target*, and that made the suite structurally
+unable to fail: a two-part `Schema.Object` happened to land in the right place,
+and the assertion then read it back through the same session catalogue, so a
+table written to the wrong Lakehouse would have been read from the wrong Lakehouse
+and passed. Under the real attachment an unqualified name lands in the control
+plane, so every statement has to name its Lakehouse — and so does every assertion.
+
+`BuildEnv.query` takes the same `{{object:Schema.Name}}` form a payload uses and
+resolves it against a named destination, defaulting to the target:
+
+```python
+build_env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")
+build_env.query("SELECT * FROM {{object:_.Registry}}",
+                destination=build_env.weaver_destination)
+```
+
 See the journal's build-bundle log for the full Fabric contract these tests
 established (`CREATE SCHEMA` over `CREATE DATABASE`, the reserved `dbo` schema, the
-https/abfss bundle re-resolution, and `FabricStore` byte reads/writes).
+https/abfss bundle re-resolution, and `FabricStore` byte reads/writes), and the
+multi-target entry for what a four-part name can and cannot do.
 
 ## One environment fixture, two transports
 
@@ -124,9 +145,10 @@ The build tests share a single reusable harness so the same assertions run
 locally and on Fabric, and so a Fabric run costs as little as possible.
 
 `BuildEnv` (in `tests/fabric/conftest.py`) is a small record of callables —
-`install_repo`, `generate`, `install`, `query`, `columns`, `seed_orphans` — with
-the transport hidden behind them. A test body drives it and never mentions Livy,
-Spark or ODBC. Three environments implement it:
+`install_repo`, `generate`, `install`, `run_query`, `run_columns`, `seed_orphans`,
+`setup_weaver` — with the transport hidden behind them, plus the two destinations
+the environment addresses. A test body drives it and never mentions Livy, Spark or
+ODBC. Three environments implement it:
 
 | fixture | generation | installation | reads back with |
 |---|---|---|---|
@@ -205,6 +227,40 @@ appear or change, a Warehouse cross-database view can fail with
 `POST /v1/workspaces/{workspace}/sqlEndpoints/{endpoint}/refreshMetadata`,
 taking the endpoint id from the Lakehouse's
 `properties.sqlEndpointProperties.id`.
+
+**A schema is a three-level name.** Under `spark_catalog`, a Fabric schema is
+`workspace.lakehouse.schema`, so an object is four parts. One session can create,
+read, drop and `MERGE` in any Lakehouse in the workspace by that name, and can
+build a view in one Lakehouse over a table in another — no attaching, no
+switching. `SHOW SCHEMAS IN `ws`.`lh`` is **not** supported, though: it encodes the
+pair and looks it up as a schema, and a bare `SHOW SCHEMAS` answers only for the
+attached Lakehouse. Enumerating another Lakehouse's schemas means reading its
+`Tables/` area. `SHOW TABLES IN` a four-part schema works and includes views, so
+tables are `SHOW TABLES` minus `SHOW VIEWS`. `spark.catalog.tableExists` and
+`databaseExists` accept the qualified name; `listDatabases` and `listTables` do
+not — they re-encode it and fail.
+
+**A Lakehouse table's physical name is lower-cased, and the Warehouse is
+case-sensitive.** Spark creates `Sales.Customer`, Fabric stores the directory as
+`Tables/Sales/customer`, and the Lakehouse SQL endpoint exposes it as
+`Sales.customer`. A Fabric Warehouse uses a case-sensitive collation, so a
+cross-database read written as `[Lakehouse].[Sales].[Customer]` fails with
+`Invalid object name` — and it fails identically to an endpoint that has not
+synced yet, which is the trap. Check `INFORMATION_SCHEMA.TABLES` on the endpoint
+before assuming it is lag.
+
+Weaver passes a three- or four-part name through untouched, by design: the author
+named a physical thing. Matching its physical spelling is therefore the author's
+job, and a cross-engine read must use the lower-cased name.
+
+**A Lakehouse SQL endpoint exposes tables, not Spark views.** `Sales.ActiveCustomer`
+is a Spark-catalogue object; it is queryable from Spark in any Lakehouse and is
+simply absent from the endpoint. A Warehouse object cannot read one.
+
+**An unqualified name lands in the attached Lakehouse, silently.**
+`CREATE TABLE DWG.Customer` in a session attached to Lakehouse A creates
+`Weaver.A.DWG.Customer` with no error, whatever the caller meant. This is why
+generated payloads name their objects logically and the installer resolves them.
 
 **Delta row counts without Spark.** Sum `numRecords` from `add.stats` across the
 active files in `Tables/<schema>/<table>/_delta_log/*.json`, subtracting

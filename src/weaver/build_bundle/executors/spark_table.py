@@ -57,8 +57,14 @@ class SparkTableExecutor:
             )
 
         instruction = json.loads(payload.decode("utf-8"))
-        qualified = instruction["object"]
-        query = instruction["source_query"]
+        catalogue = context.catalogue
+        # Both sides are resolved against the batch's destination: the table this
+        # creates, and every managed object its query reads. Inferring the shape
+        # from a query that resolved through the session's own catalogue would
+        # read some other Lakehouse's table of that name — and then create a table
+        # of that shape, silently, in the right place.
+        qualified = catalogue.expand(instruction["object"])
+        query = catalogue.expand(instruction["source_query"])
 
         frame = context.spark.sql(query)
         query_columns = tuple(field.name for field in frame.schema.fields)

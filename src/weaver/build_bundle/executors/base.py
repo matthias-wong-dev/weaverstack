@@ -15,7 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ...locations import Location
+from ...errors import InstallError
+from ...locations import LakehouseSparkLocation, Location
+from ...spark import SparkCatalogue, SparkDestination
 from ...store import Store
 from ...targets import ItemRef
 from ..models import BuildAction
@@ -26,20 +28,43 @@ from ..targets import BoundTarget
 class ResolvedTarget:
     """A manifest target resolved to what the executor addresses.
 
-    Locally that is the destination Lakehouse ``ItemRef``; Fabric will add the
-    concrete session handles alongside, through the same type.
+    ``lakehouse`` is the logical item the bundle named. The other two are that
+    item resolved into the two things Spark needs to reach it, and they are two
+    because Fabric answers them separately:
+
+    ``location``
+        the physical roots — where the bytes are. An ``abfss://`` URL on Fabric, a
+        directory locally.
+    ``destination``
+        the catalogue name — what a statement calls it. Fabric's four-part
+        ``workspace.lakehouse.schema.object``; locally the folded database name.
+
+    Both are needed, and neither substitutes for the other: a folder is created at
+    a path and has no catalogue name, while a view exists only as a name and has no
+    path of its own.
+
+    Resolution happens here, once per target, rather than in each executor. An
+    executor that derived either for itself would be re-deciding where an action
+    lands, which is a planning decision it is not allowed to make. It is also what
+    lets one session build several destinations, and write the catalogue to a
+    different one again, without ever switching what the session is attached to.
+
+    Both are None for a Warehouse target, which is reached over TDS and has
+    neither.
     """
 
     bound: BoundTarget
     lakehouse: ItemRef
+    location: LakehouseSparkLocation | None = None
+    destination: SparkDestination | None = None
 
 
 @dataclass(frozen=True)
 class InstallationContext:
     """Runtime services and the one target the current batch is bound to.
 
-    ``spark`` runs Lakehouse work; ``sql`` runs Warehouse (T-SQL) work. A bundle
-    is single-target, so only the one its actions need has to be present.
+    ``spark`` runs Lakehouse work; ``sql`` runs Warehouse (T-SQL) work. A batch
+    names one target, so only the capability its actions need has to be present.
     """
 
     spark: Any
@@ -48,6 +73,23 @@ class InstallationContext:
     snapshot: Location
     target: ResolvedTarget
     sql: Any = None
+
+    @property
+    def catalogue(self) -> SparkCatalogue:
+        """Catalogue operations against *this batch's* destination.
+
+        Built per access rather than stored, so the context stays a frozen record
+        of what was resolved. Failing here — rather than falling back to the
+        session's own catalogue — is the point: an action with nowhere to go must
+        stop, not land somewhere plausible (build-philosophy §9).
+        """
+
+        if self.target.destination is None:
+            raise InstallError(
+                f"target {self.target.bound.id!r} resolved to no Spark destination, "
+                "so a statement naming an object has nowhere to run"
+            )
+        return SparkCatalogue(self.spark, self.target.destination)
 
 
 class ActionExecutor(Protocol):

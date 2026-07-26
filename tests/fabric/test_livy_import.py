@@ -78,9 +78,9 @@ def test_the_ses_contract_parses_there(livy_session):
     assert result.payload["id"] == "Sales.Order"
     assert result.payload["columns"] == [
         "Order id",
-        "Row_insert_datetime",
-        "Row_update_datetime",
-        "Row_delete_datetime",
+        "row_insert_datetime",
+        "row_update_datetime",
+        "row_delete_datetime",
     ]
 
 

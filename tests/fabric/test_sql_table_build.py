@@ -28,10 +28,13 @@ def _count(env, table):
 
 def test_both_schema_modes_build_the_main_tables_empty(lakehouse_estate):
     env = lakehouse_estate.env
-    tables = {row["tableName"].lower() for row in env.query("SHOW TABLES IN Sales")}
+    tables = {
+        row["tableName"].lower()
+        for row in env.query(f"SHOW TABLES IN {env.schema_name('Sales')}")
+    }
     assert {"customer", "inferredcustomer", "declaredcustomer"} <= tables
 
-    for table in ("Sales.InferredCustomer", "Sales.DeclaredCustomer"):
+    for table in ("{{object:Sales.InferredCustomer}}", "{{object:Sales.DeclaredCustomer}}"):
         columns = _by_name(env.columns(table))
         assert {"customerid", "customername"} <= set(columns)
         assert AUDIT <= set(columns)
@@ -43,13 +46,15 @@ def test_inferred_types_come_from_the_query_declared_from_the_declaration(lakeho
     env = lakehouse_estate.env
     # The base types CustomerId as int; the inferred table follows the query, the
     # declared table its wider declaration — the same on both engines.
-    assert _by_name(env.columns("Sales.InferredCustomer"))["customerid"]["type"] == "int"
-    assert _by_name(env.columns("Sales.DeclaredCustomer"))["customerid"]["type"] == "bigint"
+    inferred = _by_name(env.columns("{{object:Sales.InferredCustomer}}"))
+    declared = _by_name(env.columns("{{object:Sales.DeclaredCustomer}}"))
+    assert inferred["customerid"]["type"] == "int"
+    assert declared["customerid"]["type"] == "bigint"
 
 
 def test_primary_key_and_audit_columns_are_physically_not_nullable(lakehouse_estate):
     env = lakehouse_estate.env
-    for table in ("Sales.InferredCustomer", "Sales.DeclaredCustomer"):
+    for table in ("{{object:Sales.InferredCustomer}}", "{{object:Sales.DeclaredCustomer}}"):
         columns = _by_name(env.columns(table))
         # The primary key and all three audit columns carry NOT NULL through to
         # the physical Delta schema, inferred or declared, on both engines.

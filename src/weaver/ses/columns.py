@@ -52,6 +52,18 @@ def metadata_column_references(document: SesDocument) -> tuple[tuple[str, str], 
 
     references: list[tuple[str, str]] = []
     references.extend(("Primary key", column) for column in document.primary_key)
+    references.extend(
+        ("Unique keys", column)
+        for unique_key in document.unique_keys
+        for column in unique_key
+    )
+    # Only this side of a relationship: the parent's columns belong to the parent
+    # and are checked when it is built, not here.
+    references.extend(
+        ("Foreign keys", column)
+        for foreign_key in document.foreign_keys
+        for column in foreign_key.columns
+    )
     references.extend(("Not null", column) for column in document.declared_not_null)
     references.extend(
         ("Comparison columns", column)

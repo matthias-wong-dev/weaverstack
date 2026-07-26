@@ -15,6 +15,7 @@ from .hosts import FabricHost, Host, LocalHost, WarehouseSettings
 from .locations import Location
 from .objects import Folder, ObjectContext, Table, View, WeaverObject
 from .resolution import LocalResolver
+from .setup import SetupResult, initialise_weaver_lakehouse
 from .store import Entry, LocalStore, Store, StoreError
 from .sql import (
     PooledSqlExecutor,
@@ -84,6 +85,9 @@ __all__ = [
     # resolved locations and transport
     "Location",
     "LocalResolver",
+    # bootstrapping the control plane
+    "SetupResult",
+    "initialise_weaver_lakehouse",
     # authoring
     "WeaverObject",
     "Folder",

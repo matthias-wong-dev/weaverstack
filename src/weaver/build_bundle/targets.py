@@ -38,8 +38,19 @@ class BoundTarget:
     id: str
     kind: str
     item_id: str
+    #: The item's resolved display name. Carried alongside ``item_id`` because on
+    #: Fabric the id is a GUID: the catalogue records which item an installation is
+    #: bound to, and a GUID would make that record unreadable. It is a *record*,
+    #: never identity — resolution goes through ``item_id``.
+    item_name: str | None = None
     workspace_id: str | None = None
     sql_endpoint_id: str | None = None
+
+    @property
+    def name(self) -> str:
+        """The readable name, falling back to the id when none was carried."""
+
+        return self.item_name or self.item_id
 
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {
@@ -47,6 +58,8 @@ class BoundTarget:
             "kind": self.kind,
             "item_id": self.item_id,
         }
+        if self.item_name is not None:
+            mapping["item_name"] = self.item_name
         if self.workspace_id is not None:
             mapping["workspace_id"] = self.workspace_id
         if self.sql_endpoint_id is not None:
@@ -59,6 +72,7 @@ class BoundTarget:
             id=mapping["id"],
             kind=mapping["kind"],
             item_id=mapping["item_id"],
+            item_name=mapping.get("item_name"),
             workspace_id=mapping.get("workspace_id"),
             sql_endpoint_id=mapping.get("sql_endpoint_id"),
         )
@@ -85,6 +99,7 @@ class LakehouseBinding:
             id=f"{LAKEHOUSE_TARGET}-{self.lakehouse.name}",
             kind=LAKEHOUSE_TARGET,
             item_id=self.item_id or self.lakehouse.name,
+            item_name=self.lakehouse.name,
             workspace_id=self.workspace_id,
         )
 
@@ -104,6 +119,7 @@ class WarehouseBinding:
             id=f"{WAREHOUSE_TARGET}-{self.warehouse.name}",
             kind=WAREHOUSE_TARGET,
             item_id=self.item_id or self.warehouse.name,
+            item_name=self.warehouse.name,
             workspace_id=self.workspace_id,
             sql_endpoint_id=self.sql_endpoint_id,
         )

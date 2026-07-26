@@ -5,6 +5,13 @@ Build creates structure, not data. A Delta table (Python or Spark SQL) becomes a
 VIEW`` over its query body. A Folder has no DDL (it is a directory). T-SQL
 generation has its own test module (``test_ses_tsql_ddl``); here we only assert a
 SQL object routes to the ``tsql`` executor. Nothing here runs ``read()``.
+
+Every Spark object is named ``{{object:Schema.Name}}``, and so is every managed
+reference in a body. That is not decoration: a bare two-part name resolves
+through whatever catalogue the session is attached to, and the session is
+attached to the Weaver Lakehouse rather than to the destination being built. The
+payload names the object and the installer resolves it against the Lakehouse the
+batch is bound to.
 """
 
 from __future__ import annotations
@@ -32,6 +39,10 @@ def _doc(relative_path: str, text: str):
 
 VIEW_BODY = "select\n    CustomerId,\n    CustomerName\nfrom DWG.Customer\nwhere IsActive = true"
 
+#: The same body as it is frozen: the reference addressed, everything else as the
+#: author wrote it.
+ADDRESSED_BODY = VIEW_BODY.replace("DWG.Customer", "{{object:DWG.Customer}}")
+
 VIEW_SOURCE = f"""
 /*
 View ID: DWG.ActiveCustomer
@@ -52,22 +63,52 @@ def test_view_wraps_body_in_create_or_replace_view():
 
     assert isinstance(ddl, GeneratedDdl)
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
-    assert ddl.content.startswith("CREATE OR REPLACE VIEW DWG.ActiveCustomer AS\n")
+    assert ddl.content.startswith(
+        "CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS\n"
+    )
 
 
 def test_view_name_is_the_validated_object_id():
     ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE).create_ddl()
-    assert "VIEW DWG.ActiveCustomer AS" in ddl.content
+    assert "VIEW {{object:DWG.ActiveCustomer}} AS" in ddl.content
 
 
-def test_view_preserves_the_body_verbatim():
+def test_view_preserves_the_body_apart_from_addressing_its_references():
     ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE).create_ddl()
-    assert VIEW_BODY in ddl.content
+    assert ADDRESSED_BODY in ddl.content
+    # Only the reference moved. Line breaks, indentation and casing are the
+    # author's, because a build freezes text it is going to execute and must not
+    # quietly reformat it.
+    assert ddl.content.count("\n    CustomerId,\n    CustomerName\n") == 1
+    assert "where IsActive = true" in ddl.content
+
+
+def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
+    """Three parts means the author named a physical thing. Weaver leaves it."""
+
+    source = """
+    /*
+    View ID: DWG.ActiveCustomer
+
+    Description: Active customers from another Lakehouse entirely.
+
+    Lineage: A Lakehouse this repository does not manage.
+
+    Dependencies: []
+    */
+    select CustomerId from Other_LH.DWG.Customer where IsActive = true
+    """
+    ddl = _doc("DWG.ActiveCustomer.spark.sql", source).create_ddl()
+    assert "from Other_LH.DWG.Customer" in ddl.content
+    assert "{{object:Other_LH" not in ddl.content
 
 
 def test_view_normalises_only_trailing_whitespace():
     ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl()
-    assert ddl.content == f"CREATE OR REPLACE VIEW DWG.ActiveCustomer AS\n{VIEW_BODY}\n"
+    assert ddl.content == (
+        "CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS\n"
+        f"{ADDRESSED_BODY}\n"
+    )
 
 
 def test_view_has_exactly_one_create_and_none_in_the_source():
@@ -122,16 +163,18 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl()
 
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
-    assert ddl.content.startswith("CREATE OR REPLACE TABLE DWG.Customer (\n")
+    assert ddl.content.startswith(
+        "CREATE OR REPLACE TABLE {{object:DWG.Customer}} (\n"
+    )
     assert "`CustomerId` integer" in ddl.content
     assert "`CustomerName` string" in ddl.content
     assert "`IsActive` boolean" in ddl.content
     # Every built table carries the audit columns, in the Delta (underscored)
     # spelling, as not-null timestamps (build-philosophy §7.1, plan "Audit
     # columns"); Weaver populates all three on every loaded row.
-    assert "`Row_insert_datetime` timestamp NOT NULL" in ddl.content
-    assert "`Row_update_datetime` timestamp NOT NULL" in ddl.content
-    assert "`Row_delete_datetime` timestamp NOT NULL" in ddl.content
+    assert "`row_insert_datetime` timestamp NOT NULL" in ddl.content
+    assert "`row_update_datetime` timestamp NOT NULL" in ddl.content
+    assert "`row_delete_datetime` timestamp NOT NULL" in ddl.content
     assert "USING delta" in ddl.content
     assert "delta.columnMapping.mode" in ddl.content
 
@@ -149,15 +192,17 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
         SPARK_TABLE_EXTENSION,
     )
     payload = json.loads(ddl.content)
-    assert payload["object"] == "DWG.CustomerCount"
+    assert payload["object"] == "{{object:DWG.CustomerCount}}"
     assert payload["schema_mode"] == "declared"
     # [name, type, not_null]; CustomerCount has no primary key here, so it is
     # nullable, while every audit column is not null.
     assert payload["declared_columns"] == [["CustomerCount", "bigint", False]]
-    assert payload["source_query"] == "select count(*) as CustomerCount from DWG.Customer"
+    assert payload["source_query"] == (
+        "select count(*) as CustomerCount from {{object:DWG.Customer}}"
+    )
     # Audit columns are frozen into the instruction so the executor never reopens
     # the SES source to learn them.
-    assert ["Row_insert_datetime", "timestamp", True] in payload["audit_columns"]
+    assert ["row_insert_datetime", "timestamp", True] in payload["audit_columns"]
 
 
 def test_an_inferred_spark_sql_table_carries_no_declared_columns():

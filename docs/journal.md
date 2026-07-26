@@ -1280,6 +1280,752 @@ vacuously** whether or not prune ever dropped it. It now excludes system schemas
 instead of naming user ones. A reconciliation test that cannot see the thing it
 expects to be absent is not testing anything.
 
+### Catalogue checkpoint 0 — the SES gaps the catalogue exposed
+
+Before the central catalogue could project anything, the authoring model had to
+be able to say what the catalogue records. Planning the projection found four
+oversights and two rules that were broader than their reason.
+
+**Logical keys were missing.** SES had `Primary key` and nothing else, so a
+catalogue's key and relationship dictionaries would have been empty by
+construction. Added: `Unique keys`, a YAML list of comma-separated column sets;
+and `Foreign keys`, a list of `- Col A, Col B: Parent.Object[P A, P B]`.
+
+Both are **semantic, not physical** — nearer an ER diagram than DDL. Nothing is
+built and nothing is enforced. That decision is what removes their names: a
+relationship is identified by its own columns and its parent, so several may run
+between the same pair of objects and an object may reference itself (a hierarchy
+in one table). A row in the catalogue *is* the edge.
+
+**Views declare logical keys too.** A view stores no rows, so a key on one
+describes the shape of its result. `Primary key`, `Unique keys` and `Foreign
+keys` are now accepted on a view; everything implying storage — `Identity`,
+`Not null`, `Incremental`, `Comparison columns` — is still refused.
+
+**The Delta audit columns are snake case.** `row_insert_datetime`, not
+`Row_insert_datetime`. The Warehouse keeps the spaced `Row insert datetime` the
+SQL backend has always used, so the divergence stays exactly where it was
+justified — spaces in Spark column names need quoting everywhere they appear.
+Every spelling, retired ones included, stays reserved against a declaration.
+
+**Two rules were over-broad, and the catalogue is what proved it.**
+
+Weaver's own catalogue lives in schema `_`, declared as ordinary SES and built by
+the ordinary build path — that recursion is the point of it (plan §4). Two rules
+made it unauthorable:
+
+1. *A root file beginning with `_` was support, never an object.* The underscore
+   convention is about **directories** — `_schemas`, `_helpers` — and
+   subdirectories were already excluded a line earlier. So the rule now demotes
+   an underscored root file only when its stem does not name a schema and an
+   object: `_scratch.py` is still private, `_.Registry.spark.sql` is an object.
+   A file *without* an underscore is still judged on its suffix alone, so
+   `Sales.Order.py` remains a reported error rather than a silent demotion —
+   that distinction is the whole value of the guard.
+
+2. *A Spark SQL object had to declare a non-empty `Dependencies`.* The rule's
+   reason is that a Spark query may read by path, which cannot be resolved back
+   to a managed object, so the graph is declared rather than discovered. What it
+   actually wants is for the author to be **explicit**, and `Dependencies: []`
+   is explicit. A catalogue table's body is literals and depends on nothing.
+   An empty declaration also *suppresses* discovery, because a declaration has
+   always replaced discovery rather than adding to it — otherwise
+   `Dependencies: []` would quietly mean "discover them for me".
+
+Note that Python cannot express schema `_` at all: the separator is `__`, so
+`_.Registry` would be `___Registry`, whose first part is empty. The catalogue
+tables are therefore Spark SQL, which is also what gives them a declared schema
+and a body that returns no rows.
+
+**A metadata reference is not a dependency.** `Description: $Sales.Order` means
+*the text over there is the text here* — one sentence, written once, pointed at
+from everywhere it applies. Resolving it is a copy, and `weaver.ses.references`
+performs it: chains are followed to the literal at the end, and a cycle is an
+error because it can never produce text.
+
+Resolution deliberately does **not** work like dependency resolution. A
+dependency binds in its consumer's execution namespace, because that is what the
+SQL will bind to. A reference is a logical pointer, and the case it exists for is
+the cross-target one — `tests/fixtures/sales-etl/Sales.Customer.sql` is a
+Warehouse table whose `Lineage: $Sales.Customer` means the *Delta* table sharing
+its ID. It cannot sensibly mean itself, so resolution excludes the referrer and
+prefers its namespace only to break a tie.
+
+An unresolved reference is **not** an error: it may legitimately name another
+repository's object, and refusing it would cost someone a working object over a
+documentation nicety. The pointer is recorded and the text is absent, which is
+why the catalogue keeps `description` and `description_reference` side by side.
+
+### Catalogue checkpoint 1 — one authority for the catalogue's shape
+
+`weaver.catalogue` now owns the fixed representation of all ten tables and the
+rendering of their DML. The point of concentrating it is that the schema is a
+contract between four things that must agree — the built-in SES that materialises
+the tables, the tolerant reader, the projection that fills them, and the SQL that
+writes them. Four independent lists would drift, and drift here fails subtly
+rather than loudly.
+
+**Installation scope is in the key, not beside it.** Every table opens its key
+with `repository` and `target_type`. That is not a convention; it is what makes a
+partial-target build safe *by construction*. There is no way to name a row without
+naming the installation it belongs to, so a comparison or a delete cannot span
+both target types by omission. `CatalogueTable.__post_init__` refuses a definition
+whose key does not open with the scope, and the renderer refuses rows from an
+installation other than the one it was given.
+
+**The one thing not frozen is the clock.** `current_timestamp()` is rendered as a
+call rather than as an instant. A rendered time would change the payload — and so
+the bundle id — on every run, destroying the identity that review and
+certification rest on (§10). The engine supplies the moment; the payload stays
+stable. Rows are sorted by key before rendering for the same reason: a mapping's
+iteration order must not be able to change a bundle.
+
+**Values are typed, and the reason is a Spark detail worth recording.** A `MERGE`
+source is a `SELECT … UNION ALL SELECT …` whose schema comes from its first
+branch, so an uncast `NULL` would type a column by accident and a later branch
+could then fail to match the target. Every value is therefore cast to its declared
+type. Strings escape the backslash as well as the quote, because Spark's default
+parser treats a backslash as an escape.
+
+**Two shapes fell out of the decisions rather than being designed.** A logical key
+has no name — nothing physical is built, so a name would have to be invented — so
+`index_type` and `column_set` are part of its identity. A relationship has no name
+either, and *every* column of `ForeignKeyDictionary` is therefore key: the row is
+the edge. Its only comparison column is the signature, which is right, because an
+edge that points somewhere else is a different edge, not a changed one.
+
+**A live row's delete datetime is a sentinel, not a null.** All three audit
+columns are physically not null, so catalogue DML has to supply
+`9999-12-31 23:59:59.999999`. `AUDIT_LIVE_DELETE_DATETIME` lives with the audit
+columns in `weaver.ses.metadata` rather than in the catalogue, because it is the
+row convention and load will need the same one. It is the SQL Server original's
+choice, and its merit is that "as at" becomes one range predicate instead of a
+null check. Worth revisiting deliberately when load lands rather than inheriting
+by accident.
+
+### Catalogue checkpoint 2 — Weaver builds its own catalogue
+
+`src/weaver/builtin/catalogue/` is an SES repository shipped as package
+resources. Setup materialises it into the Weaver Lakehouse and the *ordinary*
+planner and installer build it — there is no catalogue-specific create, no
+privileged executor, no special-cased schema. `tests/spark/` proves it end to end
+on local Delta: ten Delta tables, every column and type matching the
+representation, declared keys physically not null, and no rows, because build
+creates structure.
+
+**The text is committed, and a test regenerates it.** Generating the SES at
+runtime would remove any chance of drift but also remove the reviewable
+declaration, which is the more valuable half — a reader should be able to read
+`_.Registry` as SES like any other object. So `render_sources()` produces the
+canonical text from the table definitions and a test asserts the shipped
+resources match byte for byte. Add a column to a definition and the suite fails
+until the resource is regenerated.
+
+**The tables describe themselves.** Each declares its catalogue key as its SES
+`Primary key`, which is what makes those columns physically not null — so the
+not-null guarantee the representation asserts is the one Delta actually enforces.
+A test also checks that SES's *default* comparison columns equal the set the
+renderer compares in its MERGE guard: two independent definitions of "what makes
+a row different", which would let an unchanged row be written or a changed one
+skipped if they diverged.
+
+**`builtin/catalogue` is deliberately not a Python package.** An `__init__.py`
+sitting in it would travel into the Weaver Lakehouse as a support file and into
+that repository's signature. Resources are reached through
+`importlib.resources.files("weaver.builtin") / "catalogue"`, which is what works
+from an installed wheel rather than only from a source tree.
+
+**A `$` in a description had to be escaped.** `description_reference` is described
+as "the $Schema.Object the description was copied from" — which SES would parse as
+a reference and refuse. The generator escapes it as `$$`, and a test asserts the
+note comes back as prose. A small thing, but it is the authoring contract applying
+to Weaver's own declarations, which is the point of them being ordinary.
+
+**Two local-emulator divergences, recorded rather than designed around.** The
+local Hive metastore lowercases both a registered table name and its managed
+directory; Fabric preserves case. The assertions are therefore
+case-insensitive — which is the behaviour Weaver relies on anyway, since the
+reader already refuses two names differing only by case. And one Spark catalog is
+shared by every test while each gets its own Lakehouse directory, so the fixture
+drops schema `_` on the way out; a schema left registered makes the next test's
+`CREATE SCHEMA IF NOT EXISTS` a no-op and sends its tables into this test's
+`tmp_path`. That is the established convention here, not a new one.
+
+**What this branch does not yet claim.** Build still emits `CREATE OR REPLACE
+TABLE`, so re-running the bootstrap is idempotent in *shape* and destructive of
+*rows*. Dropping only what changed needs the signatures the catalogue is being
+built to hold, plus the drop policy that reads them — the next branch. Only setup
+rebuilds schema `_`, so the exposure is a setup re-run, not an ordinary build.
+
+### Catalogue checkpoint 3 — tolerant reading, and the projection boundary
+
+**The reader's tolerance is deliberately asymmetric.** Two absences are ordinary
+and read as data: a table that does not exist yet (the build that writes the
+catalogue is the build that creates it) and a column an older Weaver never wrote.
+An unexpected extra column is ignored, which is the mirror — a newer catalogue must
+not break an older Weaver. But a permission error, a corrupt Delta log or a broken
+session must **propagate**, because read as "no rows" it would tell the next build
+that nothing is catalogued, and once drop policy lands that is a licence to remove
+an estate. So absence is recognised only by Spark's own
+`TABLE_OR_VIEW_NOT_FOUND` error class — not by message text, which a Spark upgrade
+could reword into a catastrophe. Tolerance is cheap when it is specific and
+dangerous when it is a bare `except`.
+
+A present column is cast to its expected type as well as a missing one, which is
+not obvious: an older catalogue may have stored a boolean as a string, and an
+uncast comparison would rewrite an unchanged row on every build.
+
+**The reader names no Spark API.** `tests/test_core_boundary.py` forbids the core
+from even mentioning `pyspark` in source, lazily or not, and it caught the first
+draft using `pyspark.sql.functions`. The projection is rendered as SQL text
+instead, and the session is duck-typed — which is the existing convention in the
+executors and has the side benefit that a tolerant read is inspectable as a
+statement.
+
+**Projection reads nothing physical.** Every value comes from the validated
+declaration or the repository's own resolved graph. The consequence worth naming:
+because `ColumnDictionary` is descriptive rather than a physical column list, an
+*inferred* Spark SQL or T-SQL table projects completely at plan time even though
+its columns are not known until install. That is what allows the whole catalogue
+to be frozen into the bundle rather than half of it waiting on the engine — and it
+is why keeping ordinals and types out of that table was the right call rather than
+a simplification.
+
+**A cross-engine alias is not a dependency, and the fixture proves it.** Where an
+edge resolved through a `Lakehouse alias`, the dependency row records the *alias*
+name — the name that binds in the consumer's own namespace — and `_.Alias` records
+what it points at. Dependency rows are therefore same-namespace by construction,
+and crossing engines requires the join. `tests/fixtures/catalogue-estate` carries
+the awkward cases together: `Sales.Customer` as both a Delta and a Warehouse
+table, an alias-resolved edge, a three-part physical reference, a
+self-referencing relationship, an identity column, and a column note that points
+at another object's note.
+
+**Schema rows are projected only for schemas the installation uses.** A schema the
+repository declares but this side never created would otherwise be claimed as part
+of an installation that does not contain it.
+
+### Catalogue checkpoints 4–6 — scoped DML, the build tail, and the bootstrap
+
+**The statements do not depend on reading the catalogue.** This is the decision
+worth recording, because the plan asked for the read and the read is still done —
+just not for the reason it looked like. Reconciliation for one installation is a
+scoped delete of everything the projection does not claim, plus an idempotent
+merge of everything it does. That pair is correct against *any* prior state,
+including a state the planner could not see. A build that derived its deletes from
+an inventory would have its deletion scope widened by a failed read, which is
+exactly what build-philosophy §6 exists to prevent; here nothing is derived from
+the read, so a failed read cannot widen anything. The read produces the *summary*
+a reviewer sees (§3, §17), and its absence degrades the report rather than the
+correctness — which is why generation still works with no session at all.
+
+**`_.Installation` has no obsolete row to delete, and finding that out was a
+bug.** Its key *is* the installation scope, so the "keys beyond the scope"
+predicate was a predicate over no columns and rendered `NOT ( () )`. Spark caught
+it. The fix is not a special case so much as the honest consequence: there is at
+most one such row per scope, so the merge alone keeps it current, and rendering a
+delete would have removed the row about to be written. A second, smaller bug came
+out of the same shape — catalogue actions were being named by position, so
+Installation's only statement was labelled `delete`. Names now come from what a
+statement *is*.
+
+**The bundle names the Weaver Lakehouse as a second bound target.** Catalogue work
+writes to the control plane, not to the destination, and a bundle must name every
+physical destination it touches (§9). When the destination *is* the Weaver
+Lakehouse — precisely the case when Weaver builds its own catalogue — the existing
+binding is reused rather than duplicated. `BoundTarget` also gained `item_name`,
+because on Fabric `item_id` is a GUID and `_.Installation.target_name` has to be
+readable; it is a record, never identity.
+
+**A Warehouse build now writes Spark SQL.** There is one central catalogue and it
+lives in a Lakehouse, so a Warehouse build carries Spark SQL catalogue actions
+against the Weaver Lakehouse. Three existing tests asserted a Warehouse plan was
+all-T-SQL; they now scope that claim to the *physical* actions, which is what they
+always meant. Accepted consequence of a central catalogue rather than a wart.
+
+**Sequence numbers 9000/9010/9020, with a guard.** The SQL Server system this
+ports from ran past thirty dependency layers, so the tail sits far above them —
+about 896 layers of headroom — and `check_sequence_headroom` fails generation
+rather than letting a deep repository silently reorder its own catalogue.
+
+**One test needed sharpening in a way worth noting.** "A Warehouse build's
+statements never say `lakehouse`" is false, and correctly so: an `_.Alias` row
+records `lakehouse` in `alias_target_type`, because a Warehouse object's Lakehouse
+alias is a fact about its declaration. Scope is now asserted on the *predicate*,
+not on the presence of a word — a value and a claim about which rows are touched
+are different things.
+
+**The bootstrap is one bundle.** Setup materialises the built-in repository and
+builds it normally; the barriers already order it — schema, then the ten tables,
+then the catalogue's own DML writing into the tables that same bundle just
+created. No first-run mode, and the only thing making it possible is the tolerant
+reader, since planning reads a catalogue that does not exist yet. Setup never
+prunes: the Weaver Lakehouse belongs to the installation, not to this repository,
+so a reconciling build would treat a user's own schema there as an orphan. There
+is a test that a user's schema survives.
+
+**No `weaver setup` CLI command, and no local session factory needed.** The obvious
+adapter would construct a Spark session, and `tests/test_core_boundary.py` forbids
+the CLI from naming PySpark — `[cli]` does not install it. That boundary is correct
+and stays. The CLI, when it lands, will *submit* the operation to Fabric rather than
+run Spark locally:
+
+```text
+local CLI → Fabric submission → remote session attached to the Weaver Lakehouse
+          → initialise_weaver_lakehouse(...)
+```
+
+So the callable function is the whole of what this branch needs.
+`weaver.initialise_weaver_lakehouse` takes the session it is given.
+
+### Two things only running it on Delta could find
+
+**A merge source cannot be a chain of unioned selects.** The obvious construction —
+one `SELECT` of cast literals per row, joined by `UNION ALL` — broke the bootstrap
+with Janino's `Code grows beyond 64 KB`. Spark generates Java for the plan and a
+method's bytecode is capped, so a union of ~90 projections exceeds it. The
+catalogue's own `_.ColumnDictionary` has a row per column of every catalogue table,
+which was enough. It is now one `VALUES` relation — a single plan node however many
+rows it carries — with the casts moved outward into one enclosing projection. The
+values are bare literals; `VALUES` unifies a column's type across rows (all-null
+becomes void) and the enclosing `CAST` settles it either way, which is what keeps
+the source's schema exactly the target's. Smaller text, too.
+
+**Row counts must not go in a sequence description.** They briefly did, so a
+reviewer could see the effect of a bundle before running it. But a description is
+part of the hashed plan, so two runs of the *same* repository produced different
+bundle identities purely because the catalogue's state had changed — breaking the
+property that lets a reviewer compare environments and certify an artefact (§10).
+Counting rows is a report about state, not part of a frozen contract.
+
+Generation therefore no longer reads the catalogue at all, which is the honest end
+of the reasoning that started with "the statements do not depend on the read". The
+tolerant reader and `summarise` are still the API for asking what a build would
+change, and they are what the drop policy will run its signature comparison
+through — but nothing in the frozen plan depends on them, so nothing in the plan
+can vary with the state of the thing being written.
+
+Both are the kind of defect local Spark exists to catch: neither is visible in
+generated text, and both would have surfaced first in a workspace.
+
+### The execution model: the session is attached to Weaver
+
+This was recorded as an open question — whether the catalogue should be addressed
+by explicit path — and the question was based on a wrong model. Matthias settled
+it, and it is worth writing down properly because everything about addressing
+follows from it.
+
+**The Spark session is attached to the Weaver Lakehouse.** That is the fixed
+control-plane context, not an accident of whatever a notebook happened to open. So
+`_.Registry`, `_.Installation` and the rest being reached as ordinary two-part
+names in schema `_` is the *defined* execution context — not the ambient-catalogue
+anti-pattern of build-philosophy §16, which is about a destination resolving
+through whatever context happens to be current.
+
+Destination Lakehouses are the **variable data plane**. They are reached through
+roots resolved from their target bindings, and a build never switches the session's
+current catalogue to reach one:
+
+```text
+Spark session
+└── attached: Weaver            control plane, fixed
+    ├── _.Installation
+    ├── _.Registry
+    └── …
+Build targets                   data plane, resolved explicitly
+├── Lakehouse A → tables_root, files_root
+├── Lakehouse B → tables_root, files_root
+└── Lakehouse C → tables_root, files_root
+```
+
+That separation is what makes one invocation building several Lakehouses possible.
+Switching the current catalogue between targets would make `Sales` in Lakehouse A
+and `Sales` in Lakehouse B indistinguishable; resolved roots keep them apart by
+construction.
+
+`LakehouseSparkLocation` is that resolution, provided by the host adapter —
+`resolver.lakehouse_spark_location(item)` — with `table_path()` and
+`folder_path()` on it. The responsibilities stay separated: `ItemRef` identifies
+the logical item, the host resolves the physical roots, the plan carries the item,
+the installation context resolves it once per target, and the executor uses it. An
+executor deriving its own path would be re-deciding where an action lands, which is
+a planning decision it is not allowed to make.
+
+**One distinction nearly got conflated, and it matters.** On Fabric a Lakehouse has
+*two* addresses: the DFS location the store lists through, and the `abfss://` root
+Spark reads and writes through. `LakehouseSparkLocation` carries the second. Prune
+inspection *lists* a target, so it keeps using the store's DFS location — a first
+attempt at routing everything through one type would have had inspection trying to
+enumerate a URL Spark cannot walk.
+
+**A resolved root is deliberately not in the bundle.** On Fabric it embeds
+workspace and item ids; locally it embeds a temporary directory. A bundle whose
+identity moved with a temporary path would not be comparable between environments
+(§10), and one carrying a stale root would install somewhere the caller no longer
+means. The bundle names the item; the installer resolves it.
+
+**The local `_` fixture churn is not evidence about production.** The local fixture
+runs one long-lived session while presenting a succession of temporary directories
+as though each were *the* Weaver Lakehouse, so `CREATE SCHEMA IF NOT EXISTS _` is a
+no-op after the first and the next test's tables would land in the previous test's
+directory. That is a session-isolation problem in the harness, which the catalogue
+suites handle by dropping `_`. Production has one Weaver Lakehouse attached for the
+life of the session and reaches destinations through resolved roots. The
+architecture does not follow the lifecycle of a test fixture.
+
+### What the settled model exposes: destination DDL is still two-part
+
+Fixing the *catalogue's* addressing settles the catalogue. It also makes visible
+that **destination** addressing has the problem the catalogue was suspected of.
+
+Today a destination table is built as a two-part name:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS `Sales` LOCATION '<destination>/Tables/Sales'   -- local
+CREATE SCHEMA IF NOT EXISTS `Sales`                                        -- Fabric
+CREATE OR REPLACE TABLE Sales.Customer (…) USING delta
+```
+
+A two-part name resolves through the session's current catalogue, and the session
+is attached to **Weaver**. So:
+
+- **Locally** it works, but only for one destination. `LocalResolver.schema_location`
+  pins `Sales` to that destination's `Tables` area with an explicit `LOCATION`, and
+  `IF NOT EXISTS` means the *first* Lakehouse to register `Sales` wins. Two
+  destinations sharing a schema name would silently share a location.
+- **On Fabric** `schema_location` returns None by design — a schema-enabled
+  Lakehouse pins managed tables itself — so `CREATE SCHEMA IF NOT EXISTS Sales`
+  creates `Sales` in the *attached* Lakehouse, and the table lands in Weaver rather
+  than in the destination.
+
+This is the work `LakehouseSparkLocation` exists for and does not yet do: the build
+DDL has to address a destination by its resolved root, not by a bare two-part name.
+It touches the schema sequence and every Lakehouse executor, so it is its own piece
+of work rather than an addition to this one.
+
+**Why the Fabric build tests did not catch it.** They generate *and* install in one
+session and then verify through `spark.table("DWG.Customer")` — the same session
+catalogue the write went through. A table written to the wrong Lakehouse is then
+read back from the wrong Lakehouse, and the assertion passes. This is the same shape
+as the prune helper that once allow-listed the schemas it inspected: an assertion
+that cannot see the thing it claims about is not testing it. The fix is to assert on
+the destination's *resolved path* — `location.table_path(schema, name)` — as well as
+on the name.
+
+### The Spark suite no longer fits one process here
+
+The catalogue roughly doubled the Spark suite, from 41 tests to ~93. Every file
+passes on its own — built-in build 9/9, tolerant reader 14/14, reconciliation 19/19,
+bootstrap 18/18, and the physical build set 26/26. The *combined* run does not: at
+around stage 7000 the shared JVM starts failing with `Py4JJavaError: <exception
+str() failed>`, and whatever runs last collects the failures. In one run that was
+three `test_catalogue_setup` assertions; in the next it was
+`test_local_lifecycle`, `test_local_persisted_view` and
+`test_diagnostics::test_the_report_agrees_with_a_session_actually_starting` — a test
+that only starts a session and cannot be affected by catalogue code. All seven of
+those pass in 39 seconds when run alone.
+
+This is **a test-harness limitation**, recorded as such: cumulative degradation of
+one shared JVM and its session state. The catalogue increased the total Spark
+workload enough to expose it; that does not make the catalogue the cause, and the
+catalogue design must not be distorted to work around it. Process isolation, or a
+session per test group, can be considered on its own.
+
+Costs were cut where it was free to do so — the reconcile fixture creates its tables
+directly instead of building a bundle per test, and the bootstrap is shared by every
+read-only assertion, taking that file from 5:13 to 1:39 — so the run completes in
+~17 minutes rather than timing out. That is mitigation, not a fix.
+
+### It was not the harness: Delta was keeping every Lakehouse the tests threw away
+
+The entry above recorded the combined `-m spark` failure as a harness limitation —
+cumulative degradation of one shared JVM — and proposed process isolation. That
+was a guess, and it was wrong in an instructive way.
+
+Measure the heap *after a forced collection* and the guess collapses. A reading
+taken without one shows garbage, which proves nothing; taken after one it shows
+retention, and the live set climbs about 5.6 MB per test and never comes down.
+Under the default 1 GB driver heap the run reaches the ceiling around test 50,
+after which everything is GC thrash until the JVM gives out — which is why the
+failure attached itself to whichever test happened to be running, including one
+that only starts a session.
+
+A class histogram named it. The heap is Catalyst expression trees of exactly the
+shape an `ExpressionEncoder` builds — `Invoke`, `GetExternalRowField`,
+`ValidateExternalType`, `AssertNotNull` — plus the bytecode generated for them.
+Those belong to Delta: `DeltaLog` caches one instance per table **path**, each
+holding a `Snapshot` whose state is a `Dataset`, and therefore a whole query
+execution and its encoder. Every test builds under a fresh `tmp_path`, so every
+table is a new path, and the cache keeps the snapshot of each one alive long
+after the directory it describes has been deleted.
+
+So the tests were isolated and the session's memory of them was not. The harness
+now clears Delta's log cache and Spark's plan cache after each test. Both are
+caches; the cost is re-reading a transaction log and no answer changes.
+
+| | result | wall clock | live heap |
+|---|---|---|---|
+| before | 2 failed, 6 errors | 5:04 | pinned at the 1 GB ceiling |
+| after | 92 passed | 3:42 | 68–219 MB |
+
+Two things were tried and are *not* in the fix, which is worth recording so they
+are not tried again. Turning Spark's status retention down to the minimum
+(`spark.sql.ui.retainedExecutions` and friends, whose defaults are sized for a
+long-lived cluster with someone watching it) looked like the answer because live
+heap tracked retained executions almost exactly — and made no measurable
+difference, because the correlation was with work done, not with what the
+listeners kept. Raising the heap was never the fix; it moves the ceiling.
+
+### What Fabric actually does with a four-part name
+
+Everything below rests on Fabric's namespace, so it was asked rather than
+recalled. One Livy session, attached to `Play_Lakehouse_1`, driving both
+Lakehouses:
+
+```text
+current_catalog()   spark_catalog
+current_database()  chimcobldhq2alr5c5r6ash5a1m62uav9hgmmpb8dtqn6pav64im8ojf
+SHOW SCHEMAS        Weaver.Play_Lakehouse_1.TestSchema
+                    Weaver.Play_Lakehouse_1.dbo
+```
+
+A Fabric schema is a **three-level name under `spark_catalog`**, so an object is
+four parts. Against a Lakehouse the session was *not* attached to, all of these
+work: `CREATE SCHEMA`, `CREATE OR REPLACE TABLE`, `INSERT`, `SELECT`,
+`CREATE OR REPLACE VIEW` (including a view in one Lakehouse over a table in
+another), `MERGE`, `DELETE`, `DROP TABLE`/`VIEW`/`SCHEMA … CASCADE`,
+`SHOW TABLES IN`, `SHOW VIEWS IN`, `DESCRIBE`, and
+`spark.catalog.tableExists`/`databaseExists`. Nothing needs attaching and nothing
+needs switching.
+
+Three findings shaped the design rather than merely confirming it:
+
+- **`SHOW SCHEMAS IN `ws`.`lh`` is refused.** It encodes the pair and looks it up
+  as a schema. A bare `SHOW SCHEMAS` answers for the attached Lakehouse only. So
+  there is *no* SQL way to enumerate another Lakehouse's schemas, and schema
+  discovery must read storage — which prune already did, and which the journal
+  had already defended for a different reason.
+- **`SHOW TABLES` returns views too.** Tables are `SHOW TABLES` minus
+  `SHOW VIEWS`.
+- **The anticipated failure is real and exact.** An unqualified
+  `CREATE TABLE WvProbe2.Stray` landed in `Weaver.Play_Lakehouse_1.WvProbe2` — the
+  attached Lakehouse — with no error.
+
+`spark.catalog.listDatabases()` and `listTables(...)` are broken in Fabric (they
+re-encode an already-qualified name and fail), so nothing uses them.
+
+### Local Spark cannot be given a catalogue per Lakehouse
+
+The obvious local proxy is one Spark catalogue per Lakehouse:
+`spark.sql.catalog.Sales_LH`. It does not work, and it fails deep rather than
+cleanly. Delta's `DeltaCatalog` extends `DelegatingCatalogExtension`, whose
+delegate is only ever set for `spark_catalog`; registered as an ordinary named
+catalogue its delegate is null, and every statement dies inside the analyzer with
+`INTERNAL_ERROR` or a bare `NullPointerException`. Tried, and recorded so it is
+not tried again.
+
+Local Spark therefore has exactly one namespace level, and the proxy folds the
+Lakehouse into it:
+
+```text
+Fabric   `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`
+local    `Sales_LH__Sales`.`Customer`
+```
+
+That is not Fabric syntax and is not meant to be. What it reproduces is the one
+property Fabric's namespace provides and a bare `Sales.Customer` does not: two
+destinations declaring a schema of the same name stay apart. The fold is in the
+*name* only — the local database still carries an explicit `LOCATION` of
+`<lakehouse>/Tables/<schema>`, so a managed table lands exactly where the Fabric
+layout puts it and the emulator keeps mirroring OneLake. Local simplification does
+not reach the Fabric model.
+
+### The payload names the object; the installer says which Lakehouse
+
+The open question this branch inherited was how destination DDL should be
+addressed. Two answers were available and both are wrong.
+
+Freezing the qualified name into the payload — `CREATE TABLE
+`Weaver`.`Play_LH`.`Sales`.`Customer`` — loses §10. Two bundles of one repository
+generated against dev and prod would then differ in *every payload*, and
+comparison between environments is one of the four things canonical hashing
+exists for. Keeping the bare two-part name loses §9 and §16, which is what was
+already happening.
+
+So the payload names the object logically and the executor resolves it against
+the batch's target:
+
+```sql
+CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS
+SELECT * FROM {{object:DWG.Customer}} WHERE IsActive
+```
+
+This is the substitution §16 permits — "strictly transport-level values whose
+meaning was already bound and validated" — and not the template it forbids. The
+object, its schema, the statement, and which item the batch targets are all fixed
+before the bundle is written. What is supplied late is only how that
+already-chosen destination spells a name, which is the one thing generation
+cannot know without tying the bundle to the environment it ran in. A reviewer
+reading the payload sees the object; the manifest's target block says where it
+goes. A bare two-part name said neither.
+
+View bodies are rewritten in place, so a view built in one destination reads its
+inputs from the same one. Only ordinary two-part references are touched, which is
+exactly the set the reader guarantees resolves inside the repository — anything
+left is a physically-qualified name or a table-valued function, both of them the
+author naming something Weaver does not manage. Nothing else about the text moves:
+same whitespace, same comments, same casing, same delimiters.
+
+### Freezing a schema create was freezing a temporary directory
+
+Following the addressing through turned up a §10 violation that had been sitting
+in every local bundle. `CREATE SCHEMA` needs a `LOCATION` on local Spark, the
+planner asked the resolver for one, and the resolved path went into the payload:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS `Sales` LOCATION '/var/folders/…/pytest-42/Sales_LH/Tables/Sales'
+```
+
+A temporary directory, inside the hashed plan, deciding where a managed table
+lands. On Fabric the same code froze the opposite mistake — no clause and a bare
+two-part name, so the schema was created in the attached Lakehouse.
+
+The action now names the schema and nothing else, and the destination decides how
+to make one. That is not the installer filling in a semantic decision: which
+schema, in which Lakehouse, is settled and in the manifest. It is the same
+transport-level resolution every other action gets, applied to a clause that is
+purely about storage.
+
+### The Fabric build tests were structurally unable to fail
+
+The previous entry predicted this and it held. The fixture attached its Livy
+session to the **target** Lakehouse, so a two-part name happened to land in the
+right place; the write and the read then went through one session catalogue, and
+a table written to the wrong Lakehouse would have been read back from the wrong
+Lakehouse with the assertion passing.
+
+The fixture now attaches to the **Weaver** Lakehouse, which is the production
+model, and both Lakehouses are schema-enabled — the Weaver one because the
+catalogue lives in a schema called `_` and a Lakehouse without schemas cannot
+hold one. Every assertion names the Lakehouse it is about, and the build-bundle
+test checks the resolved *path* as well as the name.
+
+Two tests make the whole claim directly. One session builds the destination,
+writes the catalogue into the Weaver Lakehouse, reads `_.Registry` and
+`_.Installation` back through their fully-qualified names, and checks schema `_`
+is *not* in the destination. Locally, two Lakehouses each declaring `DWG` get two
+separate tables — a row written to one is not in the other, which is precisely
+what `CREATE SCHEMA IF NOT EXISTS DWG` could not deliver when the first Lakehouse
+to register the name won.
+
+Both pass on Fabric. The catalogue read there is a four-part
+`` `Weaver`.`weavertest_weaver_…`.`_`.`Registry` `` against a Lakehouse the
+session is attached to, while the objects it describes are in one it is not.
+
+One assertion had to be written differently than the previous entry proposed. It
+said the fix was to assert on the destination's resolved path, and a path is too
+precise: Fabric lowercases a managed table's directory (`Tables/DWG/customer`),
+exactly as the local metastore does. The physical name is the host's to choose, so
+the assertion lists the schema directory and matches case-insensitively — which
+still proves the bytes are in the destination's own storage, and which is how
+Weaver treats identity anyway.
+
+### The Fabric suite is now long enough to be refused a session
+
+Worth recording because it is not a code failure and will be misread as one. A
+full `-m fabric` run is 39 minutes and starts a Livy session per function-scoped
+build environment plus one per module-scoped estate. At the tail of one such run,
+the two estate modules failed identically:
+
+```text
+LivyError: Livy session did not reach 'idle' within 600s
+```
+
+Seven errors, all of them a session that never started. Run on their own the same
+seven tests pass in four minutes. So the capacity was saturated, not the code —
+and the count of sessions has not changed, only their length, because generation
+and installation both happen in them and there is now more of both.
+
+**Done, and it took two attempts to find the right shape.**
+
+Sharing the session alone was not enough. The Fabric build context was creating
+and deleting its *own* Weaver Lakehouse and its own target per test; pointing it
+at the run's session left the Lakehouse churn in place, and Fabric's namespace
+resolver then intermittently reported `Artifact not found` for a target that
+demonstrably existed. That was checked directly rather than assumed: a Lakehouse
+created *after* a session has started is addressable straight away, so lateness is
+not the problem — churning artifacts underneath a long-lived session is.
+
+So nothing is re-provisioned. One Weaver Lakehouse, one target Lakehouse and one
+session for the whole run, all created before the session starts; a build context
+*empties* the target on its way in, which is what a freshly created one used to
+provide and what the local context has always done. It also models the
+architecture rather than contradicting it — a real installation does not get a new
+Lakehouse per build.
+
+One consequence had to be fixed rather than tolerated. Two modules install
+different fixtures under one repository name, and with a shared Weaver Lakehouse a
+file-by-file upload *merged* them: the Warehouse estate inherited a
+Lakehouse-reading table from a repository it had never heard of. Installing a
+repository now replaces it, which is what the words already meant.
+
+| | result | wall clock | sessions |
+|---|---|---|---|
+| before | 41 passed, 7 errors | 39:16 | ~9 |
+| after | **48 passed** | **10:06** | 1 |
+
+`close()` also waits for the session to report itself gone. `DELETE` returns when
+the request is accepted, not when the capacity slot is free, so a caller that
+closed and immediately opened another was asking for a second session while the
+first still held the only one.
+
+### Building the mixed estate into a real workspace, and what it cost
+
+The multi-target work was exercised on a workspace that is not disposable —
+`Play_Lakehouse_1` as the Weaver Lakehouse, `Play_Lakehouse_2` as the destination,
+`Play Warehouse` as the Warehouse — with prune on, which is how three things came
+out that a disposable fixture could not have shown.
+
+**Weaver's Warehouse prune deleted nine schemas it does not own.** Every Fabric
+Warehouse carries a schema per fixed database role (`db_owner`, `db_datareader`
+and seven more) and the prune treated each as an orphan. On SQL Server
+`drop schema [db_owner]` fails; on Fabric it *succeeds*. All nine went. The roles
+survive, so `create schema [db_owner] authorization [db_owner];` puts them back,
+and it did. They are now excluded by ownership — asked of the server through
+`sys.database_principals.is_fixed_role` — rather than by adding nine names to a
+reserved list, because the reserved list says what Weaver declines to manage and
+this says what the database owns on its own behalf.
+
+This is the sharpest argument yet for the rule that a build is planned against a
+*read* target: the drops were visible in the bundle before anything ran, and were
+read only after the fact.
+
+**A Lakehouse table's physical name is lower-cased and the Warehouse is
+case-sensitive.** Spark creates `Sales.Customer`; Fabric stores
+`Tables/Sales/customer`; the SQL endpoint exposes `Sales.customer`; and a Fabric
+Warehouse, whose collation is case-sensitive, cannot see `[Sales].[Customer]` at
+all. The failure is `Invalid object name`, which is exactly what an unsynced
+endpoint reports — so the obvious diagnosis is the wrong one, and five minutes
+were spent waiting for a sync that had already happened. Weaver passes a
+three-part name through untouched by design, so matching the physical spelling is
+the author's job; the trap is worth knowing rather than working around.
+
+**A Lakehouse SQL endpoint exposes tables, not Spark views.** `Sales.ActiveCustomer`
+is a Spark-catalogue object, queryable from Spark in any Lakehouse, and simply
+absent from the endpoint. A Warehouse object cannot read one.
+
+What worked, first time and unremarkably, is the part this branch was about. One
+repository installed into two physical sides, one session, three Lakehouse-scoped
+destinations in play, and the catalogue in the Weaver Lakehouse recording both:
+
+```text
+_.Installation      MixedEstate  lakehouse  -> Play_Lakehouse_2
+                    MixedEstate  warehouse  -> Play Warehouse
+                    _weaver      lakehouse  -> Play_Lakehouse_1
+```
+
+Read back, as ever, through ```Weaver`.`Play_Lakehouse_1`.`_`.`Registry```.
+
 ---
 
 ## Open questions
@@ -1297,6 +2043,12 @@ expects to be absent is not testing anything.
 | Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | narrowed at CP6c: within a repository, cross-engine access is now an explicit alias; `_shortcuts` is only for *another repository's* objects. Still due at build. |
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
+| Should the catalogue be addressed by explicit path rather than by two-part name? | catalogue | **settled: no.** The Spark session is attached to the Weaver Lakehouse — that is the fixed control-plane context, so two-part names in schema `_` are the defined execution context rather than ambient resolution. Destination Lakehouses are the data plane and are addressed through roots resolved from their bindings (`LakehouseSparkLocation`). The local `_` churn is fixture isolation, not architecture. |
+| Destination Delta objects are still built as two-part names, which resolve through the session's catalogue — and the session is attached to Weaver. | catalogue | **settled: a payload names its object, the installer names the Lakehouse.** A generated statement carries `{{object:Schema.Name}}` and the executor resolves it against the batch's target — Fabric's four-part name, or the local proxy's folded database name. Freezing the qualified name would have made two bundles of one repository differ in every payload between environments (§10); keeping the two-part name kept the defect. Schema creation stopped being frozen SQL for the same reason: its `LOCATION` was a resolved temporary directory inside the hashed plan. |
+| How should `-m spark` run now that it is ~93 tests? | catalogue | **settled, and it was not a harness limitation.** Delta's `DeltaLog` cache holds a `Snapshot`, and therefore a query execution and its encoder, per table *path*; every test builds under a fresh `tmp_path`, so the cache kept every Lakehouse the suite had thrown away. Clearing it between tests took the run from failing at the 1 GB ceiling in 5:04 to 92 passing in 3:42 with live heap between 68 and 219 MB. No process isolation needed. |
+| Can a destination Lakehouse's schemas be enumerated through Spark? | multi-target | **settled: no, and storage answers instead.** Fabric refuses `SHOW SCHEMAS IN `ws`.`lh`` and a bare `SHOW SCHEMAS` answers only for the attached Lakehouse, so schema discovery reads the destination's `Tables/` area through the store — which prune already did. Views are catalogue-only and are asked of the destination by its four-part name. |
+| Should the local emulator give each Lakehouse its own Spark catalogue? | multi-target | **settled: it cannot.** `DeltaCatalog` extends `DelegatingCatalogExtension` and its delegate is only set for `spark_catalog`; registered as a named catalogue every statement dies in the analyzer. The proxy folds the Lakehouse into the one namespace level Spark offers (`Sales_LH__Sales`), keeping the isolation and leaving storage layout untouched. |
+| Should the Fabric build modules share one Livy session? | multi-target | **settled: one session, one Weaver Lakehouse and one target Lakehouse for the whole run**, all created before the session, with the target emptied between contexts. Sharing the session alone was not enough — the remaining per-test Lakehouse churn made Fabric's namespace resolver report `Artifact not found` for a target that existed. 41 passed with 7 errors in 39:16 became 48 passed in 10:06. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
 

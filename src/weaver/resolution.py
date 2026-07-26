@@ -28,7 +28,8 @@ from __future__ import annotations
 
 from .errors import CommandError
 from .hosts import BUILD_BUNDLES_AREA, REPOS_AREA, LocalHost
-from .locations import Location
+from .locations import LakehouseSparkLocation, Location
+from .spark import SparkDestination, local_destination
 from .targets import (
     FILES_AREA,
     DeltaTarget,
@@ -112,17 +113,35 @@ class LocalResolver:
             validate_name(name, what="object name"),
         )
 
-    def schema_location(self, lakehouse: ItemRef, schema: str) -> str | None:
-        """Where a managed schema's tables must be pinned, or None if the platform
-        pins them itself.
+    def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
+        """One destination Lakehouse's physical roots, for Spark to address.
 
-        Local Spark drops a managed table in its own warehouse directory unless the
-        schema carries an explicit ``LOCATION``, so a build gives it the Lakehouse
-        Tables path — emulating what a Fabric Lakehouse does natively (which returns
-        None, meaning no ``LOCATION`` clause).
+        The local counterpart of the Fabric ``abfss://`` roots: same contract,
+        filesystem transport. Resolving a target once here is what keeps the
+        session's attached Lakehouse (Weaver) separate from the destinations a
+        build writes to — see :class:`~weaver.locations.LakehouseSparkLocation`.
         """
 
-        return self.tables_root(lakehouse).join(validate_name(schema, what="schema")).value
+        return LakehouseSparkLocation(
+            item=item.name,
+            tables_root=self.tables_root(item).value,
+            files_root=self.files_root(item).value,
+        )
+
+    def spark_destination(self, item: ItemRef) -> SparkDestination:
+        """One Lakehouse, as this session's Spark catalogue names it.
+
+        The local proxy for Fabric's four-part namespace. Local Spark has one
+        namespace level and cannot be given another, so the Lakehouse is folded
+        into the database name and the database carries an explicit ``LOCATION``
+        under the Lakehouse's ``Tables`` area — same isolation, same storage
+        layout, different syntax. See
+        :mod:`weaver.spark.destination` for why it is folded rather than nested.
+        """
+
+        return local_destination(
+            item=item.name, tables_root=self.tables_root(item).value
+        )
 
     # --- warehouse targets -----------------------------------------------
 

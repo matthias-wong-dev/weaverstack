@@ -19,7 +19,40 @@ FOLDER_SEQUENCE = 30
 OBJECT_SEQUENCE_START = 40
 OBJECT_SEQUENCE_STEP = 10
 
+#: Catalogue work concludes a build, and its numbers sit far above the object
+#: layers because there is no bound on how deep a repository's dependency chain
+#: is — the SQL Server system this ports from ran past thirty layers. At ten per
+#: layer that leaves room for hundreds more, and :func:`check_sequence_headroom`
+#: refuses a plan that ever gets close rather than letting a deep repository
+#: silently reorder its own catalogue.
+#:
+#: The order within the tail is the invariant: dictionaries describe, Installation
+#: records the binding, Registry certifies. Registry is last, so a row in it
+#: cannot outrun the work it attests to.
+CATALOGUE_SEQUENCE = 9000
+INSTALLATION_SEQUENCE = 9010
+REGISTRY_SEQUENCE = 9020
+
 PAYLOAD_ROOT = "payload"
+
+
+def check_sequence_headroom(number: int) -> None:
+    """Refuse an object layer that would collide with the catalogue tail.
+
+    Reaching this means a repository has ~896 dependency layers, which is far
+    beyond anything real — so it is a signal that something is wrong, and failing
+    at generation is much better than producing a bundle whose Registry runs
+    before the objects it certifies.
+    """
+
+    if number >= CATALOGUE_SEQUENCE:
+        from ..errors import BuildError
+
+        raise BuildError(
+            f"object layer sequence {number} has reached the catalogue sequence "
+            f"range ({CATALOGUE_SEQUENCE}) — a repository with this many dependency "
+            "layers is almost certainly a cycle or a generation fault"
+        )
 
 
 def sequence_dir(number: int, slug: str) -> str:

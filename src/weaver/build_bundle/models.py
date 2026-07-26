@@ -37,6 +37,17 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
+#: Catalogue kinds. These write the central catalogue in the Weaver Lakehouse
+#: rather than the destination, and they conclude a build. They are three kinds
+#: rather than one so the ordering invariant is assertable from a manifest: a
+#: reviewer, and a test, can see that registry publication is last.
+RECONCILE_CATALOGUE = "reconcile_catalogue"
+RECORD_INSTALLATION = "record_installation"
+PUBLISH_REGISTRY = "publish_registry"
+CATALOGUE_KINDS = frozenset(
+    {RECONCILE_CATALOGUE, RECORD_INSTALLATION, PUBLISH_REGISTRY}
+)
+
 #: Reasons a repository node is not in the plan. A missing target is visible,
 #: not a mysterious absence.
 OMIT_TARGET_UNBOUND = "target_unbound"

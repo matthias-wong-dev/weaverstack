@@ -69,9 +69,12 @@ def test_generated_plan_has_the_expected_shape(weaver_lakehouse, tmp_path):
     assert plan.format_version == 1
     assert plan.repository_name == "MyRepo"
     assert plan.repository_signature
-    assert len(plan.targets) == 1
-    target = plan.targets[0]
-    assert (target.kind, target.item_id) == ("lakehouse", "Sales_LH")
+    # Two bound targets: the destination, and the Weaver Lakehouse the catalogue is
+    # written to. A bundle names every physical destination it touches, and the
+    # control plane is a different item from the destination.
+    destination, control = plan.targets
+    assert (destination.kind, destination.item_id) == ("lakehouse", "Sales_LH")
+    assert (control.kind, control.item_id) == ("lakehouse", "Weaver")
     assert plan.omitted_nodes == ()
 
 
@@ -81,7 +84,7 @@ def test_no_warehouse_target_or_tsql_executor(weaver_lakehouse, tmp_path):
 
     assert all(target.kind == "lakehouse" for target in plan.targets)
     executors = {action.executor for _, _, action in plan.actions()}
-    assert executors <= {"spark_sql", "folder", "prune"}
+    assert executors <= {"spark_sql", "spark_schema", "folder"}
 
 
 def test_build_order_is_folder_then_delta_then_view_on_view(weaver_lakehouse, tmp_path):
@@ -143,8 +146,11 @@ def test_prune_freezes_a_drop_for_each_physical_orphan(weaver_lakehouse, tmp_pat
         for _, _, a in plan.actions()
         if a.payload is not None and a.kind.startswith("prune")
     }
-    assert "DROP TABLE IF EXISTS `DWG`.`Ghost`" in frozen["prune-table-DWG.Ghost"]
-    assert "DROP SCHEMA IF EXISTS `Legacy` CASCADE" in frozen["prune-schema-Legacy"]
+    # Each drop names its object logically. The Lakehouse it belongs to is the
+    # batch's target, resolved at install — so a drop cannot be read as applying
+    # to whichever Lakehouse the session happens to be attached to.
+    assert "DROP TABLE IF EXISTS {{object:DWG.Ghost}}" in frozen["prune-table-DWG.Ghost"]
+    assert "DROP SCHEMA IF EXISTS {{schema:Legacy}} CASCADE" in frozen["prune-schema-Legacy"]
     # The unmanaged folder is a directory-removing action, identified by resource.
     prune_folders = [a for _, _, a in plan.actions() if a.kind == "prune_folder"]
     assert {a.resource_node_id for a in prune_folders} == {"folder:Raw.OldFolder"}

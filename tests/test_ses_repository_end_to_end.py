@@ -48,7 +48,7 @@ def test_a_python_table_carries_its_full_contract(repo):
     assert document.comparison_columns == ("Last modified",)
     assert document.lineage.reference.object_id.qualified == "Sales.OrderExport"
     assert [column.name for column in document.effective_schema][-3:] == [
-        "Row_insert_datetime", "Row_update_datetime", "Row_delete_datetime",
+        "row_insert_datetime", "row_update_datetime", "row_delete_datetime",
     ]
 
 
@@ -79,7 +79,7 @@ def test_a_spark_table_declares_schema_and_dependencies(repo):
         "Customer id", "Order count", "Total amount",
     ]
     assert [str(d) for d in document.dependencies] == ["Sales.Order"]
-    assert [column.name for column in document.audit_columns][0] == "Row_insert_datetime"
+    assert [column.name for column in document.audit_columns][0] == "row_insert_datetime"
 
 
 # --- structural --------------------------------------------------------------

@@ -211,8 +211,13 @@ These become enforceable as the corresponding code lands:
 - **Static discovery.** Discovery never imports object modules.
 - **Objects never mutate the target.** `read()` proposes; Weaver owns mutation,
   CRUD accounting, staging and logging.
-- **Every target root is explicit.** No destination Lakehouse is assumed to be
-  attached to the notebook.
+- **Every target is named, not inherited.** No destination Lakehouse is assumed to
+  be attached to the notebook, and that covers *names* as well as paths: a
+  generated statement says which Lakehouse it means. On Fabric that is the native
+  four-part `workspace.lakehouse.schema.object`; the local emulator folds the
+  Lakehouse into its one namespace level. A bare `Schema.Object` resolves through
+  whatever the session is attached to — which is the Weaver Lakehouse — so it is
+  the ambient-context anti-pattern in disguise.
 - **Level-three identity is host + type + name.** An item name is unique per
   *type*, not across types — a Lakehouse and its generated SQL endpoint share a
   display name. Resolution is typed: the slot supplies the type (a `DeltaTarget`
@@ -279,6 +284,16 @@ The `spark` fixture is **session-scoped** and the `lakehouses` fixture is
 **per-test**, because those costs differ by four orders of magnitude: a session
 takes ~1.2 s plus ~4.3 s of JVM warm-up on its first Delta operation, while a
 local Lakehouse skeleton takes 0.2 ms. Only one `SparkSession` may be active per
-process in any case. Tests stay isolated through their own `tmp_path`, not
-their own session — safe because Weaver addresses Delta by explicit path rather
-than through a metastore.
+process in any case. Tests stay isolated through their own `tmp_path`, not their
+own session.
+
+One shared session does need help with that, and the reason is worth knowing
+before you add a Spark test. Delta caches a `DeltaLog` — and through it a
+`Snapshot`, a query execution and its encoder — per table *path*, so a suite that
+builds every table under a fresh `tmp_path` accumulates the retained state of
+every Lakehouse it has already deleted. Left alone that exhausted the default 1 GB
+driver heap partway through a combined `-m spark` run, and the failure surfaced as
+an unreadable `Py4JJavaError` blamed on whichever test was running. An autouse
+fixture in `tests/conftest.py` clears Delta's log cache and Spark's plan cache
+after each test; a test that registers a *schema* still has to drop it, because
+a schema is not a cache.
