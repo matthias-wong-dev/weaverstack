@@ -85,6 +85,9 @@ __all__ = [
     # resolved locations and transport
     "Location",
     "LocalResolver",
+    # bootstrapping the control plane
+    "SetupResult",
+    "initialise_weaver_lakehouse",
     # authoring
     "WeaverObject",
     "Folder",

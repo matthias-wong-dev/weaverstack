@@ -47,10 +47,6 @@ from .tables import (
     CatalogueTable,
 )
 
-#: Rows keyed by their table's key tuple, for comparison.
-Keyed = Mapping[tuple, Row]
-
-
 @dataclass(frozen=True)
 class TableChanges:
     """What reconciling one table would do. Reporting only — see the module note."""

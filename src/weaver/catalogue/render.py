@@ -193,16 +193,24 @@ def render_merge(
         + [f"target.{identifier(AUDIT_UPDATE_COLUMN)} = current_timestamp()"]
     )
 
+    # Named rather than positional: the audit columns are appended by the build in
+    # a fixed order, and pairing values to that order by position would put the
+    # sentinel in the wrong column the day the order changed.
+    audit = {
+        AUDIT_INSERT_COLUMN: "current_timestamp()",
+        AUDIT_UPDATE_COLUMN: "current_timestamp()",
+        # A live row's delete datetime is a sentinel maximum, never null — all
+        # three audit columns are physically not null.
+        AUDIT_DELETE_COLUMN: (
+            f"CAST({literal(AUDIT_LIVE_DELETE_DATETIME)} AS {TIMESTAMP.upper()})"
+        ),
+    }
     insert_columns = ", ".join(
         identifier(name) for name in table.physical_columns
     )
     insert_values = ", ".join(
-        [f"source.{identifier(name)}" for name in columns]
-        + [
-            "current_timestamp()",
-            "current_timestamp()",
-            f"CAST({literal(AUDIT_LIVE_DELETE_DATETIME)} AS {TIMESTAMP.upper()})",
-        ]
+        audit[name] if name in audit else f"source.{identifier(name)}"
+        for name in table.physical_columns
     )
 
     return (
