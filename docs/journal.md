@@ -1918,6 +1918,39 @@ separate tables — a row written to one is not in the other, which is precisely
 what `CREATE SCHEMA IF NOT EXISTS DWG` could not deliver when the first Lakehouse
 to register the name won.
 
+Both pass on Fabric. The catalogue read there is a four-part
+`` `Weaver`.`weavertest_weaver_…`.`_`.`Registry` `` against a Lakehouse the
+session is attached to, while the objects it describes are in one it is not.
+
+One assertion had to be written differently than the previous entry proposed. It
+said the fix was to assert on the destination's resolved path, and a path is too
+precise: Fabric lowercases a managed table's directory (`Tables/DWG/customer`),
+exactly as the local metastore does. The physical name is the host's to choose, so
+the assertion lists the schema directory and matches case-insensitively — which
+still proves the bytes are in the destination's own storage, and which is how
+Weaver treats identity anyway.
+
+### The Fabric suite is now long enough to be refused a session
+
+Worth recording because it is not a code failure and will be misread as one. A
+full `-m fabric` run is 39 minutes and starts a Livy session per function-scoped
+build environment plus one per module-scoped estate. At the tail of one such run,
+the two estate modules failed identically:
+
+```text
+LivyError: Livy session did not reach 'idle' within 600s
+```
+
+Seven errors, all of them a session that never started. Run on their own the same
+seven tests pass in four minutes. So the capacity was saturated, not the code —
+and the count of sessions has not changed, only their length, because generation
+and installation both happen in them and there is now more of both.
+
+The cheap mitigation is to share one Livy session across the estate modules the
+way `warehouse_estate` shares its Warehouse. Recorded as harness work rather than
+done here, because unlike the local Spark entry above there is no measurement yet
+saying which limit was hit.
+
 ---
 
 ## Open questions
@@ -1940,6 +1973,7 @@ to register the name won.
 | How should `-m spark` run now that it is ~93 tests? | catalogue | **settled, and it was not a harness limitation.** Delta's `DeltaLog` cache holds a `Snapshot`, and therefore a query execution and its encoder, per table *path*; every test builds under a fresh `tmp_path`, so the cache kept every Lakehouse the suite had thrown away. Clearing it between tests took the run from failing at the 1 GB ceiling in 5:04 to 92 passing in 3:42 with live heap between 68 and 219 MB. No process isolation needed. |
 | Can a destination Lakehouse's schemas be enumerated through Spark? | multi-target | **settled: no, and storage answers instead.** Fabric refuses `SHOW SCHEMAS IN `ws`.`lh`` and a bare `SHOW SCHEMAS` answers only for the attached Lakehouse, so schema discovery reads the destination's `Tables/` area through the store — which prune already did. Views are catalogue-only and are asked of the destination by its four-part name. |
 | Should the local emulator give each Lakehouse its own Spark catalogue? | multi-target | **settled: it cannot.** `DeltaCatalog` extends `DelegatingCatalogExtension` and its delegate is only set for `spark_catalog`; registered as a named catalogue every statement dies in the analyzer. The proxy folds the Lakehouse into the one namespace level Spark offers (`Sales_LH__Sales`), keeping the isolation and leaving storage layout untouched. |
+| Should the Fabric build modules share one Livy session? | multi-target | open, and a **harness** question. A full `-m fabric` run is 39 minutes and starts a session per function-scoped build environment plus one per module-scoped estate; at the tail of one run the capacity refused two, with `Livy session did not reach 'idle' within 600s`. The same tests pass in four minutes on their own. `warehouse_estate` already shares one Warehouse for a module; the Lakehouse estates could share one session. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
 
