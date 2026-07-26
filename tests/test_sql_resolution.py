@@ -34,12 +34,6 @@ class Client:
         }
 
 
-def test_fabric_schema_location_is_managed_by_the_lakehouse():
-    resolver = FabricResolver(FabricHost(workspace="Analytics"), client=Client())
-
-    assert resolver.schema_location(ItemRef("Sales"), "DWG") is None
-
-
 def test_desktop_resolution_uses_the_typed_connection_string_endpoint():
     client = Client()
     resolver = FabricResolver(

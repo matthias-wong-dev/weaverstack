@@ -13,10 +13,13 @@ import json
 
 import pytest
 
-from weaver.build_bundle.executors.base import InstallationContext
+from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.spark_table import SparkTableExecutor
 from weaver.build_bundle.models import BuildAction
+from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import BuildError, InstallError
+from weaver.spark import local_destination
+from weaver.targets import ItemRef
 
 
 class _FakeType:
@@ -64,12 +67,21 @@ AUDIT = [
 ]
 
 
+#: The destination every case here builds into. Local, so the qualified name is
+#: the folded database name — and the executor has to be *given* one, which is
+#: the whole point: an action with no destination has nowhere to go.
+DESTINATION = local_destination(item="Sales_LH", tables_root="/tmp/Sales_LH/Tables")
+
+#: What `Sales.Customer` is called there.
+CUSTOMER = "`Sales_LH__Sales`.`Customer`"
+
+
 def _payload(**overrides) -> bytes:
     payload = {
-        "object": "Sales.Customer",
+        "object": "{{object:Sales.Customer}}",
         "schema_mode": "inferred",
         "declared_columns": None,
-        "source_query": "select CustomerId, CustomerName from Sales.Raw",
+        "source_query": "select CustomerId, CustomerName from {{object:Sales.Raw}}",
         "references": [["Primary key", "CustomerId"]],
         "identity": None,
         "audit_columns": AUDIT,
@@ -88,8 +100,13 @@ def _run(spark, payload: bytes):
         payload="payload/x.spark-table.json",
         payload_sha256="x",
     )
+    target = ResolvedTarget(
+        bound=BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH"),
+        lakehouse=ItemRef("Sales_LH"),
+        destination=DESTINATION,
+    )
     context = InstallationContext(
-        spark=spark, resolver=None, store=None, snapshot=None, target=None
+        spark=spark, resolver=None, store=None, snapshot=None, target=target
     )
     return SparkTableExecutor().execute(action, payload, context)
 
@@ -106,7 +123,7 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     details = _run(spark, _payload())
 
     statement = _create_statement(spark)
-    assert statement.startswith("CREATE OR REPLACE TABLE Sales.Customer (\n")
+    assert statement.startswith(f"CREATE OR REPLACE TABLE {CUSTOMER} (\n")
     # CustomerId is the primary key, so it is not null even when inferred;
     # CustomerName is not, so it stays nullable.
     assert "`CustomerId` int NOT NULL" in statement
@@ -150,7 +167,7 @@ def test_the_identity_column_leads_as_a_not_null_bigint():
     # The Weaver-managed surrogate is created first, as a plain not-null bigint —
     # no GENERATED/identity keyword; a later load populates it.
     assert statement.startswith(
-        "CREATE OR REPLACE TABLE Sales.Customer (\n    `CustomerKey` bigint NOT NULL,\n"
+        f"CREATE OR REPLACE TABLE {CUSTOMER} (\n    `CustomerKey` bigint NOT NULL,\n"
     )
     assert "generated" not in statement.lower()
     assert "identity" not in statement.lower()

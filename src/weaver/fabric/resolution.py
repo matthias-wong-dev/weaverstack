@@ -18,6 +18,7 @@ from ..errors import CommandError
 from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, FabricHost
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
+from ..spark import SparkDestination, fabric_destination
 from ..targets import (
     FILES_AREA,
     DeltaTarget,
@@ -199,11 +200,23 @@ class FabricResolver:
             files_root=f"{root}/{FILES_AREA}",
         )
 
-    def schema_location(self, lakehouse: ItemRef, schema: str) -> str | None:
-        """None: a schema-enabled Fabric Lakehouse pins a managed table under
-        ``Tables/<schema>`` itself, so no ``LOCATION`` clause is generated."""
+    def spark_destination(self, item: ItemRef) -> SparkDestination:
+        """One Lakehouse, as Fabric's Spark catalogue names it.
 
-        return None
+        Fabric's namespace is the fundamental representation:
+        ``workspace.lakehouse.schema.object``. One session addresses every
+        Lakehouse in the workspace through it, so nothing has to be attached and
+        nothing has to be switched — and a schema-enabled Lakehouse pins its own
+        managed tables, which is why no path appears in the destination.
+
+        Display names, because that is what the namespace is spelled with. The
+        ids stay in resolution and in the bundle's target block.
+        """
+
+        return fabric_destination(
+            workspace=self.workspace.name,
+            lakehouse=self.resolve(item, item_type=LAKEHOUSE).name,
+        )
 
     @property
     def control_tables_root(self) -> Location:

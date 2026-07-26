@@ -72,20 +72,24 @@ class InstallationEnvironment:
         # destination Lakehouses without ever changing the session's own.
         item = ItemRef(bound.item_id)
         return ResolvedTarget(
-            bound=bound, lakehouse=item, location=self._location_for(bound, item)
+            bound=bound,
+            lakehouse=item,
+            location=self._resolved(bound, item, "lakehouse_spark_location"),
+            destination=self._resolved(bound, item, "spark_destination"),
         )
 
-    def _location_for(self, bound: BoundTarget, item: ItemRef):
-        """The destination's Spark roots, where the host can resolve them.
+    def _resolved(self, bound: BoundTarget, item: ItemRef, method: str):
+        """One of the destination's two addresses, where the host can give it.
 
-        A Warehouse has no OneLake roots, and a resolver may not implement the
-        method; neither is a failure, because the actions that need roots are
-        Lakehouse actions and they will fail explicitly if it is missing.
+        A Warehouse has neither — it is reached over TDS — and a resolver may not
+        implement the method at all. Neither is a failure here, because the
+        actions that need an address are Lakehouse actions and each fails
+        explicitly, naming the target, when it is missing.
         """
 
         if bound.kind == WAREHOUSE_TARGET:
             return None
-        resolve = getattr(self.resolver, "lakehouse_spark_location", None)
+        resolve = getattr(self.resolver, method, None)
         if resolve is None:
             return None
         return resolve(item)

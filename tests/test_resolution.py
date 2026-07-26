@@ -58,10 +58,40 @@ def test_a_delta_table_lands_under_tables(resolver):
     )
 
 
-def test_local_schema_location_emulates_fabric_managed_table_placement(resolver):
-    assert resolver.schema_location(ItemRef("Sales"), "Budget") == (
-        "/srv/.local/Sales/Tables/Budget"
-    )
+def test_a_local_destination_folds_the_lakehouse_into_the_database_name(resolver):
+    """Local Spark has one namespace level, so the Lakehouse shares it.
+
+    That is what keeps two destinations declaring the same schema apart. Fabric
+    keeps them apart with a namespace of its own; here the name does it.
+    """
+
+    destination = resolver.spark_destination(ItemRef("Sales"))
+
+    assert destination.qualify("Budget", "Expense") == "`Sales__Budget`.`Expense`"
+    assert destination.qualified_schema("Budget") == "`Sales__Budget`"
+
+
+def test_a_local_schema_pins_its_storage_under_the_lakehouse_tables_area(resolver):
+    """Emulating what a schema-enabled Fabric Lakehouse does natively.
+
+    The folding is in the *name* only: a managed table still lands at
+    ``<lakehouse>/Tables/<schema>/<object>``, so the emulator keeps mirroring the
+    OneLake layout every other part of Weaver resolves against.
+    """
+
+    destination = resolver.spark_destination(ItemRef("Sales"))
+
+    assert destination.schema_location("Budget") == "/srv/.local/Sales/Tables/Budget"
+
+
+def test_two_local_destinations_sharing_a_schema_name_stay_apart(resolver):
+    """The defect this replaced: `IF NOT EXISTS` meant the first Lakehouse won."""
+
+    first = resolver.spark_destination(ItemRef("Sales"))
+    second = resolver.spark_destination(ItemRef("Inventory"))
+
+    assert first.qualify("Budget", "Expense") != second.qualify("Budget", "Expense")
+    assert first.schema_location("Budget") != second.schema_location("Budget")
 
 
 def test_schema_and_object_are_separate_segments(resolver):
