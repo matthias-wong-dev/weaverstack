@@ -158,6 +158,36 @@ def fabric_weaver_lakehouse(fabric_workspace, fabric_client):
 
 
 @pytest.fixture(scope="session")
+def fabric_target_lakehouse(fabric_workspace, fabric_client):
+    """One disposable destination Lakehouse for the whole run.
+
+    Created **before** the Livy session, and never re-created. A Lakehouse made
+    after a session has started is addressable — that was checked directly, and it
+    works — but a run that creates and deletes one per test churns the workspace's
+    artifacts underneath a long-lived session, and Fabric's namespace resolver
+    then intermittently reports `Artifact not found` for a Lakehouse that demonstrably
+    exists.
+
+    So nothing is re-provisioned and isolation comes from cleaning up instead —
+    which is what the local context has always done, and what a real installation
+    does: you do not get a new Lakehouse per build.
+    """
+
+    from weaver.fabric import delete_item
+
+    item = _create_schema_enabled_lakehouse(
+        fabric_client, fabric_workspace, _disposable_name("target")
+    )
+    try:
+        yield item
+    finally:
+        try:
+            delete_item(item, client=fabric_client)
+        except Exception as exc:
+            print(f"warning: could not delete {item}: {exc}")
+
+
+@pytest.fixture(scope="session")
 def fabric_environment_name():
     return os.environ.get(ENVIRONMENT_ENV, DEFAULT_ENVIRONMENT)
 
@@ -577,6 +607,21 @@ def _outcome_from_report(report) -> InstallOutcome:
 
 
 def _upload_tree(store, source: Path, destination) -> None:
+    """Install a repository, *replacing* whatever was there under that name.
+
+    Replacing, not merging. Two modules install different fixtures under the same
+    repository name into one shared Weaver Lakehouse, and a plain file-by-file
+    write left the previous fixture's objects behind — so a Warehouse estate
+    inherited a Lakehouse-reading table from a repository it had never heard of,
+    and failed on a three-part name naming a Lakehouse that does not exist here.
+    Installing a repository has never meant "add to whatever is already called
+    that".
+    """
+
+    try:
+        store.delete(destination, recursive=True)
+    except Exception:  # nothing there yet, which is the ordinary case
+        pass
     for path in sorted(source.rglob("*")):
         if path.is_file():
             store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
@@ -747,14 +792,16 @@ def local_build_env(tmp_path, spark, ses_fixture):
 
 
 @contextmanager
-def _fabric_build_context(fabric_workspace, fabric_client, host, session, ses_fixture):
+def _fabric_build_context(
+    fabric_workspace, fabric_client, host, target_lh, session, ses_fixture
+):
     """A build environment run entirely inside Fabric over Livy.
 
     Weaver is Fabric-first: both **generation and installation** run in the
     session, against the native Spark catalogue, so planning sees catalogue views
     and nothing is contorted to fit a desktop planner. The desktop only pushes the
-    repository and reads back results. Both Lakehouses are disposable and deleted
-    on teardown.
+    repository and reads back results. Both Lakehouses are disposable and are
+    deleted when the run ends.
 
     **The session attaches to the Weaver Lakehouse**, which is the production
     model: the control plane is the fixed attachment and destinations are the
@@ -777,198 +824,224 @@ def _fabric_build_context(fabric_workspace, fabric_client, host, session, ses_fi
     start, and at the tail of a long run it did not, so two estates were refused
     with ``did not reach 'idle' within 600s``.
 
-    Only the **target** Lakehouse is per-context, because that is what a test
-    genuinely needs fresh: prune and the failure paths each want a target nobody
-    else has touched. A fresh target never needed a fresh session, and conflating
-    the two was the whole cost.
+    The **target** Lakehouse is the run's too, and is *emptied* on the way in
+    rather than re-created. Tests that want a target nobody has touched — prune,
+    the failure paths — get one that way, and the workspace's artifacts stop
+    churning underneath a long-lived session. It is also what the local context
+    has always done.
     """
 
     from weaver import RepositoryRef
     from weaver.build_bundle import BuildBundle, BuildPlan
-    from weaver.fabric import FabricResolver, OneLakeDfsClient, delete_item
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
 
-    created = []
-    try:
-        target_lh = _create_schema_enabled_lakehouse(
-            fabric_client, fabric_workspace, _disposable_name("target")
+    # Nothing is torn down here. The Weaver Lakehouse, the target and the
+    # session all outlive this context; the next one empties the target again
+    # on its way in.
+    resolver = FabricResolver(host, client=fabric_client)
+    store = OneLakeDfsClient()
+    weaver = ItemRef(host.weaver_lakehouse)
+    target = ItemRef(target_lh.name)
+
+    destination = resolver.spark_destination(target)
+    _empty_the_target(session, store, resolver, target, destination)
+    weaver_destination = resolver.spark_destination(weaver)
+
+    def install_repo(name: str) -> str:
+        _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
+        return name
+
+    def remove_repo(name: str) -> None:
+        store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+
+    def _host_literal() -> str:
+        return (
+            f"FabricHost(workspace={host.workspace!r}, "
+            f"weaver_lakehouse={host.weaver_lakehouse!r}, "
+            f"fabric_environment={host.fabric_environment!r})"
         )
-        created.append(target_lh)
 
-        resolver = FabricResolver(host, client=fabric_client)
-        store = OneLakeDfsClient()
-        weaver = ItemRef(host.weaver_lakehouse)
-        target = ItemRef(target_lh.name)
-
-        destination = resolver.spark_destination(target)
-        weaver_destination = resolver.spark_destination(weaver)
-
-        def install_repo(name: str) -> str:
-            _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
-            return name
-
-        def remove_repo(name: str) -> None:
-            store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
-
-        def _host_literal() -> str:
-            return (
-                f"FabricHost(workspace={host.workspace!r}, "
-                f"weaver_lakehouse={host.weaver_lakehouse!r}, "
-                f"fabric_environment={host.fabric_environment!r})"
-            )
-
-        def generate(
-            bundle_name: str = "buildtest",
-            *,
-            repository_name: str = "MyRepo",
-            prune: bool = True,
-            catalogue: bool = False,
-        ):
-            # Generation runs IN the session, against the native Spark catalogue —
-            # so prune sees catalogue views, matching how a notebook would build.
-            # `catalogue` is off by default because the catalogue's tables have to
-            # exist before its DML can run; a test that wants it calls
-            # `setup_weaver()` first.
-            body = (
-                "from weaver import ItemRef, FabricHost\n"
-                "from weaver.resolution import resolver_for, store_for\n"
-                "from weaver.build_bundle import generate_build_bundle, TargetBindings, "
-                "LakehouseBinding\n"
-                f"host = {_host_literal()}\n"
-                "store = store_for(host)\n"
-                "resolver = resolver_for(host)\n"
-                "bundle = generate_build_bundle(\n"
-                f"    weaver_lakehouse=ItemRef({weaver.name!r}),\n"
-                f"    repository_name={repository_name!r},\n"
-                f"    targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef({target.name!r}))),\n"
-                f"    output=resolver.build_bundle({bundle_name!r}),\n"
-                f"    host=host, store=store, prune={prune!r}, catalogue={catalogue!r}, "
-                "spark=spark)\n"
-                "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
-                "'plan': bundle.plan.to_mapping()})\n"
-            )
-            payload = session.run(body).payload
-            plan = BuildPlan.from_mapping(payload["plan"])
-            # A desktop-addressed (https) handle to the same physical bundle, so the
-            # test can read it and the install can re-resolve it by name in-session.
-            return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
-
-        def install(bundle) -> InstallOutcome:
-            # Generation wrote the bundle through the session's abfss path. The
-            # desktop handle names the same physical place over https, so install
-            # re-resolves the name to the session-native path.
-            bundle_name = bundle.location.name
-            body = (
-                "from weaver import FabricHost\n"
-                "from weaver.resolution import resolver_for, store_for\n"
-                "from weaver.build_bundle import install_bundle, load_bundle, "
-                "InstallationEnvironment\n"
-                f"host = {_host_literal()}\n"
-                "store = store_for(host)\n"
-                "resolver = resolver_for(host)\n"
-                "env = InstallationEnvironment(store=store, resolver=resolver, spark=spark)\n"
-                f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
-                "report = install_bundle(bundle, environment=env)\n"
-                "emit({'status': report.status, 'bundle_id': report.bundle_id, "
-                "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
-                "'actions': [{'id': a.action_id, 'status': a.status, "
-                "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
-                "for a in report.action_results()]})\n"
-            )
-            payload = session.run(body).payload
-            outcome = InstallOutcome(
-                status=payload["status"],
-                bundle_id=payload["bundle_id"],
-                sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
-                action_status={a["id"]: a["status"] for a in payload["actions"]},
-                action_order=tuple(a["id"] for a in payload["actions"]),
-                action_error={a["id"]: a["error"] for a in payload["actions"] if a["error"]},
-            )
-            if outcome.status != "succeeded":
-                print("INSTALL ACTION ERRORS:", outcome.action_error)
-            return outcome
-
-        def query(sql: str) -> list:
-            body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
-            return session.run(body).payload
-
-        def columns(table: str) -> list:
-            body = (
-                "emit([{'name': f.name, 'type': f.dataType.simpleString(), "
-                f"'nullable': f.nullable}} for f in spark.table({table!r}).schema])\n"
-            )
-            return session.run(body).payload
-
-        def schema_exists(qualified: str) -> bool:
-            body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
-            return session.run(body).payload
-
-        def setup_weaver() -> None:
-            """Install Weaver's own catalogue into the Weaver Lakehouse, in-session."""
-
-            body = (
-                "from weaver import ItemRef, FabricHost\n"
-                "from weaver.resolution import resolver_for, store_for\n"
-                "from weaver.setup import initialise_weaver_lakehouse\n"
-                f"host = {_host_literal()}\n"
-                "result = initialise_weaver_lakehouse(\n"
-                f"    weaver_lakehouse=ItemRef({weaver.name!r}), host=host,\n"
-                "    store=store_for(host), spark=spark)\n"
-                "emit({'status': result.report.status, 'tables': list(result.tables), "
-                "'errors': [a.action_id + ': ' + str(a.error_message) "
-                "for s in result.report.sequences for a in s.actions "
-                "if a.status == 'failed']})\n"
-            )
-            payload = session.run(body).payload
-            assert payload["status"] == "succeeded", payload["errors"]
-
-        def seed_orphans() -> None:
-            # Seeded in the *destination*, by its four-part name — the session is
-            # attached to the Weaver Lakehouse, so an unqualified create here would
-            # put the orphans in the control plane and prune would rightly not find
-            # them.
-            statements = [
-                f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('DWG')}",
-                f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('Legacy')}",
-                f"CREATE TABLE IF NOT EXISTS {destination.qualify('DWG', 'OldTable')} "
-                "(x int) USING delta",
-                f"CREATE OR REPLACE VIEW {destination.qualify('DWG', 'OldView')} "
-                "AS SELECT 1 AS x",
-                f"CREATE TABLE IF NOT EXISTS {destination.qualify('Legacy', 'OldThing')} "
-                "(x int) USING delta",
-            ]
-            body = "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n"
-            session.run(body)
-            files_root = resolver.files_root(target)
-            store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
-            store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
-
-        yield BuildEnv(
-            label="fabric", host=host, weaver=weaver, target=target,
-            resolver=resolver, store=store, generate_spark=True,  # in-session catalogue
-            install_repo=install_repo, remove_repo=remove_repo, generate=generate,
-            install=install, run_query=query, run_columns=columns,
-            seed_orphans=seed_orphans, run_schema_exists=schema_exists,
-            setup_weaver=setup_weaver,
-            destination=destination, weaver_destination=weaver_destination,
+    def generate(
+        bundle_name: str = "buildtest",
+        *,
+        repository_name: str = "MyRepo",
+        prune: bool = True,
+        catalogue: bool = False,
+    ):
+        # Generation runs IN the session, against the native Spark catalogue —
+        # so prune sees catalogue views, matching how a notebook would build.
+        # `catalogue` is off by default because the catalogue's tables have to
+        # exist before its DML can run; a test that wants it calls
+        # `setup_weaver()` first.
+        body = (
+            "from weaver import ItemRef, FabricHost\n"
+            "from weaver.resolution import resolver_for, store_for\n"
+            "from weaver.build_bundle import generate_build_bundle, TargetBindings, "
+            "LakehouseBinding\n"
+            f"host = {_host_literal()}\n"
+            "store = store_for(host)\n"
+            "resolver = resolver_for(host)\n"
+            "bundle = generate_build_bundle(\n"
+            f"    weaver_lakehouse=ItemRef({weaver.name!r}),\n"
+            f"    repository_name={repository_name!r},\n"
+            f"    targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef({target.name!r}))),\n"
+            f"    output=resolver.build_bundle({bundle_name!r}),\n"
+            f"    host=host, store=store, prune={prune!r}, catalogue={catalogue!r}, "
+            "spark=spark)\n"
+            "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
+            "'plan': bundle.plan.to_mapping()})\n"
         )
-    finally:
-        # The session is the run's and stays open; only what this context created
-        # is removed.
-        for item in created:
-            try:
-                delete_item(item, client=fabric_client)
-            except Exception as exc:
-                print(f"warning: could not delete {item}: {exc}")
+        payload = session.run(body).payload
+        plan = BuildPlan.from_mapping(payload["plan"])
+        # A desktop-addressed (https) handle to the same physical bundle, so the
+        # test can read it and the install can re-resolve it by name in-session.
+        return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
+
+    def install(bundle) -> InstallOutcome:
+        # Generation wrote the bundle through the session's abfss path. The
+        # desktop handle names the same physical place over https, so install
+        # re-resolves the name to the session-native path.
+        bundle_name = bundle.location.name
+        body = (
+            "from weaver import FabricHost\n"
+            "from weaver.resolution import resolver_for, store_for\n"
+            "from weaver.build_bundle import install_bundle, load_bundle, "
+            "InstallationEnvironment\n"
+            f"host = {_host_literal()}\n"
+            "store = store_for(host)\n"
+            "resolver = resolver_for(host)\n"
+            "env = InstallationEnvironment(store=store, resolver=resolver, spark=spark)\n"
+            f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
+            "report = install_bundle(bundle, environment=env)\n"
+            "emit({'status': report.status, 'bundle_id': report.bundle_id, "
+            "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
+            "'actions': [{'id': a.action_id, 'status': a.status, "
+            "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
+            "for a in report.action_results()]})\n"
+        )
+        payload = session.run(body).payload
+        outcome = InstallOutcome(
+            status=payload["status"],
+            bundle_id=payload["bundle_id"],
+            sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
+            action_status={a["id"]: a["status"] for a in payload["actions"]},
+            action_order=tuple(a["id"] for a in payload["actions"]),
+            action_error={a["id"]: a["error"] for a in payload["actions"] if a["error"]},
+        )
+        if outcome.status != "succeeded":
+            print("INSTALL ACTION ERRORS:", outcome.action_error)
+        return outcome
+
+    def query(sql: str) -> list:
+        body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
+        return session.run(body).payload
+
+    def columns(table: str) -> list:
+        body = (
+            "emit([{'name': f.name, 'type': f.dataType.simpleString(), "
+            f"'nullable': f.nullable}} for f in spark.table({table!r}).schema])\n"
+        )
+        return session.run(body).payload
+
+    def schema_exists(qualified: str) -> bool:
+        body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
+        return session.run(body).payload
+
+    def setup_weaver() -> None:
+        """Install Weaver's own catalogue into the Weaver Lakehouse, in-session."""
+
+        body = (
+            "from weaver import ItemRef, FabricHost\n"
+            "from weaver.resolution import resolver_for, store_for\n"
+            "from weaver.setup import initialise_weaver_lakehouse\n"
+            f"host = {_host_literal()}\n"
+            "result = initialise_weaver_lakehouse(\n"
+            f"    weaver_lakehouse=ItemRef({weaver.name!r}), host=host,\n"
+            "    store=store_for(host), spark=spark)\n"
+            "emit({'status': result.report.status, 'tables': list(result.tables), "
+            "'errors': [a.action_id + ': ' + str(a.error_message) "
+            "for s in result.report.sequences for a in s.actions "
+            "if a.status == 'failed']})\n"
+        )
+        payload = session.run(body).payload
+        assert payload["status"] == "succeeded", payload["errors"]
+
+    def seed_orphans() -> None:
+        # Seeded in the *destination*, by its four-part name — the session is
+        # attached to the Weaver Lakehouse, so an unqualified create here would
+        # put the orphans in the control plane and prune would rightly not find
+        # them.
+        statements = [
+            f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('DWG')}",
+            f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('Legacy')}",
+            f"CREATE TABLE IF NOT EXISTS {destination.qualify('DWG', 'OldTable')} "
+            "(x int) USING delta",
+            f"CREATE OR REPLACE VIEW {destination.qualify('DWG', 'OldView')} "
+            "AS SELECT 1 AS x",
+            f"CREATE TABLE IF NOT EXISTS {destination.qualify('Legacy', 'OldThing')} "
+            "(x int) USING delta",
+        ]
+        body = "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n"
+        session.run(body)
+        files_root = resolver.files_root(target)
+        store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
+        store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
+
+    yield BuildEnv(
+        label="fabric", host=host, weaver=weaver, target=target,
+        resolver=resolver, store=store, generate_spark=True,  # in-session catalogue
+        install_repo=install_repo, remove_repo=remove_repo, generate=generate,
+        install=install, run_query=query, run_columns=columns,
+        seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+        setup_weaver=setup_weaver,
+        destination=destination, weaver_destination=weaver_destination,
+    )
+
+
+#: Every schema a Lakehouse build fixture registers in the target, and every Files
+#: area it writes. Emptied between contexts, which is what a fresh target used to
+#: be for. The local context drops the same set — see `_LOCAL_SCHEMAS`.
+_FABRIC_TARGET_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting")
+
+
+def _empty_the_target(session, store, resolver, target, destination) -> None:
+    """Leave the target Lakehouse as though nothing had been built into it.
+
+    Catalogue first, then storage: dropping a schema removes its tables and views
+    from the catalogue, and anything left on disk afterwards was never registered.
+    """
+
+    statements = [
+        f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema)} CASCADE"
+        for schema in _FABRIC_TARGET_SCHEMAS
+    ]
+    session.run("".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n")
+
+    for area in (resolver.tables_root(target), resolver.files_root(target)):
+        try:
+            entries = store.list(area)
+        except Exception:  # the area may not exist yet
+            continue
+        for entry in entries:
+            if entry.is_directory and entry.name.lower() != "dbo":
+                try:
+                    store.delete(entry.location, recursive=True)
+                except Exception as exc:
+                    print(f"warning: could not empty {entry.location}: {exc}")
 
 
 @pytest.fixture
-def fabric_build_env(fabric_workspace, fabric_client, fabric_host, livy_session, ses_fixture):
-    """One Fabric build environment per test — its own disposable *target*
-    Lakehouse, over the run's shared Weaver Lakehouse and Livy session. Used where
-    a test needs a target nobody else has touched (prune, the failure paths)."""
+def fabric_build_env(
+    fabric_workspace, fabric_client, fabric_host, fabric_target_lakehouse,
+    livy_session, ses_fixture,
+):
+    """One Fabric build environment per test, over the run's Weaver Lakehouse,
+    target Lakehouse and Livy session. The target is emptied on the way in, which
+    is what a freshly created one used to provide."""
 
     with _fabric_build_context(
-        fabric_workspace, fabric_client, fabric_host, livy_session, ses_fixture
+        fabric_workspace, fabric_client, fabric_host, fabric_target_lakehouse,
+        livy_session, ses_fixture,
     ) as env:
         yield env
 
@@ -1159,6 +1232,7 @@ def lakehouse_estate(request, ses_fixture):
             request.getfixturevalue("fabric_workspace"),
             request.getfixturevalue("fabric_client"),
             request.getfixturevalue("fabric_host"),
+            request.getfixturevalue("fabric_target_lakehouse"),
             request.getfixturevalue("livy_session"),
             ses_fixture,
         ) as env:
