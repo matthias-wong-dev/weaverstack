@@ -1673,6 +1673,45 @@ suites handle by dropping `_`. Production has one Weaver Lakehouse attached for 
 life of the session and reaches destinations through resolved roots. The
 architecture does not follow the lifecycle of a test fixture.
 
+### What the settled model exposes: destination DDL is still two-part
+
+Fixing the *catalogue's* addressing settles the catalogue. It also makes visible
+that **destination** addressing has the problem the catalogue was suspected of.
+
+Today a destination table is built as a two-part name:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS `Sales` LOCATION '<destination>/Tables/Sales'   -- local
+CREATE SCHEMA IF NOT EXISTS `Sales`                                        -- Fabric
+CREATE OR REPLACE TABLE Sales.Customer (…) USING delta
+```
+
+A two-part name resolves through the session's current catalogue, and the session
+is attached to **Weaver**. So:
+
+- **Locally** it works, but only for one destination. `LocalResolver.schema_location`
+  pins `Sales` to that destination's `Tables` area with an explicit `LOCATION`, and
+  `IF NOT EXISTS` means the *first* Lakehouse to register `Sales` wins. Two
+  destinations sharing a schema name would silently share a location.
+- **On Fabric** `schema_location` returns None by design — a schema-enabled
+  Lakehouse pins managed tables itself — so `CREATE SCHEMA IF NOT EXISTS Sales`
+  creates `Sales` in the *attached* Lakehouse, and the table lands in Weaver rather
+  than in the destination.
+
+This is the work `LakehouseSparkLocation` exists for and does not yet do: the build
+DDL has to address a destination by its resolved root, not by a bare two-part name.
+It touches the schema sequence and every Lakehouse executor, so it is its own piece
+of work rather than an addition to this one.
+
+**Why the Fabric build tests did not catch it.** They generate *and* install in one
+session and then verify through `spark.table("DWG.Customer")` — the same session
+catalogue the write went through. A table written to the wrong Lakehouse is then
+read back from the wrong Lakehouse, and the assertion passes. This is the same shape
+as the prune helper that once allow-listed the schemas it inspected: an assertion
+that cannot see the thing it claims about is not testing it. The fix is to assert on
+the destination's *resolved path* — `location.table_path(schema, name)` — as well as
+on the name.
+
 ### The Spark suite no longer fits one process here
 
 The catalogue roughly doubled the Spark suite, from 41 tests to ~93. Every file
@@ -1715,6 +1754,7 @@ read-only assertion, taking that file from 5:13 to 1:39 — so the run completes
 | Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
 | Should the catalogue be addressed by explicit path rather than by two-part name? | catalogue | **settled: no.** The Spark session is attached to the Weaver Lakehouse — that is the fixed control-plane context, so two-part names in schema `_` are the defined execution context rather than ambient resolution. Destination Lakehouses are the data plane and are addressed through roots resolved from their bindings (`LakehouseSparkLocation`). The local `_` churn is fixture isolation, not architecture. |
+| Destination Delta objects are still built as two-part names, which resolve through the session's catalogue — and the session is attached to Weaver. Locally that works for one destination (the schema carries an explicit `LOCATION`) and breaks for two; on Fabric `schema_location()` is None by design, so the table lands in the attached Lakehouse rather than the destination. `LakehouseSparkLocation` is the seam; using it in the schema sequence and the Lakehouse executors is the work. The Fabric build tests cannot currently see this, because they write and read through the same session catalogue. | catalogue | **open — the next piece of work this implies** |
 | How should `-m spark` run now that it is ~93 tests? | catalogue | open, and a **harness** question: every file passes alone, and one long-lived JVM degrades late in a combined run. Process isolation or a session per group. Not a reason to change catalogue design. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
