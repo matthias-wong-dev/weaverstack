@@ -240,6 +240,23 @@ tables are `SHOW TABLES` minus `SHOW VIEWS`. `spark.catalog.tableExists` and
 `databaseExists` accept the qualified name; `listDatabases` and `listTables` do
 not — they re-encode it and fail.
 
+**A Lakehouse table's physical name is lower-cased, and the Warehouse is
+case-sensitive.** Spark creates `Sales.Customer`, Fabric stores the directory as
+`Tables/Sales/customer`, and the Lakehouse SQL endpoint exposes it as
+`Sales.customer`. A Fabric Warehouse uses a case-sensitive collation, so a
+cross-database read written as `[Lakehouse].[Sales].[Customer]` fails with
+`Invalid object name` — and it fails identically to an endpoint that has not
+synced yet, which is the trap. Check `INFORMATION_SCHEMA.TABLES` on the endpoint
+before assuming it is lag.
+
+Weaver passes a three- or four-part name through untouched, by design: the author
+named a physical thing. Matching its physical spelling is therefore the author's
+job, and a cross-engine read must use the lower-cased name.
+
+**A Lakehouse SQL endpoint exposes tables, not Spark views.** `Sales.ActiveCustomer`
+is a Spark-catalogue object; it is queryable from Spark in any Lakehouse and is
+simply absent from the endpoint. A Warehouse object cannot read one.
+
 **An unqualified name lands in the attached Lakehouse, silently.**
 `CREATE TABLE DWG.Customer` in a session attached to Lakehouse A creates
 `Weaver.A.DWG.Customer` with no error, whatever the caller meant. This is why

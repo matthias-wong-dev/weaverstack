@@ -1951,6 +1951,53 @@ way `warehouse_estate` shares its Warehouse. Recorded as harness work rather tha
 done here, because unlike the local Spark entry above there is no measurement yet
 saying which limit was hit.
 
+### Building the mixed estate into a real workspace, and what it cost
+
+The multi-target work was exercised on a workspace that is not disposable —
+`Play_Lakehouse_1` as the Weaver Lakehouse, `Play_Lakehouse_2` as the destination,
+`Play Warehouse` as the Warehouse — with prune on, which is how three things came
+out that a disposable fixture could not have shown.
+
+**Weaver's Warehouse prune deleted nine schemas it does not own.** Every Fabric
+Warehouse carries a schema per fixed database role (`db_owner`, `db_datareader`
+and seven more) and the prune treated each as an orphan. On SQL Server
+`drop schema [db_owner]` fails; on Fabric it *succeeds*. All nine went. The roles
+survive, so `create schema [db_owner] authorization [db_owner];` puts them back,
+and it did. They are now excluded by ownership — asked of the server through
+`sys.database_principals.is_fixed_role` — rather than by adding nine names to a
+reserved list, because the reserved list says what Weaver declines to manage and
+this says what the database owns on its own behalf.
+
+This is the sharpest argument yet for the rule that a build is planned against a
+*read* target: the drops were visible in the bundle before anything ran, and were
+read only after the fact.
+
+**A Lakehouse table's physical name is lower-cased and the Warehouse is
+case-sensitive.** Spark creates `Sales.Customer`; Fabric stores
+`Tables/Sales/customer`; the SQL endpoint exposes `Sales.customer`; and a Fabric
+Warehouse, whose collation is case-sensitive, cannot see `[Sales].[Customer]` at
+all. The failure is `Invalid object name`, which is exactly what an unsynced
+endpoint reports — so the obvious diagnosis is the wrong one, and five minutes
+were spent waiting for a sync that had already happened. Weaver passes a
+three-part name through untouched by design, so matching the physical spelling is
+the author's job; the trap is worth knowing rather than working around.
+
+**A Lakehouse SQL endpoint exposes tables, not Spark views.** `Sales.ActiveCustomer`
+is a Spark-catalogue object, queryable from Spark in any Lakehouse, and simply
+absent from the endpoint. A Warehouse object cannot read one.
+
+What worked, first time and unremarkably, is the part this branch was about. One
+repository installed into two physical sides, one session, three Lakehouse-scoped
+destinations in play, and the catalogue in the Weaver Lakehouse recording both:
+
+```text
+_.Installation      MixedEstate  lakehouse  -> Play_Lakehouse_2
+                    MixedEstate  warehouse  -> Play Warehouse
+                    _weaver      lakehouse  -> Play_Lakehouse_1
+```
+
+Read back, as ever, through ```Weaver`.`Play_Lakehouse_1`.`_`.`Registry```.
+
 ---
 
 ## Open questions
