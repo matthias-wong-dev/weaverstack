@@ -13,6 +13,8 @@ a special case — it is the ordinary one.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from weaver import ItemRef, RepositoryRef
@@ -34,16 +36,51 @@ pytestmark = pytest.mark.spark
 SCOPE = InstallationScope(repository=CATALOGUE_REPOSITORY, target_type="lakehouse")
 
 
-@pytest.fixture
-def setup(lakehouses, spark):
+@dataclass(frozen=True)
+class Bootstrapped:
+    """One completed bootstrap, with the environment it ran against."""
+
+    result: object
+    host: object
+    resolver: object
+    store: object
+
+
+def _environment(root):
+    """A disposable Weaver Lakehouse skeleton at one root."""
+
+    from weaver import ItemRef, LocalHost, LocalResolver, LocalStore
+
+    host = LocalHost(root=root, weaver_lakehouse="Weaver")
+    store = LocalStore()
+    resolver = LocalResolver(host)
+    store.make_directory(resolver.files_root(ItemRef("Weaver")))
+    store.make_directory(resolver.tables_root(ItemRef("Weaver")))
+    store.make_directory(resolver.repos_root)
+    return host, resolver, store
+
+
+def _bootstrap(spark, root) -> Bootstrapped:
+    host, resolver, store = _environment(root)
     result = initialise_weaver_lakehouse(
-        weaver_lakehouse=lakehouses.weaver,
-        host=lakehouses.host,
-        store=lakehouses.store,
-        spark=spark,
+        weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
     )
+    return Bootstrapped(result=result, host=host, resolver=resolver, store=store)
+
+
+@pytest.fixture(scope="module")
+def setup(spark, tmp_path_factory):
+    """One bootstrap, shared by every read-only assertion in this file.
+
+    Module-scoped on purpose. A full bootstrap is about twenty seconds of Spark, and
+    almost everything here only *reads* the catalogue it produced — so paying for it
+    once is the difference between this file taking a minute and taking five. The
+    two tests that mutate anything run their own setup instead.
+    """
+
+    spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
     try:
-        yield result
+        yield _bootstrap(spark, tmp_path_factory.mktemp("weaver-setup"))
     finally:
         spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
 
@@ -61,20 +98,20 @@ def _failures(report) -> str:
 
 
 def test_setup_succeeds(setup):
-    assert setup.succeeded, _failures(setup.report)
+    assert setup.result.succeeded, _failures(setup.result.report)
 
 
-def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup, lakehouses):
-    root = lakehouses.resolver.repository(RepositoryRef(CATALOGUE_REPOSITORY))
-    assert lakehouses.store.exists(root.join("_schemas", "_.yml"))
+def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup):
+    root = setup.resolver.repository(RepositoryRef(CATALOGUE_REPOSITORY))
+    assert setup.store.exists(root.join("_schemas", "_.yml"))
     for table in CATALOGUE_TABLES:
-        assert lakehouses.store.exists(root.join(f"{table.qualified}.spark.sql"))
-    assert "_schemas/_.yml" in setup.materialised
+        assert setup.store.exists(root.join(f"{table.qualified}.spark.sql"))
+    assert "_schemas/_.yml" in setup.result.materialised
 
 
-def test_the_bundle_is_kept_where_bundles_belong(setup, lakehouses):
-    expected = lakehouses.resolver.build_bundle(BUNDLE_NAME)
-    assert setup.bundle.location.value == expected.value
+def test_the_bundle_is_kept_where_bundles_belong(setup):
+    expected = setup.resolver.build_bundle(BUNDLE_NAME)
+    assert setup.result.bundle.location.value == expected.value
 
 
 def test_every_catalogue_table_exists_and_matches_the_representation(setup, spark):
@@ -169,10 +206,12 @@ def test_no_folder_rows_since_the_catalogue_has_no_folders(setup, spark):
 
 
 def test_registry_is_published_after_the_dictionaries_and_the_installation(setup):
-    numbers = [sequence.number for sequence in setup.report.sequences]
+    numbers = [sequence.number for sequence in setup.result.report.sequences]
     assert numbers == sorted(numbers)
     assert numbers[-1] == 9020
-    statuses = {sequence.number: sequence.status for sequence in setup.report.sequences}
+    statuses = {
+        sequence.number: sequence.status for sequence in setup.result.report.sequences
+    }
     assert all(status == "succeeded" for status in statuses.values())
 
 
@@ -181,24 +220,32 @@ def test_setup_prunes_nothing(setup):
 
     kinds = {
         action.action_id
-        for sequence in setup.report.sequences
+        for sequence in setup.result.report.sequences
         for action in sequence.actions
     }
     assert not [name for name in kinds if name.startswith("prune-")]
 
 
-def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(lakehouses, spark):
+# --- tests that own schema `_` themselves --------------------------------------
+#
+# These two bootstrap their own catalogue rather than sharing the module's, because
+# each needs a *pristine* one: schema `_` is a fixed name in one shared Spark
+# catalog, so a test that creates or drops it takes the module's with it. They must
+# therefore stay last in the file — anything ordered after them that reads the
+# shared catalogue would find it gone. Only a test needing no Spark may follow.
+
+
+def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(spark, tmp_path):
     """The consequence of not pruning, asserted rather than assumed."""
 
-    tables_root = lakehouses.resolver.tables_root(ItemRef("Weaver")).value
+    spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+    host, resolver, store = _environment(tmp_path)
+    tables_root = resolver.tables_root(ItemRef("Weaver")).value
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS `Scratch` LOCATION '{tables_root}/Scratch'")
     spark.sql("CREATE OR REPLACE TABLE `Scratch`.`Notes` (x int) USING delta")
     try:
         result = initialise_weaver_lakehouse(
-            weaver_lakehouse=lakehouses.weaver,
-            host=lakehouses.host,
-            store=lakehouses.store,
-            spark=spark,
+            weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
         )
         assert result.succeeded, _failures(result.report)
         assert spark.table("`Scratch`.`Notes`").count() == 0  # still there
@@ -207,12 +254,7 @@ def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(lakehouses, s
         spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
 
 
-# --- re-running ----------------------------------------------------------------
-
-
-def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(
-    setup, lakehouses, spark
-):
+def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_path):
     """Idempotent in shape: same package, same bundle identity, same catalogue.
 
     Not yet idempotent in *rows* for anything else — build still emits
@@ -221,29 +263,36 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(
     drop policy reads the signatures this catalogue now holds.
     """
 
-    before = {
-        name: tuple(sorted(map(repr, rows)))
-        for name, rows in read_installation(spark, scope=SCOPE).items()
-    }
+    spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
+    try:
+        first = _bootstrap(spark, tmp_path)
+        assert first.result.succeeded, _failures(first.result.report)
+        before = {
+            name: tuple(sorted(map(repr, rows)))
+            for name, rows in read_installation(spark, scope=SCOPE).items()
+        }
+        assert before["Registry"], "the first run must have catalogued something"
 
-    again = initialise_weaver_lakehouse(
-        weaver_lakehouse=lakehouses.weaver,
-        host=lakehouses.host,
-        store=lakehouses.store,
-        spark=spark,
-    )
-    assert again.succeeded, _failures(again.report)
-    assert again.bundle.plan.bundle_id == setup.bundle.plan.bundle_id
+        again = initialise_weaver_lakehouse(
+            weaver_lakehouse=ItemRef("Weaver"),
+            host=first.host,
+            store=first.store,
+            spark=spark,
+        )
+        assert again.succeeded, _failures(again.report)
+        assert again.bundle.plan.bundle_id == first.result.bundle.plan.bundle_id
 
-    after = {
-        name: tuple(sorted(map(repr, rows)))
-        for name, rows in read_installation(spark, scope=SCOPE).items()
-    }
-    assert after == before
+        after = {
+            name: tuple(sorted(map(repr, rows)))
+            for name, rows in read_installation(spark, scope=SCOPE).items()
+        }
+        assert after == before
+    finally:
+        spark.sql("DROP DATABASE IF EXISTS `_` CASCADE")
 
 
 def test_the_result_serialises_for_a_cli_without_owning_any_semantics(setup):
-    mapping = setup.to_mapping()
+    mapping = setup.result.to_mapping()
     assert mapping["repository"] == CATALOGUE_REPOSITORY
     assert mapping["weaver_lakehouse"] == "Weaver"
     assert mapping["status"] == "succeeded"
