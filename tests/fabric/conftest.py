@@ -136,12 +136,17 @@ def fabric_weaver_lakehouse(fabric_workspace, fabric_client):
 
     The Livy session is created against it; Weaver itself comes from the
     attached Environment, not from here.
+
+    **Schema-enabled**, because the catalogue lives in a schema called ``_`` and a
+    Lakehouse without schemas cannot hold one. Also because there is exactly one of
+    these per run: production has one Weaver Lakehouse for the life of a session,
+    and a suite that made a new one per test would be modelling something else.
     """
 
-    from weaver.fabric import create_lakehouse, delete_item
+    from weaver.fabric import delete_item
 
-    item = create_lakehouse(
-        fabric_workspace, _disposable_name("home"), client=fabric_client
+    item = _create_schema_enabled_lakehouse(
+        fabric_client, fabric_workspace, _disposable_name("home")
     )
     try:
         yield item
@@ -742,7 +747,7 @@ def local_build_env(tmp_path, spark, ses_fixture):
 
 
 @contextmanager
-def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_name, ses_fixture):
+def _fabric_build_context(fabric_workspace, fabric_client, host, session, ses_fixture):
     """A build environment run entirely inside Fabric over Livy.
 
     Weaver is Fabric-first: both **generation and installation** run in the
@@ -762,46 +767,37 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
     **Both Lakehouses are schema-enabled.** The target so a managed table appears
     under ``Tables/<schema>/<table>``; the Weaver Lakehouse because the catalogue
     lives in a schema called ``_`` and a Lakehouse without schemas cannot hold one.
+
+    **The Weaver Lakehouse and the Livy session are the run's, not this context's.**
+    A destination is disposable and a control plane is not — that is the
+    architecture, and modelling it costs less as well. A Livy session takes one to
+    two minutes to reach ``idle``, which was about seventy per cent of this
+    module's wall clock when every test started its own; a capacity that permits
+    one session at a time also has to release the previous one before the next can
+    start, and at the tail of a long run it did not, so two estates were refused
+    with ``did not reach 'idle' within 600s``.
+
+    Only the **target** Lakehouse is per-context, because that is what a test
+    genuinely needs fresh: prune and the failure paths each want a target nobody
+    else has touched. A fresh target never needed a fresh session, and conflating
+    the two was the whole cost.
     """
 
-    from weaver import FabricHost, RepositoryRef
+    from weaver import RepositoryRef
     from weaver.build_bundle import BuildBundle, BuildPlan
-    from weaver.fabric import (
-        FabricResolver,
-        LivySession,
-        OneLakeDfsClient,
-        create_lakehouse,
-        delete_item,
-    )
+    from weaver.fabric import FabricResolver, OneLakeDfsClient, delete_item
 
     created = []
-    session = None
     try:
-        weaver_lh = _create_schema_enabled_lakehouse(
-            fabric_client, fabric_workspace, _disposable_name("weaver")
-        )
-        created.append(weaver_lh)
         target_lh = _create_schema_enabled_lakehouse(
             fabric_client, fabric_workspace, _disposable_name("target")
         )
         created.append(target_lh)
 
-        host = FabricHost(
-            workspace=fabric_workspace.name,
-            weaver_lakehouse=weaver_lh.name,
-            fabric_environment=fabric_environment_name,
-        )
         resolver = FabricResolver(host, client=fabric_client)
         store = OneLakeDfsClient()
-        weaver = ItemRef(weaver_lh.name)
+        weaver = ItemRef(host.weaver_lakehouse)
         target = ItemRef(target_lh.name)
-
-        # One session, attached to the *Weaver* Lakehouse — the control plane, as
-        # in production — with the Weaver Environment attached so the install
-        # program can import weaver.build_bundle. Every destination statement names
-        # its Lakehouse rather than relying on this attachment.
-        session = LivySession.for_host(host)
-        session.start()
 
         destination = resolver.spark_destination(target)
         weaver_destination = resolver.spark_destination(weaver)
@@ -956,11 +952,8 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
             destination=destination, weaver_destination=weaver_destination,
         )
     finally:
-        if session is not None:
-            try:
-                session.close()
-            except Exception as exc:
-                print(f"warning: could not close Livy session: {exc}")
+        # The session is the run's and stays open; only what this context created
+        # is removed.
         for item in created:
             try:
                 delete_item(item, client=fabric_client)
@@ -969,12 +962,13 @@ def _fabric_build_context(fabric_workspace, fabric_client, fabric_environment_na
 
 
 @pytest.fixture
-def fabric_build_env(fabric_workspace, fabric_client, fabric_environment_name, ses_fixture):
-    """One Fabric build environment per test — its own disposable Lakehouses and
-    Livy session. Used where each test needs an isolated target (e.g. prune)."""
+def fabric_build_env(fabric_workspace, fabric_client, fabric_host, livy_session, ses_fixture):
+    """One Fabric build environment per test — its own disposable *target*
+    Lakehouse, over the run's shared Weaver Lakehouse and Livy session. Used where
+    a test needs a target nobody else has touched (prune, the failure paths)."""
 
     with _fabric_build_context(
-        fabric_workspace, fabric_client, fabric_environment_name, ses_fixture
+        fabric_workspace, fabric_client, fabric_host, livy_session, ses_fixture
     ) as env:
         yield env
 
@@ -1152,7 +1146,8 @@ def _install_estate(env, repo: str = "Estate", *, prune: bool = True) -> Install
 def lakehouse_estate(request, ses_fixture):
     """One Lakehouse estate, provisioned and installed **once per module** on both
     local Spark and Fabric. Read-only assertions reuse it, so a whole module of
-    Fabric checks costs one Lakehouse, one Livy session and one install."""
+    Fabric checks costs one target Lakehouse and one install — the Weaver
+    Lakehouse and the Livy session are the run's."""
 
     if request.param == "local":
         spark = request.getfixturevalue("spark")
@@ -1163,7 +1158,8 @@ def lakehouse_estate(request, ses_fixture):
         with _fabric_build_context(
             request.getfixturevalue("fabric_workspace"),
             request.getfixturevalue("fabric_client"),
-            request.getfixturevalue("fabric_environment_name"),
+            request.getfixturevalue("fabric_host"),
+            request.getfixturevalue("livy_session"),
             ses_fixture,
         ) as env:
             yield _install_estate(env)

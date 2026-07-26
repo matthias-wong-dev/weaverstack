@@ -23,6 +23,10 @@ DEFAULT_LIVY_API_VERSION = "2023-12-01"
 DEFAULT_POLL_INTERVAL = 3.0
 DEFAULT_SESSION_TIMEOUT = 600.0
 DEFAULT_STATEMENT_TIMEOUT = 900.0
+#: How long a close waits for the session to actually release its capacity slot.
+#: Shorter than a start, because a session being torn down has no work to finish
+#: and a caller should not be held up by one that will not admit it has gone.
+DEFAULT_CLOSE_TIMEOUT = 120.0
 
 #: Wrapped around returned values so a result can be told from printed output.
 RESULT_PREFIX = "__weaver_result__"
@@ -202,13 +206,47 @@ class LivySession:
             time.sleep(self.poll_interval)
         raise LivyError(f"Livy statement did not finish within {int(timeout)}s")
 
-    def close(self) -> None:
+    def close(self, *, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
+        """Ask Fabric to end the session, and wait until it has.
+
+        The waiting is the point, and it is not tidiness. A capacity has a limit on
+        concurrent Spark sessions — often one — and `DELETE` returns as soon as the
+        request is accepted, not when the session has released its slot. A caller
+        that closed and immediately opened another would be asking for a second
+        session while the first still held the only slot: the new one queues, and
+        on a long run it eventually never reaches `idle` at all.
+
+        A close that cannot be confirmed is reported and not raised. The session is
+        being abandoned either way, and a teardown problem must not mask whatever
+        the caller was actually doing.
+        """
+
         if self.session_url is None:
             return
+        url = self.session_url
         try:
-            _call("DELETE", self.session_url, self.token, expected=(200, 202, 204, 404))
+            _call("DELETE", url, self.token, expected=(200, 202, 204, 404))
+            self._await_release(url, timeout=timeout)
         finally:
             self.session_url = None
+
+    def _await_release(self, url: str, *, timeout: float) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                state = _call("GET", url, self.token, expected=(200, 404))
+            except LivyError:  # gone, or no longer ours to ask about
+                return
+            if not state:  # 404 — the session is no longer there
+                return
+            if (state.get("state") or "").lower() in {"dead", "killed", "success", "error"}:
+                return
+            time.sleep(self.poll_interval)
+        print(
+            f"warning: Livy session {url.rsplit('/', 1)[-1]} did not report itself "
+            f"released within {int(timeout)}s; a capacity limited to one session "
+            "may refuse the next one"
+        )
 
 
 def _result(statement: dict) -> StatementResult:
