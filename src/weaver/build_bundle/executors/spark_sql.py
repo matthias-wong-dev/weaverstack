@@ -42,9 +42,13 @@ class SparkSqlExecutor:
             raise InstallError(
                 f"spark_sql action {action.id!r} needs a Spark session but none was provided"
             )
-        statement = context.catalogue.expand(payload.decode("utf-8").strip())
+        catalogue = context.catalogue
+        statement = catalogue.expand(payload.decode("utf-8").strip())
         context.spark.sql(statement)
+        # The destination is reported, not just used: an install report that says
+        # which Lakehouse each statement ran against is the record a reviewer needs
+        # when the answer used to depend on what the session was attached to.
         return {
-            "destination": context.catalogue.destination.item,
+            "destination": catalogue.destination.item,
             "statement_first_line": statement.splitlines()[0] if statement else "",
         }
