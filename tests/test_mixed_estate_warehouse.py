@@ -24,6 +24,18 @@ from weaver.build_bundle import (
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mixed-estate"
 
+def _physical(plan):
+    """Actions that build the destination, excluding the catalogue's own work.
+
+    The catalogue is written to the Weaver Lakehouse through Spark SQL whichever
+    side is being built, so a claim about *this* target's executors has to say so.
+    """
+
+    from weaver.build_bundle.models import CATALOGUE_KINDS
+
+    return [action for _s, _b, action in plan.actions() if action.kind not in CATALOGUE_KINDS]
+
+
 
 @pytest.fixture
 def estate(tmp_path):
@@ -60,11 +72,12 @@ def test_the_warehouse_plan_builds_both_objects_in_dependency_order(estate):
     bundle = _generate(estate)
     plan = bundle.plan
 
-    assert [t.kind for t in plan.targets] == ["warehouse"]
+    # Plus the Weaver Lakehouse, which is where the catalogue lives.
+    assert [t.kind for t in plan.targets] == ["warehouse", "lakehouse"]
     built = [a.resource_node_id for _, _, a in plan.actions() if a.resource_node_id]
     # The report is built before the view that reads it.
     assert built == ["sql:Wh.CustomerReport", "sql:Wh.ActiveReport"]
-    assert {a.executor for _, _, a in plan.actions()} == {"tsql"}
+    assert {a.executor for a in _physical(plan)} == {"tsql"}
 
     omitted = {node.node_id for node in plan.omitted_nodes}
     assert omitted == {

@@ -69,9 +69,12 @@ def test_generated_plan_has_the_expected_shape(weaver_lakehouse, tmp_path):
     assert plan.format_version == 1
     assert plan.repository_name == "MyRepo"
     assert plan.repository_signature
-    assert len(plan.targets) == 1
-    target = plan.targets[0]
-    assert (target.kind, target.item_id) == ("lakehouse", "Sales_LH")
+    # Two bound targets: the destination, and the Weaver Lakehouse the catalogue is
+    # written to. A bundle names every physical destination it touches, and the
+    # control plane is a different item from the destination.
+    destination, control = plan.targets
+    assert (destination.kind, destination.item_id) == ("lakehouse", "Sales_LH")
+    assert (control.kind, control.item_id) == ("lakehouse", "Weaver")
     assert plan.omitted_nodes == ()
 
 

@@ -25,6 +25,18 @@ from weaver.build_bundle.models import OMIT_TARGET_UNBOUND
 
 WAREHOUSE_FIXTURE = Path(__file__).parent / "fixtures" / "build-lakehouse-warehouse"
 
+def _physical(plan):
+    """Actions that build the destination, excluding the catalogue's own work.
+
+    The catalogue is written to the Weaver Lakehouse through Spark SQL whichever
+    side is being built, so a claim about *this* target's executors has to say so.
+    """
+
+    from weaver.build_bundle.models import CATALOGUE_KINDS
+
+    return [action for _s, _b, action in plan.actions() if action.kind not in CATALOGUE_KINDS]
+
+
 
 @pytest.fixture
 def warehouse_repo(tmp_path):
@@ -87,11 +99,11 @@ def test_warehouse_only_builds_the_tsql_objects_and_omits_the_lakehouse(warehous
 
     # The one Warehouse target, and the Warehouse object built through the T-SQL
     # executor; the Lakehouse objects are omitted as unbound.
-    assert [t.kind for t in plan.targets] == ["warehouse"]
+    # Plus the Weaver Lakehouse, which is where the catalogue lives.
+    assert [t.kind for t in plan.targets] == ["warehouse", "lakehouse"]
     built = {a.resource_node_id for _, _, a in plan.actions() if a.resource_node_id}
     assert built == {"sql:Reporting.CustomerReport"}
-    executors = {a.executor for _, _, a in plan.actions()}
-    assert executors == {"tsql"}
+    assert {a.executor for a in _physical(plan)} == {"tsql"}
 
     omitted = {node.node_id: node.reason for node in plan.omitted_nodes}
     assert omitted == {

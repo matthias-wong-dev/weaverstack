@@ -309,6 +309,31 @@ def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
 # --- the explicit prune scopes ----------------------------------------------
 
 
+def test_the_installation_table_has_no_obsolete_row_to_delete():
+    """Its key *is* the scope, so at most one row exists and the merge maintains it.
+
+    A predicate over the key columns "beyond the scope" would be a predicate over
+    no columns, and would delete the very row about to be merged.
+    """
+
+    row = {
+        "repository": "SalesRepo",
+        "target_type": "lakehouse",
+        "target_name": "Sales_LH",
+        "weaver_version": "0.1.0",
+        "signature": "abc",
+    }
+    assert render_delete_obsolete(INSTALLATION, [row], scope=LAKEHOUSE_SCOPE) is None
+
+
+def test_an_installation_projecting_nothing_is_still_deleted():
+    """The empty case is how an installation is removed, so it must still render."""
+
+    statement = render_delete_obsolete(INSTALLATION, [], scope=LAKEHOUSE_SCOPE)
+    assert statement is not None
+    assert "`repository` = 'SalesRepo' AND `target_type` = 'lakehouse'" in statement
+
+
 def test_installation_prune_removes_one_scope_and_names_it():
     statement = render_delete_scope(REGISTRY, scope=LAKEHOUSE_SCOPE)
     assert "`repository` = 'SalesRepo' AND `target_type` = 'lakehouse'" in statement

@@ -15,6 +15,7 @@ from .hosts import FabricHost, Host, LocalHost, WarehouseSettings
 from .locations import Location
 from .objects import Folder, ObjectContext, Table, View, WeaverObject
 from .resolution import LocalResolver
+from .setup import SetupResult, initialise_weaver_lakehouse
 from .store import Entry, LocalStore, Store, StoreError
 from .sql import (
     PooledSqlExecutor,

@@ -1505,6 +1505,74 @@ at another object's note.
 repository declares but this side never created would otherwise be claimed as part
 of an installation that does not contain it.
 
+### Catalogue checkpoints 4–6 — scoped DML, the build tail, and the bootstrap
+
+**The statements do not depend on reading the catalogue.** This is the decision
+worth recording, because the plan asked for the read and the read is still done —
+just not for the reason it looked like. Reconciliation for one installation is a
+scoped delete of everything the projection does not claim, plus an idempotent
+merge of everything it does. That pair is correct against *any* prior state,
+including a state the planner could not see. A build that derived its deletes from
+an inventory would have its deletion scope widened by a failed read, which is
+exactly what build-philosophy §6 exists to prevent; here nothing is derived from
+the read, so a failed read cannot widen anything. The read produces the *summary*
+a reviewer sees (§3, §17), and its absence degrades the report rather than the
+correctness — which is why generation still works with no session at all.
+
+**`_.Installation` has no obsolete row to delete, and finding that out was a
+bug.** Its key *is* the installation scope, so the "keys beyond the scope"
+predicate was a predicate over no columns and rendered `NOT ( () )`. Spark caught
+it. The fix is not a special case so much as the honest consequence: there is at
+most one such row per scope, so the merge alone keeps it current, and rendering a
+delete would have removed the row about to be written. A second, smaller bug came
+out of the same shape — catalogue actions were being named by position, so
+Installation's only statement was labelled `delete`. Names now come from what a
+statement *is*.
+
+**The bundle names the Weaver Lakehouse as a second bound target.** Catalogue work
+writes to the control plane, not to the destination, and a bundle must name every
+physical destination it touches (§9). When the destination *is* the Weaver
+Lakehouse — precisely the case when Weaver builds its own catalogue — the existing
+binding is reused rather than duplicated. `BoundTarget` also gained `item_name`,
+because on Fabric `item_id` is a GUID and `_.Installation.target_name` has to be
+readable; it is a record, never identity.
+
+**A Warehouse build now writes Spark SQL.** There is one central catalogue and it
+lives in a Lakehouse, so a Warehouse build carries Spark SQL catalogue actions
+against the Weaver Lakehouse. Three existing tests asserted a Warehouse plan was
+all-T-SQL; they now scope that claim to the *physical* actions, which is what they
+always meant. Accepted consequence of a central catalogue rather than a wart.
+
+**Sequence numbers 9000/9010/9020, with a guard.** The SQL Server system this
+ports from ran past thirty dependency layers, so the tail sits far above them —
+about 896 layers of headroom — and `check_sequence_headroom` fails generation
+rather than letting a deep repository silently reorder its own catalogue.
+
+**One test needed sharpening in a way worth noting.** "A Warehouse build's
+statements never say `lakehouse`" is false, and correctly so: an `_.Alias` row
+records `lakehouse` in `alias_target_type`, because a Warehouse object's Lakehouse
+alias is a fact about its declaration. Scope is now asserted on the *predicate*,
+not on the presence of a word — a value and a claim about which rows are touched
+are different things.
+
+**The bootstrap is one bundle.** Setup materialises the built-in repository and
+builds it normally; the barriers already order it — schema, then the ten tables,
+then the catalogue's own DML writing into the tables that same bundle just
+created. No first-run mode, and the only thing making it possible is the tolerant
+reader, since planning reads a catalogue that does not exist yet. Setup never
+prunes: the Weaver Lakehouse belongs to the installation, not to this repository,
+so a reconciling build would treat a user's own schema there as an orphan. There
+is a test that a user's schema survives.
+
+**No `weaver setup` CLI command, deliberately.** The obvious adapter needs a Spark
+session, and `tests/test_core_boundary.py` forbids the CLI from naming PySpark —
+`[cli]` does not install it. That rule is right, and the gap it exposes is real:
+Weaver has no production session factory anywhere, only the test fixture.
+Constructing a session is the caller's job, and in the product the caller is a
+Fabric notebook that already has one. Adding a session factory is a decision about
+where that seam lives, not something to slip into this branch;
+`weaver.initialise_weaver_lakehouse` is the API and takes the session it is given.
+
 ---
 
 ## Open questions

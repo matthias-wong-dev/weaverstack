@@ -25,6 +25,18 @@ from weaver.build_bundle import (
 
 FIXTURE = Path(__file__).parent / "fixtures" / "warehouse-estate"
 
+def _physical(plan):
+    """Actions that build the destination, excluding the catalogue's own work.
+
+    The catalogue is written to the Weaver Lakehouse through Spark SQL whichever
+    side is being built, so a claim about *this* target's executors has to say so.
+    """
+
+    from weaver.build_bundle.models import CATALOGUE_KINDS
+
+    return [action for _s, _b, action in plan.actions() if action.kind not in CATALOGUE_KINDS]
+
+
 
 @pytest.fixture
 def estate(tmp_path):
@@ -72,8 +84,10 @@ def _sequence_of(bundle) -> dict[str, int]:
 
 
 def test_the_estate_is_warehouse_native_and_all_tsql(estate, bundle):
-    assert [t.kind for t in bundle.plan.targets] == ["warehouse"]
-    assert {a.executor for _, _, a in bundle.plan.actions()} == {"tsql"}
+    # The Warehouse destination, plus the Weaver Lakehouse the catalogue is
+    # written to — the control plane is a Lakehouse whichever side is built.
+    assert [t.kind for t in bundle.plan.targets] == ["warehouse", "lakehouse"]
+    assert {a.executor for a in _physical(bundle.plan)} == {"tsql"}
     assert bundle.plan.omitted_nodes == ()
 
 

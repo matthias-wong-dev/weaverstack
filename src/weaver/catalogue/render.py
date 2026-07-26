@@ -218,12 +218,17 @@ def render_merge(
 
 def render_delete_obsolete(
     table: CatalogueTable, rows: Sequence[Row], *, scope: InstallationScope
-) -> str:
+) -> str | None:
     """A scoped ``DELETE`` of everything in this installation the rows do not claim.
 
-    Always returns a statement, including when ``rows`` is empty — an installation
-    that now projects no rows for a table must have its rows removed, and
-    rendering nothing would leave them behind forever.
+    An installation that now projects *no* rows for a table gets a plain scoped
+    delete: rendering nothing there would leave stale rows behind forever.
+
+    Returns None only for a table whose key is the installation scope itself —
+    :data:`~weaver.catalogue.tables.INSTALLATION`. There is at most one such row
+    per scope, so "the rows this projection does not claim" is empty by
+    construction and the merge alone keeps it current. Rendering a predicate over
+    no columns beyond the scope would delete the very row about to be merged.
 
     The predicate is written as a disjunction of key equalities rather than a
     tuple ``IN``: it renders identically on any engine, reads in a review, and
@@ -237,6 +242,9 @@ def render_delete_obsolete(
 
     # Only the key columns beyond the scope: the scope is already in the WHERE.
     identity = tuple(name for name in table.key if name not in (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE))
+    if not identity:
+        return None
+
     keep = "\n           OR ".join(
         "("
         + " AND ".join(
