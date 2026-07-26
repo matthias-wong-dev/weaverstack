@@ -43,8 +43,23 @@ MANAGED = [
 RESERVED = [{"schema_name": "dbo", "object_name": "Leave", "object_type": "U "}]
 
 
+#: Every Fabric Warehouse carries a schema per fixed database role. They are not
+#: Weaver's to drop, and not anyone's — `DROP SCHEMA` on one fails.
+FIXED_ROLE_SCHEMAS = (
+    "db_owner", "db_accessadmin", "db_securityadmin", "db_ddladmin",
+    "db_backupoperator", "db_datareader", "db_datawriter",
+    "db_denydatareader", "db_denydatawriter",
+)
+
+
 class FakeSql:
-    """A Warehouse catalogue, as the planner reads it."""
+    """A Warehouse catalogue, as the planner reads it.
+
+    The schema query models the server rather than returning a flat list: the
+    fixed-role schemas are always present, and are filtered out *by the query* if
+    it asks the server to. A fake that answered every schema query identically
+    could not tell a planner that excludes them from one that does not.
+    """
 
     def __init__(self, objects, schemas):
         self.objects = objects
@@ -52,7 +67,10 @@ class FakeSql:
 
     def query(self, statement: str):
         if "sys.schemas" in statement and "sys.objects" not in statement:
-            return [{"name": name} for name in self.schemas]
+            names = list(self.schemas)
+            if "is_fixed_role" not in statement:
+                names += list(FIXED_ROLE_SCHEMAS)
+            return [{"name": name} for name in names]
         return list(self.objects)
 
 
@@ -154,3 +172,20 @@ def test_pruning_off_a_fabric_session_fails_closed(estate):
 def test_prune_false_skips_reconciliation_without_a_catalogue(estate):
     bundle = _generate(estate, None, prune=False)
     assert _prune_scripts(estate, bundle) == []
+
+
+def test_a_fixed_role_schema_is_never_dropped(estate):
+    """Every Fabric Warehouse has nine of them, and none can be dropped.
+
+    Excluded by *ownership*, asked of the server, rather than by adding nine more
+    names to Weaver's reserved list — the reserved list says what Weaver declines
+    to manage, and this says what SQL will not let anyone touch.
+    """
+
+    sql = FakeSql(ORPHANS + MANAGED, ["Wh", "Rpt", "Legacy"])
+    statements = " ".join(s for _, s in _prune_scripts(estate, _generate(estate, sql)))
+
+    # The one genuine orphan still goes.
+    assert "drop schema if exists [Legacy];" in statements
+    for name in FIXED_ROLE_SCHEMAS:
+        assert f"[{name}]" not in statements

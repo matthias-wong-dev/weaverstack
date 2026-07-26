@@ -491,7 +491,9 @@ def _prune_sequence(
     )
 
 
-#: Warehouse schemas Weaver never manages, so a prune never drops them.
+#: Warehouse schemas Weaver never manages, so a prune never drops them. The
+#: schemas owned by fixed database roles are excluded separately, by ownership —
+#: see :func:`_warehouse_prune_actions`.
 _RESERVED_SQL_SCHEMAS = frozenset(
     {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
 )
@@ -565,7 +567,21 @@ def _warehouse_prune_actions(
         if str(row["schema_name"]).lower() not in _RESERVED_SQL_SCHEMAS
     ]
 
-    schema_rows = sql.query("select name from sys.schemas")
+    # A fixed database role owns a schema of its own — `db_owner`, `db_datareader`
+    # and seven more — and those are not Weaver's to drop, or anyone's: `DROP
+    # SCHEMA` on one fails. They are excluded by *ownership* rather than by adding
+    # nine more names to the reserved list, because the reserved list is a
+    # statement about Weaver's conventions and this is a statement about SQL's.
+    schema_rows = sql.query(
+        """
+        select schemas.name as name
+        from sys.schemas as schemas
+        left join sys.database_principals as owners
+          on owners.principal_id = schemas.principal_id
+        where owners.is_fixed_role is null
+           or owners.is_fixed_role = 0
+        """
+    )
     existing_schemas = [
         str(row["name"])
         for row in schema_rows
