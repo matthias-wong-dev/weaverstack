@@ -1403,6 +1403,60 @@ choice, and its merit is that "as at" becomes one range predicate instead of a
 null check. Worth revisiting deliberately when load lands rather than inheriting
 by accident.
 
+### Catalogue checkpoint 2 — Weaver builds its own catalogue
+
+`src/weaver/builtin/catalogue/` is an SES repository shipped as package
+resources. Setup materialises it into the Weaver Lakehouse and the *ordinary*
+planner and installer build it — there is no catalogue-specific create, no
+privileged executor, no special-cased schema. `tests/spark/` proves it end to end
+on local Delta: ten Delta tables, every column and type matching the
+representation, declared keys physically not null, and no rows, because build
+creates structure.
+
+**The text is committed, and a test regenerates it.** Generating the SES at
+runtime would remove any chance of drift but also remove the reviewable
+declaration, which is the more valuable half — a reader should be able to read
+`_.Registry` as SES like any other object. So `render_sources()` produces the
+canonical text from the table definitions and a test asserts the shipped
+resources match byte for byte. Add a column to a definition and the suite fails
+until the resource is regenerated.
+
+**The tables describe themselves.** Each declares its catalogue key as its SES
+`Primary key`, which is what makes those columns physically not null — so the
+not-null guarantee the representation asserts is the one Delta actually enforces.
+A test also checks that SES's *default* comparison columns equal the set the
+renderer compares in its MERGE guard: two independent definitions of "what makes
+a row different", which would let an unchanged row be written or a changed one
+skipped if they diverged.
+
+**`builtin/catalogue` is deliberately not a Python package.** An `__init__.py`
+sitting in it would travel into the Weaver Lakehouse as a support file and into
+that repository's signature. Resources are reached through
+`importlib.resources.files("weaver.builtin") / "catalogue"`, which is what works
+from an installed wheel rather than only from a source tree.
+
+**A `$` in a description had to be escaped.** `description_reference` is described
+as "the $Schema.Object the description was copied from" — which SES would parse as
+a reference and refuse. The generator escapes it as `$$`, and a test asserts the
+note comes back as prose. A small thing, but it is the authoring contract applying
+to Weaver's own declarations, which is the point of them being ordinary.
+
+**Two local-emulator divergences, recorded rather than designed around.** The
+local Hive metastore lowercases both a registered table name and its managed
+directory; Fabric preserves case. The assertions are therefore
+case-insensitive — which is the behaviour Weaver relies on anyway, since the
+reader already refuses two names differing only by case. And one Spark catalog is
+shared by every test while each gets its own Lakehouse directory, so the fixture
+drops schema `_` on the way out; a schema left registered makes the next test's
+`CREATE SCHEMA IF NOT EXISTS` a no-op and sends its tables into this test's
+`tmp_path`. That is the established convention here, not a new one.
+
+**What this branch does not yet claim.** Build still emits `CREATE OR REPLACE
+TABLE`, so re-running the bootstrap is idempotent in *shape* and destructive of
+*rows*. Dropping only what changed needs the signatures the catalogue is being
+built to hold, plus the drop policy that reads them — the next branch. Only setup
+rebuilds schema `_`, so the exposure is a setup re-run, not an ordinary build.
+
 ---
 
 ## Open questions
