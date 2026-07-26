@@ -840,7 +840,7 @@ def _catalogue_sequences(
     """
 
     from ..catalogue.projection import project_installation
-    from ..catalogue.reconcile import reconcile, summarise
+    from ..catalogue.reconcile import reconcile
     from ..catalogue.render import InstallationScope
 
     if projection.is_empty:
@@ -865,14 +865,17 @@ def _catalogue_sequences(
     )
     plan = reconcile(installation)
 
-    # Reading the existing catalogue is for the *report*, never for the statements
-    # — see weaver.catalogue.reconcile. So a session that cannot read it degrades
-    # the description and leaves correctness alone.
-    changes = ()
-    if spark is not None:
-        from ..catalogue.reader import read_installation
-
-        changes = summarise(installation, read_installation(spark, scope=scope))
+    # Deliberately *not* read here. The statements never depended on the existing
+    # rows — see weaver.catalogue.reconcile — so the only use for a read was a row
+    # count in the sequence description, and a description is part of the hashed
+    # plan. That made two runs of the same repository produce different bundle
+    # identities purely because the catalogue's state had changed, which breaks the
+    # property review and environment comparison rest on (§10). Counting rows is a
+    # report about state, not part of a frozen contract.
+    #
+    # `weaver.catalogue.reconcile.summarise` and the tolerant reader remain the API
+    # for asking what a build would change; they are what the drop policy will run
+    # its signature comparison through.
 
     numbers = (CATALOGUE_SEQUENCE, INSTALLATION_SEQUENCE, REGISTRY_SEQUENCE)
     kinds = (RECONCILE_CATALOGUE, RECORD_INSTALLATION, PUBLISH_REGISTRY)
@@ -911,33 +914,9 @@ def _catalogue_sequences(
             actions=tuple(actions),
         )
         sequences.append(
-            BuildSequence(
-                number=number,
-                description=_catalogue_description(description, group, changes),
-                batches=(batch,),
-            )
+            BuildSequence(number=number, description=description, batches=(batch,))
         )
     return tuple(sequences)
-
-
-def _catalogue_description(description: str, group, changes) -> str:
-    """The sequence description, with what it will change when that is known.
-
-    A reviewer should be able to see the effect of a bundle without executing it
-    (§17), and for catalogue work the interesting part is how many rows move.
-    """
-
-    if not changes:
-        return description
-    names = {reconciliation.table.name for reconciliation in group}
-    relevant = [change for change in changes if change.table.name in names]
-    touched = sum(change.touched for change in relevant)
-    if touched == 0:
-        return f"{description} (no change)"
-    inserted = sum(change.inserted for change in relevant)
-    updated = sum(change.updated for change in relevant)
-    deleted = sum(change.deleted for change in relevant)
-    return f"{description} (+{inserted} ~{updated} -{deleted})"
 
 
 def _catalogue_action(

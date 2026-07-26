@@ -117,8 +117,8 @@ sequence 9020   certify them in their own registry
 ```
 
 The catalogue's own DML runs after the tables it writes to exist, so no first-run
-mode is needed. What *is* needed is a reader that tolerates absence, since planning
-reads a catalogue that is not there yet.
+mode is needed. Generation reads nothing, so an absent catalogue is not a special
+case — the statements are correct against it either way.
 
 Setup never prunes. The Weaver Lakehouse belongs to the installation, not to the
 built-in repository, so a reconciling build would treat anything else there as an
@@ -134,10 +134,15 @@ does.
 Those statements deliberately **do not depend on reading the catalogue first**. The
 pair is correct against any prior state, including one the planner could not see. A
 build that derived its deletes from an inventory would have its deletion scope
-widened by a failed read, which is what build-philosophy §6 exists to prevent. The
-catalogue *is* read at plan time — to report what will change, so a reviewer can
-see the effect before it runs — and a session that cannot read it degrades the
-report rather than the correctness.
+widened by a failed read, which is what build-philosophy §6 exists to prevent.
+
+Generation therefore does not read the catalogue at all. It briefly did, to put a
+row count in each sequence description — but a description is part of the hashed
+plan, so two runs of the same repository produced *different bundle identities*
+purely because the catalogue's state had changed. Counting rows is a report about
+state, not part of a frozen contract.
+`weaver.catalogue.reconcile.summarise` and the tolerant reader remain the API for
+asking what a build would change.
 
 Ordering is the one strict invariant:
 

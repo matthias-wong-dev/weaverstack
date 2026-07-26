@@ -166,13 +166,7 @@ def render_merge(
     _check_unique_keys(table, rows)
 
     columns = table.column_names
-    source = "\n        UNION ALL ".join(
-        "SELECT " + ", ".join(
-            f"{typed_literal(row.get(name), table.column(name).type)} AS {identifier(name)}"
-            for name in columns
-        )
-        for row in rows
-    )
+    source = _source_relation(table, rows)
 
     on = " AND ".join(
         f"target.{identifier(name)} <=> source.{identifier(name)}" for name in table.key
@@ -222,6 +216,44 @@ def render_merge(
         f"  AND {on}\n"
         f"WHEN MATCHED AND ({changed}) THEN UPDATE SET {updates}\n"
         f"WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})\n"
+    )
+
+
+def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
+    """The merge source: one ``VALUES`` relation, cast by an enclosing projection.
+
+    The obvious construction — one ``SELECT`` of cast literals per row, chained
+    with ``UNION ALL`` — does not scale, and the failure is nasty. Spark generates
+    Java for the plan, a method's bytecode may not exceed 64 KB, and a union of a
+    hundred projections exceeds it: the catalogue's own ``ColumnDictionary`` has a
+    row per column of every catalogue table, and that was enough to break the
+    bootstrap with ``Code grows beyond 64 KB``.
+
+    One ``VALUES`` relation is a single plan node however many rows it carries, so
+    the casts move outward into one projection over it. The values themselves are
+    bare literals: ``VALUES`` unifies a column's type across rows — all-null
+    becomes void — and the enclosing ``CAST`` settles it either way, which is what
+    keeps the source's schema exactly the target's.
+    """
+
+    tuples = ",\n                    ".join(
+        "(" + ", ".join(literal(row.get(name)) for name in table.column_names) + ")"
+        for row in rows
+    )
+    # Positional names for the raw relation, so a column called `repository` in the
+    # values cannot be confused with the aliased output of the same name.
+    raw = [f"c{index}" for index, _name in enumerate(table.column_names)]
+    projected = ", ".join(
+        f"CAST({identifier(raw[index])} AS {table.column(name).type.upper()})"
+        f" AS {identifier(name)}"
+        for index, name in enumerate(table.column_names)
+    )
+    names = ", ".join(identifier(name) for name in raw)
+    return (
+        f"SELECT {projected}\n"
+        f"          FROM VALUES\n"
+        f"                    {tuples}\n"
+        f"               AS source_values({names})"
     )
 
 

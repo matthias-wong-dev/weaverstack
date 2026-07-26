@@ -1573,6 +1573,36 @@ Fabric notebook that already has one. Adding a session factory is a decision abo
 where that seam lives, not something to slip into this branch;
 `weaver.initialise_weaver_lakehouse` is the API and takes the session it is given.
 
+### Two things only running it on Delta could find
+
+**A merge source cannot be a chain of unioned selects.** The obvious construction —
+one `SELECT` of cast literals per row, joined by `UNION ALL` — broke the bootstrap
+with Janino's `Code grows beyond 64 KB`. Spark generates Java for the plan and a
+method's bytecode is capped, so a union of ~90 projections exceeds it. The
+catalogue's own `_.ColumnDictionary` has a row per column of every catalogue table,
+which was enough. It is now one `VALUES` relation — a single plan node however many
+rows it carries — with the casts moved outward into one enclosing projection. The
+values are bare literals; `VALUES` unifies a column's type across rows (all-null
+becomes void) and the enclosing `CAST` settles it either way, which is what keeps
+the source's schema exactly the target's. Smaller text, too.
+
+**Row counts must not go in a sequence description.** They briefly did, so a
+reviewer could see the effect of a bundle before running it. But a description is
+part of the hashed plan, so two runs of the *same* repository produced different
+bundle identities purely because the catalogue's state had changed — breaking the
+property that lets a reviewer compare environments and certify an artefact (§10).
+Counting rows is a report about state, not part of a frozen contract.
+
+Generation therefore no longer reads the catalogue at all, which is the honest end
+of the reasoning that started with "the statements do not depend on the read". The
+tolerant reader and `summarise` are still the API for asking what a build would
+change, and they are what the drop policy will run its signature comparison
+through — but nothing in the frozen plan depends on them, so nothing in the plan
+can vary with the state of the thing being written.
+
+Both are the kind of defect local Spark exists to catch: neither is visible in
+generated text, and both would have surfaced first in a workspace.
+
 ---
 
 ## Open questions

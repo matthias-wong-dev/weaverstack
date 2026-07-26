@@ -376,10 +376,19 @@ def test_a_table_dictionary_row_renders_its_nulls_and_booleans():
         "signature": "deadbeef",
     }
     statement = render_merge(TABLE_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE)
-    assert "CAST(NULL AS STRING) AS `not_null_columns`" in statement
-    assert "CAST(false AS BOOLEAN) AS `is_incremental`" in statement
-    assert "CAST(true AS BOOLEAN) AS `is_static`" in statement
-    assert "CAST('Customer name, Region' AS STRING) AS `comparison_columns`" in statement
+    # The values are bare literals in one VALUES relation; the enclosing projection
+    # casts each column to its declared type. So a null is a typed null by
+    # construction, whichever row it sits in.
+    values = statement.split("FROM VALUES")[1].split("AS source_values")[0]
+    assert "NULL" in values
+    assert "false" in values and "true" in values
+    assert "'Customer name, Region'" in values
+    for name, type_ in (
+        ("not_null_columns", "STRING"),
+        ("is_incremental", "BOOLEAN"),
+        ("is_static", "BOOLEAN"),
+    ):
+        assert f"AS {type_}) AS `{name}`" in statement
 
 
 def test_a_relationship_row_compares_only_its_signature():
@@ -453,5 +462,7 @@ def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
         "signature": "abc",
     }
     statement = render_merge(DEPENDENCY, [row], scope=WAREHOUSE_SCOPE)
-    assert "CAST(false AS BOOLEAN) AS `is_within_repository`" in statement
-    assert "CAST('Sales_LH' AS STRING) AS `dependency_repository`" in statement
+    assert "AS BOOLEAN) AS `is_within_repository`" in statement
+    values = statement.split("FROM VALUES")[1].split("AS source_values")[0]
+    assert "'Sales_LH'" in values
+    assert "false" in values

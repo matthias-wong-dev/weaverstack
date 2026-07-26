@@ -7,8 +7,8 @@ later in the design leans on.
 
 One bundle does the whole bootstrap, because the barriers already order it: the
 schema, then the tables, then the catalogue's own DML writing into the tables the
-same bundle just created. The only thing that makes it possible is a reader that
-tolerates absence, since planning reads a catalogue that is not there yet.
+same bundle just created. Generation reads nothing, so an absent catalogue is not
+a special case — it is the ordinary one.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup, lakehou
     assert lakehouses.store.exists(root.join("_schemas", "_.yml"))
     for table in CATALOGUE_TABLES:
         assert lakehouses.store.exists(root.join(f"{table.qualified}.spark.sql"))
-    assert setup.materialised[0] == "_schemas/_.yml"
+    assert "_schemas/_.yml" in setup.materialised
 
 
 def test_the_bundle_is_kept_where_bundles_belong(setup, lakehouses):

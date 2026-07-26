@@ -287,7 +287,8 @@ def test_an_alias_row_may_name_the_other_target_type_as_a_value(estate):
         if action.id == "catalogue-Alias-merge"
     ]
     text = store.read(bundle.location.join(*alias.payload.split("/"))).decode()
-    assert "CAST('lakehouse' AS STRING) AS `alias_target_type`" in text
+    assert "AS STRING) AS `alias_target_type`" in text
+    assert "'lakehouse'" in text.split("FROM VALUES")[1]
     assert _scope_predicates(text) == {"warehouse"}
 
 

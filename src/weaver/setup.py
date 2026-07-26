@@ -19,9 +19,9 @@ the barriers already order it correctly:
     sequence 9020  certify them in their own registry
 
 The catalogue's own DML runs after the tables it writes to exist, so no special
-first-run mode is needed. What *is* needed is a reader that tolerates absence:
-planning reads the catalogue to report what will change, and on a first run there
-is nothing there to read (see :mod:`weaver.catalogue.reader`).
+first-run mode is needed and generation reads nothing — the statements are
+rendered from the projection and are correct against an absent catalogue as much
+as a populated one.
 
 **Setup never prunes.** The Weaver Lakehouse belongs to the installation, not to
 this repository — a reconciling build would treat every schema the built-in
