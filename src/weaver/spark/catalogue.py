@@ -137,22 +137,47 @@ class SparkCatalogue:
         """Run a listing, reading an absent schema as an empty one.
 
         A schema that is not there holds nothing, which is the answer an inventory
-        wants. Both hosts raise for it rather than returning no rows, and both
-        raise the same way for a genuine failure — so this narrows to the absence
-        it means to tolerate and lets everything else through.
+        wants — and both hosts raise for it rather than returning no rows. So the
+        absence is tolerated and everything else propagates, narrowly, for the same
+        reason :mod:`weaver.catalogue.reader` does it that way: a real failure read
+        as "nothing here" tells the next build that nothing is managed.
         """
 
         try:
             return self.spark.sql(statement).collect()
-        except Exception as exc:
-            if _is_missing_schema(exc):
+        except Exception as exception:
+            if _is_missing_schema(exception):
                 return []
             raise
 
 
-def _is_missing_schema(exc: Exception) -> bool:
-    text = str(exc)
-    return "SCHEMA_NOT_FOUND" in text or "NoSuchDatabaseException" in type(exc).__name__
+#: Spark's error class for a namespace that does not exist. A missing Lakehouse
+#: reports the same one, which is what we want: an inventory of somewhere that is
+#: not there is empty either way.
+_ABSENT = frozenset({"SCHEMA_NOT_FOUND"})
+
+
+def _is_missing_schema(exception: Exception) -> bool:
+    """Whether this means "not created yet" rather than "went wrong".
+
+    Keyed on Spark's error class, not on message text, so a reworded message
+    cannot quietly turn an infrastructure failure into an empty inventory. The
+    class name is consulted only when no error class is available — a stub session
+    in a test, or a connector that raises a plain error.
+    """
+
+    error_class = getattr(exception, "getErrorClass", None)
+    if callable(error_class):
+        try:
+            found = error_class()
+        except Exception:  # pragma: no cover - a broken accessor is not absence
+            found = None
+        if found:
+            return found in _ABSENT
+    return any(name in str(exception) for name in _ABSENT) or (
+        "NoSuchNamespaceException" in type(exception).__name__
+        or "NoSuchDatabaseException" in type(exception).__name__
+    )
 
 
 def _escaped(value: str) -> str:

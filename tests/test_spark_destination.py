@@ -288,6 +288,37 @@ def test_a_failure_that_is_not_absence_still_propagates(fabric):
         SparkCatalogue(Angry(), fabric).views("Sales")
 
 
+def test_absence_is_recognised_by_spark_s_error_class_not_its_message(fabric):
+    """A reworded message must not turn a real failure into an empty inventory.
+
+    So an exception carrying an error class is judged on that class alone —
+    including one whose *text* looks like absence but whose class says otherwise.
+    """
+
+    class Classified(RuntimeError):
+        def __init__(self, error_class, message):
+            super().__init__(message)
+            self._error_class = error_class
+
+        def getErrorClass(self):
+            return self._error_class
+
+    class Raising(_Spark):
+        def __init__(self, exception):
+            super().__init__()
+            self._exception = exception
+
+        def sql(self, statement):
+            raise self._exception
+
+    absent = Raising(Classified("SCHEMA_NOT_FOUND", "no such schema"))
+    assert SparkCatalogue(absent, fabric).views("Sales") == ()
+
+    lying = Raising(Classified("DELTA_LOG_CORRUPTED", "SCHEMA_NOT_FOUND"))
+    with pytest.raises(RuntimeError):
+        SparkCatalogue(lying, fabric).views("Sales")
+
+
 def test_existence_is_asked_of_the_qualified_name(fabric):
     spark = _Spark(
         catalog=_Catalog(
