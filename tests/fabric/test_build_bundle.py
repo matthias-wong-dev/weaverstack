@@ -75,10 +75,22 @@ def test_generate_and_install_lakehouse_bundle(build_env):
         for r in build_env.query(f"SHOW TABLES IN {build_env.schema_name('DWG')}")
     }
 
-    # The name is only half of it. A Delta table is a directory under the
-    # destination's own Tables area, so the resolved *path* is asserted too — that
-    # is what a read through the session catalogue could not tell us.
-    assert build_env.store.exists(_table(build_env, "DWG", "Customer"))
+    # The name is only half of it. A read through the session catalogue cannot say
+    # *which Lakehouse* answered, so the storage is checked too: the table's
+    # directory is under the destination's own Tables area.
+    #
+    # Case-insensitively, and not by exact path, because the physical name is the
+    # host's to choose — Fabric lowercases a managed table's directory
+    # (`Tables/DWG/customer`) exactly as the local metastore does. Identity in
+    # Weaver is case-insensitive, so the assertion is written to that.
+    stored = {
+        entry.name.lower()
+        for entry in build_env.store.list(
+            build_env.resolver.tables_root(build_env.target).join("DWG")
+        )
+        if entry.is_directory
+    }
+    assert "customer" in stored
 
     columns = {
         row["col_name"].lower()
