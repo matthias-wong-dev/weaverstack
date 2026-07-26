@@ -192,6 +192,19 @@ and once drop policy lands, that is a licence to remove an estate. So absence is
 recognised only by Spark's own `TABLE_OR_VIEW_NOT_FOUND` error class, never by
 message text.
 
+## Known gap on Fabric
+
+Locally, schema `_` is pinned with an explicit `LOCATION` under the Weaver
+Lakehouse's `Tables` area, so a two-part `` `_`.`Registry` `` is unambiguous. On
+Fabric the platform manages schemas per item, and a session attached to a
+*destination* Lakehouse resolving `` `_`.`Registry` `` would be leaning on ambient
+catalogue context — which build-philosophy §16 names as an anti-pattern.
+
+Everything here is green on local Spark and Delta, and this is the one catalogue
+behaviour local cannot answer. It is the first thing to settle when this reaches a
+workspace; the likely answers are addressing the catalogue by explicit `abfss://`
+path, or attaching the Weaver Lakehouse deliberately rather than incidentally.
+
 ## What this branch does not do yet
 
 Build still emits `CREATE OR REPLACE TABLE`, so a re-run of **setup** empties the
