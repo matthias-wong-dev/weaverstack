@@ -48,7 +48,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "from weaver import FabricHost, ItemRef, WeaverItemId\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBinding, "
         "ItemBindings, LakehouseBinding, build_item_repository)\n"
-        "from weaver.catalogue.item_tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY\n"
+        "from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.spark import SparkCatalogue\n"
         f"host = FabricHost(workspace={fabric_host.workspace!r}, "

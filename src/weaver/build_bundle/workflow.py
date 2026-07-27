@@ -25,7 +25,7 @@ from ..ses.repository import read_weaver_repository
 from ..store import LocalStore, Store
 from .bundle import BuildBundle, load_bundle
 from .installer import InstallationEnvironment, install_bundle
-from .item_planner import generate_item_build_bundle
+from .planner import generate_item_build_bundle
 from .models import BuildPlan
 from .report import InstallationReport
 from .targets import ItemBindings, LakehouseBinding
@@ -198,7 +198,7 @@ def build_item_repository(
 ) -> ItemBuildResult:
     """Materialise, plan and install one coordinated item build in this session."""
 
-    from ..catalogue.item_builtin import materialise_builtin_item
+    from ..catalogue.builtin import materialise_builtin_item
 
     materialise_builtin_item(repository_root, store=environment.store)
     with materialise_tree(repository_root, store=environment.store) as materialised:

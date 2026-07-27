@@ -1,10 +1,8 @@
 # The central catalogue
 
-The item-oriented catalogue scopes installations by `(item_type, item_name)`,
-projects each item's own `alias.yml`, and
-builds generated `Lakehouse/_weaver` through the ordinary planner. The earlier
-flat planner is retained only for isolated compatibility tests and is not part of
-the advertised public or CLI model.
+The catalogue scopes installations by `(item_type, item_name)`, projects each
+item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
+ordinary planner.
 
 Weaver's catalogue records, for every object it has successfully built, what SES
 declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
@@ -80,13 +78,12 @@ them, so a name would have to be invented. A key is identified by its type and i
 columns; a relationship by the whole edge — which is why several relationships may
 run between one pair of objects, and why an object may reference itself.
 
-**`_.Dependency` says nothing about targets.** The reference is logical and
-inherits the owner's target type: a Warehouse object resolves its dependencies in
-the Warehouse. Recording a target on the reference would let a Warehouse object
-appear to depend directly on a Delta table. Crossing engines is an *alias*, and
-aliases are a separate table — composing `_.Dependency`, `_.Alias` and
-`_.Registry` is what yields the estate's whole graph, and only that composition
-may cross.
+**`_.Dependency` keeps the author's spelling.** The reference is recorded exactly
+as written and resolves within the consuming item. Recording a resolved physical
+name would let one item appear to depend directly on another's storage. Crossing
+items or engines is an *alias*, and aliases are a separate table — composing
+`_.Dependency`, `_.Alias` and `_.Registry` is what yields the estate's whole
+graph, and only that composition may cross.
 
 A dependency may leave its item. A two-part logical name is recorded with
 `is_within_item=true`; a canonical cross-item name or an authored physical name is
@@ -122,7 +119,7 @@ mode is needed. Generation reads nothing, so an absent catalogue is not a specia
 case — the statements are correct against it either way.
 
 Setup never prunes. The Weaver Lakehouse belongs to the installation, not to the
-built-in repository, so a reconciling build would treat anything else there as an
+built-in item, so a reconciling build would treat anything else there as an
 orphan.
 
 ## How a build writes it

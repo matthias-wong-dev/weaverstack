@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.catalogue.legacy import (
+from weaver.catalogue import (
     ALIAS,
     AUDIT_COLUMN_NAMES,
-    CATALOGUE_REPOSITORY,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     COLUMN_DICTIONARY,
@@ -27,16 +26,13 @@ from weaver.catalogue.legacy import (
     FOREIGN_KEY_DICTIONARY,
     INDEX_DICTIONARY,
     INSTALLATION,
-    LAKEHOUSE,
     REGISTRY,
     SCHEMA_DICTIONARY,
     SIGNATURE,
     TABLE_DICTIONARY,
-    WAREHOUSE,
     CatalogueColumn,
     CatalogueTable,
     table,
-    target_type_for_ses_target,
 )
 
 ALL = CATALOGUE_TABLES
@@ -85,7 +81,7 @@ def test_every_key_opens_with_the_installation_scope(each: CatalogueTable):
     comparison or a delete cannot span both target types by omission.
     """
 
-    assert each.key[:2] == ("repository", "target_type")
+    assert each.key[:2] == ("item_type", "item_name")
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
@@ -153,10 +149,10 @@ def test_installation_is_keyed_on_the_scope_alone():
     the key is what guarantees a renderer cannot express the alternative.
     """
 
-    assert INSTALLATION.key == ("repository", "target_type")
+    assert INSTALLATION.key == ("item_type", "item_name")
     assert INSTALLATION.column_names == (
-        "repository",
-        "target_type",
+        "item_type",
+        "item_name",
         "target_name",
         "weaver_version",
         "signature",
@@ -165,10 +161,10 @@ def test_installation_is_keyed_on_the_scope_alone():
 
 
 def test_registry_says_what_and_what_for_and_nothing_about_the_source():
-    assert REGISTRY.key == ("repository", "target_type", "schema_name", "object_name")
+    assert REGISTRY.key == ("item_type", "item_name", "schema_name", "object_name")
     assert REGISTRY.column_names == (
-        "repository",
-        "target_type",
+        "item_type",
+        "item_name",
         "schema_name",
         "object_name",
         "object_type",
@@ -190,8 +186,8 @@ def test_the_column_dictionary_is_purely_descriptive():
     """
 
     assert COLUMN_DICTIONARY.column_names == (
-        "repository",
-        "target_type",
+        "item_type",
+        "item_name",
         "schema_name",
         "object_name",
         "column_name",
@@ -218,8 +214,8 @@ def test_a_logical_key_is_identified_by_its_columns_not_a_name():
     """
 
     assert INDEX_DICTIONARY.key == (
-        "repository",
-        "target_type",
+        "item_type",
+        "item_name",
         "schema_name",
         "object_name",
         "index_type",
@@ -241,45 +237,38 @@ def test_a_relationship_row_is_the_whole_edge():
     assert "foreign_key_name" not in FOREIGN_KEY_DICTIONARY.column_names
 
 
-def test_a_dependency_reference_is_three_logical_parts_and_no_more():
-    """The reference stays logical and inherits the owner's target type.
+def test_a_dependency_records_the_reference_exactly_as_authored():
+    """The row keeps the author's spelling and says whether it stayed at home.
 
-    Recording a target type or a physical name on the reference would let a
-    Warehouse object appear to depend directly on a Lakehouse object. Crossing
-    engines is an alias, and aliases are a separate table.
+    Recording a resolved physical name would let one item appear to depend
+    directly on another's storage. Crossing items is an alias, and aliases are a
+    separate table.
     """
 
     assert DEPENDENCY.key == (
-        "repository",
-        "target_type",
+        "item_type",
+        "item_name",
         "schema_name",
         "object_name",
-        "dependency_repository",
-        "dependency_schema_name",
-        "dependency_object_name",
+        "dependency_name",
     )
-    assert not {
-        "dependency_target_type",
-        "dependency_target_name",
-        "dependency_type",
-    } & set(DEPENDENCY.column_names)
-    assert DEPENDENCY.column("is_within_repository").type == "boolean"
+    assert "is_within_item" in DEPENDENCY.column_names
 
 
-def test_an_alias_is_keyed_by_the_target_type_it_publishes_into():
-    """There will be more kinds of alias than two, so the kind is part of identity."""
+def test_an_alias_is_keyed_by_the_name_its_own_item_presents():
+    """The destination is the consuming item's own local name."""
 
     assert ALIAS.key == (
-        "repository",
-        "target_type",
-        "schema_name",
-        "object_name",
-        "alias_target_type",
+        "item_type",
+        "item_name",
+        "destination_schema_name",
+        "destination_object_name",
     )
-    assert ALIAS.column_names[-4:-1] == (
-        "alias_target_type",
-        "alias_schema_name",
-        "alias_object_name",
+    assert ALIAS.column_names[-5:-1] == (
+        "source_item_type",
+        "source_item_name",
+        "source_schema_name",
+        "source_object_name",
     )
 
 
@@ -299,8 +288,8 @@ def test_the_table_dictionary_holds_tables_and_views_together():
 
 def test_a_folder_keeps_its_two_part_identity_and_its_file_key():
     assert FOLDER_DICTIONARY.key == (
-        "repository",
-        "target_type",
+        "item_type",
+        "item_name",
         "schema_name",
         "object_name",
     )
@@ -309,7 +298,7 @@ def test_a_folder_keeps_its_two_part_identity_and_its_file_key():
 
 
 def test_the_schema_dictionary_describes_a_schema_within_one_installation():
-    assert SCHEMA_DICTIONARY.key == ("repository", "target_type", "schema_name")
+    assert SCHEMA_DICTIONARY.key == ("item_type", "item_name", "schema_name")
 
 
 # --- lookups and vocabulary --------------------------------------------------
@@ -324,33 +313,24 @@ def test_an_unknown_table_name_lists_the_real_ones():
         table("Nonexistent")
 
 
-def test_three_ses_target_kinds_collapse_to_two_installation_types():
-    assert target_type_for_ses_target("folder") == LAKEHOUSE
-    assert target_type_for_ses_target("delta") == LAKEHOUSE
-    assert target_type_for_ses_target("sql") == WAREHOUSE
 
 
-def test_an_unrecognised_ses_target_kind_is_refused():
-    with pytest.raises(KeyError, match="unrecognised SES target kind"):
-        target_type_for_ses_target("eventhouse")
 
 
-def test_the_built_in_repository_is_named():
-    assert CATALOGUE_REPOSITORY == "_weaver"
 
 
 # --- the definition guards itself -------------------------------------------
 
 
 def test_a_table_whose_key_omits_the_scope_cannot_be_declared():
-    with pytest.raises(ValueError, match="installation scope"):
+    with pytest.raises(ValueError, match="logical item scope"):
         CatalogueTable(
             name="Bad",
             description="x",
-            key=("schema_name", "repository"),
+            key=("schema_name", "item_type"),
             columns=(
                 CatalogueColumn("schema_name", not_null=True, description="x"),
-                CatalogueColumn("repository", not_null=True, description="x"),
+                CatalogueColumn("item_type", not_null=True, description="x"),
                 CatalogueColumn("signature", not_null=True, description="x"),
             ),
         )
@@ -361,10 +341,10 @@ def test_a_table_whose_key_does_not_lead_cannot_be_declared():
         CatalogueTable(
             name="Bad",
             description="x",
-            key=("repository", "target_type"),
+            key=("item_type", "item_name"),
             columns=(
-                CatalogueColumn("target_type", not_null=True, description="x"),
-                CatalogueColumn("repository", not_null=True, description="x"),
+                CatalogueColumn("item_name", not_null=True, description="x"),
+                CatalogueColumn("item_type", not_null=True, description="x"),
                 CatalogueColumn("signature", not_null=True, description="x"),
             ),
         )
@@ -375,10 +355,10 @@ def test_a_table_without_a_trailing_signature_cannot_be_declared():
         CatalogueTable(
             name="Bad",
             description="x",
-            key=("repository", "target_type"),
+            key=("item_type", "item_name"),
             columns=(
-                CatalogueColumn("repository", not_null=True, description="x"),
-                CatalogueColumn("target_type", not_null=True, description="x"),
+                CatalogueColumn("item_type", not_null=True, description="x"),
+                CatalogueColumn("item_name", not_null=True, description="x"),
             ),
         )
 
@@ -388,10 +368,10 @@ def test_a_nullable_key_column_cannot_be_declared():
         CatalogueTable(
             name="Bad",
             description="x",
-            key=("repository", "target_type"),
+            key=("item_type", "item_name"),
             columns=(
-                CatalogueColumn("repository", not_null=True, description="x"),
-                CatalogueColumn("target_type", description="x"),
+                CatalogueColumn("item_type", not_null=True, description="x"),
+                CatalogueColumn("item_name", description="x"),
                 CatalogueColumn("signature", not_null=True, description="x"),
             ),
         )
@@ -408,10 +388,10 @@ def test_a_signature_in_the_key_cannot_be_declared():
         CatalogueTable(
             name="Bad",
             description="x",
-            key=("repository", "target_type", "signature"),
+            key=("item_type", "item_name", "signature"),
             columns=(
-                CatalogueColumn("repository", not_null=True, description="x"),
-                CatalogueColumn("target_type", not_null=True, description="x"),
+                CatalogueColumn("item_type", not_null=True, description="x"),
+                CatalogueColumn("item_name", not_null=True, description="x"),
                 CatalogueColumn("signature", not_null=True, description="x"),
             ),
         )

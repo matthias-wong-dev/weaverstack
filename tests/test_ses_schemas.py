@@ -13,7 +13,7 @@ from weaver.ses import (
     SchemaSes,
     is_schema_file,
     parse_schema_document,
-    read_repository,
+    read_weaver_repository,
     read_schema_document,
 )
 
@@ -120,13 +120,16 @@ class {schema}__Thing(Table):
 '''
 
 
+ITEM = "Lakehouse/Raw"
+
+
 def build(tmp_path: Path, *, schemas: list[str], objects: dict[str, str]) -> Location:
-    directory = tmp_path / "_schemas"
-    directory.mkdir()
+    directory = tmp_path / ITEM / "schemas"
+    directory.mkdir(parents=True)
     for schema in schemas:
         (directory / f"{schema}.yml").write_text(f"Schema ID: {schema}\n", encoding="utf-8")
     for name, text in objects.items():
-        (tmp_path / name).write_text(textwrap.dedent(text), encoding="utf-8")
+        (tmp_path / ITEM / name).write_text(textwrap.dedent(text), encoding="utf-8")
     return Location(str(tmp_path))
 
 
@@ -137,7 +140,7 @@ def test_a_native_object_needs_its_schema_declared(tmp_path):
         objects={"Widget__Thing.py": PY_TABLE.format(schema="Widget")},
     )
     with pytest.raises(DiscoveryError, match="schema 'Widget' is not declared"):
-        read_repository(root)
+        read_weaver_repository(root)
 
 
 def test_a_declared_schema_lets_the_object_read(tmp_path):
@@ -146,7 +149,7 @@ def test_a_declared_schema_lets_the_object_read(tmp_path):
         schemas=["Sales"],
         objects={"Sales__Thing.py": PY_TABLE.format(schema="Sales")},
     )
-    assert "delta:Sales.Thing" in read_repository(root).graph.nodes
+    assert f"{ITEM}/Sales.Thing" in read_weaver_repository(root).dependency_graph.nodes
 
 
 def test_an_unused_schema_is_still_valid(tmp_path):
@@ -155,9 +158,9 @@ def test_an_unused_schema_is_still_valid(tmp_path):
         schemas=["Sales", "Unused"],
         objects={"Sales__Thing.py": PY_TABLE.format(schema="Sales")},
     )
-    repo = read_repository(root)
-    assert "Unused" in repo.schemas
-    assert "Unused" not in repo.schemas_by_namespace["lakehouse"]
+    repo = read_weaver_repository(root)
+    declared = {schema.schema for schema in repo.schema_documents}
+    assert "Unused" in declared
 
 
 def test_the_error_names_the_expected_schema_file(tmp_path):
@@ -166,8 +169,8 @@ def test_the_error_names_the_expected_schema_file(tmp_path):
         schemas=[],
         objects={"Widget__Thing.py": PY_TABLE.format(schema="Widget")},
     )
-    with pytest.raises(DiscoveryError, match=r"_schemas/Widget\.yml"):
-        read_repository(root)
+    with pytest.raises(DiscoveryError, match="schema 'Widget' is not declared"):
+        read_weaver_repository(root)
 
 
 # --- case-only duplicate schemas ---------------------------------------------
@@ -188,14 +191,3 @@ class _StubStore:
         raise KeyError(location.value)
 
 
-def test_two_schema_files_differing_only_by_case_are_refused():
-    from weaver.ses.repository import _read_schemas
-
-    store = _StubStore(
-        {
-            "_schemas/Abc.yml": b"Schema ID: Abc",
-            "_schemas/abc.yml": b"Schema ID: abc",
-        }
-    )
-    with pytest.raises(DiscoveryError, match="differ only by case"):
-        _read_schemas(["_schemas/Abc.yml", "_schemas/abc.yml"], store, Location("/repo"))

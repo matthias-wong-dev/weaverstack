@@ -40,6 +40,7 @@ build constraints remain
 | R9 | Local and Fabric verticals prove the architecture | in progress |
 | R10 | Workspace-scoped catalogue identity and `weaver_items` source root | in progress |
 | R11 | The item implies the SQL dialect and owns its aliases | in progress |
+| R12 | The pre-item architecture is removed | in progress |
 
 ---
 
@@ -680,3 +681,32 @@ suffix and root-alias rejections, item-local alias parsing including the
 collision, exact-case and duplicate rules, and single-item signature movement.
 Local Spark builds an authored item whose views are plain `.sql`, and the row-3
 Fabric estate declares and reads the same shapes.
+
+---
+
+## R12 — Remove the pre-item architecture
+
+### Outcome
+
+One reader, one planner, one catalogue. The flat model is deleted rather than
+kept as a compatibility seam, because nothing has shipped that needs a migration
+path from it.
+
+### Contract
+
+- `weaver.catalogue.legacy`, the flat `read_repository`/`SesRepository`, the flat
+  planner and projection, and the committed `weaver/builtin/catalogue` resources
+  are removed;
+- the catalogue tables are defined once, item-scoped, in `weaver.catalogue.tables`;
+- the target inspectors move to `weaver.build_bundle.prune`, named for what they
+  do rather than left as planner leftovers;
+- the surviving item modules take the plain names — `planner`, `projection`,
+  `builtin` — since the qualifier no longer distinguishes anything;
+- `.spark.sql` is gone entirely, including as a special-cased rejection;
+- no migration guard, no legacy-layout error, no deprecated export.
+
+### Verification
+
+The pure suite and local Spark pass without the flat path. Fabric verticals that
+were built on the flat `BuildEnv` harness are ported to the item build or removed
+with the coverage loss recorded.

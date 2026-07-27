@@ -23,9 +23,7 @@ class carries the same full name as its file — ``class Sales__Order(Table)`` �
 so the import at a call site is explicit about which object it names.
 
 **The owning item chooses the SQL dialect.** A ``.sql`` file in a Lakehouse item
-is Spark SQL; the same name in a Warehouse item is T-SQL. The older
-``.spark.sql`` suffix existed because the flat layout had no item to ask, and it
-survives only for the deprecated flat reader, which still has none.
+is Spark SQL; the same name in a Warehouse item is T-SQL.
 """
 
 from __future__ import annotations
@@ -62,7 +60,6 @@ from .metadata import (
 from .model import LAKEHOUSE, WeaverDocumentId
 
 PYTHON_SUFFIX = ".py"
-SPARK_SQL_SUFFIX = ".spark.sql"
 SQL_SUFFIX = ".sql"
 
 #: Python cannot have a dot in a module name, so a schema separator is needed.
@@ -93,30 +90,21 @@ def sql_dialect_for_item_type(item_type: str) -> str:
     return SPARK_SQL if item_type == LAKEHOUSE else SQL
 
 
-def language_for_filename(filename: str, item_type: str | None = None) -> str | None:
-    """The language a filename declares, or None if it is not an object file.
-
-    ``item_type`` is how an item-owned ``.sql`` document picks its dialect. Its
-    absence means the caller has no item — the deprecated flat reader — and the
-    legacy ``.spark.sql`` suffix then answers instead.
-    """
+def language_for_filename(filename: str, item_type: str) -> str | None:
+    """The language a filename declares, or None if it is not an object file."""
 
     if filename.endswith(PYTHON_SUFFIX):
         return PYTHON
-    if item_type is not None:
-        return sql_dialect_for_item_type(item_type) if filename.endswith(SQL_SUFFIX) else None
-    if filename.endswith(SPARK_SQL_SUFFIX):
-        return SPARK_SQL
     if filename.endswith(SQL_SUFFIX):
-        return SQL
+        return sql_dialect_for_item_type(item_type)
     return None
 
 
 def _stem(filename: str) -> str:
-    """The filename with its object suffix removed, longest suffix first."""
+    """The filename with its object suffix removed."""
 
     name = filename.rsplit("/", 1)[-1]
-    for suffix in (PYTHON_SUFFIX, SPARK_SQL_SUFFIX, SQL_SUFFIX):
+    for suffix in (PYTHON_SUFFIX, SQL_SUFFIX):
         if name.endswith(suffix):
             return name[: -len(suffix)]
     return name
@@ -185,8 +173,8 @@ class SourceDocument:
     #: concern — it needs the external-dependency configuration.
     discovered_references: tuple[RelationReference, ...] = ()
     python_ast: ast.Module | None = field(default=None, compare=False, repr=False)
-    #: Item-qualified logical identity, assigned by the item-oriented reader.
-    #: The transitional flat reader leaves it unset until R8 removes that path.
+    #: Item-qualified logical identity, assigned by the reader once the owning
+    #: item is known. Unset only while a document is read in isolation.
     logical_id: WeaverDocumentId | None = None
 
     @property
@@ -311,7 +299,7 @@ class SourceDocument:
 
 
 def read_source_document(
-    relative_path: str, data: bytes, item_type: str | None = None
+    relative_path: str, data: bytes, item_type: str
 ) -> SourceDocument:
     """Parse and structurally validate one object file."""
 

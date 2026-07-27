@@ -12,10 +12,15 @@ from __future__ import annotations
 import textwrap
 
 from weaver.ses import read_source_document
+from weaver.ses.model import WAREHOUSE
 
 
 def _ddl(path: str, text: str):
-    return read_source_document(path, textwrap.dedent(text).lstrip().encode("utf-8")).create_ddl()
+    """A Warehouse document: the item type is what makes its .sql T-SQL."""
+
+    return read_source_document(
+        path, textwrap.dedent(text).lstrip().encode("utf-8"), WAREHOUSE
+    ).create_ddl()
 
 
 INFERRED = """

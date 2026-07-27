@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.catalogue.legacy import (
+from weaver.catalogue import (
     DEPENDENCY,
     FOREIGN_KEY_DICTIONARY,
     INDEX_DICTIONARY,
@@ -31,21 +31,20 @@ from weaver.catalogue.legacy import (
     identifier,
     literal,
     render_delete_obsolete,
-    render_delete_repository,
     render_delete_scope,
     render_merge,
     sorted_rows,
     typed_literal,
 )
 
-LAKEHOUSE_SCOPE = InstallationScope(repository="SalesRepo", target_type="lakehouse")
-WAREHOUSE_SCOPE = InstallationScope(repository="SalesRepo", target_type="warehouse")
+LAKEHOUSE_SCOPE = InstallationScope(item_type="Lakehouse", item_name="Raw")
+WAREHOUSE_SCOPE = InstallationScope(item_type="Warehouse", item_name="Reporting")
 
 
-def registry_row(name: str, *, target_type: str = "lakehouse", signature: str = "abc"):
+def registry_row(name: str, *, item_name: str = "Raw", signature: str = "abc"):
     return {
-        "repository": "SalesRepo",
-        "target_type": target_type,
+        "item_type": "Lakehouse",
+        "item_name": item_name,
         "schema_name": "Sales",
         "object_name": name,
         "object_type": "table",
@@ -166,8 +165,8 @@ def test_the_clock_is_a_call_not_a_rendered_instant():
 
 def test_a_merge_is_scoped_to_one_installation_on_the_target_side():
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
-    assert "target.`repository` = 'SalesRepo'" in statement
-    assert "target.`target_type` = 'lakehouse'" in statement
+    assert "target.`item_type` = 'Lakehouse'" in statement
+    assert "target.`item_name` = 'Raw'" in statement
     assert "warehouse" not in statement
 
 
@@ -175,29 +174,27 @@ def test_a_delete_is_scoped_to_one_installation():
     statement = render_delete_obsolete(
         REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE
     )
-    assert "`repository` = 'SalesRepo' AND `target_type` = 'lakehouse'" in statement
+    assert "`item_type` = 'Lakehouse' AND `item_name` = 'Raw'" in statement
     assert "warehouse" not in statement
 
 
-def test_the_same_object_in_the_other_target_type_renders_a_different_statement():
+def test_the_same_object_in_another_item_renders_a_different_statement():
     """The one property the whole installation model rests on.
 
-    ``Sales.Customer`` in the Lakehouse and in the Warehouse are two rows. Neither
-    statement can reach the other's row, because the scope is in the key and in
-    every predicate.
+    ``Sales.Customer`` in two logical items is two rows. Neither statement can
+    reach the other's row, because the scope is in the key and in every
+    predicate.
     """
 
-    lakehouse = render_merge(
-        REGISTRY, [registry_row("Customer")], scope=LAKEHOUSE_SCOPE
-    )
-    warehouse = render_merge(
+    raw = render_merge(REGISTRY, [registry_row("Customer")], scope=LAKEHOUSE_SCOPE)
+    curated = render_merge(
         REGISTRY,
-        [registry_row("Customer", target_type="warehouse")],
-        scope=WAREHOUSE_SCOPE,
+        [registry_row("Customer", item_name="Curated")],
+        scope=InstallationScope(item_type="Lakehouse", item_name="Curated"),
     )
-    assert lakehouse != warehouse
-    assert "'warehouse'" not in lakehouse
-    assert "'lakehouse'" not in warehouse
+    assert raw != curated
+    assert "'Curated'" not in raw
+    assert "'Raw'" not in curated
 
 
 def test_a_row_from_another_installation_cannot_be_rendered():
@@ -206,13 +203,13 @@ def test_a_row_from_another_installation_cannot_be_rendered():
     with pytest.raises(ValueError, match="do not belong to installation"):
         render_merge(
             REGISTRY,
-            [registry_row("Customer", target_type="warehouse")],
+            [registry_row("Customer", item_name="Curated")],
             scope=LAKEHOUSE_SCOPE,
         )
 
 
-def test_a_row_from_another_repository_cannot_be_rendered():
-    stray = {**registry_row("Customer"), "repository": "OtherRepo"}
+def test_a_row_from_another_item_cannot_be_rendered():
+    stray = {**registry_row("Customer"), "item_name": "Other"}
     with pytest.raises(ValueError, match="do not belong to installation"):
         render_merge(REGISTRY, [stray], scope=LAKEHOUSE_SCOPE)
 
@@ -221,7 +218,7 @@ def test_the_guard_applies_to_deletes_too():
     with pytest.raises(ValueError, match="do not belong to installation"):
         render_delete_obsolete(
             REGISTRY,
-            [registry_row("Customer", target_type="warehouse")],
+            [registry_row("Customer", item_name="Curated")],
             scope=LAKEHOUSE_SCOPE,
         )
 
@@ -293,7 +290,7 @@ def test_an_installation_that_projects_nothing_still_deletes_its_rows():
     """
 
     statement = render_delete_obsolete(REGISTRY, [], scope=LAKEHOUSE_SCOPE)
-    assert statement.strip().endswith("'lakehouse'")
+    assert statement.strip().endswith("'Raw'")
     assert "NOT (" not in statement
 
 
@@ -303,7 +300,7 @@ def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
     )
     lines = statement.splitlines()
     assert lines[0].startswith("DELETE FROM {{object:_.Registry}}")
-    assert lines[1].strip().startswith("WHERE `repository` =")
+    assert lines[1].strip().startswith("WHERE `item_type` =")
 
 
 # --- the explicit prune scopes ----------------------------------------------
@@ -317,8 +314,8 @@ def test_the_installation_table_has_no_obsolete_row_to_delete():
     """
 
     row = {
-        "repository": "SalesRepo",
-        "target_type": "lakehouse",
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
         "target_name": "Sales_LH",
         "weaver_version": "0.1.0",
         "signature": "abc",
@@ -331,25 +328,15 @@ def test_an_installation_projecting_nothing_is_still_deleted():
 
     statement = render_delete_obsolete(INSTALLATION, [], scope=LAKEHOUSE_SCOPE)
     assert statement is not None
-    assert "`repository` = 'SalesRepo' AND `target_type` = 'lakehouse'" in statement
+    assert "`item_type` = 'Lakehouse' AND `item_name` = 'Raw'" in statement
 
 
 def test_installation_prune_removes_one_scope_and_names_it():
     statement = render_delete_scope(REGISTRY, scope=LAKEHOUSE_SCOPE)
-    assert "`repository` = 'SalesRepo' AND `target_type` = 'lakehouse'" in statement
+    assert "`item_type` = 'Lakehouse' AND `item_name` = 'Raw'" in statement
     assert "NOT (" not in statement
 
 
-def test_repository_prune_is_deliberately_not_scoped_by_target_type():
-    """Being cross-scope is the whole of what distinguishes it from installation prune.
-
-    So it names no target type — and it is never reached from a build, only from an
-    explicit repository lifecycle operation.
-    """
-
-    statement = render_delete_repository(REGISTRY, repository="SalesRepo")
-    assert "`repository` = 'SalesRepo'" in statement
-    assert "target_type" not in statement
 
 
 # --- the shapes that carry awkward values -----------------------------------
@@ -357,8 +344,8 @@ def test_repository_prune_is_deliberately_not_scoped_by_target_type():
 
 def test_a_table_dictionary_row_renders_its_nulls_and_booleans():
     row = {
-        "repository": "SalesRepo",
-        "target_type": "lakehouse",
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
         "schema_name": "Sales",
         "object_name": "Customer",
         "object_type": "table",
@@ -399,12 +386,13 @@ def test_a_relationship_row_compares_only_its_signature():
     """
 
     row = {
-        "repository": "SalesRepo",
-        "target_type": "lakehouse",
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
         "schema_name": "Sales",
         "object_name": "Order",
         "column_set": "Customer id",
-        "reference_repository": "SalesRepo",
+        "reference_item_type": "Lakehouse",
+        "reference_item_name": "Raw",
         "reference_schema_name": "Sales",
         "reference_object_name": "Customer",
         "reference_column_set": "Customer id",
@@ -416,8 +404,8 @@ def test_a_relationship_row_compares_only_its_signature():
 
 def test_a_composite_key_delete_names_every_key_column():
     row = {
-        "repository": "SalesRepo",
-        "target_type": "lakehouse",
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
         "schema_name": "Sales",
         "object_name": "Order",
         "index_type": "unique",
@@ -438,8 +426,8 @@ def test_an_installation_row_updates_the_target_name_without_a_new_key():
     """
 
     row = {
-        "repository": "SalesRepo",
-        "target_type": "lakehouse",
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
         "target_name": "Sales_LH_v2",
         "weaver_version": "0.1.0",
         "signature": "abc",
@@ -451,18 +439,16 @@ def test_an_installation_row_updates_the_target_name_without_a_new_key():
 
 def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
     row = {
-        "repository": "SalesRepo",
-        "target_type": "warehouse",
+        "item_type": "Warehouse",
+        "item_name": "Reporting",
         "schema_name": "Rpt",
         "object_name": "CustomerSummary",
-        "dependency_repository": "Sales_LH",
-        "dependency_schema_name": "Sales",
-        "dependency_object_name": "Customer",
-        "is_within_repository": False,
+        "dependency_name": "Sales_LH.Sales.Customer",
+        "is_within_item": False,
         "signature": "abc",
     }
     statement = render_merge(DEPENDENCY, [row], scope=WAREHOUSE_SCOPE)
-    assert "AS BOOLEAN) AS `is_within_repository`" in statement
+    assert "AS BOOLEAN) AS `is_within_item`" in statement
     values = statement.split("FROM VALUES")[1].split("AS source_values")[0]
-    assert "'Sales_LH'" in values
+    assert "'Sales_LH.Sales.Customer'" in values
     assert "false" in values

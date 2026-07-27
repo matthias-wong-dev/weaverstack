@@ -10,7 +10,7 @@ from weaver.errors import DiscoveryError
 from weaver.locations import Location
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverDocumentId, WeaverSchemaId
-from weaver.catalogue.item_builtin import materialise_builtin_item
+from weaver.catalogue.builtin import materialise_builtin_item
 from weaver.store import LocalStore
 
 
@@ -255,10 +255,17 @@ def test_the_owning_item_decides_which_sql_a_document_speaks(tmp_path):
     assert warehouse.language == "sql"
 
 
-def test_the_dialect_suffix_is_rejected_inside_an_item(tmp_path):
+def test_a_dialect_suffix_is_not_a_document_name(tmp_path):
+    """``Sales.Rollup.spark`` is not Schema.Object, so the file names nothing.
+
+    There is no special case for the retired ``.spark.sql`` spelling: with the
+    item choosing the dialect, that suffix is simply a filename with an extra
+    dot in it.
+    """
+
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Curated/Sales.Rollup.spark.sql", _spark_view("Sales.Rollup"))
-    with pytest.raises(DiscoveryError, match="the owning item chooses the SQL dialect"):
+    with pytest.raises(DiscoveryError, match="must name Schema and Object"):
         read_weaver_repository(Location(str(root)))
 
 
@@ -353,23 +360,6 @@ def test_authored_weaver_item_is_rejected(tmp_path):
         read_weaver_repository(Location(str(root)))
 
 
-def test_legacy_flat_layout_fails_with_concrete_migration_instructions(tmp_path):
-    root = tmp_path / "Legacy"
-    _write(root, "Sales__Customer.py", _table("Sales.Customer"))
-    _write(root, "_schemas/Sales.yml", _schema("Sales"))
-
-    with pytest.raises(DiscoveryError) as failure:
-        read_weaver_repository(Location(str(root)))
-
-    message = str(failure.value)
-    for destination in (
-        "Lakehouse/<item>/",
-        "Warehouse/<item>/",
-        "Lakehouse/<item>/Files/",
-        "schemas/",
-        "Lakehouse/<item>/lib/",
-    ):
-        assert destination in message
 
 
 def test_canonical_metadata_reference_resolves_across_items(tmp_path):

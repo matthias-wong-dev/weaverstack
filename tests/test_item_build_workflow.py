@@ -24,7 +24,7 @@ from weaver.build_bundle import (
 from weaver.errors import BuildError
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverItemId
-from weaver.catalogue.item_builtin import item_repository_files
+from weaver.catalogue.builtin import item_repository_files
 
 from test_item_repository import _estate
 

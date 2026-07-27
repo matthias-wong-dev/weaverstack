@@ -35,7 +35,6 @@ from .render import (
     InstallationScope,
     Row,
     render_delete_obsolete,
-    render_delete_repository,
     render_delete_scope,
     render_merge,
 )
@@ -229,15 +228,3 @@ def prune_installation(scope: InstallationScope) -> tuple[str, ...]:
     return tuple(render_delete_scope(table, scope=scope) for table in ordered)
 
 
-def prune_repository(repository: str) -> tuple[str, ...]:
-    """Remove every installation of one repository, across target types.
-
-    Being cross-scope is the whole of what distinguishes this from installation
-    prune, so it names no target type. A repository lifecycle operation, reached
-    explicitly and never from a build.
-    """
-
-    ordered = (REGISTRY, INSTALLATION, *reversed(DICTIONARY_TABLES))
-    return tuple(
-        render_delete_repository(table, repository=repository) for table in ordered
-    )

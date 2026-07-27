@@ -29,8 +29,7 @@ from .models import (
     OmittedNode,
 )
 from .installer import InstallationEnvironment, install_bundle
-from .planner import Projection, generate_build_bundle, project
-from .item_planner import generate_item_build_bundle
+from .planner import generate_item_build_bundle
 from .report import InstallationReport
 from .workflow import (
     ItemBuildResult,
@@ -47,7 +46,6 @@ from .targets import (
     ItemBinding,
     ItemBindings,
     parse_item_binding,
-    TargetBindings,
     WarehouseBinding,
 )
 
@@ -58,7 +56,6 @@ __all__ = [
     "ItemBindings",
     "parse_item_binding",
     "WarehouseBinding",
-    "TargetBindings",
     "OmittedNode",
     "BuildAction",
     "BuildBatch",
@@ -70,9 +67,6 @@ __all__ = [
     "write_bundle",
     "plan_to_yaml",
     "plan_from_yaml",
-    "Projection",
-    "project",
-    "generate_build_bundle",
     "generate_item_build_bundle",
     "InstallationEnvironment",
     "install_bundle",

@@ -38,29 +38,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..ses.metadata import (
-    AUDIT_COLUMNS,
-    DELTA_TARGET,
-    FOLDER_TARGET,
-    SPARK_SQL,
-    SQL_TARGET,
-    audit_column_name,
-)
+from ..ses.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
 
 #: The schema Weaver's own control plane lives in, inside the Weaver Lakehouse.
 #: One character, reserved, and never touched by an application build's prune.
 CATALOGUE_SCHEMA = "_"
-
-#: The built-in repository that declares these tables. It is installed like any
-#: other repository and catalogued in its own catalogue.
-CATALOGUE_REPOSITORY = "_weaver"
-
-#: The two physical installation types a repository may have. These are *target*
-#: types, not SES target kinds: a Folder and a Delta table both install into a
-#: Lakehouse, so ``folder`` and ``delta`` collapse to ``lakehouse`` here.
-LAKEHOUSE = "lakehouse"
-WAREHOUSE = "warehouse"
-TARGET_TYPES = (LAKEHOUSE, WAREHOUSE)
 
 #: What an installed object is, in the catalogue's vocabulary. Deliberately
 #: coarse: enough for a later operation to know how to address the thing, without
@@ -128,11 +110,9 @@ class CatalogueTable:
             raise ValueError(f"{self.name}: signature must be the last business column")
         if names[: len(self.key)] != list(self.key):
             raise ValueError(f"{self.name}: key columns must lead, in key order")
-        valid_scope = self.key[:2] == (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE)
-        valid_item_scope = self.key[:2] == ("item_type", "item_name")
-        if not (valid_scope or valid_item_scope):
+        if self.key[:2] != ITEM_SCOPE_COLUMNS:
             raise ValueError(
-                f"{self.name}: every key opens with the installation scope"
+                f"{self.name}: every key opens with the logical item scope"
             )
         not_nullable = {column.name for column in self.columns if column.not_null}
         missing = [name for name in self.key if name not in not_nullable]
@@ -181,24 +161,22 @@ class CatalogueTable:
 
 # --- the installation scope, shared by every table ---------------------------
 
-SCOPE_REPOSITORY = "repository"
-SCOPE_TARGET_TYPE = "target_type"
+SCOPE_ITEM_TYPE = "item_type"
+SCOPE_ITEM_NAME = "item_name"
+ITEM_SCOPE_COLUMNS = (SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME)
 
 
 def _scope() -> tuple[CatalogueColumn, ...]:
     return (
         CatalogueColumn(
-            SCOPE_REPOSITORY,
+            SCOPE_ITEM_TYPE,
             not_null=True,
-            description="The SES repository this row belongs to.",
+            description="Logical Weaver item type.",
         ),
         CatalogueColumn(
-            SCOPE_TARGET_TYPE,
+            SCOPE_ITEM_NAME,
             not_null=True,
-            description=(
-                "The physical installation type, lakehouse or warehouse. A "
-                "repository has at most one current installation of each."
-            ),
+            description="Logical Weaver item name.",
         ),
     )
 
@@ -283,7 +261,7 @@ INSTALLATION = CatalogueTable(
         "rebinding to a different Lakehouse updates this row rather than adding "
         "a second installation."
     ),
-    key=(SCOPE_REPOSITORY, SCOPE_TARGET_TYPE),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME),
     columns=(
         *_scope(),
         CatalogueColumn(
@@ -308,7 +286,7 @@ REGISTRY = CatalogueTable(
         "Written last in a build, so its presence means everything the object "
         "needed succeeded."
     ),
-    key=(SCOPE_REPOSITORY, SCOPE_TARGET_TYPE, "schema_name", "object_name"),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
         *_scope(),
         *_object(),
@@ -332,7 +310,7 @@ REGISTRY = CatalogueTable(
 SCHEMA_DICTIONARY = CatalogueTable(
     name="SchemaDictionary",
     description="The declared schemas an installation uses, and what they are for.",
-    key=(SCOPE_REPOSITORY, SCOPE_TARGET_TYPE, "schema_name"),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name"),
     columns=(
         *_scope(),
         CatalogueColumn("schema_name", not_null=True, description="The schema."),
@@ -348,7 +326,7 @@ TABLE_DICTIONARY = CatalogueTable(
         "reader asks the same questions of both. Everything here is declared in "
         "SES; nothing is read back from the physical object."
     ),
-    key=(SCOPE_REPOSITORY, SCOPE_TARGET_TYPE, "schema_name", "object_name"),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
         *_scope(),
         *_object(),
@@ -385,7 +363,7 @@ FOLDER_DICTIONARY = CatalogueTable(
         "being reduced to a path, and its file key is the scope of what Weaver "
         "manages inside it — reconciliation deletes nothing outside that."
     ),
-    key=(SCOPE_REPOSITORY, SCOPE_TARGET_TYPE, "schema_name", "object_name"),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
         *_scope(),
         *_object(),
@@ -410,8 +388,8 @@ COLUMN_DICTIONARY = CatalogueTable(
         "built table."
     ),
     key=(
-        SCOPE_REPOSITORY,
-        SCOPE_TARGET_TYPE,
+        SCOPE_ITEM_TYPE,
+        SCOPE_ITEM_NAME,
         "schema_name",
         "object_name",
         "column_name",
@@ -438,8 +416,8 @@ INDEX_DICTIONARY = CatalogueTable(
         "row. A key is identified by its own columns, so it needs no name."
     ),
     key=(
-        SCOPE_REPOSITORY,
-        SCOPE_TARGET_TYPE,
+        SCOPE_ITEM_TYPE,
+        SCOPE_ITEM_NAME,
         "schema_name",
         "object_name",
         "index_type",
@@ -467,16 +445,16 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
         "database constraints. Nothing is enforced. Because a relationship has "
         "no name, the row is the edge: every column is part of the key, so two "
         "objects may be related several times over and an object may reference "
-        "itself. The reference stays logical and inherits the owner's target "
-        "type; a Warehouse object's parent is a Warehouse object."
+        "itself. The parent is named by its own logical item."
     ),
     key=(
-        SCOPE_REPOSITORY,
-        SCOPE_TARGET_TYPE,
+        SCOPE_ITEM_TYPE,
+        SCOPE_ITEM_NAME,
         "schema_name",
         "object_name",
         "column_set",
-        "reference_repository",
+        "reference_item_type",
+        "reference_item_name",
         "reference_schema_name",
         "reference_object_name",
         "reference_column_set",
@@ -490,9 +468,10 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
             description="This object's columns, comma-separated in declared order.",
         ),
         CatalogueColumn(
-            "reference_repository",
-            not_null=True,
-            description="The parent's repository. Today always the owner's own.",
+            "reference_item_type", not_null=True, description="The parent's item type."
+        ),
+        CatalogueColumn(
+            "reference_item_name", not_null=True, description="The parent's item name."
         ),
         CatalogueColumn(
             "reference_schema_name", not_null=True, description="The parent's schema."
@@ -512,45 +491,30 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
-        "One row per resolved dependency edge. The owning object is "
-        "installation-scoped, but the reference is a three-part logical name and "
-        "inherits the owner's target type — a Warehouse object resolves its "
-        "dependencies in the Warehouse. Crossing engines is an alias, recorded "
-        "separately, not a dependency that quietly changes namespace."
+        "One row per resolved dependency edge, scoped to the consuming item and "
+        "keeping the reference exactly as the author wrote it. Crossing items or "
+        "engines is an alias, recorded separately, not a dependency that quietly "
+        "changes namespace."
     ),
     key=(
-        SCOPE_REPOSITORY,
-        SCOPE_TARGET_TYPE,
+        SCOPE_ITEM_TYPE,
+        SCOPE_ITEM_NAME,
         "schema_name",
         "object_name",
-        "dependency_repository",
-        "dependency_schema_name",
-        "dependency_object_name",
+        "dependency_name",
     ),
     columns=(
         *_scope(),
         *_object(),
         CatalogueColumn(
-            "dependency_repository",
+            "dependency_name",
             not_null=True,
-            description=(
-                "The dependency's repository, or the physical item a "
-                "three-part external reference named."
-            ),
+            description="The dependency exactly as the owning document wrote it.",
         ),
         CatalogueColumn(
-            "dependency_schema_name", not_null=True, description="The dependency's schema."
-        ),
-        CatalogueColumn(
-            "dependency_object_name", not_null=True, description="The dependency's name."
-        ),
-        CatalogueColumn(
-            "is_within_repository",
+            "is_within_item",
             BOOLEAN,
-            description=(
-                "False when the author named a physical target in three parts, "
-                "which is allowed and is not a managed object of this repository."
-            ),
+            description="Whether the producer is owned by the same logical item.",
         ),
         _signature("the owning object's source file"),
     ),
@@ -559,39 +523,43 @@ DEPENDENCY = CatalogueTable(
 ALIAS = CatalogueTable(
     name="Alias",
     description=(
-        "Cross-engine publication: the name a native object presents in another "
-        "target type. This is where the estate's graph crosses engines, so it is "
-        "kept apart from Dependency — composing Dependency, Alias and Registry "
-        "is what yields the whole DAG, and only that composition may cross. The "
-        "alias target type is part of the identity because there will be more "
-        "kinds of alias than two."
+        "The name one item presents for a document another item owns, "
+        "reproduced from the consuming item's own alias.yml. This is where the "
+        "estate's graph crosses items and engines, so it is kept apart from "
+        "Dependency — composing Dependency, Alias and Registry is what yields "
+        "the whole DAG, and only that composition may cross."
     ),
     key=(
-        SCOPE_REPOSITORY,
-        SCOPE_TARGET_TYPE,
-        "schema_name",
-        "object_name",
-        "alias_target_type",
+        SCOPE_ITEM_TYPE,
+        SCOPE_ITEM_NAME,
+        "destination_schema_name",
+        "destination_object_name",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
-            "alias_target_type",
+            "destination_schema_name",
             not_null=True,
-            description="The target type the alias is published into.",
+            description="The schema the consuming item presents the alias in.",
         ),
         CatalogueColumn(
-            "alias_schema_name",
+            "destination_object_name",
             not_null=True,
-            description="The schema the alias is published under.",
+            description="The name the consuming item presents.",
         ),
         CatalogueColumn(
-            "alias_object_name",
-            not_null=True,
-            description="The name the alias is published under.",
+            "source_item_type", not_null=True, description="The producer's item type."
         ),
-        _signature("the publishing object's source file"),
+        CatalogueColumn(
+            "source_item_name", not_null=True, description="The producer's item name."
+        ),
+        CatalogueColumn(
+            "source_schema_name", not_null=True, description="The producer's schema."
+        ),
+        CatalogueColumn(
+            "source_object_name", not_null=True, description="The producer's name."
+        ),
+        _signature("the alias declaration"),
     ),
 )
 
@@ -629,20 +597,3 @@ def table(name: str) -> CatalogueTable:
         ) from None
 
 
-#: Which installation type each SES target kind installs into. Folders and Delta
-#: tables both live in a Lakehouse, so three SES kinds collapse to two
-#: installation types — and this mapping is the only place that collapse happens.
-TARGET_TYPE_FOR_SES_TARGET = {
-    FOLDER_TARGET: LAKEHOUSE,
-    DELTA_TARGET: LAKEHOUSE,
-    SQL_TARGET: WAREHOUSE,
-}
-
-
-def target_type_for_ses_target(target_kind: str) -> str:
-    """The installation type an SES target kind installs into."""
-
-    try:
-        return TARGET_TYPE_FOR_SES_TARGET[target_kind]
-    except KeyError:
-        raise KeyError(f"unrecognised SES target kind {target_kind!r}") from None

@@ -18,26 +18,43 @@ from weaver.errors import DiscoveryError
 from weaver.ses import (
     IDENTITY_COLUMN_NOTE,
     declared_column_notes,
-    read_repository,
+    read_weaver_repository,
     resolve_text,
 )
+from weaver.ses.model import WeaverDocumentId
 
-FIXTURES = Location(value=str(Path(__file__).parent / "fixtures"))
+ITEM = "Lakehouse/Raw"
 
 
-def _write(root, name: str, text: str) -> None:
-    (root / name).write_text(text, encoding="utf-8")
+def _write(root, relative: str, text: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+class _Documents:
+    """The item's documents, addressed by the local ``Schema.Object`` name."""
+
+    def __init__(self, repository):
+        self.repository = repository
+
+    def __getitem__(self, qualified: str):
+        return self.repository.source_documents[
+            WeaverDocumentId.parse(f"{ITEM}/{qualified}")
+        ]
+
+    @property
+    def documents(self):
+        return tuple(self.repository.source_documents.values())
 
 
 def _repo(tmp_path, files: dict[str, str], schemas=("Sales",)):
     root = tmp_path / "repo"
-    root.mkdir()
-    (root / "_schemas").mkdir()
     for schema in schemas:
-        _write(root / "_schemas", f"{schema}.yml", f"Schema ID: {schema}\n")
+        _write(root, f"{ITEM}/schemas/{schema}.yml", f"Schema ID: {schema}\n")
     for name, text in files.items():
-        _write(root, name, text)
-    return read_repository(Location(value=str(root)), store=LocalStore(), name="repo")
+        _write(root, f"{ITEM}/{name}", text)
+    return _Documents(read_weaver_repository(Location(value=str(root)), store=LocalStore()))
 
 
 PARENT = """\
@@ -64,7 +81,7 @@ select cast(null as string) as `Order id`
 
 
 def test_literal_prose_resolves_to_itself_with_no_reference(tmp_path):
-    repo = _repo(tmp_path, {"Sales.Order.spark.sql": PARENT})
+    repo = _repo(tmp_path, {"Sales.Order.sql": PARENT})
     document = repo["Sales.Order"]
     resolved = resolve_text(
         document.document.description, owner=document, documents=repo.documents
@@ -79,7 +96,7 @@ def test_a_reference_copies_the_target_s_description(tmp_path):
         "Description: One row per confirmed customer order.", "Description: $Sales.Order"
     )
     repo = _repo(
-        tmp_path, {"Sales.Order.spark.sql": PARENT, "Sales.OrderCopy.spark.sql": child}
+        tmp_path, {"Sales.Order.sql": PARENT, "Sales.OrderCopy.sql": child}
     )
     document = repo["Sales.OrderCopy"]
     resolved = resolve_text(
@@ -95,7 +112,7 @@ def test_a_column_reference_copies_that_column_s_note(tmp_path):
         "Description: $Sales.Order[Amount]",
     )
     repo = _repo(
-        tmp_path, {"Sales.Order.spark.sql": PARENT, "Sales.OrderCopy.spark.sql": child}
+        tmp_path, {"Sales.Order.sql": PARENT, "Sales.OrderCopy.sql": child}
     )
     document = repo["Sales.OrderCopy"]
     resolved = resolve_text(
@@ -114,9 +131,9 @@ def test_a_chain_is_followed_to_the_literal_at_its_end(tmp_path):
     repo = _repo(
         tmp_path,
         {
-            "Sales.Order.spark.sql": PARENT,
-            "Sales.Middle.spark.sql": middle,
-            "Sales.Last.spark.sql": last,
+            "Sales.Order.sql": PARENT,
+            "Sales.Middle.sql": middle,
+            "Sales.Last.sql": last,
         },
     )
     document = repo["Sales.Last"]
@@ -135,52 +152,65 @@ def test_a_cycle_is_an_error_because_it_has_no_text_to_copy(tmp_path):
     right = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Right").replace(
         "Description: One row per confirmed customer order.", "Description: $Sales.Left"
     )
-    repo = _repo(
-        tmp_path, {"Sales.Left.spark.sql": left, "Sales.Right.spark.sql": right}
-    )
-    document = repo["Sales.Left"]
     with pytest.raises(DiscoveryError, match="reference cycle"):
-        resolve_text(document.document.description, owner=document, documents=repo.documents)
+        _repo(tmp_path, {"Sales.Left.sql": left, "Sales.Right.sql": right})
 
 
-def test_an_unresolved_reference_keeps_the_pointer_and_reports_no_text(tmp_path):
-    # A reference may legitimately name another repository's object. Refusing it
-    # would cost a working object for a documentation nicety, so it is recorded.
+def test_a_reference_that_names_nothing_is_rejected_when_read(tmp_path):
+    """Exact identity means a dangling documentation pointer is an error.
+
+    The flat model recorded it and moved on, because a reference could name
+    another repository's object. Inside one workspace declaration there is no
+    such elsewhere: every item is present, so a name that resolves to nothing is
+    a mistake in the declaration.
+    """
+
     child = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.OrderCopy").replace(
         "Description: One row per confirmed customer order.", "Description: $Sales.Elsewhere"
     )
-    repo = _repo(tmp_path, {"Sales.OrderCopy.spark.sql": child})
-    document = repo["Sales.OrderCopy"]
-    resolved = resolve_text(
-        document.document.description, owner=document, documents=repo.documents
-    )
-    assert resolved.literal is None
-    assert resolved.reference == "$Sales.Elsewhere"
+    with pytest.raises(DiscoveryError, match="does not resolve exactly"):
+        _repo(tmp_path, {"Sales.OrderCopy.sql": child})
 
 
-def test_a_reference_resolves_across_targets_excluding_the_referrer_itself():
-    """The sales-etl fixture's Warehouse Sales.Customer names $Sales.Customer.
+def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
+    """A Warehouse table's lineage names the Lakehouse table it came from.
 
-    It means the Delta table of the same ID — it cannot sensibly mean itself.
-    This is the case a documentation reference exists for, and the reason it is
-    not resolved in the referrer's execution namespace the way a dependency is.
+    The two share an ID and differ only by owning item, so the reference cannot
+    sensibly mean the referrer itself. This is the case a documentation
+    reference exists for, and the reason it is not resolved in the referrer's
+    own execution namespace the way a dependency is.
     """
 
-    repo = read_repository(FIXTURES / "sales-etl", store=LocalStore(), name="sales-etl")
-    warehouse = repo["sql:Sales.Customer"]
+    root = tmp_path / "repo"
+    _write(root, "Lakehouse/Raw/schemas/Sales.yml", "Schema ID: Sales\n")
+    _write(root, "Warehouse/Reporting/schemas/Sales.yml", "Schema ID: Sales\n")
+    _write(root, "Lakehouse/Raw/Sales.Order.sql", PARENT)
+    warehouse_source = PARENT.replace(
+        "Lineage: The sales system.", "Lineage: $Lakehouse/Raw/Sales.Order"
+    ).replace("Dependencies: []\n\n", "")
+    _write(root, "Warehouse/Reporting/Sales.Order.sql", warehouse_source)
+
+    repository = read_weaver_repository(Location(value=str(root)), store=LocalStore())
+    warehouse = repository.source_documents[
+        WeaverDocumentId.parse("Warehouse/Reporting/Sales.Order")
+    ]
+    lakehouse = repository.source_documents[
+        WeaverDocumentId.parse("Lakehouse/Raw/Sales.Order")
+    ]
     resolved = resolve_text(
-        warehouse.document.lineage, owner=warehouse, documents=repo.documents
+        warehouse.document.lineage,
+        owner=warehouse,
+        documents=tuple(repository.source_documents.values()),
     )
-    assert resolved.reference == "$Sales.Customer"
-    # Resolved to the Delta table's description, not to its own.
-    assert resolved.literal == repo["delta:Sales.Customer"].document.description.literal
+    assert resolved.reference == "$Lakehouse/Raw/Sales.Order"
+    assert resolved.literal == lakehouse.document.description.literal
 
 
 # --- what the column dictionary describes -----------------------------------
 
 
 def test_declared_column_notes_are_the_columns_an_author_described(tmp_path):
-    repo = _repo(tmp_path, {"Sales.Order.spark.sql": PARENT})
+    repo = _repo(tmp_path, {"Sales.Order.sql": PARENT})
     notes = declared_column_notes(repo["Sales.Order"])
     assert [name for name, _note in notes] == ["Amount"]
 
@@ -189,7 +219,7 @@ def test_the_identity_column_gets_a_generic_note_no_author_writes(tmp_path):
     source = PARENT.replace(
         "Schema:", "Identity: Order key\n\nSchema:"
     )
-    repo = _repo(tmp_path, {"Sales.Order.spark.sql": source})
+    repo = _repo(tmp_path, {"Sales.Order.sql": source})
     notes = declared_column_notes(repo["Sales.Order"])
     assert notes[0] == ("Order key", notes[0][1])
     assert notes[0][1].literal == IDENTITY_COLUMN_NOTE
@@ -214,7 +244,7 @@ select cast(null as string) as `Customer id`
      , cast(null as decimal(18,2)) as `Total amount`
  where 1 = 0
 """
-    repo = _repo(tmp_path, {"Sales.Summary.spark.sql": source})
+    repo = _repo(tmp_path, {"Sales.Order.sql": PARENT, "Sales.Summary.sql": source})
     notes = declared_column_notes(repo["Sales.Summary"])
     assert [name for name, _note in notes] == ["Total amount"]
     assert notes[0][1].literal == "Sum of gross order amounts."

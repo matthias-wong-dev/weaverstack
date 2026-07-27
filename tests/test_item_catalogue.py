@@ -5,9 +5,9 @@ from __future__ import annotations
 from weaver.locations import Location
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverDocumentId, WeaverItemId
-from weaver.catalogue.item_projection import project_item_installation
-from weaver.catalogue.item_reconcile import reconcile_item
-from weaver.catalogue.item_tables import (
+from weaver.catalogue.projection import project_item_installation
+from weaver.catalogue.reconcile import reconcile
+from weaver.catalogue.tables import (
     ALIAS,
     CATALOGUE_TABLES,
     DEPENDENCY,
@@ -79,8 +79,8 @@ def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
     raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     curated = _project(repository, "Lakehouse/Curated", "Curated_Dev")
 
-    raw_sql = "\n".join(reconcile_item(raw).statements)
-    curated_sql = "\n".join(reconcile_item(curated).statements)
+    raw_sql = "\n".join(reconcile(raw).statements)
+    curated_sql = "\n".join(reconcile(curated).statements)
     assert "`item_name` = 'Raw'" in raw_sql
     assert "`item_name` = 'Curated'" not in raw_sql
     assert "`item_name` = 'Curated'" in curated_sql
@@ -141,7 +141,7 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
     repository = read_weaver_repository(Location(str(_estate(tmp_path))))
-    reconciliation = reconcile_item(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
+    reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
 
     assert reconciliation.registry.table is REGISTRY
     assert reconciliation.statements[-1] == reconciliation.registry.merge

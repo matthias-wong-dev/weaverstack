@@ -23,10 +23,10 @@ import pytest
 from weaver import ItemRef
 from weaver.build_bundle.bundle import load_bundle
 from weaver.build_bundle.installer import InstallationEnvironment, install_bundle
-from weaver.build_bundle.item_planner import generate_item_build_bundle
+from weaver.build_bundle.planner import generate_item_build_bundle
 from weaver.build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
-from weaver.catalogue.item_builtin import materialise_builtin_item
-from weaver.catalogue.item_tables import CATALOGUE_TABLES
+from weaver.catalogue.builtin import materialise_builtin_item
+from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverItemId
 

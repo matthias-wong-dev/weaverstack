@@ -36,11 +36,11 @@ from typing import Any
 
 from .build_bundle.bundle import BuildBundle, load_bundle
 from .build_bundle.installer import InstallationEnvironment, install_bundle
-from .build_bundle.item_planner import generate_item_build_bundle
+from .build_bundle.planner import generate_item_build_bundle
 from .build_bundle.report import InstallationReport
 from .build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
-from .catalogue.item_builtin import materialise_builtin_item
-from .catalogue.item_tables import CATALOGUE_TABLES
+from .catalogue.builtin import materialise_builtin_item
+from .catalogue.tables import CATALOGUE_TABLES
 from .locations import Location
 from .resolution import resolver_for
 from .store import Store

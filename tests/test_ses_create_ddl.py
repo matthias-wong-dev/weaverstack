@@ -22,6 +22,7 @@ import textwrap
 import pytest
 
 from weaver.ses import read_source_document
+from weaver.ses.model import LAKEHOUSE, WAREHOUSE
 from weaver.ses.ddl import (
     SPARK_SQL_EXECUTOR,
     SPARK_SQL_EXTENSION,
@@ -31,8 +32,12 @@ from weaver.ses.ddl import (
 )
 
 
-def _doc(relative_path: str, text: str):
-    return read_source_document(relative_path, textwrap.dedent(text).lstrip().encode("utf-8"))
+def _doc(relative_path: str, text: str, item_type: str = LAKEHOUSE):
+    """The owning item type is what chooses a ``.sql`` document's dialect."""
+
+    return read_source_document(
+        relative_path, textwrap.dedent(text).lstrip().encode("utf-8"), item_type
+    )
 
 
 # --- Spark SQL views ---------------------------------------------------------
@@ -59,7 +64,7 @@ Dependencies:
 
 
 def test_view_wraps_body_in_create_or_replace_view():
-    ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
 
     assert isinstance(ddl, GeneratedDdl)
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
@@ -69,12 +74,12 @@ def test_view_wraps_body_in_create_or_replace_view():
 
 
 def test_view_name_is_the_validated_object_id():
-    ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
     assert "VIEW {{object:DWG.ActiveCustomer}} AS" in ddl.content
 
 
 def test_view_preserves_the_body_apart_from_addressing_its_references():
-    ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
     assert ADDRESSED_BODY in ddl.content
     # Only the reference moved. Line breaks, indentation and casing are the
     # author's, because a build freezes text it is going to execute and must not
@@ -98,13 +103,13 @@ def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
     */
     select CustomerId from Other_LH.DWG.Customer where IsActive = true
     """
-    ddl = _doc("DWG.ActiveCustomer.spark.sql", source).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", source).create_ddl()
     assert "from Other_LH.DWG.Customer" in ddl.content
     assert "{{object:Other_LH" not in ddl.content
 
 
 def test_view_normalises_only_trailing_whitespace():
-    ddl = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl()
     assert ddl.content == (
         "CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS\n"
         f"{ADDRESSED_BODY}\n"
@@ -112,7 +117,7 @@ def test_view_normalises_only_trailing_whitespace():
 
 
 def test_view_has_exactly_one_create_and_none_in_the_source():
-    doc = _doc("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE)
+    doc = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE)
     ddl = doc.create_ddl()
     assert ddl.content.count("CREATE OR REPLACE VIEW") == 1
     assert "create" not in (doc.sql_body or "").lower()
@@ -185,7 +190,7 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     at install — not finished SQL (build-philosophy §7.3). The query therefore
     *does* belong in the payload; it is executed at install, not at build."""
 
-    ddl = _doc("DWG.CustomerCount.spark.sql", SPARK_TABLE_SOURCE).create_ddl()
+    ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl()
 
     assert (ddl.executor, ddl.extension) == (
         SPARK_TABLE_EXECUTOR,
@@ -209,7 +214,7 @@ def test_an_inferred_spark_sql_table_carries_no_declared_columns():
     source = SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip() + "\n*/\n" + (
         "select count(*) as CustomerCount from DWG.Customer\n"
     )
-    ddl = _doc("DWG.CustomerCount.spark.sql", source).create_ddl()
+    ddl = _doc("DWG.CustomerCount.sql", source).create_ddl()
 
     payload = json.loads(ddl.content)
     assert payload["schema_mode"] == "inferred"
@@ -256,7 +261,7 @@ def test_folder_has_no_create_ddl():
 def test_tsql_object_routes_to_the_tsql_executor():
     from weaver.ses.ddl import TSQL_EXECUTOR, TSQL_EXTENSION
 
-    ddl = _doc("Reporting.CustomerReport.sql", TSQL_SOURCE).create_ddl()
+    ddl = _doc("Reporting.CustomerReport.sql", TSQL_SOURCE, WAREHOUSE).create_ddl()
     assert (ddl.executor, ddl.extension) == (TSQL_EXECUTOR, TSQL_EXTENSION)
 
 
@@ -266,8 +271,8 @@ def test_tsql_object_routes_to_the_tsql_executor():
 @pytest.mark.parametrize(
     "path, source",
     [
-        ("DWG.ActiveCustomer.spark.sql", VIEW_SOURCE),
-        ("DWG.CustomerCount.spark.sql", SPARK_TABLE_SOURCE),
+        ("DWG.ActiveCustomer.sql", VIEW_SOURCE),
+        ("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE),
         ("DWG__Customer.py", PY_TABLE_SOURCE),
     ],
 )

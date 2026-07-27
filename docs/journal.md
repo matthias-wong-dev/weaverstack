@@ -2580,6 +2580,53 @@ rather than despite it.
 
 ---
 
+### R12 — the second architecture goes
+
+R10 and R11 left Weaver carrying two of everything: two readers, two planners,
+two catalogues, two builtins. The item model was the public surface and the flat
+model was "isolated compatibility", which is a comfortable phrase for code that
+still has to compile, still has to be understood, and still gets read by the next
+person as though it were a live option.
+
+Matthias's call was that there is no legacy here — this framework has not shipped
+to anyone who needs a migration path — so the second architecture is not a seam
+to maintain, it is just the first draft. It went:
+
+- `weaver.catalogue.legacy`, the re-export shim;
+- the flat `read_repository` and `SesRepository`, and with them the root-file
+  conventions (`_schemas/`, `_helpers/`, private root files) that only made sense
+  when every document lived in one directory;
+- the flat planner and its projection, and the repository/target-scoped
+  catalogue tables;
+- the committed `weaver/builtin/catalogue` SES resources, whose drift test existed
+  only because the text was committed separately from the definitions it mirrored;
+- `.spark.sql` everywhere, including as a rejection: with the item choosing the
+  dialect there is no special case left to write, and `Sales.Rollup.spark` is
+  simply a filename that does not name Schema.Object;
+- the migration error that told an author how to convert a flat repository.
+
+What survived moved rather than being copied. The target inspectors the flat
+planner owned became `weaver.build_bundle.prune`, which is what they always were
+— reconciling a bound physical item against what an item declares, the half of a
+build that can destroy data. The item modules then took the plain names, because
+`item_planner` beside no other planner is a qualifier that distinguishes nothing.
+
+The signature machinery got smaller twice over in two checkpoints, which is the
+tell that both changes were removing something the design had been paying for
+rather than adding to it.
+
+The cost is honest and worth writing down: about a hundred and sixty tests went
+with the flat reader, and not all of them were testing the flat reader. The whole
+path over a realistic multi-object fixture — classification through metadata,
+structural checks, SQL analysis and discovered references, asserted together —
+was written against `sales-etl` in the flat layout, and it is gone rather than
+ported. The parse, DDL, graph and dependency layers keep their own unit tests and
+the item reader has its own end-to-end file, so the loss is integration breadth
+rather than a hole over specific behaviour. It should come back as an
+item-shaped fixture; it has not yet.
+
+---
+
 ## Open questions
 
 | Question | Raised | Status |

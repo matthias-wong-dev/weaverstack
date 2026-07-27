@@ -29,11 +29,8 @@ from .model import (
     WeaverSchemaId,
 )
 from .repository import (
-    DependencyEdge,
-    SesRepository,
     build_internal_graph,
     effective_dependencies,
-    read_repository,
     read_weaver_repository,
     unresolved_references,
 )
@@ -100,7 +97,6 @@ __all__ = [
     "PythonImport",
     "extract_python_references",
     "extract_sql_references",
-    "SesRepository",
     "WeaverRepository",
     "WeaverItem",
     "WeaverItemId",
@@ -112,8 +108,6 @@ __all__ = [
     "WAREHOUSE",
     "ITEM_TYPES",
     "FILES",
-    "DependencyEdge",
-    "read_repository",
     "read_weaver_repository",
     "Graph",
     "resolve_item_dependencies",

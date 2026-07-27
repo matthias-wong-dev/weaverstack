@@ -37,8 +37,9 @@ from .tables import (
     AUDIT_UPDATE_COLUMN,
     BOOLEAN,
     CATALOGUE_SCHEMA,
-    SCOPE_REPOSITORY,
-    SCOPE_TARGET_TYPE,
+    ITEM_SCOPE_COLUMNS,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
     TIMESTAMP,
     CatalogueTable,
 )
@@ -56,18 +57,18 @@ class InstallationScope:
     called without it and a caller cannot supply half of it.
     """
 
-    repository: str
-    target_type: str
+    item_type: str
+    item_name: str
 
     @property
     def columns(self) -> tuple[str, ...]:
-        return (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE)
+        return ITEM_SCOPE_COLUMNS
 
     @property
     def values(self) -> Mapping[str, str]:
         return {
-            SCOPE_REPOSITORY: self.repository,
-            SCOPE_TARGET_TYPE: self.target_type,
+            SCOPE_ITEM_TYPE: self.item_type,
+            SCOPE_ITEM_NAME: self.item_name,
         }
 
     @property
@@ -85,7 +86,7 @@ class InstallationScope:
         return all(row.get(column) == value for column, value in self.values.items())
 
     def __str__(self) -> str:
-        return f"{self.repository}/{self.target_type}"
+        return f"{self.item_type}/{self.item_name}"
 
 
 def identifier(name: str) -> str:
@@ -338,18 +339,6 @@ def render_delete_scope(table: CatalogueTable, *, scope: InstallationScope) -> s
     return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
 
-def render_delete_repository(table: CatalogueTable, *, repository: str) -> str:
-    """A ``DELETE`` of every installation of one repository from one table.
-
-    Deliberately not scoped by target type — this is the repository lifecycle
-    operation, and being cross-scope is the whole of what distinguishes it. It is
-    never reached from a build.
-    """
-
-    return (
-        f"DELETE FROM {qualified_name(table)}\n"
-        f" WHERE {identifier(SCOPE_REPOSITORY)} = {literal(repository)}\n"
-    )
 
 
 def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:

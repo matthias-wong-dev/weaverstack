@@ -14,7 +14,7 @@ from weaver.build_bundle import (
     generate_item_build_bundle,
     install_bundle,
 )
-from weaver.catalogue.item_tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
+from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverItemId
 from weaver.spark import SparkCatalogue

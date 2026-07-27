@@ -4,13 +4,14 @@ Weaver's own catalogue lives in schema ``_`` of the Weaver Lakehouse, declared a
 ordinary SES and built through the ordinary build path. Two rules had to give way
 for that, and both were over-broad rather than load-bearing:
 
-- the underscore convention is about *directories* — ``_schemas``, ``_helpers`` —
-  so a root file may begin with one when it still names a schema and an object;
+- the underscore convention is about *directories* — ``schemas/``, ``lib/`` — so
+  a document filename may begin with one when it still names a schema and an
+  object;
 - a Spark SQL object must be explicit about its dependencies, which an empty list
   satisfies as well as a populated one. A query built from literals has none.
 
-A private root file is still private, and a misnamed object file is still an
-error rather than quietly demoted to support.
+A misnamed object file is still an error rather than quietly demoted to
+support.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ import pytest
 
 from weaver import LocalStore, Location
 from weaver.errors import DiscoveryError, MetadataError
-from weaver.ses import PYTHON, SPARK_SQL, parse_document, read_repository
+from weaver.ses import PYTHON, SPARK_SQL, parse_document, read_weaver_repository
+from weaver.ses.model import WeaverDocumentId
 
 REGISTRY = """\
 /*
@@ -70,40 +72,57 @@ def _python_object(qualified: str, *, extra: str = "", imports: str = "") -> str
     )
 
 
+ITEM = "Lakehouse/Raw"
+
+
+class _Documents:
+    """The item's documents, addressed by their local ``Schema.Object`` name."""
+
+    def __init__(self, repository):
+        self.repository = repository
+        self.support_files = tuple(
+            path for path in repository.support_files if path.startswith(f"{ITEM}/")
+        )
+        self.dependency_graph = repository.dependency_graph
+        self.documents = tuple(
+            document
+            for identity, document in repository.source_documents.items()
+            if str(identity.item) == ITEM
+        )
+
+    def __getitem__(self, qualified: str):
+        return self.repository.source_documents[
+            WeaverDocumentId.parse(f"{ITEM}/{qualified}")
+        ]
+
+
 def _repo(tmp_path, files: dict[str, str], schemas=("_",)):
     root = tmp_path / "repo"
-    root.mkdir()
-    (root / "_schemas").mkdir()
     for schema in schemas:
-        (root / "_schemas" / f"{schema}.yml").write_text(
-            f"Schema ID: {schema}\n", encoding="utf-8"
-        )
+        path = root / ITEM / "schemas" / f"{schema}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"Schema ID: {schema}\n", encoding="utf-8")
     for name, text in files.items():
-        (root / name).write_text(text, encoding="utf-8")
-    return read_repository(Location(value=str(root)), store=LocalStore(), name="repo")
+        path = root / ITEM / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return _Documents(read_weaver_repository(Location(value=str(root)), store=LocalStore()))
 
 
 def test_an_object_in_schema_underscore_is_read_as_an_object(tmp_path):
-    repo = _repo(tmp_path, {"_.Registry.spark.sql": REGISTRY})
+    repo = _repo(tmp_path, {"_.Registry.sql": REGISTRY})
     document = repo["_.Registry"]
     assert document.object_id.schema == "_"
     assert document.object_id.object == "Registry"
-    assert document.node_id == "delta:_.Registry"
+    assert document.node_id == f"{ITEM}/_.Registry"
     assert repo.support_files == ()
 
 
 def test_the_underscore_schema_must_still_be_declared(tmp_path):
-    with pytest.raises(DiscoveryError, match="undeclared schema"):
-        _repo(tmp_path, {"_.Registry.spark.sql": REGISTRY}, schemas=("Sales",))
+    with pytest.raises(DiscoveryError, match="is not declared by item"):
+        _repo(tmp_path, {"_.Registry.sql": REGISTRY}, schemas=("Sales",))
 
 
-def test_a_private_root_file_is_still_support_not_an_object(tmp_path):
-    repo = _repo(
-        tmp_path,
-        {"_.Registry.spark.sql": REGISTRY, "_scratch.py": "not an object\n"},
-    )
-    assert repo.support_files == ("_scratch.py",)
-    assert [document.qualified for document in repo.documents] == ["_.Registry"]
 
 
 def test_a_misnamed_object_file_is_an_error_not_quietly_demoted(tmp_path):
@@ -113,14 +132,6 @@ def test_a_misnamed_object_file_is_an_error_not_quietly_demoted(tmp_path):
         _repo(tmp_path, {"Sales.Order.py": "class X: pass\n"}, schemas=("Sales",))
 
 
-def test_an_underscored_file_that_names_nothing_is_support(tmp_path):
-    # Python cannot express schema `_`: `_` + `__` + `Registry` is `___Registry`,
-    # whose first part is empty. So it is support, which is the honest answer.
-    repo = _repo(
-        tmp_path,
-        {"_.Registry.spark.sql": REGISTRY, "___Registry.py": "class X: pass\n"},
-    )
-    assert repo.support_files == ("___Registry.py",)
 
 
 # --- an explicit absence of dependencies ------------------------------------
@@ -170,7 +181,7 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     document = repo["Sales.Ignored"]
     assert document.referenced_object_ids  # discovery did see the import
     assert effective_dependencies(document) == ()
-    assert repo.dependency_graph.upstream_of("delta:Sales.Ignored") == ()
+    assert repo.dependency_graph.upstream_of(f"{ITEM}/Sales.Ignored") == ()
 
 
 def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):

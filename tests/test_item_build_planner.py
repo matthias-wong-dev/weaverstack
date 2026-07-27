@@ -397,7 +397,7 @@ def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
         )
 
 
-def test_builtin_weaver_item_builds_through_the_same_item_planner(tmp_path):
+def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     repository = _repository(_estate(tmp_path))
     control = LakehouseBinding(ItemRef("Weaver_Control"))
     bundle = generate_item_build_bundle(

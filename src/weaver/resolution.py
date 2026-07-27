@@ -184,11 +184,11 @@ class LocalResolver:
         return self.files_root(ItemRef(self._weaver_lakehouse_name())) / BUILD_BUNDLES_AREA
 
     def build_bundle(self, name: str) -> Location:
-        """One legacy persisted bundle location.
+        """One named bundle directory beneath ``build_bundles_root``.
 
-        New callers use a timestamped archive beneath build_bundles_root.
-        This directory-shaped resolver remains for compatibility with already
-        persisted bundles and the flat-planner test suite.
+        Setup uses this because its bootstrap bundle is idempotent and there is
+        no value in a new name each run. A build that keeps its bundle for
+        handover or audit uses a timestamped archive instead.
         """
 
         return self.build_bundles_root / validate_name(name, what="bundle name")

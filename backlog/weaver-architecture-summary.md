@@ -3,9 +3,9 @@
 ## Status
 
 This is the accepted and implemented architecture for the
-repository/item/document re-architecture. The item model is the public and CLI
-surface; the earlier flat planner remains only as isolated compatibility code.
-Final end-to-end consolidation is tracked in
+repository/item/document re-architecture. The item model is the whole of Weaver:
+the pre-item flat planner, reader and catalogue have been removed rather than
+kept behind a compatibility seam. Final end-to-end consolidation is tracked in
 [the re-architecture checkpoint plan](weaver-repositories-items-documents-checkpoints.md).
 
 [`docs/journal.md`](../docs/journal.md) remains the record of implementation
@@ -438,9 +438,8 @@ catalogue is destructively rebuilt from the repository when its representation
 changes. It becomes durable only when incremental build starts depending on its
 history.
 
-`weaver.catalogue` exposes this item-scoped representation. The earlier flat
-planner's repository/target catalogue is isolated in `weaver.catalogue.legacy`
-only as a temporary compatibility seam and is not part of the public architecture.
+`weaver.catalogue` exposes this item-scoped representation, and it is the only
+one. There is no repository/target-scoped catalogue to fall back to.
 
 ---
 

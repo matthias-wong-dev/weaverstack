@@ -136,23 +136,6 @@ class WarehouseBinding:
 
 
 @dataclass(frozen=True)
-class TargetBindings:
-    """The optional physical bindings a build is projected onto."""
-
-    lakehouse: LakehouseBinding | None = None
-    warehouse: WarehouseBinding | None = None
-
-    @property
-    def bound_target_kinds(self) -> frozenset[str]:
-        kinds = set()
-        if self.lakehouse is not None:
-            kinds.add(LAKEHOUSE_TARGET)
-        if self.warehouse is not None:
-            kinds.add(WAREHOUSE_TARGET)
-        return frozenset(kinds)
-
-
-@dataclass(frozen=True)
 class ItemBinding:
     """One exact logical Weaver item bound to one typed physical item."""
 

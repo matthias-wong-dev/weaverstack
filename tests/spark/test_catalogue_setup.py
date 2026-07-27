@@ -18,14 +18,14 @@ from dataclasses import dataclass
 import pytest
 
 from weaver import ItemRef
-from weaver.catalogue.item_tables import (
+from weaver.catalogue import (
     CATALOGUE_TABLES,
     DEPENDENCY,
     INSTALLATION,
     REGISTRY,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
-    ItemInstallationScope,
+    InstallationScope,
 )
 from weaver.catalogue.reader import read_installation, read_table
 from weaver.spark import SparkCatalogue, local_destination
@@ -33,7 +33,7 @@ from weaver.setup import BUNDLE_NAME, initialise_weaver_lakehouse
 
 pytestmark = pytest.mark.spark
 
-SCOPE = ItemInstallationScope(item_type="Lakehouse", item_name="_weaver")
+SCOPE = InstallationScope(item_type="Lakehouse", item_name="_weaver")
 
 
 @dataclass(frozen=True)
@@ -188,7 +188,7 @@ def test_the_catalogue_describes_its_own_tables_and_their_keys(setup, spark):
 
 
 def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
-    from weaver.catalogue.item_tables import COLUMN_DICTIONARY
+    from weaver.catalogue.tables import COLUMN_DICTIONARY
 
     rows = read_table(setup.catalogue, COLUMN_DICTIONARY, scope=SCOPE)
     described = {(row["object_name"], row["column_name"]) for row in rows}
@@ -198,7 +198,7 @@ def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
 
 
 def test_the_catalogue_records_its_own_logical_keys(setup, spark):
-    from weaver.catalogue.item_tables import INDEX_DICTIONARY
+    from weaver.catalogue.tables import INDEX_DICTIONARY
 
     rows = read_table(setup.catalogue, INDEX_DICTIONARY, scope=SCOPE)
     keys = {(row["object_name"], row["column_set"]) for row in rows}

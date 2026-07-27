@@ -135,33 +135,14 @@ def lakehouses(tmp_path: Path) -> LocalLakehouses:
 def installed_repository(lakehouses: LocalLakehouses) -> Location:
     """The example declaration, copied into the Weaver Lakehouse item area."""
 
-    source = Path(__file__).parent / "fixtures" / "sales-etl"
+    source = Path(__file__).parent / "fixtures" / "build-lakehouse-item"
     destination = lakehouses.resolver.weaver_items_root
     shutil.copytree(source, destination.path, dirs_exist_ok=True)
     return destination
 
 
-@pytest.fixture
-def installed_build_repository(lakehouses: LocalLakehouses) -> str:
-    """The build-lakehouse fixture, installed under a deliberately different name.
-
-    The installed name is what the build reads, not the fixture directory name,
-    so ``MyRepo`` proves the input chooses the installed repository.
-    """
-
-    source = Path(__file__).parent / "fixtures" / "build-lakehouse"
-    destination = lakehouses.resolver.weaver_items_root
-    shutil.copytree(source, destination.path, dirs_exist_ok=True)
-    return "MyRepo"
 
 
-@pytest.fixture
-def lakehouse_only_bindings(lakehouses: LocalLakehouses):
-    """A Lakehouse binding to the target Lakehouse, no Warehouse."""
-
-    from weaver.build_bundle import LakehouseBinding, TargetBindings
-
-    return TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.target))
 
 
 @pytest.fixture
