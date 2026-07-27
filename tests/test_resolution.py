@@ -67,8 +67,8 @@ def test_a_local_destination_folds_the_lakehouse_into_the_database_name(resolver
 
     destination = resolver.spark_destination(ItemRef("Sales"))
 
-    assert destination.qualify("Budget", "Expense") == "`Sales__Budget`.`Expense`"
-    assert destination.qualified_schema("Budget") == "`Sales__Budget`"
+    assert destination.qualify("Budget", "Expense") == "`sales__budget`.`Expense`"
+    assert destination.qualified_schema("Budget") == "`sales__budget`"
 
 
 def test_a_local_schema_pins_its_storage_under_the_lakehouse_tables_area(resolver):

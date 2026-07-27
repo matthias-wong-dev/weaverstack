@@ -14,7 +14,7 @@ destination what that is called there::
     SELECT * FROM {{object:Sales.Customer}} WHERE IsActive
 
     Fabric   ->  `Weaver`.`Play_Lakehouse_1`.`Sales`.`ActiveCustomer`
-    local    ->  `Sales_LH__Sales`.`ActiveCustomer`
+    local    ->  `sales_lh__sales`.`ActiveCustomer`
 
 This is substitution of a transport-level value, not a template (§16). Nothing
 semantic is left for the installer to decide: the object, its schema, the

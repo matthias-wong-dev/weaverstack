@@ -246,10 +246,12 @@ CREATE TABLE `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer` …
 One session can create, read and drop through that name in any Lakehouse in the
 workspace, and can build a view in one over a table in another. The local
 emulator has one namespace level and cannot be given another, so it folds the
-Lakehouse into that level — `` `Sales_LH__Sales`.`Customer` `` — which is not
+Lakehouse into that level — `` `sales_lh__sales`.`Customer` `` — which is not
 Fabric syntax and is not meant to be. What it reproduces is the property: two
 destinations declaring a schema of the same name stay apart. Storage is untouched
-by the folding.
+by the folding. The folded schema uses the local catalogue's canonical lower-case
+spelling; the emulator keeps declared object names exact-case and therefore uses
+case-sensitive analysis for its Spark session.
 
 Both are needed and neither substitutes for the other: a folder is created at a
 path and has no catalogue name, while a view exists only as a name and has no path

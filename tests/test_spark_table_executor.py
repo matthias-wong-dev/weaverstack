@@ -92,7 +92,7 @@ DESTINATION = local_destination(item="Sales_LH", tables_root="/tmp/Sales_LH/Tabl
 FABRIC_DESTINATION = fabric_destination(workspace="Analytics", lakehouse="Sales_LH")
 
 #: What `Sales.Customer` is called there.
-CUSTOMER = "`Sales_LH__Sales`.`Customer`"
+CUSTOMER = "`sales_lh__sales`.`Customer`"
 
 
 def _payload(**overrides) -> bytes:
@@ -157,7 +157,7 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
-def test_table_creation_preserves_identifier_case_and_restores_the_session_setting():
+def test_fabric_creation_preserves_identifier_case_and_restores_the_session_setting():
     spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
 
     _run(spark, _payload(), destination=FABRIC_DESTINATION)
@@ -165,6 +165,18 @@ def test_table_creation_preserves_identifier_case_and_restores_the_session_setti
     assert spark.case_at_create == "true"
     assert spark.conf.value == "false"
     assert spark.conf.changes == ["true", "false"]
+
+
+def test_local_creation_uses_the_registered_folded_schema_and_pascal_table_name():
+    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
+
+    _run(spark, _payload())
+
+    assert _create_statement(spark).startswith(
+        "CREATE OR REPLACE TABLE `sales_lh__sales`.`Customer`"
+    )
+    assert spark.case_at_create == "true"
+    assert spark.conf.value == "true"
 
 
 def test_a_failed_create_still_restores_the_session_setting():

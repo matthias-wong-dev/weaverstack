@@ -102,7 +102,9 @@ class SparkTableExecutor:
         physical = leading + business + [tuple(entry) for entry in instruction["audit_columns"]]
 
         statement = _create_table_sql(
-            qualified, physical, column_mapping=instruction.get("column_mapping", True)
+            qualified,
+            physical,
+            column_mapping=instruction.get("column_mapping", True),
         )
         _create_preserving_identifier_case(
             context.spark,
@@ -179,6 +181,9 @@ def _create_preserving_identifier_case(
         spark.sql(statement)
         return
     previous = spark.conf.get(_CASE_SENSITIVE)
+    if str(previous).lower() == "true":
+        spark.sql(statement)
+        return
     spark.conf.set(_CASE_SENSITIVE, "true")
     try:
         spark.sql(statement)

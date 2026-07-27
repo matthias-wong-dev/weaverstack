@@ -43,6 +43,13 @@ def _bound(session):
     return SparkCatalogue(session, local_destination(item="Weaver", tables_root="/x"))
 
 
+class _Conf:
+    """The minimum session policy surface a deliberately failing fake needs."""
+
+    def set(self, _key, _value):
+        pass
+
+
 def _create(catalogue, name: str, columns: str) -> None:
     catalogue.sql(
         f"CREATE OR REPLACE TABLE {{{{object:_.{name}}}}} ({columns}) USING delta"
@@ -227,6 +234,7 @@ def test_a_syntax_or_infrastructure_failure_is_not_read_as_an_empty_catalogue(we
 
     class Failing:
         catalog = None
+        conf = _Conf()
 
         def table(self, name):
             raise PermissionError("storage account access denied")
@@ -240,6 +248,7 @@ def test_an_analysis_error_that_is_not_absence_still_propagates(weaver_catalogue
 
     class Failing:
         catalog = None
+        conf = _Conf()
 
         def table(self, name):
             raise AnalysisException("DELTA_LOG_CORRUPTED: checkpoint is unreadable")

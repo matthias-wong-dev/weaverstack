@@ -135,6 +135,11 @@ def test_each_destination_keeps_its_own_storage(estate, spark):
         table = resolver.tables_root(ItemRef(lakehouse)).join("DWG", "Customer")
         assert store.exists(table), lakehouse
         assert store.exists(table / "_delta_log")
+        # Do not let macOS's case-insensitive filesystem hide Spark folding the
+        # physical directory to ``customer``; local emulates Fabric's casing.
+        names = {path.name for path in table.path.parent.iterdir()}
+        assert "Customer" in names
+        assert "customer" not in names
 
 
 def test_the_catalogue_records_the_installation_it_is_currently_bound_to(estate, spark):

@@ -24,14 +24,17 @@ delegate is null), so ``spark.sql.catalog.<lakehouse>`` is not available. Its on
 namespace level is the database. The proxy therefore folds the Lakehouse into
 that level::
 
-    `Sales_LH__Sales`.`Customer`
+    `sales_lh__sales`.`Customer`
 
 which is not Fabric syntax and is not meant to be. What it reproduces is the
 *property* Fabric's namespace provides and a bare ``Sales.Customer`` does not:
 two destinations that declare a schema of the same name stay apart. Storage is
 untouched by the folding — the database still carries an explicit ``LOCATION`` of
 ``<lakehouse>/Tables/<schema>``, so a managed table lands exactly where the
-Fabric layout puts it and the emulator keeps mirroring OneLake.
+Fabric layout puts it and the emulator keeps mirroring OneLake. The folded
+database identifier is lower-case because the local session catalogue registers
+it that way; declared object identifiers remain exact-case under the emulator's
+case-sensitive analysis policy.
 
 A destination is never carried in a build bundle. It is derived at install time
 from the item the bundle names, because a Fabric namespace is workspace-specific
@@ -82,11 +85,14 @@ class SparkDestination:
     schema_prefix: str = ""
     tables_root: str | None = None
     preserve_table_identifier_case: bool = False
+    lowercase_schema_identifier: bool = False
+    case_sensitive_analysis: bool = False
 
     def schema_identifier(self, schema: str) -> str:
         """The schema's name at its own namespace level, unquoted."""
 
-        return f"{self.schema_prefix}{_checked(schema, what='schema')}"
+        name = f"{self.schema_prefix}{_checked(schema, what='schema')}"
+        return name.lower() if self.lowercase_schema_identifier else name
 
     def qualified_schema(self, schema: str) -> str:
         """The schema, fully qualified — what ``CREATE SCHEMA`` is given."""
@@ -135,8 +141,7 @@ def fabric_destination(*, workspace: str, lakehouse: str) -> SparkDestination:
             _checked(lakehouse, what="lakehouse"),
         ),
         # Fabric otherwise folds a quoted table identifier to lower-case at
-        # creation. Local Spark must retain its default: its folded schema was
-        # registered case-insensitively and a case-sensitive lookup misses it.
+        # creation.
         preserve_table_identifier_case=True,
     )
 
@@ -161,6 +166,15 @@ def local_destination(*, item: str, tables_root: str) -> SparkDestination:
         item=name,
         schema_prefix=f"{name}{LOCAL_SEPARATOR}",
         tables_root=tables_root,
+        # The emulator mirrors Fabric's case-preserving table directories. Its
+        # folded schema itself was registered under Spark's case-insensitive
+        # policy, so every statement addresses it by its canonical lower case.
+        preserve_table_identifier_case=True,
+        lowercase_schema_identifier=True,
+        # Unlike Fabric's catalogue, Spark's local session catalogue cannot find
+        # a PascalCase table again after analysis returns to case-insensitive
+        # mode. The emulator therefore uses one exact-case policy for its life.
+        case_sensitive_analysis=True,
     )
 
 

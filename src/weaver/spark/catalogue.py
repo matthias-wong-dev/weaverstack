@@ -42,6 +42,13 @@ class SparkCatalogue:
             )
         self.spark = spark
         self.destination = destination
+        if destination.case_sensitive_analysis:
+            # Local's folded schema is lower-case and every declared object keeps
+            # its exact Weaver spelling. Unlike Fabric's catalogue, Spark's local
+            # session catalogue cannot look that object up again after reverting
+            # to case-insensitive analysis, so this is the emulator's session
+            # policy rather than a one-statement override.
+            spark.conf.set("spark.sql.caseSensitive", "true")
 
     # --- naming -----------------------------------------------------------
 

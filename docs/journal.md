@@ -1829,7 +1829,7 @@ Lakehouse into it:
 
 ```text
 Fabric   `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`
-local    `Sales_LH__Sales`.`Customer`
+local    `sales_lh__sales`.`Customer`
 ```
 
 That is not Fabric syntax and is not meant to be. What it reproduces is the one
@@ -2349,7 +2349,7 @@ now applies that setting only for a Fabric destination's create DDL and restores
 the caller's value in `finally`. It is destination capability data, not an
 executor host branch. Applying it to the local emulator was tested and rejected:
 local's intentionally folded schema had been registered case-insensitively, so a
-case-sensitive lookup could not find it.
+case-sensitive lookup could not find it under the display-case spelling.
 
 Pure tests prove session parsing/filtering, preflight-before-start, configuration
 restoration after both successful and failed DDL, and the Fabric/local destination
@@ -2376,6 +2376,22 @@ converted its LF resources to CRLF and therefore changed both the drift check an
 the repository signature. `.gitattributes` now pins those shipped catalogue
 resources to LF on every platform; generated and reviewed bytes remain identical.
 
+The same matrix then exposed a Linux-only case defect that macOS's default
+case-insensitive filesystem concealed. Local Spark had physically created
+``customer`` while the emulator asserted ``Customer``; macOS treated those as the
+same path. A per-create case-sensitive override was insufficient locally because
+returning the session to case-insensitive analysis made the exact-case table
+unresolvable. The local destination now uses the session catalogue's canonical
+lower-case folded schema (for example ``sales_lh__sales``) and establishes
+case-sensitive analysis as the emulator's session policy. Declared table names and
+their managed directories therefore remain PascalCase, while Fabric continues to
+scope and restore the setting around creation so Weaver does not take ownership of
+the user's session policy. A filesystem-name assertion prevents macOS from hiding
+the regression again. The focused two-Lakehouse proof passed all four cases. The
+complete local Spark run then passed 98 real cases and exposed two deliberately
+minimal error-path fakes that lacked the newly required session configuration
+surface; after giving those fakes that surface, both focused error cases passed.
+
 ---
 
 ## Open questions
@@ -2397,7 +2413,7 @@ resources to LF on every platform; generated and reviewed bytes remain identical
 | Destination Delta objects are still built as two-part names, which resolve through the session's catalogue — and the session is attached to Weaver. | catalogue | **settled: a payload names its object, the installer names the Lakehouse.** A generated statement carries `{{object:Schema.Name}}` and the executor resolves it against the batch's target — Fabric's four-part name, or the local proxy's folded database name. Freezing the qualified name would have made two bundles of one repository differ in every payload between environments (§10); keeping the two-part name kept the defect. Schema creation stopped being frozen SQL for the same reason: its `LOCATION` was a resolved temporary directory inside the hashed plan. |
 | How should `-m spark` run now that it is ~93 tests? | catalogue | **settled, and it was not a harness limitation.** Delta's `DeltaLog` cache holds a `Snapshot`, and therefore a query execution and its encoder, per table *path*; every test builds under a fresh `tmp_path`, so the cache kept every Lakehouse the suite had thrown away. Clearing it between tests took the run from failing at the 1 GB ceiling in 5:04 to 92 passing in 3:42 with live heap between 68 and 219 MB. No process isolation needed. |
 | Can a destination Lakehouse's schemas be enumerated through Spark? | multi-target | **settled: no, and storage answers instead.** Fabric refuses `SHOW SCHEMAS IN `ws`.`lh`` and a bare `SHOW SCHEMAS` answers only for the attached Lakehouse, so schema discovery reads the destination's `Tables/` area through the store — which prune already did. Views are catalogue-only and are asked of the destination by its four-part name. |
-| Should the local emulator give each Lakehouse its own Spark catalogue? | multi-target | **settled: it cannot.** `DeltaCatalog` extends `DelegatingCatalogExtension` and its delegate is only set for `spark_catalog`; registered as a named catalogue every statement dies in the analyzer. The proxy folds the Lakehouse into the one namespace level Spark offers (`Sales_LH__Sales`), keeping the isolation and leaving storage layout untouched. |
+| Should the local emulator give each Lakehouse its own Spark catalogue? | multi-target | **settled: it cannot.** `DeltaCatalog` extends `DelegatingCatalogExtension` and its delegate is only set for `spark_catalog`; registered as a named catalogue every statement dies in the analyzer. The proxy folds the Lakehouse into the one namespace level Spark offers (`sales_lh__sales`), keeping the isolation and leaving storage layout untouched. |
 | Should the Fabric build modules share one Livy session? | multi-target | **settled: one session, one Weaver Lakehouse and one target Lakehouse for the whole run**, all created before the session, with the target emptied between contexts. Sharing the session alone was not enough — the remaining per-test Lakehouse churn made Fabric's namespace resolver report `Artifact not found` for a target that existed. 41 passed with 7 errors in 39:16 became 48 passed in 10:06. |
 | Does `%pip install` from a notebook resource path work in a Fabric session? | CP7 | open, cheap to check |
 | Can a Livy session see a notebook's resources? If so, delivery and runtime source need not be separated at all. | CP7 | open |
