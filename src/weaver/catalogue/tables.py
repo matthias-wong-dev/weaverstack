@@ -128,7 +128,13 @@ class CatalogueTable:
             raise ValueError(f"{self.name}: signature must be the last business column")
         if names[: len(self.key)] != list(self.key):
             raise ValueError(f"{self.name}: key columns must lead, in key order")
-        if self.key[:2] != (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE):
+        valid_scope = self.key[:2] == (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE)
+        valid_item_scope = self.key[:3] == (
+            SCOPE_REPOSITORY,
+            "item_type",
+            "item_name",
+        )
+        if not (valid_scope or valid_item_scope):
             raise ValueError(
                 f"{self.name}: every key opens with the installation scope"
             )

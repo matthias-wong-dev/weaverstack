@@ -113,6 +113,7 @@ def test_reads_multiple_items_and_owned_documents_without_execution(tmp_path):
     assert tuple(str(item.identity) for item in repository.items) == (
         "Lakehouse/Curated",
         "Lakehouse/Raw",
+        "Lakehouse/_weaver",
         "Warehouse/Audit",
         "Warehouse/Reporting",
     )
@@ -176,6 +177,26 @@ def test_item_type_is_exact(tmp_path):
     # developer filesystems; casing itself is covered by the identity tests.
     _write(root, "Inventory/Wrong/schemas/Sales.yml", _schema("Sales"))
     with pytest.raises(DiscoveryError, match="first directory must be exactly"):
+        read_weaver_repository(Location(str(root)))
+
+
+def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    builtin = repository["Lakehouse/_weaver"]
+
+    assert len(builtin.documents) == 10
+    assert WeaverSchemaId.parse("Lakehouse/_weaver/_") in repository.schema_documents
+    assert all(
+        str(identity).startswith("Lakehouse/_weaver/_.")
+        for identity in builtin.documents
+    )
+    assert repository.generated_files
+
+
+def test_authored_weaver_item_is_rejected(tmp_path):
+    root = _estate(tmp_path)
+    _write(root, "Lakehouse/_weaver/schemas/_.yml", _schema("_"))
+    with pytest.raises(DiscoveryError, match="built-in catalogue item"):
         read_weaver_repository(Location(str(root)))
 
 

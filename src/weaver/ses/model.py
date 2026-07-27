@@ -238,6 +238,7 @@ class WeaverRepository:
     aliases: tuple[RepositoryAlias, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
+    generated_files: Mapping[str, bytes] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _logical_name(self.name, what="repository name"))

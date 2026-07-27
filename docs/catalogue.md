@@ -1,12 +1,9 @@
 # The central catalogue
 
-> **Transition note.** This document describes the catalogue implemented today.
-> The accepted repository/item/document architecture changes installation scope
-> from `(repository, target_type)` to `(repository, item_type, item_name)`, moves
-> aliases to destination-keyed `alias.yml`, and makes `Lakehouse/_weaver` the
-> built-in catalogue item. Those changes land at checkpoint R6 of
-> [the re-architecture plan](../backlog/weaver-repositories-items-documents-checkpoints.md).
-> Until then, this current-state description and the journal remain accurate.
+> **Transition note.** The item-oriented path now scopes installations by
+> `(repository, item_type, item_name)`, projects destination-keyed `alias.yml`, and
+> injects `Lakehouse/_weaver` as a generated built-in item. The earlier flat
+> planner remains only as a compatibility path until the public migration in R8.
 
 Weaver's catalogue records, for every object it has successfully built, what SES
 declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
@@ -27,23 +24,21 @@ valid.
 
 ## Installation scope is identity
 
-A repository is installed independently into its Lakehouse and its Warehouse, and
-the same `Schema.Object` legitimately exists in both — a Delta table and a
-Warehouse table of one name are two objects in two places. So every catalogue row
-is keyed on `repository` and `target_type` before anything else:
+A repository owns several exact logical items, and the same `Schema.Object` may
+legitimately exist in several of them. Every catalogue row is therefore keyed on
+`repository`, `item_type` and `item_name` before anything else:
 
 ```text
-SalesRepo | lakehouse | Sales | Customer
-SalesRepo | warehouse | Sales | Customer
+SalesRepo | Lakehouse | Raw       | Tables | Sales | Customer
+SalesRepo | Warehouse | Reporting | Tables | Sales | Customer
 ```
 
 Those are two rows and both are real. A Lakehouse-only build reconciles only the
 first; it must not touch the second, and cannot, because there is no way to name a
 row without naming the installation it belongs to.
 
-An object left out of a build because its target was not bound is **out of
-scope**, not deleted. A Lakehouse build has no opinion about the Warehouse
-installation — which is a different thing from having removed it.
+An object left out because its owning item was not bound is **out of scope**, not
+deleted. A build has no opinion about unbound items.
 
 The bound item's name is an attribute, never identity. Rebinding a repository to a
 different Lakehouse **updates** its `_.Installation` row; it does not add a second
@@ -57,7 +52,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 
 | Table | One row per | Notes |
 |---|---|---|
-| `_.Installation` | repository + target type | The item currently bound, and the Weaver version that last reconciled it. |
+| `_.Installation` | repository + logical item | The physical target currently bound, and the Weaver version that last reconciled it. |
 | `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
@@ -65,8 +60,8 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | `_.ColumnDictionary` | described column | Purely descriptive: the columns an author wrote a note about, plus Weaver's surrogate. Not every column. |
 | `_.IndexDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
-| `_.Dependency` | resolved edge | Three-part logical reference, inheriting the owner's target type. |
-| `_.Alias` | cross-engine publication | Where the graph crosses engines. |
+| `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
+| `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from `alias.yml`. |
 
 ### Why some tables look sparse
 
@@ -91,17 +86,17 @@ aliases are a separate table — composing `_.Dependency`, `_.Alias` and
 `_.Registry` is what yields the estate's whole graph, and only that composition
 may cross.
 
-A dependency may leave the repository. A three-part reference names a physical
-item deliberately, and is recorded with `is_within_repository` false — the first
-part is an item, not a repository, so nothing here resolves it.
+A dependency may leave its item. A two-part logical name is recorded with
+`is_within_item=true`; a canonical cross-item name or an authored physical name is
+recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-`weaver/builtin/catalogue/` is an SES repository shipped as package resources.
-Setup materialises it into the Weaver Lakehouse and the **ordinary** planner and
-installer build it. There is no second "create the control tables" path, and that
-recursion is the point: if the catalogue needed privileged machinery to exist, the
-claim that a catalogue table is an ordinary Weaver object would be false.
+The item reader generates `Lakehouse/_weaver` from the authoritative table
+definitions and parses those generated schema and source files through the same
+static readers as authored content. The **ordinary item planner and installer**
+then build it. There is no second "create the control tables" path, and that
+recursion is the point.
 
 ```python
 from weaver import ItemRef, initialise_weaver_lakehouse
@@ -175,11 +170,11 @@ Three scopes, and they are deliberately different operations:
 | Scope | What it removes | Reached from |
 |---|---|---|
 | object | rows no longer projected, within one installation | every build |
-| installation | one `(repository, target_type)` entirely | decommissioning a target, explicitly |
+| installation | one `(repository, item_type, item_name)` entirely | decommissioning a logical item, explicitly |
 | repository | every installation of one repository | repository lifecycle, explicitly |
 
-Only the first is part of a build. A build that did not include a target type has
-no opinion about it, so nothing in the build path can reach installation prune.
+Only the first is part of a build. A build that did not bind an item has no opinion
+about it, so nothing in the build path can reach its installation rows.
 
 Schema `_` is reserved from ordinary prune. An application build normally cannot
 see it — prune is scoped to the bound destination's own storage, and the catalogue

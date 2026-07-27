@@ -60,17 +60,29 @@ class InstallationScope:
     target_type: str
 
     @property
+    def columns(self) -> tuple[str, ...]:
+        return (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE)
+
+    @property
+    def values(self) -> Mapping[str, str]:
+        return {
+            SCOPE_REPOSITORY: self.repository,
+            SCOPE_TARGET_TYPE: self.target_type,
+        }
+
+    @property
     def predicate(self) -> str:
-        return (
-            f"{identifier(SCOPE_REPOSITORY)} = {literal(self.repository)}"
-            f" AND {identifier(SCOPE_TARGET_TYPE)} = {literal(self.target_type)}"
+        return self.predicate_for()
+
+    def predicate_for(self, qualifier: str = "") -> str:
+        prefix = f"{qualifier}." if qualifier else ""
+        return " AND ".join(
+            f"{prefix}{identifier(column)} = {literal(value)}"
+            for column, value in self.values.items()
         )
 
     def owns(self, row: Row) -> bool:
-        return (
-            row.get(SCOPE_REPOSITORY) == self.repository
-            and row.get(SCOPE_TARGET_TYPE) == self.target_type
-        )
+        return all(row.get(column) == value for column, value in self.values.items())
 
     def __str__(self) -> str:
         return f"{self.repository}/{self.target_type}"
@@ -185,8 +197,7 @@ def render_merge(
     # The target side is narrowed to this installation as well as matched on the
     # key. The key already carries the scope, so this is belt and braces — and it
     # is the belt that shows in a review.
-    scoped = f"target.{identifier(SCOPE_REPOSITORY)} = {literal(scope.repository)} AND " \
-             f"target.{identifier(SCOPE_TARGET_TYPE)} = {literal(scope.target_type)}"
+    scoped = scope.predicate_for("target")
 
     comparison = table.comparison_columns
     changed = " OR ".join(
@@ -293,7 +304,7 @@ def render_delete_obsolete(
         return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
     # Only the key columns beyond the scope: the scope is already in the WHERE.
-    identity = tuple(name for name in table.key if name not in (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE))
+    identity = tuple(name for name in table.key if name not in scope.columns)
     if not identity:
         return None
 
@@ -379,7 +390,7 @@ def _check_scope(
     stray = [row for row in rows if not scope.owns(row)]
     if stray:
         found = ", ".join(
-            f"{row.get(SCOPE_REPOSITORY)!r}/{row.get(SCOPE_TARGET_TYPE)!r}"
+            "/".join(repr(row.get(column)) for column in scope.columns)
             for row in stray[:3]
         )
         raise ValueError(

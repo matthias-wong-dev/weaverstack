@@ -18,6 +18,9 @@ from .models import (
     BUILD_VIEW,
     CREATE_SCHEMA,
     OMIT_TARGET_UNBOUND,
+    PUBLISH_REGISTRY,
+    RECONCILE_CATALOGUE,
+    RECORD_INSTALLATION,
     BuildAction,
     BuildBatch,
     BuildPlan,
@@ -25,7 +28,8 @@ from .models import (
     OmittedNode,
 )
 from .payloads import SCHEMA_SEQUENCE, payload_path, sha256_hex
-from .targets import ItemBindings, WAREHOUSE_TARGET
+from .payloads import CATALOGUE_SEQUENCE, INSTALLATION_SEQUENCE, REGISTRY_SEQUENCE
+from .targets import ItemBindings, LakehouseBinding, WAREHOUSE_TARGET
 
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
 
@@ -37,6 +41,8 @@ def generate_item_build_bundle(
     output: Location,
     store: Store,
     prune: bool = False,
+    catalogue: bool = False,
+    control_lakehouse: LakehouseBinding | None = None,
 ) -> BuildBundle:
     """Freeze all bound items into one manifest and certified snapshot.
 
@@ -106,6 +112,21 @@ def generate_item_build_bundle(
         for identity in sorted(repository.source_documents, key=str)
         if identity not in selected_ids
     )
+    if catalogue:
+        if control_lakehouse is None:
+            raise BuildError("catalogue publication requires the control-plane Lakehouse binding")
+        control_target = _control_target(control_lakehouse, targets)
+        sequences.extend(
+            _catalogue_sequences(
+                repository,
+                selected_ids,
+                target_by_item,
+                control_target,
+                payloads,
+            )
+        )
+        if all(target.id != control_target.id for target in targets):
+            targets = targets + (control_target,)
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
@@ -256,11 +277,88 @@ def _snapshot(repository: WeaverRepository, store: Store) -> dict[str, bytes]:
     paths = {source.relative_path for source in repository.source_documents.values()}
     paths.update(schema.relative_path for schema in repository.schema_documents.values())
     paths.update(repository.support_files)
-    return {
+    snapshot = {
         relative: store.read(repository.root.join(*relative.split("/")))
         for relative in sorted(paths)
+        if relative not in repository.generated_files
     }
+    snapshot.update(repository.generated_files)
+    return dict(sorted(snapshot.items()))
 
 
 def _slug(value) -> str:
     return str(value).replace("/", "--").replace(" ", "-")
+
+
+def _control_target(binding: LakehouseBinding, targets):
+    physical = binding.to_bound_target()
+    for target in targets:
+        if target.kind == physical.kind and target.item_id == physical.item_id:
+            return target
+    return replace(physical, id=f"control-{physical.id}")
+
+
+def _catalogue_sequences(
+    repository,
+    selected_ids,
+    target_by_item,
+    control_target,
+    payloads,
+):
+    from .. import __version__
+    from ..catalogue.item_projection import project_item_installation
+    from ..catalogue.item_reconcile import reconcile_item
+
+    groups = {
+        CATALOGUE_SEQUENCE: ("reconcile item catalogue dictionaries", RECONCILE_CATALOGUE, []),
+        INSTALLATION_SEQUENCE: ("record item installations", RECORD_INSTALLATION, []),
+        REGISTRY_SEQUENCE: ("publish item registry", PUBLISH_REGISTRY, []),
+    }
+    for item in sorted(target_by_item, key=str):
+        retained = [identity for identity in selected_ids if identity.item == item]
+        projection = project_item_installation(
+            repository,
+            item=item,
+            retained=retained,
+            target_name=target_by_item[item].name,
+            weaver_version=__version__,
+        )
+        reconciliation = reconcile_item(projection)
+        for number, (_description, kind, batches) in groups.items():
+            reconciliation_group = {
+                CATALOGUE_SEQUENCE: reconciliation.dictionaries,
+                INSTALLATION_SEQUENCE: (reconciliation.installation,),
+                REGISTRY_SEQUENCE: (reconciliation.registry,),
+            }[number]
+            actions = []
+            for table_plan in reconciliation_group:
+                for verb, statement in (("delete", table_plan.delete), ("merge", table_plan.merge)):
+                    if statement is None:
+                        continue
+                    content = statement.encode("utf-8")
+                    name = f"{_slug(item)}-{table_plan.table.name}-{verb}.spark.sql"
+                    path = payload_path(number, "item-catalogue", name)
+                    payloads[path] = content
+                    actions.append(
+                        BuildAction(
+                            id=f"catalogue-{_slug(item)}-{table_plan.table.name}-{verb}",
+                            kind=kind,
+                            resource_node_id=None,
+                            executor="spark_sql",
+                            payload=path,
+                            payload_sha256=sha256_hex(content),
+                        )
+                    )
+            if actions:
+                batches.append(
+                    BuildBatch(
+                        id=f"{number:03d}-catalogue-{_slug(item)}",
+                        target_id=control_target.id,
+                        actions=tuple(actions),
+                    )
+                )
+    return tuple(
+        BuildSequence(number=number, description=description, batches=tuple(batches))
+        for number, (description, _kind, batches) in groups.items()
+        if batches
+    )

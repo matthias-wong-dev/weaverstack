@@ -32,7 +32,7 @@ build constraints remain
 | R3 | Exact-case logical references and `alias.yml` resolve | complete |
 | R4 | Dependencies, graph and sparse projection are item-owned | complete |
 | R5 | Build bundles bind and coordinate multiple logical items | in progress |
-| R6 | The catalogue is item-scoped and `_weaver` is built in | pending |
+| R6 | The catalogue is item-scoped and `_weaver` is built in | complete |
 | R7 | Lakehouse ownership unifies Tables, Files, prune and wipe | pending |
 | R8 | Public API, CLI and compatibility surface use the new model | pending |
 | R9 | Local and Fabric verticals prove the architecture | pending |
@@ -526,7 +526,11 @@ The completed vertical covers:
 12. combined Lakehouse prune and full physical wipe;
 13. bundle independence from the source repository;
 14. row 1 local behaviour, row 2 desktop-to-Fabric access where relevant, and
-    row 3 installed Weaver inside Fabric.
+    row 3 installed Weaver inside Fabric;
+15. catalogue table display names preserve their canonical PascalCase on Fabric,
+    separately from Fabric's host-chosen lower-case physical Delta directory;
+16. the Fabric harness reports active or queued Livy sessions before requesting a
+    scarce capacity slot, using the sessions collection API where available.
 
 ### Completion condition
 

@@ -2223,6 +2223,44 @@ repository-independent install tests are all pure Python. At this seam the full
 lightweight suite finished with 1,117 passing, one skipped and 146 Spark tests
 deselected.
 
+### R6 — item-scoped catalogue and built-in `_weaver`
+
+The item path now has its own authoritative catalogue representation. All ten
+tables carry `(repository, item_type, item_name)` scope, and object tables add an
+explicit `object_namespace` so `Tables/Sales.Order` and `Files/Sales.Order` do not
+collide. Dependency rows belong to the consumer and retain the exact authored
+name plus `is_within_item`; Alias rows reproduce the canonical destination/source
+pair from `alias.yml`. The legacy renderer was generalised around a scope value,
+so its existing target-kind output remains byte-compatible while the item path
+uses the stricter identity.
+
+`read_weaver_repository()` injects `Lakehouse/_weaver` from generated schema and
+source bytes. Those bytes are parsed by the ordinary readers, included in the
+repository signature and certified snapshot, and an authored item of that name is
+rejected. Binding the built-in item to the control Lakehouse therefore emits ten
+ordinary table actions followed by item-scoped dictionary, Installation and
+Registry barriers. Registry remains last. Rebinding changes only the physical
+`target_name` attribute of that logical item's Installation row; scoped delete and
+merge cannot reach another item of the same type.
+
+The test pyramid is deliberate. Pure tests cover definitions, projection,
+deterministic DML, scope isolation, rebinding, aliases, dependencies, planner
+barriers and bootstrap shape. The full core suite passed with 1,129 tests and one
+skip. A focused real local install built and populated the catalogue, and the
+complete runnable Spark suite passed 99 tests in 4m14s. Finally, Weaver
+`0.1.1.dev11157825816` was published to the Fabric `weaver` Environment; the
+installed wheel discovered, generated, installed and independently read the same
+built-in item inside an Environment-backed Livy session. That row-3 proof passed
+in 6m13s.
+
+Two endgame observations are recorded in R9 rather than widening R6. Fabric's
+managed Delta directory is host-lowercased, but the catalogue table's display name
+should still preserve the PascalCase definition and needs an explicit proof. Also,
+the Livy sessions collection endpoint exposes scheduler/plugin/Livy states,
+timestamps and cancellation reasons. The Fabric harness should report those
+before requesting a capacity's single Spark slot, so a queued session is visible
+rather than looking like a silent start.
+
 ---
 
 ## Open questions

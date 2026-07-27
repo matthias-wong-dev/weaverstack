@@ -313,6 +313,11 @@ def read_weaver_repository(
                 f"{relative}: user-authored __init__.py is not allowed; "
                 "Weaver supplies package loading"
             )
+        if relative == "Lakehouse/_weaver" or relative.startswith("Lakehouse/_weaver/"):
+            raise DiscoveryError(
+                "Lakehouse/_weaver is Weaver's built-in catalogue item and must not "
+                "be authored in the repository"
+            )
 
     invalid_roots = sorted(
         {
@@ -458,6 +463,25 @@ def read_weaver_repository(
         )
         documents_by_item[item].append(identity)
 
+    from ..catalogue.item_builtin import item_repository_files
+
+    generated_files = item_repository_files()
+    builtin_item = WeaverItemId(LAKEHOUSE, "_weaver")
+    item_ids.add(builtin_item)
+    documents_by_item[builtin_item] = []
+    schemas_by_item[builtin_item] = []
+    for relative, data in sorted(generated_files.items()):
+        if "/schemas/" in relative:
+            schema = read_schema_document(relative, data)
+            identity = WeaverSchemaId(builtin_item, schema.schema_id)
+            schema_documents[identity] = schema
+            schemas_by_item[builtin_item].append(identity)
+            continue
+        source = read_source_document(relative, data)
+        identity = WeaverDocumentId(builtin_item, source.object_id)
+        source_documents[identity] = replace(source, logical_id=identity)
+        documents_by_item[builtin_item].append(identity)
+
     items: list[WeaverItem] = []
     for item_id in sorted(item_ids):
         schemas = tuple(sorted(schemas_by_item[item_id], key=str))
@@ -489,8 +513,11 @@ def read_weaver_repository(
         source_documents=source_documents,
         schema_documents=schema_documents,
         support_files=tuple(sorted(support_files)),
-        signature=_item_repository_signature(files, store, root),
+        signature=_item_repository_signature(
+            files, store, root, generated=generated_files
+        ),
         aliases=aliases,
+        generated_files=generated_files,
     )
     return resolve_item_dependencies(repository)
 
@@ -517,17 +544,28 @@ def _insert_exact_case(
     destination[identity] = value
 
 
-def _item_repository_signature(paths: Iterable[str], store: Store, root: Location) -> str:
+def _item_repository_signature(
+    paths: Iterable[str],
+    store: Store,
+    root: Location,
+    *,
+    generated: Mapping[str, bytes] | None = None,
+) -> str:
     """Hash included item-oriented files; `_ignore/` never reaches this list."""
 
     from .source import content_hash
 
     digest = hashlib.sha256()
-    for relative in sorted(paths):
+    generated = generated or {}
+    for relative in sorted(set(paths) | set(generated)):
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         digest.update(
-            content_hash(store.read(root.join(*relative.split("/")))).encode("ascii")
+            content_hash(
+                generated.get(relative)
+                if relative in generated
+                else store.read(root.join(*relative.split("/")))
+            ).encode("ascii")
         )
         digest.update(b"\n")
     return digest.hexdigest()

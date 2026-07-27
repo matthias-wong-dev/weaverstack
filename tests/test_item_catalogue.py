@@ -1,0 +1,121 @@
+"""Pure-Python tests for item-scoped catalogue projection and DML."""
+
+from __future__ import annotations
+
+from weaver.locations import Location
+from weaver.ses import read_weaver_repository
+from weaver.ses.model import WeaverDocumentId, WeaverItemId
+from weaver.catalogue.item_projection import project_item_installation
+from weaver.catalogue.item_reconcile import reconcile_item
+from weaver.catalogue.item_tables import (
+    ALIAS,
+    CATALOGUE_TABLES,
+    DEPENDENCY,
+    INSTALLATION,
+    REGISTRY,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
+)
+
+from test_item_dependencies import _dependency_estate
+from test_item_repository import _estate
+
+
+def _project(repository, item_text: str, target: str):
+    item = WeaverItemId.parse(item_text)
+    retained = [
+        identity for identity in repository.source_documents if identity.item == item
+    ]
+    return project_item_installation(
+        repository,
+        item=item,
+        retained=retained,
+        target_name=target,
+        weaver_version="1.2.3",
+    )
+
+
+def test_every_catalogue_table_is_keyed_by_repository_and_exact_item():
+    for table in CATALOGUE_TABLES:
+        assert table.key[:3] == ("repository", "item_type", "item_name")
+        assert table.column_names[:3] == table.key[:3]
+
+
+def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+    rows = projection.for_table(REGISTRY)
+
+    customer = [
+        row
+        for row in rows
+        if row["schema_name"] == "Sales" and row["object_name"] == "Customer"
+    ]
+    assert {row["object_namespace"] for row in customer} == {"Tables", "Files"}
+
+
+def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+    curated = _project(repository, "Lakehouse/Curated", "Curated_Dev")
+
+    raw_sql = "\n".join(reconcile_item(raw).statements)
+    curated_sql = "\n".join(reconcile_item(curated).statements)
+    assert "`item_name` = 'Raw'" in raw_sql
+    assert "`item_name` = 'Curated'" not in raw_sql
+    assert "`item_name` = 'Curated'" in curated_sql
+    assert "`item_name` = 'Raw'" not in curated_sql
+
+
+def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    first = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+    second = _project(repository, "Lakehouse/Raw", "Raw_Prod")
+
+    first_row = first.for_table(INSTALLATION)[0]
+    second_row = second.for_table(INSTALLATION)[0]
+    assert first.scope == second.scope
+    assert first_row["target_name"] == "Raw_Dev"
+    assert second_row["target_name"] == "Raw_Prod"
+    assert {
+        key: value for key, value in first_row.items() if key != "target_name"
+    } == {
+        key: value for key, value in second_row.items() if key != "target_name"
+    }
+
+
+def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path):
+    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
+    row = projection.for_table(ALIAS)[0]
+
+    assert row[SCOPE_ITEM_TYPE] == "Warehouse"
+    assert row[SCOPE_ITEM_NAME] == "Reporting"
+    assert row["destination_schema_name"] == "Sales"
+    assert row["destination_object_name"] == "PortableCustomer"
+    assert row["source_item_type"] == "Lakehouse"
+    assert row["source_item_name"] == "Curated"
+    assert row["source_schema_name"] == "Sales"
+    assert row["source_object_name"] == "Customer"
+
+
+def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp_path):
+    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
+    row = projection.for_table(DEPENDENCY)[0]
+
+    assert row["item_type"] == "Warehouse"
+    assert row["item_name"] == "Reporting"
+    assert row["dependency_name"] == "Sales.PortableCustomer"
+    assert row["is_within_item"] is False
+
+
+def test_registry_merge_is_last_and_item_scoped(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    reconciliation = reconcile_item(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
+
+    assert reconciliation.registry.table is REGISTRY
+    assert reconciliation.statements[-1] == reconciliation.registry.merge
+    assert "`repository` = 'Estate'" in reconciliation.registry.merge
+    assert "`item_type` = 'Lakehouse'" in reconciliation.registry.merge
+    assert "`item_name` = 'Raw'" in reconciliation.registry.merge

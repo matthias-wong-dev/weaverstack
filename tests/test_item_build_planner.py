@@ -196,3 +196,76 @@ def test_item_planner_refuses_old_target_kind_prune(tmp_path):
             store=LocalStore(),
             prune=True,
         )
+
+
+def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
+    repository = _repository(_estate(tmp_path))
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", "Raw_Dev"),
+                _binding("Warehouse/Audit", "Audit_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+        prune=False,
+        catalogue=True,
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+    )
+
+    assert bundle.plan.sequences[-3].number == 9000
+    assert bundle.plan.sequences[-2].number == 9010
+    assert bundle.plan.sequences[-1].number == 9020
+    assert all(
+        action.kind == "publish_registry"
+        for batch in bundle.plan.sequences[-1].batches
+        for action in batch.actions
+    )
+    assert len(bundle.plan.sequences[-1].batches) == 2
+    registry_payloads = [
+        LocalStore().read(bundle.location.join(*action.payload.split("/"))).decode()
+        for batch in bundle.plan.sequences[-1].batches
+        for action in batch.actions
+    ]
+    assert any("`item_name` = 'Raw'" in payload for payload in registry_payloads)
+    assert any("`item_name` = 'Audit'" in payload for payload in registry_payloads)
+
+
+def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
+    repository = _repository(_estate(tmp_path))
+    with pytest.raises(BuildError, match="control-plane Lakehouse"):
+        generate_item_build_bundle(
+            repository,
+            bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
+            output=Location(str(tmp_path / "bundle")),
+            store=LocalStore(),
+            prune=False,
+            catalogue=True,
+        )
+
+
+def test_builtin_weaver_item_builds_through_the_same_item_planner(tmp_path):
+    repository = _repository(_estate(tmp_path))
+    control = LakehouseBinding(ItemRef("Weaver_Control"))
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+        prune=False,
+        catalogue=True,
+        control_lakehouse=control,
+    )
+
+    physical = [
+        action
+        for sequence, _batch, action in bundle.plan.actions()
+        if sequence.number < 9000 and action.kind == "build_table"
+    ]
+    assert len(physical) == 10
+    assert bundle.plan.sequences[-1].number == 9020
+    assert bundle.plan.targets[0].logical_item_name == "_weaver"
