@@ -200,6 +200,25 @@ def test_authored_weaver_item_is_rejected(tmp_path):
         read_weaver_repository(Location(str(root)))
 
 
+def test_legacy_flat_layout_fails_with_concrete_migration_instructions(tmp_path):
+    root = tmp_path / "Legacy"
+    _write(root, "Sales__Customer.py", _table("Sales.Customer"))
+    _write(root, "_schemas/Sales.yml", _schema("Sales"))
+
+    with pytest.raises(DiscoveryError) as failure:
+        read_weaver_repository(Location(str(root)))
+
+    message = str(failure.value)
+    for destination in (
+        "Lakehouse/<item>/",
+        "Warehouse/<item>/",
+        "Lakehouse/<item>/Files/",
+        "schemas/",
+        "Lakehouse/<item>/lib/",
+    ):
+        assert destination in message
+
+
 def test_canonical_metadata_reference_resolves_across_items(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(

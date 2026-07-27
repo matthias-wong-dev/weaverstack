@@ -51,6 +51,20 @@ from .ses.model import (
     WeaverRepository,
     WeaverSchemaId,
 )
+from .ses.metadata import WeaverDocument
+from .ses.repository import read_weaver_repository
+from .build_bundle import (
+    InstallationEnvironment,
+    InstallationReport,
+    ItemBinding,
+    ItemBindings,
+    LakehouseBinding,
+    WarehouseBinding,
+    generate_item_build_bundle,
+    install_bundle,
+    load_bundle,
+    parse_item_binding,
+)
 
 def _resolve_version() -> str:
     """The installed version, read from distribution metadata.
@@ -87,8 +101,6 @@ __all__ = [
     "parse_hosts",
     # identities — level three
     "ItemRef",
-    "FolderTarget",
-    "DeltaTarget",
     "WarehouseTarget",
     "RepositoryRef",
     # logical identities, independent of physical bindings
@@ -99,12 +111,22 @@ __all__ = [
     "WeaverDocumentId",
     "RepositoryAlias",
     "ItemDependency",
+    "WeaverDocument",
+    "read_weaver_repository",
+    # item-oriented build
+    "ItemBinding",
+    "ItemBindings",
+    "LakehouseBinding",
+    "WarehouseBinding",
+    "parse_item_binding",
+    "generate_item_build_bundle",
+    "load_bundle",
+    "InstallationEnvironment",
+    "install_bundle",
+    "InstallationReport",
     # resolved locations and transport
     "Location",
     "LocalResolver",
-    # bootstrapping the control plane
-    "SetupResult",
-    "initialise_weaver_lakehouse",
     # authoring
     "WeaverObject",
     "Folder",
@@ -124,11 +146,7 @@ __all__ = [
     "SqlExecutionError",
     "generate_warehouse_wipe_sql",
     # wipe
-    "wipe",
-    "wipe_folder_target",
-    "wipe_delta_target",
     "wipe_sql_target",
     "wipe_lakehouse",
-    "wipe_selection",
     "WipeReport",
 ]

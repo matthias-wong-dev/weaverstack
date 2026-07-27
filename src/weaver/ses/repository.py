@@ -307,6 +307,26 @@ def read_weaver_repository(
             continue
         entries.append((relative, entry.is_directory))
 
+    legacy_markers = sorted(
+        relative
+        for relative, is_directory in entries
+        if relative == "_schemas"
+        or relative.startswith("_schemas/")
+        or (
+            not is_directory
+            and "/" not in relative
+            and language_for_filename(relative) is not None
+        )
+    )
+    if legacy_markers:
+        raise DiscoveryError(
+            f"{legacy_markers[0]}: legacy flat repository layout is not supported; "
+            "move Delta and Spark documents to Lakehouse/<item>/, Warehouse "
+            "documents to Warehouse/<item>/, Folder documents to "
+            "Lakehouse/<item>/Files/, _schemas/*.yml to each item's schemas/, "
+            "and Python helpers to Lakehouse/<item>/lib/"
+        )
+
     for relative, is_directory in entries:
         if not is_directory and relative.rsplit("/", 1)[-1] == "__init__.py":
             raise DiscoveryError(

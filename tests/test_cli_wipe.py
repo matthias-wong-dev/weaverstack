@@ -46,8 +46,6 @@ def test_typed_flags_accept_hyphens_and_the_documented_underscore_aliases():
             "Sales",
             "--warehouse_target",
             "Sales",
-            "--folder_target",
-            "Sales/Files/Inbound",
             "--root",
             ".local",
         ]
@@ -55,7 +53,13 @@ def test_typed_flags_accept_hyphens_and_the_documented_underscore_aliases():
 
     assert args.lakehouse_targets == ["Sales"]
     assert args.warehouse_targets == ["Sales"]
-    assert args.folder_targets == ["Sales/Files/Inbound"]
+
+
+def test_a_folder_is_not_an_independently_wipeable_target():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["wipe", "--folder-target", "Sales/Files/Inbound", "--root", ".local"]
+        )
 
 
 def test_typed_targets_route_to_core_without_name_inference(
@@ -84,14 +88,6 @@ def test_typed_targets_route_to_core_without_name_inference(
             ),
         )
 
-    def folder_wipe(target, host, *, store, dry_run=False):
-        calls.append(("folder", str(target), store, dry_run))
-        return _Report(
-            target=f"folder:{target}",
-            location=f"/{target}",
-            dry_run=dry_run,
-        )
-
     class DesktopExecutor:
         def __enter__(self):
             return sql
@@ -107,7 +103,6 @@ def test_typed_targets_route_to_core_without_name_inference(
         calls.append(("warehouse", target.warehouse.name, sql))
 
     monkeypatch.setattr("weaver.wipe_lakehouse", lakehouse_wipe)
-    monkeypatch.setattr("weaver.wipe_folder_target", folder_wipe)
     monkeypatch.setattr("weaver.wipe_sql_target", warehouse_wipe)
     monkeypatch.setattr("weaver.fabric.desktop_sql_executor", desktop_executor)
 
@@ -118,8 +113,6 @@ def test_typed_targets_route_to_core_without_name_inference(
             "Shared",
             "--warehouse_target",
             "Shared",
-            "--folder_target",
-            "Shared/Files/Inbound",
             "--host",
             "Weaver",
             "--hosts",
@@ -130,16 +123,13 @@ def test_typed_targets_route_to_core_without_name_inference(
 
     assert calls == [
         ("lakehouse", "Shared", store, True),
-        ("folder", "Shared/Files/Inbound", store, True),
         ("lakehouse", "Shared", store, False),
-        ("folder", "Shared/Files/Inbound", store, False),
         ("desktop sql", "Shared"),
         ("warehouse", "Shared", sql),
     ]
     output = capsys.readouterr().out
     assert "lakehouse:Shared" in output
     assert "warehouse:Shared" in output
-    assert "folder:Shared/Files/Inbound" in output
 
 
 def test_a_warehouse_target_requires_a_fabric_host(tmp_path, capsys):
@@ -219,16 +209,6 @@ def test_an_item_name_clears_the_whole_item(populated_folders, capsys):
         "--root", str(populated_folders.root), "--yes",
     ]) == 0
     assert list(files_root(populated_folders).iterdir()) == []
-
-
-def test_a_folder_path_narrows_to_that_root(populated_folders, capsys):
-    exit_code = main([
-        "wipe", "--folder-target", "Sales_LH/Files/Sales",
-        "--root", str(populated_folders.root), "--yes",
-    ])
-    assert exit_code == 0
-    assert (files_root(populated_folders) / "notes.txt").exists()
-    assert list((files_root(populated_folders) / "Sales").iterdir()) == []
 
 
 def test_several_targets_at_once(populated_folders, capsys):

@@ -98,16 +98,12 @@ static readers as authored content. The **ordinary item planner and installer**
 then build it. There is no second "create the control tables" path, and that
 recursion is the point.
 
-```python
-from weaver import ItemRef, initialise_weaver_lakehouse
-
-result = initialise_weaver_lakehouse(
-    weaver_lakehouse=ItemRef("Weaver"),
-    host=host,
-    store=store,
-    spark=spark,          # a Fabric notebook already has one
-)
-```
+On a new control plane, bind `Lakehouse/_weaver` to the control Lakehouse in the
+first coordinated item build. Its physical actions create the tables before the
+same bundle reaches the catalogue tail. Ordinary later builds leave `_weaver`
+unbound and reconcile rows in those existing tables. Rebinding `_weaver` is the
+explicit destructive catalogue-evolution operation while no migration promise
+exists.
 
 One bundle does the whole bootstrap, because the barriers already order it:
 

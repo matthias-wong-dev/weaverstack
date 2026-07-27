@@ -37,6 +37,7 @@ from .targets import (
     LakehouseBinding,
     ItemBinding,
     ItemBindings,
+    parse_item_binding,
     TargetBindings,
     WarehouseBinding,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "LakehouseBinding",
     "ItemBinding",
     "ItemBindings",
+    "parse_item_binding",
     "WarehouseBinding",
     "TargetBindings",
     "OmittedNode",

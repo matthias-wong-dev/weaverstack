@@ -2290,6 +2290,40 @@ called the real Lakehouse wipe and found both empty. The same behavior ran throu
 the published `0.1.1.dev21230656620` wheel inside Fabric: after one test-fixture
 metadata correction, the installed code passed the prune/build/wipe proof in 70s.
 
+### R8 — item vocabulary at the public and CLI boundaries
+
+The root package now presents the item model as the primary surface:
+`WeaverRepository`, `WeaverItem`, `WeaverDocument`, exact logical identities,
+`read_weaver_repository()`, item bindings and the item bundle generator/installer.
+The old Folder/Delta target and standalone setup functions remain directly
+importable for the isolated flat-planner compatibility suite, but are no longer
+advertised through `__all__`. Flat-layout input to the item reader fails early
+with concrete moves for Delta/Spark, Warehouse, Folder, `_schemas/` and helper
+files; it is never guessed into an item layout.
+
+`weaver build` now takes one installed repository, a required bundle name and one
+or more repeatable `--bind ItemType/LogicalName=PhysicalName` declarations. Prune
+and catalogue publication default on, with explicit `--no-prune` and
+`--no-catalogue` escape hatches. The desktop adapter requires a Fabric host and
+submits one Environment-backed program in which the installed Weaver performs
+static discovery, generation and installation. It does not plan on the laptop.
+The local emulator remains available through the public Python API, where the
+caller owns its Spark session. On a new control plane the first coordinated build
+binds generated `Lakehouse/_weaver` once; later builds leave it unbound unless an
+explicit destructive catalogue rebuild is intended.
+
+Wipe stays physical and typed. The CLI accepts whole Lakehouse and Warehouse
+targets only; independently wiping a Folder was removed because Files belongs to
+the Lakehouse item. The compatibility underscore spellings for the two remaining
+flags stay cheap and isolated. Repository and CLI documentation now use the
+item-owned layout and logical/physical binding vocabulary.
+
+R8 verification is intentionally pure Python rather than another heavy Fabric
+test. Parser, typed binding, serialisable result, one-session program syntax,
+migration error, help text, public API, boundary and neutrality tests cover the
+interface. The underlying item planner/installer transport was already exercised
+through the installed wheel at R6 and R7.
+
 ---
 
 ## Open questions

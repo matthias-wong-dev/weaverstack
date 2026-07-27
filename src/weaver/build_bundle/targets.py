@@ -198,3 +198,25 @@ class ItemBindings:
     @property
     def by_item(self) -> Mapping[WeaverItemId, ItemBinding]:
         return {binding.item: binding for binding in self.entries}
+
+
+def parse_item_binding(text: str) -> ItemBinding:
+    """Parse ``ItemType/LogicalName=PhysicalName`` at the public boundary."""
+
+    if not isinstance(text, str) or text.count("=") != 1:
+        raise BuildError(
+            "an item binding must be ItemType/LogicalName=PhysicalName"
+        )
+    logical_text, physical_text = (part.strip() for part in text.split("=", 1))
+    if not logical_text or not physical_text:
+        raise BuildError(
+            "an item binding must be ItemType/LogicalName=PhysicalName"
+        )
+    item = WeaverItemId.parse(logical_text)
+    physical = ItemRef.parse(physical_text)
+    target = (
+        LakehouseBinding(physical)
+        if item.item_type == LAKEHOUSE
+        else WarehouseBinding(physical)
+    )
+    return ItemBinding(item, target)
