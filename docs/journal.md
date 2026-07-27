@@ -2665,17 +2665,25 @@ they are `Lakehouse/Sales/Sales.Customer` and
 old test existed to ask. The disambiguation machinery was load-bearing only for
 an identity that was missing a dimension.
 
-One Fabric observation came out of running the restored verticals together, and
-it is worth recording because it is about Fabric rather than about Weaver.
-`test_warehouse_wipe` passes on its own and fails when it runs after
-`test_warehouse_build`: the second Warehouse created in a run is not yet
-connectable from the Livy session's identity, and reports `the database was not
-found or you have insufficient permissions` while the desktop connects to it
-fine a second earlier. The connection pool is keyed by workspace, warehouse,
-server, database and port, so this is not one Warehouse's connection being
-handed to another — it is propagation. A suite that creates Warehouses per
-module will keep meeting it; the fixture, not the product, is the place to
-absorb it.
+Restoring the verticals put the Fabric suite back to its full length for the
+first time since R9, and that exposed something about the *suite* rather than
+about Weaver: two tests now fail only in a long combined run and pass on their
+own.
+
+`test_warehouse_wipe` fails when it runs after `test_warehouse_build`. The
+second Warehouse created in a run is not yet connectable from the Livy session's
+identity — `the database was not found or you have insufficient permissions` —
+while the desktop connected to it fine a second earlier. The connection pool is
+keyed by workspace, warehouse, server, database and port, so this is not one
+Warehouse's connection being handed to another. It is propagation, and the
+fixture is where to absorb it.
+
+`test_a_failing_statement_reports_its_error` failed once, eleven minutes into a
+run, and passes in isolation and in shorter runs. Both are the same shape: a
+session-scoped Livy session and workspace-scoped Warehouses accumulate state a
+short run never reaches. Every test passes; the suite does not, at full length.
+That is a fixture-isolation defect and it should be fixed as one, not papered
+over with retries.
 
 ---
 
