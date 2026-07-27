@@ -126,7 +126,7 @@ def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup):
     assert setup.store.exists(root.join("Lakehouse", "_weaver", "schemas", "_.yml"))
     for table in CATALOGUE_TABLES:
         assert setup.store.exists(
-            root.join("Lakehouse", "_weaver", f"{table.qualified}.spark.sql")
+            root.join("Lakehouse", "_weaver", f"{table.qualified}.sql")
         )
     assert "Lakehouse/_weaver/schemas/_.yml" in setup.result.materialised
 

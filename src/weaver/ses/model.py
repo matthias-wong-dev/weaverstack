@@ -144,6 +144,24 @@ class WeaverDocumentId:
             f"Lakehouse/ItemName/Files/Schema.Object, got {text!r}"
         )
 
+    @classmethod
+    def parse_local(cls, item: "WeaverItemId", text: str) -> "WeaverDocumentId":
+        """Parse the item-relative spelling — the inverse of :attr:`relative`.
+
+        Used where the item is already known from context, such as an item's own
+        ``alias.yml``, so the declaration does not repeat it.
+        """
+
+        parts = _split(text, what="document identity")
+        if len(parts) == 1:
+            return cls(item, _object_id(parts[0]))
+        if len(parts) == 2 and parts[0] == FILES:
+            return cls(item, _object_id(parts[1]), is_files=True)
+        raise IdentityError(
+            "an item-relative document identity must be Schema.Object or "
+            f"Files/Schema.Object, got {text!r}"
+        )
+
     @property
     def relative(self) -> str:
         prefix = f"{FILES}/" if self.is_files else ""

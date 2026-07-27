@@ -39,6 +39,7 @@ build constraints remain
 | R8b | Fabric materialises once and bundle persistence is optional | complete |
 | R9 | Local and Fabric verticals prove the architecture | in progress |
 | R10 | Workspace-scoped catalogue identity and `weaver_items` source root | in progress |
+| R11 | The item implies the SQL dialect and owns its aliases | in progress |
 
 ---
 
@@ -646,3 +647,36 @@ documents, reconcile two independent items, materialise `_weaver` beside authore
 items, and prove one read per source file from the fixed tree. Local Spark and the
 row-3 Fabric mixed estate rebuild the destructible early catalogue to its new
 shape and read it back through the public catalogue tables.
+
+---
+
+## R11 — Let the item imply the dialect and own its aliases
+
+### Outcome
+
+An item's directory carries what the directory already knows, so a document and
+an alias each stop repeating their own location.
+
+### Contract
+
+- a SQL document is `Schema.Object.sql`; the containing item type chooses the
+  dialect, Spark SQL for a Lakehouse and T-SQL for a Warehouse;
+- `.spark.sql` inside an item is rejected with the rename to make, and survives
+  only in the deprecated flat reader, which has no item to ask;
+- generated `Lakehouse/_weaver` sources use the same suffixless spelling;
+- an alias is declared in the consuming item's own `<ItemType>/<ItemName>/alias.yml`
+  and maps that item's local `Schema.Object` to a full four-part source;
+- an alias.yml at the declaration root is rejected and names the item it belongs to;
+- a four-part destination key inside an item's alias.yml is rejected;
+- an item's alias.yml certifies with that item's other files, so one alias
+  changes exactly one item signature;
+- `_.Alias` keeps the shape R10 gave it — the item scope columns already carried
+  the destination item.
+
+### Verification
+
+Pure tests prove one filename resolving to two dialects by item type, the
+suffix and root-alias rejections, item-local alias parsing including the
+collision, exact-case and duplicate rules, and single-item signature movement.
+Local Spark builds an authored item whose views are plain `.sql`, and the row-3
+Fabric estate declares and reads the same shapes.

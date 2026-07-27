@@ -27,7 +27,7 @@ def render_item_sources() -> dict[str, str]:
                 for column in table.columns
             ),
         )
-        sources[f"{ITEM_ROOT}/{table.qualified}.spark.sql"] = render_source(documented)
+        sources[f"{ITEM_ROOT}/{table.qualified}.sql"] = render_source(documented)
     return sources
 
 

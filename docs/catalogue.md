@@ -1,7 +1,7 @@
 # The central catalogue
 
 The item-oriented catalogue scopes installations by `(item_type, item_name)`,
-projects destination-keyed `alias.yml`, and
+projects each item's own `alias.yml`, and
 builds generated `Lakehouse/_weaver` through the ordinary planner. The earlier
 flat planner is retained only for isolated compatibility tests and is not part of
 the advertised public or CLI model.
@@ -63,7 +63,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | `_.IndexDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
 | `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
-| `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from `alias.yml`. |
+| `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from the consuming item's `alias.yml`. |
 
 ### Why some tables look sparse
 
@@ -165,8 +165,8 @@ The Installation signature is deliberately item-scoped. The repository signature
 still certifies the complete coordinated source and bundle snapshot, while object
 rows retain their individual source signatures. This separation lets a future
 incremental planner see that changing `Lakehouse/Raw` does not by itself make an
-installed `Warehouse/Reporting` stale. A destination-keyed alias contributes to
-the consumer item's signature, not the producer's.
+installed `Warehouse/Reporting` stale. An alias lives in the consuming item's own
+`alias.yml`, so it contributes to that item's signature and not the producer's.
 
 ## Removing things
 

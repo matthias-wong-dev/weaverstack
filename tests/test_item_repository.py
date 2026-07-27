@@ -62,6 +62,19 @@ class {class_name}(Folder):
 '''
 
 
+def _spark_view(object_id: str) -> str:
+    return f'''\
+/*
+View ID: {object_id}
+Description: A declared view.
+Lineage: A source system.
+Dependencies:
+  - Sales.Customer
+*/
+select Id from Sales.Customer
+'''
+
+
 def _warehouse_table(object_id: str) -> str:
     return f'''\
 /*
@@ -101,7 +114,7 @@ def _estate(tmp_path: Path) -> Path:
         _warehouse_table("Sales.Change"),
     )
     _write(root, "Lakehouse/Raw/lib/csv_helpers.py", "def rows():\n    return []\n")
-    _write(root, "alias.yml", "aliases: {}\n")
+    _write(root, "Warehouse/Reporting/alias.yml", "aliases: {}\n")
     _write(root, "_ignore/broken/__init__.py", "this is not python\n")
     _write(root, "_ignore/unfinished.py", "not valid\n")
     return root
@@ -189,10 +202,8 @@ def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
     before = read_weaver_repository(Location(str(root)))
     _write(
         root,
-        "alias.yml",
-        "aliases:\n"
-        "  Warehouse/Reporting/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
     )
     after = read_weaver_repository(Location(str(root)))
 
@@ -220,6 +231,77 @@ def test_empty_other_underscore_directory_is_still_discovered(tmp_path):
     (root / "Lakehouse/Raw/_draft").mkdir(parents=True)
     with pytest.raises(DiscoveryError, match="only schemas/.*lib/.*Files/"):
         read_weaver_repository(Location(str(root)))
+
+
+def test_the_owning_item_decides_which_sql_a_document_speaks(tmp_path):
+    """One filename, two dialects — the directory above it is the difference.
+
+    This is why a document needs no dialect suffix: a Lakehouse materialises
+    Delta through Spark and a Warehouse materialises through T-SQL, so the
+    containing item has already answered.
+    """
+
+    root = _estate(tmp_path)
+    _write(root, "Lakehouse/Curated/Sales.Rollup.sql", _spark_view("Sales.Rollup"))
+    repository = read_weaver_repository(Location(str(root)))
+
+    lakehouse = repository.source_documents[
+        WeaverDocumentId.parse("Lakehouse/Curated/Sales.Rollup")
+    ]
+    warehouse = repository.source_documents[
+        WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+    ]
+    assert lakehouse.language == "spark_sql"
+    assert warehouse.language == "sql"
+
+
+def test_the_dialect_suffix_is_rejected_inside_an_item(tmp_path):
+    root = _estate(tmp_path)
+    _write(root, "Lakehouse/Curated/Sales.Rollup.spark.sql", _spark_view("Sales.Rollup"))
+    with pytest.raises(DiscoveryError, match="the owning item chooses the SQL dialect"):
+        read_weaver_repository(Location(str(root)))
+
+
+def test_an_alias_declared_at_the_root_names_the_item_it_belongs_to(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "alias.yml",
+        "aliases:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
+    )
+    with pytest.raises(DiscoveryError, match="an alias belongs to the item"):
+        read_weaver_repository(Location(str(root)))
+
+
+def test_an_item_local_alias_does_not_repeat_its_own_item(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
+    )
+    with pytest.raises(DiscoveryError, match="this item's own Schema.Object"):
+        read_weaver_repository(Location(str(root)))
+
+
+def test_an_item_alias_certifies_only_its_own_item(tmp_path):
+    root = _estate(tmp_path)
+    before = read_weaver_repository(Location(str(root)))
+    _write(
+        root,
+        "Warehouse/Audit/alias.yml",
+        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+    )
+    after = read_weaver_repository(Location(str(root)))
+
+    assert after["Warehouse/Audit"].signature != before["Warehouse/Audit"].signature
+    for unchanged in ("Lakehouse/Curated", "Lakehouse/Raw", "Warehouse/Reporting"):
+        assert after[unchanged].signature == before[unchanged].signature
+    assert "Warehouse/Audit/alias.yml" in after.support_files
 
 
 def test_schema_must_be_declared_by_the_owning_item(tmp_path):
@@ -323,29 +405,33 @@ def test_files_metadata_reference_uses_its_distinct_namespace(tmp_path):
     read_weaver_repository(Location(str(root)))
 
 
-def test_aliases_are_destination_keyed_and_one_source_may_repeat(tmp_path):
+def test_aliases_are_item_local_and_one_source_may_repeat(tmp_path):
+    """Two items may each name the same producer under their own local name."""
+
     root = _estate(tmp_path)
-    _write(
-        root,
-        "alias.yml",
-        """aliases:
-  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
-  Warehouse/Audit/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
-""",
-    )
+    for item in ("Warehouse/Reporting", "Warehouse/Audit"):
+        _write(
+            root,
+            f"{item}/alias.yml",
+            "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+        )
     repository = read_weaver_repository(Location(str(root)))
 
     assert len(repository.aliases) == 2
     assert repository.aliases[0].source == repository.aliases[1].source
+    assert {str(alias.destination) for alias in repository.aliases} == {
+        "Warehouse/Reporting/Sales.PortableCustomer",
+        "Warehouse/Audit/Sales.PortableCustomer",
+    }
 
 
 def test_alias_destination_must_not_collide_with_a_native_document(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "alias.yml",
+        "Warehouse/Reporting/alias.yml",
         """aliases:
-  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer
+  Sales.Customer: Lakehouse/Curated/Sales.Customer
 """,
     )
     with pytest.raises(DiscoveryError, match="collides with native document"):
@@ -356,9 +442,9 @@ def test_alias_source_must_resolve_with_exact_case(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "alias.yml",
+        "Warehouse/Reporting/alias.yml",
         """aliases:
-  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/sales.Customer
+  Sales.PortableCustomer: Lakehouse/Curated/sales.Customer
 """,
     )
     with pytest.raises(DiscoveryError, match="declared spelling"):
@@ -369,9 +455,9 @@ def test_alias_rejects_physical_three_part_names(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "alias.yml",
+        "Warehouse/Reporting/alias.yml",
         """aliases:
-  Warehouse/Reporting/Sales.PortableCustomer: Curated_LH.Sales.Customer
+  Sales.PortableCustomer: Curated_LH.Sales.Customer
 """,
     )
     with pytest.raises(DiscoveryError, match="document identity must be"):
@@ -382,10 +468,10 @@ def test_duplicate_alias_destination_is_rejected_by_yaml_reader(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "alias.yml",
+        "Warehouse/Reporting/alias.yml",
         """aliases:
-  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Raw/Sales.Customer
-  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
+  Sales.PortableCustomer: Lakehouse/Raw/Sales.Customer
+  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
 """,
     )
     with pytest.raises(Exception, match="duplicate metadata key"):
@@ -401,9 +487,9 @@ def test_metadata_reference_may_resolve_through_alias_destination(tmp_path):
     _write(root, "Warehouse/Audit/Sales.Change.sql", source)
     _write(
         root,
-        "alias.yml",
+        "Warehouse/Audit/alias.yml",
         """aliases:
-  Warehouse/Audit/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
+  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
 """,
     )
     read_weaver_repository(Location(str(root)))
@@ -444,5 +530,5 @@ def test_document_local_alias_headers_are_rejected_in_new_layout(tmp_path):
         "Lineage: A source system.\nWarehouse alias: Sales.CustomerAlias",
     )
     _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
-    with pytest.raises(DiscoveryError, match="replaced by repository-level alias.yml"):
+    with pytest.raises(DiscoveryError, match="replaced by the item's own alias.yml"):
         read_weaver_repository(Location(str(root)))

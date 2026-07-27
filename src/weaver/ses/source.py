@@ -14,14 +14,18 @@ present exactly one unit of work.
 | Language   | File                            | ID               |
 +============+=================================+==================+
 | Python     | ``Sales__Order.py``             | ``Sales.Order``  |
-| Spark SQL  | ``Sales.Order.spark.sql``       | ``Sales.Order``  |
-| T-SQL      | ``Reporting.Order.sql``         | ``Reporting.Order`` |
+| SQL        | ``Sales.Order.sql``             | ``Sales.Order``  |
 +------------+---------------------------------+------------------+
 
 Python uses ``__`` because a module name cannot contain a dot without breaking
 imports; SQL files have no such constraint and use the dot directly. The Python
 class carries the same full name as its file — ``class Sales__Order(Table)`` —
 so the import at a call site is explicit about which object it names.
+
+**The owning item chooses the SQL dialect.** A ``.sql`` file in a Lakehouse item
+is Spark SQL; the same name in a Warehouse item is T-SQL. The older
+``.spark.sql`` suffix existed because the flat layout had no item to ask, and it
+survives only for the deprecated flat reader, which still has none.
 """
 
 from __future__ import annotations
@@ -55,7 +59,7 @@ from .metadata import (
     extract_python_metadata,
     extract_sql_metadata_and_body,
 )
-from .model import WeaverDocumentId
+from .model import LAKEHOUSE, WeaverDocumentId
 
 PYTHON_SUFFIX = ".py"
 SPARK_SQL_SUFFIX = ".spark.sql"
@@ -78,31 +82,50 @@ def content_hash(data: bytes) -> str:
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
-def language_for_filename(filename: str) -> str | None:
-    """The language a filename declares, or None if it is not an object file."""
+def sql_dialect_for_item_type(item_type: str) -> str:
+    """The SQL a ``.sql`` file speaks inside an item of this type.
 
+    This is the whole reason a Weaver document needs no dialect suffix: the
+    containing item already decides. A Lakehouse materialises Delta through
+    Spark; a Warehouse materialises tables and views through T-SQL.
+    """
+
+    return SPARK_SQL if item_type == LAKEHOUSE else SQL
+
+
+def language_for_filename(filename: str, item_type: str | None = None) -> str | None:
+    """The language a filename declares, or None if it is not an object file.
+
+    ``item_type`` is how an item-owned ``.sql`` document picks its dialect. Its
+    absence means the caller has no item — the deprecated flat reader — and the
+    legacy ``.spark.sql`` suffix then answers instead.
+    """
+
+    if filename.endswith(PYTHON_SUFFIX):
+        return PYTHON
+    if item_type is not None:
+        return sql_dialect_for_item_type(item_type) if filename.endswith(SQL_SUFFIX) else None
     if filename.endswith(SPARK_SQL_SUFFIX):
         return SPARK_SQL
     if filename.endswith(SQL_SUFFIX):
         return SQL
-    if filename.endswith(PYTHON_SUFFIX):
-        return PYTHON
     return None
 
 
-def _stem(filename: str, language: str) -> str:
-    suffix = {
-        PYTHON: PYTHON_SUFFIX,
-        SPARK_SQL: SPARK_SQL_SUFFIX,
-        SQL: SQL_SUFFIX,
-    }[language]
-    return filename.rsplit("/", 1)[-1][: -len(suffix)]
+def _stem(filename: str) -> str:
+    """The filename with its object suffix removed, longest suffix first."""
+
+    name = filename.rsplit("/", 1)[-1]
+    for suffix in (PYTHON_SUFFIX, SPARK_SQL_SUFFIX, SQL_SUFFIX):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def object_id_for_filename(filename: str, language: str) -> ObjectId:
     """The ID a filename claims, before the document is consulted."""
 
-    stem = _stem(filename, language)
+    stem = _stem(filename)
     if language == PYTHON:
         if "." in stem:
             raise DiscoveryError(
@@ -115,8 +138,7 @@ def object_id_for_filename(filename: str, language: str) -> ObjectId:
         if PYTHON_ID_SEPARATOR in stem:
             raise DiscoveryError(
                 f"{filename}: a SQL object file separates schema and object with '.', "
-                f"not {PYTHON_ID_SEPARATOR!r} — expected Schema.Object"
-                + (SPARK_SQL_SUFFIX if language == SPARK_SQL else SQL_SUFFIX)
+                f"not {PYTHON_ID_SEPARATOR!r} — expected Schema.Object{SQL_SUFFIX}"
             )
         parts = stem.split(".")
     parts = [part.strip() for part in parts]
@@ -288,10 +310,12 @@ class SourceDocument:
         return generate_ddl(self)
 
 
-def read_source_document(relative_path: str, data: bytes) -> SourceDocument:
+def read_source_document(
+    relative_path: str, data: bytes, item_type: str | None = None
+) -> SourceDocument:
     """Parse and structurally validate one object file."""
 
-    language = language_for_filename(relative_path)
+    language = language_for_filename(relative_path, item_type)
     if language is None:
         raise DiscoveryError(f"{relative_path}: not a Weaver object file")
 
@@ -330,7 +354,7 @@ def _read_python(
         )
 
     module = ast.parse(text)
-    expected_class = _stem(relative_path, PYTHON)
+    expected_class = _stem(relative_path)
 
     # Ordinary helper classes may live alongside the object. What must be
     # unique is the *Weaver* class — the one inheriting Folder, Table or View.

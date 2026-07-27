@@ -56,6 +56,7 @@ from .metadata import _UniqueKeyLoader
 from .schemas import SchemaSes, is_schema_file, read_schema_document
 from .source import (
     PYTHON_ID_SEPARATOR,
+    SPARK_SQL_SUFFIX,
     SourceDocument,
     language_for_filename,
     object_id_for_filename,
@@ -367,12 +368,18 @@ def read_weaver_repository(
                 "Weaver supplies package loading"
             )
 
+    if any(relative == "alias.yml" for relative, _ in entries):
+        raise DiscoveryError(
+            "alias.yml: an alias belongs to the item that consumes it — declare it "
+            "in <ItemType>/<ItemName>/alias.yml, keyed by that item's own "
+            "Schema.Object"
+        )
+
     invalid_roots = sorted(
         {
             relative.split("/", 1)[0]
             for relative, _ in entries
             if relative.split("/", 1)[0] not in ITEM_TYPES
-            and relative != "alias.yml"
         }
     )
     if invalid_roots:
@@ -407,12 +414,9 @@ def read_weaver_repository(
         if len(parts) == 1:
             if is_directory and parts[0] in ITEM_TYPES:
                 continue
-            if not is_directory and parts[0] == "alias.yml":
-                files.append(relative)
-                continue
             raise DiscoveryError(
-                f"{relative}: repository root may contain only item type directories, "
-                "alias.yml and _ignore/"
+                f"{relative}: the declaration root may contain only item type "
+                "directories and _ignore/"
             )
         if parts[0] not in ITEM_TYPES:
             raise DiscoveryError(
@@ -438,13 +442,18 @@ def read_weaver_repository(
         item: [] for item in item_ids
     }
 
+    alias_files: dict[WeaverItemId, str] = {}
     for relative in sorted(files):
-        if relative == "alias.yml":
-            support_files.append(relative)
-            continue
         parts = relative.split("/")
         item = WeaverItemId(parts[0], parts[1])
         within = parts[2:]
+
+        if within == ["alias.yml"]:
+            # The item owns its aliases, so the file travels and certifies with
+            # the rest of the item's source rather than as a shared root file.
+            alias_files[item] = relative
+            support_files.append(relative)
+            continue
 
         if within[0] == "lib":
             if item.item_type != LAKEHOUSE:
@@ -484,15 +493,23 @@ def read_weaver_repository(
             )
 
         filename = within[-1]
-        if language_for_filename(filename) is None:
+        if filename.endswith(SPARK_SQL_SUFFIX):
+            raise DiscoveryError(
+                f"{relative}: the owning item chooses the SQL dialect, so a document "
+                f"is named Schema.Object.sql — a {item.item_type} item's .sql is "
+                + ("Spark SQL" if item.item_type == LAKEHOUSE else "T-SQL")
+            )
+        if language_for_filename(filename, item.item_type) is None:
             raise DiscoveryError(f"{relative}: not a Weaver object file")
         source = read_source_document(
-            relative, store.read(root.join(*relative.split("/")))
+            relative,
+            store.read(root.join(*relative.split("/"))),
+            item.item_type,
         )
         if source.warehouse_alias is not None or source.lakehouse_alias is not None:
             raise DiscoveryError(
                 f"{relative}: document-local Warehouse alias/Lakehouse alias headers "
-                "have been replaced by repository-level alias.yml"
+                "have been replaced by the item's own alias.yml"
             )
         if item.item_type == LAKEHOUSE:
             expected = FOLDER_TARGET if is_files else DELTA_TARGET
@@ -522,7 +539,7 @@ def read_weaver_repository(
             schema_documents[identity] = schema
             schemas_by_item[builtin_item].append(identity)
             continue
-        source = read_source_document(relative, data)
+        source = read_source_document(relative, data, builtin_item.item_type)
         identity = WeaverDocumentId(builtin_item, source.object_id)
         source_documents[identity] = replace(source, logical_id=identity)
         documents_by_item[builtin_item].append(identity)
@@ -541,11 +558,10 @@ def read_weaver_repository(
                 )
         items.append(WeaverItem(item_id, schemas=schemas, documents=documents))
 
-    aliases = _read_repository_aliases(
+    aliases = _read_item_aliases(
         root,
         store,
-        files,
-        item_ids=item_ids,
+        alias_files,
         source_documents=source_documents,
         schemas_by_item=schemas_by_item,
     )
@@ -559,7 +575,6 @@ def read_weaver_repository(
                 source_documents=source_documents,
                 schema_documents=schema_documents,
                 support_files=support_files,
-                aliases=aliases,
                 store=store,
                 root=root,
             ),
@@ -589,16 +604,15 @@ def _item_signature(
     source_documents: Mapping[WeaverDocumentId, SourceDocument],
     schema_documents: Mapping[WeaverSchemaId, SchemaSes],
     support_files: Iterable[str],
-    aliases: Iterable[RepositoryAlias],
     store: Store,
     root: Location,
 ) -> str:
     """Certify exactly one logical item's authored and generated inputs.
 
-    Repository-level aliases belong to their destination/consumer item. The
-    producer's content deliberately does not participate: a logical dependency
-    does not make an independently installed producer part of the consumer's
-    source item.
+    An item's ``alias.yml`` sits under its own prefix and is certified with its
+    other support files. The producer's content deliberately does not
+    participate: a logical dependency does not make an independently installed
+    producer part of the consumer's source item.
     """
 
     from .source import content_hash
@@ -620,11 +634,6 @@ def _item_signature(
                     content_hash(store.read(root.join(*relative.split("/")))),
                 )
             )
-    for alias in aliases:
-        if alias.destination.item == item.identity:
-            declaration = f"{alias.destination}\0{alias.source}".encode("utf-8")
-            entries.append((f"alias:{alias.destination}", content_hash(declaration)))
-
     digest = hashlib.sha256()
     digest.update(str(item.identity).encode("utf-8"))
     digest.update(b"\n")
@@ -685,73 +694,89 @@ def _item_repository_signature(
     return digest.hexdigest()
 
 
-def _read_repository_aliases(
+def _read_item_aliases(
     root: Location,
     store: Store,
-    paths: Iterable[str],
+    alias_files: Mapping[WeaverItemId, str],
     *,
-    item_ids: set[WeaverItemId],
     source_documents: Mapping[WeaverDocumentId, SourceDocument],
     schemas_by_item: Mapping[WeaverItemId, list[WeaverSchemaId]],
 ) -> tuple[RepositoryAlias, ...]:
-    if "alias.yml" not in paths:
-        return ()
-    try:
-        text = store.read(root.join("alias.yml")).decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise DiscoveryError(f"alias.yml: must be UTF-8 text ({exc})") from exc
-    try:
-        loaded = yaml.load(text, Loader=_UniqueKeyLoader)
-    except MetadataError:
-        raise
-    except yaml.YAMLError as exc:
-        raise DiscoveryError(f"alias.yml: invalid YAML: {exc}") from exc
-    if not isinstance(loaded, dict) or set(loaded) != {"aliases"}:
-        raise DiscoveryError("alias.yml must contain exactly one 'aliases' mapping")
-    declarations = loaded["aliases"]
-    if not isinstance(declarations, dict):
-        raise DiscoveryError("alias.yml 'aliases' must be a mapping")
+    """Read each item's own ``alias.yml``.
+
+    The file's location names the consuming item, so a declaration maps that
+    item's local ``Schema.Object`` to a full four-part source elsewhere in the
+    workspace. Nothing in the file repeats what the directory already says.
+    """
 
     aliases: list[RepositoryAlias] = []
     native_folded = {str(identity).casefold(): identity for identity in source_documents}
     destination_folded: dict[str, WeaverDocumentId] = {}
-    for raw_destination, raw_source in declarations.items():
-        if not isinstance(raw_destination, str) or not isinstance(raw_source, str):
-            raise DiscoveryError("alias.yml destinations and sources must be strings")
+
+    for item in sorted(alias_files):
+        relative = alias_files[item]
         try:
-            destination = WeaverDocumentId.parse(raw_destination)
-            source = WeaverDocumentId.parse(raw_source)
-        except IdentityError as exc:
-            raise DiscoveryError(f"alias.yml: {exc}") from exc
-        if destination.item not in item_ids:
+            text = store.read(root.join(*relative.split("/"))).decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise DiscoveryError(f"{relative}: must be UTF-8 text ({exc})") from exc
+        try:
+            loaded = yaml.load(text, Loader=_UniqueKeyLoader)
+        except MetadataError:
+            raise
+        except yaml.YAMLError as exc:
+            raise DiscoveryError(f"{relative}: invalid YAML: {exc}") from exc
+        if not isinstance(loaded, dict) or set(loaded) != {"aliases"}:
             raise DiscoveryError(
-                f"alias destination item {destination.item} is not declared"
+                f"{relative} must contain exactly one 'aliases' mapping"
             )
-        if source not in source_documents:
-            case_match = native_folded.get(str(source).casefold())
-            detail = f"; declared spelling is {case_match}" if case_match else ""
-            raise DiscoveryError(f"alias source {source} is not a document{detail}")
-        declared_schemas = {
-            schema.schema for schema in schemas_by_item[destination.item]
-        }
-        if destination.object_id.schema not in declared_schemas:
-            raise DiscoveryError(
-                f"alias destination schema {destination.object_id.schema!r} is not "
-                f"declared by item {destination.item}"
-            )
-        folded = str(destination).casefold()
-        native = native_folded.get(folded)
-        if native is not None:
-            raise DiscoveryError(
-                f"alias destination {destination} collides with native document {native}"
-            )
-        prior = destination_folded.get(folded)
-        if prior is not None:
-            raise DiscoveryError(
-                f"alias destinations {destination} and {prior} differ only by case"
-            )
-        destination_folded[folded] = destination
-        aliases.append(RepositoryAlias(destination=destination, source=source))
+        declarations = loaded["aliases"]
+        if not isinstance(declarations, dict):
+            raise DiscoveryError(f"{relative}: 'aliases' must be a mapping")
+
+        declared_schemas = {schema.schema for schema in schemas_by_item[item]}
+        for raw_destination, raw_source in declarations.items():
+            if not isinstance(raw_destination, str) or not isinstance(raw_source, str):
+                raise DiscoveryError(
+                    f"{relative}: destinations and sources must be strings"
+                )
+            try:
+                destination = WeaverDocumentId.parse_local(item, raw_destination)
+            except IdentityError as exc:
+                raise DiscoveryError(
+                    f"{relative}: an alias destination is this item's own "
+                    f"Schema.Object — the item is already known ({exc})"
+                ) from exc
+            try:
+                source = WeaverDocumentId.parse(raw_source)
+            except IdentityError as exc:
+                raise DiscoveryError(f"{relative}: {exc}") from exc
+            local = destination.object_id
+            if source not in source_documents:
+                case_match = native_folded.get(str(source).casefold())
+                detail = f"; declared spelling is {case_match}" if case_match else ""
+                raise DiscoveryError(
+                    f"{relative}: alias source {source} is not a document{detail}"
+                )
+            if local.schema not in declared_schemas:
+                raise DiscoveryError(
+                    f"{relative}: alias destination schema {local.schema!r} is not "
+                    f"declared by item {item}"
+                )
+            folded = str(destination).casefold()
+            native = native_folded.get(folded)
+            if native is not None:
+                raise DiscoveryError(
+                    f"{relative}: alias destination {destination} collides with "
+                    f"native document {native}"
+                )
+            prior = destination_folded.get(folded)
+            if prior is not None:
+                raise DiscoveryError(
+                    f"{relative}: alias destinations {destination} and {prior} "
+                    "differ only by case"
+                )
+            destination_folded[folded] = destination
+            aliases.append(RepositoryAlias(destination=destination, source=source))
     return tuple(aliases)
 
 

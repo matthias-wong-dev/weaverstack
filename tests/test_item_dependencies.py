@@ -55,9 +55,9 @@ def _dependency_estate(tmp_path):
     _write(root, "Warehouse/Audit/Sales.Change.sql", audit)
     _write(
         root,
-        "alias.yml",
+        "Warehouse/Reporting/alias.yml",
         """aliases:
-  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
+  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
 """,
     )
     return root
@@ -165,11 +165,13 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
     _write(root, "Warehouse/Reporting/Sales.Customer.sql", reporting)
     _write(
         root,
-        "alias.yml",
-        """aliases:
-  Lakehouse/Curated/Sales.Reporting: Warehouse/Reporting/Sales.Customer
-  Warehouse/Reporting/Sales.Curated: Lakehouse/Curated/Sales.Customer
-""",
+        "Lakehouse/Curated/alias.yml",
+        "aliases:\n  Sales.Reporting: Warehouse/Reporting/Sales.Customer\n",
+    )
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n  Sales.Curated: Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(GraphError, match="dependency cycle"):
         read_weaver_repository(Location(str(root)))

@@ -123,7 +123,7 @@ def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
         "root = resolver.weaver_items_root\n"
         "files = {\n"
         f"    'Lakehouse/Domain/schemas/Sales.yml': {_SCHEMA.encode()!r},\n"
-        f"    'Lakehouse/Domain/Sales.Customer.spark.sql': {_TABLE.encode()!r},\n"
+        f"    'Lakehouse/Domain/Sales.Customer.sql': {_TABLE.encode()!r},\n"
         f"    'Lakehouse/Domain/Files/Sales__Customer.py': {_FOLDER.encode()!r},\n"
         "}\n"
         "for relative, data in files.items():\n"

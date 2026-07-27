@@ -2533,6 +2533,51 @@ belong in `lib/`. So the item verticals get their own authored fixture,
 planner's compatibility tests. Two models, two fixtures, neither pretending to
 be the other.
 
+### R11 — the directory already said it
+
+Two pieces of a declaration were still repeating what their own location says.
+
+The first was `.spark.sql`. That suffix earned its place in the flat layout,
+where every document sat in one directory and nothing but the filename could say
+which engine would run it. Items removed that problem without anyone noticing:
+a Lakehouse materialises Delta through Spark, a Warehouse materialises through
+T-SQL, so by the time a reader sees the file it has already passed the directory
+that answers. A document is now `Schema.Object.sql` and the item picks the
+dialect:
+
+```text
+Lakehouse/Raw/DWG.Customer.sql          Spark SQL
+Warehouse/Reporting/DWG.Customer.sql    T-SQL
+```
+
+The deprecated flat reader keeps `.spark.sql`, and that is not an inconsistency
+to tidy away later — it is the point. The flat model has no item to ask, which is
+exactly why it needed the suffix. Inside an item the suffix is rejected outright
+with the rename to make, rather than quietly accepted as a synonym.
+
+The second was `alias.yml`. It sat at the declaration root and keyed every entry
+by a full four-part destination, which meant every line named the item it was
+already going to be read for. An alias is a name *one item* wants for a document
+another item owns, so it now lives in that item's own directory:
+
+```yaml
+# Warehouse/Reporting/alias.yml
+aliases:
+  DWG.Customer: Lakehouse/Raw/DWG.Customer
+```
+
+The file's location is the destination item. Only the source stays four-part,
+because the source genuinely is elsewhere.
+
+This paid for itself immediately in the signature code. Certifying a root
+alias.yml meant hashing each declaration separately under a synthetic
+`alias:<destination>` key, so that an entry for one item would not disturb
+another item's signature — machinery whose only job was to undo the file's
+misplacement. An item's alias.yml sits under the item's own prefix, so it is
+certified as one of its support files and that special case is deleted. Adding an
+alias still moves exactly one item signature, now because of where the file is
+rather than despite it.
+
 ---
 
 ## Open questions

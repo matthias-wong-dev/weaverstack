@@ -103,8 +103,8 @@ Files/weaver_items/
 │   └── Reporting/
 │       ├── schemas/
 │       │   └── Sales.yml
-│       └── Sales__Customer.sql
-├── alias.yml
+│       ├── alias.yml
+│       └── Sales.Customer.sql
 └── _ignore/
     └── unfinished authored work
 ```
@@ -318,27 +318,33 @@ $$not-a-reference
 
 ---
 
-## 8. Repository aliases
+## 8. Item aliases
 
-`alias.yml` is repository-level because it declares the names consumer items need
-from other items:
+An alias is a name one item wants for a document another item owns, so it is
+declared in the consuming item's own `alias.yml`. The file's location names the
+destination item; nothing in the file repeats it.
+
+Inside `Warehouse/Reporting`:
 
 ```yaml
 aliases:
-  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer
-  Lakehouse/Raw/Ref.Region: Warehouse/Reporting/Ref.Region
+  Sales.Customer: Lakehouse/Curated/Sales.Customer
 ```
 
 The mapping is deliberately **destination keyed**:
 
 ```text
-consumer-facing destination -> canonical source
+this item's local Schema.Object -> canonical four-part source
 ```
 
-That is declarative: the consumer states what must exist in its namespace. Every
-destination has exactly one source, while one source may appear at several
-destinations. Both sides use canonical exact-case logical identity. Aliases may
-cross any item types and never contain physical Fabric names.
+That is declarative: the consumer states what must exist in its own namespace.
+Every destination has exactly one source, while one source may appear at several
+destinations, in as many items as want it. Both sides use canonical exact-case
+logical identity. Aliases may cross any item types and never contain physical
+Fabric names.
+
+An item's `alias.yml` certifies with that item's other source files, so adding an
+alias changes exactly one item signature.
 
 Aliases participate in repository validation, dependency resolution, the logical
 graph and catalogue projection. `_.Alias` reproduces the `alias.yml` declarations.

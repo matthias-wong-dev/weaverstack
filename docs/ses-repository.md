@@ -28,15 +28,15 @@ Files/weaver_items/
 │   ├── Curated/
 │   │   ├── schemas/
 │   │   │   └── Sales.yml
-│   │   └── Sales.Customer.spark.sql
+│   │   └── Sales.Rollup.sql            Spark SQL — it is in a Lakehouse
 │   └── _weaver/
 │       └── … generated catalogue sources …
 ├── Warehouse/
 │   └── Reporting/
 │       ├── schemas/
 │       │   └── Sales.yml
-│       └── Sales.Customer.sql
-├── alias.yml
+│       ├── alias.yml
+│       └── Sales.Customer.sql          T-SQL — it is in a Warehouse
 └── _ignore/
     └── unfinished.py
 ```
@@ -46,6 +46,35 @@ Folder documents owned by a Lakehouse; it is not a separate deployment target.
 `lib/` contains Python helpers for that Lakehouse item. `_ignore/` is the only
 directory absent from discovery and the repository signature. Authors do not add
 `__init__.py`; Weaver supplies package loading.
+
+## The item chooses the SQL dialect
+
+A SQL document is `Schema.Object.sql`. There is no dialect suffix, because the
+containing item already decides: a Lakehouse materialises Delta through Spark,
+a Warehouse materialises through T-SQL.
+
+```text
+Lakehouse/Raw/DWG.Customer.sql          Spark SQL
+Warehouse/Reporting/DWG.Customer.sql    T-SQL
+```
+
+## Aliases are item-local
+
+An alias is a name one item wants for a document another item owns, so it is
+declared in the consuming item's own `alias.yml`. The file's location names that
+item, so the declaration only maps the item's local `Schema.Object` to the full
+four-part source.
+
+Inside `Warehouse/Reporting/alias.yml`:
+
+```yaml
+aliases:
+  DWG.Customer: Lakehouse/Raw/DWG.Customer
+```
+
+The destination schema must be declared by the owning item, and an alias may not
+shadow a document that item already declares natively. Two items may each alias
+the same source under their own local names.
 
 The built-in `Lakehouse/_weaver` item is generated and managed by Weaver inside
 this same tree. It declares the ten catalogue tables; authored changes to it are
@@ -92,7 +121,9 @@ Flat repositories are not inferred. Discovery fails with concrete instructions:
 - move Folder documents to `Lakehouse/<item>/Files/`;
 - replace `_schemas/` with each owning item's `schemas/`;
 - move Python helpers to `Lakehouse/<item>/lib/`;
-- replace document-local aliases with destination-keyed repository `alias.yml`.
+- replace document-local aliases with the consuming item's own `alias.yml`;
+- drop the `.spark.sql` suffix — a document in a Lakehouse item is already
+  Spark SQL.
 
 This is intentionally explicit. Guessing item ownership from an old target kind
 would make physical deployment history part of logical identity.
