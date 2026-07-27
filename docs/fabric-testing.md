@@ -178,9 +178,9 @@ Two rules keep the cost down and the setup in one place:
 
 - **Environment setup lives only in `conftest`.** Tests never build a host,
   create a Lakehouse, start a session or clean a catalog. Which Weaver document repository an
-  environment installs is the `ses_fixture` parameter (paths in
+  environment installs is the `weaver_repo_fixture` parameter (paths in
   `tests/fabric/build_envs.py`), so one body can be pointed at another estate:
-  `@pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.
+  `@pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.
 - **An estate is provisioned and installed once per module.** The module-scoped
   `lakehouse_estate` and `warehouse_estate` fixtures install one estate and hand
   every test in the module the same `InstalledEstate`, so a whole module of Fabric

@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from build_envs import SQL_TABLE_FIXTURE
 
-pytestmark = pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)
+pytestmark = pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)
 
 AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
 

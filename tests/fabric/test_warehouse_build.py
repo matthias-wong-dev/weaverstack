@@ -18,7 +18,7 @@ from build_envs import WAREHOUSE_ESTATE_FIXTURE
 
 pytestmark = [
     pytest.mark.fabric,
-    pytest.mark.parametrize("ses_fixture", [WAREHOUSE_ESTATE_FIXTURE], indirect=True),
+    pytest.mark.parametrize("weaver_repo_fixture", [WAREHOUSE_ESTATE_FIXTURE], indirect=True),
 ]
 
 AUDIT = {"Row insert datetime", "Row update datetime", "Row delete datetime"}

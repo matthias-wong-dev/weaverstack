@@ -504,14 +504,14 @@ from build_envs import BUILD_FIXTURE  # the default fixture a build env installs
 
 
 @pytest.fixture(scope="module")
-def ses_fixture(request):
+def weaver_repo_fixture(request):
     """Which Weaver document repository a build env installs — the default, or a test's choice.
 
     Module-scoped so an estate is provisioned once per test module. Parametrise
     indirectly (with a fixture from ``build_envs``) to point an environment at
     another fixture without changing the environment fixtures::
 
-        @pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)
+        @pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)
     """
 
     return getattr(request, "param", BUILD_FIXTURE)
@@ -656,7 +656,7 @@ def _upload_tree(store, source: Path, destination) -> None:
             store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
 
 
-def _bindings_for(ses_fixture, *, lakehouse=None, warehouse=None):
+def _bindings_for(weaver_repo_fixture, *, lakehouse=None, warehouse=None):
     """Bind the fixture's declared items to whichever targets this env has.
 
     The item type chooses the binding, so one environment serves a Lakehouse
@@ -674,7 +674,7 @@ def _bindings_for(ses_fixture, *, lakehouse=None, warehouse=None):
     from weaver.declaration.model import LAKEHOUSE, WeaverItemId
 
     entries = []
-    for name in ses_fixture.items:
+    for name in weaver_repo_fixture.items:
         item = WeaverItemId.parse(name)
         if item.item_type == LAKEHOUSE:
             if lakehouse is None:
@@ -735,7 +735,7 @@ def _local_lakehouse_setup(root):
 
 
 @contextmanager
-def _local_build_context(root, spark, ses_fixture):
+def _local_build_context(root, spark, weaver_repo_fixture):
     """A local Spark BuildEnv over a fresh Lakehouse root. Used by both the
     function-scoped fixture and the module-scoped estate."""
 
@@ -756,7 +756,7 @@ def _local_build_context(root, spark, ses_fixture):
         destination = resolver.weaver_items_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
-        _upload_tree(store, ses_fixture.path, destination)
+        _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
@@ -776,7 +776,7 @@ def _local_build_context(root, spark, ses_fixture):
         control = LakehouseBinding(lakehouse=weaver)
         return generate_item_build_bundle(
             repository,
-            bindings=_bindings_for(ses_fixture, lakehouse=target),
+            bindings=_bindings_for(weaver_repo_fixture, lakehouse=target),
             output=resolver.build_bundle(bundle_name),
             store=store,
             prune=prune,
@@ -848,16 +848,16 @@ def _local_build_context(root, spark, ses_fixture):
 
 
 @pytest.fixture
-def local_build_env(tmp_path, spark, ses_fixture):
+def local_build_env(tmp_path, spark, weaver_repo_fixture):
     """A build environment installed in-process against local Spark, per test."""
 
-    with _local_build_context(tmp_path, spark, ses_fixture) as env:
+    with _local_build_context(tmp_path, spark, weaver_repo_fixture) as env:
         yield env
 
 
 @contextmanager
 def _fabric_build_context(
-    fabric_workspace, fabric_client, host, target_lh, session, ses_fixture
+    fabric_workspace, fabric_client, host, target_lh, session, weaver_repo_fixture
 ):
     """A build environment run entirely inside Fabric over Livy.
 
@@ -914,7 +914,7 @@ def _fabric_build_context(
         destination = resolver.weaver_items_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
-        _upload_tree(store, ses_fixture.path, destination)
+        _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
@@ -940,7 +940,7 @@ def _fabric_build_context(
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
             f"LakehouseBinding(lakehouse=ItemRef({target.name!r})))"
-            for item in ses_fixture.items
+            for item in weaver_repo_fixture.items
         )
         body = (
             "from weaver import ItemRef, FabricHost, WeaverItemId\n"
@@ -1106,7 +1106,7 @@ def _empty_the_target(session, store, resolver, target, destination) -> None:
 @pytest.fixture
 def fabric_build_env(
     fabric_workspace, fabric_client, fabric_host, fabric_target_lakehouse,
-    livy_session, ses_fixture,
+    livy_session, weaver_repo_fixture,
 ):
     """One Fabric build environment per test, over the run's Weaver Lakehouse,
     target Lakehouse and Livy session. The target is emptied on the way in, which
@@ -1114,13 +1114,13 @@ def fabric_build_env(
 
     with _fabric_build_context(
         fabric_workspace, fabric_client, fabric_host, fabric_target_lakehouse,
-        livy_session, ses_fixture,
+        livy_session, weaver_repo_fixture,
     ) as env:
         yield env
 
 
 def _warehouse_build_env(
-    fabric_host, weaver_lakehouse, warehouse, ses_fixture, session
+    fabric_host, weaver_lakehouse, warehouse, weaver_repo_fixture, session
 ) -> "BuildEnv":
     """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
 
@@ -1156,7 +1156,7 @@ def _warehouse_build_env(
         destination = resolver.weaver_items_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
-        _upload_tree(store, ses_fixture.path, destination)
+        _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
@@ -1167,7 +1167,7 @@ def _warehouse_build_env(
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
             f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r})))"
-            for item in ses_fixture.items
+            for item in weaver_repo_fixture.items
         )
         body = (
             "from weaver import ItemRef, FabricHost, WeaverItemId\n"
@@ -1297,7 +1297,7 @@ def _install_estate(env, *, prune: bool = True) -> InstalledEstate:
         pytest.param("fabric", marks=pytest.mark.fabric, id="fabric"),
     ],
 )
-def lakehouse_estate(request, ses_fixture):
+def lakehouse_estate(request, weaver_repo_fixture):
     """One Lakehouse estate, provisioned and installed **once per module** on both
     local Spark and Fabric. Read-only assertions reuse it, so a whole module of
     Fabric checks costs one target Lakehouse and one install — the Weaver
@@ -1306,7 +1306,7 @@ def lakehouse_estate(request, ses_fixture):
     if request.param == "local":
         spark = request.getfixturevalue("spark")
         root = request.getfixturevalue("tmp_path_factory").mktemp("estate")
-        with _local_build_context(root, spark, ses_fixture) as env:
+        with _local_build_context(root, spark, weaver_repo_fixture) as env:
             yield _install_estate(env)
     else:
         with _fabric_build_context(
@@ -1315,14 +1315,14 @@ def lakehouse_estate(request, ses_fixture):
             request.getfixturevalue("fabric_host"),
             request.getfixturevalue("fabric_target_lakehouse"),
             request.getfixturevalue("livy_session"),
-            ses_fixture,
+            weaver_repo_fixture,
         ) as env:
             yield _install_estate(env)
 
 
 @pytest.fixture(scope="module")
 def warehouse_estate(
-    fabric_host, fabric_weaver_lakehouse, disposable_warehouse, ses_fixture, livy_session
+    fabric_host, fabric_weaver_lakehouse, disposable_warehouse, weaver_repo_fixture, livy_session
 ):
     """The Warehouse estate, built **in Fabric** and installed once per module.
 
@@ -1335,20 +1335,20 @@ def warehouse_estate(
         fabric_host,
         fabric_weaver_lakehouse,
         disposable_warehouse,
-        ses_fixture,
+        weaver_repo_fixture,
         livy_session,
     )
     yield _install_estate(env, prune=True)
 
 
 @pytest.fixture
-def build_env(request, ses_fixture):
+def build_env(request, weaver_repo_fixture):
     """Select a concrete build environment by indirect parameter.
 
-    Requesting ``ses_fixture`` here (though the concrete env fixture is the one
+    Requesting ``weaver_repo_fixture`` here (though the concrete env fixture is the one
     that uses it) anchors it in the test's static fixture closure, so a test can
     point the environment at another repository with
-    ``@pytest.mark.parametrize("ses_fixture", [...], indirect=True)`` even though
+    ``@pytest.mark.parametrize("weaver_repo_fixture", [...], indirect=True)`` even though
     the environment itself is resolved dynamically.
     """
 

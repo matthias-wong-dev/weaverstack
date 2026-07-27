@@ -15,7 +15,7 @@ from build_envs import MIXED_ESTATE_FIXTURE
 
 from weaver import FolderTarget
 
-pytestmark = pytest.mark.parametrize("ses_fixture", [MIXED_ESTATE_FIXTURE], indirect=True)
+pytestmark = pytest.mark.parametrize("weaver_repo_fixture", [MIXED_ESTATE_FIXTURE], indirect=True)
 
 AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
 
