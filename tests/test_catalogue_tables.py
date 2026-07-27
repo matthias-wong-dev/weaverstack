@@ -1,7 +1,7 @@
 """The catalogue's fixed shape, asserted so drift is loud.
 
 These tests exist to make an accidental change obvious. The catalogue schema is a
-contract between the built-in SES that materialises it, the reader that tolerates
+contract between the built-in Weaver document that materialises it, the reader that tolerates
 older shapes, the projection that fills it and the DML that writes it — four
 places that must agree, and would fail subtly rather than loudly if one drifted.
 
@@ -182,7 +182,7 @@ def test_the_column_dictionary_is_purely_descriptive():
     Ordinals, types and nullability are properties of a built table, and for a
     query-shaped object they are not knowable when the bundle is generated. Keeping
     them out is what lets the whole catalogue be projected at plan time from
-    declared SES alone.
+    declared Weaver document alone.
     """
 
     assert COLUMN_DICTIONARY.column_names == (

@@ -180,7 +180,7 @@ def render_merge(
     An unchanged row is a genuine no-op: the ``MATCHED`` branch is guarded by a
     null-safe comparison of every non-key column, so it neither writes nor
     advances ``row_update_datetime``. That is what makes a rebuild of unchanged
-    SES leave the catalogue alone.
+    Weaver document leave the catalogue alone.
     """
 
     rows = sorted_rows(table, rows)

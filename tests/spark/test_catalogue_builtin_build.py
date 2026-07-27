@@ -118,7 +118,7 @@ def test_each_column_has_the_declared_type(built_catalogue, spark, weaver_catalo
 def test_the_declared_key_is_physically_not_null(built_catalogue, spark, weaver_catalogue):
     """The representation asserts key columns are not null; the built table proves it.
 
-    Nullability comes from the SES ``Primary key`` declaration, so this closes the
+    Nullability comes from the Weaver document ``Primary key`` declaration, so this closes the
     loop between what the catalogue claims about its identity columns and what
     Delta will actually enforce.
     """

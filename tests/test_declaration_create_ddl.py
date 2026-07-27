@@ -206,7 +206,7 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
         "select count(*) as CustomerCount from {{object:DWG.Customer}}"
     )
     # Audit columns are frozen into the instruction so the executor never reopens
-    # the SES source to learn them.
+    # the Weaver document source to learn them.
     assert ["row_insert_datetime", "timestamp", True] in payload["audit_columns"]
 
 

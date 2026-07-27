@@ -1,6 +1,6 @@
-"""The built-in SES repository that declares the catalogue tables.
+"""The built-in Weaver document repository that declares the catalogue tables.
 
-Weaver's catalogue is built by Weaver, from ordinary SES, through the ordinary
+Weaver's catalogue is built by Weaver, from ordinary Weaver document, through the ordinary
 planner and installer. There is no second "create the control tables" path — that
 recursion is the point, and it is the proof that a catalogue table is an ordinary
 Weaver object rather than a privileged one.
@@ -42,14 +42,14 @@ SCHEMA_PATH = f"{ITEM_ROOT}/schemas/{CATALOGUE_SCHEMA}.yml"
 #: not boilerplate: "never loaded" is the fact that makes ``Static: true``
 #: correct, and a reader of any one file should be told it.
 LINEAGE = (
-    "Projected from validated SES declarations by Weaver's own build, and "
+    "Projected from validated Weaver document declarations by Weaver's own build, and "
     "maintained only by the catalogue DML a build appends. Never populated by a "
     "load."
 )
 
 SCHEMA_DESCRIPTION = (
     "Weaver's own control plane. These tables record what Weaver has built and "
-    "what it certifies as installed; they are declared as ordinary SES and built "
+    "what it certifies as installed; they are declared as ordinary Weaver document and built "
     "by Weaver itself, and are never authored or loaded by hand."
 )
 
@@ -62,7 +62,7 @@ def _escaped(text: str) -> str:
     A ``$`` opens a ``$Schema.Object`` reference, and several catalogue columns are
     described in terms of one — ``description_reference`` holds "the
     $Schema.Object the description was copied from". Written raw, that would parse
-    as a reference and be refused, so it is escaped the way SES specifies.
+    as a reference and be refused, so it is escaped the way Weaver document specifies.
     """
 
     return text.replace("$", "$$")
@@ -113,7 +113,7 @@ def _body(table: CatalogueTable) -> str:
 
 
 def render_source(table: CatalogueTable) -> str:
-    """The complete SES source file for one catalogue table."""
+    """The complete Weaver document source file for one catalogue table."""
 
     not_null = [
         column.name
@@ -129,7 +129,7 @@ def render_source(table: CatalogueTable) -> str:
         "Static: true",
         "Prohibit rebuild: true",
         # The key is declared as the primary key, so the catalogue's own tables
-        # describe themselves: SES makes key columns not null, and the projection
+        # describe themselves: Weaver document makes key columns not null, and the projection
         # records the key in the catalogue like any other object's.
         f"Primary key: {', '.join(table.key)}",
     ]

@@ -119,7 +119,7 @@ def test_the_not_null_header_drives_inferred_nullability():
     assert "N'CustomerId'" in cte
     assert "N'CustomerName'" in cte
     assert "N'Note'" not in cte
-    # Nullability comes from the SES header, not the query's own nullability.
+    # Nullability comes from the Weaver document header, not the query's own nullability.
     assert "d.is_nullable" not in content
     assert "left join not_null_columns as nn" in content
 

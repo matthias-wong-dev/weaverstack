@@ -51,9 +51,9 @@ from .tables import (
     CatalogueTable,
 )
 
-#: How an SES kind names itself in the catalogue. Deliberately a translation
-#: rather than a reuse: SES kinds are title case and the catalogue's vocabulary
-#: is lower case, and pinning the mapping here means a new SES kind must be given
+#: How an Weaver document kind names itself in the catalogue. Deliberately a translation
+#: rather than a reuse: Weaver document kinds are title case and the catalogue's vocabulary
+#: is lower case, and pinning the mapping here means a new Weaver document kind must be given
 #: a catalogue meaning rather than leaking one.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
 

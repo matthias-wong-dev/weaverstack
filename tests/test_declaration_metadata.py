@@ -1,4 +1,4 @@
-"""The SES contract, validated to exhaustion before anything physical happens."""
+"""The Weaver document contract, validated to exhaustion before anything physical happens."""
 
 from __future__ import annotations
 

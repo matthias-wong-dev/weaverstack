@@ -4,12 +4,12 @@ The catalogue scopes installations by `(item_type, item_name)`, projects each
 item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
 ordinary planner.
 
-Weaver's catalogue records, for every object it has successfully built, what SES
+Weaver's catalogue records, for every object it has successfully built, what Weaver document
 declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
 control plane the rest of the system reads from.
 
 It is **not** a second authoring model. Nothing in it is discovered from a
-physical table and nothing in it can be written by hand. SES remains authoritative
+physical table and nothing in it can be written by hand. Weaver document remains authoritative
 for descriptive metadata, keys, lineage, dependencies and behavioural flags; the
 catalogue is where that information lands once an object exists, so later
 operations are driven from one place instead of by re-reading a repository.
@@ -155,7 +155,7 @@ all-or-nothing transaction: partial state is repaired by the next successful
 build's ordinary row comparison.
 
 An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by a
-comparison of every non-key column, so rebuilding unchanged SES writes nothing and
+comparison of every non-key column, so rebuilding unchanged Weaver document writes nothing and
 does not move `row_update_datetime`.
 
 The Installation signature is deliberately item-scoped. The repository signature
@@ -303,6 +303,6 @@ returns only after it builds.
 
 - [build-philosophy.md](build-philosophy.md) — the governing properties every
   build implementation must preserve.
-- [ses-repository.md](ses-repository.md) — where a repository lives and how it is
+- [weaver-repository.md](weaver-repository.md) — where a repository lives and how it is
   installed.
 - [journal.md](journal.md) — why each of these decisions was taken.

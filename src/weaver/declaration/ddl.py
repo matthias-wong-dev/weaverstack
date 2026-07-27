@@ -1,4 +1,4 @@
-"""Generated create DDL — the *build* form of an SES source.
+"""Generated create DDL — the *build* form of an Weaver document source.
 
 Build creates structure; it does not load data. So the create definition for a
 source is pure structure: a table becomes an empty table of the right shape, a
@@ -194,7 +194,7 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
     query, read the ``DataFrame`` schema, validate the columns (the same guards a
     declared schema passes at parse), choose the physical business columns,
     append the audit columns, and create the table. Everything the executor needs
-    is frozen here, so it never reopens the SES source (build-philosophy §7.3).
+    is frozen here, so it never reopens the Weaver document source (build-philosophy §7.3).
     """
 
     ses = document.document

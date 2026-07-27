@@ -505,7 +505,7 @@ from build_envs import BUILD_FIXTURE  # the default fixture a build env installs
 
 @pytest.fixture(scope="module")
 def ses_fixture(request):
-    """Which SES repository a build env installs — the default, or a test's choice.
+    """Which Weaver document repository a build env installs — the default, or a test's choice.
 
     Module-scoped so an estate is provisioned once per test module. Parametrise
     indirectly (with a fixture from ``build_envs``) to point an environment at
@@ -1129,7 +1129,7 @@ def _warehouse_build_env(
     target Warehouse's system schema through Weaver's *own* Fabric-native mssql
     connector (``fabric_sql_executor``, the session identity) to compile the prune
     into the bundle, and installation runs the frozen T-SQL through that same
-    connector. The desktop uploads only the SES repository and reads results back
+    connector. The desktop uploads only the Weaver document repository and reads results back
     for assertions; it never plans and never compiles a bundle locally.
     """
 

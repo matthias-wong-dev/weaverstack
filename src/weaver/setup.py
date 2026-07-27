@@ -93,7 +93,7 @@ def materialise_catalogue_item(
 
     Deterministic and repeatable: the same package always writes the same bytes, so
     an unchanged Weaver produces an unchanged repository signature and therefore an
-    unchanged bundle. Only the SES files travel — see
+    unchanged bundle. Only the Weaver document files travel — see
     :func:`weaver.catalogue.builtin.repository_files`.
     """
 

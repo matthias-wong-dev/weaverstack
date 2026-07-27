@@ -170,14 +170,14 @@ is installed — there is no desktop-planned build. For a Warehouse that means
 generation reads the target's system schema in-session through Weaver's own
 `fabric_sql_executor` (the session identity) and compiles the prune into the
 bundle there; installation runs the frozen T-SQL through the same connector. The
-desktop's only jobs are uploading the SES repository and reading the catalogue
+desktop's only jobs are uploading the Weaver document repository and reading the catalogue
 back for assertions — the latter through `desktop_sql_executor`, which is test
 infrastructure and never part of what is under test.
 
 Two rules keep the cost down and the setup in one place:
 
 - **Environment setup lives only in `conftest`.** Tests never build a host,
-  create a Lakehouse, start a session or clean a catalog. Which SES repository an
+  create a Lakehouse, start a session or clean a catalog. Which Weaver document repository an
   environment installs is the `ses_fixture` parameter (paths in
   `tests/fabric/build_envs.py`), so one body can be pointed at another estate:
   `@pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.

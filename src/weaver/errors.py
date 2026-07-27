@@ -25,7 +25,7 @@ class IdentityError(WeaverError):
 
 
 class MetadataError(WeaverError):
-    """Raised when an SES document's metadata is missing, malformed or contradictory."""
+    """Raised when an Weaver document document's metadata is missing, malformed or contradictory."""
 
 
 class LoadError(WeaverError):

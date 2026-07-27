@@ -229,7 +229,7 @@ def test_the_guard_applies_to_deletes_too():
 def test_a_matched_unchanged_row_is_a_no_op():
     """The matched branch is guarded by a comparison of every non-key column.
 
-    So rebuilding unchanged SES writes nothing and does not advance
+    So rebuilding unchanged Weaver document writes nothing and does not advance
     ``row_update_datetime`` — which is what makes a rebuild idempotent from the
     catalogue's point of view.
     """

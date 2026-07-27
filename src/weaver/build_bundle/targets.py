@@ -21,8 +21,8 @@ from ..targets import ItemRef
 from ..errors import BuildError
 from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 
-#: Target kinds a bound target may name. They mirror the SES target kinds but
-#: live here because a bundle is read without importing the SES vocabulary.
+#: Target kinds a bound target may name. They mirror the Weaver document target kinds but
+#: live here because a bundle is read without importing the Weaver document vocabulary.
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
 

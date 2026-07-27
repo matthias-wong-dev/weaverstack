@@ -249,7 +249,7 @@ weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 
 ## See also
 
-- [Where your Weaver repository lives](ses-repository.md) — item layout and installation
+- [Where your Weaver repository lives](weaver-repository.md) — item layout and installation
 
 - [Local development setup](local-setup.md) — Java, Spark, and the local tests
 - [Fabric integration tests](fabric-testing.md) — running the opt-in suite

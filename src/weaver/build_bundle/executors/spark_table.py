@@ -11,7 +11,7 @@ pass, the Spark counterpart of the old T-SQL self-contained script
    are read;
 2. validate the columns with the same guards a declared schema passes at parse
    (:func:`weaver.ses.columns.validate_build_columns`), driven entirely by the
-   frozen payload — the SES source is never reopened;
+   frozen payload — the Weaver document source is never reopened;
 3. choose the physical business columns — declared types when declared, the
    query's inferred types otherwise;
 4. append Weaver's audit columns;

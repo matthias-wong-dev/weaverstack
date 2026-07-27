@@ -82,8 +82,8 @@ installation
 
 The installer must never:
 
-- reopen SES source documents;
-- import SES Python classes;
+- reopen Weaver document source documents;
+- import Weaver document Python classes;
 - rediscover schemas or dependencies;
 - infer omitted build metadata;
 - re-evaluate target projection;
@@ -302,7 +302,7 @@ installation. That inference is forbidden.
 ### 7.1 Declared schema
 
 For a Python-backed Delta table, the schema used to create the table must be
-supplied by the SES declaration or another explicitly supported compile-time
+supplied by the Weaver document declaration or another explicitly supported compile-time
 declaration. There is no query to consult:
 
 ```text
@@ -484,7 +484,7 @@ The builder and installer have different opportunities to fail.
 
 Bundle generation should reject:
 
-- invalid SES declarations;
+- invalid Weaver document declarations;
 - unresolved object identity;
 - missing required schemas;
 - unsupported object types;
@@ -611,12 +611,12 @@ The build system should prove that:
 
 ### The bundle is independent
 
-Generate a bundle, remove or make unavailable the SES source repository, and
+Generate a bundle, remove or make unavailable the Weaver document source repository, and
 successfully install from the bundle alone.
 
 ### Build does not load
 
-Use SES objects whose `read()` methods would fail if invoked. Building and
+Use Weaver document objects whose `read()` methods would fail if invoked. Building and
 installing their structure must still succeed.
 
 ### Declared schema is used

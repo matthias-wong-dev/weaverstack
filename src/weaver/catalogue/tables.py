@@ -2,7 +2,7 @@
 
 These definitions are the single authority on what the catalogue *is*: the
 tables, their ordered columns, their types, and the key that identifies a row.
-Everything else — the built-in SES that materialises them, the tolerant reader,
+Everything else — the built-in Weaver document that materialises them, the tolerant reader,
 the projection, the rendered DML — reads them from here. A column added in one
 place and forgotten in another is the failure mode this module exists to make
 impossible, so nothing downstream is allowed its own list.
@@ -46,7 +46,7 @@ CATALOGUE_SCHEMA = "_"
 
 #: What an installed object is, in the catalogue's vocabulary. Deliberately
 #: coarse: enough for a later operation to know how to address the thing, without
-#: inventing an identity scheme that competes with SES's kind and language.
+#: inventing an identity scheme that competes with Weaver document's kind and language.
 OBJECT_TYPES = ("folder", "table", "view")
 
 #: What an object is *for*. Everything Weaver builds today holds or shapes data;
@@ -203,7 +203,7 @@ def _signature(what: str) -> CatalogueColumn:
 def _described(*, what: str) -> tuple[CatalogueColumn, ...]:
     """A description and the pointer it was copied from, if it was copied.
 
-    A SES ``Description`` is either prose or exactly one ``$Schema.Object``
+    A Weaver document ``Description`` is either prose or exactly one ``$Schema.Object``
     reference. When it is a reference the prose is copied from the target and the
     pointer is kept, so a reader can see both what it says and where it came
     from.
@@ -324,7 +324,7 @@ TABLE_DICTIONARY = CatalogueTable(
     description=(
         "Tables and views together — they are described the same way and a "
         "reader asks the same questions of both. Everything here is declared in "
-        "SES; nothing is read back from the physical object."
+        "Weaver document; nothing is read back from the physical object."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
@@ -359,7 +359,7 @@ TABLE_DICTIONARY = CatalogueTable(
 FOLDER_DICTIONARY = CatalogueTable(
     name="FolderDictionary",
     description=(
-        "Managed folders. A folder keeps its two-part SES identity rather than "
+        "Managed folders. A folder keeps its two-part Weaver document identity rather than "
         "being reduced to a path, and its file key is the scope of what Weaver "
         "manages inside it — reconciliation deletes nothing outside that."
     ),

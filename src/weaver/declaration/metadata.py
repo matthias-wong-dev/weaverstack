@@ -1,4 +1,4 @@
-"""The SES document contract.
+"""The Weaver document document contract.
 
 This is the basic unit of work in Weaver: a Folder, a Delta table, or a
 Warehouse table or view, declared as YAML at the top of its source file — a
@@ -384,7 +384,7 @@ class Column:
 
 @dataclass(frozen=True)
 class WeaverDocument:
-    """A fully validated SES object declaration."""
+    """A fully validated Weaver document object declaration."""
 
     kind: str
     language: str
@@ -542,7 +542,7 @@ def extract_sql_metadata_and_body(source: str) -> tuple[str, str]:
 
     match = re.match(r"\s*/\*(.*?)\*/(.*)\Z", source, flags=re.DOTALL)
     if not match:
-        raise MetadataError("SES SQL must begin with a /* ... */ metadata block")
+        raise MetadataError("Weaver document SQL must begin with a /* ... */ metadata block")
     return match.group(1).strip("\n"), match.group(2).lstrip()
 
 

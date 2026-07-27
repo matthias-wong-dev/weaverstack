@@ -40,7 +40,7 @@ class Location:
         # backslashes — `LocalHost` normalises its root through `Path`, and
         # `str()` of a `WindowsPath` uses them — while everything downstream
         # treats "/" as the only separator: `join`, `name`, and the segment
-        # splitting in the SES reader. Left alone, a repository read from a
+        # splitting in the Weaver document reader. Left alone, a repository read from a
         # Windows checkout takes its whole path as its catalogue name.
         #
         # Safe against real names: "\" is rejected in object and schema names

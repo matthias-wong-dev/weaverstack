@@ -1,4 +1,4 @@
-"""Schema SES files — one declared schema per file under ``_schemas``.
+"""Schema Weaver document files — one declared schema per file under ``_schemas``.
 
 A repository declares its schemas explicitly rather than letting a two-part
 object ID conjure one on the fly. Every ``Schema.Object`` an object or an alias
@@ -30,7 +30,7 @@ import yaml
 from ..errors import DiscoveryError, MetadataError
 from .metadata import _UniqueKeyLoader
 
-#: The directory schema SES files live in, relative to the repository root.
+#: The directory schema Weaver document files live in, relative to the repository root.
 SCHEMAS_DIRECTORY = "_schemas"
 SCHEMA_SUFFIX = ".yml"
 
@@ -73,7 +73,7 @@ def is_schema_file(relative_path: str) -> bool:
 
 
 def read_schema_document(relative_path: str, data: bytes) -> SchemaSes:
-    """Parse and validate one schema SES file against its filename."""
+    """Parse and validate one schema Weaver document file against its filename."""
 
     try:
         text = data.decode("utf-8-sig")
@@ -94,7 +94,7 @@ def read_schema_document(relative_path: str, data: bytes) -> SchemaSes:
 
 
 def parse_schema_document(text: str, relative_path: str) -> SchemaSes:
-    """Parse the YAML of a schema SES file."""
+    """Parse the YAML of a schema Weaver document file."""
 
     try:
         loaded = yaml.load(text, Loader=_UniqueKeyLoader)

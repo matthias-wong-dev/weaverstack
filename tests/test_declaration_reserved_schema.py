@@ -1,7 +1,7 @@
 """Schema ``_`` is an ordinary schema, and an object may depend on nothing.
 
 Weaver's own catalogue lives in schema ``_`` of the Weaver Lakehouse, declared as
-ordinary SES and built through the ordinary build path. Two rules had to give way
+ordinary Weaver document and built through the ordinary build path. Two rules had to give way
 for that, and both were over-broad rather than load-bearing:
 
 - the underscore convention is about *directories* — ``schemas/``, ``lib/`` — so

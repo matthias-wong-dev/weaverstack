@@ -1,4 +1,4 @@
-"""Schema SES files: one declared schema per file, matched to its filename."""
+"""Schema Weaver document files: one declared schema per file, matched to its filename."""
 
 from __future__ import annotations
 

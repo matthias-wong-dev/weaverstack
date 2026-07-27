@@ -22,7 +22,7 @@ dwg-platform/
 ```
 
 `weaver` is consulted for proven algorithms, Fabric/OneLake/Spark/Warehouse edge
-cases, SES fixtures and behavioural intent. Never change it as part of
+cases, Weaver document fixtures and behavioural intent. Never change it as part of
 weaverstack work, and never import from it. Where the two disagree, the
 architecture in [the implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md)
 is authoritative.

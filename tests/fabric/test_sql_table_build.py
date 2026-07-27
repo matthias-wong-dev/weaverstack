@@ -1,6 +1,6 @@
 """SQL-backed Spark table build — the same assertions on local Spark and Fabric.
 
-Both schema modes come from one self-contained SES fixture (``sql-table-build``,
+Both schema modes come from one self-contained Weaver document fixture (``sql-table-build``,
 wired in ``build_envs`` as ``SQL_TABLE_FIXTURE``): ``Sales.InferredCustomer``
 takes its shape from its query, ``Sales.DeclaredCustomer`` declares a wider one.
 The estate is provisioned and installed **once per module** (``lakehouse_estate``)

@@ -37,7 +37,7 @@ mapped as (
         d.column_ordinal,
         quotename(d.column_name) as quoted_column_name,
         $type_case as warehouse_type,
-        -- Nullability is a Weaver contract from the SES header (primary key or
+        -- Nullability is a Weaver contract from the Weaver document header (primary key or
         -- Not null), not the query's own nullability, so both engines agree.
         case
             when nn.column_name is not null then N' not null'
