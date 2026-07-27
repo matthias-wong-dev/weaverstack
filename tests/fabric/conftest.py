@@ -275,11 +275,11 @@ class DisposableWarehouse:
     started: float
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def disposable_warehouse(fabric_workspace, fabric_client, fabric_host):
-    """Create, await, expose, and always delete one disposable Warehouse per module.
+    """Create, await, expose, and always delete one disposable Warehouse per session.
 
-    A Warehouse takes minutes to provision, so it is shared across a module's
+    A Warehouse takes minutes to provision, so it is shared across a session's
     tests rather than recreated per test."""
 
     from weaver import WarehouseTarget
@@ -391,6 +391,17 @@ def disposable_warehouse(fabric_workspace, fabric_client, fabric_host):
                     f"cleanup failed: {exc}"
                 )
 
+@pytest.fixture(scope="module")
+def clean_disposable_warehouse(disposable_warehouse):
+    from weaver import wipe_sql_target
+
+    wipe_sql_target(
+        disposable_warehouse.target,
+        disposable_warehouse.host,
+        sql=disposable_warehouse.executor,
+    )
+
+    yield disposable_warehouse
 
 # --- one populated lifecycle, on either host --------------------------------
 
@@ -1322,7 +1333,7 @@ def lakehouse_estate(request, weaver_repo_fixture):
 
 @pytest.fixture(scope="module")
 def warehouse_estate(
-    fabric_host, fabric_weaver_lakehouse, disposable_warehouse, weaver_repo_fixture, livy_session
+    fabric_host, fabric_weaver_lakehouse, clean_disposable_warehouse, weaver_repo_fixture, livy_session
 ):
     """The Warehouse estate, built **in Fabric** and installed once per module.
 
@@ -1334,7 +1345,7 @@ def warehouse_estate(
     env = _warehouse_build_env(
         fabric_host,
         fabric_weaver_lakehouse,
-        disposable_warehouse,
+        clean_disposable_warehouse,
         weaver_repo_fixture,
         livy_session,
     )

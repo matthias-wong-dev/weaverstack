@@ -185,8 +185,8 @@ Two rules keep the cost down and the setup in one place:
   `lakehouse_estate` and `warehouse_estate` fixtures install one estate and hand
   every test in the module the same `InstalledEstate`, so a whole module of Fabric
   assertions costs one Lakehouse (or one Warehouse) and one install rather than
-  one per test. `disposable_warehouse` is module-scoped for the same reason — a
-  Warehouse takes minutes to provision. Use the function-scoped
+  one per test. `disposable_warehouse` is session-scoped for the same reason — a
+  Warehouse takes minutes to provision the endpoint. Use the function-scoped
   `fabric_build_env` only where a test genuinely needs a fresh target, as the
   prune and failure-path cases in `test_build_bundle.py` do.
 

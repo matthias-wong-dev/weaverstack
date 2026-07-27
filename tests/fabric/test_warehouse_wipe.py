@@ -29,7 +29,7 @@ EXPECTED_OBJECTS = {
 
 
 def test_installed_weaver_wipes_a_desktop_populated_warehouse(
-    disposable_warehouse,
+    clean_disposable_warehouse,
     fabric_client,
     fabric_workspace,
     livy_session,
@@ -38,7 +38,7 @@ def test_installed_weaver_wipes_a_desktop_populated_warehouse(
 
     from weaver.fabric import WAREHOUSE, find_item
 
-    warehouse = disposable_warehouse
+    warehouse = clean_disposable_warehouse
 
     started = time.monotonic()
     populate_warehouse(warehouse.executor, FIXTURE)
