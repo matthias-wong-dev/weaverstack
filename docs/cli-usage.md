@@ -87,19 +87,18 @@ hosts:
 
 ## Build
 
-A build names one installed repository and repeats one exact logical-to-physical
+A build reads the workspace's fixed declaration and repeats one exact logical-to-physical
 binding for every item it should materialise:
 
 ```bash
 weaver build \
-  --repository Estate \
   --bind Lakehouse/Raw=Raw_Dev \
   --bind Warehouse/Reporting=Reporting_Dev \
   --host Development --hosts env.yml
 ```
 
-The left side is exact-case repository identity; the right side is a physical
-Fabric item name. Unmentioned repository items are ordinary and remain unbound.
+The left side is exact-case logical item identity; the right side is a physical
+Fabric item name. Unmentioned items are ordinary and remain unbound.
 At least one `--bind` is required. Prune and catalogue publication are on by
 default; `--no-prune` is the explicit unsafe sharing escape hatch, and
 `--no-catalogue` is for controlled bootstrap/diagnostic work.
@@ -116,11 +115,11 @@ submitter where Fabric supplies one. This is advisory: Weaver neither cancels a
 notebook session it does not own nor mistakes an occupied one-session capacity
 for a build failure.
 
-The repository must already be installed at
-`<Control Lakehouse>/Files/repos/<repository>`. Its directory name is its exact
-repository name.
+The declaration must already be installed at
+`<Control Lakehouse>/Files/weaver_items/`. There is no repository-name level or
+repository selector inside one control plane.
 
-Inside that one Fabric session Weaver copies the repository once to a temporary
+Inside that one Fabric session Weaver copies the declaration once to a temporary
 driver-local directory, plans and installs from local files, then removes them.
 The usual development build does not upload or download a bundle.
 

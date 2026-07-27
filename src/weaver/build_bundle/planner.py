@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..errors import BuildError
-from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, Host
+from ..hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Host
 from ..locations import Location
 from ..resolution import resolver_for
 from ..spark import SparkCatalogue, object_token, schema_token
@@ -34,7 +34,7 @@ from ..ses.metadata import TABLE, VIEW, DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from ..ses.repository import SesRepository, read_repository
 from ..ses.source import SourceDocument
 from ..store import Store
-from ..targets import ItemRef, RepositoryRef
+from ..targets import ItemRef
 from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
 from .models import (
     BUILD_FOLDER,
@@ -71,7 +71,7 @@ from .payloads import (
 )
 
 #: Files areas that are never folder resources, so a prune never touches them.
-_RESERVED_FILES_AREAS = frozenset({REPOS_AREA, BUILD_BUNDLES_AREA})
+_RESERVED_FILES_AREAS = frozenset({WEAVER_ITEMS_AREA, BUILD_BUNDLES_AREA})
 
 #: Schemas a prune never touches. A schema-enabled Fabric Lakehouse has a default
 #: ``dbo`` schema that cannot be dropped and that Weaver does not manage; ``_``
@@ -283,7 +283,7 @@ def _repository_location(resolver, weaver_lakehouse: ItemRef, repository_name: s
             f"the host's Weaver Lakehouse {configured!r} does not match the "
             f"requested {weaver_lakehouse.name!r}"
         )
-    return resolver.repository(RepositoryRef(repository_name))
+    return resolver.weaver_items_root
 
 
 def _single_binding(targets: TargetBindings):

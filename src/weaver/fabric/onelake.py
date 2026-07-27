@@ -60,7 +60,7 @@ def onelake_url(
     base_url: str = ONELAKE_DFS,
     query: dict[str, str] | None = None,
 ) -> str:
-    """A DFS URL beneath one item, e.g. ``…/{ws}/{lh}/Files/repos/x``."""
+    """A DFS URL beneath one item, e.g. ``…/{ws}/{lh}/Files/weaver_items/x``."""
 
     parts = [workspace, lakehouse_artifact_segment(item)]
     parts.extend(part for part in relative_path.strip("/").split("/") if part)

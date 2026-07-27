@@ -24,27 +24,28 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, RepositoryRef
+from weaver import ItemRef, LocalHost, LocalResolver, LocalStore
 from weaver.build_bundle import (
     InstallationEnvironment,
+    ItemBinding,
+    ItemBindings,
     LakehouseBinding,
-    TargetBindings,
-    generate_build_bundle,
-    install_bundle,
-    load_bundle,
+    build_item_repository,
 )
 from weaver.catalogue import INSTALLATION, REGISTRY, InstallationScope
 from weaver.catalogue.reader import read_table
+from weaver.ses.model import WeaverItemId
 from weaver.setup import initialise_weaver_lakehouse
 from weaver.spark import SparkCatalogue
 
 pytestmark = pytest.mark.spark
 
-FIXTURE = Path(__file__).parent.parent / "fixtures" / "build-lakehouse"
+FIXTURE = Path(__file__).parent.parent / "fixtures" / "build-lakehouse-item"
 WEAVER = "Weaver"
 FIRST = "Sales_LH"
 SECOND = "Inventory_LH"
-SCOPE = InstallationScope(repository="MyRepo", target_type="lakehouse")
+LOGICAL_ITEM = WeaverItemId.parse("Lakehouse/Raw")
+SCOPE = InstallationScope(item_type="Lakehouse", item_name="Raw")
 
 
 @pytest.fixture
@@ -56,8 +57,13 @@ def estate(tmp_path, spark):
     for name in (WEAVER, FIRST, SECOND):
         store.make_directory(resolver.files_root(ItemRef(name)))
         store.make_directory(resolver.tables_root(ItemRef(name)))
-    store.make_directory(resolver.repos_root)
-    shutil.copytree(FIXTURE, resolver.repository(RepositoryRef("MyRepo")).path)
+    store.make_directory(resolver.weaver_items_root)
+    shutil.copytree(
+        FIXTURE,
+        resolver.weaver_items_root.path,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
 
     initialise_weaver_lakehouse(
         weaver_lakehouse=ItemRef(WEAVER), host=host, store=store, spark=spark
@@ -77,28 +83,35 @@ def estate(tmp_path, spark):
 
 
 def _build(host, store, resolver, spark, lakehouse: str):
-    bundle = generate_build_bundle(
-        weaver_lakehouse=ItemRef(WEAVER),
-        repository_name="MyRepo",
-        targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef(lakehouse))),
-        output=resolver.build_bundle(f"into-{lakehouse}"),
-        host=host,
-        store=store,
+    control = LakehouseBinding(lakehouse=ItemRef(WEAVER))
+    result = build_item_repository(
+        resolver.weaver_items_root,
+        bindings=ItemBindings(
+            (
+                ItemBinding(
+                    LOGICAL_ITEM,
+                    LakehouseBinding(lakehouse=ItemRef(lakehouse)),
+                ),
+            )
+        ),
+        environment=InstallationEnvironment(
+            store=store,
+            resolver=resolver,
+            spark=spark,
+            host=host,
+        ),
         prune=True,
         catalogue=True,
-        spark=spark,
+        control_lakehouse=control,
     )
-    report = install_bundle(
-        load_bundle(bundle.location, store=store),
-        environment=InstallationEnvironment(store=store, resolver=resolver, spark=spark),
-    )
+    report = result.report
     assert report.status == "succeeded", [
         f"{a.action_id}: {a.error_message}"
         for s in report.sequences
         for a in s.actions
         if a.status == "failed"
     ]
-    return bundle
+    return result
 
 
 def test_two_lakehouses_declaring_one_schema_get_two_tables(estate, spark):
@@ -143,7 +156,7 @@ def test_each_destination_keeps_its_own_storage(estate, spark):
 
 
 def test_the_catalogue_records_the_installation_it_is_currently_bound_to(estate, spark):
-    """Both builds are the same repository, so there is one installation, rebound.
+    """Both builds bind the same logical item, so one installation is rebound.
 
     The catalogue is in a third Lakehouse throughout, and the rows are read back
     from it by name rather than from wherever the session might be pointed.

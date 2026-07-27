@@ -33,8 +33,8 @@ def weaver_lakehouse(tmp_path):
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
-    store.make_directory(resolver.repos_root)
-    shutil.copytree(FIXTURE, (resolver.repos_root / "MyRepo").path)
+    store.make_directory(resolver.weaver_items_root)
+    shutil.copytree(FIXTURE, resolver.weaver_items_root.path, dirs_exist_ok=True)
     return host, store, resolver
 
 

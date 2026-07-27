@@ -42,13 +42,10 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
 ):
     """Discovery, generation, install and reads all happen in the Fabric session."""
 
-    installation_filter = (
-        "repository = 'ItemCatalogueProbe' AND item_type = 'Lakehouse' "
-        "AND item_name = '_weaver'"
-    )
-    registry_filter = installation_filter + " AND object_namespace = 'Tables'"
+    installation_filter = "item_type = 'Lakehouse' AND item_name = '_weaver'"
+    registry_filter = installation_filter
     body = (
-        "from weaver import FabricHost, ItemRef, RepositoryRef, WeaverItemId\n"
+        "from weaver import FabricHost, ItemRef, WeaverItemId\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBinding, "
         "ItemBindings, LakehouseBinding, build_item_repository)\n"
         "from weaver.catalogue.item_tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY\n"
@@ -59,7 +56,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         f"fabric_environment={fabric_host.fabric_environment!r})\n"
         "store = store_for(host)\n"
         "resolver = resolver_for(host)\n"
-        "root = resolver.repository(RepositoryRef('ItemCatalogueProbe'))\n"
+        "root = resolver.weaver_items_root\n"
         "store.make_directory(root)\n"
         "control = LakehouseBinding(ItemRef(host.weaver_lakehouse))\n"
         "result = build_item_repository(\n"
@@ -111,7 +108,7 @@ def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
     livy_session, fabric_host, fabric_target_lakehouse
 ):
     body = (
-        "from weaver import (FabricHost, ItemRef, RepositoryRef, WeaverItemId, "
+        "from weaver import (FabricHost, ItemRef, WeaverItemId, "
         "wipe_lakehouse)\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBinding, "
         "ItemBindings, LakehouseBinding, build_item_repository)\n"
@@ -123,7 +120,7 @@ def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
         f"target = ItemRef({fabric_target_lakehouse.name!r})\n"
         "store = store_for(host)\n"
         "resolver = resolver_for(host)\n"
-        "root = resolver.repository(RepositoryRef('ItemPruneProbe'))\n"
+        "root = resolver.weaver_items_root\n"
         "files = {\n"
         f"    'Lakehouse/Domain/schemas/Sales.yml': {_SCHEMA.encode()!r},\n"
         f"    'Lakehouse/Domain/Sales.Customer.spark.sql': {_TABLE.encode()!r},\n"

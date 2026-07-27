@@ -13,6 +13,7 @@ from weaver.catalogue.item_tables import (
     DEPENDENCY,
     INSTALLATION,
     REGISTRY,
+    SCHEMA_DICTIONARY,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
 )
@@ -35,10 +36,12 @@ def _project(repository, item_text: str, target: str):
     )
 
 
-def test_every_catalogue_table_is_keyed_by_repository_and_exact_item():
+def test_every_catalogue_table_is_keyed_by_exact_item_without_repository():
     for table in CATALOGUE_TABLES:
-        assert table.key[:3] == ("repository", "item_type", "item_name")
-        assert table.column_names[:3] == table.key[:3]
+        assert table.key[:2] == ("item_type", "item_name")
+        assert table.column_names[:2] == table.key[:2]
+        assert "repository" not in table.column_names
+        assert "object_namespace" not in table.column_names
 
 
 def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
@@ -46,12 +49,29 @@ def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     rows = projection.for_table(REGISTRY)
 
-    customer = [
-        row
-        for row in rows
-        if row["schema_name"] == "Sales" and row["object_name"] == "Customer"
-    ]
-    assert {row["object_namespace"] for row in customer} == {"Tables", "Files"}
+    customer = [row for row in rows if row["object_name"] == "Customer"]
+    assert {row["schema_name"] for row in customer} == {"Sales", "Files/Sales"}
+
+
+def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+
+    schemas = {
+        row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)
+    }
+    assert schemas == {"Sales", "Files/Sales"}
+
+
+def test_no_catalogue_table_keeps_a_hidden_namespace_dimension():
+    namespace_columns = {
+        "object_namespace",
+        "destination_namespace",
+        "source_namespace",
+        "reference_namespace",
+    }
+    for table in CATALOGUE_TABLES:
+        assert namespace_columns.isdisjoint(table.column_names)
 
 
 def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
@@ -125,6 +145,6 @@ def test_registry_merge_is_last_and_item_scoped(tmp_path):
 
     assert reconciliation.registry.table is REGISTRY
     assert reconciliation.statements[-1] == reconciliation.registry.merge
-    assert "`repository` = 'Estate'" in reconciliation.registry.merge
+    assert "`repository`" not in reconciliation.registry.merge
     assert "`item_type` = 'Lakehouse'" in reconciliation.registry.merge
     assert "`item_name` = 'Raw'" in reconciliation.registry.merge

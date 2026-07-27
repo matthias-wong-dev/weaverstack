@@ -95,6 +95,7 @@ class _FakeSpark:
         self.conf = _FakeConf()
         self.case_at_create: str | None = None
         self.case_at_drop: str | None = None
+        self.case_at_query: str | None = None
 
     def sql(self, statement: str):
         self.executed.append(statement)
@@ -112,6 +113,7 @@ class _FakeSpark:
         if normalized.startswith("CREATE"):
             self.case_at_create = self.conf.value
             return None
+        self.case_at_query = self.conf.value
         return _FakeFrame(self._fields)
 
 
@@ -199,6 +201,7 @@ def test_fabric_creation_preserves_identifier_case_and_restores_the_session_sett
 
     _run(spark, _payload(), destination=FABRIC_DESTINATION)
 
+    assert spark.case_at_query == "true"
     assert spark.case_at_create == "true"
     assert spark.conf.value == "false"
     assert spark.conf.changes == ["true", "false"]

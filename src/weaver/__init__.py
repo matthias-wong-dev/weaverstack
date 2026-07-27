@@ -39,7 +39,6 @@ from .targets import (
     DeltaTarget,
     FolderTarget,
     ItemRef,
-    RepositoryRef,
     WarehouseTarget,
 )
 from .ses.model import (
@@ -106,7 +105,6 @@ __all__ = [
     # identities — level three
     "ItemRef",
     "WarehouseTarget",
-    "RepositoryRef",
     # logical identities, independent of physical bindings
     "WeaverRepository",
     "WeaverItem",

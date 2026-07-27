@@ -697,7 +697,7 @@ def _local_lakehouse_setup(root):
     for item in (weaver, target):
         store.make_directory(resolver.files_root(item))
         store.make_directory(resolver.tables_root(item))
-    store.make_directory(resolver.repos_root)
+    store.make_directory(resolver.weaver_items_root)
     return host, weaver, target, resolver, store
 
 
@@ -706,7 +706,6 @@ def _local_build_context(root, spark, ses_fixture):
     """A local Spark BuildEnv over a fresh Lakehouse root. Used by both the
     function-scoped fixture and the module-scoped estate."""
 
-    from weaver import RepositoryRef
     from weaver.build_bundle import (
         InstallationEnvironment,
         LakehouseBinding,
@@ -721,11 +720,14 @@ def _local_build_context(root, spark, ses_fixture):
     weaver_destination = resolver.spark_destination(weaver)
 
     def install_repo(name: str) -> str:
-        _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
+        destination = resolver.weaver_items_root
+        if store.exists(destination):
+            store.delete(destination, recursive=True)
+        _upload_tree(store, ses_fixture, destination)
         return name
 
     def remove_repo(name: str) -> None:
-        store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+        store.delete(resolver.weaver_items_root, recursive=True)
 
     def generate(
         bundle_name: str = "buildtest",
@@ -858,7 +860,6 @@ def _fabric_build_context(
     has always done.
     """
 
-    from weaver import RepositoryRef
     from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
@@ -875,11 +876,14 @@ def _fabric_build_context(
     weaver_destination = resolver.spark_destination(weaver)
 
     def install_repo(name: str) -> str:
-        _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
+        destination = resolver.weaver_items_root
+        if store.exists(destination):
+            store.delete(destination, recursive=True)
+        _upload_tree(store, ses_fixture, destination)
         return name
 
     def remove_repo(name: str) -> None:
-        store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+        store.delete(resolver.weaver_items_root, recursive=True)
 
     def _host_literal() -> str:
         return (
@@ -1087,7 +1091,7 @@ def _warehouse_build_env(
     for assertions; it never plans and never compiles a bundle locally.
     """
 
-    from weaver import ItemRef as _ItemRef, RepositoryRef
+    from weaver import ItemRef as _ItemRef
     from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
@@ -1107,11 +1111,14 @@ def _warehouse_build_env(
         )
 
     def install_repo(name: str) -> str:
-        _upload_tree(store, ses_fixture, resolver.repository(RepositoryRef(name)))
+        destination = resolver.weaver_items_root
+        if store.exists(destination):
+            store.delete(destination, recursive=True)
+        _upload_tree(store, ses_fixture, destination)
         return name
 
     def remove_repo(name: str) -> None:
-        store.delete(resolver.repository(RepositoryRef(name)), recursive=True)
+        store.delete(resolver.weaver_items_root, recursive=True)
 
     def generate(bundle_name: str = "whtest", *, repository_name: str = "MyRepo", prune: bool = False):
         # Generation runs IN Fabric. With prune on, Weaver reads the Warehouse

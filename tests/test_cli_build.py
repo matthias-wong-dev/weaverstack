@@ -14,8 +14,6 @@ def test_build_parser_accepts_repeatable_logical_item_bindings():
     args = build_parser().parse_args(
         [
             "build",
-            "--repository",
-            "Estate",
             "--bind",
             "Lakehouse/Raw=Raw_Dev",
             "--bind",
@@ -29,7 +27,6 @@ def test_build_parser_accepts_repeatable_logical_item_bindings():
         ]
     )
 
-    assert args.repository == "Estate"
     assert args.item_bindings == [
         "Lakehouse/Raw=Raw_Dev",
         "Warehouse/Reporting=Reporting_Dev",
@@ -42,8 +39,6 @@ def test_build_parser_does_not_require_a_persisted_bundle_record():
     args = build_parser().parse_args(
         [
             "build",
-            "--repository",
-            "Estate",
             "--bind",
             "Lakehouse/Raw=Raw_Dev",
             "--host",
@@ -60,8 +55,6 @@ def test_build_parser_accepts_a_timestamped_bundle_record_without_a_name():
     args = build_parser().parse_args(
         [
             "build",
-            "--repository",
-            "Estate",
             "--bind",
             "Lakehouse/Raw=Raw_Dev",
             "--bundle",
@@ -91,7 +84,7 @@ def test_build_handler_passes_typed_bindings_and_returns_serialisable_json(
     def run(host_value, **kwargs):
         captured.update(kwargs)
         return {
-            "repository": kwargs["repository_name"],
+            "source": "weaver_items",
             "items": [str(entry.item) for entry in kwargs["bindings"].entries],
             "bundle_id": "abc123",
             "status": "succeeded",
@@ -103,8 +96,6 @@ def test_build_handler_passes_typed_bindings_and_returns_serialisable_json(
     assert main(
         [
             "build",
-            "--repository",
-            "Estate",
             "--bind",
             "Lakehouse/Raw=Raw_Dev",
             "--bundle",
@@ -139,8 +130,6 @@ def test_invalid_binding_fails_before_transport(monkeypatch, capsys):
     assert main(
         [
             "build",
-            "--repository",
-            "Estate",
             "--bind",
             "Raw_Dev",
             "--bundle",
@@ -156,8 +145,6 @@ def test_desktop_build_requires_a_fabric_host(tmp_path, capsys):
     assert main(
         [
             "build",
-            "--repository",
-            "Estate",
             "--bind",
             "Lakehouse/Raw=Raw_Dev",
             "--bundle",
@@ -175,7 +162,7 @@ def test_fabric_adapter_submits_both_core_phases_in_one_valid_program(monkeypatc
 
     class _Result:
         payload = {
-            "repository": "Estate",
+            "source": "weaver_items",
             "items": ["Lakehouse/Raw"],
             "bundle_id": "bundle-id",
             "status": "succeeded",
@@ -208,7 +195,6 @@ def test_fabric_adapter_submits_both_core_phases_in_one_valid_program(monkeypatc
     )
     result = cli._run_fabric_item_build(
         host,
-        repository_name="Estate",
         bindings=ItemBindings((parse_item_binding("Lakehouse/Raw=Raw_Dev"),)),
         bundle_name="estate-build",
         prune=True,
@@ -265,7 +251,7 @@ def test_fabric_adapter_reports_a_queued_session_before_starting(monkeypatch, ca
         fabric_environment="Runtime",
     )
     cli._run_fabric_item_build(
-        host, repository_name="Estate",
+        host,
         bindings=ItemBindings((parse_item_binding("Lakehouse/Raw=Raw_Dev"),)),
         bundle_name="estate-build", prune=True, catalogue=True,
     )

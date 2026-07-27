@@ -307,6 +307,39 @@ def read_weaver_repository(
             continue
         entries.append((relative, entry.is_directory))
 
+    from ..catalogue.item_builtin import item_repository_files
+
+    generated_files = item_repository_files()
+    builtin_prefix = "Lakehouse/_weaver"
+    physical_builtin = {
+        relative
+        for relative, is_directory in entries
+        if not is_directory and relative.startswith(builtin_prefix + "/")
+    }
+    if physical_builtin:
+        expected = set(generated_files)
+        if physical_builtin != expected:
+            missing = sorted(expected - physical_builtin)
+            extra = sorted(physical_builtin - expected)
+            detail = (
+                f"missing {missing[0]}" if missing else f"unexpected {extra[0]}"
+            )
+            raise DiscoveryError(
+                f"{builtin_prefix}: Weaver's managed catalogue item is incomplete: {detail}"
+            )
+        for relative in sorted(expected):
+            actual = store.read(root.join(*relative.split("/")))
+            if actual != generated_files[relative]:
+                raise DiscoveryError(
+                    f"{relative}: Weaver's managed catalogue item was modified"
+                )
+    entries = [
+        entry
+        for entry in entries
+        if entry[0] != builtin_prefix
+        and not entry[0].startswith(builtin_prefix + "/")
+    ]
+
     legacy_markers = sorted(
         relative
         for relative, is_directory in entries
@@ -332,11 +365,6 @@ def read_weaver_repository(
             raise DiscoveryError(
                 f"{relative}: user-authored __init__.py is not allowed; "
                 "Weaver supplies package loading"
-            )
-        if relative == "Lakehouse/_weaver" or relative.startswith("Lakehouse/_weaver/"):
-            raise DiscoveryError(
-                "Lakehouse/_weaver is Weaver's built-in catalogue item and must not "
-                "be authored in the repository"
             )
 
     invalid_roots = sorted(
@@ -483,9 +511,6 @@ def read_weaver_repository(
         )
         documents_by_item[item].append(identity)
 
-    from ..catalogue.item_builtin import item_repository_files
-
-    generated_files = item_repository_files()
     builtin_item = WeaverItemId(LAKEHOUSE, "_weaver")
     item_ids.add(builtin_item)
     documents_by_item[builtin_item] = []

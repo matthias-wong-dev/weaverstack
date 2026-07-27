@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.catalogue import (
+from weaver.catalogue.legacy import (
     ALIAS,
     AUDIT_COLUMN_NAMES,
     CATALOGUE_REPOSITORY,

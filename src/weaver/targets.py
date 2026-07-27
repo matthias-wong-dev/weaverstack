@@ -174,28 +174,3 @@ class WarehouseTarget:
 
     def __str__(self) -> str:
         return self.warehouse.name
-
-
-@dataclass(frozen=True)
-class RepositoryRef:
-    """An installed repository, named within a Weaver Lakehouse.
-
-    The same rule as any other level-3 name: unique inside its container, so it
-    is referred to by name and never by path. Where it physically lives —
-    ``<weaver-lakehouse>/Files/repos/<name>`` — is resolution, not identity.
-    """
-
-    name: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "name", validate_name(self.name, what="repository name"))
-
-    @classmethod
-    def parse(cls, text: str) -> "RepositoryRef":
-        segments = _split(text, what="repository name")
-        if len(segments) != 1:
-            raise IdentityError(f"repository must be a single name, got {text!r}")
-        return cls(name=segments[0])
-
-    def __str__(self) -> str:
-        return self.name

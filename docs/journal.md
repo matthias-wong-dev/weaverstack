@@ -2464,6 +2464,75 @@ complete local Spark run then passed 98 real cases and exposed two deliberately
 minimal error-path fakes that lacked the newly required session configuration
 surface; after giving those fakes that surface, both focused error cases passed.
 
+### R10 — the workspace is the durable boundary, not a repository name
+
+The remaining repository dimension was generality without a use case. One Weaver
+control plane describes one Fabric workspace declaration, so a repository name
+cannot distinguish two live catalogue rows there. The source repository remains
+valuable as a development and certification unit—its signature still certifies
+the complete snapshot and coordinated bundle—but its directory name is not
+logical installation identity.
+
+The physical source contract is now singular:
+
+```text
+<Weaver Lakehouse>/Files/weaver_items/
+├── Lakehouse/
+│   ├── Raw/
+│   └── _weaver/       generated and managed by Weaver
+└── Warehouse/
+```
+
+The CLI therefore has no `--repository` selector, and both local and Fabric
+resolvers expose one `weaver_items_root`. Before the one remote-to-local copy, the
+ordinary build replaces the reserved `_weaver` subtree with the installed
+package's canonical sources. The static reader accepts those exact bytes inside
+the ordinary item hierarchy and rejects partial, unexpected or modified managed
+content. Authored and generated items consequently travel through one source
+tree, one signature and one bundle.
+
+Catalogue installation scope is now exactly `(item_type, item_name)`. Object rows
+add only `(schema_name, object_name)`, giving the four-part declaration identity
+`ItemType/ItemName/Schema.Object`. A Lakehouse Folder uses
+`schema_name = Files/<declared-schema>`; for example a Table and Folder both
+authored as `Sales.Customer` become `Sales/Customer` and
+`Files/Sales/Customer`. This removes `object_namespace` without losing identity.
+Alias endpoints and foreign-key references use the same schema spelling, so the
+catalogue also needs no destination, source or reference namespace columns.
+
+The cheap proof is intentionally structural: every one of the ten table keys
+opens with only the exact item pair, no table carries a repository or namespace
+column, same-name Table/Folder rows remain distinct, Folder schema declarations
+project as `Files/<schema>`, and item-scoped reconciliation cannot name another
+item. Spark and Fabric remain verification of physical DDL and DML, not substitutes
+for these interface tests.
+
+The public `weaver.catalogue` module now exports only that item-scoped model. The
+pre-item repository/target catalogue is quarantined under
+`weaver.catalogue.legacy` while the deprecated flat planner remains available for
+compatibility; it is not an alternative catalogue contract. Setup likewise
+reports the generated `Lakehouse/_weaver` item rather than inventing a repository
+identity for it.
+
+Exact case must cover consumption as well as creation. Fabric's default analysis
+could create `CustomerEnriched` in one action and then fold the next action's
+reference to it, so the table and view executors now analyze each complete action
+inside the same temporary exact-case scope used by its DDL and restore the user's
+session policy afterwards. The pure executor tests cover success and failure;
+the full lightweight suite passes 1,164 tests with one skip.
+
+The local Spark multi-destination test made one thing plain that the pure tests
+could not: a flat repository fixture cannot be remapped into an item tree at test
+setup. The layout is the smaller half of the difference. The *content* differs
+too — a Table consuming a Folder writes `Lineage: $Files/Raw.CustomerCsv` and
+imports `.Files.Raw__CustomerCsv`, neither of which the flat spelling can carry,
+and a bare `data/` directory has no home beneath an item, where non-object files
+belong in `lib/`. So the item verticals get their own authored fixture,
+`tests/fixtures/build-lakehouse-item`, declaring one `Lakehouse/Raw`. The flat
+`build-lakehouse` fixture stays exactly where it is, feeding the deprecated
+planner's compatibility tests. Two models, two fixtures, neither pretending to
+be the other.
+
 ---
 
 ## Open questions

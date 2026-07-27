@@ -11,8 +11,8 @@ concrete :class:`~weaver.locations.Location` values::
     FolderTarget("Sales/Files/Extracts") + Budget.BudgetPaper
         -> .local/Sales/Files/Extracts/Budget/BudgetPaper
 
-    RepositoryRef("sales-etl")
-        -> .local/Weaver/Files/repos/sales-etl
+    Weaver items
+        -> .local/Weaver/Files/weaver_items
 
 This is arithmetic only. Nothing here touches the filesystem — every location
 can be inspected before any mutation occurs. Mutation is a
@@ -27,7 +27,7 @@ explicit" enforceable rather than aspirational.
 from __future__ import annotations
 
 from .errors import CommandError
-from .hosts import BUILD_BUNDLES_AREA, REPOS_AREA, LocalHost
+from .hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, LocalHost
 from .locations import LakehouseSparkLocation, Location
 from .spark import SparkDestination, local_destination
 from .targets import (
@@ -35,7 +35,6 @@ from .targets import (
     DeltaTarget,
     FolderTarget,
     ItemRef,
-    RepositoryRef,
     WarehouseTarget,
     validate_name,
 )
@@ -164,13 +163,13 @@ class LocalResolver:
         return self.lakehouse(ItemRef(self._weaver_lakehouse_name()))
 
     @property
-    def repos_root(self) -> Location:
-        """``<weaver-lakehouse>/Files/repos`` — where installed repositories live."""
+    def weaver_items_root(self) -> Location:
+        """The workspace's one declaration, with item types directly below it."""
 
-        return self.files_root(ItemRef(self._weaver_lakehouse_name())) / REPOS_AREA
-
-    def repository(self, repository: RepositoryRef) -> Location:
-        return self.repos_root / repository.name
+        return (
+            self.files_root(ItemRef(self._weaver_lakehouse_name()))
+            / WEAVER_ITEMS_AREA
+        )
 
     @property
     def build_bundles_root(self) -> Location:

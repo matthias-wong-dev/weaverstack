@@ -32,10 +32,10 @@ from typing import Mapping
 from .errors import ConfigError
 from .targets import validate_name
 
-#: Installed repositories live beneath the Weaver Lakehouse Files area at this
-#: relative root. It is a convention, not configuration: a folder pushed here
-#: becomes an installed repository.
-REPOS_AREA = "repos"
+#: The workspace's one Weaver declaration lives beneath the control Lakehouse
+#: Files area at this fixed root. Typed item directories begin immediately below
+#: it; there is no repository-name level inside one control plane.
+WEAVER_ITEMS_AREA = "weaver_items"
 
 #: Persisted build bundles live beneath the Weaver Lakehouse Files area here,
 #: each under a per-build subdirectory. A bundle bound for immediate execution

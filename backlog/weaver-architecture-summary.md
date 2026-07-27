@@ -1,4 +1,4 @@
-# Weaver Repository, Item and Document Architecture
+# Weaver Workspace, Item and Document Architecture
 
 ## Status
 
@@ -20,13 +20,14 @@ Weaver is a control plane for declaring the logical contents of a Microsoft
 Fabric workspace:
 
 ```text
-Weaver repository
+Fabric workspace declaration
 └── Weaver items
     └── Weaver documents
 ```
 
-A **Weaver repository** is the one source-controlled declaration installed in a
-Weaver control plane.
+A **Weaver source repository** is the development and certification unit. Once
+uploaded, its directory name is not logical identity: one control plane exposes
+one fixed workspace declaration at `Files/weaver_items`.
 
 A **Weaver item** is a logical Fabric item owned by that repository. The initial
 item types are:
@@ -50,15 +51,15 @@ Semantic Models are outside this re-architecture.
 
 ## 2. Control-plane cardinality
 
-One Weaver Lakehouse is one control-plane environment and contains one Weaver
-repository. Weaver's own catalogue is not a second repository: it is the built-in
-`Lakehouse/_weaver` item of that repository.
+One Weaver Lakehouse is one control-plane environment and contains one workspace
+declaration. Weaver's own catalogue is the built-in `Lakehouse/_weaver` item of
+that same declaration.
 
 One Fabric workspace may hold several Weaver Lakehouses. A team may use one per
 developer or deployment environment, with each control plane binding the same
 logical items to shared or individual physical items. A Fabric Environment may
 likewise carry a different Weaver version where necessary; that does not create a
-second repository inside one control plane.
+second declaration inside one control plane.
 
 Within one control plane:
 
@@ -81,7 +82,7 @@ The first directory level is the singular item type. The second is the logical
 item name:
 
 ```text
-Estate/
+Files/weaver_items/
 ├── Lakehouse/
 │   ├── Raw/
 │   │   ├── schemas/
@@ -93,10 +94,11 @@ Estate/
 │   │   │   └── Sales__Order.py
 │   │   └── lib/
 │   │       └── csv_helpers.py
-│   └── Curated/
-│       ├── schemas/
-│       │   └── Sales.yml
-│       └── Sales__Customer.py
+│   ├── Curated/
+│   │   ├── schemas/
+│   │   │   └── Sales.yml
+│   │   └── Sales__Customer.py
+│   └── _weaver/                  generated and Weaver-managed
 ├── Warehouse/
 │   └── Reporting/
 │       ├── schemas/
@@ -174,8 +176,9 @@ is an unresolved reference and is an error. Declarations that differ only by cas
 are nevertheless rejected, because some physical targets collapse their names and
 could not materialise both safely.
 
-The repository name is the repository directory name. Renaming the directory is a
-logical repository rename.
+The source repository's local directory name is not logical identity and is not
+stored in the catalogue. The complete source still has a repository signature for
+bundle certification.
 
 The physical binding is separate:
 
@@ -392,16 +395,10 @@ The catalogue remains in schema `_` of the Weaver Lakehouse and remains the one
 authority for the control plane. The ten-table machinery, generated DML,
 signatures, registry-last ordering and tolerant reading are preserved.
 
-Installation scope changes from:
+Installation scope is exactly:
 
 ```text
-repository, target_type
-```
-
-to:
-
-```text
-repository, item_type, item_name
+item_type, item_name
 ```
 
 The physical target name remains an installation attribute. Rebinding an item
@@ -416,9 +413,10 @@ consumes; `_.Installation` records that item signature, so an unrelated item edi
 does not make every installation appear stale. Registry and dictionary signatures
 remain document- or declaration-specific.
 
-Object dictionaries are keyed beneath the item scope. Folder and Delta rows share
-the same Lakehouse installation scope while retaining distinct object kinds and
-logical namespaces.
+Object dictionaries add `schema_name, object_name` beneath the item scope. Folder
+and Delta rows share the same Lakehouse installation scope; a Folder's schema is
+stored as `Files/<declared-schema>`, so the four catalogue identity columns remain
+enough without an `object_namespace` dimension.
 
 `_.Alias` reproduces the destination-keyed entries of `alias.yml`. `_.Dependency`
 is scoped to the consumer item, keeps two-part logical references two-part and
@@ -433,6 +431,10 @@ Catalogue schema migration is deliberately deferred. During this early stage the
 catalogue is destructively rebuilt from the repository when its representation
 changes. It becomes durable only when incremental build starts depending on its
 history.
+
+`weaver.catalogue` exposes this item-scoped representation. The earlier flat
+planner's repository/target catalogue is isolated in `weaver.catalogue.legacy`
+only as a temporary compatibility seam and is not part of the public architecture.
 
 ---
 
@@ -476,8 +478,8 @@ Generation and installation both run in the target environment:
 Desktop CLI and Fabric tests may cross the boundary using REST, DFS and Livy, but
 core never silently substitutes a desktop client for the session-native path.
 
-Inside Fabric, the session makes one recursive copy of the installed OneLake
-repository into a driver-local temporary directory. Discovery, validation,
+Inside Fabric, the session makes one recursive copy of `Files/weaver_items` into
+a driver-local temporary directory. Discovery, validation,
 signatures, planning, snapshot generation and direct installation then use local
 files. No persisted bundle is required for the normal development path. A caller
 may subsequently preserve the complete bundle as one deterministic
@@ -500,9 +502,9 @@ This re-architecture does not implement:
 - Semantic Models;
 - catalogue migration or multi-version history;
 - making unsafe shared physical-item prune safe;
-- multiple repositories in one Weaver control plane.
+- multiple workspace declarations in one Weaver control plane.
 
-The immediate outcome is a truthful logical model: one repository declares many
-items, every document is owned by one item, bindings are item-specific, the graph
-and catalogue carry that identity, and unsupported alias execution fails before
-mutation.
+The immediate outcome is a truthful logical model: one workspace declaration
+contains many items, every document is owned by one item, bindings are
+item-specific, the graph and catalogue carry that identity, and unsupported alias
+execution fails before mutation.

@@ -46,8 +46,8 @@ def warehouse_repo(tmp_path):
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
-    store.make_directory(resolver.repos_root)
-    shutil.copytree(WAREHOUSE_FIXTURE, (resolver.repos_root / "WhRepo").path)
+    store.make_directory(resolver.weaver_items_root)
+    shutil.copytree(WAREHOUSE_FIXTURE, resolver.weaver_items_root.path, dirs_exist_ok=True)
     return host, store, resolver, tmp_path
 
 

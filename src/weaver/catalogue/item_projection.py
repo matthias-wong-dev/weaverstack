@@ -13,7 +13,6 @@ from .item_tables import (
     CATALOGUE_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
-    FILES_NAMESPACE,
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     INDEX_DICTIONARY,
@@ -21,7 +20,6 @@ from .item_tables import (
     ItemInstallationScope,
     REGISTRY,
     SCHEMA_DICTIONARY,
-    TABLES_NAMESPACE,
     TABLE_DICTIONARY,
 )
 from .projection import CatalogueProjection, OBJECT_TYPE_FOR_KIND
@@ -37,7 +35,7 @@ def project_item_installation(
     target_name: str,
     weaver_version: str,
 ) -> CatalogueProjection:
-    scope = ItemInstallationScope(repository.name, item.item_type, item.item_name)
+    scope = ItemInstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
     if any(identity.item != item for identity in retained):
         raise ValueError(f"item projection {item} received a document owned elsewhere")
@@ -144,27 +142,30 @@ def project_item_installation(
         rows[ALIAS.name].append(
             {
                 **_scope(scope),
-                "destination_namespace": _namespace(alias.destination),
-                "destination_schema_name": alias.destination.object_id.schema,
+                "destination_schema_name": _catalogue_schema(alias.destination),
                 "destination_object_name": alias.destination.object_id.object,
                 "source_item_type": alias.source.item.item_type,
                 "source_item_name": alias.source.item.item_name,
-                "source_namespace": _namespace(alias.source),
-                "source_schema_name": alias.source.object_id.schema,
+                "source_schema_name": _catalogue_schema(alias.source),
                 "source_object_name": alias.source.object_id.object,
                 "signature": _alias_signature(alias),
             }
         )
 
-    used_schemas = sorted({identity.object_id.schema for identity in retained})
+    used_schemas = sorted(
+        {
+            (_catalogue_schema(identity), identity.object_id.schema)
+            for identity in retained
+        }
+    )
     item_model = next(model for model in repository.items if model.identity == item)
     schemas = {identity.schema: identity for identity in item_model.schemas}
-    for schema_name in used_schemas:
-        schema = repository.schema_documents[schemas[schema_name]]
+    for catalogue_name, declared_name in used_schemas:
+        schema = repository.schema_documents[schemas[declared_name]]
         rows[SCHEMA_DICTIONARY.name].append(
             {
                 **_scope(scope),
-                "schema_name": schema_name,
+                "schema_name": catalogue_name,
                 "description": schema.description,
                 "description_reference": None,
                 "signature": schema.source_hash,
@@ -194,15 +195,15 @@ def _scope(scope: ItemInstallationScope) -> dict[str, str]:
     return dict(scope.values)
 
 
-def _namespace(identity: WeaverDocumentId) -> str:
-    return FILES_NAMESPACE if identity.is_files else TABLES_NAMESPACE
+def _catalogue_schema(identity: WeaverDocumentId) -> str:
+    prefix = "Files/" if identity.is_files else ""
+    return f"{prefix}{identity.object_id.schema}"
 
 
 def _identity(scope: ItemInstallationScope, identity: WeaverDocumentId) -> dict:
     return {
         **_scope(scope),
-        "object_namespace": _namespace(identity),
-        "schema_name": identity.object_id.schema,
+        "schema_name": _catalogue_schema(identity),
         "object_name": identity.object_id.object,
     }
 
@@ -254,8 +255,9 @@ def _foreign_keys(source, identity, common, signature) -> list[dict]:
                 "column_set": column_set(key.columns),
                 "reference_item_type": parent_item.item_type,
                 "reference_item_name": parent_item.item_name,
-                "reference_namespace": FILES_NAMESPACE if reference.is_files else TABLES_NAMESPACE,
-                "reference_schema_name": reference.schema,
+                "reference_schema_name": (
+                    f"Files/{reference.schema}" if reference.is_files else reference.schema
+                ),
                 "reference_object_name": reference.object,
                 "reference_column_set": column_set(key.reference_columns),
                 "signature": signature,

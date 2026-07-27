@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 from weaver import LocalStore, Location
-from weaver.catalogue import (
+from weaver.catalogue.legacy import (
     ALIAS,
     COLUMN_DICTIONARY,
     DEPENDENCY,
@@ -47,7 +47,7 @@ def repository():
 def _nodes(repository, target_type: str) -> list[str]:
     """Every node that installs into one target type — a whole-side projection."""
 
-    from weaver.catalogue import target_type_for_ses_target
+    from weaver.catalogue.legacy import target_type_for_ses_target
 
     return [
         document.node_id
@@ -536,7 +536,7 @@ def test_a_repository_named_like_the_item_it_reads_projects_one_edge_not_two(tmp
 
     import shutil
 
-    from weaver.catalogue import DEPENDENCY
+    from weaver.catalogue.legacy import DEPENDENCY
 
     root = tmp_path / "Sales_LH"
     shutil.copytree(FIXTURE, root)
@@ -600,7 +600,7 @@ def test_the_managed_reading_wins_when_the_two_do_collide():
 
 
 def test_duplicate_keys_are_refused_at_generation_not_discovered_at_install(repository):
-    from weaver.catalogue import REGISTRY, render_merge
+    from weaver.catalogue.legacy import REGISTRY, render_merge
 
     row = {
         "repository": "catalogue-estate",

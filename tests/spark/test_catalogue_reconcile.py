@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from weaver import LocalStore, Location
-from weaver.catalogue import (
+from weaver.catalogue.legacy import (
     AUDIT_COLUMN_NAMES,
     CATALOGUE_TABLES,
     DEPENDENCY,

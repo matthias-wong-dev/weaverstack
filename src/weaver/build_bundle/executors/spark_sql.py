@@ -25,6 +25,7 @@ from typing import Any
 from ...errors import InstallError
 from ..models import BuildAction
 from .base import InstallationContext
+from .spark_case import exact_identifier_case
 
 
 class SparkSqlExecutor:
@@ -44,7 +45,11 @@ class SparkSqlExecutor:
             )
         catalogue = context.catalogue
         statement = catalogue.expand(payload.decode("utf-8").strip())
-        context.spark.sql(statement)
+        with exact_identifier_case(
+            context.spark,
+            enabled=catalogue.destination.preserve_table_identifier_case,
+        ):
+            context.spark.sql(statement)
         # The destination is reported, not just used: an install report that says
         # which Lakehouse each statement ran against is the record a reviewer needs
         # when the answer used to depend on what the session was attached to.

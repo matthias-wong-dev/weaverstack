@@ -18,7 +18,7 @@ from importlib.resources import files
 import pytest
 
 from weaver import LocalStore, Location
-from weaver.catalogue import (
+from weaver.catalogue.legacy import (
     CATALOGUE_REPOSITORY,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,

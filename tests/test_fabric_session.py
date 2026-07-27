@@ -147,7 +147,7 @@ def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decodin
             return True
 
     remote_tree = Location(
-        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/repos/Estate"
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/weaver_items"
     )
     remote_archive = Location(
         "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/"

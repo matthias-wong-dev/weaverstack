@@ -34,16 +34,11 @@ from ...ses.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
 from ...spark import tokens
 from ..models import BuildAction
 from .base import InstallationContext
+from .spark_case import exact_identifier_case
 
 #: Reserved audit names, in the Delta (underscored) spelling, for collision
 #: detection against an inferred query's own output columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
-
-#: Fabric's default ``false`` folds table identifiers to lower-case at creation
-#: time, even when the DDL quotes a PascalCase name. The setting is scoped to the
-#: DDL below and restored immediately; query analysis keeps the caller's policy.
-_CASE_SENSITIVE = "spark.sql.caseSensitive"
-
 
 class SparkTableExecutor:
     name = "spark_table"
@@ -72,48 +67,59 @@ class SparkTableExecutor:
         qualified = catalogue.expand(instruction["object"])
         query = catalogue.expand(instruction["source_query"])
 
-        frame = context.spark.sql(query)
-        query_columns = tuple(field.name for field in frame.schema.fields)
-        # Exact-cased: a column name is a case-sensitive Weaver contract.
-        query_types = {
-            field.name: field.dataType.simpleString() for field in frame.schema.fields
-        }
-
-        declared = instruction["declared_columns"]
-        declared_names = (
-            tuple(name for name, _type, _nn in declared) if declared is not None else None
-        )
-        references = tuple((label, column) for label, column in instruction["references"])
-        identity = instruction.get("identity_column")
-        identity_name = identity[0] if identity else None
-
-        business_columns = validate_build_columns(
-            qualified,
-            query_columns,
-            declared_columns=declared_names,
-            references=references,
-            identity=identity_name,
-        )
-
-        business = self._physical_columns(
-            qualified, business_columns, declared, query_types, references
-        )
-        # The identity column leads, the audit columns trail — both Weaver's own.
-        leading = [tuple(identity)] if identity else []
-        physical = leading + business + [tuple(entry) for entry in instruction["audit_columns"]]
-
-        statement = _create_table_sql(
-            qualified,
-            physical,
-            column_mapping=instruction.get("column_mapping", True),
-        )
-        _create_preserving_identifier_case(
+        # Fabric defaults case-sensitive analysis off. Weaver identities are exact,
+        # so the source query and the resulting DDL must share one exact-case scope:
+        # otherwise a table created as ``CustomerEnriched`` cannot be consumed by
+        # the next action in the same coordinated build.
+        with exact_identifier_case(
             context.spark,
-            statement,
             enabled=catalogue.destination.preserve_table_identifier_case,
-            catalogue=catalogue,
-            logical_object=instruction["object"],
-        )
+        ):
+            frame = context.spark.sql(query)
+            query_columns = tuple(field.name for field in frame.schema.fields)
+            query_types = {
+                field.name: field.dataType.simpleString() for field in frame.schema.fields
+            }
+
+            declared = instruction["declared_columns"]
+            declared_names = (
+                tuple(name for name, _type, _nn in declared)
+                if declared is not None
+                else None
+            )
+            references = tuple(
+                (label, column) for label, column in instruction["references"]
+            )
+            identity = instruction.get("identity_column")
+            identity_name = identity[0] if identity else None
+
+            business_columns = validate_build_columns(
+                qualified,
+                query_columns,
+                declared_columns=declared_names,
+                references=references,
+                identity=identity_name,
+            )
+
+            business = self._physical_columns(
+                qualified, business_columns, declared, query_types, references
+            )
+            leading = [tuple(identity)] if identity else []
+            physical = leading + business + [
+                tuple(entry) for entry in instruction["audit_columns"]
+            ]
+
+            statement = _create_table_sql(
+                qualified,
+                physical,
+                column_mapping=instruction.get("column_mapping", True),
+            )
+            _create_preserving_identifier_case(
+                context.spark,
+                statement,
+                catalogue=catalogue,
+                logical_object=instruction["object"],
+            )
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
@@ -179,7 +185,6 @@ def _create_preserving_identifier_case(
     spark,
     statement: str,
     *,
-    enabled: bool,
     catalogue,
     logical_object: str,
 ) -> None:
@@ -193,20 +198,9 @@ def _create_preserving_identifier_case(
     and replaces table structure; load is the phase that owns rows.
     """
 
-    if not enabled:
-        spark.sql(statement)
-        return
-    previous = spark.conf.get(_CASE_SENSITIVE)
-    if str(previous).lower() == "true":
+    if catalogue.destination.preserve_table_identifier_case:
         _drop_case_variant(catalogue, logical_object)
-        spark.sql(statement)
-        return
-    spark.conf.set(_CASE_SENSITIVE, "true")
-    try:
-        _drop_case_variant(catalogue, logical_object)
-        spark.sql(statement)
-    finally:
-        spark.conf.set(_CASE_SENSITIVE, previous)
+    spark.sql(statement)
 
 
 def _drop_case_variant(catalogue, logical_object: str) -> None:

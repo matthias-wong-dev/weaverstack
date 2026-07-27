@@ -10,7 +10,6 @@ from weaver import (
     ItemRef,
     LocalHost,
     LocalResolver,
-    RepositoryRef,
     WarehouseTarget,
 )
 from weaver.errors import CommandError
@@ -105,10 +104,9 @@ def test_a_warehouse_fails_explicitly_rather_than_silently(resolver):
         resolver.warehouse(WarehouseTarget.parse("Reporting"))
 
 
-def test_repositories_live_under_the_weaver_lakehouse(resolver):
-    assert resolver.repos_root.value == "/srv/.local/Weaver/Files/repos"
-    assert resolver.repository(RepositoryRef("sales-etl")).value == (
-        "/srv/.local/Weaver/Files/repos/sales-etl"
+def test_weaver_items_live_directly_under_the_control_lakehouse(resolver):
+    assert resolver.weaver_items_root.value == (
+        "/srv/.local/Weaver/Files/weaver_items"
     )
 
 
@@ -123,7 +121,7 @@ def test_the_weaver_lakehouse_is_just_another_item(resolver):
 def test_a_host_without_a_weaver_lakehouse_says_so():
     resolver = LocalResolver(LocalHost(root="/srv/.local"))
     with pytest.raises(CommandError, match="weaver_lakehouse"):
-        resolver.repos_root
+        resolver.weaver_items_root
 
 
 def test_resolution_touches_nothing(tmp_path):

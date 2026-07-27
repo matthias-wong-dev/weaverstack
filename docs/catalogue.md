@@ -1,7 +1,7 @@
 # The central catalogue
 
-The item-oriented catalogue scopes installations by
-`(repository, item_type, item_name)`, projects destination-keyed `alias.yml`, and
+The item-oriented catalogue scopes installations by `(item_type, item_name)`,
+projects destination-keyed `alias.yml`, and
 builds generated `Lakehouse/_weaver` through the ordinary planner. The earlier
 flat planner is retained only for isolated compatibility tests and is not part of
 the advertised public or CLI model.
@@ -25,23 +25,24 @@ valid.
 
 ## Installation scope is identity
 
-A repository owns several exact logical items, and the same `Schema.Object` may
-legitimately exist in several of them. Every catalogue row is therefore keyed on
-`repository`, `item_type` and `item_name` before anything else:
+The workspace declaration owns several exact logical items, and the same
+`Schema.Object` may legitimately exist in several of them. Every catalogue row is
+therefore keyed on `item_type` and `item_name` before anything else:
 
 ```text
-SalesRepo | Lakehouse | Raw       | Tables | Sales | Customer
-SalesRepo | Warehouse | Reporting | Tables | Sales | Customer
+Lakehouse | Raw       | Sales       | Customer
+Lakehouse | Raw       | Files/Sales | Customer
+Warehouse | Reporting | Sales       | Customer
 ```
 
-Those are two rows and both are real. A Lakehouse-only build reconciles only the
-first; it must not touch the second, and cannot, because there is no way to name a
-row without naming the installation it belongs to.
+Those are three rows and all are real. The first two share one Lakehouse item but
+remain distinct because `Files/` is part of the Folder's schema. A build cannot
+touch another item because every key begins with its exact item identity.
 
 An object left out because its owning item was not bound is **out of scope**, not
 deleted. A build has no opinion about unbound items.
 
-The bound item's name is an attribute, never identity. Rebinding a repository to a
+The bound item's name is an attribute, never identity. Rebinding an item to a
 different Lakehouse **updates** its `_.Installation` row; it does not add a second
 installation.
 
@@ -53,7 +54,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 
 | Table | One row per | Notes |
 |---|---|---|
-| `_.Installation` | repository + logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
+| `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
 | `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
@@ -93,8 +94,8 @@ recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-The item reader generates `Lakehouse/_weaver` from the authoritative table
-definitions and parses those generated schema and source files through the same
+Weaver materialises `Lakehouse/_weaver` beneath `Files/weaver_items` from the
+authoritative table definitions and parses those generated schema and source files through the same
 static readers as authored content. The **ordinary item planner and installer**
 then build it. There is no second "create the control tables" path, and that
 recursion is the point.
@@ -147,7 +148,7 @@ asking what a build would change.
 Ordering is the one strict invariant:
 
 1. **dictionaries** describe what was built;
-2. **`_.Installation`** records which item the repository is bound to;
+2. **`_.Installation`** records which physical item the logical item is bound to;
 3. **`_.Registry`** certifies.
 
 Registry is last and is its own barrier, so a row in it cannot outrun the work it
@@ -174,8 +175,7 @@ Three scopes, and they are deliberately different operations:
 | Scope | What it removes | Reached from |
 |---|---|---|
 | object | rows no longer projected, within one installation | every build |
-| installation | one `(repository, item_type, item_name)` entirely | decommissioning a logical item, explicitly |
-| repository | every installation of one repository | repository lifecycle, explicitly |
+| installation | one `(item_type, item_name)` entirely | decommissioning a logical item, explicitly |
 
 Only the first is part of a build. A build that did not bind an item has no opinion
 about it, so nothing in the build path can reach its installation rows.
@@ -291,10 +291,9 @@ Two things worth knowing:
 
 ## What this branch does not do yet
 
-Build still emits `CREATE OR REPLACE TABLE`, so a re-run of **setup** empties the
-catalogue tables before repopulating the built-in repository's own rows — and any
-other repository's rows go with them. Only setup rebuilds schema `_`; an ordinary
-build never does.
+Build still emits `CREATE OR REPLACE TABLE`, so an explicit `_weaver` rebuild
+empties the catalogue tables before the same coordinated build repopulates the
+workspace declaration's rows. Ordinary builds leave `_weaver` unbound.
 
 Dropping only what changed is the next branch, and it is what the signatures in
 this catalogue exist for: compare the recorded signature with the source, drop the

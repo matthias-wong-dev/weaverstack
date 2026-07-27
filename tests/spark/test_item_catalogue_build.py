@@ -69,15 +69,14 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
 
     installation = spark.table(
         weaver_catalogue.qualify("_", INSTALLATION.name)
-    ).select("repository", "item_type", "item_name", "target_name").collect()
+    ).select("item_type", "item_name", "target_name").collect()
     assert [tuple(row) for row in installation] == [
-        ("Estate", "Lakehouse", "_weaver", lakehouses.weaver.name)
+        ("Lakehouse", "_weaver", lakehouses.weaver.name)
     ]
 
     registry = spark.table(weaver_catalogue.qualify("_", REGISTRY.name))
     assert registry.where(
-        "repository = 'Estate' AND item_type = 'Lakehouse' "
-        "AND item_name = '_weaver' AND object_namespace = 'Tables'"
+        "item_type = 'Lakehouse' AND item_name = '_weaver'"
     ).count() == len(CATALOGUE_TABLES)
 
 

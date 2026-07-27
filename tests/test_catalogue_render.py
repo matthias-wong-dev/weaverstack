@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.catalogue import (
+from weaver.catalogue.legacy import (
     DEPENDENCY,
     FOREIGN_KEY_DICTIONARY,
     INDEX_DICTIONARY,

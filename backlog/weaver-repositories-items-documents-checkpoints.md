@@ -38,6 +38,7 @@ build constraints remain
 | R8a | Repository, item and document signatures are separated | complete |
 | R8b | Fabric materialises once and bundle persistence is optional | complete |
 | R9 | Local and Fabric verticals prove the architecture | in progress |
+| R10 | Workspace-scoped catalogue identity and `weaver_items` source root | in progress |
 
 ---
 
@@ -109,7 +110,8 @@ an object kind inside a Lakehouse, not a target.
   `Warehouse/Reporting/Sales.Customer` are distinct;
 - logical parsing and lookup require exact case;
 - case-only duplicate declarations are rejected;
-- repository name comes from the repository directory;
+- repository name comes from the repository directory (source-model detail,
+  superseded as durable identity by R10);
 - no CLI, planner or catalogue migration occurs yet.
 
 ### Verification
@@ -328,9 +330,10 @@ physical reference preservation and no install-time repository interpretation.
 
 ### Outcome
 
-The ten catalogue tables identify installations and objects by
-`(repository, item_type, item_name)`. The built-in catalogue is the repository's
-`Lakehouse/_weaver` item and is built through the ordinary path.
+The ten catalogue tables identify installations and objects by logical item. The
+built-in catalogue is `Lakehouse/_weaver` and is built through the ordinary path.
+R10 removes the repository and namespace dimensions from the representation
+introduced here.
 
 ### Read
 
@@ -355,8 +358,8 @@ The ten catalogue tables identify installations and objects by
 
 ### Replace
 
-- scope `(repository, target_type)` with
-  `(repository, item_type, item_name)`;
+- scope `(repository, target_type)` with item ownership (finalised by R10 as
+  `(item_type, item_name)`);
 - target-type alias ownership with destination-keyed `alias.yml` rows;
 - repository-relative dependency scope with consumer-item scope;
 - the standalone `_weaver` repository with built-in `Lakehouse/_weaver`;
@@ -608,3 +611,38 @@ The journal, architecture summary, build philosophy, catalogue guide, repository
 authoring guide, CLI guide and test fixtures all describe the same shipped model.
 Physical alias behaviour remains a clearly named future checkpoint rather than a
 hidden fallback.
+
+---
+
+## R10 — Make the workspace declaration the catalogue boundary
+
+### Outcome
+
+The control plane has one fixed source tree and the catalogue records only
+identities that distinguish Fabric declarations inside that workspace.
+
+### Contract
+
+- the source root is `<Weaver Lakehouse>/Files/weaver_items/`; item type
+  directories begin immediately below it and the CLI does not select a named
+  repository;
+- generated, reserved `Lakehouse/_weaver` sources are materialised inside that
+  same tree and validated against the package-owned canonical bytes;
+- repository and item signatures remain certification layers for the coordinated
+  source and bundle, but repository name is not catalogue identity;
+- every catalogue row is scoped by exact `(item_type, item_name)`;
+- object identity is `(item_type, item_name, schema_name, object_name)`;
+- a Folder's catalogue schema is `Files/<declared-schema>`, so
+  `Lakehouse/Raw/Sales.Order` and `Lakehouse/Raw/Files/Sales.Order` remain distinct
+  without `object_namespace`;
+- alias and foreign-key source/destination schemas use the same `Files/` prefix;
+  no object-, source-, destination- or reference-namespace columns remain;
+- rebinding updates the one Installation row for the logical item.
+
+### Verification
+
+Pure tests inspect all ten table keys and columns, project same-name Table/Folder
+documents, reconcile two independent items, materialise `_weaver` beside authored
+items, and prove one read per source file from the fixed tree. Local Spark and the
+row-3 Fabric mixed estate rebuild the destructible early catalogue to its new
+shape and read it back through the public catalogue tables.

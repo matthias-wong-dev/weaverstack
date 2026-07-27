@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.catalogue import REGISTRY, TABLE_DICTIONARY, InstallationScope
+from weaver.catalogue.legacy import REGISTRY, TABLE_DICTIONARY, InstallationScope
 from weaver.catalogue.reader import read_installation, read_table
 from weaver.spark import SparkCatalogue, local_destination
 

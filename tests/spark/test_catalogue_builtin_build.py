@@ -20,13 +20,15 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, RepositoryRef
+from weaver import ItemRef
 from weaver.build_bundle.bundle import load_bundle
 from weaver.build_bundle.installer import InstallationEnvironment, install_bundle
-from weaver.build_bundle.planner import generate_build_bundle
-from weaver.build_bundle.targets import LakehouseBinding, TargetBindings
-from weaver.catalogue import CATALOGUE_REPOSITORY, CATALOGUE_TABLES
-from weaver.catalogue.builtin import repository_files
+from weaver.build_bundle.item_planner import generate_item_build_bundle
+from weaver.build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
+from weaver.catalogue.item_builtin import materialise_builtin_item
+from weaver.catalogue.item_tables import CATALOGUE_TABLES
+from weaver.ses import read_weaver_repository
+from weaver.ses.model import WeaverItemId
 
 pytestmark = pytest.mark.spark
 
@@ -40,23 +42,27 @@ def built_catalogue(lakehouses, spark, weaver_catalogue):
     """
 
     resolver, store = lakehouses.resolver, lakehouses.store
-    repository = resolver.repository(RepositoryRef(CATALOGUE_REPOSITORY))
-    for relative, data in repository_files().items():
-        store.write(repository.join(*relative.split("/")), data)
+    repository_root = resolver.weaver_items_root
+    materialise_builtin_item(repository_root, store=store)
+    repository = read_weaver_repository(repository_root, store=store)
+    control = LakehouseBinding(lakehouse=lakehouses.weaver)
 
-    bundle = generate_build_bundle(
-        weaver_lakehouse=lakehouses.weaver,
-        repository_name=CATALOGUE_REPOSITORY,
-        targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.weaver)),
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+        ),
         output=resolver.build_bundle("catalogue-bootstrap"),
-        host=lakehouses.host,
         store=store,
         prune=False,
         # Structure only. With the catalogue on, this same bundle would go on to
         # populate the tables it just created — which is the bootstrap, and is
         # tested as such in test_catalogue_setup.
         catalogue=False,
+        control_lakehouse=None,
+        resolver=resolver,
         spark=spark,
+        host=lakehouses.host,
     )
     report = install_bundle(
         load_bundle(bundle.location, store=store),
@@ -194,19 +200,23 @@ def test_rebuilding_the_unchanged_repository_succeeds_again(built_catalogue, lak
     """
 
     resolver, store = lakehouses.resolver, lakehouses.store
-    bundle = generate_build_bundle(
-        weaver_lakehouse=lakehouses.weaver,
-        repository_name=CATALOGUE_REPOSITORY,
-        targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.weaver)),
+    repository = read_weaver_repository(resolver.weaver_items_root, store=store)
+    control = LakehouseBinding(lakehouse=lakehouses.weaver)
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+        ),
         output=resolver.build_bundle("catalogue-bootstrap-again"),
-        host=lakehouses.host,
         store=store,
         prune=False,
         # Structure only. With the catalogue on, this same bundle would go on to
         # populate the tables it just created — which is the bootstrap, and is
         # tested as such in test_catalogue_setup.
         catalogue=False,
+        resolver=resolver,
         spark=spark,
+        host=lakehouses.host,
     )
     report = install_bundle(
         load_bundle(bundle.location, store=store),

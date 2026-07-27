@@ -17,16 +17,15 @@ from dataclasses import dataclass
 
 import pytest
 
-from weaver import ItemRef, RepositoryRef
-from weaver.catalogue import (
-    CATALOGUE_REPOSITORY,
+from weaver import ItemRef
+from weaver.catalogue.item_tables import (
     CATALOGUE_TABLES,
     DEPENDENCY,
     INSTALLATION,
     REGISTRY,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
-    InstallationScope,
+    ItemInstallationScope,
 )
 from weaver.catalogue.reader import read_installation, read_table
 from weaver.spark import SparkCatalogue, local_destination
@@ -34,7 +33,7 @@ from weaver.setup import BUNDLE_NAME, initialise_weaver_lakehouse
 
 pytestmark = pytest.mark.spark
 
-SCOPE = InstallationScope(repository=CATALOGUE_REPOSITORY, target_type="lakehouse")
+SCOPE = ItemInstallationScope(item_type="Lakehouse", item_name="_weaver")
 
 
 @dataclass(frozen=True)
@@ -59,7 +58,7 @@ def _environment(root):
     resolver = LocalResolver(host)
     store.make_directory(resolver.files_root(ItemRef("Weaver")))
     store.make_directory(resolver.tables_root(ItemRef("Weaver")))
-    store.make_directory(resolver.repos_root)
+    store.make_directory(resolver.weaver_items_root)
     return host, resolver, store
 
 
@@ -123,11 +122,13 @@ def test_setup_succeeds(setup):
 
 
 def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup):
-    root = setup.resolver.repository(RepositoryRef(CATALOGUE_REPOSITORY))
-    assert setup.store.exists(root.join("_schemas", "_.yml"))
+    root = setup.resolver.weaver_items_root
+    assert setup.store.exists(root.join("Lakehouse", "_weaver", "schemas", "_.yml"))
     for table in CATALOGUE_TABLES:
-        assert setup.store.exists(root.join(f"{table.qualified}.spark.sql"))
-    assert "_schemas/_.yml" in setup.result.materialised
+        assert setup.store.exists(
+            root.join("Lakehouse", "_weaver", f"{table.qualified}.spark.sql")
+        )
+    assert "Lakehouse/_weaver/schemas/_.yml" in setup.result.materialised
 
 
 def test_the_bundle_is_kept_where_bundles_belong(setup):
@@ -187,7 +188,7 @@ def test_the_catalogue_describes_its_own_tables_and_their_keys(setup, spark):
 
 
 def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
-    from weaver.catalogue import COLUMN_DICTIONARY
+    from weaver.catalogue.item_tables import COLUMN_DICTIONARY
 
     rows = read_table(setup.catalogue, COLUMN_DICTIONARY, scope=SCOPE)
     described = {(row["object_name"], row["column_name"]) for row in rows}
@@ -197,7 +198,7 @@ def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
 
 
 def test_the_catalogue_records_its_own_logical_keys(setup, spark):
-    from weaver.catalogue import INDEX_DICTIONARY
+    from weaver.catalogue.item_tables import INDEX_DICTIONARY
 
     rows = read_table(setup.catalogue, INDEX_DICTIONARY, scope=SCOPE)
     keys = {(row["object_name"], row["column_set"]) for row in rows}
@@ -213,13 +214,13 @@ def test_the_catalogue_declares_no_dependencies_and_records_none(setup, spark):
 
 
 def test_no_alias_or_relationship_rows_are_invented(setup, spark):
-    read = read_installation(setup.catalogue, scope=SCOPE)
+    read = read_installation(setup.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
     assert read["Alias"] == ()
     assert read["ForeignKeyDictionary"] == ()
 
 
 def test_no_folder_rows_since_the_catalogue_has_no_folders(setup, spark):
-    read = read_installation(setup.catalogue, scope=SCOPE)
+    read = read_installation(setup.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
     assert read["FolderDictionary"] == ()
 
 
@@ -290,7 +291,9 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
         assert first.result.succeeded, _failures(first.result.report)
         before = {
             name: tuple(sorted(map(repr, rows)))
-            for name, rows in read_installation(first.catalogue, scope=SCOPE).items()
+            for name, rows in read_installation(
+                first.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES
+            ).items()
         }
         assert before["Registry"], "the first run must have catalogued something"
 
@@ -305,7 +308,9 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
 
         after = {
             name: tuple(sorted(map(repr, rows)))
-            for name, rows in read_installation(first.catalogue, scope=SCOPE).items()
+            for name, rows in read_installation(
+                first.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES
+            ).items()
         }
         assert after == before
     finally:
@@ -314,7 +319,7 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
 
 def test_the_result_serialises_for_a_cli_without_owning_any_semantics(setup):
     mapping = setup.result.to_mapping()
-    assert mapping["repository"] == CATALOGUE_REPOSITORY
+    assert mapping["item"] == "Lakehouse/_weaver"
     assert mapping["weaver_lakehouse"] == "Weaver"
     assert mapping["status"] == "succeeded"
     assert len(mapping["tables"]) == 10

@@ -10,6 +10,8 @@ from weaver.errors import DiscoveryError
 from weaver.locations import Location
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverDocumentId, WeaverSchemaId
+from weaver.catalogue.item_builtin import materialise_builtin_item
+from weaver.store import LocalStore
 
 
 def _write(root: Path, relative: str, text: str) -> None:
@@ -249,10 +251,23 @@ def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     assert repository.generated_files
 
 
+def test_generated_weaver_item_lives_inside_the_same_item_tree(tmp_path):
+    root = _estate(tmp_path)
+    location = Location(str(root))
+    materialised = materialise_builtin_item(location, store=LocalStore())
+
+    assert materialised
+    assert all(path.startswith("Lakehouse/_weaver/") for path in materialised)
+    assert (root / "Lakehouse" / "Raw").is_dir()
+    assert (root / "Lakehouse" / "_weaver" / "schemas" / "_.yml").is_file()
+    repository = read_weaver_repository(location)
+    assert repository["Lakehouse/_weaver"].documents
+
+
 def test_authored_weaver_item_is_rejected(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Lakehouse/_weaver/schemas/_.yml", _schema("_"))
-    with pytest.raises(DiscoveryError, match="built-in catalogue item"):
+    with pytest.raises(DiscoveryError, match="managed catalogue item"):
         read_weaver_repository(Location(str(root)))
 
 

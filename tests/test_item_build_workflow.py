@@ -24,6 +24,7 @@ from weaver.build_bundle import (
 from weaver.errors import BuildError
 from weaver.ses import read_weaver_repository
 from weaver.ses.model import WeaverItemId
+from weaver.catalogue.item_builtin import item_repository_files
 
 from test_item_repository import _estate
 
@@ -94,6 +95,10 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
         for entry in LocalStore().list(root, recursive=True)
         if not entry.is_directory
     }
+    expected_files.update(
+        root.join(*relative.split("/")).value
+        for relative in item_repository_files()
+    )
     environment = InstallationEnvironment(
         store=remote,
         resolver=None,
@@ -126,6 +131,11 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
         for entry in LocalStore().list(root, recursive=True)
         if not entry.is_directory
     }
+    generated = {
+        root.join(*relative.split("/")).value
+        for relative in item_repository_files()
+    }
+    expected_files.update(generated)
 
     result = build_item_repository(
         root,
@@ -144,7 +154,8 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     assert result.archive == archive
     assert set(remote.reads) == expected_files
     assert set(remote.reads.values()) == {1}
-    assert remote.writes == [archive.value]
+    assert set(remote.writes[:-1]) == generated
+    assert remote.writes[-1] == archive.value
 
 
 def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_path):

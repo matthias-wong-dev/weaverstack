@@ -15,7 +15,7 @@ costs an API call.
 from __future__ import annotations
 
 from ..errors import CommandError
-from ..hosts import BUILD_BUNDLES_AREA, REPOS_AREA, FabricHost
+from ..hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricHost
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
 from ..spark import SparkDestination, fabric_destination
@@ -24,7 +24,6 @@ from ..targets import (
     DeltaTarget,
     FolderTarget,
     ItemRef,
-    RepositoryRef,
     WarehouseTarget,
     validate_name,
 )
@@ -170,11 +169,10 @@ class FabricResolver:
         return self.lakehouse(self._weaver_lakehouse())
 
     @property
-    def repos_root(self) -> Location:
-        return self.files_root(self._weaver_lakehouse()) / REPOS_AREA
+    def weaver_items_root(self) -> Location:
+        """The workspace's one declaration, with item types directly below it."""
 
-    def repository(self, repository: RepositoryRef) -> Location:
-        return self.repos_root / repository.name
+        return self.files_root(self._weaver_lakehouse()) / WEAVER_ITEMS_AREA
 
     @property
     def build_bundles_root(self) -> Location:

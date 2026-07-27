@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location, RepositoryRef
+from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
 
 WEAVER_LAKEHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
@@ -126,18 +126,18 @@ def lakehouses(tmp_path: Path) -> LocalLakehouses:
     for item in (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
-    store.make_directory(resolver.repos_root)
+    store.make_directory(resolver.weaver_items_root)
 
     return LocalLakehouses(host=host, resolver=resolver, store=store, root=tmp_path)
 
 
 @pytest.fixture
 def installed_repository(lakehouses: LocalLakehouses) -> Location:
-    """The example repository, copied into the Weaver Lakehouse repos area."""
+    """The example declaration, copied into the Weaver Lakehouse item area."""
 
     source = Path(__file__).parent / "fixtures" / "sales-etl"
-    destination = lakehouses.resolver.repos_root / source.name
-    shutil.copytree(source, destination.path)
+    destination = lakehouses.resolver.weaver_items_root
+    shutil.copytree(source, destination.path, dirs_exist_ok=True)
     return destination
 
 
@@ -150,8 +150,8 @@ def installed_build_repository(lakehouses: LocalLakehouses) -> str:
     """
 
     source = Path(__file__).parent / "fixtures" / "build-lakehouse"
-    destination = lakehouses.resolver.repository(RepositoryRef("MyRepo"))
-    shutil.copytree(source, destination.path)
+    destination = lakehouses.resolver.weaver_items_root
+    shutil.copytree(source, destination.path, dirs_exist_ok=True)
     return "MyRepo"
 
 

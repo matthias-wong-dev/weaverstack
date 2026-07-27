@@ -5,9 +5,9 @@ Guidance for coding agents working **on weaverstack itself**.
 ## Repository role
 
 `weaverstack` is a data-engineering runtime for Microsoft Fabric built around a
-central control plane. One mandatory **Weaver Lakehouse** holds the installed
-Weaver repository and the authoritative catalogue; destination Lakehouses and
-Warehouses hold only materialised output.
+central control plane. One mandatory **Weaver Lakehouse** holds the workspace
+declaration under `Files/weaver_items` and the authoritative catalogue;
+destination Lakehouses and Warehouses hold only materialised output.
 
 The distribution is `weaverstack`; the import is `weaver`.
 

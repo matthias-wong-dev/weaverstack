@@ -198,6 +198,9 @@ def build_item_repository(
 ) -> ItemBuildResult:
     """Materialise, plan and install one coordinated item build in this session."""
 
+    from ..catalogue.item_builtin import materialise_builtin_item
+
+    materialise_builtin_item(repository_root, store=environment.store)
     with materialise_tree(repository_root, store=environment.store) as materialised:
         repository = read_weaver_repository(
             materialised.location, store=materialised.store

@@ -39,10 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(handler=handle_doctor)
 
     build = subcommands.add_parser(
-        "build", help="build bound logical items from one installed repository"
-    )
-    build.add_argument(
-        "--repository", required=True, metavar="NAME", help="installed repository name"
+        "build", help="build bound logical items from the workspace declaration"
     )
     build.add_argument(
         "--bind",
@@ -386,7 +383,6 @@ def handle_build(args: argparse.Namespace) -> int:
         )
     result = _run_fabric_item_build(
         host,
-        repository_name=args.repository,
         bindings=bindings,
         bundle_name=args.bundle,
         prune=not args.no_prune,
@@ -395,7 +391,7 @@ def handle_build(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print(f"build {result['status']}: {result['repository']}")
+        print(f"build {result['status']}: workspace declaration")
         print(f"  bundle: {result['bundle_id']}")
         if result.get("archive"):
             print(f"  record: {result['archive']}")
@@ -409,7 +405,6 @@ def handle_build(args: argparse.Namespace) -> int:
 def _run_fabric_item_build(
     host,
     *,
-    repository_name: str,
     bindings,
     bundle_name: str | None,
     prune: bool,
@@ -442,7 +437,7 @@ def _run_fabric_item_build(
         f"fabric_environment={host.fabric_environment!r})"
     )
     body = (
-        "from weaver import (FabricHost, ItemRef, RepositoryRef, "
+        "from weaver import (FabricHost, ItemRef, "
         "build_item_repository, timestamped_archive_name)\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBindings, "
         "LakehouseBinding, parse_item_binding)\n"
@@ -461,14 +456,14 @@ def _run_fabric_item_build(
         "environment = InstallationEnvironment(\n"
         "    store=store, resolver=resolver, spark=spark, host=host)\n"
         "result = build_item_repository(\n"
-        f"    resolver.repository(RepositoryRef({repository_name!r})),\n"
+        "    resolver.weaver_items_root,\n"
         "    bindings=bindings, environment=environment,\n"
         f"    prune={prune!r}, catalogue={catalogue!r},\n"
         f"    control_lakehouse=control if {catalogue!r} else None,\n"
         "    archive=archive)\n"
         "report = result.report\n"
         "emit({\n"
-        f"    'repository': {repository_name!r},\n"
+        "    'source': 'weaver_items',\n"
         "    'items': [str(binding.item) for binding in bindings.entries],\n"
         "    'bundle_id': result.bundle_id,\n"
         "    'archive': result.archive.value if result.archive else None,\n"
