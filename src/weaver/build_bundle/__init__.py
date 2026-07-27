@@ -1,14 +1,13 @@
-"""Weaver build — planning a repository into a bundle, and installing it.
+"""Weaver build — planning a declaration into a bundle, and installing it.
 
 The boundary is deliberate::
 
-    SesRepository -> BuildPlanner -> BuildBundle -> BundleInstaller -> hosts
+    WeaverRepository -> planner -> BuildBundle -> installer -> hosts
 
-The planner owns every decision — projection, ordering, executable generation,
-certification. The installer owns execution only: it validates a bundle and runs
-it, and never reads the source repository, resolves a dependency or selects a
-target. This package grows one checkpoint at a time; only the intended entry
-points are exported.
+The planner owns every decision — item selection, ordering, executable
+generation, certification. The installer owns execution only: it validates a
+bundle and runs it, and never reads the source declaration, resolves a
+dependency or selects a target.
 """
 
 from __future__ import annotations
