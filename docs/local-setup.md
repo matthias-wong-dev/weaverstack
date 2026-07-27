@@ -133,6 +133,49 @@ yields backslashes. Read paths back through `Location`, not by string surgery.
 Spark tests are deselected by default and skip themselves when PySpark or a JDK
 is absent, so a contributor without a JVM is never blocked.
 
+### Codex cloud workspaces
+
+A new Codex cloud session may reuse a repository virtual environment that has
+the core test dependencies but not PySpark or Delta. Install the development
+extra and ask Weaver to verify the runtime first:
+
+```bash
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/weaver doctor
+```
+
+Cloud egress commonly goes through `HTTP_PROXY` and `HTTPS_PROXY`. Python tools
+honour those variables, but the JVM used by Spark's Ivy dependency resolver
+does not convert them to Java system properties. Derive the Java settings from
+the workspace configuration, without embedding the proxy address:
+
+```bash
+export JAVA_TOOL_OPTIONS="$(.venv/bin/python - <<'PY'
+import os
+from urllib.parse import urlparse
+
+proxy = urlparse(os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", ""))
+if proxy.hostname:
+    print(
+        f"-Dhttp.proxyHost={proxy.hostname} -Dhttp.proxyPort={proxy.port or 80} "
+        f"-Dhttps.proxyHost={proxy.hostname} -Dhttps.proxyPort={proxy.port or 80}"
+    )
+PY
+)"
+.venv/bin/python -m pytest -m spark
+```
+
+The setting is needed because `configure_spark_with_delta_pip()` makes Ivy
+download the Delta JVM artefacts from Maven when the first Spark session starts.
+If Java cannot use the proxy, the visible symptoms are an unresolved
+`io.delta#delta-spark_2.12` dependency and then `JAVA_GATEWAY_EXITED`. The
+artefacts are cached in `~/.ivy2`, so the network step is normally paid only
+once per persistent cloud workspace.
+
+This setup proves the local Spark emulator in the cloud container. It does not
+run Weaver inside Microsoft Fabric; that separate row-three path is covered by
+the opt-in Fabric suite described in [Fabric testing](fabric-testing.md).
+
 CI runs both: the core suite on macOS, Linux and Windows across Python 3.11 and
 3.12, and the Spark suite on macOS and Linux across Java 17 and 21. See
 [.github/workflows/tests.yml](../.github/workflows/tests.yml). Fabric tests need

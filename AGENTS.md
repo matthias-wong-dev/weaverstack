@@ -272,6 +272,40 @@ python3.11 -m venv .venv
 .venv/bin/weaver --help
 ```
 
+### Codex cloud: run Spark without rediscovering the setup
+
+Codex cloud workspaces usually already have `.venv` and a supported JDK, but
+the virtual environment may contain only the core test dependencies. The JVM
+also does not automatically use the HTTP proxy variables that `pip` and
+`curl` understand. Use this sequence rather than diagnosing Spark from
+scratch:
+
+```bash
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/weaver doctor
+JAVA_TOOL_OPTIONS="$(.venv/bin/python - <<'PY'
+import os
+from urllib.parse import urlparse
+
+proxy = urlparse(os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", ""))
+if proxy.hostname:
+    print(
+        f"-Dhttp.proxyHost={proxy.hostname} -Dhttp.proxyPort={proxy.port or 80} "
+        f"-Dhttps.proxyHost={proxy.hostname} -Dhttps.proxyPort={proxy.port or 80}"
+    )
+PY
+)" .venv/bin/python -m pytest -m spark
+```
+
+Why the third command matters: `delta-spark` asks Spark's Ivy resolver to fetch
+Delta JVM artefacts from Maven on the first session start. Without Java proxy
+properties, a proxied cloud workspace can report an unresolved
+`io.delta#delta-spark_2.12` dependency followed by `JAVA_GATEWAY_EXITED`, even
+though `pip install` worked. Ivy caches the download under `~/.ivy2`, so later
+runs in the same workspace normally start without another download. See
+[the cloud-workspace notes](docs/local-setup.md#codex-cloud-workspaces) for
+individual commands and troubleshooting.
+
 Spark tests are deselected by default (`addopts = ["-m", "not spark"]`) and skip
 themselves if PySpark or a supported JDK is missing, so a contributor without a
 JVM is never blocked. `weaver doctor` reports what is present and what to
