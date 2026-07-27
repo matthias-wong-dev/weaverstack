@@ -39,8 +39,34 @@ from .targets import (
     DeltaTarget,
     FolderTarget,
     ItemRef,
-    RepositoryRef,
     WarehouseTarget,
+)
+from .declaration.model import (
+    ItemDependency,
+    RepositoryAlias,
+    WeaverDocumentId,
+    WeaverItem,
+    WeaverItemId,
+    WeaverRepository,
+    WeaverSchemaId,
+)
+from .declaration.metadata import WeaverDocument
+from .declaration.repository import read_weaver_repository
+from .build_bundle import (
+    InstallationEnvironment,
+    InstallationReport,
+    ItemBinding,
+    ItemBindings,
+    LakehouseBinding,
+    WarehouseBinding,
+    generate_item_build_bundle,
+    build_item_repository,
+    install_bundle,
+    install_bundle_archive,
+    load_bundle,
+    persist_bundle_archive,
+    timestamped_archive_name,
+    parse_item_binding,
 )
 
 def _resolve_version() -> str:
@@ -78,16 +104,35 @@ __all__ = [
     "parse_hosts",
     # identities — level three
     "ItemRef",
-    "FolderTarget",
-    "DeltaTarget",
     "WarehouseTarget",
-    "RepositoryRef",
+    # logical identities, independent of physical bindings
+    "WeaverRepository",
+    "WeaverItem",
+    "WeaverItemId",
+    "WeaverSchemaId",
+    "WeaverDocumentId",
+    "RepositoryAlias",
+    "ItemDependency",
+    "WeaverDocument",
+    "read_weaver_repository",
+    # item-oriented build
+    "ItemBinding",
+    "ItemBindings",
+    "LakehouseBinding",
+    "WarehouseBinding",
+    "parse_item_binding",
+    "generate_item_build_bundle",
+    "build_item_repository",
+    "load_bundle",
+    "persist_bundle_archive",
+    "install_bundle_archive",
+    "timestamped_archive_name",
+    "InstallationEnvironment",
+    "install_bundle",
+    "InstallationReport",
     # resolved locations and transport
     "Location",
     "LocalResolver",
-    # bootstrapping the control plane
-    "SetupResult",
-    "initialise_weaver_lakehouse",
     # authoring
     "WeaverObject",
     "Folder",
@@ -107,11 +152,7 @@ __all__ = [
     "SqlExecutionError",
     "generate_warehouse_wipe_sql",
     # wipe
-    "wipe",
-    "wipe_folder_target",
-    "wipe_delta_target",
     "wipe_sql_target",
     "wipe_lakehouse",
-    "wipe_selection",
     "WipeReport",
 ]

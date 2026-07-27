@@ -1,11 +1,15 @@
 # The central catalogue
 
-Weaver's catalogue records, for every object it has successfully built, what SES
+The catalogue scopes installations by `(item_type, item_name)`, projects each
+item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
+ordinary planner.
+
+Weaver's catalogue records, for every object it has successfully built, what Weaver document
 declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
 control plane the rest of the system reads from.
 
 It is **not** a second authoring model. Nothing in it is discovered from a
-physical table and nothing in it can be written by hand. SES remains authoritative
+physical table and nothing in it can be written by hand. Weaver document remains authoritative
 for descriptive metadata, keys, lineage, dependencies and behavioural flags; the
 catalogue is where that information lands once an object exists, so later
 operations are driven from one place instead of by re-reading a repository.
@@ -19,25 +23,24 @@ valid.
 
 ## Installation scope is identity
 
-A repository is installed independently into its Lakehouse and its Warehouse, and
-the same `Schema.Object` legitimately exists in both — a Delta table and a
-Warehouse table of one name are two objects in two places. So every catalogue row
-is keyed on `repository` and `target_type` before anything else:
+The workspace declaration owns several exact logical items, and the same
+`Schema.Object` may legitimately exist in several of them. Every catalogue row is
+therefore keyed on `item_type` and `item_name` before anything else:
 
 ```text
-SalesRepo | lakehouse | Sales | Customer
-SalesRepo | warehouse | Sales | Customer
+Lakehouse | Raw       | Sales       | Customer
+Lakehouse | Raw       | Files/Sales | Customer
+Warehouse | Reporting | Sales       | Customer
 ```
 
-Those are two rows and both are real. A Lakehouse-only build reconciles only the
-first; it must not touch the second, and cannot, because there is no way to name a
-row without naming the installation it belongs to.
+Those are three rows and all are real. The first two share one Lakehouse item but
+remain distinct because `Files/` is part of the Folder's schema. A build cannot
+touch another item because every key begins with its exact item identity.
 
-An object left out of a build because its target was not bound is **out of
-scope**, not deleted. A Lakehouse build has no opinion about the Warehouse
-installation — which is a different thing from having removed it.
+An object left out because its owning item was not bound is **out of scope**, not
+deleted. A build has no opinion about unbound items.
 
-The bound item's name is an attribute, never identity. Rebinding a repository to a
+The bound item's name is an attribute, never identity. Rebinding an item to a
 different Lakehouse **updates** its `_.Installation` row; it does not add a second
 installation.
 
@@ -49,7 +52,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 
 | Table | One row per | Notes |
 |---|---|---|
-| `_.Installation` | repository + target type | The item currently bound, and the Weaver version that last reconciled it. |
+| `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
 | `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
@@ -57,8 +60,8 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | `_.ColumnDictionary` | described column | Purely descriptive: the columns an author wrote a note about, plus Weaver's surrogate. Not every column. |
 | `_.IndexDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
-| `_.Dependency` | resolved edge | Three-part logical reference, inheriting the owner's target type. |
-| `_.Alias` | cross-engine publication | Where the graph crosses engines. |
+| `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
+| `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from the consuming item's `alias.yml`. |
 
 ### Why some tables look sparse
 
@@ -75,36 +78,31 @@ them, so a name would have to be invented. A key is identified by its type and i
 columns; a relationship by the whole edge — which is why several relationships may
 run between one pair of objects, and why an object may reference itself.
 
-**`_.Dependency` says nothing about targets.** The reference is logical and
-inherits the owner's target type: a Warehouse object resolves its dependencies in
-the Warehouse. Recording a target on the reference would let a Warehouse object
-appear to depend directly on a Delta table. Crossing engines is an *alias*, and
-aliases are a separate table — composing `_.Dependency`, `_.Alias` and
-`_.Registry` is what yields the estate's whole graph, and only that composition
-may cross.
+**`_.Dependency` keeps the author's spelling.** The reference is recorded exactly
+as written and resolves within the consuming item. Recording a resolved physical
+name would let one item appear to depend directly on another's storage. Crossing
+items or engines is an *alias*, and aliases are a separate table — composing
+`_.Dependency`, `_.Alias` and `_.Registry` is what yields the estate's whole
+graph, and only that composition may cross.
 
-A dependency may leave the repository. A three-part reference names a physical
-item deliberately, and is recorded with `is_within_repository` false — the first
-part is an item, not a repository, so nothing here resolves it.
+A dependency may leave its item. A two-part logical name is recorded with
+`is_within_item=true`; a canonical cross-item name or an authored physical name is
+recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-`weaver/builtin/catalogue/` is an SES repository shipped as package resources.
-Setup materialises it into the Weaver Lakehouse and the **ordinary** planner and
-installer build it. There is no second "create the control tables" path, and that
-recursion is the point: if the catalogue needed privileged machinery to exist, the
-claim that a catalogue table is an ordinary Weaver object would be false.
+Weaver materialises `Lakehouse/_weaver` beneath `Files/weaver_items` from the
+authoritative table definitions and parses those generated schema and source files through the same
+static readers as authored content. The **ordinary item planner and installer**
+then build it. There is no second "create the control tables" path, and that
+recursion is the point.
 
-```python
-from weaver import ItemRef, initialise_weaver_lakehouse
-
-result = initialise_weaver_lakehouse(
-    weaver_lakehouse=ItemRef("Weaver"),
-    host=host,
-    store=store,
-    spark=spark,          # a Fabric notebook already has one
-)
-```
+On a new control plane, bind `Lakehouse/_weaver` to the control Lakehouse in the
+first coordinated item build. Its physical actions create the tables before the
+same bundle reaches the catalogue tail. Ordinary later builds leave `_weaver`
+unbound and reconcile rows in those existing tables. Rebinding `_weaver` is the
+explicit destructive catalogue-evolution operation while no migration promise
+exists.
 
 One bundle does the whole bootstrap, because the barriers already order it:
 
@@ -121,7 +119,7 @@ mode is needed. Generation reads nothing, so an absent catalogue is not a specia
 case — the statements are correct against it either way.
 
 Setup never prunes. The Weaver Lakehouse belongs to the installation, not to the
-built-in repository, so a reconciling build would treat anything else there as an
+built-in item, so a reconciling build would treat anything else there as an
 orphan.
 
 ## How a build writes it
@@ -147,7 +145,7 @@ asking what a build would change.
 Ordering is the one strict invariant:
 
 1. **dictionaries** describe what was built;
-2. **`_.Installation`** records which item the repository is bound to;
+2. **`_.Installation`** records which physical item the logical item is bound to;
 3. **`_.Registry`** certifies.
 
 Registry is last and is its own barrier, so a row in it cannot outrun the work it
@@ -157,8 +155,15 @@ all-or-nothing transaction: partial state is repaired by the next successful
 build's ordinary row comparison.
 
 An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by a
-comparison of every non-key column, so rebuilding unchanged SES writes nothing and
+comparison of every non-key column, so rebuilding unchanged Weaver document writes nothing and
 does not move `row_update_datetime`.
+
+The Installation signature is deliberately item-scoped. The repository signature
+still certifies the complete coordinated source and bundle snapshot, while object
+rows retain their individual source signatures. This separation lets a future
+incremental planner see that changing `Lakehouse/Raw` does not by itself make an
+installed `Warehouse/Reporting` stale. An alias lives in the consuming item's own
+`alias.yml`, so it contributes to that item's signature and not the producer's.
 
 ## Removing things
 
@@ -167,11 +172,10 @@ Three scopes, and they are deliberately different operations:
 | Scope | What it removes | Reached from |
 |---|---|---|
 | object | rows no longer projected, within one installation | every build |
-| installation | one `(repository, target_type)` entirely | decommissioning a target, explicitly |
-| repository | every installation of one repository | repository lifecycle, explicitly |
+| installation | one `(item_type, item_name)` entirely | decommissioning a logical item, explicitly |
 
-Only the first is part of a build. A build that did not include a target type has
-no opinion about it, so nothing in the build path can reach installation prune.
+Only the first is part of a build. A build that did not bind an item has no opinion
+about it, so nothing in the build path can reach its installation rows.
 
 Schema `_` is reserved from ordinary prune. An application build normally cannot
 see it — prune is scoped to the bound destination's own storage, and the catalogue
@@ -246,10 +250,12 @@ CREATE TABLE `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer` …
 One session can create, read and drop through that name in any Lakehouse in the
 workspace, and can build a view in one over a table in another. The local
 emulator has one namespace level and cannot be given another, so it folds the
-Lakehouse into that level — `` `Sales_LH__Sales`.`Customer` `` — which is not
+Lakehouse into that level — `` `sales_lh__sales`.`Customer` `` — which is not
 Fabric syntax and is not meant to be. What it reproduces is the property: two
 destinations declaring a schema of the same name stay apart. Storage is untouched
-by the folding.
+by the folding. The folded schema uses the local catalogue's canonical lower-case
+spelling; the emulator keeps declared object names exact-case and therefore uses
+case-sensitive analysis for its Spark session.
 
 Both are needed and neither substitutes for the other: a folder is created at a
 path and has no catalogue name, while a view exists only as a name and has no path
@@ -282,10 +288,9 @@ Two things worth knowing:
 
 ## What this branch does not do yet
 
-Build still emits `CREATE OR REPLACE TABLE`, so a re-run of **setup** empties the
-catalogue tables before repopulating the built-in repository's own rows — and any
-other repository's rows go with them. Only setup rebuilds schema `_`; an ordinary
-build never does.
+Build still emits `CREATE OR REPLACE TABLE`, so an explicit `_weaver` rebuild
+empties the catalogue tables before the same coordinated build repopulates the
+workspace declaration's rows. Ordinary builds leave `_weaver` unbound.
 
 Dropping only what changed is the next branch, and it is what the signatures in
 this catalogue exist for: compare the recorded signature with the source, drop the
@@ -298,6 +303,6 @@ returns only after it builds.
 
 - [build-philosophy.md](build-philosophy.md) — the governing properties every
   build implementation must preserve.
-- [ses-repository.md](ses-repository.md) — where a repository lives and how it is
+- [weaver-repository.md](weaver-repository.md) — where a repository lives and how it is
   installed.
 - [journal.md](journal.md) — why each of these decisions was taken.

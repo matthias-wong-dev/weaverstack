@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 import yaml
@@ -78,10 +78,18 @@ _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
 
 @dataclass(frozen=True)
 class BuildBundle:
-    """A validated bundle on a store: its root location and loaded plan."""
+    """A validated bundle and the store holding its files.
+
+    The bundle store is deliberately independent of the target store. Inside
+    Fabric, payloads and the certified snapshot live on the session driver's
+    temporary filesystem while target Files mutations still use ``FabricStore``.
+    ``None`` remains accepted for compatibility with callers that reconstruct a
+    lightweight handle and let the installer use its environment store.
+    """
 
     location: Location
     plan: BuildPlan
+    store: Store | None = field(default=None, compare=False, repr=False)
 
     @property
     def bundle_id(self) -> str:
@@ -188,7 +196,7 @@ def load_bundle(location: Location, *, store: Store) -> BuildBundle:
 
     plan = plan_from_yaml(store.read(plan_location).decode("utf-8"))
     validate_bundle(location, plan, store=store)
-    return BuildBundle(location=location, plan=plan)
+    return BuildBundle(location=location, plan=plan, store=store)
 
 
 def validate_bundle(location: Location, plan: BuildPlan, *, store: Store) -> None:
@@ -220,6 +228,21 @@ def validate_plan_structure(plan: BuildPlan) -> None:
     target_ids = plan.target_ids
     if len(target_ids) != len(plan.targets):
         raise BuildError("duplicate target id in plan")
+    for target in plan.targets:
+        if (target.logical_item_type is None) != (target.logical_item_name is None):
+            raise BuildError(
+                f"target {target.id!r} carries an incomplete logical item identity"
+            )
+        if target.logical_item_type is not None:
+            expected = {
+                "Lakehouse": "lakehouse",
+                "Warehouse": "warehouse",
+            }.get(target.logical_item_type)
+            if expected != target.kind:
+                raise BuildError(
+                    f"target {target.id!r} binds logical {target.logical_item_type} "
+                    f"to physical kind {target.kind!r}"
+                )
 
     seen_numbers: list[int] = []
     batch_ids: set[str] = set()

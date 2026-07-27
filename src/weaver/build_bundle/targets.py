@@ -18,9 +18,11 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..targets import ItemRef
+from ..errors import BuildError
+from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 
-#: Target kinds a bound target may name. They mirror the SES target kinds but
-#: live here because a bundle is read without importing the SES vocabulary.
+#: Target kinds a bound target may name. They mirror the Weaver document target kinds but
+#: live here because a bundle is read without importing the Weaver document vocabulary.
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
 
@@ -45,6 +47,8 @@ class BoundTarget:
     item_name: str | None = None
     workspace_id: str | None = None
     sql_endpoint_id: str | None = None
+    logical_item_type: str | None = None
+    logical_item_name: str | None = None
 
     @property
     def name(self) -> str:
@@ -64,6 +68,10 @@ class BoundTarget:
             mapping["workspace_id"] = self.workspace_id
         if self.sql_endpoint_id is not None:
             mapping["sql_endpoint_id"] = self.sql_endpoint_id
+        if self.logical_item_type is not None:
+            mapping["logical_item_type"] = self.logical_item_type
+        if self.logical_item_name is not None:
+            mapping["logical_item_name"] = self.logical_item_name
         return mapping
 
     @classmethod
@@ -75,6 +83,8 @@ class BoundTarget:
             item_name=mapping.get("item_name"),
             workspace_id=mapping.get("workspace_id"),
             sql_endpoint_id=mapping.get("sql_endpoint_id"),
+            logical_item_type=mapping.get("logical_item_type"),
+            logical_item_name=mapping.get("logical_item_name"),
         )
 
 
@@ -126,17 +136,70 @@ class WarehouseBinding:
 
 
 @dataclass(frozen=True)
-class TargetBindings:
-    """The optional physical bindings a build is projected onto."""
+class ItemBinding:
+    """One exact logical Weaver item bound to one typed physical item."""
 
-    lakehouse: LakehouseBinding | None = None
-    warehouse: WarehouseBinding | None = None
+    item: WeaverItemId
+    target: LakehouseBinding | WarehouseBinding
+
+    def __post_init__(self) -> None:
+        expected = LAKEHOUSE if isinstance(self.target, LakehouseBinding) else WAREHOUSE
+        if self.item.item_type != expected:
+            raise BuildError(
+                f"logical item {self.item} requires a {self.item.item_type} binding, "
+                f"not {type(self.target).__name__}"
+            )
+
+    def to_bound_target(self) -> BoundTarget:
+        physical = self.target.to_bound_target()
+        logical_slug = f"{self.item.item_type}-{self.item.item_name}"
+        return BoundTarget(
+            id=f"{logical_slug}--{physical.id}",
+            kind=physical.kind,
+            item_id=physical.item_id,
+            item_name=physical.item_name,
+            workspace_id=physical.workspace_id,
+            sql_endpoint_id=physical.sql_endpoint_id,
+            logical_item_type=self.item.item_type,
+            logical_item_name=self.item.item_name,
+        )
+
+
+@dataclass(frozen=True)
+class ItemBindings:
+    """The sparse logical-to-physical bindings for one coordinated build."""
+
+    entries: tuple[ItemBinding, ...]
+
+    def __post_init__(self) -> None:
+        seen: set[WeaverItemId] = set()
+        for binding in self.entries:
+            if binding.item in seen:
+                raise BuildError(f"logical item is bound more than once: {binding.item}")
+            seen.add(binding.item)
 
     @property
-    def bound_target_kinds(self) -> frozenset[str]:
-        kinds = set()
-        if self.lakehouse is not None:
-            kinds.add(LAKEHOUSE_TARGET)
-        if self.warehouse is not None:
-            kinds.add(WAREHOUSE_TARGET)
-        return frozenset(kinds)
+    def by_item(self) -> Mapping[WeaverItemId, ItemBinding]:
+        return {binding.item: binding for binding in self.entries}
+
+
+def parse_item_binding(text: str) -> ItemBinding:
+    """Parse ``ItemType/LogicalName=PhysicalName`` at the public boundary."""
+
+    if not isinstance(text, str) or text.count("=") != 1:
+        raise BuildError(
+            "an item binding must be ItemType/LogicalName=PhysicalName"
+        )
+    logical_text, physical_text = (part.strip() for part in text.split("=", 1))
+    if not logical_text or not physical_text:
+        raise BuildError(
+            "an item binding must be ItemType/LogicalName=PhysicalName"
+        )
+    item = WeaverItemId.parse(logical_text)
+    physical = ItemRef.parse(physical_text)
+    target = (
+        LakehouseBinding(physical)
+        if item.item_type == LAKEHOUSE
+        else WarehouseBinding(physical)
+    )
+    return ItemBinding(item, target)

@@ -65,6 +65,13 @@ rather than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy
 tests skip (rather than fail) if that Environment has no Weaver installed yet,
 pointing at `weaver install`.
 
+Immediately before it requests its shared Livy session, the harness reads the
+sessions collection for every Lakehouse in the workspace. It prints active or
+queued scheduler/plugin/Livy states and the submitter when present. This catches
+the common one-session-capacity case where an open notebook or leaked test would
+otherwise make startup appear silently stuck. The check is read-only and never
+cancels someone else's session.
+
 To run only the Warehouse SQL vertical and see its stage timings:
 
 ```bash
@@ -105,9 +112,11 @@ Fabric and its local emulator, selected by an indirect `build_env` parameter
 of a build — *generate* and *install* — run in the target environment.** On
 Fabric that is inside the Livy session, against the native Spark catalogue: the
 test uploads the repository to the Weaver Lakehouse (the push), then a Livy
-program calls `generate_build_bundle` in-session and another calls
-`install_bundle`, so planning and installation both use the authoritative
-catalogue. In the emulator the same two calls run in-process against local Spark.
+program calls the public `build_item_repository` workflow. That workflow copies
+the OneLake repository once to the session driver's temporary filesystem, then
+generates and installs from local files while target inspection still uses the
+authoritative Fabric catalogue. In the emulator the same workflow runs
+in-process against local Spark.
 The desktop's only job on Fabric is to push the repository and read results back
 for assertions — it never plans.
 
@@ -161,23 +170,23 @@ is installed — there is no desktop-planned build. For a Warehouse that means
 generation reads the target's system schema in-session through Weaver's own
 `fabric_sql_executor` (the session identity) and compiles the prune into the
 bundle there; installation runs the frozen T-SQL through the same connector. The
-desktop's only jobs are uploading the SES repository and reading the catalogue
+desktop's only jobs are uploading the Weaver document repository and reading the catalogue
 back for assertions — the latter through `desktop_sql_executor`, which is test
 infrastructure and never part of what is under test.
 
 Two rules keep the cost down and the setup in one place:
 
 - **Environment setup lives only in `conftest`.** Tests never build a host,
-  create a Lakehouse, start a session or clean a catalog. Which SES repository an
-  environment installs is the `ses_fixture` parameter (paths in
+  create a Lakehouse, start a session or clean a catalog. Which Weaver document repository an
+  environment installs is the `weaver_repo_fixture` parameter (paths in
   `tests/fabric/build_envs.py`), so one body can be pointed at another estate:
-  `@pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.
+  `@pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.
 - **An estate is provisioned and installed once per module.** The module-scoped
   `lakehouse_estate` and `warehouse_estate` fixtures install one estate and hand
   every test in the module the same `InstalledEstate`, so a whole module of Fabric
   assertions costs one Lakehouse (or one Warehouse) and one install rather than
-  one per test. `disposable_warehouse` is module-scoped for the same reason — a
-  Warehouse takes minutes to provision. Use the function-scoped
+  one per test. `disposable_warehouse` is session-scoped for the same reason — a
+  Warehouse takes minutes to provision the endpoint. Use the function-scoped
   `fabric_build_env` only where a test genuinely needs a fresh target, as the
   prune and failure-path cases in `test_build_bundle.py` do.
 
@@ -240,18 +249,22 @@ tables are `SHOW TABLES` minus `SHOW VIEWS`. `spark.catalog.tableExists` and
 `databaseExists` accept the qualified name; `listDatabases` and `listTables` do
 not — they re-encode it and fail.
 
-**A Lakehouse table's physical name is lower-cased, and the Warehouse is
-case-sensitive.** Spark creates `Sales.Customer`, Fabric stores the directory as
-`Tables/Sales/customer`, and the Lakehouse SQL endpoint exposes it as
-`Sales.customer`. A Fabric Warehouse uses a case-sensitive collation, so a
-cross-database read written as `[Lakehouse].[Sales].[Customer]` fails with
-`Invalid object name` — and it fails identically to an endpoint that has not
-synced yet, which is the trap. Check `INFORMATION_SCHEMA.TABLES` on the endpoint
-before assuming it is lag.
+**Lakehouse table casing is creation-session policy, and the Warehouse is
+case-sensitive.** With Fabric's default `spark.sql.caseSensitive=false`, even a
+quoted `Sales.Customer` is registered and stored as `Sales.customer`. Weaver
+temporarily enables case-sensitive analysis for its table-create DDL and restores
+the session setting immediately, so current Weaver builds preserve `Customer` in
+both the Spark catalogue and managed directory. If an older build registered a
+case-only predecessor such as `customer`, the same DDL scope drops that
+build-owned structure before creating the declared spelling; an ordinary rebuild therefore converges
+existing Lakehouses as well as creating new ones correctly. A Fabric Warehouse
+uses a case-sensitive collation, so inspect
+`INFORMATION_SCHEMA.TABLES` on the Lakehouse SQL endpoint rather than guessing
+either spelling or a sync delay.
 
 Weaver passes a three- or four-part name through untouched, by design: the author
-named a physical thing. Matching its physical spelling is therefore the author's
-job, and a cross-engine read must use the lower-cased name.
+named a physical thing. Matching the endpoint's actual spelling is therefore the
+author's job.
 
 **A Lakehouse SQL endpoint exposes tables, not Spark views.** `Sales.ActiveCustomer`
 is a Spark-catalogue object; it is queryable from Spark in any Lakehouse and is

@@ -112,8 +112,8 @@ def test_a_named_item_carries_its_type():
 
 
 def test_a_onelake_location_splits_back_into_its_parts():
-    parsed = parse_onelake(Location(onelake_url("ws", "item-id", "Files/repos/x")))
-    assert (parsed.workspace, parsed.relative) == ("ws", "Files/repos/x")
+    parsed = parse_onelake(Location(onelake_url("ws", "item-id", "Files/weaver_items/x")))
+    assert (parsed.workspace, parsed.relative) == ("ws", "Files/weaver_items/x")
 
 
 def test_a_local_path_is_not_a_onelake_location():

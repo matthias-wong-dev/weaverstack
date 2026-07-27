@@ -48,11 +48,14 @@ of operational data processing.
 
 ## 2. Interpretation happens once
 
-The source repository is interpreted during bundle generation.
+The source repository is interpreted during bundle generation. In Fabric, the
+session first materialises the installed OneLake repository into a driver-local
+temporary directory. Every interpretation step then reads that one local copy;
+the laptop is not part of the product build path.
 
 That interpretation includes:
 
-- reading and validating SES source documents;
+- reading and validating Weaver source documents;
 - resolving object identity and type;
 - resolving target bindings;
 - constructing the dependency graph;
@@ -66,7 +69,7 @@ After this point, the repository is no longer an input to installation.
 The intended flow is:
 
 ```text
-SES repository
+Weaver repository
     ↓
 repository interpretation
     ↓
@@ -79,8 +82,8 @@ installation
 
 The installer must never:
 
-- reopen SES source documents;
-- import SES Python classes;
+- reopen Weaver document source documents;
+- import Weaver document Python classes;
 - rediscover schemas or dependencies;
 - infer omitted build metadata;
 - re-evaluate target projection;
@@ -93,7 +96,9 @@ This creates a foundational invariant:
 > **The source is planned once; the resulting plan is executed many times.**
 
 The repository may be deleted after bundle generation and the certified bundle
-must remain independently installable.
+must remain independently installable. Independence does not require every build
+to upload an artefact: the ordinary development path installs directly from its
+temporary local bundle in the same session.
 
 ---
 
@@ -136,7 +141,11 @@ see, before production installation:
 - in what order;
 - against which target.
 
-The bundle is therefore both an execution artifact and an audit artifact.
+The bundle is therefore both an execution artifact and an audit artifact. Its
+ordinary representation is a temporary local directory. When a durable record
+or handover is wanted, that directory is packaged after generation or
+installation as one `<timestamp>.weaver.zip`; the persisted archive is optional,
+not an intermediate remote filesystem required by every build.
 
 ---
 
@@ -293,7 +302,7 @@ installation. That inference is forbidden.
 ### 7.1 Declared schema
 
 For a Python-backed Delta table, the schema used to create the table must be
-supplied by the SES declaration or another explicitly supported compile-time
+supplied by the Weaver document declaration or another explicitly supported compile-time
 declaration. There is no query to consult:
 
 ```text
@@ -395,11 +404,30 @@ Create operations proceed in the opposite structural direction.
 
 The installer follows the encoded ordering. It does not reconstruct the graph.
 
+The graph is item-owned. Every document belongs to one logical Weaver item, and
+the build projects by exact bound item rather than by the broad fact that an
+object eventually uses Lakehouse or Warehouse machinery. Several items of one
+type may exist in one repository and must remain distinguishable throughout the
+plan.
+
+Bindings are deliberately sparse. An unbound item is outside the physical scope
+of that build; it is not a deletion. A bound consumer may declare an unbound
+producer and treat it as static. That does not certify the producer and does not
+guarantee operational availability: a structural action that needs the producer
+may fail at the engine, while a declared-schema Python table can be built without
+touching it and will discover absence only during load.
+
 ---
 
 ## 9. Physical binding is explicit
 
-Logical objects become installable only when bound to physical targets.
+A logical Weaver item becomes installable only when bound to a physical target.
+Its documents inherit that one binding. Folder and Delta are object kinds inside a
+Lakehouse item, not independently bindable destinations.
+
+At least one item must be bound, but no complete-repository binding is required.
+The bundle records both the logical item and its physical target so two items of
+the same Fabric type cannot collapse into one manifest identity.
 
 A bundle must identify the target sufficiently to prevent installation against
 an unintended Lakehouse, Warehouse, workspace, local root or environment.
@@ -456,7 +484,7 @@ The builder and installer have different opportunities to fail.
 
 Bundle generation should reject:
 
-- invalid SES declarations;
+- invalid Weaver document declarations;
 - unresolved object identity;
 - missing required schemas;
 - unsupported object types;
@@ -558,8 +586,20 @@ A capability that is unavailable on one host should produce an explicit
 unsupported result during planning or pre-installation validation. It should not
 be simulated through behaviour that changes the meaning of the build.
 
+That rule also applies to logical features whose physical implementation has not
+landed. Repository aliases may be valid declarations, graph edges and catalogue
+rows before Weaver can materialise them. A retained action that uses such an
+alias must fail explicitly before mutation; it must not run the consumer's
+two-part name against whichever physical item happens to be bound.
+
 Host-specific adapters may determine **how** an action runs. They do not
 determine **what** the action means.
+
+On Fabric, both phases run inside the session. The session copies the OneLake
+repository once to its driver-local temporary filesystem, generates and installs
+the bundle there, and removes the working files afterwards. An optional handover
+archive makes the inverse trip as one file: copy locally, extract, validate and
+install without reopening the source repository.
 
 ---
 
@@ -571,12 +611,12 @@ The build system should prove that:
 
 ### The bundle is independent
 
-Generate a bundle, remove or make unavailable the SES source repository, and
+Generate a bundle, remove or make unavailable the Weaver document source repository, and
 successfully install from the bundle alone.
 
 ### Build does not load
 
-Use SES objects whose `read()` methods would fail if invoked. Building and
+Use Weaver document objects whose `read()` methods would fail if invoked. Building and
 installing their structure must still succeed.
 
 ### Declared schema is used
@@ -678,6 +718,14 @@ On Fabric that resolves to the native four-part name,
 `workspace.lakehouse.schema.object`; the local emulator folds the Lakehouse into
 its one namespace level. Either way the destination is stated, not inherited, and
 one session can build several Lakehouses without switching what it is attached to.
+
+### Collapsing item ownership into target kind
+
+`Lakehouse/Raw` and `Lakehouse/Curated` are two logical items even though both use
+Spark and OneLake. Projecting or cataloguing them merely as `lakehouse` recreates
+the single-target architecture and permits one item to prune or certify the
+other. Materialisation kind chooses an executor; item ownership chooses identity,
+binding and scope.
 
 ### Hiding unsupported behaviour behind fallback
 

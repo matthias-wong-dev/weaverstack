@@ -154,3 +154,23 @@ class LocalStore:
 
     def make_directory(self, location: Location) -> None:
         self._local(location).mkdir(parents=True, exist_ok=True)
+
+    def copy_to_local(self, source: Location, destination: Path) -> None:
+        """Copy one local file or tree to an exact driver-local path."""
+
+        source_path = self._local(source)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.is_dir():
+            shutil.copytree(source_path, destination)
+        else:
+            shutil.copy2(source_path, destination)
+
+    def copy_from_local(self, source: Path, destination: Location) -> None:
+        """Copy one driver-local file or tree to an exact local location."""
+
+        destination_path = self._local(destination)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, destination_path)
+        else:
+            shutil.copy2(source, destination_path)

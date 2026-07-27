@@ -8,12 +8,15 @@ Directory operations came first, for wipe. Byte reads and writes came next, for
 installing a build bundle in-session — the installer reads ``plan.yml`` and the
 generated payloads from OneLake and writes an install report back. They go
 through ``notebookutils.fs.head``/``put``, which exchange UTF-8 text: a build
-bundle's manifest and payloads are UTF-8, so this is exact for them. A
-byte-accurate binary contract (for arbitrary file content) is still future work.
+bundle's manifest and payloads are UTF-8, so this is exact for them. Arbitrary
+binary artefacts do not pass through those methods: recursive repository
+materialisation and bundle-archive persistence use ``notebookutils.fs.cp``
+between OneLake and the driver's ``file:/tmp`` filesystem.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..errors import CommandError
@@ -137,3 +140,59 @@ class FabricStore:
     def make_directory(self, location: Location) -> None:
         if not self.fs.mkdirs(self._path(location)):
             raise StoreError(f"could not create directory {location.value}")
+
+    def copy_to_local(self, source: Location, destination: Path) -> None:
+        """Copy OneLake content to the driver and remove Hadoop checksum debris.
+
+        ``notebookutils.fs.cp`` writes ``.filename.crc`` sidecars through
+        Hadoop's checked local filesystem. They are transport metadata, not
+        repository content. A same-shaped file that really exists in OneLake is
+        retained, so strict discovery still sees authored input exactly.
+        """
+
+        source_is_directory = self.is_directory(source)
+        retained_checksums: set[str] = set()
+        if source_is_directory:
+            prefix = source.value.rstrip("/") + "/"
+            retained_checksums = {
+                entry.location.value[len(prefix) :]
+                for entry in self.list(source, recursive=True)
+                if not entry.is_directory and _is_checksum_sidecar(entry.name)
+            }
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        target = f"file:{destination.as_posix()}"
+        try:
+            copied = self.fs.cp(
+                self._path(source), target, source_is_directory
+            )
+        except Exception as exc:
+            raise StoreError(
+                f"cannot materialise {source.value} at {destination}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not materialise {source.value} at {destination}")
+        if source_is_directory:
+            for sidecar in destination.rglob(".*.crc"):
+                relative = sidecar.relative_to(destination).as_posix()
+                if relative not in retained_checksums:
+                    sidecar.unlink()
+        else:
+            generated = destination.parent / f".{destination.name}.crc"
+            generated.unlink(missing_ok=True)
+
+    def copy_from_local(self, source: Path, destination: Location) -> None:
+        """Copy one driver-local file or tree into OneLake without text decoding."""
+
+        origin = f"file:{source.as_posix()}"
+        try:
+            copied = self.fs.cp(origin, self._path(destination), source.is_dir())
+        except Exception as exc:
+            raise StoreError(
+                f"cannot persist {source} at {destination.value}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not persist {source} at {destination.value}")
+
+
+def _is_checksum_sidecar(name: str) -> bool:
+    return name.startswith(".") and name.endswith(".crc")

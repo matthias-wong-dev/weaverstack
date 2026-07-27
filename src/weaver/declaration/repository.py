@@ -1,0 +1,748 @@
+"""The workspace declaration — a tree of Weaver items, read and checked whole.
+
+The first directory level is the item type and the second is the logical item
+name. Everything below belongs to exactly one item.
+
+::
+
+    Files/weaver_items/
+    ├── Lakehouse/
+    │   └── Raw/
+    │       ├── schemas/Sales.yml
+    │       ├── Sales__Order.py            Delta table, Python
+    │       ├── Sales.OrderSummary.sql     Delta table, Spark SQL
+    │       ├── Files/Sales__Export.py     Folder
+    │       └── lib/dates.py
+    └── Warehouse/
+        └── Reporting/
+            ├── schemas/Sales.yml
+            ├── alias.yml
+            └── Sales.OrderReport.sql      Warehouse table, T-SQL
+
+The owning item chooses the SQL dialect, so no document carries one. Reading
+goes through a :class:`~weaver.store.Store`, so the same reader serves a local
+checkout and a declaration installed in the Weaver Lakehouse.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass, replace
+from typing import Iterable, Mapping
+
+import yaml
+
+from ..errors import DiscoveryError, IdentityError, MetadataError
+from ..locations import Location
+from ..store import LocalStore, Store
+from .graph import Graph
+from .metadata import (
+    DELTA_TARGET,
+    FOLDER_TARGET,
+    LAKEHOUSE_NAMESPACE,
+    PYTHON,
+    SQL_TARGET,
+    WAREHOUSE_NAMESPACE,
+    ObjectId,
+)
+from .model import (
+    FILES,
+    ITEM_TYPES,
+    LAKEHOUSE,
+    WAREHOUSE,
+    RepositoryAlias,
+    WeaverDocumentId,
+    WeaverItem,
+    WeaverItemId,
+    WeaverRepository,
+    WeaverSchemaId,
+)
+from .metadata import _UniqueKeyLoader
+from .schemas import SchemaSes, is_schema_file, read_schema_document
+from .source import (
+    PYTHON_ID_SEPARATOR,
+    SourceDocument,
+    language_for_filename,
+    object_id_for_filename,
+    read_source_document,
+)
+from .references import validate_repository_metadata
+from .item_dependencies import resolve_item_dependencies
+
+#: Never read, never installed.
+IGNORED_DIRECTORIES = frozenset(
+    {"__pycache__", ".git", ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea"}
+)
+IGNORED_FILENAMES = frozenset({".DS_Store", "Thumbs.db"})
+IGNORED_SUFFIXES = (".pyc", ".pyo", ".swp", ".orig", ".rej")
+
+
+
+
+
+
+
+
+def read_weaver_repository(
+    root: Location,
+    *,
+    store: Store | None = None,
+) -> WeaverRepository:
+    """Read the workspace declaration without executing authored code."""
+
+    store = store or LocalStore()
+    if not store.exists(root):
+        raise DiscoveryError(f"repository root does not exist: {root}")
+    if not store.is_directory(root):
+        raise DiscoveryError(f"repository root is not a directory: {root}")
+
+    prefix = root.value.rstrip("/") + "/"
+    entries: list[tuple[str, bool]] = []
+    for entry in store.list(root, recursive=True):
+        relative = entry.location.value[len(prefix):]
+        parts = relative.split("/")
+        if "_ignore" in parts:
+            continue
+        entries.append((relative, entry.is_directory))
+
+    from ..catalogue.builtin import item_repository_files
+
+    generated_files = item_repository_files()
+    builtin_prefix = "Lakehouse/_weaver"
+    physical_builtin = {
+        relative
+        for relative, is_directory in entries
+        if not is_directory and relative.startswith(builtin_prefix + "/")
+    }
+    if physical_builtin:
+        expected = set(generated_files)
+        if physical_builtin != expected:
+            missing = sorted(expected - physical_builtin)
+            extra = sorted(physical_builtin - expected)
+            detail = (
+                f"missing {missing[0]}" if missing else f"unexpected {extra[0]}"
+            )
+            raise DiscoveryError(
+                f"{builtin_prefix}: Weaver's managed catalogue item is incomplete: {detail}"
+            )
+        for relative in sorted(expected):
+            actual = store.read(root.join(*relative.split("/")))
+            if actual != generated_files[relative]:
+                raise DiscoveryError(
+                    f"{relative}: Weaver's managed catalogue item was modified"
+                )
+    entries = [
+        entry
+        for entry in entries
+        if entry[0] != builtin_prefix
+        and not entry[0].startswith(builtin_prefix + "/")
+    ]
+
+    for relative, is_directory in entries:
+        if not is_directory and relative.rsplit("/", 1)[-1] == "__init__.py":
+            raise DiscoveryError(
+                f"{relative}: user-authored __init__.py is not allowed; "
+                "Weaver supplies package loading"
+            )
+
+    if any(relative == "alias.yml" for relative, _ in entries):
+        raise DiscoveryError(
+            "alias.yml: an alias belongs to the item that consumes it — declare it "
+            "in <ItemType>/<ItemName>/alias.yml, keyed by that item's own "
+            "Schema.Object"
+        )
+
+    invalid_roots = sorted(
+        {
+            relative.split("/", 1)[0]
+            for relative, _ in entries
+            if relative.split("/", 1)[0] not in ITEM_TYPES
+        }
+    )
+    if invalid_roots:
+        raise DiscoveryError(
+            f"{invalid_roots[0]}: first directory must be exactly one of "
+            + ", ".join(sorted(ITEM_TYPES))
+        )
+
+    for relative, is_directory in entries:
+        if not is_directory:
+            continue
+        parts = relative.split("/")
+        if len(parts) <= 2:
+            continue
+        item = WeaverItemId(parts[0], parts[1])
+        within = parts[2:]
+        if within == ["schemas"]:
+            continue
+        if within == [FILES] and item.item_type == LAKEHOUSE:
+            continue
+        if within[0] == "lib" and item.item_type == LAKEHOUSE:
+            continue
+        raise DiscoveryError(
+            f"{relative}: only schemas/, lib/ and Lakehouse Files/ are authored "
+            "subdirectories of an item"
+        )
+
+    item_ids: set[WeaverItemId] = set()
+    files: list[str] = []
+    for relative, is_directory in entries:
+        parts = relative.split("/")
+        if len(parts) == 1:
+            if is_directory and parts[0] in ITEM_TYPES:
+                continue
+            raise DiscoveryError(
+                f"{relative}: the declaration root may contain only item type "
+                "directories and _ignore/"
+            )
+        if parts[0] not in ITEM_TYPES:
+            raise DiscoveryError(
+                f"{relative}: first directory must be exactly one of "
+                + ", ".join(sorted(ITEM_TYPES))
+            )
+        item = WeaverItemId(parts[0], parts[1])
+        item_ids.add(item)
+        if len(parts) == 2:
+            if not is_directory:
+                raise DiscoveryError(f"{relative}: an item must be a directory")
+            continue
+        if not is_directory:
+            files.append(relative)
+
+    source_documents: dict[WeaverDocumentId, SourceDocument] = {}
+    schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
+    support_files: list[str] = []
+    documents_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
+        item: [] for item in item_ids
+    }
+    schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {
+        item: [] for item in item_ids
+    }
+
+    alias_files: dict[WeaverItemId, str] = {}
+    for relative in sorted(files):
+        parts = relative.split("/")
+        item = WeaverItemId(parts[0], parts[1])
+        within = parts[2:]
+
+        if within == ["alias.yml"]:
+            # The item owns its aliases, so the file travels and certifies with
+            # the rest of the item's source rather than as a shared root file.
+            alias_files[item] = relative
+            support_files.append(relative)
+            continue
+
+        if within[0] == "lib":
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(f"{relative}: lib/ belongs to a Lakehouse item")
+            if len(within) == 1:
+                raise DiscoveryError(f"{relative}: lib must be a directory")
+            support_files.append(relative)
+            continue
+
+        if within[0] == "schemas":
+            if len(within) != 2 or not within[1].endswith(".yml"):
+                raise DiscoveryError(
+                    f"{relative}: schema declarations are schemas/<Schema>.yml"
+                )
+            schema = read_schema_document(
+                relative, store.read(root.join(*relative.split("/")))
+            )
+            identity = WeaverSchemaId(item, schema.schema_id)
+            _insert_exact_case(
+                schema_documents, identity, schema, relative, what="schema"
+            )
+            schemas_by_item[item].append(identity)
+            continue
+
+        is_files = within[0] == FILES
+        if is_files:
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(f"{relative}: Files/ belongs to a Lakehouse item")
+            if len(within) != 2:
+                raise DiscoveryError(
+                    f"{relative}: Folder documents live directly under Files/"
+                )
+        elif len(within) != 1:
+            raise DiscoveryError(
+                f"{relative}: only schemas/, lib/ and Lakehouse Files/ are authored "
+                "subdirectories of an item"
+            )
+
+        filename = within[-1]
+        if language_for_filename(filename, item.item_type) is None:
+            raise DiscoveryError(f"{relative}: not a Weaver object file")
+        source = read_source_document(
+            relative,
+            store.read(root.join(*relative.split("/"))),
+            item.item_type,
+        )
+        if source.warehouse_alias is not None or source.lakehouse_alias is not None:
+            raise DiscoveryError(
+                f"{relative}: document-local Warehouse alias/Lakehouse alias headers "
+                "have been replaced by the item's own alias.yml"
+            )
+        if item.item_type == LAKEHOUSE:
+            expected = FOLDER_TARGET if is_files else DELTA_TARGET
+        else:
+            expected = SQL_TARGET
+        if source.target_kind != expected:
+            location = "Files/" if is_files else f"{item.item_type} item root"
+            raise DiscoveryError(
+                f"{relative}: {source.document.kind} in {source.language} does not "
+                f"belong at the {location}"
+            )
+        identity = WeaverDocumentId(item, source.object_id, is_files=is_files)
+        source = replace(source, logical_id=identity)
+        _insert_exact_case(
+            source_documents, identity, source, relative, what="document"
+        )
+        documents_by_item[item].append(identity)
+
+    builtin_item = WeaverItemId(LAKEHOUSE, "_weaver")
+    item_ids.add(builtin_item)
+    documents_by_item[builtin_item] = []
+    schemas_by_item[builtin_item] = []
+    for relative, data in sorted(generated_files.items()):
+        if "/schemas/" in relative:
+            schema = read_schema_document(relative, data)
+            identity = WeaverSchemaId(builtin_item, schema.schema_id)
+            schema_documents[identity] = schema
+            schemas_by_item[builtin_item].append(identity)
+            continue
+        source = read_source_document(relative, data, builtin_item.item_type)
+        identity = WeaverDocumentId(builtin_item, source.object_id)
+        source_documents[identity] = replace(source, logical_id=identity)
+        documents_by_item[builtin_item].append(identity)
+
+    items: list[WeaverItem] = []
+    for item_id in sorted(item_ids):
+        schemas = tuple(sorted(schemas_by_item[item_id], key=str))
+        documents = tuple(sorted(documents_by_item[item_id], key=str))
+        declared = {schema.schema for schema in schemas}
+        for document_id in documents:
+            if document_id.object_id.schema not in declared:
+                source = source_documents[document_id]
+                raise DiscoveryError(
+                    f"{source.relative_path}: schema {document_id.object_id.schema!r} "
+                    f"is not declared by item {item_id}"
+                )
+        items.append(WeaverItem(item_id, schemas=schemas, documents=documents))
+
+    aliases = _read_item_aliases(
+        root,
+        store,
+        alias_files,
+        source_documents=source_documents,
+        schemas_by_item=schemas_by_item,
+    )
+    validate_repository_metadata(source_documents.values(), aliases=aliases)
+
+    items = [
+        replace(
+            model,
+            signature=_item_signature(
+                model,
+                source_documents=source_documents,
+                schema_documents=schema_documents,
+                support_files=support_files,
+                store=store,
+                root=root,
+            ),
+        )
+        for model in items
+    ]
+
+    repository = WeaverRepository(
+        name=root.name,
+        root=root,
+        items=tuple(items),
+        source_documents=source_documents,
+        schema_documents=schema_documents,
+        support_files=tuple(sorted(support_files)),
+        signature=_item_repository_signature(
+            files, store, root, generated=generated_files
+        ),
+        aliases=aliases,
+        generated_files=generated_files,
+    )
+    return resolve_item_dependencies(repository)
+
+
+def _item_signature(
+    item: WeaverItem,
+    *,
+    source_documents: Mapping[WeaverDocumentId, SourceDocument],
+    schema_documents: Mapping[WeaverSchemaId, SchemaSes],
+    support_files: Iterable[str],
+    store: Store,
+    root: Location,
+) -> str:
+    """Certify exactly one logical item's authored and generated inputs.
+
+    An item's ``alias.yml`` sits under its own prefix and is certified with its
+    other support files. The producer's content deliberately does not
+    participate: a logical dependency does not make an independently installed
+    producer part of the consumer's source item.
+    """
+
+    from .source import content_hash
+
+    entries: list[tuple[str, str]] = []
+    for identity in item.documents:
+        source = source_documents[identity]
+        entries.append((source.relative_path, source.source_hash))
+    for identity in item.schemas:
+        schema = schema_documents[identity]
+        entries.append((schema.relative_path, schema.source_hash))
+
+    prefix = f"{item.identity.item_type}/{item.identity.item_name}/"
+    for relative in support_files:
+        if relative.startswith(prefix):
+            entries.append(
+                (
+                    relative,
+                    content_hash(store.read(root.join(*relative.split("/")))),
+                )
+            )
+    digest = hashlib.sha256()
+    digest.update(str(item.identity).encode("utf-8"))
+    digest.update(b"\n")
+    for relative, source_hash in sorted(entries):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(source_hash.encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _insert_exact_case(
+    destination: dict,
+    identity,
+    value,
+    relative: str,
+    *,
+    what: str,
+) -> None:
+    rendered = str(identity)
+    for existing, existing_value in destination.items():
+        if str(existing) == rendered:
+            prior = getattr(existing_value, "relative_path", str(existing))
+            raise DiscoveryError(
+                f"{rendered} is declared twice: {prior} and {relative}"
+            )
+        if str(existing).casefold() == rendered.casefold():
+            raise DiscoveryError(
+                f"{rendered} and {existing} differ only by case and cannot coexist"
+            )
+    destination[identity] = value
+
+
+def _item_repository_signature(
+    paths: Iterable[str],
+    store: Store,
+    root: Location,
+    *,
+    generated: Mapping[str, bytes] | None = None,
+) -> str:
+    """Hash included item-oriented files; `_ignore/` never reaches this list."""
+
+    from .source import content_hash
+
+    digest = hashlib.sha256()
+    generated = generated or {}
+    for relative in sorted(set(paths) | set(generated)):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(
+            content_hash(
+                generated.get(relative)
+                if relative in generated
+                else store.read(root.join(*relative.split("/")))
+            ).encode("ascii")
+        )
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _read_item_aliases(
+    root: Location,
+    store: Store,
+    alias_files: Mapping[WeaverItemId, str],
+    *,
+    source_documents: Mapping[WeaverDocumentId, SourceDocument],
+    schemas_by_item: Mapping[WeaverItemId, list[WeaverSchemaId]],
+) -> tuple[RepositoryAlias, ...]:
+    """Read each item's own ``alias.yml``.
+
+    The file's location names the consuming item, so a declaration maps that
+    item's local ``Schema.Object`` to a full four-part source elsewhere in the
+    workspace. Nothing in the file repeats what the directory already says.
+    """
+
+    aliases: list[RepositoryAlias] = []
+    native_folded = {str(identity).casefold(): identity for identity in source_documents}
+    destination_folded: dict[str, WeaverDocumentId] = {}
+
+    for item in sorted(alias_files):
+        relative = alias_files[item]
+        try:
+            text = store.read(root.join(*relative.split("/"))).decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise DiscoveryError(f"{relative}: must be UTF-8 text ({exc})") from exc
+        try:
+            loaded = yaml.load(text, Loader=_UniqueKeyLoader)
+        except MetadataError:
+            raise
+        except yaml.YAMLError as exc:
+            raise DiscoveryError(f"{relative}: invalid YAML: {exc}") from exc
+        if not isinstance(loaded, dict) or set(loaded) != {"aliases"}:
+            raise DiscoveryError(
+                f"{relative} must contain exactly one 'aliases' mapping"
+            )
+        declarations = loaded["aliases"]
+        if not isinstance(declarations, dict):
+            raise DiscoveryError(f"{relative}: 'aliases' must be a mapping")
+
+        declared_schemas = {schema.schema for schema in schemas_by_item[item]}
+        for raw_destination, raw_source in declarations.items():
+            if not isinstance(raw_destination, str) or not isinstance(raw_source, str):
+                raise DiscoveryError(
+                    f"{relative}: destinations and sources must be strings"
+                )
+            try:
+                destination = WeaverDocumentId.parse_local(item, raw_destination)
+            except IdentityError as exc:
+                raise DiscoveryError(
+                    f"{relative}: an alias destination is this item's own "
+                    f"Schema.Object — the item is already known ({exc})"
+                ) from exc
+            try:
+                source = WeaverDocumentId.parse(raw_source)
+            except IdentityError as exc:
+                raise DiscoveryError(f"{relative}: {exc}") from exc
+            local = destination.object_id
+            if source not in source_documents:
+                case_match = native_folded.get(str(source).casefold())
+                detail = f"; declared spelling is {case_match}" if case_match else ""
+                raise DiscoveryError(
+                    f"{relative}: alias source {source} is not a document{detail}"
+                )
+            if local.schema not in declared_schemas:
+                raise DiscoveryError(
+                    f"{relative}: alias destination schema {local.schema!r} is not "
+                    f"declared by item {item}"
+                )
+            folded = str(destination).casefold()
+            native = native_folded.get(folded)
+            if native is not None:
+                raise DiscoveryError(
+                    f"{relative}: alias destination {destination} collides with "
+                    f"native document {native}"
+                )
+            prior = destination_folded.get(folded)
+            if prior is not None:
+                raise DiscoveryError(
+                    f"{relative}: alias destinations {destination} and {prior} "
+                    "differ only by case"
+                )
+            destination_folded[folded] = destination
+            aliases.append(RepositoryAlias(destination=destination, source=source))
+    return tuple(aliases)
+
+
+
+
+def _repository_files(store: Store, root: Location) -> list[str]:
+    prefix = root.value.rstrip("/") + "/"
+    relatives: list[str] = []
+    for entry in store.list(root, recursive=True):
+        if entry.is_directory:
+            continue
+        relative = entry.location.value[len(prefix):]
+        if _ignored(relative):
+            continue
+        relatives.append(relative)
+    return sorted(relatives)
+
+
+def _ignored(relative: str) -> bool:
+    parts = relative.split("/")
+    if any(part in IGNORED_DIRECTORIES for part in parts[:-1]):
+        return True
+    filename = parts[-1]
+    return filename in IGNORED_FILENAMES or filename.endswith(IGNORED_SUFFIXES)
+
+
+
+
+def importable_module_name(relative_path: str) -> str | None:
+    """The full dotted module a repository-relative path is importable as.
+
+    ``_helpers/dates.py`` is ``_helpers.dates``, not ``dates`` — a nested module
+    lives in its package's namespace and cannot shadow a top-level one.
+    ``_helpers/__init__.py`` is the package itself, ``_helpers``.
+    """
+
+    if not relative_path.endswith(".py"):
+        return None
+    stem = relative_path[: -len(".py")]
+    if stem.endswith("/__init__"):
+        stem = stem[: -len("/__init__")]
+    return stem.replace("/", ".")
+
+
+
+
+
+
+# --- schema, namespace and alias resolution ---------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- the internal dependency graph -------------------------------------------
+
+
+def _canonical(qualified: str) -> str:
+    """Object identities are compared without regard to case.
+
+    A developer may write `sales__order` where the house style is
+    `Sales__Order`, and SQL is case-insensitive by nature. Two objects whose
+    IDs differ only by case are refused, so the folding is unambiguous.
+    """
+
+    return qualified.lower()
+
+
+def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
+    """What this object depends on: declared if declared, else discovered.
+
+    A declaration replaces discovery rather than adding to it, so an author can
+    remove an edge as well as add one — the phantom dependency an unused import
+    creates has no other cure. ``Dependencies: []`` is such a declaration, so an
+    explicit none suppresses discovery rather than falling back to it.
+    """
+
+    if document.document.declares_dependencies:
+        return document.declared_dependencies
+    return document.referenced_object_ids
+
+
+def _resolve(
+    dependency: ObjectId,
+    by_id: Mapping[str, list[SourceDocument]],
+    referrer: SourceDocument,
+) -> SourceDocument | None:
+    """The object a two-part reference names, when that is unambiguous.
+
+    A two-part name resolves in the namespace of whoever wrote it: T-SQL
+    resolves inside the Warehouse, Spark SQL inside the Lakehouse. So the
+    referrer's own target wins when it has a candidate — `join Sales.Customer`
+    in a Warehouse query means the Warehouse's Sales.Customer, because that is
+    what the SQL would actually bind to.
+
+    Failing that, a single candidate anywhere is the answer, and it may cross a
+    boundary: a Warehouse query reading a Delta table is the ordinary case, and
+    the one the SQL endpoint and the shortcuts exist to bridge.
+
+    Two candidates in neither of those positions is genuinely ambiguous and is
+    left for the build, which has the targets and the shortcut bindings.
+    """
+
+    candidates = by_id.get(_canonical(dependency.qualified), [])
+    if not candidates:
+        return None
+    own_target = [
+        candidate for candidate in candidates
+        if candidate.target_kind == referrer.target_kind
+        and candidate.node_id != referrer.node_id
+    ]
+    if len(own_target) == 1:
+        return own_target[0]
+    elsewhere = [
+        candidate for candidate in candidates if candidate.node_id != referrer.node_id
+    ]
+    return elsewhere[0] if len(elsewhere) == 1 else None
+
+
+def _by_id(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:
+    grouped: dict[str, list[SourceDocument]] = {}
+    for document in documents:
+        grouped.setdefault(_canonical(document.qualified), []).append(document)
+    return grouped
+
+
+def build_internal_graph(
+    documents: Iterable[SourceDocument], *, external_names: Iterable[str] = ()
+) -> Graph:
+    """The graph over references that resolve within this repository.
+
+    Nodes are ``target:Schema.Object``, because an ID alone is not unique.
+    References resolving to nothing here — or to more than one thing — are left
+    out entirely. They may be shortcuts, objects of another repository, or
+    mistakes, and telling those apart needs the external-dependency
+    configuration supplied at build.
+    """
+
+    documents = list(documents)
+    by_id = _by_id(documents)
+    known_external = {_canonical(name) for name in external_names}
+
+    edges: list[tuple[str, str]] = []
+    for document in documents:
+        for dependency in effective_dependencies(document):
+            if _canonical(dependency.qualified) in known_external:
+                # Provided from outside — a boundary, not an edge within this graph.
+                continue
+            upstream = _resolve(dependency, by_id, document)
+            if upstream is not None and upstream.node_id != document.node_id:
+                edges.append((upstream.node_id, document.node_id))
+
+    return Graph((document.node_id for document in documents), edges)
+
+
+def unresolved_references(
+    documents: Iterable[SourceDocument], *, external_names: Iterable[str] = ()
+) -> dict[str, tuple[str, ...]]:
+    """Per object, the references naming nothing in this repository.
+
+    Recorded rather than refused: resolution needs the external-dependency
+    configuration, and that is a build concern.
+    """
+
+    documents = list(documents)
+    by_id = _by_id(documents)
+    known_external = {_canonical(name) for name in external_names}
+    unresolved: dict[str, tuple[str, ...]] = {}
+    for document in documents:
+        outside = tuple(
+            dependency.qualified
+            for dependency in effective_dependencies(document)
+            if _canonical(dependency.qualified) not in known_external
+            and _resolve(dependency, by_id, document) is None
+        )
+        physical = tuple(str(reference) for reference in document.qualified_references)
+        if outside or physical:
+            unresolved[document.node_id] = outside + physical
+    return unresolved
+
+

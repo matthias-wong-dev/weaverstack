@@ -1,6 +1,6 @@
 """SQL-backed Spark table build — the same assertions on local Spark and Fabric.
 
-Both schema modes come from one self-contained SES fixture (``sql-table-build``,
+Both schema modes come from one self-contained Weaver document fixture (``sql-table-build``,
 wired in ``build_envs`` as ``SQL_TABLE_FIXTURE``): ``Sales.InferredCustomer``
 takes its shape from its query, ``Sales.DeclaredCustomer`` declares a wider one.
 The estate is provisioned and installed **once per module** (``lakehouse_estate``)
@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from build_envs import SQL_TABLE_FIXTURE
 
-pytestmark = pytest.mark.parametrize("ses_fixture", [SQL_TABLE_FIXTURE], indirect=True)
+pytestmark = pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)
 
 AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
 
@@ -72,5 +72,8 @@ def test_dependency_order_places_the_base_before_its_readers(lakehouse_estate):
         if action.resource_node_id is not None
     }
     base = next(n for n in at if n.endswith("Sales.Customer"))
-    for reader in ("delta:Sales.InferredCustomer", "delta:Sales.DeclaredCustomer"):
+    for reader in (
+        "Lakehouse/Sales/Sales.InferredCustomer",
+        "Lakehouse/Sales/Sales.DeclaredCustomer",
+    ):
         assert at[base] < at[reader]

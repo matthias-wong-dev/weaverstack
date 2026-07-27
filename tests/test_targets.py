@@ -8,7 +8,6 @@ from weaver import (
     DeltaTarget,
     FolderTarget,
     ItemRef,
-    RepositoryRef,
     WarehouseTarget,
 )
 from weaver.errors import IdentityError
@@ -16,12 +15,11 @@ from weaver.errors import IdentityError
 ROUND_TRIP = [
     (FolderTarget, "Sales/Files"),
     (FolderTarget, "Sales/Files/Extracts"),
-    (FolderTarget, "Weaver/Files/repos"),
+    (FolderTarget, "Control/Files/Exports"),
     (FolderTarget, "Inventory/Files/Forecasts/Daily"),
     (DeltaTarget, "Sales"),
     (WarehouseTarget, "Reporting"),
     (ItemRef, "Weaver"),
-    (RepositoryRef, "sales-etl"),
 ]
 
 
@@ -68,11 +66,6 @@ def test_warehouse_target_rejects_a_path():
 def test_the_same_name_serves_different_slots():
     """Kind comes from the slot, never from the string."""
     assert DeltaTarget.parse("Shared").lakehouse == WarehouseTarget.parse("Shared").warehouse
-
-
-def test_repository_is_a_name_not_a_path():
-    with pytest.raises(IdentityError, match="single name"):
-        RepositoryRef.parse("Weaver/Files/repos/sales-etl")
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "a\\b", "a:b", "a*b", "..", "a|b"])

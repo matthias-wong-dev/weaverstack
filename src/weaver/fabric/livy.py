@@ -48,6 +48,77 @@ class StatementResult:
         return self.payload is not None
 
 
+@dataclass(frozen=True)
+class LivySessionInfo:
+    """One entry returned by Fabric's Lakehouse sessions collection."""
+
+    id: str
+    name: str | None = None
+    submitter_id: str | None = None
+    submitter_name: str | None = None
+    artifact_id: str | None = None
+    scheduler_state: str | None = None
+    plugin_state: str | None = None
+    livy_state: str | None = None
+    submitted_at: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    result: str | None = None
+    cancellation_reason: str | None = None
+    tags: tuple[str, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, value: dict[str, Any]) -> "LivySessionInfo":
+        tags = value.get("tags") or ()
+        if isinstance(tags, str):
+            tags = (tags,)
+        return cls(
+            id=str(value.get("id") or value.get("livyId") or ""),
+            name=_optional_text(value.get("name")),
+            submitter_id=_optional_text(value.get("submitterId")),
+            submitter_name=_optional_text(value.get("submitterName")),
+            artifact_id=_optional_text(value.get("artifactId")),
+            scheduler_state=_optional_text(value.get("schedulerState")),
+            plugin_state=_optional_text(value.get("pluginState")),
+            livy_state=_optional_text(value.get("livyState") or value.get("state")),
+            submitted_at=_optional_text(value.get("submittedAt")),
+            started_at=_optional_text(value.get("startedAt")),
+            ended_at=_optional_text(value.get("endedAt")),
+            result=_optional_text(value.get("result")),
+            cancellation_reason=_optional_text(value.get("cancellationReason")),
+            tags=tuple(str(tag) for tag in tags),
+        )
+
+    @property
+    def active(self) -> bool:
+        """Whether this session still occupies, or waits for, a capacity slot."""
+
+        if self.scheduler_state:
+            return self.scheduler_state.casefold() != "ended"
+        if self.livy_state:
+            return self.livy_state.casefold() not in {
+                "dead",
+                "error",
+                "killed",
+                "success",
+                "shutting_down",
+            }
+        return False
+
+
+@dataclass(frozen=True)
+class WorkspaceLivySession:
+    """A Livy collection entry with the Lakehouse whose collection owns it."""
+
+    lakehouse_id: str
+    lakehouse_name: str
+    session: LivySessionInfo
+
+    @property
+    def active(self) -> bool:
+        return self.session.active
+
+
 def sessions_url(
     workspace_id: str,
     lakehouse_id: str,
@@ -61,6 +132,68 @@ def sessions_url(
         f"/lakehouses/{lakehouse_id}"
         f"/livyapi/versions/{api_version}/sessions"
     )
+
+
+def list_livy_sessions(
+    workspace_id: str,
+    lakehouse_id: str,
+    *,
+    client=None,
+) -> tuple[LivySessionInfo, ...]:
+    """List the Spark sessions Fabric records for one Lakehouse.
+
+    This is read-only. In particular, it never cancels a stale session: the
+    caller that owns a session remains the only thing entitled to end it.
+    """
+
+    from .client import FabricClient
+
+    client = client or FabricClient()
+    payload = client.get_json(
+        sessions_url(workspace_id, lakehouse_id, api_base_url=client.api_base_url)
+    )
+    return tuple(
+        LivySessionInfo.from_mapping(item) for item in payload.get("items", ())
+    )
+
+
+def list_workspace_livy_sessions(
+    host,
+    *,
+    client=None,
+    active_only: bool = False,
+) -> tuple[WorkspaceLivySession, ...]:
+    """List sessions across every Lakehouse in a Fabric workspace.
+
+    Fabric capacities can apply a session limit across the workspace, while the
+    API exposes collections per Lakehouse. Looking only at the Lakehouse about
+    to host Weaver would therefore miss a notebook occupying the same slot.
+    """
+
+    from .client import FabricClient
+    from .resolution import FabricResolver
+    from .resources import LAKEHOUSE, list_items
+
+    client = client or FabricClient()
+    resolver = FabricResolver(host, client=client)
+    found = tuple(
+        WorkspaceLivySession(lakehouse.id, lakehouse.name, session)
+        for lakehouse in list_items(
+            resolver.workspace, item_type=LAKEHOUSE, client=client
+        )
+        for session in list_livy_sessions(
+            resolver.workspace.id, lakehouse.id, client=client
+        )
+    )
+    if active_only:
+        found = tuple(entry for entry in found if entry.active)
+    return tuple(
+        sorted(found, key=lambda entry: (entry.lakehouse_name, entry.session.id))
+    )
+
+
+def _optional_text(value: Any) -> str | None:
+    return None if value is None or value == "" else str(value)
 
 
 def _call(method: str, url: str, token: str, payload: Any = None,

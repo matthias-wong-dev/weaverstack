@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from ..ses.metadata import AUDIT_LIVE_DELETE_DATETIME
+from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..spark.tokens import object_token
 from .tables import (
     AUDIT_DELETE_COLUMN,
@@ -37,8 +37,9 @@ from .tables import (
     AUDIT_UPDATE_COLUMN,
     BOOLEAN,
     CATALOGUE_SCHEMA,
-    SCOPE_REPOSITORY,
-    SCOPE_TARGET_TYPE,
+    ITEM_SCOPE_COLUMNS,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
     TIMESTAMP,
     CatalogueTable,
 )
@@ -56,24 +57,36 @@ class InstallationScope:
     called without it and a caller cannot supply half of it.
     """
 
-    repository: str
-    target_type: str
+    item_type: str
+    item_name: str
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        return ITEM_SCOPE_COLUMNS
+
+    @property
+    def values(self) -> Mapping[str, str]:
+        return {
+            SCOPE_ITEM_TYPE: self.item_type,
+            SCOPE_ITEM_NAME: self.item_name,
+        }
 
     @property
     def predicate(self) -> str:
-        return (
-            f"{identifier(SCOPE_REPOSITORY)} = {literal(self.repository)}"
-            f" AND {identifier(SCOPE_TARGET_TYPE)} = {literal(self.target_type)}"
+        return self.predicate_for()
+
+    def predicate_for(self, qualifier: str = "") -> str:
+        prefix = f"{qualifier}." if qualifier else ""
+        return " AND ".join(
+            f"{prefix}{identifier(column)} = {literal(value)}"
+            for column, value in self.values.items()
         )
 
     def owns(self, row: Row) -> bool:
-        return (
-            row.get(SCOPE_REPOSITORY) == self.repository
-            and row.get(SCOPE_TARGET_TYPE) == self.target_type
-        )
+        return all(row.get(column) == value for column, value in self.values.items())
 
     def __str__(self) -> str:
-        return f"{self.repository}/{self.target_type}"
+        return f"{self.item_type}/{self.item_name}"
 
 
 def identifier(name: str) -> str:
@@ -167,7 +180,7 @@ def render_merge(
     An unchanged row is a genuine no-op: the ``MATCHED`` branch is guarded by a
     null-safe comparison of every non-key column, so it neither writes nor
     advances ``row_update_datetime``. That is what makes a rebuild of unchanged
-    SES leave the catalogue alone.
+    Weaver document leave the catalogue alone.
     """
 
     rows = sorted_rows(table, rows)
@@ -185,8 +198,7 @@ def render_merge(
     # The target side is narrowed to this installation as well as matched on the
     # key. The key already carries the scope, so this is belt and braces — and it
     # is the belt that shows in a review.
-    scoped = f"target.{identifier(SCOPE_REPOSITORY)} = {literal(scope.repository)} AND " \
-             f"target.{identifier(SCOPE_TARGET_TYPE)} = {literal(scope.target_type)}"
+    scoped = scope.predicate_for("target")
 
     comparison = table.comparison_columns
     changed = " OR ".join(
@@ -293,7 +305,7 @@ def render_delete_obsolete(
         return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
     # Only the key columns beyond the scope: the scope is already in the WHERE.
-    identity = tuple(name for name in table.key if name not in (SCOPE_REPOSITORY, SCOPE_TARGET_TYPE))
+    identity = tuple(name for name in table.key if name not in scope.columns)
     if not identity:
         return None
 
@@ -327,18 +339,6 @@ def render_delete_scope(table: CatalogueTable, *, scope: InstallationScope) -> s
     return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
 
-def render_delete_repository(table: CatalogueTable, *, repository: str) -> str:
-    """A ``DELETE`` of every installation of one repository from one table.
-
-    Deliberately not scoped by target type — this is the repository lifecycle
-    operation, and being cross-scope is the whole of what distinguishes it. It is
-    never reached from a build.
-    """
-
-    return (
-        f"DELETE FROM {qualified_name(table)}\n"
-        f" WHERE {identifier(SCOPE_REPOSITORY)} = {literal(repository)}\n"
-    )
 
 
 def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
@@ -379,7 +379,7 @@ def _check_scope(
     stray = [row for row in rows if not scope.owns(row)]
     if stray:
         found = ", ".join(
-            f"{row.get(SCOPE_REPOSITORY)!r}/{row.get(SCOPE_TARGET_TYPE)!r}"
+            "/".join(repr(row.get(column)) for column in scope.columns)
             for row in stray[:3]
         )
         raise ValueError(

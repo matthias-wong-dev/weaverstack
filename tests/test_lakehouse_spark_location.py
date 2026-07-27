@@ -28,23 +28,26 @@ def resolver(tmp_path):
 
 def test_a_target_resolves_to_its_two_roots(resolver, tmp_path):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
+    root = tmp_path.as_posix()
     assert location.item == "Sales_LH"
-    assert location.tables_root == f"{tmp_path}/Sales_LH/Tables"
-    assert location.files_root == f"{tmp_path}/Sales_LH/Files"
+    assert location.tables_root == f"{root}/Sales_LH/Tables"
+    assert location.files_root == f"{root}/Sales_LH/Files"
 
 
 def test_a_table_is_addressed_under_the_tables_root(resolver, tmp_path):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
+    root = tmp_path.as_posix()
     assert location.table_path("Sales", "Customer") == (
-        f"{tmp_path}/Sales_LH/Tables/Sales/Customer"
+        f"{root}/Sales_LH/Tables/Sales/Customer"
     )
-    assert location.schema_root("Sales") == f"{tmp_path}/Sales_LH/Tables/Sales"
+    assert location.schema_root("Sales") == f"{root}/Sales_LH/Tables/Sales"
 
 
 def test_a_folder_is_addressed_under_the_files_root(resolver, tmp_path):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
+    root = tmp_path.as_posix()
     assert location.folder_path("Sales", "Export") == (
-        f"{tmp_path}/Sales_LH/Files/Sales/Export"
+        f"{root}/Sales_LH/Files/Sales/Export"
     )
 
 
@@ -142,7 +145,7 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
     )
     assert resolved.lakehouse == ItemRef("Sales_LH")
     assert resolved.location is not None
-    assert resolved.location.tables_root == f"{tmp_path}/Sales_LH/Tables"
+    assert resolved.location.tables_root == f"{tmp_path.as_posix()}/Sales_LH/Tables"
 
 
 def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):

@@ -20,13 +20,15 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, RepositoryRef
+from weaver import ItemRef
 from weaver.build_bundle.bundle import load_bundle
 from weaver.build_bundle.installer import InstallationEnvironment, install_bundle
-from weaver.build_bundle.planner import generate_build_bundle
-from weaver.build_bundle.targets import LakehouseBinding, TargetBindings
-from weaver.catalogue import CATALOGUE_REPOSITORY, CATALOGUE_TABLES
-from weaver.catalogue.builtin import repository_files
+from weaver.build_bundle.planner import generate_item_build_bundle
+from weaver.build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
+from weaver.catalogue.builtin import materialise_builtin_item
+from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverItemId
 
 pytestmark = pytest.mark.spark
 
@@ -40,23 +42,27 @@ def built_catalogue(lakehouses, spark, weaver_catalogue):
     """
 
     resolver, store = lakehouses.resolver, lakehouses.store
-    repository = resolver.repository(RepositoryRef(CATALOGUE_REPOSITORY))
-    for relative, data in repository_files().items():
-        store.write(repository.join(*relative.split("/")), data)
+    repository_root = resolver.weaver_items_root
+    materialise_builtin_item(repository_root, store=store)
+    repository = read_weaver_repository(repository_root, store=store)
+    control = LakehouseBinding(lakehouse=lakehouses.weaver)
 
-    bundle = generate_build_bundle(
-        weaver_lakehouse=lakehouses.weaver,
-        repository_name=CATALOGUE_REPOSITORY,
-        targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.weaver)),
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+        ),
         output=resolver.build_bundle("catalogue-bootstrap"),
-        host=lakehouses.host,
         store=store,
         prune=False,
         # Structure only. With the catalogue on, this same bundle would go on to
         # populate the tables it just created — which is the bootstrap, and is
         # tested as such in test_catalogue_setup.
         catalogue=False,
+        control_lakehouse=None,
+        resolver=resolver,
         spark=spark,
+        host=lakehouses.host,
     )
     report = install_bundle(
         load_bundle(bundle.location, store=store),
@@ -82,17 +88,11 @@ def _failures(report) -> str:
 def test_the_ordinary_build_path_creates_all_ten_catalogue_tables(
     built_catalogue, weaver_catalogue
 ):
-    """Names are compared case-insensitively, because the local metastore folds them.
+    """The emulator preserves the same canonical display names as Fabric."""
 
-    Fabric preserves the case of a Lakehouse table; the local Hive metastore
-    lowercases both the registered name and the managed directory. That is an
-    emulator divergence, so the assertion is written to the behaviour Weaver
-    actually relies on — identity is case-insensitive, and the reader already
-    refuses two names differing only by case.
-    """
-
-    existing = {name.lower() for name in weaver_catalogue.tables("_")}
-    assert existing == {table.name.lower() for table in CATALOGUE_TABLES}
+    assert set(weaver_catalogue.tables("_")) == {
+        table.name for table in CATALOGUE_TABLES
+    }
 
 
 def test_each_table_has_exactly_the_columns_the_representation_declares(
@@ -118,7 +118,7 @@ def test_each_column_has_the_declared_type(built_catalogue, spark, weaver_catalo
 def test_the_declared_key_is_physically_not_null(built_catalogue, spark, weaver_catalogue):
     """The representation asserts key columns are not null; the built table proves it.
 
-    Nullability comes from the SES ``Primary key`` declaration, so this closes the
+    Nullability comes from the Weaver document ``Primary key`` declaration, so this closes the
     loop between what the catalogue claims about its identity columns and what
     Delta will actually enforce.
     """
@@ -181,12 +181,11 @@ def test_the_tables_land_under_the_weaver_lakehouse_tables_area(
 
     tables_root = lakehouses.resolver.tables_root(ItemRef("Weaver"))
     directories = {
-        entry.name.lower()
+        entry.name
         for entry in lakehouses.store.list(tables_root / "_")
         if entry.is_directory
     }
-    # Lowercased by the local metastore, not by Weaver — see the note above.
-    assert directories == {table.name.lower() for table in CATALOGUE_TABLES}
+    assert directories == {table.name for table in CATALOGUE_TABLES}
 
 
 def test_rebuilding_the_unchanged_repository_succeeds_again(built_catalogue, lakehouses, spark):
@@ -201,19 +200,23 @@ def test_rebuilding_the_unchanged_repository_succeeds_again(built_catalogue, lak
     """
 
     resolver, store = lakehouses.resolver, lakehouses.store
-    bundle = generate_build_bundle(
-        weaver_lakehouse=lakehouses.weaver,
-        repository_name=CATALOGUE_REPOSITORY,
-        targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=lakehouses.weaver)),
+    repository = read_weaver_repository(resolver.weaver_items_root, store=store)
+    control = LakehouseBinding(lakehouse=lakehouses.weaver)
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+        ),
         output=resolver.build_bundle("catalogue-bootstrap-again"),
-        host=lakehouses.host,
         store=store,
         prune=False,
         # Structure only. With the catalogue on, this same bundle would go on to
         # populate the tables it just created — which is the bootstrap, and is
         # tested as such in test_catalogue_setup.
         catalogue=False,
+        resolver=resolver,
         spark=spark,
+        host=lakehouses.host,
     )
     report = install_bundle(
         load_bundle(bundle.location, store=store),

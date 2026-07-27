@@ -38,8 +38,39 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
     doctor.set_defaults(handler=handle_doctor)
 
+    build = subcommands.add_parser(
+        "build", help="build bound logical items from the workspace declaration"
+    )
+    build.add_argument(
+        "--bind",
+        dest="item_bindings",
+        action="append",
+        required=True,
+        metavar="ITEM=TARGET",
+        help="logical ItemType/Name=physical item name; repeat for several",
+    )
+    build.add_argument(
+        "--bundle",
+        nargs="?",
+        const="",
+        metavar="NAME",
+        help=(
+            "optionally retain a .weaver.zip build record; omit NAME for a UTC "
+            "timestamp"
+        ),
+    )
+    build.add_argument(
+        "--no-prune", action="store_true", help="do not reconcile undeclared target objects"
+    )
+    build.add_argument(
+        "--no-catalogue", action="store_true", help="do not publish catalogue rows"
+    )
+    build.add_argument("--json", action="store_true", help="emit the result as JSON")
+    _add_host_args(build)
+    build.set_defaults(handler=handle_build)
+
     wipe = subcommands.add_parser(
-        "wipe", help="clear a Lakehouse, a Warehouse, or one folder root"
+        "wipe", help="clear a physical Lakehouse or Warehouse"
     )
     wipe.add_argument(
         "--lakehouse-target",
@@ -58,15 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME",
         help="a Fabric Warehouse to clear completely; repeat for several",
-    )
-    wipe.add_argument(
-        "--folder-target",
-        "--folder_target",
-        dest="folder_targets",
-        action="append",
-        default=[],
-        metavar="PATH",
-        help="a Lakehouse Files root to clear; repeat for several",
     )
     _add_host_args(wipe)
     wipe.add_argument("--dry-run", action="store_true", help="report without removing")
@@ -268,21 +290,16 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
     from weaver import (
         FabricHost,
-        FolderTarget,
         ItemRef,
         WarehouseTarget,
-        wipe_folder_target,
         wipe_lakehouse,
         wipe_sql_target,
     )
     from weaver.errors import CommandError
 
-    if not any(
-        (args.lakehouse_targets, args.warehouse_targets, args.folder_targets)
-    ):
+    if not any((args.lakehouse_targets, args.warehouse_targets)):
         raise CommandError(
-            "give at least one --lakehouse-target, --warehouse-target, "
-            "or --folder-target to wipe"
+            "give at least one --lakehouse-target or --warehouse-target to wipe"
         )
 
     host = _resolve_host(args)
@@ -290,22 +307,16 @@ def handle_wipe(args: argparse.Namespace) -> int:
     warehouses = tuple(
         WarehouseTarget.parse(name) for name in args.warehouse_targets
     )
-    folders = tuple(FolderTarget.parse(path) for path in args.folder_targets)
-
     if warehouses and not isinstance(host, FabricHost):
         raise CommandError(
             "Warehouse targets require a Fabric host; a local root has no SQL"
         )
 
-    store = _desktop_store(host) if lakehouses or folders else None
+    store = _desktop_store(host) if lakehouses else None
     planned = []
     for lakehouse in lakehouses:
         planned.extend(
             wipe_lakehouse(lakehouse, host, store=store, dry_run=True)
-        )
-    for folder in folders:
-        planned.append(
-            wipe_folder_target(folder, host, store=store, dry_run=True)
         )
 
     print(f"wipe on {host.alias or host.__class__.__name__}\n")
@@ -345,8 +356,6 @@ def handle_wipe(args: argparse.Namespace) -> int:
     for lakehouse in lakehouses:
         for report in wipe_lakehouse(lakehouse, host, store=store):
             print(f"  {report}")
-    for folder in folders:
-        print(f"  {wipe_folder_target(folder, host, store=store)}")
     if warehouses:
         from weaver.fabric import desktop_sql_executor
 
@@ -355,6 +364,137 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 wipe_sql_target(warehouse, host, sql=sql)
             print(f"  warehouse:{warehouse}: wiped")
     return 0
+
+
+def handle_build(args: argparse.Namespace) -> int:
+    """Adapt CLI strings and transport to the item-oriented core build."""
+
+    import json
+
+    from weaver import FabricHost, ItemBindings, parse_item_binding
+    from weaver.errors import CommandError
+
+    bindings = ItemBindings(tuple(parse_item_binding(text) for text in args.item_bindings))
+    host = _resolve_host(args)
+    if not isinstance(host, FabricHost):
+        raise CommandError(
+            "the desktop build command submits Weaver to Fabric; for the local "
+            "emulator call generate_item_build_bundle with a caller-owned SparkSession"
+        )
+    result = _run_fabric_item_build(
+        host,
+        bindings=bindings,
+        bundle_name=args.bundle,
+        prune=not args.no_prune,
+        catalogue=not args.no_catalogue,
+    )
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"build {result['status']}: workspace declaration")
+        print(f"  bundle: {result['bundle_id']}")
+        if result.get("archive"):
+            print(f"  record: {result['archive']}")
+        print(f"  items:  {', '.join(result['items'])}")
+        if result["errors"]:
+            for error in result["errors"]:
+                print(f"  failed: {error['id']}: {error['type']}: {error['message']}")
+    return 0 if result["status"] == "succeeded" else 1
+
+
+def _run_fabric_item_build(
+    host,
+    *,
+    bindings,
+    bundle_name: str | None,
+    prune: bool,
+    catalogue: bool,
+) -> dict:
+    """Run both build phases inside the host's Environment-backed session."""
+
+    from weaver.errors import CommandError
+    from weaver.fabric import LivySession, list_workspace_livy_sessions
+
+    if not host.weaver_lakehouse:
+        raise CommandError("a Fabric build host must name its weaver_lakehouse")
+    try:
+        active_sessions = list_workspace_livy_sessions(host, active_only=True)
+    except WeaverError as exc:
+        print(f"warning: could not inspect Fabric Spark sessions: {exc}", file=sys.stderr)
+    else:
+        _print_livy_preflight(active_sessions)
+    binding_texts = []
+    for binding in bindings.entries:
+        target = binding.target
+        physical = (
+            target.lakehouse.name if hasattr(target, "lakehouse") else target.warehouse.name
+        )
+        binding_texts.append(f"{binding.item}={physical}")
+
+    host_literal = (
+        f"FabricHost(workspace={host.workspace!r}, "
+        f"weaver_lakehouse={host.weaver_lakehouse!r}, "
+        f"fabric_environment={host.fabric_environment!r})"
+    )
+    body = (
+        "from weaver import (FabricHost, ItemRef, "
+        "build_item_repository, timestamped_archive_name)\n"
+        "from weaver.build_bundle import (InstallationEnvironment, ItemBindings, "
+        "LakehouseBinding, parse_item_binding)\n"
+        "from weaver.resolution import resolver_for, store_for\n"
+        f"host = {host_literal}\n"
+        "store = store_for(host)\n"
+        "resolver = resolver_for(host)\n"
+        f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
+        "control = LakehouseBinding(ItemRef(host.weaver_lakehouse))\n"
+        f"record_name = {bundle_name!r}\n"
+        "if record_name is not None:\n"
+        "    record_name = record_name or timestamped_archive_name()\n"
+        "    if not record_name.endswith('.weaver.zip'):\n"
+        "        record_name += '.weaver.zip'\n"
+        "archive = resolver.build_bundle(record_name) if record_name else None\n"
+        "environment = InstallationEnvironment(\n"
+        "    store=store, resolver=resolver, spark=spark, host=host)\n"
+        "result = build_item_repository(\n"
+        "    resolver.weaver_items_root,\n"
+        "    bindings=bindings, environment=environment,\n"
+        f"    prune={prune!r}, catalogue={catalogue!r},\n"
+        f"    control_lakehouse=control if {catalogue!r} else None,\n"
+        "    archive=archive)\n"
+        "report = result.report\n"
+        "emit({\n"
+        "    'source': 'weaver_items',\n"
+        "    'items': [str(binding.item) for binding in bindings.entries],\n"
+        "    'bundle_id': result.bundle_id,\n"
+        "    'archive': result.archive.value if result.archive else None,\n"
+        "    'status': report.status,\n"
+        "    'errors': [\n"
+        "        {'id': action.action_id, 'type': action.error_type, "
+        "         'message': action.error_message}\n"
+        "        for action in report.action_results() if action.status == 'failed'],\n"
+        "})\n"
+    )
+    with LivySession.for_host(host) as session:
+        return session.run(body).payload
+
+
+def _print_livy_preflight(active_sessions) -> None:
+    if not active_sessions:
+        print("Fabric Spark preflight: no active or queued sessions.", file=sys.stderr)
+        return
+    print("Fabric Spark preflight: active or queued sessions:", file=sys.stderr)
+    for entry in active_sessions:
+        session = entry.session
+        states = "/".join(
+            state or "-"
+            for state in (session.scheduler_state, session.plugin_state, session.livy_state)
+        )
+        print(
+            f"  {entry.lakehouse_name}: session {session.id or '?'} "
+            f"({states})"
+            + (f"; submitted by {session.submitter_name}" if session.submitter_name else ""),
+            file=sys.stderr,
+        )
 
 
 def handle_doctor(args: argparse.Namespace) -> int:

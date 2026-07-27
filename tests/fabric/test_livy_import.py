@@ -59,7 +59,7 @@ def test_the_core_public_surface_is_importable_there(livy_session):
     }
 
 
-def test_the_ses_contract_parses_there(livy_session):
+def test_the_weaver_contract_parses_there(livy_session):
     """The heart of Weaver, running in Fabric rather than described to it."""
 
     body = (

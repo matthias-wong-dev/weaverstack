@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -104,3 +105,75 @@ def test_fabric_store_lists_and_deletes_through_notebookutils():
         ("notes.txt", False, 12),
     ]
     assert fs.deleted == [(f"{root}/Sales", True)]
+
+
+def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decoding(
+    tmp_path,
+):
+    class CopyFs:
+        def __init__(self, remote_tree, remote_archive):
+            self.calls = []
+            self.remote_tree = remote_tree
+            self.remote_archive = remote_archive
+
+        def exists(self, path):
+            return path in {self.remote_tree, self.remote_archive}
+
+        def ls(self, path):
+            if path == self.remote_tree.rsplit("/", 1)[0]:
+                return [_Info(self.remote_tree, "Estate", True)]
+            if path == self.remote_tree:
+                return [
+                    _Info(f"{path}/table.py", "table.py", False, 12),
+                    _Info(f"{path}/.authored.crc", ".authored.crc", False, 8),
+                ]
+            if path == self.remote_archive.rsplit("/", 1)[0]:
+                return [
+                    _Info(self.remote_archive, "record.weaver.zip", False, 12)
+                ]
+            raise AssertionError(path)
+
+        def cp(self, source, destination, recurse):
+            self.calls.append((source, destination, recurse))
+            local = Path(destination.removeprefix("file:"))
+            if recurse:
+                local.mkdir(parents=True)
+                (local / "table.py").write_text("table", encoding="utf-8")
+                (local / ".table.py.crc").write_bytes(b"generated")
+                (local / ".authored.crc").write_bytes(b"authored")
+            elif source.startswith("abfss://"):
+                local.write_bytes(b"PK fake binary")
+                (local.parent / f".{local.name}.crc").write_bytes(b"generated")
+            return True
+
+    remote_tree = Location(
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/weaver_items"
+    )
+    remote_archive = Location(
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/"
+        "build_bundles/record.weaver.zip"
+    )
+    fs = CopyFs(remote_tree.value, remote_archive.value)
+    store = FabricStore(fs)
+    local_tree = tmp_path / "Estate"
+    downloaded_archive = tmp_path / "downloaded.weaver.zip"
+    local_archive = tmp_path / "record.weaver.zip"
+    local_archive.write_bytes(b"PK fake binary")
+
+    store.copy_to_local(remote_tree, local_tree)
+    store.copy_to_local(remote_archive, downloaded_archive)
+    store.copy_from_local(local_archive, remote_archive)
+
+    assert (local_tree / ".authored.crc").is_file()
+    assert not (local_tree / ".table.py.crc").exists()
+    assert downloaded_archive.read_bytes() == b"PK fake binary"
+    assert not (tmp_path / ".downloaded.weaver.zip.crc").exists()
+    assert fs.calls == [
+        (remote_tree.value, f"file:{local_tree.as_posix()}", True),
+        (
+            remote_archive.value,
+            f"file:{downloaded_archive.as_posix()}",
+            False,
+        ),
+        (f"file:{local_archive.as_posix()}", remote_archive.value, False),
+    ]

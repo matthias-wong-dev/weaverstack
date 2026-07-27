@@ -18,7 +18,7 @@ from weaver.build_bundle.executors.spark_table import SparkTableExecutor
 from weaver.build_bundle.models import BuildAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import BuildError, InstallError
-from weaver.spark import local_destination
+from weaver.spark import fabric_destination, local_destination
 from weaver.targets import ItemRef
 
 
@@ -45,18 +45,75 @@ class _FakeFrame:
     def __init__(self, fields: list[_FakeField]) -> None:
         self.schema = _FakeSchema(fields)
 
+    def collect(self) -> list:
+        return []
+
+
+class _FakeRow:
+    def __init__(self, **values) -> None:
+        self._values = values
+
+    def asDict(self) -> dict:
+        return self._values
+
+
+class _FakeListing:
+    def __init__(self, rows: list[_FakeRow]) -> None:
+        self._rows = rows
+
+    def collect(self) -> list[_FakeRow]:
+        return self._rows
+
+
+class _FakeConf:
+    def __init__(self) -> None:
+        self.value = "false"
+        self.changes: list[str] = []
+
+    def get(self, key: str) -> str:
+        assert key == "spark.sql.caseSensitive"
+        return self.value
+
+    def set(self, key: str, value: str) -> None:
+        assert key == "spark.sql.caseSensitive"
+        self.value = str(value)
+        self.changes.append(self.value)
+
 
 class _FakeSpark:
     """Returns a fixed query shape, and records the statements it is asked to run."""
 
-    def __init__(self, query_fields: list[tuple[str, str]]) -> None:
+    def __init__(
+        self,
+        query_fields: list[tuple[str, str]],
+        *,
+        existing_tables: tuple[str, ...] = (),
+    ) -> None:
         self._fields = [_FakeField(name, simple) for name, simple in query_fields]
+        self.existing_tables = list(existing_tables)
         self.executed: list[str] = []
+        self.conf = _FakeConf()
+        self.case_at_create: str | None = None
+        self.case_at_drop: str | None = None
+        self.case_at_query: str | None = None
 
     def sql(self, statement: str):
         self.executed.append(statement)
-        if statement.lstrip().upper().startswith("CREATE"):
+        normalized = statement.lstrip().upper()
+        if normalized.startswith("SHOW VIEWS"):
+            return _FakeListing([])
+        if normalized.startswith("SHOW TABLES"):
+            return _FakeListing(
+                [_FakeRow(tableName=name, isTemporary=False) for name in self.existing_tables]
+            )
+        if normalized.startswith("DROP TABLE"):
+            self.case_at_drop = self.conf.value
+            self.existing_tables = []
             return None
+        if normalized.startswith("CREATE"):
+            self.case_at_create = self.conf.value
+            return None
+        self.case_at_query = self.conf.value
         return _FakeFrame(self._fields)
 
 
@@ -71,9 +128,10 @@ AUDIT = [
 #: the folded database name — and the executor has to be *given* one, which is
 #: the whole point: an action with no destination has nowhere to go.
 DESTINATION = local_destination(item="Sales_LH", tables_root="/tmp/Sales_LH/Tables")
+FABRIC_DESTINATION = fabric_destination(workspace="Analytics", lakehouse="Sales_LH")
 
 #: What `Sales.Customer` is called there.
-CUSTOMER = "`Sales_LH__Sales`.`Customer`"
+CUSTOMER = "`sales_lh__sales`.`Customer`"
 
 
 def _payload(**overrides) -> bytes:
@@ -91,7 +149,7 @@ def _payload(**overrides) -> bytes:
     return (json.dumps(payload) + "\n").encode("utf-8")
 
 
-def _run(spark, payload: bytes):
+def _run(spark, payload: bytes, *, destination=DESTINATION):
     action = BuildAction(
         id="build-delta-Sales.Customer",
         kind="build_table",
@@ -103,7 +161,7 @@ def _run(spark, payload: bytes):
     target = ResolvedTarget(
         bound=BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH"),
         lakehouse=ItemRef("Sales_LH"),
-        destination=DESTINATION,
+        destination=destination,
     )
     context = InstallationContext(
         spark=spark, resolver=None, store=None, snapshot=None, target=target
@@ -136,6 +194,63 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert "USING delta" in statement
     assert "delta.columnMapping.mode" in statement
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
+
+
+def test_fabric_creation_preserves_identifier_case_and_restores_the_session_setting():
+    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
+
+    _run(spark, _payload(), destination=FABRIC_DESTINATION)
+
+    assert spark.case_at_query == "true"
+    assert spark.case_at_create == "true"
+    assert spark.conf.value == "false"
+    assert spark.conf.changes == ["true", "false"]
+
+
+def test_fabric_creation_drops_a_legacy_case_variant_before_replacing_it():
+    spark = _FakeSpark(
+        [("CustomerId", "int"), ("CustomerName", "string")],
+        existing_tables=("customer",),
+    )
+
+    _run(spark, _payload(), destination=FABRIC_DESTINATION)
+
+    drop = next(s for s in spark.executed if s.lstrip().upper().startswith("DROP"))
+    assert drop == (
+        "DROP TABLE `Analytics`.`Sales_LH`.`Sales`.`customer`"
+    )
+    assert spark.case_at_drop == "true"
+    assert spark.case_at_create == "true"
+    assert spark.conf.value == "false"
+
+
+def test_local_creation_uses_the_registered_folded_schema_and_pascal_table_name():
+    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
+
+    _run(spark, _payload())
+
+    assert _create_statement(spark).startswith(
+        "CREATE OR REPLACE TABLE `sales_lh__sales`.`Customer`"
+    )
+    assert spark.case_at_create == "true"
+    assert spark.conf.value == "true"
+
+
+def test_a_failed_create_still_restores_the_session_setting():
+    class _FailingCreate(_FakeSpark):
+        def sql(self, statement: str):
+            if statement.lstrip().upper().startswith("CREATE"):
+                self.case_at_create = self.conf.value
+                raise RuntimeError("create failed")
+            return super().sql(statement)
+
+    spark = _FailingCreate([("CustomerId", "int"), ("CustomerName", "string")])
+
+    with pytest.raises(RuntimeError, match="create failed"):
+        _run(spark, _payload(), destination=FABRIC_DESTINATION)
+
+    assert spark.case_at_create == "true"
+    assert spark.conf.value == "false"
 
 
 def test_the_not_null_header_marks_inferred_columns_not_null():

@@ -8,7 +8,7 @@ The two hosts answer differently, and the difference is data:
 
 ===========  ==================================================
 Fabric       ```Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer```
-local        ```Sales_LH__Sales`.`Customer```
+local        ```sales_lh__sales`.`Customer```
 ===========  ==================================================
 
 Fabric's shape was confirmed against a real workspace before it was built on:
@@ -77,8 +77,8 @@ def test_two_fabric_lakehouses_are_different_places(fabric):
 
 
 def test_local_folds_the_lakehouse_into_the_one_namespace_level_it_has(local):
-    assert local.qualify("Sales", "Customer") == "`Sales_LH__Sales`.`Customer`"
-    assert local.qualified_schema("Sales") == "`Sales_LH__Sales`"
+    assert local.qualify("Sales", "Customer") == "`sales_lh__sales`.`Customer`"
+    assert local.qualified_schema("Sales") == "`sales_lh__sales`"
 
 
 def test_a_local_schema_is_pinned_under_the_lakehouse_tables_area(local):
@@ -118,7 +118,7 @@ def test_a_name_carrying_a_separator_is_refused(local, bad):
 
 def test_a_backtick_in_a_name_is_doubled_not_dropped():
     destination = local_destination(item="Sales_LH", tables_root="/root")
-    assert destination.qualify("Sales", "Odd`Name") == "`Sales_LH__Sales`.`Odd``Name`"
+    assert destination.qualify("Sales", "Odd`Name") == "`sales_lh__sales`.`Odd``Name`"
 
 
 # --- tokens: what a payload carries instead of a destination -------------------
@@ -148,8 +148,8 @@ def test_the_same_payload_resolves_differently_per_destination(fabric, local):
         "SELECT * FROM `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer` WHERE IsActive"
     )
     assert expand(payload, local) == (
-        "CREATE OR REPLACE VIEW `Sales_LH__Sales`.`ActiveCustomer` AS\n"
-        "SELECT * FROM `Sales_LH__Sales`.`Customer` WHERE IsActive"
+        "CREATE OR REPLACE VIEW `sales_lh__sales`.`ActiveCustomer` AS\n"
+        "SELECT * FROM `sales_lh__sales`.`Customer` WHERE IsActive"
     )
 
 
@@ -208,6 +208,7 @@ class _Spark:
         self.executed = []
         self._listings = listings or {}
         self.catalog = catalog or _Catalog()
+        self.conf = _Conf()
 
     def sql(self, statement):
         self.executed.append(statement)
@@ -218,12 +219,20 @@ class _Spark:
         return None
 
 
+class _Conf:
+    def __init__(self):
+        self.values = {"spark.sql.caseSensitive": "false"}
+
+    def set(self, key, value):
+        self.values[key] = str(value)
+
+
 def test_creating_a_schema_locally_pins_its_storage(local):
     spark = _Spark()
     statement = SparkCatalogue(spark, local).create_schema("Sales")
 
     assert statement == (
-        "CREATE SCHEMA IF NOT EXISTS `Sales_LH__Sales` "
+        "CREATE SCHEMA IF NOT EXISTS `sales_lh__sales` "
         "LOCATION '/root/Sales_LH/Tables/Sales'"
     )
     assert spark.executed == [statement]
@@ -241,7 +250,7 @@ def test_a_statement_run_through_the_catalogue_is_addressed_first(local):
     spark = _Spark()
     SparkCatalogue(spark, local).sql("DROP TABLE IF EXISTS {{object:Sales.Old}}")
 
-    assert spark.executed == ["DROP TABLE IF EXISTS `Sales_LH__Sales`.`Old`"]
+    assert spark.executed == ["DROP TABLE IF EXISTS `sales_lh__sales`.`Old`"]
 
 
 def test_listing_views_asks_the_destination_not_the_session(fabric):

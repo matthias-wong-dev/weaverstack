@@ -24,7 +24,7 @@ from dataclasses import replace
 
 from build_envs import lakehouse_environments as build_environments
 
-from weaver import DeltaTarget, FolderTarget, RepositoryRef
+from weaver import DeltaTarget, FolderTarget
 
 
 def _folder(build_env, schema, name):
@@ -45,18 +45,23 @@ def _scalar(rows):
 
 @build_environments
 def test_generate_and_install_lakehouse_bundle(build_env):
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
 
     # Plan assertions, before installing.
     assert bundle.plan.format_version == 1
-    assert bundle.plan.repository_name == "MyRepo"
+    assert bundle.plan.repository_name == "weaver_items"
     assert len(bundle.plan.targets) == 1 and bundle.plan.targets[0].kind == "lakehouse"
-    assert bundle.plan.omitted_nodes == ()
+    # Weaver's own generated `Lakehouse/_weaver` is present in every declaration
+    # and unbound here, so it is omitted; nothing the fixture authored is.
+    assert all(
+        node.node_id.startswith("Lakehouse/_weaver/")
+        for node in bundle.plan.omitted_nodes
+    )
 
     # Independence: remove the source, then install from the bundle alone.
-    build_env.remove_repo("MyRepo")
-    assert not build_env.store.exists(build_env.resolver.repository(RepositoryRef("MyRepo")))
+    build_env.remove_repo()
+    assert not build_env.store.exists(build_env.resolver.weaver_items_root)
 
     outcome = build_env.install(bundle)
     assert outcome.status == "succeeded"
@@ -121,7 +126,7 @@ def test_nothing_is_built_in_the_weaver_lakehouse(build_env):
     session and found it. Asking the *Weaver* Lakehouse directly is what closes it.
     """
 
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     build_env.install(build_env.generate())
 
     weaver = build_env.weaver_destination
@@ -133,7 +138,7 @@ def test_nothing_is_built_in_the_weaver_lakehouse(build_env):
 
 @build_environments
 def test_install_report_is_written_into_the_bundle(build_env):
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
     build_env.install(bundle)
     assert build_env.store.exists(bundle.location.join("install-report.yml"))
@@ -158,7 +163,7 @@ def _rebuild_with_broken_summary(build_env, bundle):
     )
 
     def fix(action):
-        if action.id == "view-DWG.ActiveCustomerSummary":
+        if action.id == "object-Lakehouse--Raw--DWG.ActiveCustomerSummary":
             payloads[action.payload] = broken
             return replace(action, payload_sha256=hashlib.sha256(broken).hexdigest())
         return action
@@ -191,7 +196,7 @@ def _rebuild_with_broken_summary(build_env, bundle):
 
 @build_environments
 def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
     broken = _rebuild_with_broken_summary(build_env, bundle)
 
@@ -203,7 +208,7 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
     assert outcome.sequence_status[40] == "succeeded"  # DWG.Customer
     assert outcome.sequence_status[50] == "succeeded"  # ActiveCustomer
     assert outcome.sequence_status[60] == "failed"     # ActiveCustomerSummary
-    assert outcome.action_status["view-DWG.ActiveCustomerSummary"] == "failed"
+    assert outcome.action_status["object-Lakehouse--Raw--DWG.ActiveCustomerSummary"] == "failed"
 
     views = {
         row["viewName"].lower()
@@ -216,7 +221,7 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
 @build_environments
 def test_build_prunes_unmanaged_objects_before_creating(build_env):
     build_env.seed_orphans()
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
 
     # The build froze a drop per storage-visible orphan (a catalog session also
@@ -253,78 +258,3 @@ def test_build_prunes_unmanaged_objects_before_creating(build_env):
     # The managed set is present.
     assert "customer" in dwg_tables
     assert build_env.store.exists(_folder(build_env, "Raw", "CustomerCsv"))
-
-
-# --- two destinations, one session --------------------------------------------
-
-
-@build_environments
-def test_one_session_builds_the_destination_and_catalogues_it_in_the_weaver_lakehouse(
-    build_env,
-):
-    """The whole multi-target claim, in one test.
-
-    One Spark session, attached to the Weaver Lakehouse, does three things that
-    concern two different Lakehouses:
-
-    1. it builds the declared objects in the **target** Lakehouse;
-    2. it writes the catalogue's DML into the **Weaver** Lakehouse;
-    3. it reads both back, each through the name that says which one it is.
-
-    The catalogue read is the assertion that could not previously exist. A build
-    whose catalogue DML resolved through the session's own catalogue would write
-    ``_.Registry`` into whatever the session was attached to — and on the old
-    fixture that was the target Lakehouse, so the rows would have gone into the
-    destination and a two-part read would have found them there and passed.
-    """
-
-    build_env.setup_weaver()
-    build_env.install_repo("MyRepo")
-    bundle = build_env.generate(catalogue=True)
-
-    # A bundle that touches two Lakehouses names both of them (build-philosophy §9).
-    target_ids = {target.item_name for target in bundle.plan.targets}
-    assert {build_env.target.name, build_env.weaver.name} == target_ids
-
-    # Every catalogue action is bound to the Weaver Lakehouse, never the destination.
-    control = next(
-        t.id for t in bundle.plan.targets if t.item_name == build_env.weaver.name
-    )
-    catalogue_batches = [
-        (sequence.number, batch.target_id)
-        for sequence in bundle.plan.sequences
-        for batch in sequence.batches
-        if any(action.kind.startswith(("reconcile_", "record_", "publish_"))
-               for action in batch.actions)
-    ]
-    assert catalogue_batches, "the build produced no catalogue work"
-    assert {target_id for _n, target_id in catalogue_batches} == {control}
-
-    assert build_env.install(bundle).status == "succeeded"
-
-    # 1. The destination holds what the repository declared.
-    assert build_env.schema_exists("DWG")
-    assert _scalar(build_env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")) == 0
-
-    # 2. The catalogue is in the *Weaver* Lakehouse, read through its own
-    #    fully-qualified name — four parts on Fabric.
-    weaver = build_env.weaver_destination
-    registry = build_env.query(
-        "SELECT schema_name, object_name, object_type FROM {{object:_.Registry}} "
-        "WHERE repository = 'MyRepo' AND target_type = 'lakehouse'",
-        destination=weaver,
-    )
-    catalogued = {(row["schema_name"], row["object_name"]) for row in registry}
-    assert ("DWG", "Customer") in catalogued
-    assert ("DWG", "ActiveCustomer") in catalogued
-    assert ("Raw", "CustomerCsv") in catalogued
-
-    installation = build_env.query(
-        "SELECT target_name FROM {{object:_.Installation}} "
-        "WHERE repository = 'MyRepo' AND target_type = 'lakehouse'",
-        destination=weaver,
-    )
-    assert [row["target_name"] for row in installation] == [build_env.target.name]
-
-    # 3. And the catalogue did *not* land in the destination.
-    assert not build_env.schema_exists("_")

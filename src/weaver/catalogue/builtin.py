@@ -1,22 +1,14 @@
-"""The built-in SES repository that declares the catalogue tables.
+"""The built-in Weaver document repository that declares the catalogue tables.
 
-Weaver's catalogue is built by Weaver, from ordinary SES, through the ordinary
+Weaver's catalogue is built by Weaver, from ordinary Weaver document, through the ordinary
 planner and installer. There is no second "create the control tables" path — that
 recursion is the point, and it is the proof that a catalogue table is an ordinary
 Weaver object rather than a privileged one.
 
-The repository ships as package resources under ``weaver/builtin/catalogue``, so
-an installed wheel carries it and setup materialises it deterministically. The
-text is committed rather than generated at runtime because it is the *contract*:
-a reviewer should be able to read the declaration of ``_.Registry`` as SES, the
-same way they would read any other object.
-
-Committed text and generated shape could drift, so they cannot be allowed to.
-:func:`render_sources` produces the canonical text from
-:mod:`weaver.catalogue.tables`, and a test asserts the shipped resources match it
-byte for byte. Adding a column to a table definition therefore fails the suite
-until the resource is regenerated — which is the loud failure the whole
-arrangement exists to produce.
+The item is rendered from :mod:`weaver.catalogue.tables`, so the declaration and
+the table definitions cannot drift: there is one source of truth and the text is
+derived from it. ``Lakehouse/_weaver`` is materialised into the workspace
+declaration alongside authored items and built through the ordinary planner.
 
 Every table declares:
 
@@ -36,29 +28,28 @@ Every table declares:
 from __future__ import annotations
 
 import textwrap
-from importlib.resources import files
+from dataclasses import replace
 
+from ..locations import Location
+from ..store import Store
 from .tables import CATALOGUE_SCHEMA, CATALOGUE_TABLES, CatalogueColumn, CatalogueTable
 
-#: Where the resources live, as an importable package path. Read through
-#: ``importlib.resources`` so it works from a source tree and from a wheel alike.
-RESOURCE_PACKAGE = "weaver.builtin"
-RESOURCE_DIRECTORY = "catalogue"
-
-SCHEMA_FILE = f"_schemas/{CATALOGUE_SCHEMA}.yml"
+#: The reserved item Weaver generates and manages inside the declaration.
+ITEM_ROOT = "Lakehouse/_weaver"
+SCHEMA_PATH = f"{ITEM_ROOT}/schemas/{CATALOGUE_SCHEMA}.yml"
 
 #: One sentence, the same on every table, saying where the rows come from. It is
 #: not boilerplate: "never loaded" is the fact that makes ``Static: true``
 #: correct, and a reader of any one file should be told it.
 LINEAGE = (
-    "Projected from validated SES declarations by Weaver's own build, and "
+    "Projected from validated Weaver document declarations by Weaver's own build, and "
     "maintained only by the catalogue DML a build appends. Never populated by a "
     "load."
 )
 
 SCHEMA_DESCRIPTION = (
     "Weaver's own control plane. These tables record what Weaver has built and "
-    "what it certifies as installed; they are declared as ordinary SES and built "
+    "what it certifies as installed; they are declared as ordinary Weaver document and built "
     "by Weaver itself, and are never authored or loaded by hand."
 )
 
@@ -71,7 +62,7 @@ def _escaped(text: str) -> str:
     A ``$`` opens a ``$Schema.Object`` reference, and several catalogue columns are
     described in terms of one — ``description_reference`` holds "the
     $Schema.Object the description was copied from". Written raw, that would parse
-    as a reference and be refused, so it is escaped the way SES specifies.
+    as a reference and be refused, so it is escaped the way Weaver document specifies.
     """
 
     return text.replace("$", "$$")
@@ -122,7 +113,7 @@ def _body(table: CatalogueTable) -> str:
 
 
 def render_source(table: CatalogueTable) -> str:
-    """The complete SES source file for one catalogue table."""
+    """The complete Weaver document source file for one catalogue table."""
 
     not_null = [
         column.name
@@ -138,7 +129,7 @@ def render_source(table: CatalogueTable) -> str:
         "Static: true",
         "Prohibit rebuild: true",
         # The key is declared as the primary key, so the catalogue's own tables
-        # describe themselves: SES makes key columns not null, and the projection
+        # describe themselves: Weaver document makes key columns not null, and the projection
         # records the key in the catalogue like any other object's.
         f"Primary key: {', '.join(table.key)}",
     ]
@@ -160,28 +151,37 @@ def render_source(table: CatalogueTable) -> str:
     return f"/*\n{header}\n*/\n{_body(table)}"
 
 
-def render_sources() -> dict[str, str]:
-    """The canonical text of every file in the built-in repository.
-
-    Keyed by repository-relative path, which is exactly what setup materialises
-    and what the drift test compares against the shipped resources.
-    """
-
-    sources = {SCHEMA_FILE: render_schema_file()}
+def render_item_sources() -> dict[str, str]:
+    sources = {SCHEMA_PATH: render_schema_file()}
     for table in CATALOGUE_TABLES:
-        sources[f"{table.qualified}.spark.sql"] = render_source(table)
+        documented = replace(
+            table,
+            columns=tuple(
+                replace(
+                    column,
+                    description=column.description
+                    or f"The catalogue value for {column.name.replace('_', ' ')}.",
+                )
+                for column in table.columns
+            ),
+        )
+        sources[f"{ITEM_ROOT}/{table.qualified}.sql"] = render_source(documented)
     return sources
 
 
-def repository_files() -> dict[str, bytes]:
-    """The shipped resources, read the way an installed wheel exposes them.
-
-    Only the SES files are returned — the package's own ``__init__`` and any
-    compiled artefacts are not part of the repository, and would otherwise travel
-    into the Weaver Lakehouse as support files and into its signature.
-    """
-
-    directory = files(RESOURCE_PACKAGE) / RESOURCE_DIRECTORY
+def item_repository_files() -> dict[str, bytes]:
     return {
-        relative: (directory / relative).read_bytes() for relative in sorted(render_sources())
+        path: text.encode("utf-8") for path, text in render_item_sources().items()
     }
+
+
+def materialise_builtin_item(root: Location, *, store: Store) -> tuple[str, ...]:
+    """Replace Weaver's reserved item with this package's canonical sources."""
+
+    item_root = root / "Lakehouse" / "_weaver"
+    if store.exists(item_root):
+        store.delete(item_root, recursive=True)
+    files = item_repository_files()
+    for relative, data in sorted(files.items()):
+        store.write(root.join(*relative.split("/")), data)
+    return tuple(sorted(files))

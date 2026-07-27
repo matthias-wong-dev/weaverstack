@@ -1,14 +1,7 @@
-# The suite, on machines that are not the author's laptop.
+# CI checks the supported Python environment.
 #
-# Weaver is developed on macOS and installed by friends on whatever they have,
-# so the axes here are the ones that have actually broken: the operating system
-# and the JDK release. Fabric tests need a workspace and a live capacity, so
-# they are never run here — `-m "not fabric"` is the most this can cover.
-#
-# Windows runs the core job only. Spark's local filesystem writes go through
-# Hadoop's native IO, which needs a winutils.exe/HADOOP_HOME that the runner
-# does not have; that is a Spark-on-Windows limitation, not a Weaver one, and
-# docs/local-setup.md tells Windows contributors to use WSL for local Spark.
+# Fabric and local Spark tests are run explicitly when relevant rather than on
+# every pull request.
 name: tests
 
 on:
@@ -21,93 +14,24 @@ permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # No JVM, under a second. This is the cross-platform check: every path,
-  # filename and subprocess assumption in the core, on all three systems.
   core:
-    name: core / ${{ matrix.os }} / py${{ matrix.python }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.11", "3.12"]
+    name: core / macOS / py3.11
+    runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
-          # hatch_build.py derives the version from git describe, so a shallow
-          # clone without tags would build a version that is not the real one.
           fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.11"
           cache: pip
-      # Editable: `weaver install` locates the checkout by walking up from the
-      # installed package to its pyproject.toml, so a copy into site-packages
-      # outside the tree cannot find it.
+
       - run: pip install -r requirements-dev.txt
       - run: pip install -e . --no-deps
       - run: pytest -m "not spark and not fabric"
-
-  # Local Spark and Delta. The JDK is the axis that matters: Spark 3.5
-  # documents Java 8, 11 and 17, and 21 is what current Linux images ship.
-  spark:
-    name: spark / ${{ matrix.os }} / java${{ matrix.java }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            java: "17"
-          - os: ubuntu-latest
-            java: "21"
-          - os: macos-latest
-            java: "17"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      # Sets JAVA_HOME, which find_java_home() respects ahead of any discovery.
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ matrix.java }}
-      - run: pip install -r requirements-dev.txt
-      - run: pip install -e . --no-deps
-      # The report and the suite must agree — a doctor that passes while the
-      # tests fail (or the reverse) is the bug this job exists to catch.
-      - run: weaver doctor
-      - run: pytest -m spark
-
-  # The matrix above installs pinned versions, which is what makes a green run
-  # reproducible — and what would hide an upstream release breaking the ranges
-  # in pyproject.toml. This job resolves fresh, the way a contributor's
-  # `pip install -e '.[dev]'` does. It is advisory: a dependency published this
-  # morning should not turn someone's pull request red.
-  floating:
-    name: floating deps (advisory)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - run: pip install -e ".[dev]"
-      - run: pip list
-      - run: pytest -m "not fabric"

@@ -78,9 +78,73 @@ hosts:
 
   MyFabric:
     type: Fabric
-    workspace: Weaver
-    weaver_lakehouse: Weaver
+    workspace: Analytics
+    weaver_lakehouse: Control
+    fabric_environment: Runtime
 ```
+
+---
+
+## Build
+
+A build reads the workspace's fixed declaration and repeats one exact logical-to-physical
+binding for every item it should materialise:
+
+```bash
+weaver build \
+  --bind Lakehouse/Raw=Raw_Dev \
+  --bind Warehouse/Reporting=Reporting_Dev \
+  --host Development --hosts env.yml
+```
+
+The left side is exact-case logical item identity; the right side is a physical
+Fabric item name. Unmentioned items are ordinary and remain unbound.
+At least one `--bind` is required. Prune and catalogue publication are on by
+default; `--no-prune` is the explicit unsafe sharing escape hatch, and
+`--no-catalogue` is for controlled bootstrap/diagnostic work.
+
+The desktop CLI starts one Environment-backed Fabric session. Discovery, bundle
+generation and installation all run there; the laptop never plans a lesser copy
+of a Fabric build. The host therefore names both `weaver_lakehouse` and
+`fabric_environment`. For the local emulator use the public Python API with its
+caller-owned Spark session.
+
+Before requesting that session, the CLI reads every Lakehouse's Livy collection
+and reports any active or queued session to stderr, including its states and
+submitter where Fabric supplies one. This is advisory: Weaver neither cancels a
+notebook session it does not own nor mistakes an occupied one-session capacity
+for a build failure.
+
+The declaration must already be installed at
+`<Control Lakehouse>/Files/weaver_items/`. There is no repository-name level or
+repository selector inside one control plane.
+
+Inside that one Fabric session Weaver copies the declaration once to a temporary
+driver-local directory, plans and installs from local files, then removes them.
+The usual development build does not upload or download a bundle.
+
+To preserve the completed bundle as a handover or audit record, add `--bundle`.
+With no value Weaver uses a UTC `<timestamp>.weaver.zip` name; supplying a name
+uses that name (and appends `.weaver.zip` when omitted):
+
+```bash
+weaver build ... --bundle
+weaver build ... --bundle estate-review
+```
+
+The archive is written beneath the control plane's build-bundle area only after
+the local bundle exists. It is not required for installation.
+
+On a new control plane, include the generated built-in item once so the same
+bundle creates the catalogue before its catalogue tail runs:
+
+```bash
+--bind Lakehouse/_weaver=Control
+```
+
+Do not bind `_weaver` on ordinary later builds: catalogue evolution is currently
+an explicit destructive rebuild, while normal builds reconcile rows in the
+existing tables.
 
 ---
 
@@ -137,16 +201,15 @@ a Warehouse with the same display name:
 ```bash
 weaver wipe --lakehouse-target Sales_LH
 weaver wipe --warehouse-target "Play Warehouse"
-weaver wipe --folder-target Sales_LH/Files/Extracts
 
 # Repeat or mix typed flags.
 weaver wipe --lakehouse-target A --lakehouse-target B \
   --warehouse-target Reporting
 ```
 
-The underscore spellings (`--lakehouse_target`, `--warehouse_target`, and
-`--folder_target`) are accepted aliases. The hyphenated forms are canonical in
-help and documentation.
+The underscore spellings (`--lakehouse_target` and `--warehouse_target`) are
+accepted compatibility aliases. A Folder is not independently wipeable: it is
+owned by its Lakehouse, and a Lakehouse wipe clears both Tables and Files.
 
 Add `--yes` to skip the confirmation. Without a terminal to ask on — in a script
 or CI — the command **refuses** rather than proceeding, so nothing is destroyed
@@ -186,7 +249,7 @@ weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 
 ## See also
 
-- [Where your SES repository lives](ses-repository.md) — delivery routes, all optional
+- [Where your Weaver repository lives](weaver-repository.md) — item layout and installation
 
 - [Local development setup](local-setup.md) — Java, Spark, and the local tests
 - [Fabric integration tests](fabric-testing.md) — running the opt-in suite

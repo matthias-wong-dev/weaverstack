@@ -15,7 +15,7 @@ from build_envs import MIXED_ESTATE_FIXTURE
 
 from weaver import FolderTarget
 
-pytestmark = pytest.mark.parametrize("ses_fixture", [MIXED_ESTATE_FIXTURE], indirect=True)
+pytestmark = pytest.mark.parametrize("weaver_repo_fixture", [MIXED_ESTATE_FIXTURE], indirect=True)
 
 AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
 
@@ -29,10 +29,19 @@ def _count(env, table):
 
 
 def test_the_warehouse_leaves_are_omitted_from_the_lakehouse_build(lakehouse_estate):
-    assert {node.node_id for node in lakehouse_estate.bundle.plan.omitted_nodes} == {
-        "sql:Wh.CustomerReport",
-        "sql:Wh.ActiveReport",
-    }
+    """Only the bound item is built; the Warehouse item is out of scope.
+
+    Every other unbound item is omitted too — Weaver's own generated
+    ``Lakehouse/_weaver`` among them — so this names the Warehouse documents
+    rather than asserting the whole set.
+    """
+
+    omitted = {node.node_id for node in lakehouse_estate.bundle.plan.omitted_nodes}
+    assert {
+        "Warehouse/Reporting/Wh.CustomerReport",
+        "Warehouse/Reporting/Wh.ActiveReport",
+    } <= omitted
+    assert not any(node.startswith("Lakehouse/Sales/") for node in omitted)
 
 
 def test_the_folder_and_tables_are_built_empty_with_audit_columns(lakehouse_estate):

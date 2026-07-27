@@ -11,7 +11,7 @@ pass, the Spark counterpart of the old T-SQL self-contained script
    are read;
 2. validate the columns with the same guards a declared schema passes at parse
    (:func:`weaver.ses.columns.validate_build_columns`), driven entirely by the
-   frozen payload — the SES source is never reopened;
+   frozen payload — the Weaver document source is never reopened;
 3. choose the physical business columns — declared types when declared, the
    query's inferred types otherwise;
 4. append Weaver's audit columns;
@@ -29,15 +29,16 @@ import json
 from typing import Any
 
 from ...errors import InstallError
-from ...ses.columns import validate_build_columns
-from ...ses.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ...declaration.columns import validate_build_columns
+from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ...spark import tokens
 from ..models import BuildAction
 from .base import InstallationContext
+from .spark_case import exact_identifier_case
 
 #: Reserved audit names, in the Delta (underscored) spelling, for collision
 #: detection against an inferred query's own output columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
-
 
 class SparkTableExecutor:
     name = "spark_table"
@@ -66,40 +67,59 @@ class SparkTableExecutor:
         qualified = catalogue.expand(instruction["object"])
         query = catalogue.expand(instruction["source_query"])
 
-        frame = context.spark.sql(query)
-        query_columns = tuple(field.name for field in frame.schema.fields)
-        # Exact-cased: a column name is a case-sensitive Weaver contract.
-        query_types = {
-            field.name: field.dataType.simpleString() for field in frame.schema.fields
-        }
+        # Fabric defaults case-sensitive analysis off. Weaver identities are exact,
+        # so the source query and the resulting DDL must share one exact-case scope:
+        # otherwise a table created as ``CustomerEnriched`` cannot be consumed by
+        # the next action in the same coordinated build.
+        with exact_identifier_case(
+            context.spark,
+            enabled=catalogue.destination.preserve_table_identifier_case,
+        ):
+            frame = context.spark.sql(query)
+            query_columns = tuple(field.name for field in frame.schema.fields)
+            query_types = {
+                field.name: field.dataType.simpleString() for field in frame.schema.fields
+            }
 
-        declared = instruction["declared_columns"]
-        declared_names = (
-            tuple(name for name, _type, _nn in declared) if declared is not None else None
-        )
-        references = tuple((label, column) for label, column in instruction["references"])
-        identity = instruction.get("identity_column")
-        identity_name = identity[0] if identity else None
+            declared = instruction["declared_columns"]
+            declared_names = (
+                tuple(name for name, _type, _nn in declared)
+                if declared is not None
+                else None
+            )
+            references = tuple(
+                (label, column) for label, column in instruction["references"]
+            )
+            identity = instruction.get("identity_column")
+            identity_name = identity[0] if identity else None
 
-        business_columns = validate_build_columns(
-            qualified,
-            query_columns,
-            declared_columns=declared_names,
-            references=references,
-            identity=identity_name,
-        )
+            business_columns = validate_build_columns(
+                qualified,
+                query_columns,
+                declared_columns=declared_names,
+                references=references,
+                identity=identity_name,
+            )
 
-        business = self._physical_columns(
-            qualified, business_columns, declared, query_types, references
-        )
-        # The identity column leads, the audit columns trail — both Weaver's own.
-        leading = [tuple(identity)] if identity else []
-        physical = leading + business + [tuple(entry) for entry in instruction["audit_columns"]]
+            business = self._physical_columns(
+                qualified, business_columns, declared, query_types, references
+            )
+            leading = [tuple(identity)] if identity else []
+            physical = leading + business + [
+                tuple(entry) for entry in instruction["audit_columns"]
+            ]
 
-        statement = _create_table_sql(
-            qualified, physical, column_mapping=instruction.get("column_mapping", True)
-        )
-        context.spark.sql(statement)
+            statement = _create_table_sql(
+                qualified,
+                physical,
+                column_mapping=instruction.get("column_mapping", True),
+            )
+            _create_preserving_identifier_case(
+                context.spark,
+                statement,
+                catalogue=catalogue,
+                logical_object=instruction["object"],
+            )
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
@@ -159,6 +179,48 @@ def _create_table_sql(
         "USING delta"
         f"{mapping}\n"
     )
+
+
+def _create_preserving_identifier_case(
+    spark,
+    statement: str,
+    *,
+    catalogue,
+    logical_object: str,
+) -> None:
+    """Create one exact-case table without leaking session configuration.
+
+    ``CREATE OR REPLACE`` keeps the registered spelling of an object it resolves
+    case-insensitively.  That matters when a Lakehouse first built by an older
+    Weaver contains ``registry`` and the current declaration says ``Registry``:
+    merely enabling case-sensitive analysis for the create does not migrate the
+    existing identifier.  Drop that one case-only predecessor first.  Build owns
+    and replaces table structure; load is the phase that owns rows.
+    """
+
+    if catalogue.destination.preserve_table_identifier_case:
+        _drop_case_variant(catalogue, logical_object)
+    spark.sql(statement)
+
+
+def _drop_case_variant(catalogue, logical_object: str) -> None:
+    match = tokens.OBJECT.fullmatch(logical_object)
+    if match is None:  # expand() reports the useful token error on the main path
+        return
+    schema, declared = match.groups()
+    matches = [
+        existing
+        for existing in catalogue.tables(schema)
+        if existing.casefold() == declared.casefold()
+    ]
+    if not matches or matches == [declared]:
+        return
+    if len(matches) != 1:
+        raise InstallError(
+            f"{schema}.{declared}: target contains case-colliding tables: "
+            + ", ".join(sorted(matches))
+        )
+    catalogue.spark.sql(f"DROP TABLE {catalogue.qualify(schema, matches[0])}")
 
 
 def _ident(name: str) -> str:

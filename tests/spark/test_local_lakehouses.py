@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import DeltaTarget, FolderTarget, RepositoryRef
+from weaver import DeltaTarget, FolderTarget
 
 pytestmark = pytest.mark.spark
 
@@ -16,23 +16,23 @@ def test_a_lakehouse_presents_files_and_tables(lakehouses):
         "Sales_LH/Tables",
         "Weaver",
         "Weaver/Files",
-        "Weaver/Files/repos",
+        "Weaver/Files/weaver_items",
         "Weaver/Tables",
     ]
 
 
-def test_the_repository_installs_into_the_weaver_lakehouse(installed_repository, lakehouses):
-    resolved = lakehouses.resolver.repository(RepositoryRef("sales-etl"))
+def test_the_declaration_installs_into_the_weaver_lakehouse(installed_repository, lakehouses):
+    resolved = lakehouses.resolver.weaver_items_root
     assert resolved.value == installed_repository.value
-    assert (resolved / "Sales__Order.py").path.is_file()
+    assert (resolved / "Lakehouse" / "Raw" / "DWG__Customer.py").path.is_file()
 
 
-def test_an_installed_repository_reads_back(installed_repository):
-    from weaver.ses import read_repository
+def test_an_installed_declaration_reads_back(installed_repository):
+    from weaver.declaration import read_weaver_repository
 
-    repo = read_repository(installed_repository)
-    assert repo.name == "sales-etl"
-    assert "delta:Sales.Order" in repo.graph.nodes
+    repository = read_weaver_repository(installed_repository)
+    assert repository.name == "weaver_items"
+    assert "Lakehouse/Raw/DWG.Customer" in repository.dependency_graph.nodes
 
 
 def test_delta_writes_to_the_resolved_table_path(spark, lakehouses):
