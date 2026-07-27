@@ -2367,6 +2367,15 @@ is not Weaver identity; the required display contract is exact. Fabric's
 `schema.json.gz` also sits alongside a schema's table directories and must be
 excluded from a physical table inventory.
 
+The first full PR matrix exposed two Windows portability assumptions rather than
+runtime defects. Local Spark roots are deliberately URI-style strings with
+forward slashes, so their tests now derive expected roots with `Path.as_posix()`
+instead of interpolating a `WindowsPath`. More importantly, the committed
+built-in catalogue is byte-significant repository input: a Windows checkout had
+converted its LF resources to CRLF and therefore changed both the drift check and
+the repository signature. `.gitattributes` now pins those shipped catalogue
+resources to LF on every platform; generated and reviewed bytes remain identical.
+
 ---
 
 ## Open questions

@@ -2,15 +2,15 @@
 
 ## Status
 
-This is the accepted target architecture for the repository/item/document
-re-architecture. The current implementation still contains the earlier flat
-repository and target-kind model; the transition is divided into checkpoints in
+This is the accepted and implemented architecture for the
+repository/item/document re-architecture. The item model is the public and CLI
+surface; the earlier flat planner remains only as isolated compatibility code.
+Final end-to-end consolidation is tracked in
 [the re-architecture checkpoint plan](weaver-repositories-items-documents-checkpoints.md).
 
-[`docs/journal.md`](../docs/journal.md) remains the record of what is implemented
-today. Where this target document and the journal differ during the transition,
-the difference is planned work, not an invitation to make the journal describe
-code that does not yet exist.
+[`docs/journal.md`](../docs/journal.md) remains the record of implementation
+decisions and empirical Fabric behavior. Where this summary and the journal
+differ, the journal is authoritative.
 
 ---
 

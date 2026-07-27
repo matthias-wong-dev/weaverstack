@@ -1,9 +1,10 @@
 # The central catalogue
 
-> **Transition note.** The item-oriented path now scopes installations by
-> `(repository, item_type, item_name)`, projects destination-keyed `alias.yml`, and
-> injects `Lakehouse/_weaver` as a generated built-in item. The earlier flat
-> planner remains only as a compatibility path until the public migration in R8.
+The item-oriented catalogue scopes installations by
+`(repository, item_type, item_name)`, projects destination-keyed `alias.yml`, and
+builds generated `Lakehouse/_weaver` through the ordinary planner. The earlier
+flat planner is retained only for isolated compatibility tests and is not part of
+the advertised public or CLI model.
 
 Weaver's catalogue records, for every object it has successfully built, what SES
 declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
