@@ -715,3 +715,9 @@ The `BuildEnv` harness moves onto the item build: a fixture becomes a path plus
 the items it binds, the three generate closures call
 `generate_item_build_bundle`, and the four verticals run again on both local
 Spark and Fabric.
+
+### R12b — the estate end-to-end test returns
+
+One item-layout declaration covers classification, metadata, structural checks,
+SQL analysis, discovered references, the signature and the graph in one place.
+Every flat fixture is deleted.

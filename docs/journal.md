@@ -2649,6 +2649,34 @@ every declaration and unbound in these tests; the test now says nothing the
 fixture authored was omitted. And the mixed estate names the Warehouse documents
 it expects to be omitted rather than asserting the whole set.
 
+### R12b — the estate comes back
+
+The estate end-to-end test came back as `tests/fixtures/estate-item`: one
+declaration with `Lakehouse/Sales` and `Warehouse/Reporting`, covering
+classification, metadata contracts, structural checks, SQL analysis, discovered
+references across all four languages, the signature and the graph in one place.
+
+The translation clarified one thing. The flat version needed
+`test_asking_by_a_shared_id_says_which_are_meant`: `Sales.Customer` existed as
+both a Delta and a Warehouse table, and asking for it by ID raised. In the item
+model the same fixture has the same two objects and there is nothing to raise —
+they are `Lakehouse/Sales/Sales.Customer` and
+`Warehouse/Reporting/Sales.Customer`, and ownership answered the question the
+old test existed to ask. The disambiguation machinery was load-bearing only for
+an identity that was missing a dimension.
+
+One Fabric observation came out of running the restored verticals together, and
+it is worth recording because it is about Fabric rather than about Weaver.
+`test_warehouse_wipe` passes on its own and fails when it runs after
+`test_warehouse_build`: the second Warehouse created in a run is not yet
+connectable from the Livy session's identity, and reports `the database was not
+found or you have insufficient permissions` while the desktop connects to it
+fine a second earlier. The connection pool is keyed by workspace, warehouse,
+server, database and port, so this is not one Warehouse's connection being
+handed to another — it is propagation. A suite that creates Warehouses per
+module will keep meeting it; the fixture, not the product, is the place to
+absorb it.
+
 ---
 
 ## Open questions
