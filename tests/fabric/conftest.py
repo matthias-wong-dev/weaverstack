@@ -521,13 +521,13 @@ def ses_fixture(request):
 class InstalledEstate:
     """One estate provisioned and installed once, for read-only assertions.
 
-    ``repo`` is the installed repository name, so a test that rebuilds (e.g. to
-    exercise prune) names the same repository rather than guessing it.
+    A test that rebuilds — to exercise prune, say — calls ``env.generate()``
+    again; the bindings come from the environment's fixture, so nothing has to
+    be named twice.
     """
 
     env: "BuildEnv"
     bundle: Any
-    repo: str
 
 
 @dataclass
@@ -562,8 +562,10 @@ class BuildEnv:
     resolver: Any
     store: Store
     generate_spark: Any
-    install_repo: Callable[[str], str]
-    remove_repo: Callable[[str], None]
+    #: Install this env's declaration into the Weaver Lakehouse, replacing
+    #: whatever was there. The fixture chooses the content and the bindings.
+    install_repo: Callable[[], None]
+    remove_repo: Callable[[], None]
     generate: Callable[..., Any]
     install: Callable[[Any], InstallOutcome]
     #: Raw SQL, run wherever this environment runs. Prefer ``query``.
@@ -654,6 +656,37 @@ def _upload_tree(store, source: Path, destination) -> None:
             store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
 
 
+def _bindings_for(ses_fixture, *, lakehouse=None, warehouse=None):
+    """Bind the fixture's declared items to whichever targets this env has.
+
+    The item type chooses the binding, so one environment serves a Lakehouse
+    fixture, a Warehouse fixture or a mixed one without a test naming a target
+    kind. Items the fixture does not list stay unbound, which is how the mixed
+    estate proves its Warehouse leaves are omitted.
+    """
+
+    from weaver.build_bundle import (
+        ItemBinding,
+        ItemBindings,
+        LakehouseBinding,
+        WarehouseBinding,
+    )
+    from weaver.ses.model import LAKEHOUSE, WeaverItemId
+
+    entries = []
+    for name in ses_fixture.items:
+        item = WeaverItemId.parse(name)
+        if item.item_type == LAKEHOUSE:
+            if lakehouse is None:
+                raise AssertionError(f"{item} needs a Lakehouse this env does not have")
+            entries.append(ItemBinding(item, LakehouseBinding(lakehouse=lakehouse)))
+        else:
+            if warehouse is None:
+                raise AssertionError(f"{item} needs a Warehouse this env does not have")
+            entries.append(ItemBinding(item, WarehouseBinding(warehouse=warehouse)))
+    return ItemBindings(tuple(entries))
+
+
 def _create_schema_enabled_lakehouse(client, workspace, name):
     """A Lakehouse with schemas enabled, so `schema.table` resolves and a managed
     table lands under Tables/<schema>/<table> — which plain create_lakehouse omits."""
@@ -709,30 +742,28 @@ def _local_build_context(root, spark, ses_fixture):
     from weaver.build_bundle import (
         InstallationEnvironment,
         LakehouseBinding,
-        TargetBindings,
-        generate_build_bundle,
         install_bundle,
         load_bundle,
     )
+    from weaver.build_bundle.planner import generate_item_build_bundle
+    from weaver.ses import read_weaver_repository
 
     host, weaver, target, resolver, store = _local_lakehouse_setup(root)
     destination = resolver.spark_destination(target)
     weaver_destination = resolver.spark_destination(weaver)
 
-    def install_repo(name: str) -> str:
+    def install_repo() -> None:
         destination = resolver.weaver_items_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
-        _upload_tree(store, ses_fixture, destination)
-        return name
+        _upload_tree(store, ses_fixture.path, destination)
 
-    def remove_repo(name: str) -> None:
+    def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
 
     def generate(
         bundle_name: str = "buildtest",
         *,
-        repository_name: str = "MyRepo",
         prune: bool = True,
         catalogue: bool = False,
     ):
@@ -740,16 +771,20 @@ def _local_build_context(root, spark, ses_fixture):
         # Lakehouse that has never had setup run, and catalogue DML needs its
         # tables to exist. Their subject is physical build behaviour. A test that
         # wants the catalogue calls `setup_weaver()` first and passes it on.
-        return generate_build_bundle(
-            weaver_lakehouse=weaver,
-            repository_name=repository_name,
-            targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=target)),
+        root_location = resolver.weaver_items_root
+        repository = read_weaver_repository(root_location, store=store)
+        control = LakehouseBinding(lakehouse=weaver)
+        return generate_item_build_bundle(
+            repository,
+            bindings=_bindings_for(ses_fixture, lakehouse=target),
             output=resolver.build_bundle(bundle_name),
-            host=host,
             store=store,
             prune=prune,
             catalogue=catalogue,
+            control_lakehouse=control if catalogue else None,
+            resolver=resolver,
             spark=spark,
+            host=host,
         )
 
     def setup_weaver() -> None:
@@ -875,14 +910,13 @@ def _fabric_build_context(
     _empty_the_target(session, store, resolver, target, destination)
     weaver_destination = resolver.spark_destination(weaver)
 
-    def install_repo(name: str) -> str:
+    def install_repo() -> None:
         destination = resolver.weaver_items_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
-        _upload_tree(store, ses_fixture, destination)
-        return name
+        _upload_tree(store, ses_fixture.path, destination)
 
-    def remove_repo(name: str) -> None:
+    def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
 
     def _host_literal() -> str:
@@ -895,7 +929,6 @@ def _fabric_build_context(
     def generate(
         bundle_name: str = "buildtest",
         *,
-        repository_name: str = "MyRepo",
         prune: bool = True,
         catalogue: bool = False,
     ):
@@ -904,21 +937,30 @@ def _fabric_build_context(
         # `catalogue` is off by default because the catalogue's tables have to
         # exist before its DML can run; a test that wants it calls
         # `setup_weaver()` first.
+        binds = ", ".join(
+            f"ItemBinding(WeaverItemId.parse({item!r}), "
+            f"LakehouseBinding(lakehouse=ItemRef({target.name!r})))"
+            for item in ses_fixture.items
+        )
         body = (
-            "from weaver import ItemRef, FabricHost\n"
+            "from weaver import ItemRef, FabricHost, WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.build_bundle import generate_build_bundle, TargetBindings, "
+            "from weaver.ses import read_weaver_repository\n"
+            "from weaver.build_bundle import ItemBinding, ItemBindings, "
             "LakehouseBinding\n"
+            "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"host = {_host_literal()}\n"
             "store = store_for(host)\n"
             "resolver = resolver_for(host)\n"
-            "bundle = generate_build_bundle(\n"
-            f"    weaver_lakehouse=ItemRef({weaver.name!r}),\n"
-            f"    repository_name={repository_name!r},\n"
-            f"    targets=TargetBindings(lakehouse=LakehouseBinding(lakehouse=ItemRef({target.name!r}))),\n"
+            "repository = read_weaver_repository(resolver.weaver_items_root, store=store)\n"
+            f"control = LakehouseBinding(lakehouse=ItemRef({weaver.name!r}))\n"
+            "bundle = generate_item_build_bundle(\n"
+            "    repository,\n"
+            f"    bindings=ItemBindings(({binds},)),\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
-            f"    host=host, store=store, prune={prune!r}, catalogue={catalogue!r}, "
-            "spark=spark)\n"
+            f"    store=store, prune={prune!r}, catalogue={catalogue!r},\n"
+            f"    control_lakehouse=control if {catalogue!r} else None,\n"
+            "    resolver=resolver, spark=spark, host=host)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1110,37 +1152,42 @@ def _warehouse_build_env(
             f"fabric_environment={fabric_host.fabric_environment!r})"
         )
 
-    def install_repo(name: str) -> str:
+    def install_repo() -> None:
         destination = resolver.weaver_items_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
-        _upload_tree(store, ses_fixture, destination)
-        return name
+        _upload_tree(store, ses_fixture.path, destination)
 
-    def remove_repo(name: str) -> None:
+    def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
 
-    def generate(bundle_name: str = "whtest", *, repository_name: str = "MyRepo", prune: bool = False):
+    def generate(bundle_name: str = "whtest", *, prune: bool = False):
         # Generation runs IN Fabric. With prune on, Weaver reads the Warehouse
         # catalogue there through its own Fabric-native SQL — no sql= injection.
+        binds = ", ".join(
+            f"ItemBinding(WeaverItemId.parse({item!r}), "
+            f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r})))"
+            for item in ses_fixture.items
+        )
         body = (
-            "from weaver import ItemRef, FabricHost\n"
+            "from weaver import ItemRef, FabricHost, WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.build_bundle import generate_build_bundle, TargetBindings, "
+            "from weaver.ses import read_weaver_repository\n"
+            "from weaver.build_bundle import ItemBinding, ItemBindings, "
             "WarehouseBinding\n"
+            "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"host = {_host_literal()}\n"
             "store = store_for(host)\n"
             "resolver = resolver_for(host)\n"
-            "bundle = generate_build_bundle(\n"
-            f"    weaver_lakehouse=ItemRef({weaver.name!r}),\n"
-            f"    repository_name={repository_name!r},\n"
-            f"    targets=TargetBindings(warehouse=WarehouseBinding("
-            f"warehouse=ItemRef({warehouse_ref.name!r}))),\n"
+            "repository = read_weaver_repository(resolver.weaver_items_root, store=store)\n"
+            "bundle = generate_item_build_bundle(\n"
+            "    repository,\n"
+            f"    bindings=ItemBindings(({binds},)),\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
             # catalogue=False for the same reason as the Lakehouse harness: no
             # setup has run in this workspace, and a Warehouse build's catalogue
             # work is Spark against the Weaver Lakehouse.
-            f"    host=host, store=store, prune={prune!r}, catalogue=False)\n"
+            f"    store=store, prune={prune!r}, catalogue=False, host=host)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1233,14 +1280,14 @@ def _warehouse_build_env(
     )
 
 
-def _install_estate(env, repo: str = "Estate", *, prune: bool = True) -> InstalledEstate:
+def _install_estate(env, *, prune: bool = True) -> InstalledEstate:
     """Install one estate through a BuildEnv, once, and assert it succeeded."""
 
-    env.install_repo(repo)
-    bundle = env.generate(repository_name=repo, prune=prune)
+    env.install_repo()
+    bundle = env.generate(prune=prune)
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
-    return InstalledEstate(env=env, bundle=bundle, repo=repo)
+    return InstalledEstate(env=env, bundle=bundle)
 
 
 @pytest.fixture(

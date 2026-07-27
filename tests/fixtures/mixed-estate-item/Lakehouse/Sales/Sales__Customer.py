@@ -3,7 +3,7 @@ Table ID: Sales.Customer
 
 Description: One row per customer, the Lakehouse base table.
 
-Lineage: $Raw.Orders
+Lineage: $Files/Raw.Orders
 
 Primary key: CustomerId
 
@@ -12,7 +12,7 @@ Schema:
   CustomerName: string
 """
 
-from Raw__Orders import Raw__Orders
+from .Files.Raw__Orders import Raw__Orders
 
 from weaver import Table
 

@@ -707,6 +707,11 @@ path from it.
 
 ### Verification
 
-The pure suite and local Spark pass without the flat path. Fabric verticals that
-were built on the flat `BuildEnv` harness are ported to the item build or removed
-with the coverage loss recorded.
+The pure suite and local Spark pass without the flat path.
+
+### R12a — the build verticals return
+
+The `BuildEnv` harness moves onto the item build: a fixture becomes a path plus
+the items it binds, the three generate closures call
+`generate_item_build_bundle`, and the four verticals run again on both local
+Spark and Fabric.

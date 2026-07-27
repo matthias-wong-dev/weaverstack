@@ -45,17 +45,22 @@ def _scalar(rows):
 
 @build_environments
 def test_generate_and_install_lakehouse_bundle(build_env):
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
 
     # Plan assertions, before installing.
     assert bundle.plan.format_version == 1
-    assert bundle.plan.repository_name == "MyRepo"
+    assert bundle.plan.repository_name == "weaver_items"
     assert len(bundle.plan.targets) == 1 and bundle.plan.targets[0].kind == "lakehouse"
-    assert bundle.plan.omitted_nodes == ()
+    # Weaver's own generated `Lakehouse/_weaver` is present in every declaration
+    # and unbound here, so it is omitted; nothing the fixture authored is.
+    assert all(
+        node.node_id.startswith("Lakehouse/_weaver/")
+        for node in bundle.plan.omitted_nodes
+    )
 
     # Independence: remove the source, then install from the bundle alone.
-    build_env.remove_repo("MyRepo")
+    build_env.remove_repo()
     assert not build_env.store.exists(build_env.resolver.weaver_items_root)
 
     outcome = build_env.install(bundle)
@@ -121,7 +126,7 @@ def test_nothing_is_built_in_the_weaver_lakehouse(build_env):
     session and found it. Asking the *Weaver* Lakehouse directly is what closes it.
     """
 
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     build_env.install(build_env.generate())
 
     weaver = build_env.weaver_destination
@@ -133,7 +138,7 @@ def test_nothing_is_built_in_the_weaver_lakehouse(build_env):
 
 @build_environments
 def test_install_report_is_written_into_the_bundle(build_env):
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
     build_env.install(bundle)
     assert build_env.store.exists(bundle.location.join("install-report.yml"))
@@ -158,7 +163,7 @@ def _rebuild_with_broken_summary(build_env, bundle):
     )
 
     def fix(action):
-        if action.id == "view-DWG.ActiveCustomerSummary":
+        if action.id == "object-Lakehouse--Raw--DWG.ActiveCustomerSummary":
             payloads[action.payload] = broken
             return replace(action, payload_sha256=hashlib.sha256(broken).hexdigest())
         return action
@@ -191,7 +196,7 @@ def _rebuild_with_broken_summary(build_env, bundle):
 
 @build_environments
 def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
     broken = _rebuild_with_broken_summary(build_env, bundle)
 
@@ -203,7 +208,7 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
     assert outcome.sequence_status[40] == "succeeded"  # DWG.Customer
     assert outcome.sequence_status[50] == "succeeded"  # ActiveCustomer
     assert outcome.sequence_status[60] == "failed"     # ActiveCustomerSummary
-    assert outcome.action_status["view-DWG.ActiveCustomerSummary"] == "failed"
+    assert outcome.action_status["object-Lakehouse--Raw--DWG.ActiveCustomerSummary"] == "failed"
 
     views = {
         row["viewName"].lower()
@@ -216,7 +221,7 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
 @build_environments
 def test_build_prunes_unmanaged_objects_before_creating(build_env):
     build_env.seed_orphans()
-    build_env.install_repo("MyRepo")
+    build_env.install_repo()
     bundle = build_env.generate()
 
     # The build froze a drop per storage-visible orphan (a catalog session also

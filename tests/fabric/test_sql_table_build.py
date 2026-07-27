@@ -72,5 +72,8 @@ def test_dependency_order_places_the_base_before_its_readers(lakehouse_estate):
         if action.resource_node_id is not None
     }
     base = next(n for n in at if n.endswith("Sales.Customer"))
-    for reader in ("delta:Sales.InferredCustomer", "delta:Sales.DeclaredCustomer"):
+    for reader in (
+        "Lakehouse/Sales/Sales.InferredCustomer",
+        "Lakehouse/Sales/Sales.DeclaredCustomer",
+    ):
         assert at[base] < at[reader]

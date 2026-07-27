@@ -2621,15 +2621,33 @@ installed Weaver, item build with prune, full Lakehouse wipe — passed inside a
 Fabric session, along with the OneLake store, Livy import, resources and wipe
 suites. Thirty-one tests against a live workspace and capacity.
 
-The cost is honest and worth writing down: about a hundred and sixty tests went
-with the flat reader, and not all of them were testing the flat reader. The whole
-path over a realistic multi-object fixture — classification through metadata,
-structural checks, SQL analysis and discovered references, asserted together —
-was written against `sales-etl` in the flat layout, and it is gone rather than
-ported. The parse, DDL, graph and dependency layers keep their own unit tests and
-the item reader has its own end-to-end file, so the loss is integration breadth
-rather than a hole over specific behaviour. It should come back as an
-item-shaped fixture; it has not yet.
+The cost was recorded at the time and then paid off. About a hundred and sixty
+tests went with the flat reader, and not all of them were testing the flat
+reader: the whole path over a realistic multi-object fixture, and every Fabric
+vertical built on the `BuildEnv` harness, were written against flat fixtures.
+Both came back.
+
+### R12a — the verticals come back
+
+Porting the Fabric harness turned out to be a smaller job than deleting it had
+suggested, and for a reason worth recording: `BuildEnv` was almost entirely
+*transport* — `run_query`, `run_columns`, `schema_name`, `store`, `resolver`,
+`install` — and none of that ever knew which planner it was driving. Only three
+closures did. The harness was well factored and nobody had noticed, because
+nothing had previously asked it to change planners.
+
+What did change is that a fixture now carries its bindings. `SesFixture` is a
+path plus the items to bind, because binding *is* the build input and an
+environment cannot derive it. That turned out to express something the flat
+harness could only imply: the mixed estate binds `Lakehouse/Sales` and says
+nothing about `Warehouse/Reporting`, so the Warehouse leaves must be omitted —
+the fixture declares its own subject.
+
+Two assertions had to be loosened, both honestly. `omitted_nodes == ()` is no
+longer true of any build, because Weaver's generated `Lakehouse/_weaver` is in
+every declaration and unbound in these tests; the test now says nothing the
+fixture authored was omitted. And the mixed estate names the Warehouse documents
+it expects to be omitted rather than asserting the whole set.
 
 ---
 

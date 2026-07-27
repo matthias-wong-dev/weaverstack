@@ -67,8 +67,9 @@ def test_every_object_is_built_in_dependency_order(warehouse_estate):
         for seq, _, a in bundle.plan.actions()
         if a.resource_node_id is not None
     }
-    assert at["sql:Wh.Customer"] < at["sql:Wh.CustomerOrder"]
-    assert at["sql:Wh.CustomerOrder"] < at["sql:Rpt.CustomerSummary"]
+    item = "Warehouse/Reporting"
+    assert at[f"{item}/Wh.Customer"] < at[f"{item}/Wh.CustomerOrder"]
+    assert at[f"{item}/Wh.CustomerOrder"] < at[f"{item}/Rpt.CustomerSummary"]
 
 
 def test_tables_are_built_empty(warehouse_estate):
@@ -114,7 +115,7 @@ def test_prune_reconciles_unmanaged_objects_and_spares_the_managed_set(warehouse
 
     # The build inspects the catalogue now and freezes one drop per orphan.
     bundle = env.generate(
-        bundle_name="whprune", repository_name=warehouse_estate.repo, prune=True
+        bundle_name="whprune", prune=True
     )
     prune_kinds = {a.kind for _, _, a in bundle.plan.actions() if a.kind.startswith("prune")}
     assert {"prune_table", "prune_view", "prune_schema"} <= prune_kinds
