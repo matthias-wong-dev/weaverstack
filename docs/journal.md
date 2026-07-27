@@ -2354,9 +2354,18 @@ case-sensitive lookup could not find it.
 Pure tests prove session parsing/filtering, preflight-before-start, configuration
 restoration after both successful and failed DDL, and the Fabric/local destination
 split. The lightweight suite passed 1,146 tests with one skip. The complete local
-Spark suite then passed all 100 tests in 4m15s. The remaining proof for this slice
-is to publish the wheel and rebuild a fresh Fabric catalogue while asserting the
-raw, not case-folded, `SHOW TABLES` result.
+Spark suite then passed all 100 tests in 4m15s. Weaver
+`0.1.1.dev40734786769` was published from commit `d1dd3c8`; a fresh installed
+row-3 build then returned every raw, not case-folded, `SHOW TABLES` name in
+canonical PascalCase.
+
+That same build corrected a second stale assumption. The managed directories
+were PascalCase too: lower-case was not an immutable host choice once the session
+was case-sensitive, but another consequence of the default setting. Physical
+inventory remains an independent case-insensitive assertion because its spelling
+is not Weaver identity; the required display contract is exact. Fabric's
+`schema.json.gz` also sits alongside a schema's table directories and must be
+excluded from a physical table inventory.
 
 ---
 

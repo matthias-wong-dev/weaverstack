@@ -247,18 +247,19 @@ tables are `SHOW TABLES` minus `SHOW VIEWS`. `spark.catalog.tableExists` and
 `databaseExists` accept the qualified name; `listDatabases` and `listTables` do
 not — they re-encode it and fail.
 
-**A Lakehouse table's physical name is lower-cased, and the Warehouse is
-case-sensitive.** Spark creates `Sales.Customer`, Fabric stores the directory as
-`Tables/Sales/customer`, and the Lakehouse SQL endpoint exposes it as
-`Sales.customer`. A Fabric Warehouse uses a case-sensitive collation, so a
-cross-database read written as `[Lakehouse].[Sales].[Customer]` fails with
-`Invalid object name` — and it fails identically to an endpoint that has not
-synced yet, which is the trap. Check `INFORMATION_SCHEMA.TABLES` on the endpoint
-before assuming it is lag.
+**Lakehouse table casing is creation-session policy, and the Warehouse is
+case-sensitive.** With Fabric's default `spark.sql.caseSensitive=false`, even a
+quoted `Sales.Customer` is registered and stored as `Sales.customer`. Weaver
+temporarily enables case-sensitive analysis for its table-create DDL and restores
+the session setting immediately, so current Weaver builds preserve `Customer` in
+both the Spark catalogue and managed directory. Pre-existing tables may still be
+lower-case. A Fabric Warehouse uses a case-sensitive collation, so inspect
+`INFORMATION_SCHEMA.TABLES` on the Lakehouse SQL endpoint rather than guessing
+either spelling or a sync delay.
 
 Weaver passes a three- or four-part name through untouched, by design: the author
-named a physical thing. Matching its physical spelling is therefore the author's
-job, and a cross-engine read must use the lower-cased name.
+named a physical thing. Matching the endpoint's actual spelling is therefore the
+author's job.
 
 **A Lakehouse SQL endpoint exposes tables, not Spark views.** `Sales.ActiveCustomer`
 is a Spark-catalogue object; it is queryable from Spark in any Lakehouse and is

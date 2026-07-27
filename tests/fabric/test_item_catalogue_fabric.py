@@ -90,6 +90,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "    'physical_tables': sorted(\n"
         "        entry.name for entry in store.list(\n"
         "            resolver.tables_root(ItemRef(host.weaver_lakehouse)) / '_')\n"
+        "        if entry.name.casefold() != 'schema.json.gz'\n"
         "    ),\n"
         "    'target_names': [row['target_name'] for row in installation],\n"
         "    'registry_count': registry_count,\n"
