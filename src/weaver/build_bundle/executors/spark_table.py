@@ -38,6 +38,11 @@ from .base import InstallationContext
 #: detection against an inferred query's own output columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
 
+#: Fabric's default ``false`` folds table identifiers to lower-case at creation
+#: time, even when the DDL quotes a PascalCase name. The setting is scoped to the
+#: DDL below and restored immediately; query analysis keeps the caller's policy.
+_CASE_SENSITIVE = "spark.sql.caseSensitive"
+
 
 class SparkTableExecutor:
     name = "spark_table"
@@ -99,7 +104,11 @@ class SparkTableExecutor:
         statement = _create_table_sql(
             qualified, physical, column_mapping=instruction.get("column_mapping", True)
         )
-        context.spark.sql(statement)
+        _create_preserving_identifier_case(
+            context.spark,
+            statement,
+            enabled=catalogue.destination.preserve_table_identifier_case,
+        )
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
@@ -159,6 +168,22 @@ def _create_table_sql(
         "USING delta"
         f"{mapping}\n"
     )
+
+
+def _create_preserving_identifier_case(
+    spark, statement: str, *, enabled: bool
+) -> None:
+    """Create one table without leaking a Spark session configuration change."""
+
+    if not enabled:
+        spark.sql(statement)
+        return
+    previous = spark.conf.get(_CASE_SENSITIVE)
+    spark.conf.set(_CASE_SENSITIVE, "true")
+    try:
+        spark.sql(statement)
+    finally:
+        spark.conf.set(_CASE_SENSITIVE, previous)
 
 
 def _ident(name: str) -> str:

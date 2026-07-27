@@ -65,6 +65,13 @@ rather than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy
 tests skip (rather than fail) if that Environment has no Weaver installed yet,
 pointing at `weaver install`.
 
+Immediately before it requests its shared Livy session, the harness reads the
+sessions collection for every Lakehouse in the workspace. It prints active or
+queued scheduler/plugin/Livy states and the submitter when present. This catches
+the common one-session-capacity case where an open notebook or leaked test would
+otherwise make startup appear silently stuck. The check is read-only and never
+cancels someone else's session.
+
 To run only the Warehouse SQL vertical and see its stage timings:
 
 ```bash

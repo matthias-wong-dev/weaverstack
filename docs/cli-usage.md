@@ -111,6 +111,12 @@ of a Fabric build. The host therefore names both `weaver_lakehouse` and
 `fabric_environment`. For the local emulator use the public Python API with its
 caller-owned Spark session.
 
+Before requesting that session, the CLI reads every Lakehouse's Livy collection
+and reports any active or queued session to stderr, including its states and
+submitter where Fabric supplies one. This is advisory: Weaver neither cancels a
+notebook session it does not own nor mistakes an occupied one-session capacity
+for a build failure.
+
 The repository must already be installed at
 `<Control Lakehouse>/Files/repos/<repository>`. Its directory name is its exact
 repository name.

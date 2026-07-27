@@ -2324,6 +2324,40 @@ migration error, help text, public API, boundary and neutrality tests cover the
 interface. The underlying item planner/installer transport was already exercised
 through the installed wheel at R6 and R7.
 
+### R9 underway — visible session contention and canonical table names
+
+Fabric's Livy collection is now a public read-only diagnostic rather than a fact
+known only to a one-off probe. `list_livy_sessions()` preserves session identity,
+submitter, scheduler/plugin/Livy states, timestamps, result and cancellation
+reason; `list_workspace_livy_sessions()` joins those per-Lakehouse collections
+across the workspace and can retain only sessions still occupying or awaiting a
+capacity slot. Both the desktop build adapter and Fabric pytest harness call it
+before requesting their session. They report contention and continue; they never
+cancel a session whose lifecycle they do not own. A live read against the Weaver
+workspace found no active session, while its most recent ended entry carried the
+user cancellation, all three states and the submitter exactly as the model
+records them.
+
+The catalogue casing observation was real and was not merely OneLake path
+presentation. `SHOW TABLES` returned all ten existing names lower-cased even
+though their definitions and quoted DDL are PascalCase. A disposable Fabric
+probe isolated the cause: the session default
+`spark.sql.caseSensitive=false` folds a table identifier at creation, while
+temporarily setting it to `true` preserved `CamelSql`, `CamelSave` and
+`RenamedSql` through SQL creation, `saveAsTable` and rename. The table executor
+now applies that setting only for a Fabric destination's create DDL and restores
+the caller's value in `finally`. It is destination capability data, not an
+executor host branch. Applying it to the local emulator was tested and rejected:
+local's intentionally folded schema had been registered case-insensitively, so a
+case-sensitive lookup could not find it.
+
+Pure tests prove session parsing/filtering, preflight-before-start, configuration
+restoration after both successful and failed DDL, and the Fabric/local destination
+split. The lightweight suite passed 1,146 tests with one skip. The complete local
+Spark suite then passed all 100 tests in 4m15s. The remaining proof for this slice
+is to publish the wheel and rebuild a fresh Fabric catalogue while asserting the
+raw, not case-folded, `SHOW TABLES` result.
+
 ---
 
 ## Open questions

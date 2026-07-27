@@ -163,6 +163,7 @@ def test_fabric_adapter_submits_both_core_phases_in_one_valid_program(monkeypatc
             return _Result()
 
     monkeypatch.setattr("weaver.fabric.LivySession", _Session)
+    monkeypatch.setattr("weaver.fabric.list_workspace_livy_sessions", lambda *a, **k: ())
     host = FabricHost(
         workspace="Analytics",
         weaver_lakehouse="Control",
@@ -181,3 +182,54 @@ def test_fabric_adapter_submits_both_core_phases_in_one_valid_program(monkeypatc
     assert "read_weaver_repository" in captured["body"]
     assert "generate_item_build_bundle" in captured["body"]
     assert "install_bundle" in captured["body"]
+
+
+def test_fabric_adapter_reports_a_queued_session_before_starting(monkeypatch, capsys):
+    cli = importlib.import_module("weaver_cli.main")
+    from weaver.fabric import LivySessionInfo, WorkspaceLivySession
+
+    events = []
+    queued = WorkspaceLivySession(
+        "lakehouse-id", "Play_Lakehouse_1",
+        LivySessionInfo(
+            "7", name="notebook", scheduler_state="Scheduled",
+            plugin_state="Queued", livy_state="not_started",
+        ),
+    )
+
+    class _Result:
+        payload = {"status": "succeeded"}
+
+    class _Session:
+        @classmethod
+        def for_host(cls, host):
+            events.append("start")
+            return cls()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def run(self, body):
+            return _Result()
+
+    def inspect(*args, **kwargs):
+        events.append("inspect")
+        return (queued,)
+
+    monkeypatch.setattr("weaver.fabric.LivySession", _Session)
+    monkeypatch.setattr("weaver.fabric.list_workspace_livy_sessions", inspect)
+    host = FabricHost(
+        workspace="Analytics", weaver_lakehouse="Control",
+        fabric_environment="Runtime",
+    )
+    cli._run_fabric_item_build(
+        host, repository_name="Estate",
+        bindings=ItemBindings((parse_item_binding("Lakehouse/Raw=Raw_Dev"),)),
+        bundle_name="estate-build", prune=True, catalogue=True,
+    )
+
+    assert events == ["inspect", "start"]
+    assert "Play_Lakehouse_1: session 7 (Scheduled/Queued/not_started)" in capsys.readouterr().err

@@ -35,7 +35,7 @@ build constraints remain
 | R6 | The catalogue is item-scoped and `_weaver` is built in | complete |
 | R7 | Lakehouse ownership unifies Tables, Files, prune and wipe | complete |
 | R8 | Public API, CLI and compatibility surface use the new model | complete |
-| R9 | Local and Fabric verticals prove the architecture | pending |
+| R9 | Local and Fabric verticals prove the architecture | in progress |
 
 ---
 

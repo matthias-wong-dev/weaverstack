@@ -409,10 +409,16 @@ def _run_fabric_item_build(
     """Run both build phases inside the host's Environment-backed session."""
 
     from weaver.errors import CommandError
-    from weaver.fabric import LivySession
+    from weaver.fabric import LivySession, list_workspace_livy_sessions
 
     if not host.weaver_lakehouse:
         raise CommandError("a Fabric build host must name its weaver_lakehouse")
+    try:
+        active_sessions = list_workspace_livy_sessions(host, active_only=True)
+    except WeaverError as exc:
+        print(f"warning: could not inspect Fabric Spark sessions: {exc}", file=sys.stderr)
+    else:
+        _print_livy_preflight(active_sessions)
     binding_texts = []
     for binding in bindings.entries:
         target = binding.target
@@ -460,6 +466,25 @@ def _run_fabric_item_build(
     )
     with LivySession.for_host(host) as session:
         return session.run(body).payload
+
+
+def _print_livy_preflight(active_sessions) -> None:
+    if not active_sessions:
+        print("Fabric Spark preflight: no active or queued sessions.", file=sys.stderr)
+        return
+    print("Fabric Spark preflight: active or queued sessions:", file=sys.stderr)
+    for entry in active_sessions:
+        session = entry.session
+        states = "/".join(
+            state or "-"
+            for state in (session.scheduler_state, session.plugin_state, session.livy_state)
+        )
+        print(
+            f"  {entry.lakehouse_name}: session {session.id or '?'} "
+            f"({states})"
+            + (f"; submitted by {session.submitter_name}" if session.submitter_name else ""),
+            file=sys.stderr,
+        )
 
 
 def handle_doctor(args: argparse.Namespace) -> int:

@@ -81,6 +81,7 @@ class SparkDestination:
     namespace: tuple[str, ...] = ()
     schema_prefix: str = ""
     tables_root: str | None = None
+    preserve_table_identifier_case: bool = False
 
     def schema_identifier(self, schema: str) -> str:
         """The schema's name at its own namespace level, unquoted."""
@@ -133,6 +134,10 @@ def fabric_destination(*, workspace: str, lakehouse: str) -> SparkDestination:
             _checked(workspace, what="workspace"),
             _checked(lakehouse, what="lakehouse"),
         ),
+        # Fabric otherwise folds a quoted table identifier to lower-case at
+        # creation. Local Spark must retain its default: its folded schema was
+        # registered case-insensitively and a case-sensitive lookup misses it.
+        preserve_table_identifier_case=True,
     )
 
 

@@ -85,8 +85,12 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "        {'id': action.action_id, 'type': action.error_type, "
         "         'message': action.error_message}\n"
         "        for action in report.action_results() if action.status == 'failed'],\n"
-        "    'tables': sorted(name.lower() for name in catalogue.tables('_')),\n"
-        "    'expected': sorted(table.name.lower() for table in CATALOGUE_TABLES),\n"
+        "    'tables': sorted(catalogue.tables('_')),\n"
+        "    'expected': sorted(table.name for table in CATALOGUE_TABLES),\n"
+        "    'physical_tables': sorted(\n"
+        "        entry.name for entry in store.list(\n"
+        "            resolver.tables_root(ItemRef(host.weaver_lakehouse)) / '_')\n"
+        "    ),\n"
         "    'target_names': [row['target_name'] for row in installation],\n"
         "    'registry_count': registry_count,\n"
         "    'table_count': len(CATALOGUE_TABLES),\n"
@@ -96,6 +100,9 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     payload = livy_session.run(body).payload
     assert payload["status"] == "succeeded", payload["errors"]
     assert payload["tables"] == payload["expected"]
+    assert {name.casefold() for name in payload["physical_tables"]} == {
+        name.casefold() for name in payload["expected"]
+    }
     assert payload["target_names"] == [fabric_host.weaver_lakehouse]
     assert payload["registry_count"] == payload["table_count"]
     assert payload["version"]

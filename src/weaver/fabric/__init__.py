@@ -8,7 +8,16 @@ from __future__ import annotations
 
 from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
 from .client import FabricClient, FabricError
-from .livy import LivyError, LivySession, StatementResult, emit_source
+from .livy import (
+    LivyError,
+    LivySession,
+    LivySessionInfo,
+    StatementResult,
+    WorkspaceLivySession,
+    emit_source,
+    list_livy_sessions,
+    list_workspace_livy_sessions,
+)
 from .environment import (
     InstallResult,
     build_wheel,
@@ -61,9 +70,13 @@ __all__ = [
     "find_or_create_environment",
     "missing_from_environment",
     "LivySession",
+    "LivySessionInfo",
+    "WorkspaceLivySession",
     "LivyError",
     "StatementResult",
     "emit_source",
+    "list_livy_sessions",
+    "list_workspace_livy_sessions",
     "OneLakeDfsClient",
     "abfss_root",
     "onelake_url",

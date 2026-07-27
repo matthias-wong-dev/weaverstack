@@ -6,7 +6,16 @@ returned value is told from printed output — verified without a workspace.
 
 from __future__ import annotations
 
-from weaver.fabric.livy import RESULT_PREFIX, StatementResult, _payload, sessions_url
+from weaver import FabricHost
+from weaver.fabric.livy import (
+    RESULT_PREFIX,
+    LivySessionInfo,
+    StatementResult,
+    _payload,
+    list_livy_sessions,
+    list_workspace_livy_sessions,
+    sessions_url,
+)
 
 
 def test_the_sessions_url_names_workspace_and_lakehouse():
@@ -32,6 +41,66 @@ def test_the_last_returned_value_wins():
 
 def test_malformed_json_is_not_a_result():
     assert _payload(f"{RESULT_PREFIX}not json\n") is None
+
+
+class _CollectionClient:
+    api_base_url = "https://fabric.example/v1"
+
+    def paged(self, path):
+        assert path == "workspaces/ws-id/items?type=Lakehouse"
+        return [
+            {"id": "lh-2", "displayName": "Sales", "type": "Lakehouse"},
+            {"id": "lh-1", "displayName": "Control", "type": "Lakehouse"},
+        ]
+
+    def get_json(self, url):
+        if url.endswith("/lh-1/livyapi/versions/2023-12-01/sessions"):
+            return {"items": [{
+                "id": "11", "name": "weaver", "schedulerState": "Ended",
+                "pluginState": "Ended", "livyState": "killed",
+                "cancellationReason": "cancelled by user",
+            }]}
+        return {"items": [{
+            "id": "22", "name": "notebook", "schedulerState": "Scheduled",
+            "pluginState": "Queued", "livyState": "not_started",
+            "submitterId": "person-id", "submitterName": "builder@example.invalid",
+            "artifactId": "lh-2",
+            "submittedAt": "2026-07-27T01:02:03Z", "tags": ["interactive"],
+        }]}
+
+
+def test_livy_collection_preserves_scheduler_details():
+    sessions = list_livy_sessions("ws-id", "lh-2", client=_CollectionClient())
+
+    assert sessions == (LivySessionInfo(
+        id="22", name="notebook", scheduler_state="Scheduled",
+        plugin_state="Queued", livy_state="not_started",
+        submitter_id="person-id", submitter_name="builder@example.invalid",
+        artifact_id="lh-2",
+        submitted_at="2026-07-27T01:02:03Z", tags=("interactive",),
+    ),)
+    assert sessions[0].active is True
+
+
+def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
+    monkeypatch,
+):
+    host = FabricHost(workspace="Analytics", weaver_lakehouse="Control")
+    client = _CollectionClient()
+
+    # Keep the test pure: the fake resolver already knows the workspace identity.
+    from weaver.fabric.resources import Workspace
+
+    class _Resolver:
+        def __init__(self, host, client):
+            self.workspace = Workspace("ws-id", host.workspace)
+
+    monkeypatch.setattr("weaver.fabric.resolution.FabricResolver", _Resolver)
+    active = list_workspace_livy_sessions(host, client=client, active_only=True)
+
+    assert [(entry.lakehouse_name, entry.session.id) for entry in active] == [
+        ("Sales", "22")
+    ]
 
 
 # --- closing releases the capacity slot ---------------------------------------

@@ -206,7 +206,7 @@ def fabric_host(fabric_workspace, fabric_weaver_lakehouse, fabric_environment_na
 
 
 @pytest.fixture(scope="session")
-def livy_session(fabric_host):
+def livy_session(fabric_host, fabric_client):
     """One Spark session in Fabric with the Weaver Environment attached.
 
     Skips — rather than fails — when the Environment is missing or carries no
@@ -215,7 +215,34 @@ def livy_session(fabric_host):
     """
 
     from weaver.errors import CommandError
-    from weaver.fabric import LivyError, LivySession
+    from weaver.fabric import LivyError, LivySession, list_workspace_livy_sessions
+
+    try:
+        active_sessions = list_workspace_livy_sessions(
+            fabric_host, client=fabric_client, active_only=True
+        )
+    except Exception as exc:
+        print(f"warning: could not inspect Fabric Spark sessions: {exc}")
+    else:
+        if not active_sessions:
+            print("Fabric Spark preflight: no active or queued sessions.")
+        for entry in active_sessions:
+            session_info = entry.session
+            states = "/".join(
+                state or "-" for state in (
+                    session_info.scheduler_state,
+                    session_info.plugin_state,
+                    session_info.livy_state,
+                )
+            )
+            print(
+                f"Fabric Spark preflight: {entry.lakehouse_name}: session "
+                f"{session_info.id or '?'} ({states})"
+                + (
+                    f"; submitted by {session_info.submitter_name}"
+                    if session_info.submitter_name else ""
+                )
+            )
 
     try:
         session = LivySession.for_host(fabric_host)
