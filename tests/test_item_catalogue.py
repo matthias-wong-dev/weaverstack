@@ -84,6 +84,15 @@ def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
     }
 
 
+def test_installation_records_the_item_signature_not_the_repository_signature(tmp_path):
+    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+    row = projection.for_table(INSTALLATION)[0]
+
+    assert row["signature"] == repository["Lakehouse/Raw"].signature
+    assert row["signature"] != repository.signature
+
+
 def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path):
     repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")

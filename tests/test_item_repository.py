@@ -143,6 +143,62 @@ def test_ordinary_content_changes_the_signature(tmp_path):
     assert read_weaver_repository(Location(str(root))).signature != before
 
 
+def test_an_unrelated_item_changes_the_repository_but_not_this_item_signature(tmp_path):
+    root = _estate(tmp_path)
+    before = read_weaver_repository(Location(str(root)))
+
+    changed = _warehouse_table("Sales.Change").replace(
+        "A reporting table.", "An independently changed audit table."
+    )
+    _write(root, "Warehouse/Audit/Sales.Change.sql", changed)
+    after = read_weaver_repository(Location(str(root)))
+
+    assert after.signature != before.signature
+    assert after["Lakehouse/Raw"].signature == before["Lakehouse/Raw"].signature
+    assert after["Warehouse/Audit"].signature != before["Warehouse/Audit"].signature
+
+
+def test_item_signature_covers_its_schema_document_and_support_files(tmp_path):
+    root = _estate(tmp_path)
+    before = read_weaver_repository(Location(str(root)))
+
+    _write(root, "Lakehouse/Raw/lib/csv_helpers.py", "def rows():\n    return [1]\n")
+    support_changed = read_weaver_repository(Location(str(root)))
+    assert support_changed["Lakehouse/Raw"].signature != before["Lakehouse/Raw"].signature
+    assert (
+        support_changed["Lakehouse/Curated"].signature
+        == before["Lakehouse/Curated"].signature
+    )
+
+    _write(
+        root,
+        "Lakehouse/Raw/schemas/Sales.yml",
+        _schema("Sales").replace("Sales objects.", "Changed Sales objects."),
+    )
+    schema_changed = read_weaver_repository(Location(str(root)))
+    assert (
+        schema_changed["Lakehouse/Raw"].signature
+        != support_changed["Lakehouse/Raw"].signature
+    )
+
+
+def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
+    root = _estate(tmp_path)
+    before = read_weaver_repository(Location(str(root)))
+    _write(
+        root,
+        "alias.yml",
+        "aliases:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
+    )
+    after = read_weaver_repository(Location(str(root)))
+
+    assert after["Warehouse/Reporting"].signature != before["Warehouse/Reporting"].signature
+    for unchanged in ("Lakehouse/Curated", "Lakehouse/Raw", "Warehouse/Audit"):
+        assert after[unchanged].signature == before[unchanged].signature
+
+
 def test_user_authored_init_is_rejected_outside_ignore(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/lib/__init__.py", "")

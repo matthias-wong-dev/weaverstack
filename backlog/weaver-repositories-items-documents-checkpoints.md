@@ -35,6 +35,8 @@ build constraints remain
 | R6 | The catalogue is item-scoped and `_weaver` is built in | complete |
 | R7 | Lakehouse ownership unifies Tables, Files, prune and wipe | complete |
 | R8 | Public API, CLI and compatibility surface use the new model | complete |
+| R8a | Repository, item and document signatures are separated | complete |
+| R8b | Fabric materialises once and bundle persistence is optional | complete |
 | R9 | Local and Fabric verticals prove the architecture | in progress |
 
 ---
@@ -473,6 +475,72 @@ clear migration error rather than an inferred adapter.
 
 Core-boundary, CLI parser, help-text, serialisation and neutrality tests pass. The
 base package remains importable without CLI, PySpark or Fabric credentials.
+
+---
+
+## R8a — Separate repository, item and document certification
+
+### Outcome
+
+The catalogue records the signature of the logical item actually installed. A
+change in an unrelated item changes the repository signature but not this item's
+installation signature.
+
+### Contract
+
+- the repository signature covers the complete source repository and certifies
+  the build plan/snapshot;
+- each `WeaverItem` carries a deterministic item signature over its identity,
+  schemas, documents, support files and destination-keyed aliases;
+- an alias contributes only to the destination/consumer item's signature;
+- physical bindings, timestamps, unrelated items and producer contents reached
+  through a logical dependency do not contribute;
+- Installation records use the item signature;
+- Registry and dictionary rows retain their document/schema source signatures.
+
+### Verification
+
+Pure tests mutate one input class at a time and prove the three signature levels
+move independently. Rebinding changes only `target_name`; an unrelated item edit
+does not rewrite another item's Installation row.
+
+---
+
+## R8b — Materialise once inside Fabric and persist bundles optionally
+
+### Outcome
+
+The ordinary product path runs wholly inside one Fabric session. It copies the
+OneLake repository once into a session-local temporary worktree, performs all
+discovery, validation, signature calculation, planning and snapshot generation
+there, installs from a session-local bundle directory, and deletes the temporary
+files afterwards.
+
+### Contract
+
+- desktop execution remains an optional development adapter and owns no part of
+  the build semantics;
+- repository materialisation preserves the discovered directory/file tree and
+  reads each remote source file at most once;
+- a bundle's source store is independent of the target `InstallationEnvironment`
+  store, so local payloads can mutate Fabric targets;
+- the usual development build installs directly from temporary files and performs
+  no bundle upload/download;
+- after generation or installation, a caller may persist one deterministic ZIP
+  archive named `<timestamp>.weaver.zip` as a record or handover artefact;
+- a receiving Fabric session copies that one archive locally, extracts it safely,
+  validates the existing manifest/payload hashes, and installs from the extracted
+  files;
+- the archive is an internal optimisation artefact, not a heavyweight package or
+  trust boundary.
+
+### Verification
+
+Counting stores prove one remote read per repository file and no remote bundle
+traffic on the direct path. Pure archive round-trips preserve the plan, payloads,
+snapshot and bundle identity. A row-3 Fabric proof calls the same public workflow
+and uses only a session-local worktree while building named Lakehouse/Warehouse
+targets.
 
 ---
 

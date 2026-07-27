@@ -71,14 +71,16 @@ weaver build \
   --repository Estate \
   --bind Lakehouse/Raw=Raw_Dev \
   --bind Warehouse/Reporting=Reporting_Dev \
-  --bundle estate-review \
   --host Development --hosts env.yml
 ```
 
-From Python inside the target environment, use `read_weaver_repository()`,
-`ItemBindings` and `generate_item_build_bundle()` directly. The generated bundle
-contains a certified repository snapshot, so installation never reopens or
-reinterprets the source repository.
+From Python inside the target environment, use `build_item_repository()` for the
+ordinary coordinated path. It copies the installed repository once to a
+session-local temporary directory, reads and plans there, installs from a local
+bundle and removes the working files. The generated bundle contains a certified
+repository snapshot, so installation never reopens or reinterprets the source
+repository. Persisting a `.weaver.zip` archive is optional and intended for a
+record or handover rather than the normal development build.
 
 ## Migrating a flat repository
 

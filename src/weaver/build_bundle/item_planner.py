@@ -45,6 +45,7 @@ def generate_item_build_bundle(
     bindings: ItemBindings,
     output: Location,
     store: Store,
+    target_store: Store | None = None,
     prune: bool = True,
     catalogue: bool = False,
     control_lakehouse: LakehouseBinding | None = None,
@@ -61,6 +62,8 @@ def generate_item_build_bundle(
     from ``host``. Warehouse planning opens Fabric-native SQL from ``host`` unless
     the caller supplies an executor in ``sql_by_item``.
     """
+
+    target_store = target_store or store
 
     by_item = bindings.by_item
     if not by_item:
@@ -103,7 +106,7 @@ def generate_item_build_bundle(
             selected_ids,
             target_by_item,
             resolver=resolver,
-            store=store,
+            store=target_store,
             spark=spark,
             host=host,
             sql_by_item=sql_by_item,

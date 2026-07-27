@@ -73,6 +73,7 @@ class InstallationContext:
     snapshot: Location
     target: ResolvedTarget
     sql: Any = None
+    snapshot_store: Store | None = None
 
     @property
     def catalogue(self) -> SparkCatalogue:

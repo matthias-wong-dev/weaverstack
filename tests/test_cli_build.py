@@ -38,6 +38,43 @@ def test_build_parser_accepts_repeatable_logical_item_bindings():
     assert args.no_catalogue is False
 
 
+def test_build_parser_does_not_require_a_persisted_bundle_record():
+    args = build_parser().parse_args(
+        [
+            "build",
+            "--repository",
+            "Estate",
+            "--bind",
+            "Lakehouse/Raw=Raw_Dev",
+            "--host",
+            "Development",
+            "--hosts",
+            "env.yml",
+        ]
+    )
+
+    assert args.bundle is None
+
+
+def test_build_parser_accepts_a_timestamped_bundle_record_without_a_name():
+    args = build_parser().parse_args(
+        [
+            "build",
+            "--repository",
+            "Estate",
+            "--bind",
+            "Lakehouse/Raw=Raw_Dev",
+            "--bundle",
+            "--host",
+            "Development",
+            "--hosts",
+            "env.yml",
+        ]
+    )
+
+    assert args.bundle == ""
+
+
 def test_build_handler_passes_typed_bindings_and_returns_serialisable_json(
     monkeypatch, capsys
 ):
@@ -179,9 +216,11 @@ def test_fabric_adapter_submits_both_core_phases_in_one_valid_program(monkeypatc
     )
 
     assert result["status"] == "succeeded"
-    assert "read_weaver_repository" in captured["body"]
-    assert "generate_item_build_bundle" in captured["body"]
-    assert "install_bundle" in captured["body"]
+    assert "build_item_repository" in captured["body"]
+    assert "read_weaver_repository" not in captured["body"]
+    assert "generate_item_build_bundle" not in captured["body"]
+    assert "install_bundle(" not in captured["body"]
+    assert "resolver.build_bundle(record_name)" in captured["body"]
 
 
 def test_fabric_adapter_reports_a_queued_session_before_starting(monkeypatch, capsys):

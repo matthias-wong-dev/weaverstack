@@ -112,9 +112,11 @@ Fabric and its local emulator, selected by an indirect `build_env` parameter
 of a build — *generate* and *install* — run in the target environment.** On
 Fabric that is inside the Livy session, against the native Spark catalogue: the
 test uploads the repository to the Weaver Lakehouse (the push), then a Livy
-program calls `generate_build_bundle` in-session and another calls
-`install_bundle`, so planning and installation both use the authoritative
-catalogue. In the emulator the same two calls run in-process against local Spark.
+program calls the public `build_item_repository` workflow. That workflow copies
+the OneLake repository once to the session driver's temporary filesystem, then
+generates and installs from local files while target inspection still uses the
+authoritative Fabric catalogue. In the emulator the same workflow runs
+in-process against local Spark.
 The desktop's only job on Fabric is to push the repository and read results back
 for assertions — it never plans.
 

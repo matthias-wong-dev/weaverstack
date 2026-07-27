@@ -177,15 +177,20 @@ class LocalResolver:
         """``<weaver-lakehouse>/Files/build_bundles`` — where persisted bundles live.
 
         A generated bundle normally lands in a throwaway directory that is passed
-        straight to the installer. When one is kept — for a test, or to inspect —
-        it belongs here, under a per-build subdirectory, so bundles sit beside the
-        repositories they were built from rather than scattered across temp dirs.
+        straight to the installer. When one is kept — for handover, audit, or
+        inspection — its single .weaver.zip archive belongs here, beside the
+        repositories it was built from rather than in a remote working tree.
         """
 
         return self.files_root(ItemRef(self._weaver_lakehouse_name())) / BUILD_BUNDLES_AREA
 
     def build_bundle(self, name: str) -> Location:
-        """One persisted bundle's directory — typically named for a timestamp."""
+        """One legacy persisted bundle location.
+
+        New callers use a timestamped archive beneath build_bundles_root.
+        This directory-shaped resolver remains for compatibility with already
+        persisted bundles and the flat-planner test suite.
+        """
 
         return self.build_bundles_root / validate_name(name, what="bundle name")
 

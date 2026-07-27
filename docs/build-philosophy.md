@@ -48,7 +48,10 @@ of operational data processing.
 
 ## 2. Interpretation happens once
 
-The source repository is interpreted during bundle generation.
+The source repository is interpreted during bundle generation. In Fabric, the
+session first materialises the installed OneLake repository into a driver-local
+temporary directory. Every interpretation step then reads that one local copy;
+the laptop is not part of the product build path.
 
 That interpretation includes:
 
@@ -93,7 +96,9 @@ This creates a foundational invariant:
 > **The source is planned once; the resulting plan is executed many times.**
 
 The repository may be deleted after bundle generation and the certified bundle
-must remain independently installable.
+must remain independently installable. Independence does not require every build
+to upload an artefact: the ordinary development path installs directly from its
+temporary local bundle in the same session.
 
 ---
 
@@ -136,7 +141,11 @@ see, before production installation:
 - in what order;
 - against which target.
 
-The bundle is therefore both an execution artifact and an audit artifact.
+The bundle is therefore both an execution artifact and an audit artifact. Its
+ordinary representation is a temporary local directory. When a durable record
+or handover is wanted, that directory is packaged after generation or
+installation as one `<timestamp>.weaver.zip`; the persisted archive is optional,
+not an intermediate remote filesystem required by every build.
 
 ---
 
@@ -585,6 +594,12 @@ two-part name against whichever physical item happens to be bound.
 
 Host-specific adapters may determine **how** an action runs. They do not
 determine **what** the action means.
+
+On Fabric, both phases run inside the session. The session copies the OneLake
+repository once to its driver-local temporary filesystem, generates and installs
+the bundle there, and removes the working files afterwards. An optional handover
+archive makes the inverse trip as one file: copy locally, extract, validate and
+install without reopening the source repository.
 
 ---
 

@@ -137,7 +137,11 @@ def install_bundle(
     else:
         # Preflight even a pre-loaded bundle: the installer trusts nothing it has
         # not just checked.
-        validate_bundle(bundle.location, bundle.plan, store=environment.store)
+        validate_bundle(
+            bundle.location,
+            bundle.plan,
+            store=bundle.store or environment.store,
+        )
 
     plan = bundle.plan
     resolved = {target.id: environment.resolve_target(target) for target in plan.targets}
@@ -167,7 +171,7 @@ def install_bundle(
         finished_at=finished,
         sequences=tuple(sequence_results),
     )
-    environment.store.write(
+    (bundle.store or environment.store).write(
         bundle.location.join(REPORT_FILENAME), report.to_yaml().encode("utf-8")
     )
     return report
@@ -191,6 +195,7 @@ def _run_sequence(
             snapshot=bundle.location.join("repository"),
             target=target,
             sql=environment.sql_for(target.bound),
+            snapshot_store=bundle.store or environment.store,
         )
         for action in batch.actions:
             if failed:
@@ -226,7 +231,7 @@ def _run_action(
     try:
         payload = None
         if action.payload is not None:
-            payload = environment.store.read(
+            payload = (bundle.store or environment.store).read(
                 bundle.location.join(*action.payload.split("/"))
             )
         details = executor.execute(action, payload, context)

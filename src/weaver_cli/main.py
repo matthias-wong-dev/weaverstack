@@ -53,7 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="logical ItemType/Name=physical item name; repeat for several",
     )
     build.add_argument(
-        "--bundle", required=True, metavar="NAME", help="name for the frozen build bundle"
+        "--bundle",
+        nargs="?",
+        const="",
+        metavar="NAME",
+        help=(
+            "optionally retain a .weaver.zip build record; omit NAME for a UTC "
+            "timestamp"
+        ),
     )
     build.add_argument(
         "--no-prune", action="store_true", help="do not reconcile undeclared target objects"
@@ -390,6 +397,8 @@ def handle_build(args: argparse.Namespace) -> int:
     else:
         print(f"build {result['status']}: {result['repository']}")
         print(f"  bundle: {result['bundle_id']}")
+        if result.get("archive"):
+            print(f"  record: {result['archive']}")
         print(f"  items:  {', '.join(result['items'])}")
         if result["errors"]:
             for error in result["errors"]:
@@ -402,7 +411,7 @@ def _run_fabric_item_build(
     *,
     repository_name: str,
     bindings,
-    bundle_name: str,
+    bundle_name: str | None,
     prune: bool,
     catalogue: bool,
 ) -> dict:
@@ -434,29 +443,35 @@ def _run_fabric_item_build(
     )
     body = (
         "from weaver import (FabricHost, ItemRef, RepositoryRef, "
-        "read_weaver_repository)\n"
+        "build_item_repository, timestamped_archive_name)\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBindings, "
-        "LakehouseBinding, generate_item_build_bundle, install_bundle, "
-        "parse_item_binding)\n"
+        "LakehouseBinding, parse_item_binding)\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"host = {host_literal}\n"
         "store = store_for(host)\n"
         "resolver = resolver_for(host)\n"
-        f"repository = read_weaver_repository(resolver.repository(RepositoryRef({repository_name!r})), store=store)\n"
         f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
         "control = LakehouseBinding(ItemRef(host.weaver_lakehouse))\n"
-        "bundle = generate_item_build_bundle(\n"
-        "    repository, bindings=bindings,\n"
-        f"    output=resolver.build_bundle({bundle_name!r}), store=store,\n"
+        f"record_name = {bundle_name!r}\n"
+        "if record_name is not None:\n"
+        "    record_name = record_name or timestamped_archive_name()\n"
+        "    if not record_name.endswith('.weaver.zip'):\n"
+        "        record_name += '.weaver.zip'\n"
+        "archive = resolver.build_bundle(record_name) if record_name else None\n"
+        "environment = InstallationEnvironment(\n"
+        "    store=store, resolver=resolver, spark=spark, host=host)\n"
+        "result = build_item_repository(\n"
+        f"    resolver.repository(RepositoryRef({repository_name!r})),\n"
+        "    bindings=bindings, environment=environment,\n"
         f"    prune={prune!r}, catalogue={catalogue!r},\n"
         f"    control_lakehouse=control if {catalogue!r} else None,\n"
-        "    resolver=resolver, spark=spark, host=host)\n"
-        "report = install_bundle(bundle, environment=InstallationEnvironment(\n"
-        "    store=store, resolver=resolver, spark=spark, host=host))\n"
+        "    archive=archive)\n"
+        "report = result.report\n"
         "emit({\n"
         f"    'repository': {repository_name!r},\n"
         "    'items': [str(binding.item) for binding in bindings.entries],\n"
-        "    'bundle_id': bundle.bundle_id,\n"
+        "    'bundle_id': result.bundle_id,\n"
+        "    'archive': result.archive.value if result.archive else None,\n"
         "    'status': report.status,\n"
         "    'errors': [\n"
         "        {'id': action.action_id, 'type': action.error_type, "

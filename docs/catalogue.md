@@ -53,7 +53,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 
 | Table | One row per | Notes |
 |---|---|---|
-| `_.Installation` | repository + logical item | The physical target currently bound, and the Weaver version that last reconciled it. |
+| `_.Installation` | repository + logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
 | `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
@@ -159,6 +159,13 @@ build's ordinary row comparison.
 An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by a
 comparison of every non-key column, so rebuilding unchanged SES writes nothing and
 does not move `row_update_datetime`.
+
+The Installation signature is deliberately item-scoped. The repository signature
+still certifies the complete coordinated source and bundle snapshot, while object
+rows retain their individual source signatures. This separation lets a future
+incremental planner see that changing `Lakehouse/Raw` does not by itself make an
+installed `Warehouse/Reporting` stale. A destination-keyed alias contributes to
+the consumer item's signature, not the producer's.
 
 ## Removing things
 

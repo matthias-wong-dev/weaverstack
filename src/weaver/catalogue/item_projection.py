@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Iterable
 
 from ..ses.metadata import FOLDER, TABLE, VIEW, Reference
@@ -151,7 +152,7 @@ def project_item_installation(
                 "source_namespace": _namespace(alias.source),
                 "source_schema_name": alias.source.object_id.schema,
                 "source_object_name": alias.source.object_id.object,
-                "signature": repository.signature,
+                "signature": _alias_signature(alias),
             }
         )
 
@@ -175,13 +176,18 @@ def project_item_installation(
             **_scope(scope),
             "target_name": target_name,
             "weaver_version": weaver_version,
-            "signature": repository.signature,
+            "signature": item_model.signature,
         }
     )
     return CatalogueProjection(
         scope=scope,
         rows={name: tuple(values) for name, values in rows.items()},
     )
+
+
+def _alias_signature(alias) -> str:
+    declaration = f"{alias.destination}\0{alias.source}".encode("utf-8")
+    return hashlib.sha256(declaration).hexdigest()
 
 
 def _scope(scope: ItemInstallationScope) -> dict[str, str]:

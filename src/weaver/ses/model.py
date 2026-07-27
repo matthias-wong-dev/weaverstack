@@ -206,6 +206,7 @@ class WeaverItem:
     identity: WeaverItemId
     schemas: tuple[WeaverSchemaId, ...] = ()
     documents: tuple[WeaverDocumentId, ...] = ()
+    signature: str = ""
 
     def __post_init__(self) -> None:
         if any(schema.item != self.identity for schema in self.schemas):

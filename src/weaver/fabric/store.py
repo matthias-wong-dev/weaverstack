@@ -8,12 +8,15 @@ Directory operations came first, for wipe. Byte reads and writes came next, for
 installing a build bundle in-session — the installer reads ``plan.yml`` and the
 generated payloads from OneLake and writes an install report back. They go
 through ``notebookutils.fs.head``/``put``, which exchange UTF-8 text: a build
-bundle's manifest and payloads are UTF-8, so this is exact for them. A
-byte-accurate binary contract (for arbitrary file content) is still future work.
+bundle's manifest and payloads are UTF-8, so this is exact for them. Arbitrary
+binary artefacts do not pass through those methods: recursive repository
+materialisation and bundle-archive persistence use ``notebookutils.fs.cp``
+between OneLake and the driver's ``file:/tmp`` filesystem.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..errors import CommandError
@@ -137,3 +140,30 @@ class FabricStore:
     def make_directory(self, location: Location) -> None:
         if not self.fs.mkdirs(self._path(location)):
             raise StoreError(f"could not create directory {location.value}")
+
+    def copy_to_local(self, source: Location, destination: Path) -> None:
+        """Recursively copy OneLake content to the Fabric driver's filesystem."""
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        target = f"file:{destination.as_posix()}"
+        try:
+            copied = self.fs.cp(self._path(source), target, True)
+        except Exception as exc:
+            raise StoreError(
+                f"cannot materialise {source.value} at {destination}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not materialise {source.value} at {destination}")
+
+    def copy_from_local(self, source: Path, destination: Location) -> None:
+        """Copy one driver-local file or tree into OneLake without text decoding."""
+
+        origin = f"file:{source.as_posix()}"
+        try:
+            copied = self.fs.cp(origin, self._path(destination), source.is_dir())
+        except Exception as exc:
+            raise StoreError(
+                f"cannot persist {source} at {destination.value}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not persist {source} at {destination.value}")

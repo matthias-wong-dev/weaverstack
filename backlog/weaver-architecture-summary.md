@@ -409,6 +409,13 @@ updates its current installation row after a successful build. The old physical
 item is left untouched and is later wiped only by naming that physical item
 explicitly; the catalogue does not retain installation history merely to find it.
 
+Certification separates at three levels. The repository signature covers the
+complete source and certifies the coordinated plan and snapshot. Each item has a
+signature over its own identity, schemas, documents, support files and aliases it
+consumes; `_.Installation` records that item signature, so an unrelated item edit
+does not make every installation appear stale. Registry and dictionary signatures
+remain document- or declaration-specific.
+
 Object dictionaries are keyed beneath the item scope. Folder and Delta rows share
 the same Lakehouse installation scope while retaining distinct object kinds and
 logical namespaces.
@@ -468,6 +475,14 @@ Generation and installation both run in the target environment:
 
 Desktop CLI and Fabric tests may cross the boundary using REST, DFS and Livy, but
 core never silently substitutes a desktop client for the session-native path.
+
+Inside Fabric, the session makes one recursive copy of the installed OneLake
+repository into a driver-local temporary directory. Discovery, validation,
+signatures, planning, snapshot generation and direct installation then use local
+files. No persisted bundle is required for the normal development path. A caller
+may subsequently preserve the complete bundle as one deterministic
+`<timestamp>.weaver.zip` for audit or handover; a receiving session copies and
+extracts that archive locally before validation and installation.
 
 One bundle may contain batches for several Lakehouses, Warehouses and the Weaver
 control-plane Lakehouse. Each batch is bound to exactly one physical target and

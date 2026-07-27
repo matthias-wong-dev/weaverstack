@@ -526,6 +526,22 @@ def read_weaver_repository(
     )
     validate_repository_metadata(source_documents.values(), aliases=aliases)
 
+    items = [
+        replace(
+            model,
+            signature=_item_signature(
+                model,
+                source_documents=source_documents,
+                schema_documents=schema_documents,
+                support_files=support_files,
+                aliases=aliases,
+                store=store,
+                root=root,
+            ),
+        )
+        for model in items
+    ]
+
     repository = WeaverRepository(
         name=root.name,
         root=root,
@@ -540,6 +556,59 @@ def read_weaver_repository(
         generated_files=generated_files,
     )
     return resolve_item_dependencies(repository)
+
+
+def _item_signature(
+    item: WeaverItem,
+    *,
+    source_documents: Mapping[WeaverDocumentId, SourceDocument],
+    schema_documents: Mapping[WeaverSchemaId, SchemaSes],
+    support_files: Iterable[str],
+    aliases: Iterable[RepositoryAlias],
+    store: Store,
+    root: Location,
+) -> str:
+    """Certify exactly one logical item's authored and generated inputs.
+
+    Repository-level aliases belong to their destination/consumer item. The
+    producer's content deliberately does not participate: a logical dependency
+    does not make an independently installed producer part of the consumer's
+    source item.
+    """
+
+    from .source import content_hash
+
+    entries: list[tuple[str, str]] = []
+    for identity in item.documents:
+        source = source_documents[identity]
+        entries.append((source.relative_path, source.source_hash))
+    for identity in item.schemas:
+        schema = schema_documents[identity]
+        entries.append((schema.relative_path, schema.source_hash))
+
+    prefix = f"{item.identity.item_type}/{item.identity.item_name}/"
+    for relative in support_files:
+        if relative.startswith(prefix):
+            entries.append(
+                (
+                    relative,
+                    content_hash(store.read(root.join(*relative.split("/")))),
+                )
+            )
+    for alias in aliases:
+        if alias.destination.item == item.identity:
+            declaration = f"{alias.destination}\0{alias.source}".encode("utf-8")
+            entries.append((f"alias:{alias.destination}", content_hash(declaration)))
+
+    digest = hashlib.sha256()
+    digest.update(str(item.identity).encode("utf-8"))
+    digest.update(b"\n")
+    for relative, source_hash in sorted(entries):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(source_hash.encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _insert_exact_case(

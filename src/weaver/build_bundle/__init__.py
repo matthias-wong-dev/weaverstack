@@ -32,6 +32,15 @@ from .installer import InstallationEnvironment, install_bundle
 from .planner import Projection, generate_build_bundle, project
 from .item_planner import generate_item_build_bundle
 from .report import InstallationReport
+from .workflow import (
+    ItemBuildResult,
+    build_item_repository,
+    install_bundle_archive,
+    materialise_bundle_archive,
+    materialise_tree,
+    persist_bundle_archive,
+    timestamped_archive_name,
+)
 from .targets import (
     BoundTarget,
     LakehouseBinding,
@@ -68,4 +77,11 @@ __all__ = [
     "InstallationEnvironment",
     "install_bundle",
     "InstallationReport",
+    "ItemBuildResult",
+    "build_item_repository",
+    "materialise_tree",
+    "persist_bundle_archive",
+    "materialise_bundle_archive",
+    "install_bundle_archive",
+    "timestamped_archive_name",
 ]

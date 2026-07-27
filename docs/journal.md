@@ -2301,7 +2301,7 @@ advertised through `__all__`. Flat-layout input to the item reader fails early
 with concrete moves for Delta/Spark, Warehouse, Folder, `_schemas/` and helper
 files; it is never guessed into an item layout.
 
-`weaver build` now takes one installed repository, a required bundle name and one
+`weaver build` now takes one installed repository, an optional bundle record and one
 or more repeatable `--bind ItemType/LogicalName=PhysicalName` declarations. Prune
 and catalogue publication default on, with explicit `--no-prune` and
 `--no-catalogue` escape hatches. The desktop adapter requires a Fabric host and
@@ -2323,6 +2323,46 @@ test. Parser, typed binding, serialisable result, one-session program syntax,
 migration error, help text, public API, boundary and neutrality tests cover the
 interface. The underlying item planner/installer transport was already exercised
 through the installed wheel at R6 and R7.
+
+### R8a/R8b — item certification and one local Fabric operation
+
+The installation row had accidentally retained the repository signature from the
+flat model. That made an edit to one logical item invalidate every installation,
+which is the wrong basis for incremental build. Certification now has three
+deliberate grains: the repository signature covers the complete source and
+coordinated snapshot; each `WeaverItem` signs its own identity, schemas,
+documents, support files and destination-keyed aliases; Registry and dictionary
+rows keep their declaration-level signatures. An alias belongs to the destination
+that consumes it, so it changes only that item's signature. Physical bindings and
+producer contents do not leak into the consumer's signature.
+
+The build path now matches the deployment architecture rather than a desktop
+optimisation. Weaver running inside Fabric makes one session-native recursive copy
+from the repository in OneLake to a driver-local temporary directory. Static
+discovery, validation, all three signature levels, planning and repository
+snapshot generation read that local tree. The bundle is generated locally and its
+payload store is independent of the target store, so its mechanical installer can
+read local payloads while mutating named Fabric Lakehouses and Warehouses.
+Temporary work is removed at the end of the call.
+
+Persisting a bundle is no longer compulsory. An ordinary developer build installs
+the temporary bundle directly and performs no bundle round trip through OneLake.
+When a durable record or handover is useful, Weaver packages the complete bundle
+as one deterministic `<timestamp>.weaver.zip` after generation or installation
+and uploads that one file. A receiver copies one archive to its own temporary
+directory, rejects unsafe ZIP paths, extracts it and applies the existing manifest
+and payload-hash validation before installation. The archive is an internal
+transport form, not a new package trust boundary.
+
+Pure tests carry most of this proof. They mutate unrelated items, support files,
+schemas and aliases independently; count one source read per remotely shaped
+repository file; prove the direct path has no remote bundle reads; round-trip a
+bundle including payloads and its repository snapshot; and prove archive install
+reads payloads from the extraction rather than the target store. The complete
+non-Spark suite passed 1,160 tests with one skip. The full shared-session Spark
+suite passed all 101 tests; its public-workflow vertical creates a real Delta
+table and Folder from the driver-local bundle and explicitly drops its registered
+schema so the expensive session remains isolated for the following prune proof.
 
 ### R9 underway — visible session contention and canonical table names
 

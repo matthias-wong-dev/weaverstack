@@ -95,7 +95,6 @@ weaver build \
   --repository Estate \
   --bind Lakehouse/Raw=Raw_Dev \
   --bind Warehouse/Reporting=Reporting_Dev \
-  --bundle estate-review \
   --host Development --hosts env.yml
 ```
 
@@ -120,6 +119,22 @@ for a build failure.
 The repository must already be installed at
 `<Control Lakehouse>/Files/repos/<repository>`. Its directory name is its exact
 repository name.
+
+Inside that one Fabric session Weaver copies the repository once to a temporary
+driver-local directory, plans and installs from local files, then removes them.
+The usual development build does not upload or download a bundle.
+
+To preserve the completed bundle as a handover or audit record, add `--bundle`.
+With no value Weaver uses a UTC `<timestamp>.weaver.zip` name; supplying a name
+uses that name (and appends `.weaver.zip` when omitted):
+
+```bash
+weaver build ... --bundle
+weaver build ... --bundle estate-review
+```
+
+The archive is written beneath the control plane's build-bundle area only after
+the local bundle exists. It is not required for installation.
 
 On a new control plane, include the generated built-in item once so the same
 bundle creates the catalogue before its catalogue tail runs:

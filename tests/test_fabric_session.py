@@ -104,3 +104,36 @@ def test_fabric_store_lists_and_deletes_through_notebookutils():
         ("notes.txt", False, 12),
     ]
     assert fs.deleted == [(f"{root}/Sales", True)]
+
+
+def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decoding(
+    tmp_path,
+):
+    class CopyFs:
+        def __init__(self):
+            self.calls = []
+
+        def cp(self, source, destination, recurse):
+            self.calls.append((source, destination, recurse))
+            return True
+
+    fs = CopyFs()
+    store = FabricStore(fs)
+    remote_tree = Location(
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/repos/Estate"
+    )
+    local_tree = tmp_path / "Estate"
+    local_archive = tmp_path / "record.weaver.zip"
+    local_archive.write_bytes(b"PK fake binary")
+    remote_archive = Location(
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/"
+        "build_bundles/record.weaver.zip"
+    )
+
+    store.copy_to_local(remote_tree, local_tree)
+    store.copy_from_local(local_archive, remote_archive)
+
+    assert fs.calls == [
+        (remote_tree.value, f"file:{local_tree.as_posix()}", True),
+        (f"file:{local_archive.as_posix()}", remote_archive.value, False),
+    ]

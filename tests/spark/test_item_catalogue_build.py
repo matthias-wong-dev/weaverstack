@@ -10,6 +10,7 @@ from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
+    build_item_repository,
     generate_item_build_bundle,
     install_bundle,
 )
@@ -78,6 +79,41 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
         "repository = 'Estate' AND item_type = 'Lakehouse' "
         "AND item_name = '_weaver' AND object_namespace = 'Tables'"
     ).count() == len(CATALOGUE_TABLES)
+
+
+def test_public_workflow_materialises_then_installs_from_driver_local_files(
+    tmp_path, lakehouses, spark
+):
+    repository_root = Location(str(_estate(tmp_path)))
+    binding = LakehouseBinding(lakehouses.target)
+
+    target = SparkCatalogue(
+        spark, lakehouses.resolver.spark_destination(lakehouses.target)
+    )
+    try:
+        result = build_item_repository(
+            repository_root,
+            bindings=ItemBindings(
+                (ItemBinding(WeaverItemId.parse("Lakehouse/Raw"), binding),)
+            ),
+            environment=InstallationEnvironment(
+                store=lakehouses.store,
+                resolver=lakehouses.resolver,
+                spark=spark,
+            ),
+            prune=False,
+            catalogue=False,
+        )
+
+        assert result.report.status == "succeeded", _failures(result.report)
+        assert target.exists("Sales", "Customer")
+        assert lakehouses.store.exists(
+            lakehouses.resolver.files_root(lakehouses.target) / "Sales" / "Customer"
+        )
+    finally:
+        spark.sql(
+            f"DROP SCHEMA IF EXISTS {target.qualified_schema('Sales')} CASCADE"
+        )
 
 
 def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
