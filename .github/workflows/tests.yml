@@ -1,12 +1,7 @@
-# CI checks the environment Weaver is actually developed and deployed against:
+# CI checks the supported Python environment.
 #
-# - macOS, matching the primary development machine
-# - Python 3.11 and Java 11, matching Microsoft Fabric
-#
-# Fabric tests require a workspace and live capacity, so they are not run here.
-# Broader operating-system and runtime compatibility can be checked manually or
-# added later as advisory or scheduled workflows when there is a demonstrated
-# need.
+# Fabric and local Spark tests are run explicitly when relevant rather than on
+# every pull request.
 name: tests
 
 on:
@@ -19,17 +14,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   core:
     name: core / macOS / py3.11
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
-          # hatch_build.py derives the version from git describe.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -40,49 +35,3 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pip install -e . --no-deps
       - run: pytest -m "not spark and not fabric"
-
-  spark:
-    name: spark / macOS / py3.11 / java11
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "11"
-
-      - run: pip install -r requirements-dev.txt
-      - run: pip install -e . --no-deps
-      - run: weaver doctor
-      - run: pytest -m spark
-
-  floating:
-    name: floating dependencies (advisory)
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "11"
-
-      - run: pip install -e ".[dev]"
-      - run: pip list
-      - run: pytest -m "not fabric"
