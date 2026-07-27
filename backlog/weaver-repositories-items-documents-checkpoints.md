@@ -38,8 +38,8 @@ build constraints remain
 | R8a | Repository, item and document signatures are separated | complete |
 | R8b | Fabric materialises once and bundle persistence is optional | complete |
 | R9 | Local and Fabric verticals prove the architecture | in progress |
-| R10 | Workspace-scoped catalogue identity and `weaver_items` source root | in progress |
-| R11 | The item implies the SQL dialect and owns its aliases | in progress |
+| R10 | Workspace-scoped catalogue identity and `weaver_items` source root | complete |
+| R11 | The item implies the SQL dialect and owns its aliases | complete |
 | R12 | The pre-item architecture is removed | in progress |
 
 ---

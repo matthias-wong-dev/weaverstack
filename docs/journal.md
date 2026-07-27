@@ -2615,6 +2615,12 @@ The signature machinery got smaller twice over in two checkpoints, which is the
 tell that both changes were removing something the design had been paying for
 rather than adding to it.
 
+Fabric confirmed the removal at row 3: the Environment was republished from this
+branch and the item verticals — the built-in catalogue built and catalogued by
+installed Weaver, item build with prune, full Lakehouse wipe — passed inside a
+Fabric session, along with the OneLake store, Livy import, resources and wipe
+suites. Thirty-one tests against a live workspace and capacity.
+
 The cost is honest and worth writing down: about a hundred and sixty tests went
 with the flat reader, and not all of them were testing the flat reader. The whole
 path over a realistic multi-object fixture — classification through metadata,
