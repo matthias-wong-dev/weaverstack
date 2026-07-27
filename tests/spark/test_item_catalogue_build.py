@@ -63,8 +63,8 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
     )
 
     assert report.status == "succeeded", _failures(report)
-    assert {name.lower() for name in weaver_catalogue.tables("_")} == {
-        table.name.lower() for table in CATALOGUE_TABLES
+    assert set(weaver_catalogue.tables("_")) == {
+        table.name for table in CATALOGUE_TABLES
     }
 
     installation = spark.table(

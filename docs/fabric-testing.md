@@ -254,8 +254,11 @@ case-sensitive.** With Fabric's default `spark.sql.caseSensitive=false`, even a
 quoted `Sales.Customer` is registered and stored as `Sales.customer`. Weaver
 temporarily enables case-sensitive analysis for its table-create DDL and restores
 the session setting immediately, so current Weaver builds preserve `Customer` in
-both the Spark catalogue and managed directory. Pre-existing tables may still be
-lower-case. A Fabric Warehouse uses a case-sensitive collation, so inspect
+both the Spark catalogue and managed directory. If an older build registered a
+case-only predecessor such as `customer`, the same DDL scope renames it to the
+declared spelling before replacement; an ordinary rebuild therefore converges
+existing Lakehouses as well as creating new ones correctly. A Fabric Warehouse
+uses a case-sensitive collation, so inspect
 `INFORMATION_SCHEMA.TABLES` on the Lakehouse SQL endpoint rather than guessing
 either spelling or a sync delay.
 

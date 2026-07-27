@@ -2375,6 +2375,27 @@ adjacent generated sidecar directly. A pure fake reproduces both directory and
 binary-file behavior without weakening the rule that only ``_ignore`` is absent
 from repository discovery.
 
+The review deployment then exercised the whole coordinated path with a staged
+``MixedEstate`` repository: the built-in control item in ``Play_Lakehouse_1``, a
+Lakehouse item in ``Play_Lakehouse_2`` and a Warehouse item in ``Play Warehouse``.
+One bundle built all three bindings, published three item-signature installation
+rows, registered four operational documents, ten control-plane documents and two
+reporting documents, and left both Warehouse objects and both Delta tables empty
+as a build should. The Lakehouse SQL endpoint exposes its physical table names in
+lower case and its collation-sensitive Warehouse consumer therefore authors that
+exact three-part spelling; this is distinct from Weaver's canonical logical and
+catalogue display names.
+
+That deployment also exposed the remaining catalogue-case transition rather than
+a clean-create defect. ``CREATE OR REPLACE`` under case-sensitive analysis keeps
+the registered spelling when a case-insensitive predecessor already exists, so an
+old ``registry`` did not become ``Registry`` merely because the new DDL was exact.
+The table executor now inventories the destination inside the same case-sensitive
+scope and renames the single case-only predecessor before replacement. It refuses
+multiple case-colliding predecessors. The operation preserves the old table until
+the ordinary build-phase replacement, and an existing control plane now converges
+to the same PascalCase contract as a fresh one.
+
 ### R9 underway — visible session contention and canonical table names
 
 Fabric's Livy collection is now a public read-only diagnostic rather than a fact

@@ -45,6 +45,25 @@ class _FakeFrame:
     def __init__(self, fields: list[_FakeField]) -> None:
         self.schema = _FakeSchema(fields)
 
+    def collect(self) -> list:
+        return []
+
+
+class _FakeRow:
+    def __init__(self, **values) -> None:
+        self._values = values
+
+    def asDict(self) -> dict:
+        return self._values
+
+
+class _FakeListing:
+    def __init__(self, rows: list[_FakeRow]) -> None:
+        self._rows = rows
+
+    def collect(self) -> list[_FakeRow]:
+        return self._rows
+
 
 class _FakeConf:
     def __init__(self) -> None:
@@ -64,15 +83,33 @@ class _FakeConf:
 class _FakeSpark:
     """Returns a fixed query shape, and records the statements it is asked to run."""
 
-    def __init__(self, query_fields: list[tuple[str, str]]) -> None:
+    def __init__(
+        self,
+        query_fields: list[tuple[str, str]],
+        *,
+        existing_tables: tuple[str, ...] = (),
+    ) -> None:
         self._fields = [_FakeField(name, simple) for name, simple in query_fields]
+        self.existing_tables = list(existing_tables)
         self.executed: list[str] = []
         self.conf = _FakeConf()
         self.case_at_create: str | None = None
+        self.case_at_alter: str | None = None
 
     def sql(self, statement: str):
         self.executed.append(statement)
-        if statement.lstrip().upper().startswith("CREATE"):
+        normalized = statement.lstrip().upper()
+        if normalized.startswith("SHOW VIEWS"):
+            return _FakeListing([])
+        if normalized.startswith("SHOW TABLES"):
+            return _FakeListing(
+                [_FakeRow(tableName=name, isTemporary=False) for name in self.existing_tables]
+            )
+        if normalized.startswith("ALTER TABLE"):
+            self.case_at_alter = self.conf.value
+            self.existing_tables = ["Customer"]
+            return None
+        if normalized.startswith("CREATE"):
             self.case_at_create = self.conf.value
             return None
         return _FakeFrame(self._fields)
@@ -165,6 +202,24 @@ def test_fabric_creation_preserves_identifier_case_and_restores_the_session_sett
     assert spark.case_at_create == "true"
     assert spark.conf.value == "false"
     assert spark.conf.changes == ["true", "false"]
+
+
+def test_fabric_creation_renames_a_legacy_case_variant_before_replacing_it():
+    spark = _FakeSpark(
+        [("CustomerId", "int"), ("CustomerName", "string")],
+        existing_tables=("customer",),
+    )
+
+    _run(spark, _payload(), destination=FABRIC_DESTINATION)
+
+    alter = next(s for s in spark.executed if s.lstrip().upper().startswith("ALTER"))
+    assert alter == (
+        "ALTER TABLE `Analytics`.`Sales_LH`.`Sales`.`customer` "
+        "RENAME TO `Analytics`.`Sales_LH`.`Sales`.`Customer`"
+    )
+    assert spark.case_at_alter == "true"
+    assert spark.case_at_create == "true"
+    assert spark.conf.value == "false"
 
 
 def test_local_creation_uses_the_registered_folded_schema_and_pascal_table_name():

@@ -596,6 +596,7 @@ The completed vertical covers:
 14. row 1 local behaviour, row 2 desktop-to-Fabric access where relevant, and
     row 3 installed Weaver inside Fabric;
 15. catalogue table display names preserve their canonical PascalCase on Fabric,
+    including convergence from tables registered by an older lower-case build,
     while physical Delta inventory is verified independently without making its
     casing part of Weaver identity;
 16. the Fabric harness reports active or queued Livy sessions before requesting a

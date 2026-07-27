@@ -82,17 +82,11 @@ def _failures(report) -> str:
 def test_the_ordinary_build_path_creates_all_ten_catalogue_tables(
     built_catalogue, weaver_catalogue
 ):
-    """Names are compared case-insensitively, because the local metastore folds them.
+    """The emulator preserves the same canonical display names as Fabric."""
 
-    Fabric preserves the case of a Lakehouse table; the local Hive metastore
-    lowercases both the registered name and the managed directory. That is an
-    emulator divergence, so the assertion is written to the behaviour Weaver
-    actually relies on — identity is case-insensitive, and the reader already
-    refuses two names differing only by case.
-    """
-
-    existing = {name.lower() for name in weaver_catalogue.tables("_")}
-    assert existing == {table.name.lower() for table in CATALOGUE_TABLES}
+    assert set(weaver_catalogue.tables("_")) == {
+        table.name for table in CATALOGUE_TABLES
+    }
 
 
 def test_each_table_has_exactly_the_columns_the_representation_declares(
@@ -181,12 +175,11 @@ def test_the_tables_land_under_the_weaver_lakehouse_tables_area(
 
     tables_root = lakehouses.resolver.tables_root(ItemRef("Weaver"))
     directories = {
-        entry.name.lower()
+        entry.name
         for entry in lakehouses.store.list(tables_root / "_")
         if entry.is_directory
     }
-    # Lowercased by the local metastore, not by Weaver — see the note above.
-    assert directories == {table.name.lower() for table in CATALOGUE_TABLES}
+    assert directories == {table.name for table in CATALOGUE_TABLES}
 
 
 def test_rebuilding_the_unchanged_repository_succeeds_again(built_catalogue, lakehouses, spark):

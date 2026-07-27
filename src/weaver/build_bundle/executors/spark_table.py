@@ -31,6 +31,7 @@ from typing import Any
 from ...errors import InstallError
 from ...ses.columns import validate_build_columns
 from ...ses.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ...spark import tokens
 from ..models import BuildAction
 from .base import InstallationContext
 
@@ -110,6 +111,8 @@ class SparkTableExecutor:
             context.spark,
             statement,
             enabled=catalogue.destination.preserve_table_identifier_case,
+            catalogue=catalogue,
+            logical_object=instruction["object"],
         )
         return {
             "object": qualified,
@@ -173,22 +176,63 @@ def _create_table_sql(
 
 
 def _create_preserving_identifier_case(
-    spark, statement: str, *, enabled: bool
+    spark,
+    statement: str,
+    *,
+    enabled: bool,
+    catalogue,
+    logical_object: str,
 ) -> None:
-    """Create one table without leaking a Spark session configuration change."""
+    """Create one exact-case table without leaking session configuration.
+
+    ``CREATE OR REPLACE`` keeps the registered spelling of an object it resolves
+    case-insensitively.  That matters when a Lakehouse first built by an older
+    Weaver contains ``registry`` and the current declaration says ``Registry``:
+    merely enabling case-sensitive analysis for the create does not migrate the
+    existing identifier.  Rename that one case-only predecessor first.  The
+    operation preserves the table until the ordinary replace takes ownership of
+    its build-phase structure.
+    """
 
     if not enabled:
         spark.sql(statement)
         return
     previous = spark.conf.get(_CASE_SENSITIVE)
     if str(previous).lower() == "true":
+        _canonicalize_case_variant(catalogue, logical_object)
         spark.sql(statement)
         return
     spark.conf.set(_CASE_SENSITIVE, "true")
     try:
+        _canonicalize_case_variant(catalogue, logical_object)
         spark.sql(statement)
     finally:
         spark.conf.set(_CASE_SENSITIVE, previous)
+
+
+def _canonicalize_case_variant(catalogue, logical_object: str) -> None:
+    match = tokens.OBJECT.fullmatch(logical_object)
+    if match is None:  # expand() reports the useful token error on the main path
+        return
+    schema, declared = match.groups()
+    matches = [
+        existing
+        for existing in catalogue.tables(schema)
+        if existing.casefold() == declared.casefold()
+    ]
+    if not matches or matches == [declared]:
+        return
+    if len(matches) != 1:
+        raise InstallError(
+            f"{schema}.{declared}: target contains case-colliding tables: "
+            + ", ".join(sorted(matches))
+        )
+    existing = matches[0]
+    spark = catalogue.spark
+    spark.sql(
+        f"ALTER TABLE {catalogue.qualify(schema, existing)} "
+        f"RENAME TO {catalogue.qualify(schema, declared)}"
+    )
 
 
 def _ident(name: str) -> str:
