@@ -37,6 +37,7 @@ from typing import Iterable, Mapping
 
 from ..errors import DiscoveryError
 from .metadata import MetadataText, Reference
+from .model import RepositoryAlias, WeaverDocumentId, WeaverItemId
 from .source import SourceDocument
 
 #: The note the catalogue gives Weaver's own surrogate column, which no author
@@ -70,6 +71,7 @@ def resolve_text(
     *,
     owner: SourceDocument,
     documents: Iterable[SourceDocument],
+    aliases: Iterable[RepositoryAlias] = (),
 ) -> ResolvedText:
     """Follow one piece of metadata to its literal prose.
 
@@ -83,15 +85,23 @@ def resolve_text(
         return ResolvedText(literal=text.literal)
 
     index = _index(documents)
+    alias_index = {str(alias.destination): str(alias.source) for alias in aliases}
     written = str(text.reference)
-    literal = _follow(text.reference, owner, index, seen=[(owner.node_id, written)])
+    literal = _follow(
+        text.reference,
+        owner,
+        index,
+        alias_index=alias_index,
+        seen=[(owner.node_id, written)],
+    )
     return ResolvedText(literal=literal, reference=written)
 
 
 def _index(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:
     grouped: dict[str, list[SourceDocument]] = {}
     for document in documents:
-        grouped.setdefault(document.qualified.lower(), []).append(document)
+        key = str(document.logical_id) if document.logical_id is not None else document.qualified.lower()
+        grouped.setdefault(key, []).append(document)
     return grouped
 
 
@@ -100,12 +110,17 @@ def _follow(
     referrer: SourceDocument,
     index: Mapping[str, list[SourceDocument]],
     *,
+    alias_index: Mapping[str, str],
     seen: list[tuple[str, str]],
 ) -> str | None:
     """The literal at the end of a chain, or None when it cannot be followed."""
 
-    target = _target(reference, referrer, index)
+    target = _target(reference, referrer, index, alias_index=alias_index)
     if target is None:
+        if referrer.logical_id is not None:
+            raise DiscoveryError(
+                f"{referrer.node_id}: metadata reference {reference} does not resolve exactly"
+            )
         return None
 
     step = (target.node_id, reference.column or "")
@@ -118,16 +133,29 @@ def _follow(
 
     text = _text_of(target, reference.column)
     if text is None:
+        if referrer.logical_id is not None:
+            suffix = f" column {reference.column!r}" if reference.column else " text"
+            raise DiscoveryError(
+                f"{referrer.node_id}: metadata reference {reference} names no{suffix}"
+            )
         return None
     if not text.is_reference:
         return text.literal
-    return _follow(text.reference, target, index, seen=seen + [step])
+    return _follow(
+        text.reference,
+        target,
+        index,
+        alias_index=alias_index,
+        seen=seen + [step],
+    )
 
 
 def _target(
     reference: Reference,
     referrer: SourceDocument,
     index: Mapping[str, list[SourceDocument]],
+    *,
+    alias_index: Mapping[str, str],
 ) -> SourceDocument | None:
     """The object a documentation reference names, excluding the referrer itself.
 
@@ -137,6 +165,18 @@ def _target(
     referrer's own namespace wins; failing that the reference is ambiguous and is
     left unresolved rather than guessed.
     """
+
+    if referrer.logical_id is not None:
+        item = (
+            WeaverItemId(reference.item_type, reference.item_name)
+            if reference.is_item_qualified
+            else referrer.logical_id.item
+        )
+        identity = WeaverDocumentId(item, reference.object_id, is_files=reference.is_files)
+        key = str(identity)
+        key = alias_index.get(key, key)
+        candidates = index.get(key, [])
+        return candidates[0] if len(candidates) == 1 else None
 
     candidates = [
         candidate
@@ -151,6 +191,45 @@ def _target(
         candidate for candidate in candidates if candidate.namespace == referrer.namespace
     ]
     return same_namespace[0] if len(same_namespace) == 1 else None
+
+
+def validate_repository_metadata(
+    documents: Iterable[SourceDocument],
+    *,
+    aliases: Iterable[RepositoryAlias] = (),
+) -> None:
+    """Eagerly validate every logical metadata pointer in an item repository."""
+
+    documents = tuple(documents)
+    aliases = tuple(aliases)
+    index = _index(documents)
+    alias_index = {str(alias.destination): str(alias.source) for alias in aliases}
+    for source in documents:
+        resolve_text(
+            source.document.description,
+            owner=source,
+            documents=documents,
+            aliases=aliases,
+        )
+        resolve_text(
+            source.document.lineage,
+            owner=source,
+            documents=documents,
+            aliases=aliases,
+        )
+        for _column, note in declared_column_notes(source):
+            resolve_text(note, owner=source, documents=documents, aliases=aliases)
+        for foreign_key in source.document.foreign_keys:
+            reference = foreign_key.logical_reference or Reference(
+                schema=foreign_key.reference.schema,
+                object=foreign_key.reference.object,
+            )
+            target = _target(reference, source, index, alias_index=alias_index)
+            if target is None:
+                raise DiscoveryError(
+                    f"{source.node_id}: foreign key target {reference.target} "
+                    "does not resolve exactly"
+                )
 
 
 def _text_of(document: SourceDocument, column: str | None) -> MetadataText | None:

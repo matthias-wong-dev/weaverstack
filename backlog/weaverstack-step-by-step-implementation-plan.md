@@ -1,5 +1,11 @@
 # Weaverstack Architecture and Step-by-Step Implementation Plan
 
+> **Historical construction plan.** This remains the guide to the checkpoints
+> that produced the current implementation. The accepted repository/item/document
+> re-architecture continues in
+> [`weaver-repositories-items-documents-checkpoints.md`](weaver-repositories-items-documents-checkpoints.md).
+> The journal remains authoritative about what has actually landed.
+
 **Purpose:** Guide a coding agent with no prior context through the construction of `weaverstack`, using the existing sibling `weaver` repository as reference material.
 
 **Reference repository:** `matthias-wong-dev/weaver`  

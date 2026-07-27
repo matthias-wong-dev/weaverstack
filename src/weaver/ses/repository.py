@@ -22,10 +22,12 @@ the Weaver Lakehouse.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
 
-from ..errors import DiscoveryError
+import yaml
+
+from ..errors import DiscoveryError, IdentityError, MetadataError
 from ..locations import Location
 from ..store import LocalStore, Store
 from .graph import Graph
@@ -38,6 +40,19 @@ from .metadata import (
     WAREHOUSE_NAMESPACE,
     ObjectId,
 )
+from .model import (
+    FILES,
+    ITEM_TYPES,
+    LAKEHOUSE,
+    WAREHOUSE,
+    RepositoryAlias,
+    WeaverDocumentId,
+    WeaverItem,
+    WeaverItemId,
+    WeaverRepository,
+    WeaverSchemaId,
+)
+from .metadata import _UniqueKeyLoader
 from .schemas import SchemaSes, is_schema_file, read_schema_document
 from .source import (
     PYTHON_ID_SEPARATOR,
@@ -46,6 +61,8 @@ from .source import (
     object_id_for_filename,
     read_source_document,
 )
+from .references import validate_repository_metadata
+from .item_dependencies import resolve_item_dependencies
 
 #: Never read, never installed.
 IGNORED_DIRECTORIES = frozenset(
@@ -262,6 +279,328 @@ def read_repository(
         schemas_by_namespace=schemas_by_namespace,
         external_references=external,
     )
+
+
+def read_weaver_repository(
+    root: Location,
+    *,
+    store: Store | None = None,
+) -> WeaverRepository:
+    """Read the item-oriented repository layout without executing authored code.
+
+    This is the canonical reader introduced by R2. ``read_repository`` remains
+    the explicitly legacy flat reader until the public migration in R8.
+    """
+
+    store = store or LocalStore()
+    if not store.exists(root):
+        raise DiscoveryError(f"repository root does not exist: {root}")
+    if not store.is_directory(root):
+        raise DiscoveryError(f"repository root is not a directory: {root}")
+
+    prefix = root.value.rstrip("/") + "/"
+    entries: list[tuple[str, bool]] = []
+    for entry in store.list(root, recursive=True):
+        relative = entry.location.value[len(prefix):]
+        parts = relative.split("/")
+        if "_ignore" in parts:
+            continue
+        entries.append((relative, entry.is_directory))
+
+    for relative, is_directory in entries:
+        if not is_directory and relative.rsplit("/", 1)[-1] == "__init__.py":
+            raise DiscoveryError(
+                f"{relative}: user-authored __init__.py is not allowed; "
+                "Weaver supplies package loading"
+            )
+
+    invalid_roots = sorted(
+        {
+            relative.split("/", 1)[0]
+            for relative, _ in entries
+            if relative.split("/", 1)[0] not in ITEM_TYPES
+            and relative != "alias.yml"
+        }
+    )
+    if invalid_roots:
+        raise DiscoveryError(
+            f"{invalid_roots[0]}: first directory must be exactly one of "
+            + ", ".join(sorted(ITEM_TYPES))
+        )
+
+    for relative, is_directory in entries:
+        if not is_directory:
+            continue
+        parts = relative.split("/")
+        if len(parts) <= 2:
+            continue
+        item = WeaverItemId(parts[0], parts[1])
+        within = parts[2:]
+        if within == ["schemas"]:
+            continue
+        if within == [FILES] and item.item_type == LAKEHOUSE:
+            continue
+        if within[0] == "lib" and item.item_type == LAKEHOUSE:
+            continue
+        raise DiscoveryError(
+            f"{relative}: only schemas/, lib/ and Lakehouse Files/ are authored "
+            "subdirectories of an item"
+        )
+
+    item_ids: set[WeaverItemId] = set()
+    files: list[str] = []
+    for relative, is_directory in entries:
+        parts = relative.split("/")
+        if len(parts) == 1:
+            if is_directory and parts[0] in ITEM_TYPES:
+                continue
+            if not is_directory and parts[0] == "alias.yml":
+                files.append(relative)
+                continue
+            raise DiscoveryError(
+                f"{relative}: repository root may contain only item type directories, "
+                "alias.yml and _ignore/"
+            )
+        if parts[0] not in ITEM_TYPES:
+            raise DiscoveryError(
+                f"{relative}: first directory must be exactly one of "
+                + ", ".join(sorted(ITEM_TYPES))
+            )
+        item = WeaverItemId(parts[0], parts[1])
+        item_ids.add(item)
+        if len(parts) == 2:
+            if not is_directory:
+                raise DiscoveryError(f"{relative}: an item must be a directory")
+            continue
+        if not is_directory:
+            files.append(relative)
+
+    source_documents: dict[WeaverDocumentId, SourceDocument] = {}
+    schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
+    support_files: list[str] = []
+    documents_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
+        item: [] for item in item_ids
+    }
+    schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {
+        item: [] for item in item_ids
+    }
+
+    for relative in sorted(files):
+        if relative == "alias.yml":
+            support_files.append(relative)
+            continue
+        parts = relative.split("/")
+        item = WeaverItemId(parts[0], parts[1])
+        within = parts[2:]
+
+        if within[0] == "lib":
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(f"{relative}: lib/ belongs to a Lakehouse item")
+            if len(within) == 1:
+                raise DiscoveryError(f"{relative}: lib must be a directory")
+            support_files.append(relative)
+            continue
+
+        if within[0] == "schemas":
+            if len(within) != 2 or not within[1].endswith(".yml"):
+                raise DiscoveryError(
+                    f"{relative}: schema declarations are schemas/<Schema>.yml"
+                )
+            schema = read_schema_document(
+                relative, store.read(root.join(*relative.split("/")))
+            )
+            identity = WeaverSchemaId(item, schema.schema_id)
+            _insert_exact_case(
+                schema_documents, identity, schema, relative, what="schema"
+            )
+            schemas_by_item[item].append(identity)
+            continue
+
+        is_files = within[0] == FILES
+        if is_files:
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(f"{relative}: Files/ belongs to a Lakehouse item")
+            if len(within) != 2:
+                raise DiscoveryError(
+                    f"{relative}: Folder documents live directly under Files/"
+                )
+        elif len(within) != 1:
+            raise DiscoveryError(
+                f"{relative}: only schemas/, lib/ and Lakehouse Files/ are authored "
+                "subdirectories of an item"
+            )
+
+        filename = within[-1]
+        if language_for_filename(filename) is None:
+            raise DiscoveryError(f"{relative}: not a Weaver object file")
+        source = read_source_document(
+            relative, store.read(root.join(*relative.split("/")))
+        )
+        if source.warehouse_alias is not None or source.lakehouse_alias is not None:
+            raise DiscoveryError(
+                f"{relative}: document-local Warehouse alias/Lakehouse alias headers "
+                "have been replaced by repository-level alias.yml"
+            )
+        if item.item_type == LAKEHOUSE:
+            expected = FOLDER_TARGET if is_files else DELTA_TARGET
+        else:
+            expected = SQL_TARGET
+        if source.target_kind != expected:
+            location = "Files/" if is_files else f"{item.item_type} item root"
+            raise DiscoveryError(
+                f"{relative}: {source.document.kind} in {source.language} does not "
+                f"belong at the {location}"
+            )
+        identity = WeaverDocumentId(item, source.object_id, is_files=is_files)
+        source = replace(source, logical_id=identity)
+        _insert_exact_case(
+            source_documents, identity, source, relative, what="document"
+        )
+        documents_by_item[item].append(identity)
+
+    items: list[WeaverItem] = []
+    for item_id in sorted(item_ids):
+        schemas = tuple(sorted(schemas_by_item[item_id], key=str))
+        documents = tuple(sorted(documents_by_item[item_id], key=str))
+        declared = {schema.schema for schema in schemas}
+        for document_id in documents:
+            if document_id.object_id.schema not in declared:
+                source = source_documents[document_id]
+                raise DiscoveryError(
+                    f"{source.relative_path}: schema {document_id.object_id.schema!r} "
+                    f"is not declared by item {item_id}"
+                )
+        items.append(WeaverItem(item_id, schemas=schemas, documents=documents))
+
+    aliases = _read_repository_aliases(
+        root,
+        store,
+        files,
+        item_ids=item_ids,
+        source_documents=source_documents,
+        schemas_by_item=schemas_by_item,
+    )
+    validate_repository_metadata(source_documents.values(), aliases=aliases)
+
+    repository = WeaverRepository(
+        name=root.name,
+        root=root,
+        items=tuple(items),
+        source_documents=source_documents,
+        schema_documents=schema_documents,
+        support_files=tuple(sorted(support_files)),
+        signature=_item_repository_signature(files, store, root),
+        aliases=aliases,
+    )
+    return resolve_item_dependencies(repository)
+
+
+def _insert_exact_case(
+    destination: dict,
+    identity,
+    value,
+    relative: str,
+    *,
+    what: str,
+) -> None:
+    rendered = str(identity)
+    for existing, existing_value in destination.items():
+        if str(existing) == rendered:
+            prior = getattr(existing_value, "relative_path", str(existing))
+            raise DiscoveryError(
+                f"{rendered} is declared twice: {prior} and {relative}"
+            )
+        if str(existing).casefold() == rendered.casefold():
+            raise DiscoveryError(
+                f"{rendered} and {existing} differ only by case and cannot coexist"
+            )
+    destination[identity] = value
+
+
+def _item_repository_signature(paths: Iterable[str], store: Store, root: Location) -> str:
+    """Hash included item-oriented files; `_ignore/` never reaches this list."""
+
+    from .source import content_hash
+
+    digest = hashlib.sha256()
+    for relative in sorted(paths):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(
+            content_hash(store.read(root.join(*relative.split("/")))).encode("ascii")
+        )
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _read_repository_aliases(
+    root: Location,
+    store: Store,
+    paths: Iterable[str],
+    *,
+    item_ids: set[WeaverItemId],
+    source_documents: Mapping[WeaverDocumentId, SourceDocument],
+    schemas_by_item: Mapping[WeaverItemId, list[WeaverSchemaId]],
+) -> tuple[RepositoryAlias, ...]:
+    if "alias.yml" not in paths:
+        return ()
+    try:
+        text = store.read(root.join("alias.yml")).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise DiscoveryError(f"alias.yml: must be UTF-8 text ({exc})") from exc
+    try:
+        loaded = yaml.load(text, Loader=_UniqueKeyLoader)
+    except MetadataError:
+        raise
+    except yaml.YAMLError as exc:
+        raise DiscoveryError(f"alias.yml: invalid YAML: {exc}") from exc
+    if not isinstance(loaded, dict) or set(loaded) != {"aliases"}:
+        raise DiscoveryError("alias.yml must contain exactly one 'aliases' mapping")
+    declarations = loaded["aliases"]
+    if not isinstance(declarations, dict):
+        raise DiscoveryError("alias.yml 'aliases' must be a mapping")
+
+    aliases: list[RepositoryAlias] = []
+    native_folded = {str(identity).casefold(): identity for identity in source_documents}
+    destination_folded: dict[str, WeaverDocumentId] = {}
+    for raw_destination, raw_source in declarations.items():
+        if not isinstance(raw_destination, str) or not isinstance(raw_source, str):
+            raise DiscoveryError("alias.yml destinations and sources must be strings")
+        try:
+            destination = WeaverDocumentId.parse(raw_destination)
+            source = WeaverDocumentId.parse(raw_source)
+        except IdentityError as exc:
+            raise DiscoveryError(f"alias.yml: {exc}") from exc
+        if destination.item not in item_ids:
+            raise DiscoveryError(
+                f"alias destination item {destination.item} is not declared"
+            )
+        if source not in source_documents:
+            case_match = native_folded.get(str(source).casefold())
+            detail = f"; declared spelling is {case_match}" if case_match else ""
+            raise DiscoveryError(f"alias source {source} is not a document{detail}")
+        declared_schemas = {
+            schema.schema for schema in schemas_by_item[destination.item]
+        }
+        if destination.object_id.schema not in declared_schemas:
+            raise DiscoveryError(
+                f"alias destination schema {destination.object_id.schema!r} is not "
+                f"declared by item {destination.item}"
+            )
+        folded = str(destination).casefold()
+        native = native_folded.get(folded)
+        if native is not None:
+            raise DiscoveryError(
+                f"alias destination {destination} collides with native document {native}"
+            )
+        prior = destination_folded.get(folded)
+        if prior is not None:
+            raise DiscoveryError(
+                f"alias destinations {destination} and {prior} differ only by case"
+            )
+        destination_folded[folded] = destination
+        aliases.append(RepositoryAlias(destination=destination, source=source))
+    return tuple(aliases)
 
 
 def _is_object_filename(filename: str) -> bool:

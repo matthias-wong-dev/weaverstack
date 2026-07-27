@@ -162,7 +162,7 @@ _RETIRED_KEYS = {
 _LIST_KEYS = {"Not null"}
 _SET_KEYS = {"Primary key", "Comparison columns"}
 
-_REFERENCE = re.compile(r"^\$([^.\[\]$]+)\.([^.\[\]$]+)(?:\[([^\[\]$]+)\])?$")
+_REFERENCE = re.compile(r"^\$([^\[\]$]+?)(?:\[([^\[\]$]+)\])?$")
 
 # A revision entry opens with a date. Which spelling is the developer's choice;
 # holding to one spelling within a document is not, because a mixed list cannot
@@ -267,18 +267,42 @@ class ObjectId:
 
 @dataclass(frozen=True)
 class Reference:
-    """A ``$Schema.Object`` or ``$Schema.Object[Column]`` reference."""
+    """An item-relative or item-qualified exact-case metadata reference."""
 
     schema: str
     object: str
     column: str | None = None
+    item_type: str | None = None
+    item_name: str | None = None
+    is_files: bool = False
+
+    def __post_init__(self) -> None:
+        if (self.item_type is None) != (self.item_name is None):
+            raise MetadataError("a qualified reference needs both item type and item name")
+        if self.item_type is not None and self.item_type not in ("Lakehouse", "Warehouse"):
+            raise MetadataError(
+                f"reference item type must be Lakehouse or Warehouse, got {self.item_type!r}"
+            )
+        if self.is_files and self.item_type == "Warehouse":
+            raise MetadataError("Files references may only name a Lakehouse item")
 
     @property
     def object_id(self) -> ObjectId:
         return ObjectId(schema=self.schema, object=self.object)
 
+    @property
+    def target(self) -> str:
+        within = f"Files/{self.schema}.{self.object}" if self.is_files else self.object_id.qualified
+        if self.item_type is None:
+            return within
+        return f"{self.item_type}/{self.item_name}/{within}"
+
+    @property
+    def is_item_qualified(self) -> bool:
+        return self.item_type is not None
+
     def __str__(self) -> str:
-        target = f"${self.schema}.{self.object}"
+        target = f"${self.target}"
         return f"{target}[{self.column}]" if self.column else target
 
 
@@ -330,11 +354,17 @@ class ForeignKey:
     columns: tuple[str, ...]
     reference: ObjectId
     reference_columns: tuple[str, ...]
+    logical_reference: Reference | None = None
 
     def __str__(self) -> str:
         child = ", ".join(self.columns)
         parent = ", ".join(self.reference_columns)
-        return f"{child}: {self.reference.qualified}[{parent}]"
+        target = (
+            self.logical_reference.target
+            if self.logical_reference is not None
+            else self.reference.qualified
+        )
+        return f"{child}: {target}[{parent}]"
 
 
 @dataclass(frozen=True)
@@ -353,7 +383,7 @@ class Column:
 
 
 @dataclass(frozen=True)
-class SesDocument:
+class WeaverDocument:
     """A fully validated SES object declaration."""
 
     kind: str
@@ -463,6 +493,11 @@ class SesDocument:
             for column in self.schema
             if column.name not in self.primary_key and not column.is_audit
         )
+
+
+# Transitional public spelling. R8 removes it after callers have migrated;
+# keeping the alias here lets identity and discovery move independently.
+SesDocument = WeaverDocument
 
 
 # --- extraction ------------------------------------------------------------
@@ -698,15 +733,57 @@ def _parse_text_value(value: str, key: str) -> MetadataText:
                 f"{key} must be either prose or exactly one $Schema.Object reference, "
                 f"not a mix of both: {stripped!r}. Write $$ for a literal dollar sign."
             )
-        schema, obj, column = match.groups()
+        target, column = match.groups()
         return MetadataText(
-            reference=Reference(schema=schema.strip(), object=obj.strip(),
-                                column=column.strip() if column else None)
+            reference=_parse_logical_reference(
+                target.strip(), column=column.strip() if column else None, key=key
+            )
         )
     literal = stripped.replace("$$", "$")
     if literal.lower() in _PLACEHOLDERS:
         raise MetadataError(f"{key} must not be a placeholder value ({literal!r})")
     return MetadataText(literal=literal)
+
+
+def _parse_logical_reference(
+    target: str, *, column: str | None = None, key: str
+) -> Reference:
+    """Parse the shared short/canonical logical-reference grammar."""
+
+    parts = target.split("/")
+    item_type: str | None = None
+    item_name: str | None = None
+    is_files = False
+    object_text: str
+    if len(parts) == 1:
+        object_text = parts[0]
+    elif len(parts) == 2 and parts[0] == "Files":
+        is_files = True
+        object_text = parts[1]
+    elif len(parts) == 3:
+        item_type, item_name, object_text = parts
+    elif len(parts) == 4 and parts[2] == "Files":
+        item_type, item_name, _, object_text = parts
+        is_files = True
+    else:
+        raise MetadataError(
+            f"{key} reference must be Schema.Object, Files/Schema.Object or an "
+            f"item-qualified logical identity, got {target!r}"
+        )
+    if object_text.count(".") != 1:
+        raise MetadataError(f"{key} reference must end in Schema.Object, got {target!r}")
+    schema, object_name = object_text.split(".")
+    names = (schema, object_name, item_name) if item_name is not None else (schema, object_name)
+    if any(not name or name != name.strip() for name in names):
+        raise MetadataError(f"{key} reference contains an empty or padded logical name")
+    return Reference(
+        schema=schema,
+        object=object_name,
+        column=column,
+        item_type=item_type,
+        item_name=item_name,
+        is_files=is_files,
+    )
 
 
 def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]:
@@ -957,7 +1034,7 @@ def _parse_unique_keys(
 #: A foreign key's parent: ``Schema.Object[Column, Column]``. Brackets are
 #: required — the parent columns are what make the relationship readable, and a
 #: bare parent name would leave them to be guessed.
-_FOREIGN_KEY_PARENT = re.compile(r"^([^.\[\]]+)\.([^.\[\]]+)\[([^\[\]]+)\]$")
+_FOREIGN_KEY_PARENT = re.compile(r"^([^\[\]]+)\[([^\[\]]+)\]$")
 
 
 def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ...]:
@@ -1005,7 +1082,17 @@ def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ..
                 f"the Foreign keys parent for {', '.join(columns)} must be "
                 f"Schema.Object[Column, Column], got {raw_parent.strip()!r}"
             )
-        schema, obj, raw_parent_columns = match.groups()
+        raw_target, raw_parent_columns = match.groups()
+        try:
+            logical_reference = _parse_logical_reference(
+                raw_target.strip(), key="Foreign keys"
+            )
+        except MetadataError as exc:
+            raise MetadataError(
+                f"the Foreign keys parent for {', '.join(columns)} must be "
+                "Schema.Object[Column, Column] or an item-qualified logical "
+                f"identity, got {raw_parent.strip()!r}"
+            ) from exc
         parent_columns = _parse_column_set(raw_parent_columns, "Foreign keys parent")
         if len(parent_columns) != len(columns):
             raise MetadataError(
@@ -1015,8 +1102,13 @@ def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ..
             )
         key = ForeignKey(
             columns=columns,
-            reference=ObjectId(schema=schema.strip(), object=obj.strip()),
+            reference=logical_reference.object_id,
             reference_columns=parent_columns,
+            logical_reference=(
+                logical_reference
+                if logical_reference.is_item_qualified or logical_reference.is_files
+                else None
+            ),
         )
         if not key.reference.schema or not key.reference.object:
             raise MetadataError(

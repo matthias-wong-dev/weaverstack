@@ -220,6 +220,21 @@ def validate_plan_structure(plan: BuildPlan) -> None:
     target_ids = plan.target_ids
     if len(target_ids) != len(plan.targets):
         raise BuildError("duplicate target id in plan")
+    for target in plan.targets:
+        if (target.logical_item_type is None) != (target.logical_item_name is None):
+            raise BuildError(
+                f"target {target.id!r} carries an incomplete logical item identity"
+            )
+        if target.logical_item_type is not None:
+            expected = {
+                "Lakehouse": "lakehouse",
+                "Warehouse": "warehouse",
+            }.get(target.logical_item_type)
+            if expected != target.kind:
+                raise BuildError(
+                    f"target {target.id!r} binds logical {target.logical_item_type} "
+                    f"to physical kind {target.kind!r}"
+                )
 
     seen_numbers: list[int] = []
     batch_ids: set[str] = set()

@@ -30,10 +30,13 @@ from .models import (
 )
 from .installer import InstallationEnvironment, install_bundle
 from .planner import Projection, generate_build_bundle, project
+from .item_planner import generate_item_build_bundle
 from .report import InstallationReport
 from .targets import (
     BoundTarget,
     LakehouseBinding,
+    ItemBinding,
+    ItemBindings,
     TargetBindings,
     WarehouseBinding,
 )
@@ -41,6 +44,8 @@ from .targets import (
 __all__ = [
     "BoundTarget",
     "LakehouseBinding",
+    "ItemBinding",
+    "ItemBindings",
     "WarehouseBinding",
     "TargetBindings",
     "OmittedNode",
@@ -57,6 +62,7 @@ __all__ = [
     "Projection",
     "project",
     "generate_build_bundle",
+    "generate_item_build_bundle",
     "InstallationEnvironment",
     "install_bundle",
     "InstallationReport",

@@ -6,7 +6,7 @@ Guidance for coding agents working **on weaverstack itself**.
 
 `weaverstack` is a data-engineering runtime for Microsoft Fabric built around a
 central control plane. One mandatory **Weaver Lakehouse** holds the installed
-SES repositories and the authoritative catalogue; destination Lakehouses and
+Weaver repository and the authoritative catalogue; destination Lakehouses and
 Warehouses hold only materialised output.
 
 The distribution is `weaverstack`; the import is `weaver`.
@@ -178,8 +178,10 @@ through the store directly and looked like it was testing `wipe`.
 
 ## Working protocol
 
-Construction follows numbered checkpoints in
-[backlog/weaverstack-step-by-step-implementation-plan.md](backlog/weaverstack-step-by-step-implementation-plan.md).
+Construction follows numbered checkpoints. The original construction is recorded
+in [the step-by-step implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md);
+the current repository/item/document re-architecture follows
+[its dedicated continuation](backlog/weaver-repositories-items-documents-checkpoints.md).
 This is not a document to implement in one pass. For each checkpoint:
 
 1. read only that section and its listed reference files;

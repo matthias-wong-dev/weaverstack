@@ -52,7 +52,7 @@ The source repository is interpreted during bundle generation.
 
 That interpretation includes:
 
-- reading and validating SES source documents;
+- reading and validating Weaver source documents;
 - resolving object identity and type;
 - resolving target bindings;
 - constructing the dependency graph;
@@ -66,7 +66,7 @@ After this point, the repository is no longer an input to installation.
 The intended flow is:
 
 ```text
-SES repository
+Weaver repository
     ↓
 repository interpretation
     ↓
@@ -395,11 +395,30 @@ Create operations proceed in the opposite structural direction.
 
 The installer follows the encoded ordering. It does not reconstruct the graph.
 
+The graph is item-owned. Every document belongs to one logical Weaver item, and
+the build projects by exact bound item rather than by the broad fact that an
+object eventually uses Lakehouse or Warehouse machinery. Several items of one
+type may exist in one repository and must remain distinguishable throughout the
+plan.
+
+Bindings are deliberately sparse. An unbound item is outside the physical scope
+of that build; it is not a deletion. A bound consumer may declare an unbound
+producer and treat it as static. That does not certify the producer and does not
+guarantee operational availability: a structural action that needs the producer
+may fail at the engine, while a declared-schema Python table can be built without
+touching it and will discover absence only during load.
+
 ---
 
 ## 9. Physical binding is explicit
 
-Logical objects become installable only when bound to physical targets.
+A logical Weaver item becomes installable only when bound to a physical target.
+Its documents inherit that one binding. Folder and Delta are object kinds inside a
+Lakehouse item, not independently bindable destinations.
+
+At least one item must be bound, but no complete-repository binding is required.
+The bundle records both the logical item and its physical target so two items of
+the same Fabric type cannot collapse into one manifest identity.
 
 A bundle must identify the target sufficiently to prevent installation against
 an unintended Lakehouse, Warehouse, workspace, local root or environment.
@@ -558,6 +577,12 @@ A capability that is unavailable on one host should produce an explicit
 unsupported result during planning or pre-installation validation. It should not
 be simulated through behaviour that changes the meaning of the build.
 
+That rule also applies to logical features whose physical implementation has not
+landed. Repository aliases may be valid declarations, graph edges and catalogue
+rows before Weaver can materialise them. A retained action that uses such an
+alias must fail explicitly before mutation; it must not run the consumer's
+two-part name against whichever physical item happens to be bound.
+
 Host-specific adapters may determine **how** an action runs. They do not
 determine **what** the action means.
 
@@ -678,6 +703,14 @@ On Fabric that resolves to the native four-part name,
 `workspace.lakehouse.schema.object`; the local emulator folds the Lakehouse into
 its one namespace level. Either way the destination is stated, not inherited, and
 one session can build several Lakehouses without switching what it is attached to.
+
+### Collapsing item ownership into target kind
+
+`Lakehouse/Raw` and `Lakehouse/Curated` are two logical items even though both use
+Spark and OneLake. Projecting or cataloguing them merely as `lakehouse` recreates
+the single-target architecture and permits one item to prune or certify the
+other. Materialisation kind chooses an executor; item ownership chooses identity,
+binding and scope.
 
 ### Hiding unsupported behaviour behind fallback
 

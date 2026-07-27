@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from ..errors import DiscoveryError
 from ..objects import BASE_CLASSES, BASE_CLASS_NAMES
 from .dependencies import (
+    PythonImport,
     RelationReference,
     extract_python_references,
     extract_sql_references,
@@ -54,6 +55,7 @@ from .metadata import (
     extract_python_metadata,
     extract_sql_metadata_and_body,
 )
+from .model import WeaverDocumentId
 
 PYTHON_SUFFIX = ".py"
 SPARK_SQL_SUFFIX = ".spark.sql"
@@ -94,7 +96,7 @@ def _stem(filename: str, language: str) -> str:
         SPARK_SQL: SPARK_SQL_SUFFIX,
         SQL: SQL_SUFFIX,
     }[language]
-    return filename[: -len(suffix)]
+    return filename.rsplit("/", 1)[-1][: -len(suffix)]
 
 
 def object_id_for_filename(filename: str, language: str) -> ObjectId:
@@ -154,12 +156,16 @@ class SourceDocument:
     document: SesDocument
     class_name: str | None = None
     imported_modules: tuple[str, ...] = ()
+    python_imports: tuple[PythonImport, ...] = ()
     sql_body: str | None = None
     sql_analysis: SqlAnalysis | None = None
     #: Names this file refers to, as written. Whether each resolves is a build
     #: concern — it needs the external-dependency configuration.
     discovered_references: tuple[RelationReference, ...] = ()
     python_ast: ast.Module | None = field(default=None, compare=False, repr=False)
+    #: Item-qualified logical identity, assigned by the item-oriented reader.
+    #: The transitional flat reader leaves it unset until R8 removes that path.
+    logical_id: WeaverDocumentId | None = None
 
     @property
     def object_id(self) -> ObjectId:
@@ -187,6 +193,8 @@ class SourceDocument:
         folder, a Delta table and a Warehouse table simultaneously.
         """
 
+        if self.logical_id is not None:
+            return str(self.logical_id)
         return f"{self.target_kind}:{self.qualified}"
 
     @property
@@ -354,6 +362,7 @@ def _read_python(
     _check_base_class(relative_path, declared, document.kind)
     _check_read_method(relative_path, declared)
     imports = _imported_modules(module)
+    python_imports = _python_imports(module)
 
     return SourceDocument(
         relative_path=relative_path,
@@ -363,6 +372,7 @@ def _read_python(
         document=document,
         class_name=declared.name,
         imported_modules=imports,
+        python_imports=python_imports,
         discovered_references=extract_python_references(imports),
         python_ast=module,
     )
@@ -429,6 +439,27 @@ def _imported_modules(module: ast.Module) -> tuple[str, ...]:
         if name not in seen:
             seen.append(name)
     return tuple(seen)
+
+
+def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:
+    """All imports needed for item-package dependency resolution."""
+
+    imports: list[PythonImport] = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom):
+            imports.append(
+                PythonImport(
+                    module=node.module,
+                    level=node.level,
+                    names=tuple(alias.name for alias in node.names),
+                )
+            )
+        elif isinstance(node, ast.Import):
+            imports.extend(
+                PythonImport(module=alias.name, names=(alias.name,))
+                for alias in node.names
+            )
+    return tuple(imports)
 
 
 def _read_sql(

@@ -1,5 +1,13 @@
 # Where your SES repository lives
 
+> **Transition note.** This guide describes the current flat repository layout.
+> The accepted architecture renames it a Weaver repository and places declarations
+> beneath `Lakehouse/<item>` and `Warehouse/<item>`, with item-owned `schemas/`,
+> `Files/` and `lib/`. See
+> [the target architecture](../backlog/weaver-architecture-summary.md) and
+> [checkpoint plan](../backlog/weaver-repositories-items-documents-checkpoints.md).
+> The authoring guide will switch over when the reader implementation lands.
+
 An SES repository is **just a folder of files**. Weaver has no opinion about
 where that folder sits, what its parent is called, or how it got there.
 

@@ -43,7 +43,13 @@ class FolderExecutor:
 
     def _location(self, node_id: str, context: InstallationContext):
         target = FolderTarget(lakehouse=context.target.lakehouse)
-        qualified = node_id.split(":", 1)[1]
+        if "/Files/" in node_id:
+            # Item-oriented canonical identity. The batch already carries the
+            # physical Lakehouse binding, so the logical item prefix is only
+            # identity and is not reinterpreted here.
+            qualified = node_id.split("/Files/", 1)[1]
+        else:
+            qualified = node_id.split(":", 1)[1]
         if "." in qualified:  # a specific folder object
             schema, name = qualified.split(".", 1)
             return context.resolver.folder_object(target, schema, name)

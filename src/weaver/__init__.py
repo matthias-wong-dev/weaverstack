@@ -42,6 +42,15 @@ from .targets import (
     RepositoryRef,
     WarehouseTarget,
 )
+from .ses.model import (
+    ItemDependency,
+    RepositoryAlias,
+    WeaverDocumentId,
+    WeaverItem,
+    WeaverItemId,
+    WeaverRepository,
+    WeaverSchemaId,
+)
 
 def _resolve_version() -> str:
     """The installed version, read from distribution metadata.
@@ -82,6 +91,14 @@ __all__ = [
     "DeltaTarget",
     "WarehouseTarget",
     "RepositoryRef",
+    # logical identities, independent of physical bindings
+    "WeaverRepository",
+    "WeaverItem",
+    "WeaverItemId",
+    "WeaverSchemaId",
+    "WeaverDocumentId",
+    "RepositoryAlias",
+    "ItemDependency",
     # resolved locations and transport
     "Location",
     "LocalResolver",

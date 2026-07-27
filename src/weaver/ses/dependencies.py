@@ -80,6 +80,19 @@ class RelationReference:
         return ".".join(self.parts)
 
 
+@dataclass(frozen=True)
+class PythonImport:
+    """One Python import with its relative level preserved for item resolution."""
+
+    module: str | None
+    level: int = 0
+    names: tuple[str, ...] = ()
+
+    def __str__(self) -> str:
+        prefix = "." * self.level
+        return prefix + (self.module or "")
+
+
 # --- Python -----------------------------------------------------------------
 
 

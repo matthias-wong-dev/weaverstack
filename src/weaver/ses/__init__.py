@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .dependencies import (
+    PythonImport,
     RelationReference,
     extract_python_references,
     extract_sql_references,
@@ -13,12 +14,27 @@ from .columns import (
     validate_build_columns,
 )
 from .graph import Edge, Graph
+from .item_dependencies import project_bound_documents, resolve_item_dependencies
+from .model import (
+    FILES,
+    ITEM_TYPES,
+    ItemDependency,
+    LAKEHOUSE,
+    RepositoryAlias,
+    WAREHOUSE,
+    WeaverDocumentId,
+    WeaverItem,
+    WeaverItemId,
+    WeaverRepository,
+    WeaverSchemaId,
+)
 from .repository import (
     DependencyEdge,
     SesRepository,
     build_internal_graph,
     effective_dependencies,
     read_repository,
+    read_weaver_repository,
     unresolved_references,
 )
 from .schemas import (
@@ -43,6 +59,7 @@ from .references import (
     column_note,
     declared_column_notes,
     resolve_text,
+    validate_repository_metadata,
 )
 from .metadata import (
     AUDIT_COLUMNS,
@@ -68,6 +85,7 @@ from .metadata import (
     Reference,
     Revision,
     SesDocument,
+    WeaverDocument,
     audit_column_name,
     extract_python_metadata,
     extract_sql_metadata_and_body,
@@ -79,12 +97,27 @@ from .metadata import (
 
 __all__ = [
     "RelationReference",
+    "PythonImport",
     "extract_python_references",
     "extract_sql_references",
     "SesRepository",
+    "WeaverRepository",
+    "WeaverItem",
+    "WeaverItemId",
+    "WeaverSchemaId",
+    "WeaverDocumentId",
+    "RepositoryAlias",
+    "ItemDependency",
+    "LAKEHOUSE",
+    "WAREHOUSE",
+    "ITEM_TYPES",
+    "FILES",
     "DependencyEdge",
     "read_repository",
+    "read_weaver_repository",
     "Graph",
+    "resolve_item_dependencies",
+    "project_bound_documents",
     "Edge",
     "build_internal_graph",
     "effective_dependencies",
@@ -126,11 +159,13 @@ __all__ = [
     "Reference",
     "Revision",
     "SesDocument",
+    "WeaverDocument",
     "IDENTITY_COLUMN_NOTE",
     "ResolvedText",
     "column_note",
     "declared_column_notes",
     "resolve_text",
+    "validate_repository_metadata",
     "extract_python_metadata",
     "extract_sql_metadata_and_body",
     "parse_document",

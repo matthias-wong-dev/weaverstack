@@ -1,5 +1,13 @@
 # The central catalogue
 
+> **Transition note.** This document describes the catalogue implemented today.
+> The accepted repository/item/document architecture changes installation scope
+> from `(repository, target_type)` to `(repository, item_type, item_name)`, moves
+> aliases to destination-keyed `alias.yml`, and makes `Lakehouse/_weaver` the
+> built-in catalogue item. Those changes land at checkpoint R6 of
+> [the re-architecture plan](../backlog/weaver-repositories-items-documents-checkpoints.md).
+> Until then, this current-state description and the journal remain accurate.
+
 Weaver's catalogue records, for every object it has successfully built, what SES
 declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
 control plane the rest of the system reads from.

@@ -2026,6 +2026,203 @@ _.Installation      MixedEstate  lakehouse  -> Play_Lakehouse_2
 
 Read back, as ever, through ```Weaver`.`Play_Lakehouse_1`.`_`.`Registry```.
 
+### The next architecture: repositories own items, and items own documents
+
+The catalogue and multi-target work made the remaining false abstraction plain.
+The repository is still flat and each document still chooses one of three target
+kinds, while the thing being declared is a Fabric workspace containing several
+Lakehouses and Warehouses. The accepted next architecture makes that containment
+the source of identity:
+
+```text
+Weaver repository
+└── Weaver item
+    └── Weaver document
+```
+
+One Weaver Lakehouse is one control plane and holds one source-controlled Weaver
+repository. Weaver's catalogue is its built-in `Lakehouse/_weaver` item, not a
+second repository. Another developer may run another Weaver Lakehouse in the same
+workspace, install the same repository, and choose different physical bindings.
+
+**Binding is exact-item and deliberately sparse.** A build needs at least one
+binding and usually leaves most items unbound. A consumer in a bound item is not
+dropped merely because a producer item is unbound: the producer is assumed static
+for this build and the catalogue records the dependency exactly as the consumer
+declared it. A declared-schema Python table can therefore build its empty
+structure and discover a missing producer only at load; an action that needs the
+producer during build still fails honestly at the engine.
+
+**The repository layout carries ownership.** `Lakehouse/<name>` and
+`Warehouse/<name>` are logical items. A Lakehouse item owns both its Tables
+documents and its `Files/` Folder documents; `schemas/` is item-owned and `lib/`
+holds helper code. Folder stops being a target. A Delta and Folder document of one
+`Schema.Object` may coexist because `Files/Schema.Object` is a distinct logical
+namespace.
+
+`_ignore/` is the only ignored authored directory. It and its complete subtree do
+not travel, do not contribute to the repository signature and are not discovered.
+Every other underscore path goes through ordinary parsing and validation; there is
+no general underscore reservation.
+
+**Logical identity is exact-case.** Item, schema, object and logical reference
+spellings must match exactly. Case-only duplicate declarations remain invalid
+because a physical engine may collapse them even though Weaver can tell them
+apart. The repository name is its directory name.
+
+**Aliases move to `alias.yml`, destination first.** A declaration says which
+consumer-facing canonical name is supplied by which canonical source:
+
+```yaml
+aliases:
+  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer
+```
+
+One destination has one source; one source may serve several destinations; any
+item types may be connected. The declaration participates in exact-case
+validation, graph resolution and catalogue projection. `_.Alias` reproduces the
+file. `_.Dependency` belongs to the consumer item, preserves two-part names as
+two-part and physical three-/four-part names as authored, and renames
+`is_within_repository` to `is_within_item`.
+
+Only the logical half lands in this re-architecture. A physical three-part name is
+already supported and may coordinate items when it happens to match their bound
+names — the low-ceremony, environment-locked path. Physical alias behaviour is a
+later branch. If retained work actually uses an alias, planning fails before
+mutation with `NotImplementedError: Alias usage is not yet supported`; it never
+lets the two-part name bind to the wrong destination. Python imports may still
+resolve statically through an alias destination, since their declared-schema build
+does not use the producer until load.
+
+**Build, prune, wipe and rebind keep their distinct meanings.** A multi-item build
+is one coordinated unit with one catalogue tail after all retained physical work.
+Prune remains frozen build reconciliation and removes target structure not declared
+by the bound item. Two logical items may be pointed at the same physical item, but
+with prune on they will consume one another's structure; Weaver need not add a
+special prohibition, and `prune=False` is the explicit unsafe escape hatch. Wipe
+still wipes the named physical item. Rebinding updates the current Installation
+row and leaves the old physical item behind until someone names it for a wipe.
+
+Catalogue evolution remains intentionally destructive while the system is this
+young. It is rebuilt from its repository; preserving history becomes important
+when incremental build begins to depend on it. Schema declarations remain a
+separate document type, ready to carry item-specific security policy later.
+
+The accepted target is now in
+[`backlog/weaver-architecture-summary.md`](../backlog/weaver-architecture-summary.md),
+and implementation is divided into R0–R9 in
+[`backlog/weaver-repositories-items-documents-checkpoints.md`](../backlog/weaver-repositories-items-documents-checkpoints.md).
+R0 records the architecture only; no implementation changed with it.
+
+### R1 — logical identity without physical binding
+
+The first implementation seam is deliberately pure Python. `WeaverItemId`,
+`WeaverSchemaId` and `WeaverDocumentId` now carry the exact-case canonical
+grammar, including the separate Lakehouse `Files/` namespace. `WeaverItem` and
+`WeaverRepository` enforce exact duplicates, reject case-only collisions and do
+exact lookup. They contain no host or target value, so changing a physical
+`DeltaTarget` cannot change logical equality.
+
+The validated metadata declaration is canonically named `WeaverDocument`.
+`SesDocument` remains an alias until R8 migrates the compatibility surface; it
+is not a second model. The flat `SesRepository` similarly remains the old
+execution model while discovery and planning move checkpoint by checkpoint.
+
+R1 is covered by pure unit tests only. The full lightweight suite finished with
+1,082 passing, one skipped and 146 Spark tests deselected.
+
+### R2 — static item-owned discovery
+
+`read_weaver_repository()` is the canonical item-layout reader. It traverses a
+`Store`, takes the repository name from the root directory, discovers exact
+`Lakehouse/<name>` and `Warehouse/<name>` items, and assigns each schema and
+source document an item-qualified identity. Lakehouse `Files/` documents must be
+Folders, Lakehouse root documents must be Delta/Spark materialisations, and
+Warehouse root documents must be T-SQL materialisations. Every object's schema
+must be declared by that same item.
+
+Discovery parses Python through AST and never imports it. `lib/` is snapshotted
+as support, while a user-authored `__init__.py` is rejected. `_ignore/` is the
+only invisible directory: even invalid Python beneath it is absent from parsing,
+installation input and the repository signature. Every other underscore path is
+ordinary input and therefore validated or refused according to where it sits.
+
+The end-to-end `Estate` test is entirely pure Python and contains two
+Lakehouses, two Warehouses, independently owned `Sales` schemas, a same-name
+Delta/Folder pair, a helper module and parked invalid content. After R2 the full
+lightweight suite finished with 1,089 passing, one skipped and 146 Spark tests
+deselected.
+
+### R3 — one exact logical-reference grammar and `alias.yml`
+
+Metadata pointers now preserve short item-relative forms and canonical
+item-qualified forms, including `Files/` and `[Column]`. The item reader eagerly
+follows description, lineage and column-note chains and validates foreign-key
+targets. Missing names, casing mismatches and cycles are repository errors. The
+flat reader retains its old tolerant resolver only as part of the R8 transition.
+
+Repository-level `alias.yml` is parsed destination first into immutable
+`RepositoryAlias` values. Both sides must be canonical logical document
+identities; the source must exist exactly, the destination item and schema must
+exist, and a destination cannot collide with native content. Several
+destinations may name one source. Metadata may resolve through an alias
+destination, but no physical alias work is generated. The new item reader rejects
+the retired document-local alias headers.
+
+All parsing, chains, cycles, casing failures, collisions and one-to-many source
+tests are pure Python. After R3 the lightweight suite finished with 1,101
+passing, one skipped and 146 Spark tests deselected.
+
+### R4 — item-owned dependencies, graph and sparse projection
+
+The static Python parse now retains relative import level and module path. From
+an item root, `.Files.Schema__Object` resolves to a Folder; from `Files/`,
+`..Schema__Object` resolves to a table-style document and
+`.Schema__Object` to another Folder. Imports below the item's `lib/` are helper
+imports and produce no graph edge. Absolute object-shaped imports remain a
+low-friction item-root spelling during the transition.
+
+SQL two-part names resolve exactly in the consumer item's table namespace or
+through an alias destination. Authored three- and four-part names remain
+unchanged physical declarations with no invented logical producer. Each
+`ItemDependency` records the consumer, the spelling the consumer wrote, the
+resolved producer when logical, resolution provenance and `is_within_item`.
+
+The repository now carries one global exact-case DAG. Cross-item cycles fail at
+read time. Sparse projection accepts exact item identities and selects only
+documents those items own; a producer in an unbound item remains a graph ancestor
+but is not silently added to physical work or used to discard its bound consumer.
+
+The focused fixture proves Delta-to-Folder, Folder-to-Delta,
+Folder-to-Folder, lib exclusion, cross-item alias resolution, physical-name
+preservation, an unbound producer and a cross-item cycle. After R4 the pure
+suite finished with 1,108 passing, one skipped and 146 Spark tests deselected.
+
+### R5 in progress — the multi-item manifest seam
+
+The existing immutable manifest and mechanical installer are being retained.
+`ItemBinding` now binds one exact `WeaverItemId` to a typed physical Lakehouse or
+Warehouse, and the serialised `BoundTarget` carries both identities. Manifest
+target ids include the logical item, so two logical items may deliberately name
+one physical item without colliding inside the bundle.
+
+`generate_item_build_bundle()` freezes any non-empty sparse set of bindings into
+one plan. Schema and dependency-layer barriers may contain several item-specific,
+target-bound batches. Action ids and payload paths include item identity, the
+repository snapshot is certified, and loading/installing the result performs no
+source interpretation. Authored physical SQL remains byte-preserved. If any
+retained consumer resolves through `alias.yml`, generation stops before writing
+with `NotImplementedError: Alias usage is not yet supported`.
+
+This does not complete R5 yet. Two later ownership seams are prerequisites for a
+truthful end-to-end manifest: R6 must append one item-scoped catalogue tail, and
+R7 must replace the old target-kind prune with Lakehouse-item ownership. The new
+planner therefore refuses `prune=True` rather than reusing an unsafe scope. Its
+multi-binding, deterministic identity, alias preflight, physical-name and
+repository-independent install tests are all pure Python. At this seam the full
+lightweight suite finished with 1,117 passing, one skipped and 146 Spark tests
+deselected.
+
 ---
 
 ## Open questions
@@ -2036,12 +2233,12 @@ Read back, as ever, through ```Weaver`.`Play_Lakehouse_1`.`_`.`Registry```.
 | Path-like *reader* for Folder dependencies during ETL. | CP2 | settled at CP4: `Folder.folder_path()` on the depended-on class; realised as a `Path` at load. Load itself is deferred. |
 | The whole load phase: running `read()`, upsert/incremental merge, audit-column accounting, applying proposed deletes. | build | deferred — build creates structure only; load populates it, and is the next body of work after the Fabric seam. |
 | Should the local emulator stand up a durable (cross-process) metastore, or is in-session catalog registration enough? | build | open — build registers each Delta table into the session catalog (via a schema database with a `Tables/<schema>` LOCATION) so views bind by name; cross-process persistence is not a prerequisite. |
-| Build reconciliation scope: prune drops what a Lakehouse holds that the bundle does not manage, scoped to that Lakehouse's `Tables/`/`Files/` storage. Is per-Lakehouse physical scope the right boundary once Fabric catalogs are per-item? | build | open — chosen so a shared local Spark catalog cannot make a build nuke another Lakehouse's databases. |
+| Build reconciliation scope: prune drops what a Lakehouse holds that the bundle does not manage, scoped to that Lakehouse's `Tables/`/`Files/` storage. Is per-Lakehouse physical scope the right boundary once Fabric catalogs are per-item? | build | **settled at R0: yes, now reached through the exact owning Weaver item.** Prune removes physical structure absent from that item's retained documents. Two logical items may bind one physical item, but with prune on they consume one another; `prune=False` is the explicit unsafe exception, not a shared-ownership model. |
 | Does OneLake DFS implement ADLS Gen2 `x-ms-rename-source`? Determines whether desktop-initiated moves are cheap. Ten-minute experiment. | CP2 | open, due CP7 |
 | Should `Identity` imply `Incremental: true`? Left free deliberately. | CP3 | still open — build now materialises the surrogate (a Weaver-managed not-null `bigint`, not autogenerated), but identity is provisional and treated separately, load semantics included. |
 | Control-table names, and whether they sit under a schema. | CP2 | due CP16 |
-| Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | narrowed at CP6c: within a repository, cross-engine access is now an explicit alias; `_shortcuts` is only for *another repository's* objects. Still due at build. |
-| Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | open |
+| Shortcut / external-dependency config: `_shortcuts/*.yml`, selected as `--shortcuts prod.yml`. Names are logical and belong to the repository; targets are physical and belong to the build. Deferred. | CP6 | **superseded at R0.** One control plane contains one Weaver repository. Portable cross-item names are destination-keyed declarations in repository-level `alias.yml`; authored three-/four-part names remain the physical, environment-locked route. Physical alias behaviour is still deferred and retained alias use fails explicitly. |
+| Is the third target called `delta_target` or `spark_target`? The command sketch says Spark; the internal target kind is `delta`. | CP11 | **superseded at R0.** Bindings are logical `Lakehouse/<name>` or `Warehouse/<name>` items. Delta and Folder are object kinds owned by a Lakehouse, not binding types. |
 | Does `build` move any files at all? | CP2 | settled: yes, exactly one — the repository snapshot, and that movement is certification rather than a side effect. |
 | Should the catalogue be addressed by explicit path rather than by two-part name? | catalogue | **settled: no.** The Spark session is attached to the Weaver Lakehouse — that is the fixed control-plane context, so two-part names in schema `_` are the defined execution context rather than ambient resolution. Destination Lakehouses are the data plane and are addressed through roots resolved from their bindings (`LakehouseSparkLocation`). The local `_` churn is fixture isolation, not architecture. |
 | Destination Delta objects are still built as two-part names, which resolve through the session's catalogue — and the session is attached to Weaver. | catalogue | **settled: a payload names its object, the installer names the Lakehouse.** A generated statement carries `{{object:Schema.Name}}` and the executor resolves it against the batch's target — Fabric's four-part name, or the local proxy's folded database name. Freezing the qualified name would have made two bundles of one repository differ in every payload between environments (§10); keeping the two-part name kept the defect. Schema creation stopped being frozen SQL for the same reason: its `LOCATION` was a resolved temporary directory inside the hashed plan. |

@@ -1,446 +1,493 @@
-# Weaver Central Lakehouse Architecture
+# Weaver Repository, Item and Document Architecture
 
-## 1. Architectural intent
+## Status
 
-Weaver separates four concerns:
+This is the accepted target architecture for the repository/item/document
+re-architecture. The current implementation still contains the earlier flat
+repository and target-kind model; the transition is divided into checkpoints in
+[the re-architecture checkpoint plan](weaver-repositories-items-documents-checkpoints.md).
 
-| Concern | Responsibility |
-|---|---|
-| SES repository | Defines Folder, Delta and SQL objects, shared helpers and dependencies |
-| Weaver Lakehouse | Holds the Weaver runtime, installed SES repositories, catalogue and orchestration state |
-| Physical targets | Hold only the materialised Folder, Delta and SQL outputs |
-| Weaver orchestrator | Executes one dependency graph across all configured targets |
-
-Folder, Delta and SQL are **materialisation forms**, not architectural tiers. A repository may use T0/T1/T2, domains, products or any other structure, but Weaver assigns no semantics to those names.
+[`docs/journal.md`](../docs/journal.md) remains the record of what is implemented
+today. Where this target document and the journal differ during the transition,
+the difference is planned work, not an invitation to make the journal describe
+code that does not yet exist.
 
 ---
 
-## 2. Existing dbrep configuration remains authoritative
+## 1. The mental model
 
-No new deployment-mapping file is introduced.
+Weaver is a control plane for declaring the logical contents of a Microsoft
+Fabric workspace:
 
-The existing dbrep configuration continues to define:
+```text
+Weaver repository
+└── Weaver items
+    └── Weaver documents
+```
 
-- SES source aliases;
-- Files targets;
-- Delta targets;
-- Warehouse targets;
-- server details;
-- Fabric environments;
-- SQL endpoints;
-- local and Fabric variants.
+A **Weaver repository** is the one source-controlled declaration installed in a
+Weaver control plane.
 
-The only additional configuration is a normal target entry for the mandatory Weaver Lakehouse, using the same existing dbrep configuration mechanism. A conventional alias such as `WEAVER` can identify it.
+A **Weaver item** is a logical Fabric item owned by that repository. The initial
+item types are:
 
-Conceptually:
+```text
+Lakehouse
+Warehouse
+```
+
+A **Weaver document** is an authored declaration owned by one item. It declares a
+Delta table, Spark view, SQL table, SQL view or Lakehouse folder. A schema
+declaration is item-owned too, but remains its own document type because it has a
+different contract and is expected to carry security policy later.
+
+Folder, Delta, Spark SQL and T-SQL describe materialisation or execution. They are
+not deployment targets and they are not architectural tiers.
+
+Semantic Models are outside this re-architecture.
+
+---
+
+## 2. Control-plane cardinality
+
+One Weaver Lakehouse is one control-plane environment and contains one Weaver
+repository. Weaver's own catalogue is not a second repository: it is the built-in
+`Lakehouse/_weaver` item of that repository.
+
+One Fabric workspace may hold several Weaver Lakehouses. A team may use one per
+developer or deployment environment, with each control plane binding the same
+logical items to shared or individual physical items. A Fabric Environment may
+likewise carry a different Weaver version where necessary; that does not create a
+second repository inside one control plane.
+
+Within one control plane:
+
+- a logical Weaver item has at most one current physical binding;
+- at least one item must be bound for a build;
+- unbound items are ordinary and usually outnumber bound items;
+- physical binding is environment state, never logical identity.
+
+Weaver does not need a special guard against two logical items binding the same
+physical item. With prune enabled, each declaration will reconcile that item
+against itself and the two will consume one another's objects. `prune=False` is an
+explicit escape hatch for someone deliberately sharing a physical item, but this
+is not a recommended deployment shape and Weaver does not make it safe.
+
+---
+
+## 3. Repository structure
+
+The first directory level is the singular item type. The second is the logical
+item name:
+
+```text
+Estate/
+├── Lakehouse/
+│   ├── Raw/
+│   │   ├── schemas/
+│   │   │   ├── Ref.yml
+│   │   │   └── Sales.yml
+│   │   ├── Ref__Agency.py
+│   │   ├── Files/
+│   │   │   ├── Sales__Landing.py
+│   │   │   └── Sales__Order.py
+│   │   └── lib/
+│   │       └── csv_helpers.py
+│   └── Curated/
+│       ├── schemas/
+│       │   └── Sales.yml
+│       └── Sales__Customer.py
+├── Warehouse/
+│   └── Reporting/
+│       ├── schemas/
+│       │   └── Sales.yml
+│       └── Sales__Customer.sql
+├── alias.yml
+└── _ignore/
+    └── unfinished authored work
+```
+
+The ordinary authored directories are:
+
+| Directory | Meaning |
+|---|---|
+| item root | Delta, Spark SQL or Warehouse documents |
+| `Files/` | Folder documents belonging to a Lakehouse item |
+| `schemas/` | One schema declaration per file, owned by the item |
+| `lib/` | Python support modules, not Weaver documents |
+
+`_ignore/` is the only ignored directory. Its complete subtree is absent from
+discovery, installation and the repository signature. It is a keyword for
+parking work that is not ready to become part of the repository contract.
+
+No other leading-underscore convention exists. A path such as `_draft` or
+`_helpers` passes through ordinary discovery and validation. Known editor,
+virtual-environment and bytecode exclusions are not a second authoring
+convention; repository content should not depend on them.
+
+Repository authors do not create `__init__.py`. Weaver supplies package-aware
+loading internally. A user-authored `__init__.py` is ordinary input and is
+rejected by the repository contract rather than executed as hidden package code.
+
+---
+
+## 4. Logical identity
+
+An item is identified by exact-case:
+
+```text
+ItemType/ItemName
+```
+
+An object or schema is identified by exact-case beneath that item:
+
+```text
+ItemType/ItemName/Schema
+ItemType/ItemName/Schema.Object
+ItemType/ItemName/Files/Schema.Object
+```
+
+Examples:
+
+```text
+Lakehouse/Raw/Sales
+Lakehouse/Raw/Sales.Customer
+Lakehouse/Raw/Files/Sales.CustomerCsv
+Warehouse/Reporting/Sales.Customer
+```
+
+Within the current item, the short forms are:
+
+```text
+Sales
+Sales.Customer
+Files/Sales.CustomerCsv
+```
+
+Short names resolve from the owning item root, never from the referring file's
+filesystem directory. A Folder document therefore still writes
+`Files/Ref.Lookup` to name another Folder and `Ref.Lookup` to name a table-style
+document.
+
+Logical identity and every logical reference are case-sensitive. A casing mismatch
+is an unresolved reference and is an error. Declarations that differ only by case
+are nevertheless rejected, because some physical targets collapse their names and
+could not materialise both safely.
+
+The repository name is the repository directory name. Renaming the directory is a
+logical repository rename.
+
+The physical binding is separate:
+
+```text
+logical:  Lakehouse/Curated
+physical: Curated_LH
+```
+
+Physical Fabric item names never appear in logical identity or `alias.yml`.
+
+---
+
+## 5. Item ownership
+
+A Lakehouse item owns both of the Fabric areas it presents:
+
+```text
+Lakehouse item
+├── Tables
+│   ├── Delta tables
+│   └── Spark views
+└── Files
+    └── Folder objects
+```
+
+Folder is therefore a Weaver document and managed object kind, not a target.
+`FolderTarget`, a separate folder binding and folder-specific installation scope
+do not exist in the target architecture.
+
+Because `Files/` is a distinct logical namespace, these may coexist:
+
+```text
+Lakehouse/Raw/Sales.Order
+Lakehouse/Raw/Files/Sales.Order
+```
+
+They have different source paths, logical identities and Python module identities,
+while sharing the one `Lakehouse/Raw` physical binding.
+
+Each item owns its own `schemas/` declarations. The same schema spelling in two
+items denotes two declarations:
+
+```text
+Lakehouse/Raw/Sales
+Lakehouse/Curated/Sales
+Warehouse/Reporting/Sales
+```
+
+There is no repository-global schema declaration.
+
+---
+
+## 6. Bindings and partial builds
+
+A build supplies logical-item bindings:
+
+```text
+Lakehouse/Raw       -> Raw_LH
+Lakehouse/Curated   -> Curated_LH
+Warehouse/Reporting -> Reporting_WH
+```
+
+The precise CLI syntax is an adapter concern. The core contract is a mapping from
+one declared logical item to one typed physical Fabric item.
+
+Bindings are sparse by default. A developer working on one domain may bind only
+that domain and assume the rest of the repository is static. At least one binding
+is required.
+
+Projection is by exact owning item, not merely by `lakehouse` or `warehouse` kind:
+
+- documents owned by bound items are eligible for the build;
+- documents owned by unbound items are not built or recertified;
+- a dependency on an unbound item does not by itself omit the bound consumer;
+- the catalogue records the dependency as the consumer declared it;
+- a declared-schema Python object can have its structure built without running or
+  locating its producer, so operational failure is deferred to load;
+- an action that genuinely requires an existing producer at build time may still
+  fail honestly at the target engine.
+
+A multi-item build is one coordinated unit. Physical actions follow the global
+dependency graph; catalogue dictionaries, installation records and registry
+publication form one tail after all retained physical work. A failure before that
+tail leaves the prior certification in place and is visible as partial physical
+execution in the installation report.
+
+---
+
+## 7. References and dependencies
+
+Two-part references are logical and item-relative:
+
+```text
+Sales.Customer
+Files/Sales.CustomerCsv
+```
+
+Three- and four-part SQL names are physical declarations written by the author.
+Weaver preserves them. This is the low-ceremony route: a coordinated build may
+work because an authored three-part name matches a physical item binding, at the
+cost of being locked to that environment.
+
+Portable cross-item lookup uses a repository alias. A dependency row belongs to
+the consumer item and records the reference exactly as the consumer declared it:
+
+- two-part logical names remain two-part;
+- three- and four-part physical names remain as authored;
+- `is_within_repository` becomes `is_within_item`.
+
+An unbound producer is treated as static for projection. Weaver does not pretend to
+have built or certified it in that build.
+
+### Metadata references
+
+The canonical identity grammar is accepted by:
+
+- descriptions;
+- lineage;
+- column notes;
+- foreign keys;
+- generated documentation hyperlinks.
+
+It is not added to `Dependencies` in this re-architecture; portable dependency
+names are expressed through the consumer item's alias namespace.
+
+All logical metadata references must resolve exactly, including case. An
+unresolved reference is a repository error. Description copying remains metadata
+reuse only: it creates no dependency, alias, inheritance or physical relationship.
+
+Column references retain the existing bracket suffix and literal dollars retain
+the existing escape:
+
+```text
+$Lakehouse/Raw/Sales.Customer[CustomerId]
+$$not-a-reference
+```
+
+---
+
+## 8. Repository aliases
+
+`alias.yml` is repository-level because it declares the names consumer items need
+from other items:
 
 ```yaml
-servers:
-  Weaver_LH:
-    type: Fabric Lakehouse
-    server: I Love Government/Weaver
-    environment: ilg
-
-databases:
-  WEAVER:
-    type: Delta
-    server: Weaver_LH
-    database: Weaver
+aliases:
+  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer
+  Lakehouse/Raw/Ref.Region: Warehouse/Reporting/Ref.Region
 ```
 
-The exact alias is configurable, but it should be stable and resolved from the existing dbrep configuration. It does not need to be repeated on every build command.
+The mapping is deliberately **destination keyed**:
+
+```text
+consumer-facing destination -> canonical source
+```
+
+That is declarative: the consumer states what must exist in its namespace. Every
+destination has exactly one source, while one source may appear at several
+destinations. Both sides use canonical exact-case logical identity. Aliases may
+cross any item types and never contain physical Fabric names.
+
+Aliases participate in repository validation, dependency resolution, the logical
+graph and catalogue projection. `_.Alias` reproduces the `alias.yml` declarations.
+Python imports may resolve to an alias destination even when no source document
+exists at that path, because declared-schema Python structure does not use the
+producer until load.
+
+Physical alias behaviour is **not implemented by this re-architecture**. A bundle
+whose retained physical work uses an alias fails explicitly with:
+
+```text
+NotImplementedError: Alias usage is not yet supported
+```
+
+It must never silently bind the two-part name to the consumer's physical item.
+Materialising shortcuts, rewriting cross-item physical names and establishing
+cross-engine refresh barriers are later work.
 
 ---
 
-## 3. SES repository structure
+## 9. Python package semantics
 
-An SES source is a single top-level directory containing any mixture of supported objects:
+Python object dependencies remain imports, analysed statically without executing
+the module:
 
-```text
-SES/
-├── Gazette__VacancyNoticePdf.py
-├── Gazette__Vacancy.py
-├── Gazette.Vacancy.sql
-├── Budget__BudgetPaper.py
-├── Budget__Expense.py
-├── DWG.AgencyExpense.sql
-└── _helpers/
-    ├── gazette.py
-    └── common.py
+```python
+# Delta document -> Folder document in the same Lakehouse item
+from .Files.Sales__Landing import Sales__Landing
+
+# Folder document -> Delta document in the same Lakehouse item
+from ..Sales__Customer import Sales__Customer
+
+# Helper import, not a graph edge
+from .lib.csv_helpers import read_csv
 ```
 
-Classification is inferred from the source:
+For a Folder document, the helper import uses `..lib`. Imports that resolve under
+`lib/` are implementation imports, not Weaver dependencies.
 
-| Source | Materialisation |
-|---|---|
-| Python file with `Folder ID` | Lakehouse Files |
-| Python file with `Table ID` | Lakehouse Delta table |
-| SQL file with Table/View declaration | Warehouse object |
-| Helper Python files and packages | Installed with the SES source but not materialised directly |
+Weaver supplies a repository-qualified package context internally, so two
+repositories or two execution contexts cannot collide in `sys.modules`. The
+private root name is not part of the authored contract; relative imports are.
+Documents are never executed as standalone files.
 
-The complete source tree is installed intact, including SQL and helper folders.
-
-A repository may alternatively retain several SES folders and build each separately. The physical result can be identical. A merged SES folder is an organisational simplification, not a hard requirement.
+Cross-item portable imports resolve through destination entries in `alias.yml`.
+Their runtime accessor/module behaviour lands with physical alias support; this
+checkpoint establishes only static identity, graph and catalogue behaviour.
 
 ---
 
-## 4. Weaver Lakehouse structure
+## 10. The central catalogue
 
-The Weaver Lakehouse is mandatory and wholly controlled by Weaver.
+The catalogue remains in schema `_` of the Weaver Lakehouse and remains the one
+authority for the control plane. The ten-table machinery, generated DML,
+signatures, registry-last ordering and tolerant reading are preserved.
+
+Installation scope changes from:
 
 ```text
-Weaver Lakehouse/
-├── Files/
-│   ├── runtime/
-│   │   └── weaver_runtime/
-│   └── repos/
-│       ├── ilovegov-etl/
-│       │   └── SES/
-│       │       ├── *.py
-│       │       ├── *.sql
-│       │       └── _helpers/
-│       └── another-repository/
-│           └── SES/
-└── Tables/
-    ├── Repository
-    ├── RepositoryInstallation
-    ├── Target
-    ├── Catalogue
-    ├── Dependency
-    ├── TableDictionary
-    ├── ColumnDictionary
-    ├── Build
-    ├── BuildStep
-    ├── Workflow
-    └── WorkflowStep
+repository, target_type
 ```
 
-### `Files/runtime`
+to:
 
-For now, this contains the Weaver Python code because Weaver is not installed into a Fabric Environment.
+```text
+repository, item_type, item_name
+```
 
-Later, moving Weaver into a Fabric Environment removes only this directory. The repository installation and central catalogue design remain unchanged.
+The physical target name remains an installation attribute. Rebinding an item
+updates its current installation row after a successful build. The old physical
+item is left untouched and is later wiped only by naming that physical item
+explicitly; the catalogue does not retain installation history merely to find it.
 
-### `Files/repos`
+Object dictionaries are keyed beneath the item scope. Folder and Delta rows share
+the same Lakehouse installation scope while retaining distinct object kinds and
+logical namespaces.
 
-Each installed SES repository is copied intact into one central location. There is no target-local copy of the SES source and no target-local Weaver runtime.
+`_.Alias` reproduces the destination-keyed entries of `alias.yml`. `_.Dependency`
+is scoped to the consumer item, keeps two-part logical references two-part and
+keeps authored physical names as written. Cross-item composition is obtained by
+joining the dependency's consumer-facing name through `_.Alias`.
 
-### `Tables`
+The built-in `Lakehouse/_weaver` item declares the catalogue itself and is built
+through the ordinary repository, planner and installer path. It is bound to the
+control-plane Weaver Lakehouse.
 
-These are the authoritative control-plane tables for target bindings, catalogue state, dependency resolution, builds, workflows and logs.
+Catalogue schema migration is deliberately deferred. During this early stage the
+catalogue is destructively rebuilt from the repository when its representation
+changes. It becomes durable only when incremental build starts depending on its
+history.
 
 ---
 
-## 5. Physical targets
+## 11. Build, prune, wipe and rebind
 
-### Folder target
+Build retains the governing contract in
+[`docs/build-philosophy.md`](../docs/build-philosophy.md): interpret once, freeze a
+complete bundle, keep installation mechanical, create structure rather than load
+data, and make every destructive action reviewable.
 
-For:
+Prune is part of a build. For each bound item it compares the physical item's
+visible structure with the documents retained for that item and freezes explicit
+drop/delete actions for everything not declared. A Lakehouse prune reconciles both
+Tables and Files as parts of one item. `prune=False` emits no such actions.
 
-```text
-Folder ID: Budget.BudgetPaper
-```
+Wipe is a separate, deliberately blunt physical operation. Wiping a Lakehouse
+clears both Tables and Files; wiping a Warehouse clears its supported user
+objects. It does not mean "remove what this logical item catalogued", and rebinding
+does not cause an automatic wipe of the old target.
 
-and a configured Files root:
-
-```text
-T0_DWG/Files
-```
-
-Weaver materialises:
-
-```text
-T0_DWG/Files/Budget/BudgetPaper
-T0_DWG/Files/Budget/BudgetPaper_Staging
-```
-
-Staging remains beside the managed Folder object. There is no shared staging or rejects directory because that would weaken the object-level security boundary.
-
-The Folder target contains only materialised output.
-
-### Delta target
-
-For:
-
-```text
-Table ID: Budget.Expense
-```
-
-Weaver materialises:
-
-```text
-T1_DWG/Tables/Budget/Expense
-```
-
-The Python source remains centrally installed in the Weaver Lakehouse.
-
-### Warehouse target
-
-For:
-
-```text
-Table ID: DWG.AgencyExpense
-```
-
-Weaver installs the Warehouse table or view and the generated per-object load stored procedure.
-
-The central catalogue records the Warehouse target and procedure name used during orchestration.
+The Weaver Lakehouse is not implicitly in either operation. It is reached only
+when explicitly selected as the physical target; setup continues to protect its
+catalogue schema and never prunes application content merely because it shares the
+control-plane item.
 
 ---
 
-## 6. Build command model
+## 12. Execution model
 
-The build command maps an SES source alias to one or more existing target aliases:
+The Spark session is attached to the Weaver Lakehouse. That is the fixed control
+plane context. Destination items are a variable data plane and every action names
+its bound physical item explicitly.
 
-```bash
-weaver build \
-  --from DWG_SES \
-  --to-folders T0_DWG_FABRIC \
-  --to-delta T1_DWG_FABRIC \
-  --to-sql T2_DWG
-```
+Generation and installation both run in the target environment:
 
-The aliases are resolved from the existing dbrep configuration.
+| resources | code runs | path |
+|---|---|---|
+| local emulator | local process | development and most tests |
+| Fabric | Fabric session | product path; notebook or Livy submission |
 
-Destination arguments are optional according to the objects discovered in the source. A narrow build is valid:
+Desktop CLI and Fabric tests may cross the boundary using REST, DFS and Livy, but
+core never silently substitutes a desktop client for the session-native path.
 
-```bash
-weaver build \
-  --from T0_DWG_SES \
-  --to-folders T0_DWG_FABRIC
-```
-
-```bash
-weaver build \
-  --from T1_DWG_SES \
-  --to-delta T1_DWG_FABRIC
-```
-
-```bash
-weaver build \
-  --from T2_DWG_SES \
-  --to-sql T2_DWG
-```
-
-Those three commands can produce the same physical outcome as one mixed-source build. The differences are:
-
-- build scope;
-- catalogue promotion scope;
-- atomicity;
-- whether cross-representation changes are validated together.
-
-A single mixed build provides one coordinated catalogue promotion. Separate builds provide independent deployment units.
+One bundle may contain batches for several Lakehouses, Warehouses and the Weaver
+control-plane Lakehouse. Each batch is bound to exactly one physical target and
+each action remains mechanical.
 
 ---
 
-## 7. Build flow
-
-### Step 1 — Resolve configuration
-
-Weaver resolves from dbrep:
-
-- the SES source;
-- the central Weaver Lakehouse;
-- the Files destination, when supplied;
-- the Delta destination, when supplied;
-- the Warehouse destination, when supplied.
-
-### Step 2 — Install the SES source centrally
-
-The complete SES tree is copied to:
-
-```text
-Weaver/Files/repos/<repository>/<source>
-```
-
-The installation includes Python, SQL, helpers and other repository-relative resources.
-
-### Step 3 — Discover and classify objects
-
-Weaver scans the installed source and classifies each object:
-
-```text
-Folder ID       → Files destination
-Python Table ID → Delta destination
-SQL object      → Warehouse destination
-```
-
-Helpers remain available for imports but do not become catalogue objects.
-
-### Step 4 — Resolve target bindings
-
-For each discovered object, Weaver records:
-
-- source repository and source path;
-- object ID and representation;
-- destination target alias;
-- physical materialisation path or SQL procedure;
-- source hash and build version;
-- schema, key and load policy;
-- dependency references.
-
-### Step 5 — Compile the global dependency graph
-
-Weaver validates:
-
-- missing dependencies;
-- cycles;
-- incompatible target assignments;
-- unresolved source references.
-
-The graph may cross materialisation forms in any order:
-
-```text
-Delta → Folder → SQL → Delta
-```
-
-### Step 6 — Build physical targets
-
-Weaver performs the required target-specific work:
-
-- Folder: validate and prepare managed destinations;
-- Delta: create or reshape tables and properties;
-- SQL: create tables/views and generated load stored procedures.
-
-### Step 7 — Promote the catalogue
-
-After all required target work succeeds, Weaver promotes the new repository installation, target bindings, catalogue and dependency graph as the active build.
-
-A failed coordinated build remains recorded but does not replace the previously active catalogue.
-
----
-
-## 8. Orchestration model
-
-The orchestrator runs from the Weaver Lakehouse.
-
-It loads:
-
-```text
-Files/runtime
-```
-
-onto the Python path, imports SES modules from:
-
-```text
-Files/repos/<repository>/<source>
-```
-
-and reads the active central catalogue and dependency graph.
-
-The orchestrator may select:
-
-- one object;
-- one target;
-- one repository;
-- several targets;
-- the complete active graph.
-
-Execution follows global dependency order rather than target order. The graph may return to the same physical target in several waves.
-
-### Folder execution
-
-Weaver passes:
-
-- installed repository root;
-- target Files root;
-- resolved destination path;
-- sibling staging path;
-- workflow context.
-
-The object uses the normal Weaver interface such as `self.path`, `self.staging_folder()` and `self.repo`.
-
-### Delta execution
-
-Weaver passes:
-
-- installed repository root;
-- Spark session;
-- target Lakehouse ABFSS root;
-- resolved Delta table path;
-- schema, primary key and load policy;
-- workflow context.
-
-The object uses `self.spark`, `self.path`, `self.current_dataframe`, `self.schema`, `self.primary_key` and `self.repo`.
-
-### SQL execution
-
-Weaver resolves:
-
-- Warehouse endpoint;
-- database;
-- generated stored procedure;
-- invocation parameters;
-- workflow context.
-
-The orchestrator invokes the procedure through `mssql-python`.
-
-Where Warehouse SQL depends on a recently created or changed Delta table, the endpoint metadata refresh is an orchestration barrier before the dependent SQL step runs.
-
----
-
-## 9. Parameters passed through the system
-
-### Build command parameters
-
-```text
---from
---to-folders   optional
---to-delta     optional
---to-sql       optional
-```
-
-All values are existing dbrep aliases.
-
-### Resolved central parameters
-
-```text
-Weaver Lakehouse identity
-runtime root
-installed repository root
-active build ID
-```
-
-### Folder step parameters
-
-```text
-object ID
-source module
-target Files root
-destination path
-staging path
-workflow ID
-```
-
-### Delta step parameters
-
-```text
-object ID
-source module
-Spark session
-target ABFSS root
-resolved table path
-schema
-primary key
-load policy
-workflow ID
-```
-
-### SQL step parameters
-
-```text
-object ID
-Warehouse endpoint
-database
-stored procedure
-procedure parameters
-workflow ID
-```
-
-Raw workspace IDs, Lakehouse IDs, ABFSS construction and SQL connection details are resolved by Weaver from the target aliases. SES code should not construct or manage them.
-
----
-
-## 10. Resulting mental model
-
-> Install an SES source into Weaver, point its Folder, Delta and SQL objects at existing dbrep targets, and let the central Weaver Lakehouse build, catalogue and orchestrate those objects into clean destination Lakehouses and Warehouses.
+## 13. Explicitly deferred work
+
+This re-architecture does not implement:
+
+- physical alias materialisation or relation rewriting;
+- cross-engine refresh barriers required by physical aliases;
+- load execution, merge policy or dependency accessors at runtime;
+- Semantic Models;
+- catalogue migration or multi-version history;
+- making unsafe shared physical-item prune safe;
+- multiple repositories in one Weaver control plane.
+
+The immediate outcome is a truthful logical model: one repository declares many
+items, every document is owned by one item, bindings are item-specific, the graph
+and catalogue carry that identity, and unsupported alias execution fails before
+mutation.
