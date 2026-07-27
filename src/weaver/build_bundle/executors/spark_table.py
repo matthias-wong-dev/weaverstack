@@ -189,9 +189,8 @@ def _create_preserving_identifier_case(
     case-insensitively.  That matters when a Lakehouse first built by an older
     Weaver contains ``registry`` and the current declaration says ``Registry``:
     merely enabling case-sensitive analysis for the create does not migrate the
-    existing identifier.  Rename that one case-only predecessor first.  The
-    operation preserves the table until the ordinary replace takes ownership of
-    its build-phase structure.
+    existing identifier.  Drop that one case-only predecessor first.  Build owns
+    and replaces table structure; load is the phase that owns rows.
     """
 
     if not enabled:
@@ -199,18 +198,18 @@ def _create_preserving_identifier_case(
         return
     previous = spark.conf.get(_CASE_SENSITIVE)
     if str(previous).lower() == "true":
-        _canonicalize_case_variant(catalogue, logical_object)
+        _drop_case_variant(catalogue, logical_object)
         spark.sql(statement)
         return
     spark.conf.set(_CASE_SENSITIVE, "true")
     try:
-        _canonicalize_case_variant(catalogue, logical_object)
+        _drop_case_variant(catalogue, logical_object)
         spark.sql(statement)
     finally:
         spark.conf.set(_CASE_SENSITIVE, previous)
 
 
-def _canonicalize_case_variant(catalogue, logical_object: str) -> None:
+def _drop_case_variant(catalogue, logical_object: str) -> None:
     match = tokens.OBJECT.fullmatch(logical_object)
     if match is None:  # expand() reports the useful token error on the main path
         return
@@ -227,12 +226,7 @@ def _canonicalize_case_variant(catalogue, logical_object: str) -> None:
             f"{schema}.{declared}: target contains case-colliding tables: "
             + ", ".join(sorted(matches))
         )
-    existing = matches[0]
-    spark = catalogue.spark
-    spark.sql(
-        f"ALTER TABLE {catalogue.qualify(schema, existing)} "
-        f"RENAME TO {catalogue.qualify(schema, declared)}"
-    )
+    catalogue.spark.sql(f"DROP TABLE {catalogue.qualify(schema, matches[0])}")
 
 
 def _ident(name: str) -> str:

@@ -94,7 +94,7 @@ class _FakeSpark:
         self.executed: list[str] = []
         self.conf = _FakeConf()
         self.case_at_create: str | None = None
-        self.case_at_alter: str | None = None
+        self.case_at_drop: str | None = None
 
     def sql(self, statement: str):
         self.executed.append(statement)
@@ -105,9 +105,9 @@ class _FakeSpark:
             return _FakeListing(
                 [_FakeRow(tableName=name, isTemporary=False) for name in self.existing_tables]
             )
-        if normalized.startswith("ALTER TABLE"):
-            self.case_at_alter = self.conf.value
-            self.existing_tables = ["Customer"]
+        if normalized.startswith("DROP TABLE"):
+            self.case_at_drop = self.conf.value
+            self.existing_tables = []
             return None
         if normalized.startswith("CREATE"):
             self.case_at_create = self.conf.value
@@ -204,7 +204,7 @@ def test_fabric_creation_preserves_identifier_case_and_restores_the_session_sett
     assert spark.conf.changes == ["true", "false"]
 
 
-def test_fabric_creation_renames_a_legacy_case_variant_before_replacing_it():
+def test_fabric_creation_drops_a_legacy_case_variant_before_replacing_it():
     spark = _FakeSpark(
         [("CustomerId", "int"), ("CustomerName", "string")],
         existing_tables=("customer",),
@@ -212,12 +212,11 @@ def test_fabric_creation_renames_a_legacy_case_variant_before_replacing_it():
 
     _run(spark, _payload(), destination=FABRIC_DESTINATION)
 
-    alter = next(s for s in spark.executed if s.lstrip().upper().startswith("ALTER"))
-    assert alter == (
-        "ALTER TABLE `Analytics`.`Sales_LH`.`Sales`.`customer` "
-        "RENAME TO `Analytics`.`Sales_LH`.`Sales`.`Customer`"
+    drop = next(s for s in spark.executed if s.lstrip().upper().startswith("DROP"))
+    assert drop == (
+        "DROP TABLE `Analytics`.`Sales_LH`.`Sales`.`customer`"
     )
-    assert spark.case_at_alter == "true"
+    assert spark.case_at_drop == "true"
     assert spark.case_at_create == "true"
     assert spark.conf.value == "false"
 

@@ -2391,10 +2391,10 @@ a clean-create defect. ``CREATE OR REPLACE`` under case-sensitive analysis keeps
 the registered spelling when a case-insensitive predecessor already exists, so an
 old ``registry`` did not become ``Registry`` merely because the new DDL was exact.
 The table executor now inventories the destination inside the same case-sensitive
-scope and renames the single case-only predecessor before replacement. It refuses
-multiple case-colliding predecessors. The operation preserves the old table until
-the ordinary build-phase replacement, and an existing control plane now converges
-to the same PascalCase contract as a fresh one.
+scope and drops the single case-only predecessor before replacement. It refuses
+multiple case-colliding predecessors. This follows the existing build contract:
+build owns and replaces structure, while a later load owns rows. An existing
+control plane now converges to the same PascalCase contract as a fresh one.
 
 ### R9 underway — visible session contention and canonical table names
 
