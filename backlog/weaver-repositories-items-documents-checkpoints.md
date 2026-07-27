@@ -31,9 +31,9 @@ build constraints remain
 | R2 | The item-oriented repository layout is read statically | complete |
 | R3 | Exact-case logical references and `alias.yml` resolve | complete |
 | R4 | Dependencies, graph and sparse projection are item-owned | complete |
-| R5 | Build bundles bind and coordinate multiple logical items | in progress |
+| R5 | Build bundles bind and coordinate multiple logical items | complete |
 | R6 | The catalogue is item-scoped and `_weaver` is built in | complete |
-| R7 | Lakehouse ownership unifies Tables, Files, prune and wipe | pending |
+| R7 | Lakehouse ownership unifies Tables, Files, prune and wipe | complete |
 | R8 | Public API, CLI and compatibility surface use the new model | pending |
 | R9 | Local and Fabric verticals prove the architecture | pending |
 

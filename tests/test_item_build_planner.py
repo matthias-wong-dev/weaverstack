@@ -186,16 +186,167 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
     assert report.status == "succeeded"
 
 
-def test_item_planner_refuses_old_target_kind_prune(tmp_path):
+def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
+    tmp_path, lakehouses
+):
     repository = _repository(_estate(tmp_path))
-    with pytest.raises(BuildError, match="item-scoped prune"):
-        generate_item_build_bundle(
-            repository,
-            bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
-            output=Location(str(tmp_path / "bundle")),
-            store=LocalStore(),
-            prune=True,
+    tables = lakehouses.resolver.tables_root(lakehouses.target)
+    files = lakehouses.resolver.files_root(lakehouses.target)
+    for relative in (
+        tables / "Sales" / "Customer",
+        tables / "Sales" / "Ghost",
+        files / "Sales" / "Customer",
+        files / "Sales" / "OldFolder",
+    ):
+        lakehouses.store.make_directory(relative)
+
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings((_binding("Lakehouse/Raw", lakehouses.target.name),)),
+        output=Location(str(tmp_path / "bundle")),
+        store=lakehouses.store,
+        prune=True,
+        resolver=lakehouses.resolver,
+    )
+
+    prune = bundle.plan.sequences[0]
+    assert prune.number == 10
+    assert prune.description == "prune unmanaged objects by logical item"
+    assert {action.kind for batch in prune.batches for action in batch.actions} == {
+        "prune_table",
+        "prune_folder",
+    }
+    assert {
+        action.resource_node_id
+        for batch in prune.batches
+        for action in batch.actions
+        if action.kind == "prune_folder"
+    } == {"folder:Sales.OldFolder"}
+    assert all("Customer" not in action.id for batch in prune.batches for action in batch.actions)
+
+
+def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
+    tmp_path, lakehouses
+):
+    repository = _repository(_estate(tmp_path))
+    lakehouses.store.make_directory(
+        lakehouses.resolver.tables_root(lakehouses.target) / "Sales" / "Ghost"
+    )
+    binding = ItemBindings((_binding("Lakehouse/Raw", lakehouses.target.name),))
+
+    reconciled = generate_item_build_bundle(
+        repository,
+        bindings=binding,
+        output=Location(str(tmp_path / "reconciled")),
+        store=lakehouses.store,
+        resolver=lakehouses.resolver,
+    )
+    jammed = generate_item_build_bundle(
+        repository,
+        bindings=binding,
+        output=Location(str(tmp_path / "jammed")),
+        store=lakehouses.store,
+        prune=False,
+    )
+
+    assert any(action.kind.startswith("prune") for _s, _b, action in reconciled.plan.actions())
+    assert not any(action.kind.startswith("prune") for _s, _b, action in jammed.plan.actions())
+
+
+def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses):
+    repository = _repository(_estate(tmp_path))
+    second = ItemRef("Curated_Dev")
+    for target, orphan in ((lakehouses.target, "RawGhost"), (second, "CuratedGhost")):
+        lakehouses.store.make_directory(lakehouses.resolver.files_root(target))
+        lakehouses.store.make_directory(lakehouses.resolver.tables_root(target) / "Sales" / orphan)
+
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", lakehouses.target.name),
+                _binding("Lakehouse/Curated", second.name),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=lakehouses.store,
+        prune=True,
+        resolver=lakehouses.resolver,
+    )
+
+    prune = bundle.plan.sequences[0]
+    assert len(prune.batches) == 2
+    by_target = {
+        batch.target_id: {action.id for action in batch.actions}
+        for batch in prune.batches
+    }
+    assert any("Lakehouse--Raw-prune-table-Sales.RawGhost" in ids for ids in by_target.values())
+    assert any(
+        "Lakehouse--Curated-prune-table-Sales.CuratedGhost" in ids
+        for ids in by_target.values()
+    )
+
+
+def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(tmp_path, lakehouses):
+    repository = _repository(_estate(tmp_path))
+    old = ItemRef("Raw_Old")
+    new = ItemRef("Raw_New")
+    for target in (old, new):
+        lakehouses.store.make_directory(lakehouses.resolver.files_root(target))
+        lakehouses.store.make_directory(
+            lakehouses.resolver.tables_root(target) / "Sales" / "Ghost"
         )
+
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings((_binding("Lakehouse/Raw", new.name),)),
+        output=Location(str(tmp_path / "bundle")),
+        store=lakehouses.store,
+        prune=True,
+        resolver=lakehouses.resolver,
+    )
+
+    prune_targets = {
+        batch.target_id
+        for sequence in bundle.plan.sequences
+        if sequence.number == 10
+        for batch in sequence.batches
+    }
+    assert prune_targets == {"Lakehouse-Raw--lakehouse-Raw_New"}
+    assert lakehouses.store.exists(
+        lakehouses.resolver.tables_root(old) / "Sales" / "Ghost"
+    )
+
+
+class _WarehouseInventory:
+    def query(self, statement):
+        if "from sys.objects" in statement:
+            return [
+                {"schema_name": "Sales", "object_name": "Change", "object_type": "U"},
+                {"schema_name": "Sales", "object_name": "Ghost", "object_type": "U"},
+            ]
+        return [{"name": "Sales"}]
+
+
+def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
+    repository = _repository(_estate(tmp_path))
+    item = WeaverItemId.parse("Warehouse/Audit")
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings((_binding(str(item), "Audit_Dev"),)),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+        prune=True,
+        sql_by_item={item: _WarehouseInventory()},
+    )
+
+    actions = [
+        action
+        for sequence, _batch, action in bundle.plan.actions()
+        if sequence.number == 10
+    ]
+    assert [action.kind for action in actions] == ["prune_table"]
+    assert actions[0].id == "Warehouse--Audit-prune-table-Sales.Ghost"
 
 
 def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):

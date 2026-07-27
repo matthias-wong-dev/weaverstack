@@ -2198,7 +2198,7 @@ Folder-to-Folder, lib exclusion, cross-item alias resolution, physical-name
 preservation, an unbound producer and a cross-item cycle. After R4 the pure
 suite finished with 1,108 passing, one skipped and 146 Spark tests deselected.
 
-### R5 in progress — the multi-item manifest seam
+### R5 — the multi-item manifest seam
 
 The existing immutable manifest and mechanical installer are being retained.
 `ItemBinding` now binds one exact `WeaverItemId` to a typed physical Lakehouse or
@@ -2214,14 +2214,13 @@ source interpretation. Authored physical SQL remains byte-preserved. If any
 retained consumer resolves through `alias.yml`, generation stops before writing
 with `NotImplementedError: Alias usage is not yet supported`.
 
-This does not complete R5 yet. Two later ownership seams are prerequisites for a
-truthful end-to-end manifest: R6 must append one item-scoped catalogue tail, and
-R7 must replace the old target-kind prune with Lakehouse-item ownership. The new
-planner therefore refuses `prune=True` rather than reusing an unsafe scope. Its
-multi-binding, deterministic identity, alias preflight, physical-name and
-repository-independent install tests are all pure Python. At this seam the full
-lightweight suite finished with 1,117 passing, one skipped and 146 Spark tests
-deselected.
+At its first seam the planner refused `prune=True` rather than reuse an unsafe
+target-kind scope. R6 then supplied the item-scoped catalogue tail and R7 supplied
+item-owned physical reconciliation, completing the coordinated manifest without
+changing its immutable plan/installer boundary. The original multi-binding,
+deterministic identity, alias preflight, physical-name and repository-independent
+install tests remain pure Python. At the initial seam the lightweight suite
+finished with 1,117 passing, one skipped and 146 Spark tests deselected.
 
 ### R6 — item-scoped catalogue and built-in `_weaver`
 
@@ -2260,6 +2259,36 @@ the Livy sessions collection endpoint exposes scheduler/plugin/Livy states,
 timestamps and cancellation reasons. The Fabric harness should report those
 before requesting a capacity's single Spark slot, so a queued session is visible
 rather than looking like a silent start.
+
+### R7 — one Lakehouse item owns Tables, Files, prune and wipe
+
+The item planner now ports the proven fail-closed target inventories rather than
+inventing another reconciliation path. For each bound item it derives a keep-set
+from exactly that item's retained documents, inspects the named physical target at
+generation time and freezes every drop into the bundle. Several logical items
+produce independent batches and namespaced action/payload identities even when
+their schemas and object names repeat. Warehouse items use either the
+Fabric-native connector from the host or an item-keyed injected executor. A
+Lakehouse item uses one binding and one keep-set for Delta tables, Spark views and
+Files folders together.
+
+Prune is on by default. `prune=False` emits no destructive action and remains the
+explicit unsafe escape hatch for someone deliberately jamming declarations into a
+shared physical item. Rebinding only changes which physical item the current plan
+inspects; the old target is not inferred from catalogue history and is untouched.
+The existing `wipe_lakehouse()` is the deliberately separate blunt operation: it
+resolves a typed physical Lakehouse and clears both Files and Tables, regardless
+of Weaver declarations. Compatibility functions for independently named Folder
+and Delta targets remain only until the public R8 migration.
+
+Pure tests cover the default/escape hatch, combined Tables/Files inventory,
+same-type multi-item batches, Warehouse pruning and old-binding isolation. The
+full lightweight suite passed 1,133 tests with one skip. The full local Spark
+suite passed 100 tests in 4m09s; its R7 vertical created a real orphan Delta table
+and folder, installed the retained item, independently inspected both areas, then
+called the real Lakehouse wipe and found both empty. The same behavior ran through
+the published `0.1.1.dev21230656620` wheel inside Fabric: after one test-fixture
+metadata correction, the installed code passed the prune/build/wipe proof in 70s.
 
 ---
 

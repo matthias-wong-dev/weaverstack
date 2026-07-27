@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from ..errors import BuildError
 from ..locations import Location
-from ..ses.metadata import FOLDER, TABLE, VIEW
+from ..ses.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..ses.model import LAKEHOUSE, WeaverDocumentId, WeaverItemId, WeaverRepository
 from ..ses.source import SourceDocument
 from ..store import Store
@@ -28,8 +28,13 @@ from .models import (
     OmittedNode,
 )
 from .payloads import SCHEMA_SEQUENCE, payload_path, sha256_hex
-from .payloads import CATALOGUE_SEQUENCE, INSTALLATION_SEQUENCE, REGISTRY_SEQUENCE
-from .targets import ItemBindings, LakehouseBinding, WAREHOUSE_TARGET
+from .payloads import (
+    CATALOGUE_SEQUENCE,
+    INSTALLATION_SEQUENCE,
+    PRUNE_SEQUENCE,
+    REGISTRY_SEQUENCE,
+)
+from .targets import LAKEHOUSE_TARGET, ItemBindings, LakehouseBinding, WAREHOUSE_TARGET
 
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
 
@@ -40,19 +45,23 @@ def generate_item_build_bundle(
     bindings: ItemBindings,
     output: Location,
     store: Store,
-    prune: bool = False,
+    prune: bool = True,
     catalogue: bool = False,
     control_lakehouse: LakehouseBinding | None = None,
+    resolver=None,
+    spark=None,
+    host=None,
+    sql_by_item=None,
 ) -> BuildBundle:
     """Freeze all bound items into one manifest and certified snapshot.
 
-    Item-scoped prune lands at R7. Until then callers must opt out explicitly;
-    this planner refuses to imply that target-kind prune is safe for the new
-    ownership model.
+    Prune reconciles each bound physical item against only the documents owned by
+    its logical item. Inventory is frozen into the bundle; install never lists a
+    target. Lakehouse planning needs a resolver, supplied directly or obtained
+    from ``host``. Warehouse planning opens Fabric-native SQL from ``host`` unless
+    the caller supplies an executor in ``sql_by_item``.
     """
 
-    if prune:
-        raise BuildError("item-scoped prune is not implemented until R7; pass prune=False")
     by_item = bindings.by_item
     if not by_item:
         raise BuildError("at least one Weaver item must be bound")
@@ -83,6 +92,25 @@ def generate_item_build_bundle(
     }
     payloads: dict[str, bytes] = {}
     sequences: list[BuildSequence] = []
+
+    if prune:
+        if resolver is None and host is not None:
+            from ..resolution import resolver_for
+
+            resolver = resolver_for(host)
+        prune_sequence = _item_prune_sequence(
+            repository,
+            selected_ids,
+            target_by_item,
+            resolver=resolver,
+            store=store,
+            spark=spark,
+            host=host,
+            sql_by_item=sql_by_item,
+            payloads=payloads,
+        )
+        if prune_sequence is not None:
+            sequences.append(prune_sequence)
 
     schema_sequence = _schema_sequence(repository, selected_ids, target_by_item, payloads)
     if schema_sequence is not None:
@@ -361,4 +389,91 @@ def _catalogue_sequences(
         BuildSequence(number=number, description=description, batches=tuple(batches))
         for number, (description, _kind, batches) in groups.items()
         if batches
+    )
+
+
+def _item_prune_sequence(
+    repository,
+    selected_ids,
+    target_by_item,
+    *,
+    resolver,
+    store,
+    spark,
+    host,
+    sql_by_item,
+    payloads,
+):
+    """Freeze one item-owned inventory diff per bound physical item.
+
+    The proven target inspectors remain shared with the flat planner. Their
+    output is namespaced here because two logical items may contain the same
+    schema/object names and therefore need distinct manifest action ids and
+    payload paths even when their physical targets differ.
+    """
+
+    from .planner import _managed_sets, _prune_sequence, _warehouse_prune_sequence
+
+    batches = []
+    supplied_sql = sql_by_item or {}
+    for item in sorted(target_by_item, key=str):
+        target = target_by_item[item]
+        documents = {
+            str(identity): repository.source_documents[identity]
+            for identity in selected_ids
+            if identity.item == item
+        }
+        target_kind = SQL_TARGET if target.kind == WAREHOUSE_TARGET else DELTA_TARGET
+        managed = _managed_sets(documents, target_kind)
+        temporary_payloads = {}
+        if target.kind == WAREHOUSE_TARGET:
+            sql = supplied_sql.get(item)
+            if sql is None and host is None:
+                raise BuildError(
+                    f"pruning Warehouse item {item} requires host or sql_by_item[{item}]"
+                )
+            sequence = _warehouse_prune_sequence(
+                target, sql, host, managed, temporary_payloads
+            )
+        else:
+            if target.kind != LAKEHOUSE_TARGET:
+                raise BuildError(f"unsupported physical target kind for {item}: {target.kind}")
+            if resolver is None:
+                raise BuildError(
+                    f"pruning Lakehouse item {item} requires resolver or host"
+                )
+            sequence = _prune_sequence(
+                target, resolver, store, spark, managed, temporary_payloads
+            )
+        if sequence is None:
+            continue
+
+        item_slug = _slug(item)
+        rewritten_actions = []
+        for action in sequence.batches[0].actions:
+            new_payload = None
+            if action.payload is not None:
+                content = temporary_payloads[action.payload]
+                filename = action.payload.rsplit("/", 1)[-1]
+                new_payload = payload_path(
+                    PRUNE_SEQUENCE, "item-prune", f"{item_slug}-{filename}"
+                )
+                payloads[new_payload] = content
+            rewritten_actions.append(
+                replace(
+                    action,
+                    id=f"{item_slug}-{action.id}",
+                    payload=new_payload,
+                )
+            )
+        batches.append(
+            replace(sequence.batches[0], actions=tuple(rewritten_actions))
+        )
+
+    if not batches:
+        return None
+    return BuildSequence(
+        number=PRUNE_SEQUENCE,
+        description="prune unmanaged objects by logical item",
+        batches=tuple(batches),
     )
