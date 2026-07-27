@@ -47,7 +47,7 @@ def generate_tsql_table_script(document: SesDocument, body: str) -> str:
     """A self-contained T-SQL script that builds ``document``'s main table."""
 
     mapping = _load_type_mapping()
-    temp_table = _ses_temp_table_name("#weaver_shape", document.qualified)
+    temp_table = _weaver_temp_table_name("#weaver_shape", document.qualified)
     guarded = insert_where_one_eq_zero(body)
     shape_sql = _ensure_terminated(insert_select_into(guarded, temp_table))
 
@@ -382,7 +382,7 @@ def _pk_constraint_name(qualified: str) -> str:
     return _quote_part(f"PK_{object_name}")
 
 
-def _ses_temp_table_name(prefix: str, qualified: str) -> str:
+def _weaver_temp_table_name(prefix: str, qualified: str) -> str:
     normalised_prefix = prefix if prefix.startswith("#") else f"#{prefix}"
     safe = re.sub(r"[^A-Za-z0-9_]", "_", qualified)
     candidate = f"{normalised_prefix}_{safe}"

@@ -10,7 +10,7 @@ import textwrap
 
 import pytest
 
-from weaver.ses import extract_python_references, extract_sql_references
+from weaver.declaration import extract_python_references, extract_sql_references
 
 
 def refs(sql: str) -> set[str]:
@@ -244,7 +244,7 @@ def test_unparseable_sql_still_yields_what_it_can():
 
 def test_the_fallback_scanner_runs_when_tokenising_fails(monkeypatch):
     """Proves the branch executes, rather than assuming malformed SQL reaches it."""
-    from weaver.ses import dependencies
+    from weaver.declaration import dependencies
 
     calls = []
 
@@ -262,7 +262,7 @@ def test_the_fallback_scanner_runs_when_tokenising_fails(monkeypatch):
 
 
 def test_the_fallback_still_excludes_single_part_names(monkeypatch):
-    from weaver.ses import dependencies
+    from weaver.declaration import dependencies
 
     monkeypatch.setattr(
         dependencies, "_flatten", lambda _: (_ for _ in ()).throw(RecursionError())
@@ -274,7 +274,7 @@ def test_the_fallback_still_excludes_single_part_names(monkeypatch):
 
 
 def test_the_fallback_handles_qualified_names(monkeypatch):
-    from weaver.ses import dependencies
+    from weaver.declaration import dependencies
 
     monkeypatch.setattr(
         dependencies, "_flatten", lambda _: (_ for _ in ()).throw(RecursionError())

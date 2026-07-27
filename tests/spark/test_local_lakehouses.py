@@ -28,7 +28,7 @@ def test_the_declaration_installs_into_the_weaver_lakehouse(installed_repository
 
 
 def test_an_installed_declaration_reads_back(installed_repository):
-    from weaver.ses import read_weaver_repository
+    from weaver.declaration import read_weaver_repository
 
     repository = read_weaver_repository(installed_repository)
     assert repository.name == "weaver_items"

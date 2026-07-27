@@ -18,8 +18,8 @@ from weaver.build_bundle import (
     load_bundle,
 )
 from weaver.errors import BuildError
-from weaver.ses import read_weaver_repository
-from weaver.ses.model import WeaverItemId
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverItemId
 
 from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate

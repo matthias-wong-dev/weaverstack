@@ -29,9 +29,9 @@ import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from ..ses.metadata import FOLDER, TABLE, VIEW, ObjectId, Reference
-from ..ses.model import WeaverDocumentId, WeaverItemId, WeaverRepository
-from ..ses.references import declared_column_notes, resolve_text
+from ..declaration.metadata import FOLDER, TABLE, VIEW, ObjectId, Reference
+from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
+from ..declaration.references import declared_column_notes, resolve_text
 from .render import InstallationScope, Row, column_set
 from .tables import (
     ALIAS,

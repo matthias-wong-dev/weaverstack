@@ -29,8 +29,8 @@ import json
 from typing import Any
 
 from ...errors import InstallError
-from ...ses.columns import validate_build_columns
-from ...ses.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ...declaration.columns import validate_build_columns
+from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
 from ...spark import tokens
 from ..models import BuildAction
 from .base import InstallationContext

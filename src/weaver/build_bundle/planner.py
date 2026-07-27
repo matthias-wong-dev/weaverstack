@@ -7,9 +7,9 @@ from dataclasses import replace
 
 from ..errors import BuildError
 from ..locations import Location
-from ..ses.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
-from ..ses.model import LAKEHOUSE, WeaverDocumentId, WeaverItemId, WeaverRepository
-from ..ses.source import SourceDocument
+from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
+from ..declaration.model import LAKEHOUSE, WeaverDocumentId, WeaverItemId, WeaverRepository
+from ..declaration.source import SourceDocument
 from ..store import Store
 from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
 from .models import (

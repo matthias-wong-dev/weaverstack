@@ -20,8 +20,8 @@ import pytest
 
 from weaver import LocalStore, Location
 from weaver.errors import DiscoveryError, MetadataError
-from weaver.ses import PYTHON, SPARK_SQL, parse_document, read_weaver_repository
-from weaver.ses.model import WeaverDocumentId
+from weaver.declaration import PYTHON, SPARK_SQL, parse_document, read_weaver_repository
+from weaver.declaration.model import WeaverDocumentId
 
 REGISTRY = """\
 /*
@@ -138,7 +138,7 @@ def test_a_misnamed_object_file_is_an_error_not_quietly_demoted(tmp_path):
 
 
 def _registry_metadata(*, with_dependencies: bool = True) -> str:
-    from weaver.ses import extract_sql_metadata_and_body
+    from weaver.declaration import extract_sql_metadata_and_body
 
     metadata, _body = extract_sql_metadata_and_body(REGISTRY)
     if with_dependencies:
@@ -167,7 +167,7 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     this, `Dependencies: []` would silently mean "discover them for me".
     """
 
-    from weaver.ses import effective_dependencies
+    from weaver.declaration import effective_dependencies
 
     consumer = _python_object(
         "Sales.Ignored", extra="Dependencies: []\n", imports="from Sales__Order import Sales__Order\n"
@@ -185,7 +185,7 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
 
 
 def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
-    from weaver.ses import effective_dependencies
+    from weaver.declaration import effective_dependencies
 
     consumer = _python_object(
         "Sales.Derived", imports="from Sales__Order import Sales__Order\n"
@@ -201,7 +201,7 @@ def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
 
 
 def test_the_retired_audit_spelling_is_still_reserved():
-    from weaver.ses import parse_document as parse
+    from weaver.declaration import parse_document as parse
 
     base = """
 Table ID: Sales.Order

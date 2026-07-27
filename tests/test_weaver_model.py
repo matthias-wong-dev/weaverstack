@@ -13,8 +13,8 @@ from weaver import (
     WeaverSchemaId,
 )
 from weaver.errors import DiscoveryError, IdentityError
-from weaver.ses import WeaverDocument
-from weaver.ses.metadata import SesDocument
+from weaver.declaration import WeaverDocument
+from weaver.declaration.metadata import SesDocument
 
 
 def test_item_and_document_identities_round_trip_exactly():

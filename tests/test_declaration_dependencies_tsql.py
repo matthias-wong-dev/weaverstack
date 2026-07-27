@@ -11,7 +11,7 @@ import textwrap
 
 import pytest
 
-from weaver.ses import extract_sql_references
+from weaver.declaration import extract_sql_references
 
 
 def refs(sql: str) -> set[str]:

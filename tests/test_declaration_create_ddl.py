@@ -3,7 +3,7 @@
 Build creates structure, not data. A Delta table (Python or Spark SQL) becomes a
 ``CREATE TABLE`` over its declared columns; a view becomes ``CREATE OR REPLACE
 VIEW`` over its query body. A Folder has no DDL (it is a directory). T-SQL
-generation has its own test module (``test_ses_tsql_ddl``); here we only assert a
+generation has its own test module (``test_declaration_tsql_ddl``); here we only assert a
 SQL object routes to the ``tsql`` executor. Nothing here runs ``read()``.
 
 Every Spark object is named ``{{object:Schema.Name}}``, and so is every managed
@@ -21,9 +21,9 @@ import textwrap
 
 import pytest
 
-from weaver.ses import read_source_document
-from weaver.ses.model import LAKEHOUSE, WAREHOUSE
-from weaver.ses.ddl import (
+from weaver.declaration import read_source_document
+from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
+from weaver.declaration.ddl import (
     SPARK_SQL_EXECUTOR,
     SPARK_SQL_EXTENSION,
     SPARK_TABLE_EXECUTOR,
@@ -259,7 +259,7 @@ def test_folder_has_no_create_ddl():
 
 
 def test_tsql_object_routes_to_the_tsql_executor():
-    from weaver.ses.ddl import TSQL_EXECUTOR, TSQL_EXTENSION
+    from weaver.declaration.ddl import TSQL_EXECUTOR, TSQL_EXTENSION
 
     ddl = _doc("Reporting.CustomerReport.sql", TSQL_SOURCE, WAREHOUSE).create_ddl()
     assert (ddl.executor, ddl.extension) == (TSQL_EXECUTOR, TSQL_EXTENSION)

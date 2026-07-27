@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from weaver.locations import Location
-from weaver.ses import read_weaver_repository
-from weaver.ses.model import WeaverDocumentId, WeaverItemId
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.catalogue.projection import project_item_installation
 from weaver.catalogue.reconcile import reconcile
 from weaver.catalogue.tables import (

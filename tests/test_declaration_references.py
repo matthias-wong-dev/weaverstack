@@ -15,13 +15,13 @@ from pathlib import Path
 
 from weaver import LocalStore, Location
 from weaver.errors import DiscoveryError
-from weaver.ses import (
+from weaver.declaration import (
     IDENTITY_COLUMN_NOTE,
     declared_column_notes,
     read_weaver_repository,
     resolve_text,
 )
-from weaver.ses.model import WeaverDocumentId
+from weaver.declaration.model import WeaverDocumentId
 
 ITEM = "Lakehouse/Raw"
 

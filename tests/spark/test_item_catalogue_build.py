@@ -15,8 +15,8 @@ from weaver.build_bundle import (
     install_bundle,
 )
 from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
-from weaver.ses import read_weaver_repository
-from weaver.ses.model import WeaverItemId
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverItemId
 from weaver.spark import SparkCatalogue
 
 from test_item_repository import _estate

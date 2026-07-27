@@ -41,7 +41,7 @@ from .targets import (
     ItemRef,
     WarehouseTarget,
 )
-from .ses.model import (
+from .declaration.model import (
     ItemDependency,
     RepositoryAlias,
     WeaverDocumentId,
@@ -50,8 +50,8 @@ from .ses.model import (
     WeaverRepository,
     WeaverSchemaId,
 )
-from .ses.metadata import WeaverDocument
-from .ses.repository import read_weaver_repository
+from .declaration.metadata import WeaverDocument
+from .declaration.repository import read_weaver_repository
 from .build_bundle import (
     InstallationEnvironment,
     InstallationReport,

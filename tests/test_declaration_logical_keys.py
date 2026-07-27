@@ -16,7 +16,7 @@ import textwrap
 import pytest
 
 from weaver.errors import MetadataError
-from weaver.ses import PYTHON, SQL, ObjectId, parse_document
+from weaver.declaration import PYTHON, SQL, ObjectId, parse_document
 
 TABLE = """
 Table ID: Sales.Order
@@ -246,7 +246,7 @@ def test_a_folder_declares_no_logical_keys():
 
 
 def test_an_inferred_table_checks_its_key_columns_against_the_built_shape():
-    from weaver.ses.columns import metadata_column_references
+    from weaver.declaration.columns import metadata_column_references
 
     document = parse(
         """

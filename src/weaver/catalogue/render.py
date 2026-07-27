@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from ..ses.metadata import AUDIT_LIVE_DELETE_DATETIME
+from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..spark.tokens import object_token
 from .tables import (
     AUDIT_DELETE_COLUMN,

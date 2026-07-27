@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..ses.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
+from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
 
 #: The schema Weaver's own control plane lives in, inside the Weaver Lakehouse.
 #: One character, reserved, and never touched by an application build's prune.

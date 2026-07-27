@@ -27,8 +27,8 @@ from weaver.build_bundle.planner import generate_item_build_bundle
 from weaver.build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
 from weaver.catalogue.builtin import materialise_builtin_item
 from weaver.catalogue.tables import CATALOGUE_TABLES
-from weaver.ses import read_weaver_repository
-from weaver.ses.model import WeaverItemId
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverItemId
 
 pytestmark = pytest.mark.spark
 

@@ -11,7 +11,7 @@ import pytest
 import sqlparse
 from sqlparse import tokens as T
 
-from weaver.ses.sql_shaping import (
+from weaver.declaration.sql_shaping import (
     get_sql_template,
     insert_select_into,
     insert_where_one_eq_zero,

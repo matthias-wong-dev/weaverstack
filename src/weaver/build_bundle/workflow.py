@@ -20,8 +20,8 @@ from typing import Iterator, Mapping
 
 from ..errors import BuildError
 from ..locations import Location
-from ..ses.model import WeaverItemId
-from ..ses.repository import read_weaver_repository
+from ..declaration.model import WeaverItemId
+from ..declaration.repository import read_weaver_repository
 from ..store import LocalStore, Store
 from .bundle import BuildBundle, load_bundle
 from .installer import InstallationEnvironment, install_bundle

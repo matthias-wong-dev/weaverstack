@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import textwrap
 
-from weaver.ses import read_source_document
-from weaver.ses.model import WAREHOUSE
+from weaver.declaration import read_source_document
+from weaver.declaration.model import WAREHOUSE
 
 
 def _ddl(path: str, text: str):

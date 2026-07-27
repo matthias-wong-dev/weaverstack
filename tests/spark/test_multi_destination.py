@@ -34,7 +34,7 @@ from weaver.build_bundle import (
 )
 from weaver.catalogue import INSTALLATION, REGISTRY, InstallationScope
 from weaver.catalogue.reader import read_table
-from weaver.ses.model import WeaverItemId
+from weaver.declaration.model import WeaverItemId
 from weaver.setup import initialise_weaver_lakehouse
 from weaver.spark import SparkCatalogue
 

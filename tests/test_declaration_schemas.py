@@ -9,7 +9,7 @@ import pytest
 
 from weaver import Location
 from weaver.errors import DiscoveryError
-from weaver.ses import (
+from weaver.declaration import (
     SchemaSes,
     is_schema_file,
     parse_schema_document,

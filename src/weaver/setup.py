@@ -44,8 +44,8 @@ from .catalogue.tables import CATALOGUE_TABLES
 from .locations import Location
 from .resolution import resolver_for
 from .store import Store
-from .ses import read_weaver_repository
-from .ses.model import WeaverItemId
+from .declaration import read_weaver_repository
+from .declaration.model import WeaverItemId
 from .targets import ItemRef
 
 #: The bundle directory setup writes under the Weaver Lakehouse's build_bundles

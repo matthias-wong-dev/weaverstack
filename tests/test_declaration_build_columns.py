@@ -13,8 +13,8 @@ import textwrap
 import pytest
 
 from weaver.errors import BuildError
-from weaver.ses import SPARK_SQL, SQL, parse_document
-from weaver.ses.columns import metadata_column_references, resolve_build_columns
+from weaver.declaration import SPARK_SQL, SQL, parse_document
+from weaver.declaration.columns import metadata_column_references, resolve_build_columns
 
 
 def _doc(yaml_text: str, *, language: str = SQL):

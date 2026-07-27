@@ -22,8 +22,8 @@ from weaver.build_bundle import (
     timestamped_archive_name,
 )
 from weaver.errors import BuildError
-from weaver.ses import read_weaver_repository
-from weaver.ses.model import WeaverItemId
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverItemId
 from weaver.catalogue.builtin import item_repository_files
 
 from test_item_repository import _estate

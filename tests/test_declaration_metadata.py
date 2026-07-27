@@ -7,7 +7,7 @@ import textwrap
 import pytest
 
 from weaver.errors import MetadataError
-from weaver.ses import (
+from weaver.declaration import (
     AUDIT_COLUMNS,
     FOLDER,
     PYTHON,

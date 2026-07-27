@@ -6,8 +6,8 @@ import pytest
 
 from weaver.errors import BuildError, GraphError
 from weaver.locations import Location
-from weaver.ses import project_bound_documents, read_weaver_repository
-from weaver.ses.model import WeaverDocumentId, WeaverItemId
+from weaver.declaration import project_bound_documents, read_weaver_repository
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 
 from test_item_repository import (
     _estate,

@@ -8,8 +8,8 @@ import pytest
 
 from weaver.errors import DiscoveryError
 from weaver.locations import Location
-from weaver.ses import read_weaver_repository
-from weaver.ses.model import WeaverDocumentId, WeaverSchemaId
+from weaver.declaration import read_weaver_repository
+from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 from weaver.catalogue.builtin import materialise_builtin_item
 from weaver.store import LocalStore
 

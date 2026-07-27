@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 from ..targets import ItemRef
 from ..errors import BuildError
-from ..ses.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
+from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 
 #: Target kinds a bound target may name. They mirror the SES target kinds but
 #: live here because a bundle is read without importing the SES vocabulary.

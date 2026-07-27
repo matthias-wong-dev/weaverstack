@@ -18,8 +18,8 @@ from typing import Any, Mapping
 from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Host
 from ..spark import SparkCatalogue, object_token, schema_token
-from ..ses.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
-from ..ses.source import SourceDocument
+from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
+from ..declaration.source import SourceDocument
 from ..store import Store
 from ..targets import ItemRef
 from .models import (

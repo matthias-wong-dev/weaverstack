@@ -671,7 +671,7 @@ def _bindings_for(ses_fixture, *, lakehouse=None, warehouse=None):
         LakehouseBinding,
         WarehouseBinding,
     )
-    from weaver.ses.model import LAKEHOUSE, WeaverItemId
+    from weaver.declaration.model import LAKEHOUSE, WeaverItemId
 
     entries = []
     for name in ses_fixture.items:
@@ -746,7 +746,7 @@ def _local_build_context(root, spark, ses_fixture):
         load_bundle,
     )
     from weaver.build_bundle.planner import generate_item_build_bundle
-    from weaver.ses import read_weaver_repository
+    from weaver.declaration import read_weaver_repository
 
     host, weaver, target, resolver, store = _local_lakehouse_setup(root)
     destination = resolver.spark_destination(target)
