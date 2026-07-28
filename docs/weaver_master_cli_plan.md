@@ -134,12 +134,12 @@ The canonical uploaded repository location is:
 
 ```text
 Files/
-└── weaver-items/
+└── weaver_items/
     ├── Lakehouse/
     └── Warehouse/
 ```
 
-The local repository name, such as `ilg`, is only the local folder name. Its contents are uploaded into `Files/weaver-items/`.
+The local repository name, such as `ilg`, is only the local folder name. Its contents are uploaded into `Files/weaver_items/`.
 
 ## 3.3 `_weaver` is always present logically
 
@@ -341,7 +341,7 @@ The Weaver Lakehouse is the control Lakehouse for one Workspace.
 
 It stores:
 
-- `Files/weaver-items/`;
+- `Files/weaver_items/`;
 - `_weaver` catalogue tables;
 - registry state;
 - object dictionaries;
@@ -853,7 +853,7 @@ Push performs:
 parse_item_repository(local root)
 → fail immediately when invalid
 → upload complete authored repository folder
-→ destination Files/weaver-items/
+→ destination Files/weaver_items/
 ```
 
 For this branch:
@@ -883,12 +883,12 @@ Remote:
 ```text
 <Weaver Lakehouse>/
 └── Files/
-    └── weaver-items/
+    └── weaver_items/
         ├── Lakehouse/
         └── Warehouse/
 ```
 
-The contents of `./ilg` are uploaded into `Files/weaver-items`.
+The contents of `./ilg` are uploaded into `Files/weaver_items`.
 
 There is no additional `ilg/` remote layer.
 
@@ -1288,7 +1288,7 @@ Conceptual flow:
 
 ```text
 resolve Workspace and Weaver Lakehouse
-→ read Files/weaver-items/
+→ read Files/weaver_items/
 → parse_item_repository
 → resolve selected physical bindings
 → add implicit _weaver binding
@@ -1310,7 +1310,7 @@ Conceptual flow:
 ```text
 resolve Workspace
 → parse local repository
-→ push complete repository to Files/weaver-items/
+→ push complete repository to Files/weaver_items/
 → load/parse uploaded repository
 → continue normal uploaded build workflow
 ```
@@ -1755,7 +1755,7 @@ The notebook should demonstrate the same lifecycle:
 ```text
 install
 → initialise
-→ make Files/weaver-items available
+→ make Files/weaver_items available
 → parse repository
 → build
 → wipe
@@ -1767,7 +1767,7 @@ A Fabric notebook cannot push files from the developer's desktop.
 Therefore desktop `push` is replaced by manually uploading the repository contents to:
 
 ```text
-Files/weaver-items/
+Files/weaver_items/
 ```
 
 After that point, notebook and desktop workflows use the same repository, binding, build, catalogue and reconciliation concepts.
@@ -1806,7 +1806,7 @@ repository = parse_item_repository(
 )
 ```
 
-The exact API may differ, but it must validate the uploaded `Files/weaver-items/` structure before build.
+The exact API may differ, but it must validate the uploaded `Files/weaver_items/` structure before build.
 
 ### Build
 
@@ -1936,7 +1936,7 @@ These are different operations.
 1. Add reusable push application operation.
 2. Validate the complete local repository with `parse_item_repository`.
 3. Upload the complete repository.
-4. Use canonical destination `Files/weaver-items/`.
+4. Use canonical destination `Files/weaver_items/`.
 5. Add `weaver push <root>`.
 6. Remove `--weaver-repository`.
 7. Do not implement selective push.
@@ -2061,7 +2061,7 @@ Prove that:
 
 - invalid local repositories fail before upload;
 - valid repositories upload completely;
-- destination is `Files/weaver-items/`;
+- destination is `Files/weaver_items/`;
 - the local root folder name is not inserted as an extra remote level;
 - no `--weaver-repository` option remains;
 - push performs no build;
@@ -2186,7 +2186,7 @@ install Python package
 ```text
 make Weaver package available
 → initialise Workspace/Weaver Lakehouse
-→ manually upload repository to Files/weaver-items/
+→ manually upload repository to Files/weaver_items/
 → parse and validate
 → build
 → repeated build preserving data
@@ -2197,7 +2197,7 @@ make Weaver package available
 All public examples use:
 
 - Workspace terminology;
-- `Files/weaver-items/`;
+- `Files/weaver_items/`;
 - no `--weaver-repository`;
 - no Host terminology;
 - no `catalogue=False`.
@@ -2214,7 +2214,7 @@ This refactor is complete when:
 - `parse_item_repository` is the canonical pure-Python boundary;
 - generated `_weaver` is composed without mutating authored source;
 - `weaver push ./ilg --weaver-lakehouse Weaver` validates and uploads the whole repository;
-- uploaded contents land at `Files/weaver-items/Lakehouse` and `Files/weaver-items/Warehouse`;
+- uploaded contents land at `Files/weaver_items/Lakehouse` and `Files/weaver_items/Warehouse`;
 - `--weaver-repository` no longer exists;
 - all bound physical Fabric items are assumed to exist before build;
 - `Lakehouse/_weaver` participates in every build;
