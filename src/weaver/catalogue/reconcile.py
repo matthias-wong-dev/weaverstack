@@ -10,7 +10,7 @@ exactly the keys the projection claims and the merge is idempotent, so the pair 
 correct against any prior state — including a state the planner could not see.
 That is deliberate: a build that derived its deletes from an inventory would have
 its deletion scope widened by a failed read, which is the failure mode
-build-philosophy §6 exists to prevent. Here a failed read cannot widen anything,
+how-does-build-work §6 exists to prevent. Here a failed read cannot widen anything,
 because nothing is derived from it.
 
 Reading is still worth doing, for a different reason: a reviewer should be able to
@@ -229,4 +229,3 @@ def prune_installation(scope: InstallationScope) -> tuple[str, ...]:
     # the explicit ordered equivalent of ON DELETE CASCADE.
     ordered = (REGISTRY, *reversed(DICTIONARY_TABLES), INSTALLATION)
     return tuple(render_delete_scope(table, scope=scope) for table in ordered)
-

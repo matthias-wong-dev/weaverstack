@@ -135,7 +135,7 @@ def test_the_same_payload_resolves_differently_per_destination(fabric, local):
     One set of bytes, generated once; the destination decides how it reads. Had
     the qualified name been frozen instead, two bundles of the same repository
     would differ in every payload merely for having been generated in different
-    workspaces (build-philosophy §10).
+    workspaces (how-does-build-work §15).
     """
 
     payload = (

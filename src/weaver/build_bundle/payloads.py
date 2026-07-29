@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import hashlib
 
-#: Sequence numbers for the foundational waves. Prune reconciles the target
-#: first; then schemas, folders, and the object layers, one sequence per
-#: dependency layer from OBJECT_SEQUENCE_START in steps.
-SCHEMA_SEQUENCE = 10
-RECONCILIATION_SEQUENCE = 20
+#: Sequence numbers for the foundational waves. Catalogue reconciliation and
+#: prune lead; managed drops and selected build layers follow in fixed steps.
+RECONCILIATION_SEQUENCE = 10
+PRUNE_CATALOGUE_SEQUENCE = 20
 PRUNE_SEQUENCE = 30
-FOLDER_SEQUENCE = 40
-OBJECT_SEQUENCE_START = 40
+MANAGED_CATALOGUE_SEQUENCE = 40
+MANAGED_DROP_SEQUENCE_START = 50
 OBJECT_SEQUENCE_STEP = 10
 
 #: Catalogue work concludes a build, and its numbers sit far above the object

@@ -7,7 +7,7 @@ This document is the authoritative implementation plan for the current Weaver CL
 It supersedes:
 
 - the earlier CLI and Workspace specification;
-- the earlier non-destructive Delta, catalogue and repository parsing plan;
+- the earlier Delta, catalogue and repository parsing plan;
 - the earlier use of `--weaver-repository`;
 - the earlier Host/Hosts terminology;
 - the earlier optional `catalogue=False` build path.
@@ -41,12 +41,12 @@ The principal outcomes are:
 4. `Lakehouse/_weaver` is logically included in every repository and build.
 5. Every ordinary build is catalogue-aware and catalogue-certified.
 6. `catalogue=False` is removed.
-7. Delta table creation becomes non-destructive through `CREATE TABLE IF NOT EXISTS`.
+7. Incremental selection leaves unchanged objects alone and uses strict create for selected objects.
 8. Catalogue reconciliation produces a trustworthy `ReconciledCatalogue` and associated delete DML before bundle generation.
 9. Bundle generation consumes prepared repository, catalogue and target state and performs no remote discovery.
 10. `weaver unbind` removes catalogue state for named physical targets.
 11. Catalogue reconciliation remains distinct from unbind.
-12. Incremental build selection and full schema-evolution logic remain separate future work.
+12. Incremental build selection is recorded in `plan.yml`; broader schema migration remains separate work.
 
 ---
 
@@ -71,7 +71,8 @@ This branch includes:
 - catalogue reconciliation;
 - `ReconciledCatalogue`;
 - reconciliation delete DML;
-- non-destructive Delta table creation;
+- item-scoped incremental build selection;
+- strict creation for planner-selected objects;
 - narrowing of build orchestration;
 - narrowing of bundle generation;
 - explicit unbind behaviour;
@@ -82,12 +83,10 @@ This branch includes:
 
 ## 2.2 Out of scope
 
-This branch does not implement the complete future incremental-build design.
+This branch does not implement broader schema migration or cross-item rebuild impact.
 
 Specifically out of scope:
 
-- selecting changed Weaver documents by signature;
-- rebuilding dependent descendants based on changed signatures;
 - general Delta schema evolution;
 - `ALTER TABLE` planning;
 - compatibility classification for schema changes;
@@ -99,7 +98,8 @@ Specifically out of scope:
 - multiple simultaneous physical installations of one logical item in one build;
 - automatic creation of bound Fabric Lakehouse and Warehouse items.
 
-Some interfaces introduced here must support future incremental build, but this branch must not broaden into implementing that later feature.
+Incremental impact is intentionally item-scoped until coordinated cross-item
+build semantics are designed.
 
 ---
 
@@ -197,12 +197,12 @@ builds or preserves physical objects
 
 `catalogue=False` is removed from all public and internal build APIs.
 
-## 3.7 Delta creation is non-destructive
+## 3.7 Delta creation follows incremental selection
 
-Generated Delta table DDL uses:
+Generated Delta table DDL for a selected new or rebuilt object uses:
 
 ```sql
-CREATE TABLE IF NOT EXISTS
+CREATE TABLE
 ```
 
 It does not use:
@@ -211,15 +211,13 @@ It does not use:
 CREATE OR REPLACE TABLE
 ```
 
-Views may continue to use:
+Views use the same strict lifecycle:
 
 ```sql
-CREATE OR REPLACE VIEW
+CREATE VIEW
 ```
 
-This is an interim safety change that gets the architecture through the current branch.
-
-Future schema evolution is signature-driven:
+Incremental selection is signature-driven:
 
 ```text
 signature changed
@@ -227,7 +225,8 @@ signature changed
 → existing object dropped before creation
 ```
 
-This branch does not implement that incremental selection.
+The incremental selection and its resulting physical actions are recorded in
+the bundle plan before installation.
 
 ## 3.8 Planner performs no remote discovery
 
@@ -935,9 +934,9 @@ The Weaver Lakehouse itself must already exist.
 Catalogue table DDL uses:
 
 ```sql
-CREATE SCHEMA IF NOT EXISTS _;
+CREATE SCHEMA _;
 
-CREATE TABLE IF NOT EXISTS _.Registry (
+CREATE TABLE _.Registry (
     ...
 )
 USING DELTA;
@@ -969,7 +968,7 @@ Weaver must not pretend to recover them automatically.
 
 ## 13.6 Catalogue evolution
 
-`CREATE TABLE IF NOT EXISTS` does not migrate an existing catalogue schema.
+Strict `CREATE TABLE` does not migrate an existing catalogue schema.
 
 Future catalogue migrations require explicit migration logic.
 
@@ -985,16 +984,16 @@ For this branch:
 
 ## 14.1 Required change
 
-Replace generated Delta table DDL:
+Replace defensive generated Delta table DDL:
 
 ```sql
-CREATE OR REPLACE TABLE ...
+CREATE TABLE IF NOT EXISTS ...
 ```
 
 with:
 
 ```sql
-CREATE TABLE IF NOT EXISTS ...
+CREATE TABLE ...
 USING DELTA
 ```
 
@@ -1008,31 +1007,31 @@ Apply this to:
 
 ## 14.2 Views
 
-Views retain replacement semantics:
+Views use strict creation after a planned managed drop:
 
 ```sql
-CREATE OR REPLACE VIEW ...
+CREATE VIEW ...
 ```
 
-Replacing a view definition is not equivalent to replacing stored table data.
+An unexpected existing view is a collision and fails visibly.
 
-## 14.3 Interim semantics
+## 14.3 Incremental semantics
 
-This branch does not need to compare physical Delta schema to declared schema as a new general planning feature.
-
-The intended future schema behaviour is signature-based:
+Physical selection is signature-based:
 
 ```text
 catalogue signature unchanged
 → existing managed table is treated as current
 
 catalogue signature changed
-→ future incremental planner selects it
+→ incremental planner selects it
 → existing table is dropped upfront
 → table is recreated
 ```
 
-`CREATE TABLE IF NOT EXISTS` is an interim non-destructive primitive. It prevents the current general build path from replacing table data merely because a create statement is emitted.
+Unchanged objects emit no physical create. A selected existing object is
+uncertified, explicitly dropped, and strictly recreated. This makes a collision
+evidence of an incorrect plan rather than a silent success.
 
 ## 14.4 Shared rendering rule
 
@@ -1217,9 +1216,9 @@ This makes reconciliation independently testable from bundle generation and avoi
 
 ## 16.6 Relationship to incremental build
 
-Future incremental build may use trusted signatures from `ReconciledCatalogue` to decide what changed.
-
-This branch does not implement that changed-signature selection.
+Incremental build uses trusted signatures from `ReconciledCatalogue` to decide
+what changed. It expands changed roots through existing descendants within the
+same item, then applies `Prohibit Rebuild` to physical selection.
 
 ---
 
@@ -1408,8 +1407,8 @@ The planner must:
 - compare repository declarations to target inventories for prune;
 - consume trusted catalogue state;
 - include reconciliation delete DML;
-- emit non-destructive Delta creation;
-- emit view replacement where appropriate;
+- emit strict Delta and view creation only for selected documents;
+- emit managed catalogue deletion and physical drops in dependency-safe order;
 - generate deterministic create/drop/prune actions;
 - generate catalogue publication;
 - preserve registry-last certification;
@@ -1950,15 +1949,15 @@ These are different operations.
 4. Ensure catalogue schema and tables can be created during ordinary build.
 5. Preserve `weaver initialise` as the Fabric-item creation/preparation operation.
 
-## Phase 5 — non-destructive Delta creation
+## Phase 5 — incremental strict creation
 
 1. Locate every Delta table DDL renderer.
-2. Replace `CREATE OR REPLACE TABLE` with `CREATE TABLE IF NOT EXISTS`.
+2. Emit plain `CREATE TABLE` only for new or selected rebuilt tables.
 3. Use the same invariant for `_weaver` and user tables.
-4. Leave view replacement unchanged.
-5. Add tests forbidding replace-style Delta table DDL.
-6. Add tests proving repeat build preserves existing data.
-7. Do not implement general schema evolution in this phase.
+4. Emit plain `CREATE VIEW` after planned managed drops.
+5. Add tests forbidding defensive generated create DDL.
+6. Add tests proving an unchanged build emits no physical action.
+7. Keep broader schema migration outside this phase.
 
 ## Phase 6 — mandatory catalogue
 
@@ -2085,10 +2084,10 @@ Prove that:
 
 Prove that:
 
-- every generated Delta table uses `CREATE TABLE IF NOT EXISTS`;
+- every selected Delta table uses strict `CREATE TABLE`;
 - no generated Delta table uses `CREATE OR REPLACE TABLE`;
-- views retain replace semantics;
-- repeated build preserves existing table rows;
+- views use strict `CREATE VIEW`;
+- repeated unchanged build emits no physical action and preserves existing rows;
 - wipe can still remove tables explicitly.
 
 ## 31.5 Mandatory catalogue
@@ -2218,7 +2217,7 @@ This refactor is complete when:
 - `--weaver-repository` no longer exists;
 - all bound physical Fabric items are assumed to exist before build;
 - `Lakehouse/_weaver` participates in every build;
-- all Delta table creation is `CREATE TABLE IF NOT EXISTS`;
+- selected Delta table creation is strict `CREATE TABLE`;
 - ordinary build never implicitly replaces Delta data;
 - `catalogue=False` no longer exists;
 - every ordinary build publishes catalogue state;

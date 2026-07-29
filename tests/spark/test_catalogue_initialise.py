@@ -275,7 +275,7 @@ def test_a_users_own_schema_in_the_weaver_lakehouse_survives_initialisation(spar
 
 
 def test_re_running_initialisation_preserves_the_same_rows(spark, tmp_path):
-    """Non-destructive table creation preserves the published catalogue."""
+    """An unchanged incremental plan preserves the published catalogue."""
 
     _drop_catalogue_schema(spark)
     try:

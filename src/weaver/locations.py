@@ -120,7 +120,7 @@ class LakehouseSparkLocation:
     derived from the item at install time, because on Fabric it embeds workspace
     and item ids and locally it embeds a temporary directory — and a bundle whose
     identity moved with a temporary path would not be comparable between
-    environments (build-philosophy §10).
+    environments (how-does-build-work §15).
     """
 
     #: The Lakehouse this resolves, by its logical name.

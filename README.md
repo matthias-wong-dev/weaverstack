@@ -63,6 +63,7 @@ unbind.
 ## Documentation
 
 - [Authoritative master plan](docs/weaver_master_cli_plan.md)
+- [How Weaver build works](docs/how-does-build-work.md) — incremental selection, bundle order and certification
 - [Where your Weaver document repository lives](docs/weaver-repository.md) — a folder of files, and how it reaches Fabric
 - [CLI usage](docs/cli-usage.md) — signing in, workspaces, capacity, wipe
 - [Local development setup](docs/local-setup.md)

@@ -163,10 +163,10 @@ def test_declared_builds_the_table_from_the_declaration_and_validates_the_query(
     assert "case bt.base_type" not in content
 
 
-def test_a_warehouse_view_is_a_create_or_alter_view():
+def test_a_warehouse_view_is_a_strict_create_view():
     ddl = _ddl("Reporting.ActiveReport.sql", VIEW)
     assert ddl.content == (
-        "create or alter view [Reporting].[ActiveReport] as\n"
+        "create view [Reporting].[ActiveReport] as\n"
         "select CustomerId from [Sales_LH].[Reporting].[CustomerReport]\n"
     )
 

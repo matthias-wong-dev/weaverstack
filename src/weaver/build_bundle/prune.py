@@ -95,11 +95,27 @@ def read_lakehouse_inventory(
     lakehouse = ItemRef(target.item_id)
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)
+    reserved_schemas = set(_RESERVED_SCHEMAS)
+    if target.logical_item_name == "_weaver":
+        reserved_schemas.discard(CATALOGUE_SCHEMA)
     schemas = tuple(
         entry.name
         for entry in _child_dirs(store, tables_root)
-        if entry.name.casefold() not in _RESERVED_SCHEMAS
+        if entry.name.casefold() not in reserved_schemas
     )
+    catalogue = _catalogue_for(resolver, lakehouse, spark)
+    if (
+        target.logical_item_name == "_weaver"
+        and catalogue is not None
+        and catalogue.schema_exists(CATALOGUE_SCHEMA)
+        and CATALOGUE_SCHEMA.casefold()
+        not in {schema.casefold() for schema in schemas}
+    ):
+        # The empty catalogue schema is catalogue state, not storage state: until
+        # its first table exists there is no Tables/_ directory for the store to
+        # discover.  The package-owned control item is the one safe exception to
+        # storage-only schema discovery because it is the attached Lakehouse.
+        schemas += (CATALOGUE_SCHEMA,)
     tables = tuple(
         f"{schema}.{entry.name}"
         for schema in schemas
@@ -116,7 +132,6 @@ def read_lakehouse_inventory(
         for child in _child_dirs(store, entry.location)
     )
     views: tuple[str, ...] = ()
-    catalogue = _catalogue_for(resolver, lakehouse, spark)
     if catalogue is not None:
         views = tuple(
             f"{schema}.{view}"

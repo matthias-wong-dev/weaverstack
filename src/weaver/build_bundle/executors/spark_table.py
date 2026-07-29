@@ -4,7 +4,7 @@ A Spark SQL table's shape is only settled by running its query in the session, s
 its payload is not finished SQL. It is a JSON instruction (built by
 :func:`weaver.ses.ddl._spark_table_ddl`) that this executor completes in a single
 pass, the Spark counterpart of the old T-SQL self-contained script
-(build-philosophy §7.3):
+(how-does-build-work §2):
 
 1. run the query and read the resulting ``DataFrame`` schema — Spark resolves the
    column names and types from the logical plan without running a job, so no rows
@@ -15,7 +15,7 @@ pass, the Spark counterpart of the old T-SQL self-contained script
 3. choose the physical business columns — declared types when declared, the
    query's inferred types otherwise;
 4. append Weaver's audit columns;
-5. create the table with ``CREATE TABLE IF NOT EXISTS``.
+5. create the table with strict ``CREATE TABLE``.
 
 Identity is validated (it must name a produced column) but not materialised on
 Delta: an identity/generated column is not portably available on the local Delta
@@ -173,7 +173,7 @@ def _create_table_sql(
         "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')" if column_mapping else ""
     )
     return (
-        f"CREATE TABLE IF NOT EXISTS {qualified} (\n"
+        f"CREATE TABLE {qualified} (\n"
         f"{column_lines}\n"
         ")\n"
         "USING delta"

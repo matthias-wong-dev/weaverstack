@@ -156,7 +156,7 @@ def _rebuild_with_broken_summary(build_env, bundle):
         payloads[action.payload] = store.read(bundle.location.join(*action.payload.split("/")))
 
     broken = (
-        b"CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomerSummary}} AS\n"
+        b"CREATE VIEW {{object:DWG.ActiveCustomerSummary}} AS\n"
         b"select count(*) as CustomerCount from {{object:DWG.ActiveCustomer}} "
         b"where NoSuchColumn = 1\n"
     )
@@ -202,15 +202,19 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
     outcome = build_env.install(broken)
 
     assert outcome.status == "failed"
-    # A clean target needs no prune; everything up to the summary succeeded.
-    assert outcome.sequence_status[10] == "succeeded"  # create schemas
-    assert outcome.sequence_status[40] == "succeeded"  # DWG.Customer
-    assert outcome.sequence_status[50] == "succeeded"  # ActiveCustomer
     failed_action = "object-Lakehouse--Raw--DWG.ActiveCustomerSummary"
     failed_sequence = next(
         sequence.number
         for sequence in broken.plan.sequences
         if any(action.id == failed_action for batch in sequence.batches for action in batch.actions)
+    )
+    # Sequence numbers are planner output. Every emitted phase before the
+    # broken summary must complete, regardless of whether schema creation was
+    # necessary for this target inventory.
+    assert all(
+        outcome.sequence_status[sequence.number] == "succeeded"
+        for sequence in broken.plan.sequences
+        if sequence.number < failed_sequence
     )
     assert outcome.sequence_status[failed_sequence] == "failed"
     assert outcome.action_status[failed_action] == "failed"

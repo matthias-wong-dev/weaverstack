@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from ..declaration.model import WeaverItemId
+from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..errors import BuildError
 from ..spark.tokens import object_token
 from .reader import _is_absent, read_installation
 from .render import InstallationScope, identifier, literal
-from .tables import CATALOGUE_TABLES, REGISTRY, CatalogueTable
+from .tables import CATALOGUE_TABLES, DICTIONARY_TABLES, REGISTRY, CatalogueTable
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,15 @@ class ReconciledCatalogue:
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     delete_dml: tuple[str, ...] = ()
     stale_objects: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CatalogueClaimDelete:
+    """One frozen removal of one document's rows from one catalogue table."""
+
+    identity: WeaverDocumentId
+    table: CatalogueTable
+    statement: str
 
 
 @dataclass(frozen=True, order=True)
@@ -156,4 +165,85 @@ def _delete_object(
         f"WHERE {scope.predicate}\n"
         f"  AND {identifier('schema_name')} = {literal(schema)}\n"
         f"  AND {identifier('object_name')} = {literal(name)}"
+    )
+
+
+def registered_documents(
+    catalogue: ReconciledCatalogue, *, items: set[WeaverItemId] | None = None
+) -> tuple[WeaverDocumentId, ...]:
+    """Canonical document identities certified by the reconciled Registry."""
+
+    identities = []
+    for item, tables in catalogue.rows.items():
+        if items is not None and item not in items:
+            continue
+        for row in tables.get(REGISTRY.name, ()):
+            identities.append(_row_identity(item, row))
+    return tuple(sorted(set(identities), key=str))
+
+
+def registered_document_types(
+    catalogue: ReconciledCatalogue, *, items: set[WeaverItemId] | None = None
+) -> Mapping[WeaverDocumentId, str]:
+    """Installed physical type for every document certified by Registry."""
+
+    types = {}
+    for item, tables in catalogue.rows.items():
+        if items is not None and item not in items:
+            continue
+        for row in tables.get(REGISTRY.name, ()):
+            types[_row_identity(item, row)] = str(row.get("object_type") or "")
+    return MappingProxyType(types)
+
+
+def render_catalogue_claim_deletes(
+    catalogue: ReconciledCatalogue,
+    identities,
+) -> tuple[CatalogueClaimDelete, ...]:
+    """Uncertify selected documents, then remove their owned dictionary rows.
+
+    Only tables that currently contain matching rows receive DML.  This keeps a
+    partially present catalogue safe: a missing table is never named merely
+    because it belongs to the conceptual catalogue schema.
+    """
+
+    selected = tuple(sorted(set(identities), key=str))
+    deletes = []
+    for identity in selected:
+        tables = catalogue.rows.get(identity.item, {})
+        scope = InstallationScope(identity.item.item_type, identity.item.item_name)
+        schema = (
+            f"Files/{identity.object_id.schema}"
+            if identity.is_files
+            else identity.object_id.schema
+        )
+        for table in (REGISTRY, *reversed(DICTIONARY_TABLES)):
+            if not _object_columns(table):
+                continue
+            matching = any(
+                str(row.get("schema_name")) == schema
+                and str(row.get("object_name")) == identity.object_id.object
+                for row in tables.get(table.name, ())
+            )
+            if not matching:
+                continue
+            deletes.append(
+                CatalogueClaimDelete(
+                    identity=identity,
+                    table=table,
+                    statement=_delete_object(
+                        table, scope, schema, identity.object_id.object
+                    ),
+                )
+            )
+    return tuple(deletes)
+
+
+def _row_identity(item: WeaverItemId, row: Mapping[str, object]) -> WeaverDocumentId:
+    schema = str(row.get("schema_name") or "")
+    is_files = schema.startswith("Files/")
+    logical_schema = schema[len("Files/") :] if is_files else schema
+    prefix = "Files/" if is_files else ""
+    return WeaverDocumentId.parse(
+        f"{item}/{prefix}{logical_schema}.{row.get('object_name')}"
     )

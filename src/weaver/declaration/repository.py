@@ -26,6 +26,7 @@ checkout and a declaration installed in the Weaver Lakehouse.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
@@ -66,6 +67,7 @@ from .source import (
     object_id_for_filename,
     read_source_document,
 )
+from .dependencies import PythonImport
 from .references import validate_repository_metadata
 from .item_dependencies import resolve_item_dependencies
 
@@ -325,6 +327,13 @@ def parse_item_repository(
     )
     validate_repository_metadata(source_documents.values(), aliases=aliases)
 
+    source_documents = _with_build_signatures(
+        source_documents,
+        support_files=support_files,
+        store=store,
+        root=root,
+    )
+
     items = [
         replace(
             model,
@@ -354,6 +363,142 @@ def parse_item_repository(
         generated_files=generated_files,
     )
     return resolve_item_dependencies(repository)
+
+
+def _with_build_signatures(
+    documents: Mapping[WeaverDocumentId, SourceDocument],
+    *,
+    support_files: Iterable[str],
+    store: Store,
+    root: Location,
+) -> dict[WeaverDocumentId, SourceDocument]:
+    """Attach each document's own, statically reachable implementation hash.
+
+    ``lib/`` is item-owned source code, but hashing the whole directory into
+    every object would make an unrelated helper rebuild the item.  Instead each
+    Python document carries the transitive closure of the helper modules it can
+    import.  Discovery remains static: helper modules are parsed, never imported
+    or executed.
+    """
+
+    from .source import PYTHON, content_hash
+
+    helper_paths: dict[WeaverItemId, dict[tuple[str, ...], str]] = {}
+    helper_hashes: dict[str, str] = {}
+    for relative in support_files:
+        parts = relative.split("/")
+        if len(parts) < 4 or parts[2] != "lib" or not relative.endswith(".py"):
+            continue
+        item = WeaverItemId(parts[0], parts[1])
+        module = tuple(parts[2:-1] + [parts[-1][:-3]])
+        helper_paths.setdefault(item, {})[module] = relative
+        helper_hashes[relative] = content_hash(
+            store.read(root.join(*relative.split("/")))
+        )
+
+    parsed_imports: dict[str, tuple[PythonImport, ...]] = {}
+
+    def imports_for(relative: str) -> tuple[PythonImport, ...]:
+        if relative in parsed_imports:
+            return parsed_imports[relative]
+        data = store.read(root.join(*relative.split("/")))
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise DiscoveryError(f"{relative}: must be UTF-8 text ({exc})") from exc
+        try:
+            module = ast.parse(text)
+        except SyntaxError as exc:
+            raise DiscoveryError(f"{relative}: invalid imported helper Python: {exc}") from exc
+        parsed_imports[relative] = _python_imports(module)
+        return parsed_imports[relative]
+
+    resolved: dict[WeaverDocumentId, SourceDocument] = {}
+    for identity, source in documents.items():
+        if source.language != PYTHON:
+            resolved[identity] = replace(source, build_signature=source.source_hash)
+            continue
+
+        available = helper_paths.get(identity.item, {})
+        current = _module_within_item(source.relative_path)
+        pending = list(_helper_targets(source.python_imports, current, available))
+        reached: set[tuple[str, ...]] = set()
+        while pending:
+            helper = pending.pop()
+            if helper in reached:
+                continue
+            reached.add(helper)
+            relative = available[helper]
+            pending.extend(
+                target
+                for target in _helper_targets(imports_for(relative), helper, available)
+                if target not in reached
+            )
+
+        if not reached:
+            resolved[identity] = replace(source, build_signature=source.source_hash)
+            continue
+        digest = hashlib.sha256()
+        entries = [(source.relative_path, source.source_hash)] + [
+            (available[module], helper_hashes[available[module]])
+            for module in sorted(reached)
+        ]
+        for relative, signature in entries:
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(signature.encode("ascii"))
+            digest.update(b"\n")
+        resolved[identity] = replace(source, build_signature=digest.hexdigest())
+    return resolved
+
+
+def _module_within_item(relative: str) -> tuple[str, ...]:
+    parts = relative.split("/")[2:]
+    return tuple(parts[:-1] + [parts[-1][:-3]])
+
+
+def _helper_targets(
+    imports: Iterable[PythonImport],
+    current: tuple[str, ...],
+    available: Mapping[tuple[str, ...], str],
+) -> tuple[tuple[str, ...], ...]:
+    found: set[tuple[str, ...]] = set()
+    package = current[:-1]
+    for imported in imports:
+        module = tuple(imported.module.split(".")) if imported.module else ()
+        if imported.level:
+            parents = imported.level - 1
+            if parents > len(package):
+                continue
+            base = package[: len(package) - parents] + module
+        else:
+            base = module
+        if base in available:
+            found.add(base)
+        for name in imported.names:
+            candidate = base + tuple(name.split("."))
+            if candidate in available:
+                found.add(candidate)
+    return tuple(sorted(found))
+
+
+def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:
+    imports: list[PythonImport] = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom):
+            imports.append(
+                PythonImport(
+                    module=node.module,
+                    level=node.level,
+                    names=tuple(alias.name for alias in node.names),
+                )
+            )
+        elif isinstance(node, ast.Import):
+            imports.extend(
+                PythonImport(module=alias.name, names=(alias.name,))
+                for alias in node.names
+            )
+    return tuple(imports)
 
 
 def _item_signature(
@@ -731,4 +876,3 @@ def unresolved_references(
         if outside or physical:
             unresolved[document.node_id] = outside + physical
     return unresolved
-

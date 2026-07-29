@@ -1,7 +1,7 @@
 """``SourceDocument.create_ddl`` — the generated *create* DDL per source.
 
 Build creates structure, not data. A Delta table (Python or Spark SQL) becomes a
-``CREATE TABLE`` over its declared columns; a view becomes ``CREATE OR REPLACE
+``CREATE TABLE`` over its declared columns; a view becomes strict ``CREATE
 VIEW`` over its query body. A Folder has no DDL (it is a directory). T-SQL
 generation has its own test module (``test_declaration_tsql_ddl``); here we only assert a
 SQL object routes to the ``tsql`` executor. Nothing here runs ``read()``.
@@ -63,13 +63,13 @@ Dependencies:
 """
 
 
-def test_view_wraps_body_in_create_or_replace_view():
+def test_view_wraps_body_in_strict_create_view():
     ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
 
     assert isinstance(ddl, GeneratedDdl)
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
     assert ddl.content.startswith(
-        "CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS\n"
+        "CREATE VIEW {{object:DWG.ActiveCustomer}} AS\n"
     )
 
 
@@ -111,7 +111,7 @@ def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
 def test_view_normalises_only_trailing_whitespace():
     ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl()
     assert ddl.content == (
-        "CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS\n"
+        "CREATE VIEW {{object:DWG.ActiveCustomer}} AS\n"
         f"{ADDRESSED_BODY}\n"
     )
 
@@ -119,7 +119,7 @@ def test_view_normalises_only_trailing_whitespace():
 def test_view_has_exactly_one_create_and_none_in_the_source():
     doc = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE)
     ddl = doc.create_ddl()
-    assert ddl.content.count("CREATE OR REPLACE VIEW") == 1
+    assert ddl.content.count("CREATE VIEW") == 1
     assert "create" not in (doc.sql_body or "").lower()
 
 
@@ -169,13 +169,13 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
 
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
     assert ddl.content.startswith(
-        "CREATE TABLE IF NOT EXISTS {{object:DWG.Customer}} (\n"
+        "CREATE TABLE {{object:DWG.Customer}} (\n"
     )
     assert "`CustomerId` integer" in ddl.content
     assert "`CustomerName` string" in ddl.content
     assert "`IsActive` boolean" in ddl.content
     # Every built table carries the audit columns, in the Delta (underscored)
-    # spelling, as not-null timestamps (build-philosophy §7.1, plan "Audit
+    # spelling, as not-null timestamps (how-does-build-work §2, plan "Audit
     # columns"); Weaver populates all three on every loaded row.
     assert "`row_insert_datetime` timestamp NOT NULL" in ddl.content
     assert "`row_update_datetime` timestamp NOT NULL" in ddl.content
@@ -187,7 +187,7 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
 def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     """A Spark SQL table's shape is only settled by running its query, so its
     payload is a deterministic instruction the ``spark_table`` executor completes
-    at install — not finished SQL (build-philosophy §7.3). The query therefore
+    at install — not finished SQL (how-does-build-work §2). The query therefore
     *does* belong in the payload; it is executed at install, not at build."""
 
     ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl()

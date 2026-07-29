@@ -158,8 +158,9 @@ def initialise_weaver_lakehouse(
     Idempotent to re-run in *shape*: the same package produces the same bundle, and
     the catalogue's own reconciliation is a no-op when nothing changed.
 
-    Table creation is non-destructive, so re-running initialisation preserves
-    existing catalogue rows while its catalogue tail reconciles the built-in item.
+    An unchanged incremental plan emits no physical table work, so re-running
+    initialisation preserves existing catalogue rows while its catalogue tail
+    reconciles the built-in item.
     """
 
     resolver = resolver_for(workspace)

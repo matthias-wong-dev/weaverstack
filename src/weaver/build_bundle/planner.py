@@ -18,6 +18,10 @@ from .models import (
     BUILD_TABLE,
     BUILD_VIEW,
     CREATE_SCHEMA,
+    DELETE_CATALOGUE_CLAIMS,
+    DROP_FOLDER,
+    DROP_TABLE,
+    DROP_VIEW,
     OMIT_TARGET_UNBOUND,
     PUBLISH_REGISTRY,
     RECONCILE_CATALOGUE,
@@ -28,19 +32,33 @@ from .models import (
     BuildSequence,
     OmittedNode,
 )
-from .payloads import SCHEMA_SEQUENCE, payload_path, sha256_hex
+from .payloads import payload_path, sha256_hex
 from .payloads import (
     CATALOGUE_SEQUENCE,
     INSTALLATION_SEQUENCE,
+    MANAGED_CATALOGUE_SEQUENCE,
+    MANAGED_DROP_SEQUENCE_START,
+    OBJECT_SEQUENCE_STEP,
+    PRUNE_CATALOGUE_SEQUENCE,
     PRUNE_SEQUENCE,
     RECONCILIATION_SEQUENCE,
     REGISTRY_SEQUENCE,
+    check_sequence_headroom,
 )
 from .targets import LAKEHOUSE_TARGET, ItemBindings, LakehouseBinding, WAREHOUSE_TARGET
 from .prune import TargetInventory
-from ..catalogue.state import ReconciledCatalogue
+from .incremental import select_incremental_build
+from ..catalogue.state import (
+    ReconciledCatalogue,
+    registered_document_types,
+    registered_documents,
+    render_catalogue_claim_deletes,
+)
+from ..spark.tokens import object_token
 
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
+_DROP_KIND = {FOLDER: DROP_FOLDER, TABLE: DROP_TABLE, VIEW: DROP_VIEW}
+_DECLARATION_KIND = {"folder": FOLDER, "table": TABLE, "view": VIEW}
 
 
 def generate_item_build_bundle(
@@ -94,39 +112,104 @@ def generate_item_build_bundle(
     target_by_item = {
         item: by_item[item].to_bound_target() for item in sorted(by_item, key=str)
     }
+    inventories = dict(target_inventories or {})
+    for item, target in target_by_item.items():
+        inventory = inventories.get(item)
+        if inventory is None:
+            raise BuildError(f"planning {item} requires a prepared target inventory")
+        if inventory.target_id != target.id:
+            raise BuildError(
+                f"inventory for {item} describes {inventory.target_id}, not {target.id}"
+            )
+
+    selection = select_incremental_build(
+        repository,
+        reconciled_catalogue,
+        selected=selected_ids,
+    )
+    selected_for_drop = set(selection.selected_for_drop)
+    selected_for_build = set(selection.selected_for_build)
+
     payloads: dict[str, bytes] = {}
     sequences: list[BuildSequence] = []
     control_target = _control_target(control_lakehouse, targets)
     if all(target.id != control_target.id for target in targets):
         targets = targets + (control_target,)
 
-    prune_sequence = None
-    if prune:
-        prune_sequence = _item_prune_sequence(
-            repository,
-            selected_ids,
-            target_by_item,
-            target_inventories=target_inventories or {},
-            payloads=payloads,
-        )
-
-    schema_sequence = _schema_sequence(repository, selected_ids, target_by_item, payloads)
-    if schema_sequence is not None:
-        sequences.append(schema_sequence)
-
     reconciliation_sequence = _reconciliation_sequence(
         reconciled_catalogue.delete_dml, control_target, payloads
     )
     if reconciliation_sequence is not None:
         sequences.append(reconciliation_sequence)
-    if prune_sequence is not None:
-        sequences.append(prune_sequence)
 
-    if selected_ids:
-        selected_nodes = {str(identity) for identity in selected_ids}
+    if prune:
+        removed_registered = set(
+            registered_documents(reconciled_catalogue, items=set(by_item))
+        ) - selected_ids
+        prune_catalogue = _catalogue_delete_sequence(
+            reconciled_catalogue,
+            removed_registered,
+            number=PRUNE_CATALOGUE_SEQUENCE,
+            slug="prune-catalogue",
+            description="remove catalogue claims for registered prune objects",
+            control_target=control_target,
+            payloads=payloads,
+        )
+        if prune_catalogue is not None:
+            sequences.append(prune_catalogue)
+        prune_sequence = _item_prune_sequence(
+            repository,
+            selected_ids,
+            target_by_item,
+            target_inventories=inventories,
+            payloads=payloads,
+        )
+        if prune_sequence is not None:
+            sequences.append(prune_sequence)
+
+    managed_catalogue = _catalogue_delete_sequence(
+        reconciled_catalogue,
+        selected_for_drop,
+        number=MANAGED_CATALOGUE_SEQUENCE,
+        slug="managed-rebuild-catalogue",
+        description="remove catalogue claims for selected rebuilds",
+        control_target=control_target,
+        payloads=payloads,
+    )
+    if managed_catalogue is not None:
+        sequences.append(managed_catalogue)
+
+    next_number = MANAGED_DROP_SEQUENCE_START
+    drop_sequences = _managed_drop_sequences(
+        repository,
+        selected_for_drop,
+        target_by_item,
+        installed_types=registered_document_types(
+            reconciled_catalogue, items=set(by_item)
+        ),
+        start=next_number,
+        payloads=payloads,
+    )
+    sequences.extend(drop_sequences)
+    next_number += len(drop_sequences) * OBJECT_SEQUENCE_STEP
+
+    schema_sequence = _schema_sequence(
+        next_number,
+        selected_for_build,
+        target_by_item,
+        inventories,
+        payloads,
+    )
+    if schema_sequence is not None:
+        sequences.append(schema_sequence)
+    next_number += OBJECT_SEQUENCE_STEP
+
+    if selected_for_build:
+        selected_nodes = {str(identity) for identity in selected_for_build}
         graph = repository.dependency_graph.subgraph(selected_nodes)
         for layer_index, layer in enumerate(graph.layers()):
-            number = 40 + layer_index * 10
+            number = next_number + layer_index * OBJECT_SEQUENCE_STEP
+            check_sequence_headroom(number)
             sequences.append(
                 _item_layer_sequence(
                     number,
@@ -153,6 +236,8 @@ def generate_item_build_bundle(
             target_by_item,
             control_target,
             payloads,
+            reconciled_catalogue=reconciled_catalogue,
+            preserve_unpruned=not prune,
         )
     )
     plan = BuildPlan(
@@ -163,6 +248,7 @@ def generate_item_build_bundle(
         targets=targets,
         sequences=tuple(sequences),
         omitted_nodes=omitted,
+        incremental_selection=selection,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(
@@ -211,30 +297,77 @@ def _reconciliation_sequence(
     )
 
 
+def _catalogue_delete_sequence(
+    catalogue,
+    identities,
+    *,
+    number,
+    slug,
+    description,
+    control_target,
+    payloads,
+) -> BuildSequence | None:
+    deletes = render_catalogue_claim_deletes(catalogue, identities)
+    actions = []
+    for index, deletion in enumerate(deletes, start=1):
+        content = (deletion.statement.rstrip() + "\n").encode("utf-8")
+        identity_slug = _slug(deletion.identity)
+        table_slug = deletion.table.name.lower()
+        path = payload_path(
+            number,
+            slug,
+            f"delete-{identity_slug}-{table_slug}-{index:04d}.spark.sql",
+        )
+        payloads[path] = content
+        actions.append(
+            BuildAction(
+                id=f"{slug}-{identity_slug}-{table_slug}-{index:04d}",
+                kind=DELETE_CATALOGUE_CLAIMS,
+                resource_node_id=str(deletion.identity),
+                executor="spark_sql",
+                payload=path,
+                payload_sha256=sha256_hex(content),
+            )
+        )
+    if not actions:
+        return None
+    return BuildSequence(
+        number=number,
+        description=description,
+        batches=(
+            BuildBatch(
+                id=f"{number:03d}-{slug}",
+                target_id=control_target.id,
+                actions=tuple(actions),
+            ),
+        ),
+    )
+
+
 def _schema_sequence(
-    repository: WeaverRepository,
+    number: int,
     selected: set[WeaverDocumentId],
     targets,
+    inventories,
     payloads: dict[str, bytes],
 ) -> BuildSequence | None:
     batches: list[BuildBatch] = []
     for item in sorted(targets, key=str):
         target = targets[item]
+        present = {schema.casefold() for schema in inventories[item].schemas}
         schemas = sorted(
-            {
+            schema
+            for schema in {
                 identity.object_id.schema
                 for identity in selected
                 if identity.item == item and not identity.is_files
             }
+            if schema.casefold() not in present
         )
         actions: list[BuildAction] = []
         for schema in schemas:
             if target.kind == WAREHOUSE_TARGET:
-                statement = (
-                    "if not exists (select 1 from sys.schemas where name = "
-                    f"'{schema.replace(chr(39), chr(39) * 2)}')\n"
-                    f"    exec('create schema [{schema.replace(']', ']]')}]');\n"
-                )
+                statement = f"create schema [{schema.replace(']', ']]')}];\n"
                 content = statement.encode("utf-8")
                 executor, extension = "tsql", ".sql"
             else:
@@ -242,7 +375,7 @@ def _schema_sequence(
                 executor, extension = "spark_schema", ".schema.json"
             item_slug = _slug(item)
             path = payload_path(
-                SCHEMA_SEQUENCE,
+                number,
                 "create-schemas",
                 f"create-{item_slug}-{schema}{extension}",
             )
@@ -260,18 +393,113 @@ def _schema_sequence(
         if actions:
             batches.append(
                 BuildBatch(
-                    id=f"{SCHEMA_SEQUENCE:03d}-{_slug(item)}",
+                    id=f"{number:03d}-{_slug(item)}",
                     target_id=target.id,
                     actions=tuple(actions),
                 )
             )
     if not batches:
         return None
+    check_sequence_headroom(number)
     return BuildSequence(
-        number=SCHEMA_SEQUENCE,
+        number=number,
         description="create item-owned schemas",
         batches=tuple(batches),
     )
+
+
+def _managed_drop_sequences(
+    repository,
+    selected,
+    targets,
+    *,
+    installed_types,
+    start,
+    payloads,
+) -> tuple[BuildSequence, ...]:
+    if not selected:
+        return ()
+    nodes = {str(identity) for identity in selected}
+    graph = repository.dependency_graph.subgraph(nodes)
+    sequences = []
+    for layer_index, layer in enumerate(reversed(graph.layers())):
+        number = start + layer_index * OBJECT_SEQUENCE_STEP
+        check_sequence_headroom(number)
+        by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {}
+        identities = {str(identity): identity for identity in selected}
+        for node in layer:
+            identity = identities[node]
+            by_item.setdefault(identity.item, []).append(identity)
+        batches = []
+        for item in sorted(by_item, key=str):
+            actions = tuple(
+                _managed_drop_action(
+                    number,
+                    identity,
+                    installed_types[identity],
+                    targets[item],
+                    payloads,
+                )
+                for identity in sorted(by_item[item], key=str)
+            )
+            batches.append(
+                BuildBatch(
+                    id=f"{number:03d}-managed-drop-{_slug(item)}",
+                    target_id=targets[item].id,
+                    actions=actions,
+                )
+            )
+        sequences.append(
+            BuildSequence(
+                number=number,
+                description="drop selected rebuild dependency layer",
+                batches=tuple(batches),
+            )
+        )
+    return tuple(sequences)
+
+
+def _managed_drop_action(number, identity, installed_type, target, payloads) -> BuildAction:
+    installed_kind = _DECLARATION_KIND[installed_type]
+    kind = _DROP_KIND[installed_kind]
+    action_slug = _slug(identity)
+    if installed_kind == FOLDER:
+        return BuildAction(
+            id=f"managed-drop-{action_slug}",
+            kind=kind,
+            resource_node_id=str(identity),
+            executor="folder",
+            payload=None,
+            payload_sha256=None,
+        )
+
+    schema = identity.object_id.schema
+    name = identity.object_id.object
+    if target.kind == WAREHOUSE_TARGET:
+        keyword = "view" if installed_kind == VIEW else "table"
+        statement = f"drop {keyword} {_tsql_ident(schema)}.{_tsql_ident(name)};\n"
+        executor, extension = "tsql", ".sql"
+    else:
+        keyword = "VIEW" if installed_kind == VIEW else "TABLE"
+        statement = f"DROP {keyword} {object_token(schema, name)}\n"
+        executor, extension = "spark_sql", ".spark.sql"
+    content = statement.encode("utf-8")
+    path = payload_path(
+        number, "managed-drop", f"drop-{action_slug}{extension}"
+    )
+    payloads[path] = content
+    return BuildAction(
+        id=f"managed-drop-{action_slug}",
+        kind=kind,
+        resource_node_id=str(identity),
+        executor=executor,
+        payload=path,
+        payload_sha256=sha256_hex(content),
+    )
+
+
+def _tsql_ident(name: str) -> str:
+    return "[" + name.replace("]", "]]") + "]"
 
 
 def _item_layer_sequence(
@@ -369,6 +597,9 @@ def _catalogue_sequences(
     target_by_item,
     control_target,
     payloads,
+    *,
+    reconciled_catalogue,
+    preserve_unpruned,
 ):
     from .. import __version__
     from ..catalogue.projection import project_item_installation
@@ -388,6 +619,10 @@ def _catalogue_sequences(
             target_name=target_by_item[item].name,
             weaver_version=__version__,
         )
+        if preserve_unpruned:
+            projection = _preserve_unpruned_claims(
+                projection, reconciled_catalogue.rows.get(item, {})
+            )
         reconciliation = reconcile(projection)
         for number, (_description, kind, batches) in groups.items():
             reconciliation_group = {
@@ -427,6 +662,58 @@ def _catalogue_sequences(
         for number, (description, _kind, batches) in groups.items()
         if batches
     )
+
+
+def _preserve_unpruned_claims(projection, existing):
+    """Keep claims for still-physical documents excluded by ``--no-prune``.
+
+    Incoming rows remain authoritative for desired documents. Existing rows are
+    carried forward only for Registry identities absent from that projection,
+    plus their otherwise-unused schema rows. This still lets changed desired
+    documents remove obsolete column, index, dependency, and other metadata.
+    """
+
+    from ..catalogue.projection import CatalogueProjection
+    from ..catalogue.tables import (
+        CATALOGUE_TABLES,
+        REGISTRY,
+        SCHEMA_DICTIONARY,
+    )
+
+    desired_registry = {
+        (str(row.get("schema_name")), str(row.get("object_name")))
+        for row in projection.for_table(REGISTRY)
+    }
+    retained = {
+        (str(row.get("schema_name")), str(row.get("object_name")))
+        for row in existing.get(REGISTRY.name, ())
+        if (str(row.get("schema_name")), str(row.get("object_name")))
+        not in desired_registry
+    }
+    if not retained:
+        return projection
+
+    retained_schemas = {schema for schema, _name in retained}
+    combined = {}
+    for table in CATALOGUE_TABLES:
+        rows = list(projection.for_table(table))
+        keys = {tuple(row.get(column) for column in table.key) for row in rows}
+        for row in existing.get(table.name, ()):
+            names = set(table.column_names)
+            if {"schema_name", "object_name"} <= names:
+                keep = (
+                    str(row.get("schema_name")), str(row.get("object_name"))
+                ) in retained
+            elif table == SCHEMA_DICTIONARY:
+                keep = str(row.get("schema_name")) in retained_schemas
+            else:
+                keep = False
+            key = tuple(row.get(column) for column in table.key)
+            if keep and key not in keys:
+                rows.append(row)
+                keys.add(key)
+        combined[table.name] = tuple(rows)
+    return CatalogueProjection(scope=projection.scope, rows=combined)
 
 
 def _item_prune_sequence(

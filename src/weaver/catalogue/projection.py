@@ -91,7 +91,7 @@ def project_item_installation(
 
     for identity, source in zip(retained, documents):
         common = _identity(scope, identity)
-        signature = source.source_hash
+        signature = source.effective_signature
         rows[REGISTRY.name].append(
             {
                 **common,
@@ -178,7 +178,7 @@ def project_item_installation(
                 **_identity(scope, edge.consumer),
                 "dependency_name": edge.reference,
                 "is_within_item": edge.is_within_item,
-                "signature": source.source_hash,
+                "signature": source.effective_signature,
             }
         )
 

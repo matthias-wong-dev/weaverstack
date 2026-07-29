@@ -29,7 +29,7 @@ installation.
 **Signatures and audit columns.** Every table carries ``signature`` — the source
 hash of whatever the row projects — plus Weaver's own audit columns, which the
 ordinary build appends to any Delta table and which are therefore not declared
-here as business columns. ``signature`` is what a later branch will compare to
+here as business columns. ``signature`` is what incremental planning compares to
 decide what changed and must be dropped and rebuilt; it is the reason the
 catalogue is the foundation for idempotent building rather than a report on it.
 """
@@ -595,5 +595,4 @@ def table(name: str) -> CatalogueTable:
             f"{name!r} is not a catalogue table — expected one of "
             + ", ".join(sorted(TABLES_BY_NAME))
         ) from None
-
 

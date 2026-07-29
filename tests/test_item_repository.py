@@ -195,6 +195,46 @@ def test_item_signature_covers_its_schema_document_and_support_files(tmp_path):
     )
 
 
+def test_python_document_signature_covers_only_its_transitive_lib_imports(tmp_path):
+    root = _estate(tmp_path)
+    customer_path = root / "Lakehouse/Raw/Sales__Customer.py"
+    customer_path.write_text(
+        customer_path.read_text().replace(
+            "from weaver import Table",
+            "from weaver import Table\nfrom .lib.entry import rows",
+        ),
+        encoding="utf-8",
+    )
+    _write(
+        root,
+        "Lakehouse/Raw/lib/entry.py",
+        "from .csv_helpers import rows\n",
+    )
+    _write(root, "Lakehouse/Raw/lib/unused.py", "VALUE = 1\n")
+
+    before = parse_item_repository(Location(str(root)))
+    customer = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    folder = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Customer")
+
+    _write(root, "Lakehouse/Raw/lib/unused.py", "VALUE = 2\n")
+    unused_changed = parse_item_repository(Location(str(root)))
+    assert (
+        unused_changed.source_documents[customer].effective_signature
+        == before.source_documents[customer].effective_signature
+    )
+
+    _write(root, "Lakehouse/Raw/lib/csv_helpers.py", "def rows():\n    return [1]\n")
+    imported_changed = parse_item_repository(Location(str(root)))
+    assert (
+        imported_changed.source_documents[customer].effective_signature
+        != unused_changed.source_documents[customer].effective_signature
+    )
+    assert (
+        imported_changed.source_documents[folder].effective_signature
+        == unused_changed.source_documents[folder].effective_signature
+    )
+
+
 def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))

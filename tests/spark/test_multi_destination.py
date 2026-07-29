@@ -115,7 +115,9 @@ def _build(workspace, store, resolver, spark, lakehouse: str):
     return result
 
 
-def test_two_lakehouses_declaring_one_schema_get_two_tables(estate, spark):
+def test_two_lakehouses_declaring_one_schema_get_two_tables(
+    estate, spark, weaver_catalogue
+):
     workspace, store, resolver = estate
     _build(workspace, store, resolver, spark, FIRST)
     _build(workspace, store, resolver, spark, SECOND)

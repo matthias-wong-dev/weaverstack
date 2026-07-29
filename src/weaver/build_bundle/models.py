@@ -23,12 +23,20 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .targets import BoundTarget
+from .incremental import IncrementalSelection
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"
 BUILD_FOLDER = "build_folder"
 BUILD_TABLE = "build_table"
 BUILD_VIEW = "build_view"
+
+#: Managed rebuild drops.  They are deliberately distinct from prune: these
+#: objects remain desired and are removed only so a selected definition can be
+#: recreated.
+DROP_FOLDER = "drop_folder"
+DROP_TABLE = "drop_table"
+DROP_VIEW = "drop_view"
 
 #: Prune kinds. Each names one frozen drop the build computed against the target:
 #: a Spark SQL DROP for a table/view/schema, a directory removal for a folder.
@@ -42,10 +50,16 @@ PRUNE_FOLDER = "prune_folder"
 #: rather than one so the ordering invariant is assertable from a manifest: a
 #: reviewer, and a test, can see that registry publication is last.
 RECONCILE_CATALOGUE = "reconcile_catalogue"
+DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
 RECORD_INSTALLATION = "record_installation"
 PUBLISH_REGISTRY = "publish_registry"
 CATALOGUE_KINDS = frozenset(
-    {RECONCILE_CATALOGUE, RECORD_INSTALLATION, PUBLISH_REGISTRY}
+    {
+        RECONCILE_CATALOGUE,
+        DELETE_CATALOGUE_CLAIMS,
+        RECORD_INSTALLATION,
+        PUBLISH_REGISTRY,
+    }
 )
 
 #: Reasons a repository node is not in the plan. A missing target is visible,
@@ -178,9 +192,10 @@ class BuildPlan:
     targets: tuple[BoundTarget, ...]
     sequences: tuple[BuildSequence, ...]
     omitted_nodes: tuple[OmittedNode, ...] = ()
+    incremental_selection: IncrementalSelection | None = None
 
     def to_mapping(self) -> dict[str, Any]:
-        return {
+        mapping = {
             "format_version": self.format_version,
             "bundle_id": self.bundle_id,
             "repository_name": self.repository_name,
@@ -189,6 +204,9 @@ class BuildPlan:
             "sequences": [sequence.to_mapping() for sequence in self.sequences],
             "omitted_nodes": [node.to_mapping() for node in self.omitted_nodes],
         }
+        if self.incremental_selection is not None:
+            mapping["incremental_selection"] = self.incremental_selection.to_mapping()
+        return mapping
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildPlan":
@@ -201,6 +219,11 @@ class BuildPlan:
             sequences=tuple(BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())),
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
+            ),
+            incremental_selection=(
+                IncrementalSelection.from_mapping(mapping["incremental_selection"])
+                if mapping.get("incremental_selection") is not None
+                else None
             ),
         )
 

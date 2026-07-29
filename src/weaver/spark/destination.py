@@ -40,8 +40,8 @@ A destination is never carried in a build bundle. It is derived at install time
 from the item the bundle names, because a Fabric namespace is workspace-specific
 and a local one is rooted in a temporary directory — see
 :class:`~weaver.locations.LakehouseSparkLocation` for why a bundle that moved
-with either would stop being comparable between environments (build-philosophy
-§10).
+with either would stop being comparable between environments
+(how-does-build-work §15).
 """
 
 from __future__ import annotations

@@ -58,10 +58,7 @@ begin
     throw 51005, @weaver_column_error, 1;
 end;
 
-if object_id($target_table_literal, N'U') is null
-begin
-    create table $target_table (
+create table $target_table (
 $declared_column_definitions
-    );
-end;
+);
 $pk_alter_sql
