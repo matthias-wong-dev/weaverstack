@@ -20,7 +20,7 @@ import pytest
 
 from weaver import LocalStore, Location
 from weaver.errors import DiscoveryError, MetadataError
-from weaver.declaration import PYTHON, SPARK_SQL, parse_document, read_weaver_repository
+from weaver.declaration import PYTHON, SPARK_SQL, parse_document, parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
 
 REGISTRY = """\
@@ -106,7 +106,7 @@ def _repo(tmp_path, files: dict[str, str], schemas=("_",)):
         path = root / ITEM / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    return _Documents(read_weaver_repository(Location(value=str(root)), store=LocalStore()))
+    return _Documents(parse_item_repository(Location(value=str(root)), store=LocalStore()))
 
 
 def test_an_object_in_schema_underscore_is_read_as_an_object(tmp_path):

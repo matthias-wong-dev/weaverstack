@@ -27,7 +27,7 @@ https://database.windows.net/.default
 Core never calls `prefer_cli_credential()`. The desktop CLI and Fabric pytest
 infrastructure own that policy.
 
-## Fabric within-host mode
+## Fabric within-workspace mode
 
 `weaver.fabric.fabric_sql_executor()` is for installed Weaver running inside a
 Fabric notebook or Livy session. It uses:

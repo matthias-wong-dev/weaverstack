@@ -51,13 +51,12 @@ def test_generate_and_install_lakehouse_bundle(build_env):
     # Plan assertions, before installing.
     assert bundle.plan.format_version == 1
     assert bundle.plan.repository_name == "weaver_items"
-    assert len(bundle.plan.targets) == 1 and bundle.plan.targets[0].kind == "lakehouse"
-    # Weaver's own generated `Lakehouse/_weaver` is present in every declaration
-    # and unbound here, so it is omitted; nothing the fixture authored is.
-    assert all(
-        node.node_id.startswith("Lakehouse/_weaver/")
-        for node in bundle.plan.omitted_nodes
-    )
+    assert len(bundle.plan.targets) == 2
+    assert {target.logical_item_name for target in bundle.plan.targets} == {
+        "Raw",
+        "_weaver",
+    }
+    assert bundle.plan.omitted_nodes == ()
 
     # Independence: remove the source, then install from the bundle alone.
     build_env.remove_repo()
@@ -73,7 +72,7 @@ def test_generate_and_install_lakehouse_bundle(build_env):
 
     # Build creates structure, not data. A Folder is a directory Weaver makes at
     # an exact path; a Delta table is a catalog object (Fabric stores it at a
-    # host-chosen path), so it is checked by name.
+    # workspace-chosen path), so it is checked by name.
     assert build_env.store.exists(_folder(build_env, "Raw", "CustomerCsv"))
     assert "customer" in {
         r["tableName"].lower()
@@ -85,7 +84,7 @@ def test_generate_and_install_lakehouse_bundle(build_env):
     # directory is under the destination's own Tables area.
     #
     # Case-insensitively, and not by exact path, because the physical name is the
-    # host's to choose — Fabric lowercases a managed table's directory
+    # workspace's to choose — Fabric lowercases a managed table's directory
     # (`Tables/DWG/customer`) exactly as the local metastore does. Identity in
     # Weaver is case-insensitive, so the assertion is written to that.
     stored = {
@@ -204,11 +203,17 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
 
     assert outcome.status == "failed"
     # A clean target needs no prune; everything up to the summary succeeded.
-    assert outcome.sequence_status[20] == "succeeded"  # create schema DWG
+    assert outcome.sequence_status[10] == "succeeded"  # create schemas
     assert outcome.sequence_status[40] == "succeeded"  # DWG.Customer
     assert outcome.sequence_status[50] == "succeeded"  # ActiveCustomer
-    assert outcome.sequence_status[60] == "failed"     # ActiveCustomerSummary
-    assert outcome.action_status["object-Lakehouse--Raw--DWG.ActiveCustomerSummary"] == "failed"
+    failed_action = "object-Lakehouse--Raw--DWG.ActiveCustomerSummary"
+    failed_sequence = next(
+        sequence.number
+        for sequence in broken.plan.sequences
+        if any(action.id == failed_action for batch in sequence.batches for action in batch.actions)
+    )
+    assert outcome.sequence_status[failed_sequence] == "failed"
+    assert outcome.action_status[failed_action] == "failed"
 
     views = {
         row["viewName"].lower()

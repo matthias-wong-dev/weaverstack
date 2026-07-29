@@ -4,7 +4,7 @@
 bytes live. This answers the other half: what a statement has to write to reach
 that destination's catalogue, given that the session is attached somewhere else.
 
-The two hosts disagree, and the disagreement is **data**, not behaviour — which
+The two workspaces disagree, and the disagreement is **data**, not behaviour — which
 is why there is one class here and two constructors rather than two classes.
 
 **Fabric** has a native namespace for exactly this. Under ``spark_catalog`` a

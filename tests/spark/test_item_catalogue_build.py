@@ -10,12 +10,11 @@ from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
-    build_item_repository,
-    generate_item_build_bundle,
-    install_bundle,
+    build_uploaded_item_repository,
+    effective_item_bindings,
 )
 from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
-from weaver.declaration import read_weaver_repository
+from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.spark import SparkCatalogue
 
@@ -40,27 +39,16 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
 
     repository_root = lakehouses.location("Estate")
     lakehouses.store.make_directory(repository_root)
-    repository = read_weaver_repository(repository_root, store=lakehouses.store)
+    from weaver.initialise import initialise_weaver_lakehouse
 
-    logical = WeaverItemId.parse("Lakehouse/_weaver")
-    control = LakehouseBinding(ItemRef(lakehouses.weaver.name))
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings((ItemBinding(logical, control),)),
-        output=lakehouses.location("bundle"),
+    result = initialise_weaver_lakehouse(
+        weaver_lakehouse=lakehouses.weaver,
+        workspace=lakehouses.workspace,
         store=lakehouses.store,
-        prune=False,
-        catalogue=True,
-        control_lakehouse=control,
+        spark=spark,
+        output=lakehouses.location("bundle"),
     )
-    report = install_bundle(
-        bundle,
-        environment=InstallationEnvironment(
-            store=lakehouses.store,
-            resolver=lakehouses.resolver,
-            spark=spark,
-        ),
-    )
+    report = result.report
 
     assert report.status == "succeeded", _failures(report)
     assert set(weaver_catalogue.tables("_")) == {
@@ -90,18 +78,22 @@ def test_public_workflow_materialises_then_installs_from_driver_local_files(
         spark, lakehouses.resolver.spark_destination(lakehouses.target)
     )
     try:
-        result = build_item_repository(
+        selected = ItemBindings(
+            (ItemBinding(WeaverItemId.parse("Lakehouse/Raw"), binding),)
+        )
+        result = build_uploaded_item_repository(
             repository_root,
-            bindings=ItemBindings(
-                (ItemBinding(WeaverItemId.parse("Lakehouse/Raw"), binding),)
+            bindings=effective_item_bindings(
+                selected, weaver_lakehouse=lakehouses.weaver.name
             ),
             environment=InstallationEnvironment(
                 store=lakehouses.store,
                 resolver=lakehouses.resolver,
                 spark=spark,
+                workspace=lakehouses.workspace,
             ),
             prune=False,
-            catalogue=False,
+            control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
 
         assert result.report.status == "succeeded", _failures(result.report)
@@ -130,30 +122,28 @@ def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
     old_folder = lakehouses.resolver.files_root(lakehouses.target) / "Sales" / "OldFolder"
     lakehouses.store.make_directory(old_folder)
 
-    repository = read_weaver_repository(
-        Location(str(_estate(tmp_path))), store=lakehouses.store
-    )
+    repository_root = Location(str(_estate(tmp_path)))
     logical = WeaverItemId.parse("Lakehouse/Raw")
     binding = LakehouseBinding(lakehouses.target)
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings((ItemBinding(logical, binding),)),
-        output=lakehouses.location("item-prune-bundle"),
-        store=lakehouses.store,
-        prune=True,
-        resolver=lakehouses.resolver,
-        spark=spark,
+    selected = ItemBindings((ItemBinding(logical, binding),))
+    bindings = effective_item_bindings(
+        selected, weaver_lakehouse=lakehouses.weaver.name
     )
 
     try:
-        report = install_bundle(
-            bundle,
+        result = build_uploaded_item_repository(
+            repository_root,
+            bindings=bindings,
             environment=InstallationEnvironment(
                 store=lakehouses.store,
                 resolver=lakehouses.resolver,
                 spark=spark,
+                workspace=lakehouses.workspace,
             ),
+            prune=True,
+            control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
+        report = result.report
         assert report.status == "succeeded", _failures(report)
         assert {name.lower() for name in target_catalogue.tables("Sales")} == {
             "customer"
@@ -165,7 +155,7 @@ def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
         assert not lakehouses.store.exists(old_folder)
 
         reports = wipe_lakehouse(
-            lakehouses.target, lakehouses.host, store=lakehouses.store
+            lakehouses.target, lakehouses.workspace, store=lakehouses.store
         )
         assert {report.target.split(":", 1)[0] for report in reports} == {
             "folder",

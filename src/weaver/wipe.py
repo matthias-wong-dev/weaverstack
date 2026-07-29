@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .errors import CommandError
-from .hosts import Host, LocalHost
+from .workspaces import Workspace, LocalWorkspace
 from .locations import Location
 from .resolution import LocalResolver, resolver_for, store_for
 from .store import LocalStore, Store
@@ -56,7 +56,7 @@ class WipeReport:
 
 
 def _guard(location: Location, root: Location) -> None:
-    """Never remove anything outside the host root.
+    """Never remove anything outside the workspace root.
 
     Locations are derived rather than supplied, so this should be unreachable —
     which is exactly why it is worth having, since the failure it prevents is
@@ -68,7 +68,7 @@ def _guard(location: Location, root: Location) -> None:
     )
     if not inside:
         raise CommandError(
-            f"refusing to wipe {location.value!r}: outside the host root {root.value!r}"
+            f"refusing to wipe {location.value!r}: outside the workspace root {root.value!r}"
         )
 
 
@@ -91,15 +91,15 @@ def _clear(
 
 def wipe_folder_target(
     target: FolderTarget,
-    host: Host,
+    workspace: Workspace,
     *,
     store: Store | None = None,
     dry_run: bool = False,
 ) -> WipeReport:
     """Empty a folder target, keeping the configured root itself."""
 
-    store = store or store_for(host)
-    resolver = resolver_for(host)
+    store = store or store_for(workspace)
+    resolver = resolver_for(workspace)
     location = resolver.folder_root(target)
     return WipeReport(
         target=f"folder:{target}",
@@ -111,7 +111,7 @@ def wipe_folder_target(
 
 def wipe_delta_target(
     target: DeltaTarget,
-    host: Host,
+    workspace: Workspace,
     *,
     store: Store | None = None,
     dry_run: bool = False,
@@ -122,8 +122,8 @@ def wipe_delta_target(
     leave behind, because Weaver never registered one.
     """
 
-    store = store or store_for(host)
-    resolver = resolver_for(host)
+    store = store or store_for(workspace)
+    resolver = resolver_for(workspace)
     location = resolver.tables_root(target.lakehouse)
     return WipeReport(
         target=f"delta:{target}",
@@ -135,7 +135,7 @@ def wipe_delta_target(
 
 def wipe_sql_target(
     target: WarehouseTarget,
-    host: Host,
+    workspace: Workspace,
     *,
     sql=None,
 ) -> None:
@@ -151,7 +151,7 @@ def wipe_sql_target(
     if sql is None:
         from .fabric.sql import fabric_sql_executor
 
-        sql = fabric_sql_executor(target, host)
+        sql = fabric_sql_executor(target, workspace)
     try:
         sql.execute_script(generate_warehouse_wipe_sql())
     except SqlError as exc:
@@ -168,7 +168,7 @@ def wipe_sql_target(
 
 
 def wipe(
-    host: Host,
+    workspace: Workspace,
     *,
     folder_target: FolderTarget | None = None,
     delta_target: DeltaTarget | None = None,
@@ -189,25 +189,25 @@ def wipe(
     reports: list[WipeReport] = []
     storage = store
     if folder_target is not None:
-        storage = storage or store_for(host)
+        storage = storage or store_for(workspace)
         reports.append(
-            wipe_folder_target(folder_target, host, store=storage, dry_run=dry_run)
+            wipe_folder_target(folder_target, workspace, store=storage, dry_run=dry_run)
         )
     if delta_target is not None:
-        storage = storage or store_for(host)
+        storage = storage or store_for(workspace)
         reports.append(
-            wipe_delta_target(delta_target, host, store=storage, dry_run=dry_run)
+            wipe_delta_target(delta_target, workspace, store=storage, dry_run=dry_run)
         )
     if sql_target is not None:
         if dry_run:
             raise CommandError("Warehouse wipe does not support dry_run")
-        wipe_sql_target(sql_target, host, sql=sql)
+        wipe_sql_target(sql_target, workspace, sql=sql)
     return tuple(reports)
 
 
 def wipe_lakehouse(
     lakehouse: ItemRef,
-    host: Host,
+    workspace: Workspace,
     *,
     store: Store | None = None,
     dry_run: bool = False,
@@ -219,18 +219,18 @@ def wipe_lakehouse(
     reached here. A destructive operation must not depend on name inference.
     """
 
-    store = store or store_for(host)
-    resolver = resolver_for(host)
+    store = store or store_for(workspace)
+    resolver = resolver_for(workspace)
     if not _lakehouse_exists(resolver, lakehouse):
         raise CommandError(
-            f"no Lakehouse named {lakehouse.name!r} on this host — nothing to wipe"
+            f"no Lakehouse named {lakehouse.name!r} on this workspace — nothing to wipe"
         )
     return (
         wipe_folder_target(
-            FolderTarget(lakehouse=lakehouse), host, store=store, dry_run=dry_run
+            FolderTarget(lakehouse=lakehouse), workspace, store=store, dry_run=dry_run
         ),
         wipe_delta_target(
-            DeltaTarget(lakehouse=lakehouse), host, store=store, dry_run=dry_run
+            DeltaTarget(lakehouse=lakehouse), workspace, store=store, dry_run=dry_run
         ),
     )
 
@@ -255,7 +255,7 @@ def _lakehouse_exists(resolver, lakehouse: ItemRef) -> bool:
 
 def wipe_selection(
     selection: Iterable[str],
-    host: Host,
+    workspace: Workspace,
     *,
     store: Store | None = None,
     dry_run: bool = False,
@@ -272,17 +272,17 @@ def wipe_selection(
     if not names:
         raise CommandError("wipe needs at least one target")
 
-    store = store or store_for(host)
+    store = store or store_for(workspace)
     reports: list[WipeReport] = []
     for name in names:
         if "/" in name:
             reports.append(
                 wipe_folder_target(
-                    FolderTarget.parse(name), host, store=store, dry_run=dry_run
+                    FolderTarget.parse(name), workspace, store=store, dry_run=dry_run
                 )
             )
         else:
             reports.extend(
-                wipe_lakehouse(ItemRef.parse(name), host, store=store, dry_run=dry_run)
+                wipe_lakehouse(ItemRef.parse(name), workspace, store=store, dry_run=dry_run)
             )
     return tuple(reports)

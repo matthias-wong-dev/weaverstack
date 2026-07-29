@@ -13,7 +13,7 @@ from weaver.declaration import (
     SchemaSes,
     is_schema_file,
     parse_schema_document,
-    read_weaver_repository,
+    parse_item_repository,
     read_schema_document,
 )
 
@@ -140,7 +140,7 @@ def test_a_native_object_needs_its_schema_declared(tmp_path):
         objects={"Widget__Thing.py": PY_TABLE.format(schema="Widget")},
     )
     with pytest.raises(DiscoveryError, match="schema 'Widget' is not declared"):
-        read_weaver_repository(root)
+        parse_item_repository(root)
 
 
 def test_a_declared_schema_lets_the_object_read(tmp_path):
@@ -149,7 +149,7 @@ def test_a_declared_schema_lets_the_object_read(tmp_path):
         schemas=["Sales"],
         objects={"Sales__Thing.py": PY_TABLE.format(schema="Sales")},
     )
-    assert f"{ITEM}/Sales.Thing" in read_weaver_repository(root).dependency_graph.nodes
+    assert f"{ITEM}/Sales.Thing" in parse_item_repository(root).dependency_graph.nodes
 
 
 def test_an_unused_schema_is_still_valid(tmp_path):
@@ -158,7 +158,7 @@ def test_an_unused_schema_is_still_valid(tmp_path):
         schemas=["Sales", "Unused"],
         objects={"Sales__Thing.py": PY_TABLE.format(schema="Sales")},
     )
-    repo = read_weaver_repository(root)
+    repo = parse_item_repository(root)
     declared = {schema.schema for schema in repo.schema_documents}
     assert "Unused" in declared
 
@@ -170,7 +170,7 @@ def test_the_error_names_the_expected_schema_file(tmp_path):
         objects={"Widget__Thing.py": PY_TABLE.format(schema="Widget")},
     )
     with pytest.raises(DiscoveryError, match="schema 'Widget' is not declared"):
-        read_weaver_repository(root)
+        parse_item_repository(root)
 
 
 # --- case-only duplicate schemas ---------------------------------------------

@@ -169,7 +169,7 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
 
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
     assert ddl.content.startswith(
-        "CREATE OR REPLACE TABLE {{object:DWG.Customer}} (\n"
+        "CREATE TABLE IF NOT EXISTS {{object:DWG.Customer}} (\n"
     )
     assert "`CustomerId` integer" in ddl.content
     assert "`CustomerName` string" in ddl.content

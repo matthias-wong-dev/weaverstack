@@ -17,7 +17,7 @@ class CommandError(WeaverError):
 
 
 class ConfigError(WeaverError):
-    """Raised when host configuration is invalid."""
+    """Raised when workspace configuration is invalid."""
 
 
 class IdentityError(WeaverError):

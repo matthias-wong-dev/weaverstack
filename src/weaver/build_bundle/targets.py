@@ -1,11 +1,11 @@
 """Serialisable physical target descriptors.
 
-A build request supplies live host objects; a bundle must not. The planner
+A build request supplies live workspace objects; a bundle must not. The planner
 converts each supplied binding into a :class:`BoundTarget` — a flat, stable
 descriptor carrying exactly what an installer needs to resolve the physical
 destination, and nothing that ties the bundle to the process that wrote it.
 
-There is no host kind here. Weaver has one real host, Fabric; local execution is
+There is no workspace kind here. Weaver has one real workspace, Fabric; local execution is
 an emulation of it for development, not a second kind the bundle contract records.
 A target names an item — a Lakehouse or a Warehouse — by the identifiers the
 installer resolves it with; where the installer is running (in a Fabric session,
@@ -92,7 +92,7 @@ class BoundTarget:
 #
 # What a caller supplies to the planner. These carry a live identity (an
 # ItemRef, and for Fabric the workspace/item ids); the planner converts them into
-# the flat BoundTarget above so no live host object is serialised into a bundle.
+# the flat BoundTarget above so no live workspace object is serialised into a bundle.
 
 
 @dataclass(frozen=True)
@@ -173,33 +173,95 @@ class ItemBindings:
 
     def __post_init__(self) -> None:
         seen: set[WeaverItemId] = set()
+        physical: set[tuple[str, str]] = set()
         for binding in self.entries:
             if binding.item in seen:
                 raise BuildError(f"logical item is bound more than once: {binding.item}")
             seen.add(binding.item)
+            target = binding.target
+            key = (
+                LAKEHOUSE if isinstance(target, LakehouseBinding) else WAREHOUSE,
+                target.lakehouse.name
+                if isinstance(target, LakehouseBinding)
+                else target.warehouse.name,
+            )
+            if key in physical:
+                raise BuildError(
+                    f"physical {key[0]} target is bound more than once: {key[1]}"
+                )
+            physical.add(key)
 
     @property
     def by_item(self) -> Mapping[WeaverItemId, ItemBinding]:
         return {binding.item: binding for binding in self.entries}
 
 
-def parse_item_binding(text: str) -> ItemBinding:
-    """Parse ``ItemType/LogicalName=PhysicalName`` at the public boundary."""
+def effective_item_bindings(
+    bindings: ItemBindings, *, weaver_lakehouse: str
+) -> ItemBindings:
+    """Add the mandatory package-owned control item binding."""
 
-    if not isinstance(text, str) or text.count("=") != 1:
-        raise BuildError(
-            "an item binding must be ItemType/LogicalName=PhysicalName"
+    builtin = WeaverItemId(LAKEHOUSE, "_weaver")
+    if builtin in bindings.by_item:
+        raise BuildError("Lakehouse/_weaver is bound implicitly and must not be selected")
+    return ItemBindings(
+        bindings.entries
+        + (
+            ItemBinding(
+                builtin,
+                LakehouseBinding(ItemRef.parse(weaver_lakehouse)),
+            ),
         )
-    logical_text, physical_text = (part.strip() for part in text.split("=", 1))
-    if not logical_text or not physical_text:
+    )
+
+
+def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
+    """Parse a typed physical selector with an optional logical override.
+
+    ``Lakehouses/Sales`` uses the configured default.  The self-contained form
+    ``Lakehouses/Sales=Lakehouse/Raw`` needs no configured target declaration.
+    """
+
+    if not isinstance(text, str) or text.count("=") > 1:
         raise BuildError(
-            "an item binding must be ItemType/LogicalName=PhysicalName"
+            "a binding must be TypedPhysical/Name or TypedPhysical/Name=Logical/Item"
         )
-    item = WeaverItemId.parse(logical_text)
-    physical = ItemRef.parse(physical_text)
+    physical_text, separator, logical_text = text.partition("=")
+    physical_text = physical_text.strip()
+    logical_text = logical_text.strip()
+    if not physical_text or (separator and not logical_text):
+        raise BuildError(
+            "a binding must be TypedPhysical/Name or TypedPhysical/Name=Logical/Item"
+        )
+
+    physical_type, physical = _parse_physical_item(physical_text)
+    if separator:
+        item = WeaverItemId.parse(logical_text)
+    else:
+        if workspace is None:
+            raise BuildError(
+                f"binding {physical_text!r} needs a Workspace configuration default "
+                "or an explicit =Logical/Item"
+            )
+        item = workspace.declaration_for(physical_type, physical.name).item
+    if item.item_type != physical_type:
+        raise BuildError(
+            f"physical {physical_text} cannot be bound to logical {item}; "
+            f"both must be {physical_type}"
+        )
     target = (
         LakehouseBinding(physical)
-        if item.item_type == LAKEHOUSE
+        if physical_type == LAKEHOUSE
         else WarehouseBinding(physical)
     )
     return ItemBinding(item, target)
+
+
+def _parse_physical_item(text: str) -> tuple[str, ItemRef]:
+    prefix, separator, name = text.partition("/")
+    item_type = {"Lakehouses": LAKEHOUSE, "Warehouses": WAREHOUSE}.get(prefix)
+    if not separator or item_type is None or not name or "/" in name:
+        raise BuildError(
+            "a physical target must be Lakehouses/Name or Warehouses/Name"
+        )
+    return item_type, ItemRef.parse(name)

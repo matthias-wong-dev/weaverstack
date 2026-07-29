@@ -18,9 +18,9 @@ Weaver names things the way SQL does::
 |       | folder, procedure |                               |
 +-------+-------------------+-------------------------------+
 
-Level 4 is the only level that is written down and named, in ``hosts:``
-configuration. Level 3 needs no configuration because an item is *uniquely
-identifiable within its host* — so it is referred to by its real name, never by
+Level 4 is the only level written down in Workspace configuration. Level 3
+needs no alias because an item is *uniquely
+identifiable within its workspace* — so it is referred to by its real name, never by
 an alias. That is uniqueness, not invariance: promoting ``Dev_Lakehouse`` to
 ``Prod_Lakehouse`` inside one workspace is ordinary, so level-3 names are always
 supplied explicitly at the call site and never inferred.
@@ -29,8 +29,7 @@ Levels 2 and 1 come from the object's own metadata (``Schema.Object``) and do
 not appear here.
 
 This module is pure identity. Nothing here resolves an item to a path, an ID or
-an endpoint — that is the local host's job (checkpoint 2) and the Fabric host's
-job (checkpoint 7).
+an endpoint — that is the local or Fabric resolver's job.
 """
 
 from __future__ import annotations
@@ -74,7 +73,7 @@ def _split(text: object, *, what: str) -> list[str]:
 
 @dataclass(frozen=True)
 class ItemRef:
-    """A uniquely-named item within a host — level three.
+    """A uniquely-named item within a workspace — level three.
 
     A Lakehouse, a Warehouse or a Fabric Environment. Which of those it must be
     is decided by the slot it is used in, never by the name itself: the same

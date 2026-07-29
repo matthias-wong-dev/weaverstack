@@ -249,18 +249,14 @@ def _column_entry(column) -> list:
 
 
 def _create_table_sql(qualified: str, columns) -> str:
-    """A ``CREATE OR REPLACE TABLE`` over concrete columns.
-
-    ``OR REPLACE`` so a rebuild is idempotent: build owns structure, and a table
-    carries no build-phase data to protect (populating it is load).
-    """
+    """A non-destructive ``CREATE TABLE IF NOT EXISTS`` over concrete columns."""
 
     column_lines = ",\n".join(
         f"    {_ident(c.name)} {c.type}{' NOT NULL' if c.not_null else ''}"
         for c in columns
     )
     return (
-        f"CREATE OR REPLACE TABLE {qualified} (\n"
+        f"CREATE TABLE IF NOT EXISTS {qualified} (\n"
         f"{column_lines}\n"
         ")\n"
         "USING delta\n"

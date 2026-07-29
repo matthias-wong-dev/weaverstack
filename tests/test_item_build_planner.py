@@ -13,13 +13,19 @@ from weaver.build_bundle import (
     ItemBindings,
     LakehouseBinding,
     WarehouseBinding,
-    generate_item_build_bundle,
+    generate_item_build_bundle as _generate_item_build_bundle,
     install_bundle,
     load_bundle,
 )
 from weaver.errors import BuildError
-from weaver.declaration import read_weaver_repository
+from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
+from weaver.build_bundle.prune import (
+    TargetInventory,
+    read_lakehouse_inventory,
+    read_warehouse_inventory,
+)
+from weaver.catalogue.state import ReconciledCatalogue
 
 from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate
@@ -35,7 +41,45 @@ def _binding(logical: str, physical: str):
 
 
 def _repository(root):
-    return read_weaver_repository(Location(str(root)))
+    return parse_item_repository(Location(str(root)))
+
+
+def generate_item_build_bundle(repository, **kwargs):
+    """Test adapter that prepares state before exercising the pure planner."""
+
+    bindings = kwargs["bindings"]
+    resolver = kwargs.pop("resolver", None)
+    spark = kwargs.pop("spark", None)
+    sql_by_item = kwargs.pop("sql_by_item", {})
+    kwargs.pop("workspace", None)
+    inventories = dict(kwargs.pop("target_inventories", {}))
+    for binding in bindings.entries:
+        target = binding.to_bound_target()
+        if binding.item in inventories:
+            continue
+        if binding.item in sql_by_item:
+            inventories[binding.item] = read_warehouse_inventory(
+                target, sql=sql_by_item[binding.item]
+            )
+        elif resolver is not None:
+            inventories[binding.item] = read_lakehouse_inventory(
+                target,
+                resolver=resolver,
+                store=kwargs["store"],
+                spark=spark,
+            )
+        else:
+            inventories[binding.item] = TargetInventory(
+                target_id=target.id,
+                kind=target.kind,
+                target_name=target.name,
+            )
+    kwargs.setdefault("target_inventories", inventories)
+    kwargs.setdefault("reconciled_catalogue", ReconciledCatalogue({}))
+    kwargs.setdefault(
+        "control_lakehouse", LakehouseBinding(ItemRef("Weaver_Control"))
+    )
+    return _generate_item_build_bundle(repository, **kwargs)
 
 
 def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
@@ -53,7 +97,11 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
         prune=False,
     )
 
-    assert {(target.logical_item_type, target.logical_item_name) for target in bundle.plan.targets} == {
+    assert {
+        (target.logical_item_type, target.logical_item_name)
+        for target in bundle.plan.targets
+        if target.logical_item_type is not None
+    } == {
         ("Lakehouse", "Raw"),
         ("Warehouse", "Audit"),
     }
@@ -61,23 +109,14 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
     assert all(batch.target_id in bundle.plan.target_ids for sequence in bundle.plan.sequences for batch in sequence.batches)
 
 
-def test_same_physical_item_may_be_bound_twice_with_distinct_manifest_targets(tmp_path):
-    repository = _repository(_estate(tmp_path))
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings(
+def test_same_physical_item_cannot_be_bound_twice(tmp_path):
+    with pytest.raises(BuildError, match="physical Lakehouse target is bound more than once"):
+        ItemBindings(
             (
                 _binding("Lakehouse/Raw", "Shared"),
                 _binding("Lakehouse/Curated", "Shared"),
             )
-        ),
-        output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
-        prune=False,
-    )
-
-    assert [target.item_id for target in bundle.plan.targets] == ["Shared", "Shared"]
-    assert len(bundle.plan.target_ids) == 2
+        )
 
 
 def test_at_least_one_binding_is_required(tmp_path):
@@ -209,8 +248,8 @@ def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
         resolver=lakehouses.resolver,
     )
 
-    prune = bundle.plan.sequences[0]
-    assert prune.number == 10
+    prune = next(sequence for sequence in bundle.plan.sequences if sequence.number == 30)
+    assert prune.number == 30
     assert prune.description == "prune unmanaged objects by logical item"
     assert {action.kind for batch in prune.batches for action in batch.actions} == {
         "prune_table",
@@ -274,7 +313,7 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses
         resolver=lakehouses.resolver,
     )
 
-    prune = bundle.plan.sequences[0]
+    prune = next(sequence for sequence in bundle.plan.sequences if sequence.number == 30)
     assert len(prune.batches) == 2
     by_target = {
         batch.target_id: {action.id for action in batch.actions}
@@ -309,7 +348,7 @@ def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(tmp_path, la
     prune_targets = {
         batch.target_id
         for sequence in bundle.plan.sequences
-        if sequence.number == 10
+        if sequence.number == 30
         for batch in sequence.batches
     }
     assert prune_targets == {"Lakehouse-Raw--lakehouse-Raw_New"}
@@ -343,7 +382,7 @@ def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
     actions = [
         action
         for sequence, _batch, action in bundle.plan.actions()
-        if sequence.number == 10
+        if sequence.number == 30
     ]
     assert [action.kind for action in actions] == ["prune_table"]
     assert actions[0].id == "Warehouse--Audit-prune-table-Sales.Ghost"
@@ -362,7 +401,6 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
         prune=False,
-        catalogue=True,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
 
@@ -393,7 +431,7 @@ def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
             output=Location(str(tmp_path / "bundle")),
             store=LocalStore(),
             prune=False,
-            catalogue=True,
+            control_lakehouse=None,
         )
 
 
@@ -408,7 +446,6 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
         prune=False,
-        catalogue=True,
         control_lakehouse=control,
     )
 

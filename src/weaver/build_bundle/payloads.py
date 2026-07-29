@@ -13,9 +13,10 @@ import hashlib
 #: Sequence numbers for the foundational waves. Prune reconciles the target
 #: first; then schemas, folders, and the object layers, one sequence per
 #: dependency layer from OBJECT_SEQUENCE_START in steps.
-PRUNE_SEQUENCE = 10
-SCHEMA_SEQUENCE = 20
-FOLDER_SEQUENCE = 30
+SCHEMA_SEQUENCE = 10
+RECONCILIATION_SEQUENCE = 20
+PRUNE_SEQUENCE = 30
+FOLDER_SEQUENCE = 40
 OBJECT_SEQUENCE_START = 40
 OBJECT_SEQUENCE_STEP = 10
 

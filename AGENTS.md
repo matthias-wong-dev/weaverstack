@@ -24,27 +24,22 @@ dwg-platform/
 `weaver` is consulted for proven algorithms, Fabric/OneLake/Spark/Warehouse edge
 cases, Weaver document fixtures and behavioural intent. Never change it as part of
 weaverstack work, and never import from it. Where the two disagree, the
-architecture in [the implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md)
-is authoritative.
+architecture in [the master CLI plan](docs/weaver_master_cli_plan.md) is
+authoritative.
 
 Reference baseline: `a97ba8a0b00dd66dff1b2c5e818403694562fd30` (the plan's
 reviewed snapshot). The sibling checkout has since advanced; confirm which
 revision you are reading before treating it as the baseline.
 
-## Read this first
+## Implementation authority
 
-[docs/journal.md](docs/journal.md) is the **record** of what weaverstack is and
-why. The backlog plan is the **guide**, written before construction started.
-Where they disagree, the journal is right and the plan is stale.
-
-The journal also carries the context that matters most: the underlying system
-has run in production on SQL Server for years and weaver proved it works on
-Fabric. This is implementation, not invention. Port proven algorithms rather
-than re-deriving them; spend design attention on the control plane, which is
-the genuinely new part.
-
-Add to the journal as part of the work, not afterwards — a checkpoint that
-changes a decision and leaves the journal stale is incomplete.
+[The master CLI plan](docs/weaver_master_cli_plan.md) is the authoritative plan
+for the current CLI, Workspace, repository parsing and catalogue reconciliation
+work. The underlying system has run in production on SQL Server for years and
+the sibling `weaver` implementation proved it works on Fabric. This is
+implementation, not invention: port proven algorithms rather than re-deriving
+them, and spend design attention on the control plane, which is the genuinely
+new part.
 
 ## The core abstraction
 
@@ -52,7 +47,7 @@ This is the thing that is hard to hold in your head, and the thing most likely
 to be got wrong by someone reading only the code in front of them.
 
 **Weaver is a system that runs inside Microsoft Fabric.** Fabric is its one real
-host. We develop it on a laptop against a local emulator, and test it at both
+workspace. We develop it on a laptop against a local emulator, and test it at both
 levels. Resource location and code execution are separate axes:
 
 ```text
@@ -76,16 +71,16 @@ is executing. Only the CLI and Fabric test infrastructure cross into Fabric.*
 
 ```text
 core running locally        → operates against the local emulator
-core running inside Fabric   → operates within FabricHost, session-native
+core running inside Fabric   → operates within FabricWorkspace, session-native
 CLI or pytest running locally → may cross into Fabric over REST, DFS and Livy
 ```
 
-A `FabricHost` identifies the workspace the resources live in. It does **not**
+A `FabricWorkspace` identifies the workspace the resources live in. It does **not**
 say whether access happens through desktop HTTP clients or inside a session.
-`LocalHost` remains the name of the in-process emulator configuration in Python;
-it is not a second deployment host and must not leak into durable contracts.
+`LocalWorkspace` remains the name of the in-process emulator configuration in Python;
+it is not a second deployment workspace and must not leak into durable contracts.
 In particular, a build bundle binds target kind and item identifiers, never a
-`host_kind`.
+deployment-kind discriminator.
 
 So the storage picture has two parts, and they must not be conflated:
 
@@ -93,8 +88,8 @@ So the storage picture has two parts, and they must not be conflated:
 
 | execution | environment configuration | store |
 |---|---|---|
-| local process | `LocalHost` emulator | `LocalStore` |
-| Fabric session | `FabricHost` | `FabricStore` over `notebookutils.fs` |
+| local process | `LocalWorkspace` emulator | `LocalStore` |
+| Fabric session | `FabricWorkspace` | `FabricStore` over `notebookutils.fs` |
 
 *Cross-boundary access* — a local caller reaching into a workspace:
 
@@ -105,12 +100,12 @@ So the storage picture has two parts, and they must not be conflated:
 
 `OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is **not** the Fabric equivalent of
 `LocalStore`. It is how the desktop crosses in, constructed explicitly by the
-caller that crosses. Inside Fabric, `store_for(FabricHost)` returns the
+caller that crosses. Inside Fabric, `store_for(FabricWorkspace)` returns the
 session-native `FabricStore`; from a desktop that construction fails rather
 than silently substituting DFS.
 
 Above resolution and the store, nothing knows which environment it is using. An
-`if isinstance(host, …)` in core operation code means the abstraction is being
+`if isinstance(workspace, …)` in core operation code means the abstraction is being
 broken; the fix belongs in the factories, or in the CLI that does the crossing.
 
 **Credential choice is a caller's policy, not the core's.** Core accepts an
@@ -118,7 +113,7 @@ injected credential and otherwise uses the library default without pinning the
 chain. The CLI and the Fabric test infrastructure call `prefer_cli_credential()`
 themselves; importing or using the core imposes no credential choice.
 
-### The local environment is an emulator, not a peer host
+### The local environment is an emulator, not a peer workspace
 
 `.local/Sales_LH/Files` and `.local/Sales_LH/Tables` mirror the shape a Fabric
 Lakehouse presents through OneLake, deliberately, so the same resolution
@@ -158,7 +153,7 @@ row 3.** Both are worth having, but only row 3 is the promise.
 Row 3 is delivered by installing Weaver into a Fabric Environment: `weaver
 install --workspace <ws> --environment <env>` builds a wheel from the checkout,
 stages it and Weaver's dependencies, and publishes. A Livy session (and a Fabric
-notebook) then attaches that Environment via `fabric_environment` on the host and
+notebook) then attaches that Environment via `environment` on the workspace and
 imports the installed package — nothing is copied into the workspace. Rerun
 `weaver install` whenever Weaver Python changes; an unchanged source tree builds
 the same version and the install skips the republish.
@@ -167,8 +162,8 @@ the same version and the install skips the republish.
 
 Ask, in order:
 
-1. Does it work in the `LocalHost` emulator, with a test that needs no tenant?
-2. Does it work against a `FabricHost` from the laptop?
+1. Does it work in the `LocalWorkspace` emulator, with a test that needs no tenant?
+2. Does it work against a `FabricWorkspace` from the laptop?
 3. Does it work with Weaver *running inside* Fabric?
 
 Answer all three, and answer them with tests that call the real function —
@@ -176,26 +171,9 @@ not with test code that reproduces what the function would have done. That
 mistake has already been made once here: the first Fabric suite deleted files
 through the store directly and looked like it was testing `wipe`.
 
-## Working protocol
-
-Construction follows numbered checkpoints. The original construction is recorded
-in [the step-by-step implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md);
-the current repository/item/document re-architecture follows
-[its dedicated continuation](backlog/weaver-repositories-items-documents-checkpoints.md).
-This is not a document to implement in one pass. For each checkpoint:
-
-1. read only that section and its listed reference files;
-2. say what should be ported and what should be replaced;
-3. raise the decisions that need Matthias's judgement, and wait;
-4. implement only that checkpoint;
-5. present the resulting structure and observable behaviour;
-6. wait for approval before starting the next.
-
-`backlog/weaver-architecture-summary.md` is the architectural companion.
-
 ## Architecture invariants
 
-These hold from checkpoint 0 and are enforced by `tests/test_core_boundary.py`:
+These are enforced by `tests/test_core_boundary.py`:
 
 - **Core never imports the CLI.** `weaver_cli` is an optional extra; a core
   import of it would break a Fabric Environment install. The dependency runs one
@@ -204,7 +182,7 @@ These hold from checkpoint 0 and are enforced by `tests/test_core_boundary.py`:
   PySpark, `azure-identity` and `mssql-python` are lazy imports confined to the
   modules that execute against those systems.
 - **One error hierarchy.** Everything derives from `weaver.errors.WeaverError`,
-  including CLI errors. Add a subclass at the checkpoint that first raises it.
+  including CLI errors. Add a subclass when the operation that raises it lands.
 - **The CLI owns no semantics.** It parses arguments and prints results. Command
   functions return plain serialisable structures.
 
@@ -220,7 +198,7 @@ These become enforceable as the corresponding code lands:
   Lakehouse into its one namespace level. A bare `Schema.Object` resolves through
   whatever the session is attached to — which is the Weaver Lakehouse — so it is
   the ambient-context anti-pattern in disguise.
-- **Level-three identity is host + type + name.** An item name is unique per
+- **Level-three identity is workspace + type + name.** An item name is unique per
   *type*, not across types — a Lakehouse and its generated SQL endpoint share a
   display name. Resolution is typed: the slot supplies the type (a `DeltaTarget`
   is a Lakehouse, a `WarehouseTarget` a Warehouse), so core never asks the
@@ -252,7 +230,6 @@ bronze/silver/gold is fine where it aids a reader.
 weaverstack/
 ├── pyproject.toml
 ├── AGENTS.md
-├── backlog/          architecture summary and the checkpoint plan
 ├── src/
 │   ├── weaver/       the core framework
 │   └── weaver_cli/   the optional desktop CLI
@@ -261,8 +238,8 @@ weaverstack/
 
 ## Dependencies
 
-Base install is deliberately minimal. A dependency is declared at the checkpoint
-that first needs it, not in advance. See the comment in `pyproject.toml`.
+Base install is deliberately minimal. A dependency is declared when the feature
+that first needs it lands, not in advance. See the comment in `pyproject.toml`.
 
 ## Development
 

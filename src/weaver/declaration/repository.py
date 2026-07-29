@@ -83,7 +83,7 @@ IGNORED_SUFFIXES = (".pyc", ".pyo", ".swp", ".orig", ".rej")
 
 
 
-def read_weaver_repository(
+def parse_item_repository(
     root: Location,
     *,
     store: Store | None = None,
@@ -101,7 +101,12 @@ def read_weaver_repository(
     for entry in store.list(root, recursive=True):
         relative = entry.location.value[len(prefix):]
         parts = relative.split("/")
-        if "_ignore" in parts:
+        if (
+            "_ignore" in parts
+            or any(part in IGNORED_DIRECTORIES for part in parts)
+            or parts[-1] in IGNORED_FILENAMES
+            or parts[-1].endswith(IGNORED_SUFFIXES)
+        ):
             continue
         entries.append((relative, entry.is_directory))
 
@@ -109,34 +114,16 @@ def read_weaver_repository(
 
     generated_files = item_repository_files()
     builtin_prefix = "Lakehouse/_weaver"
-    physical_builtin = {
+    authored_builtin = sorted(
         relative
-        for relative, is_directory in entries
-        if not is_directory and relative.startswith(builtin_prefix + "/")
-    }
-    if physical_builtin:
-        expected = set(generated_files)
-        if physical_builtin != expected:
-            missing = sorted(expected - physical_builtin)
-            extra = sorted(physical_builtin - expected)
-            detail = (
-                f"missing {missing[0]}" if missing else f"unexpected {extra[0]}"
-            )
-            raise DiscoveryError(
-                f"{builtin_prefix}: Weaver's managed catalogue item is incomplete: {detail}"
-            )
-        for relative in sorted(expected):
-            actual = store.read(root.join(*relative.split("/")))
-            if actual != generated_files[relative]:
-                raise DiscoveryError(
-                    f"{relative}: Weaver's managed catalogue item was modified"
-                )
-    entries = [
-        entry
-        for entry in entries
-        if entry[0] != builtin_prefix
-        and not entry[0].startswith(builtin_prefix + "/")
-    ]
+        for relative, _is_directory in entries
+        if relative == builtin_prefix or relative.startswith(builtin_prefix + "/")
+    )
+    if authored_builtin:
+        raise DiscoveryError(
+            f"{authored_builtin[0]}: Lakehouse/_weaver is package-owned and must "
+            "not be authored"
+        )
 
     for relative, is_directory in entries:
         if not is_directory and relative.rsplit("/", 1)[-1] == "__init__.py":
@@ -744,5 +731,4 @@ def unresolved_references(
         if outside or physical:
             unresolved[document.node_id] = outside + physical
     return unresolved
-
 

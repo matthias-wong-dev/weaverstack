@@ -1,12 +1,12 @@
-"""Fabric host resolution — names to OneLake locations.
+"""Fabric workspace resolution — names to OneLake locations.
 
 The twin of :class:`~weaver.resolution.LocalResolver`, and deliberately the same
 surface, so everything above resolution is written once and neither build nor
-wipe learns which host it is talking to.
+wipe learns which workspace it is talking to.
 
 The difference is that a Fabric name has to be *asked about* — a name maps to a
 GUID only by consulting the workspace. It is asked about **with its type**:
-identity is ``host + type + name``, so a Lakehouse and a Warehouse may share a
+identity is ``workspace + type + name``, so a Lakehouse and a Warehouse may share a
 display name (indeed a Lakehouse grows a same-named SQL endpoint), and the
 caller always knows the type from the slot. Answers are cached, because asking
 costs an API call.
@@ -15,7 +15,7 @@ costs an API call.
 from __future__ import annotations
 
 from ..errors import CommandError
-from ..hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricHost
+from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricWorkspace
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
 from ..spark import SparkDestination, fabric_destination
@@ -37,16 +37,16 @@ class FabricResolver:
 
     def __init__(
         self,
-        host: FabricHost,
+        workspace: FabricWorkspace,
         *,
         client: FabricClient | None = None,
         base_url: str = ONELAKE_DFS,
     ) -> None:
-        if not isinstance(host, FabricHost):
+        if not isinstance(workspace, FabricWorkspace):
             raise CommandError(
-                f"FabricResolver needs a FabricHost, got {type(host).__name__}"
+                f"FabricResolver needs a FabricWorkspace, got {type(workspace).__name__}"
             )
-        self.host = host
+        self.configuration = workspace
         self.client = client or FabricClient()
         self.base_url = base_url.rstrip("/")
         self._workspace: Workspace | None = None
@@ -57,7 +57,9 @@ class FabricResolver:
     @property
     def workspace(self) -> Workspace:
         if self._workspace is None:
-            self._workspace = find_workspace(self.host.workspace, client=self.client)
+            self._workspace = find_workspace(
+                self.configuration.workspace, client=self.client
+            )
         return self._workspace
 
     @property
@@ -71,7 +73,7 @@ class FabricResolver:
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
         """The workspace item of this name and type. Cached.
 
-        A type is required: identity is ``host + type + name``, and asking the
+        A type is required: identity is ``workspace + type + name``, and asking the
         workspace what a bare name *is* would make a caller depend on ambiguous
         name inference. The caller knows the type from the slot — a
         ``DeltaTarget`` is a Lakehouse, a ``WarehouseTarget`` is a Warehouse.
@@ -156,10 +158,10 @@ class FabricResolver:
     # --- the weaver lakehouse ---------------------------------------------
 
     def _weaver_lakehouse(self) -> ItemRef:
-        name = self.host.weaver_lakehouse
+        name = self.configuration.weaver_lakehouse
         if name is None:
             raise CommandError(
-                "no Weaver Lakehouse for this host — set weaver_lakehouse on the host "
+                "no Weaver Lakehouse for this Workspace — set weaver_lakehouse on the Workspace "
                 "or supply it explicitly"
             )
         return ItemRef(name)

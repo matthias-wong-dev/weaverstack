@@ -112,7 +112,7 @@ Fabric and its local emulator, selected by an indirect `build_env` parameter
 of a build — *generate* and *install* — run in the target environment.** On
 Fabric that is inside the Livy session, against the native Spark catalogue: the
 test uploads the repository to the Weaver Lakehouse (the push), then a Livy
-program calls the public `build_item_repository` workflow. That workflow copies
+program calls the public `build_uploaded_item_repository` workflow. That workflow copies
 the OneLake repository once to the session driver's temporary filesystem, then
 generates and installs from local files while target inspection still uses the
 authoritative Fabric catalogue. In the emulator the same workflow runs
@@ -143,10 +143,8 @@ build_env.query("SELECT * FROM {{object:_.Registry}}",
                 destination=build_env.weaver_destination)
 ```
 
-See the journal's build-bundle log for the full Fabric contract these tests
-established (`CREATE SCHEMA` over `CREATE DATABASE`, the reserved `dbo` schema, the
-https/abfss bundle re-resolution, and `FabricStore` byte reads/writes), and the
-multi-target entry for what a four-part name can and cannot do.
+See the master CLI plan for the Fabric contract these tests enforce, including
+in-session generation, explicit target naming and catalogue-last certification.
 
 ## One environment fixture, two transports
 
@@ -154,8 +152,8 @@ The build tests share a single reusable harness so the same assertions run
 locally and on Fabric, and so a Fabric run costs as little as possible.
 
 `BuildEnv` (in `tests/fabric/conftest.py`) is a small record of callables —
-`install_repo`, `generate`, `install`, `run_query`, `run_columns`, `seed_orphans`,
-`setup_weaver` — with the transport hidden behind them, plus the two destinations
+`install_repo`, `generate`, `install`, `run_query`, `run_columns` and `seed_orphans`
+— with the transport hidden behind them, plus the two destinations
 the environment addresses. A test body drives it and never mentions Livy, Spark or
 ODBC. Three environments implement it:
 
@@ -176,7 +174,7 @@ infrastructure and never part of what is under test.
 
 Two rules keep the cost down and the setup in one place:
 
-- **Environment setup lives only in `conftest`.** Tests never build a host,
+- **Environment setup lives only in `conftest`.** Tests never build a workspace,
   create a Lakehouse, start a session or clean a catalog. Which Weaver document repository an
   environment installs is the `weaver_repo_fixture` parameter (paths in
   `tests/fabric/build_envs.py`), so one body can be pointed at another estate:

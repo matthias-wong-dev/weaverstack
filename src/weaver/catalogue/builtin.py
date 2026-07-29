@@ -7,8 +7,8 @@ Weaver object rather than a privileged one.
 
 The item is rendered from :mod:`weaver.catalogue.tables`, so the declaration and
 the table definitions cannot drift: there is one source of truth and the text is
-derived from it. ``Lakehouse/_weaver`` is materialised into the workspace
-declaration alongside authored items and built through the ordinary planner.
+derived from it. ``Lakehouse/_weaver`` is composed into the parsed repository
+in memory and built through the ordinary planner.
 
 Every table declares:
 
@@ -17,8 +17,8 @@ Every table declares:
     the DML a build appends.
 
 ``Prohibit rebuild: true``
-    Once drop policy lands, this is what stops an ordinary build treating the
-    catalogue as a disposable application object.
+    This stops an ordinary build treating the catalogue as a disposable
+    application object.
 
 ``Dependencies: []``
     Explicitly nothing. The body is literals, so there is nothing to discover
@@ -30,8 +30,6 @@ from __future__ import annotations
 import textwrap
 from dataclasses import replace
 
-from ..locations import Location
-from ..store import Store
 from .tables import CATALOGUE_SCHEMA, CATALOGUE_TABLES, CatalogueColumn, CatalogueTable
 
 #: The reserved item Weaver generates and manages inside the declaration.
@@ -173,15 +171,3 @@ def item_repository_files() -> dict[str, bytes]:
     return {
         path: text.encode("utf-8") for path, text in render_item_sources().items()
     }
-
-
-def materialise_builtin_item(root: Location, *, store: Store) -> tuple[str, ...]:
-    """Replace Weaver's reserved item with this package's canonical sources."""
-
-    item_root = root / "Lakehouse" / "_weaver"
-    if store.exists(item_root):
-        store.delete(item_root, recursive=True)
-    files = item_repository_files()
-    for relative, data in sorted(files.items()):
-        store.write(root.join(*relative.split("/")), data)
-    return tuple(sorted(files))

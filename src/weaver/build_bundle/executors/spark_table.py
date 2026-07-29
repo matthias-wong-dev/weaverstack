@@ -15,7 +15,7 @@ pass, the Spark counterpart of the old T-SQL self-contained script
 3. choose the physical business columns — declared types when declared, the
    query's inferred types otherwise;
 4. append Weaver's audit columns;
-5. create the table with ``CREATE OR REPLACE TABLE``.
+5. create the table with ``CREATE TABLE IF NOT EXISTS``.
 
 Identity is validated (it must name a produced column) but not materialised on
 Delta: an identity/generated column is not portably available on the local Delta
@@ -173,7 +173,7 @@ def _create_table_sql(
         "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')" if column_mapping else ""
     )
     return (
-        f"CREATE OR REPLACE TABLE {qualified} (\n"
+        f"CREATE TABLE IF NOT EXISTS {qualified} (\n"
         f"{column_lines}\n"
         ")\n"
         "USING delta"
@@ -188,18 +188,8 @@ def _create_preserving_identifier_case(
     catalogue,
     logical_object: str,
 ) -> None:
-    """Create one exact-case table without leaking session configuration.
+    """Create one exact-case table without leaking session configuration."""
 
-    ``CREATE OR REPLACE`` keeps the registered spelling of an object it resolves
-    case-insensitively.  That matters when a Lakehouse first built by an older
-    Weaver contains ``registry`` and the current declaration says ``Registry``:
-    merely enabling case-sensitive analysis for the create does not migrate the
-    existing identifier.  Drop that one case-only predecessor first.  Build owns
-    and replaces table structure; load is the phase that owns rows.
-    """
-
-    if catalogue.destination.preserve_table_identifier_case:
-        _drop_case_variant(catalogue, logical_object)
     spark.sql(statement)
 
 

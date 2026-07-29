@@ -1,7 +1,7 @@
 """Weaver — the core framework distributed as ``weaverstack``.
 
 The public surface grows one checkpoint at a time. Today it carries the
-version, the error hierarchy, and the host and target vocabulary.
+version, the error hierarchy, and the workspace and target vocabulary.
 
 The core must remain importable without PySpark, without Fabric credentials
 and without the optional CLI. It must never import :mod:`weaver_cli`.
@@ -9,14 +9,27 @@ and without the optional CLI. It must never import :mod:`weaver_cli`.
 
 from __future__ import annotations
 
-from .config import load_hosts, parse_hosts
+from .config import load_workspace, parse_workspace, resolve_workspace
 from .errors import CommandError, ConfigError, IdentityError, WeaverError
-from .hosts import FabricHost, Host, LocalHost, WarehouseSettings
+from .workspaces import (
+    ExecutionSettings,
+    FabricWorkspace,
+    LocalWorkspace,
+    TargetDeclaration,
+    Workspace,
+)
 from .locations import Location
 from .objects import Folder, ObjectContext, Table, View, WeaverObject
 from .resolution import LocalResolver
-from .setup import SetupResult, initialise_weaver_lakehouse
+from .initialise import (
+    InitialiseResult,
+    PreparedWeaverLakehouse,
+    initialise_weaver_lakehouse,
+    prepare_weaver_lakehouse,
+)
 from .store import Entry, LocalStore, Store, StoreError
+from .push import PushResult, push_item_repository
+from .unbind import UnbindResult, plan_unbind, unbind_targets
 from .sql import (
     PooledSqlExecutor,
     SqlConnectionPool,
@@ -51,7 +64,7 @@ from .declaration.model import (
     WeaverSchemaId,
 )
 from .declaration.metadata import WeaverDocument
-from .declaration.repository import read_weaver_repository
+from .declaration.repository import parse_item_repository
 from .build_bundle import (
     InstallationEnvironment,
     InstallationReport,
@@ -61,12 +74,14 @@ from .build_bundle import (
     WarehouseBinding,
     generate_item_build_bundle,
     build_item_repository,
+    build_uploaded_item_repository,
     install_bundle,
     install_bundle_archive,
     load_bundle,
     persist_bundle_archive,
     timestamped_archive_name,
     parse_item_binding,
+    effective_item_bindings,
 )
 
 def _resolve_version() -> str:
@@ -95,13 +110,15 @@ __all__ = [
     "CommandError",
     "ConfigError",
     "IdentityError",
-    # hosts — level four
-    "Host",
-    "FabricHost",
-    "LocalHost",
-    "WarehouseSettings",
-    "load_hosts",
-    "parse_hosts",
+    # Workspace — level four
+    "Workspace",
+    "FabricWorkspace",
+    "LocalWorkspace",
+    "ExecutionSettings",
+    "TargetDeclaration",
+    "load_workspace",
+    "parse_workspace",
+    "resolve_workspace",
     # identities — level three
     "ItemRef",
     "WarehouseTarget",
@@ -114,15 +131,17 @@ __all__ = [
     "RepositoryAlias",
     "ItemDependency",
     "WeaverDocument",
-    "read_weaver_repository",
+    "parse_item_repository",
     # item-oriented build
     "ItemBinding",
     "ItemBindings",
     "LakehouseBinding",
     "WarehouseBinding",
     "parse_item_binding",
+    "effective_item_bindings",
     "generate_item_build_bundle",
     "build_item_repository",
+    "build_uploaded_item_repository",
     "load_bundle",
     "persist_bundle_archive",
     "install_bundle_archive",
@@ -130,6 +149,10 @@ __all__ = [
     "InstallationEnvironment",
     "install_bundle",
     "InstallationReport",
+    "InitialiseResult",
+    "initialise_weaver_lakehouse",
+    "PreparedWeaverLakehouse",
+    "prepare_weaver_lakehouse",
     # resolved locations and transport
     "Location",
     "LocalResolver",
@@ -143,6 +166,11 @@ __all__ = [
     "LocalStore",
     "Entry",
     "StoreError",
+    "PushResult",
+    "push_item_repository",
+    "UnbindResult",
+    "plan_unbind",
+    "unbind_targets",
     # SQL
     "SqlEndpoint",
     "SqlExecutor",

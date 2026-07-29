@@ -31,7 +31,7 @@ from .model import (
 from .repository import (
     build_internal_graph,
     effective_dependencies,
-    read_weaver_repository,
+    parse_item_repository,
     unresolved_references,
 )
 from .schemas import (
@@ -108,7 +108,7 @@ __all__ = [
     "WAREHOUSE",
     "ITEM_TYPES",
     "FILES",
-    "read_weaver_repository",
+    "parse_item_repository",
     "Graph",
     "resolve_item_dependencies",
     "project_bound_documents",

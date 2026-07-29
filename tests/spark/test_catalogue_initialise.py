@@ -29,7 +29,7 @@ from weaver.catalogue import (
 )
 from weaver.catalogue.reader import read_installation, read_table
 from weaver.spark import SparkCatalogue, local_destination
-from weaver.setup import BUNDLE_NAME, initialise_weaver_lakehouse
+from weaver.initialise import INITIALISE_BUNDLE_NAME, initialise_weaver_lakehouse
 
 pytestmark = pytest.mark.spark
 
@@ -41,7 +41,7 @@ class Bootstrapped:
     """One completed bootstrap, with the environment it ran against."""
 
     result: object
-    host: object
+    workspace: object
     resolver: object
     store: object
     #: How this bootstrap's Weaver Lakehouse is addressed in the shared session.
@@ -51,25 +51,25 @@ class Bootstrapped:
 def _environment(root):
     """A disposable Weaver Lakehouse skeleton at one root."""
 
-    from weaver import ItemRef, LocalHost, LocalResolver, LocalStore
+    from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
 
-    host = LocalHost(root=root, weaver_lakehouse="Weaver")
+    workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
     store = LocalStore()
-    resolver = LocalResolver(host)
+    resolver = LocalResolver(workspace)
     store.make_directory(resolver.files_root(ItemRef("Weaver")))
     store.make_directory(resolver.tables_root(ItemRef("Weaver")))
     store.make_directory(resolver.weaver_items_root)
-    return host, resolver, store
+    return workspace, resolver, store
 
 
 def _bootstrap(spark, root) -> Bootstrapped:
-    host, resolver, store = _environment(root)
+    workspace, resolver, store = _environment(root)
     result = initialise_weaver_lakehouse(
-        weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
+        weaver_lakehouse=ItemRef("Weaver"), workspace=workspace, store=store, spark=spark
     )
     return Bootstrapped(
         result=result,
-        host=host,
+        workspace=workspace,
         resolver=resolver,
         store=store,
         catalogue=SparkCatalogue(spark, resolver.spark_destination(ItemRef("Weaver"))),
@@ -89,18 +89,18 @@ def _drop_catalogue_schema(spark) -> None:
 
 
 @pytest.fixture(scope="module")
-def setup(spark, tmp_path_factory):
+def initialised(spark, tmp_path_factory):
     """One bootstrap, shared by every read-only assertion in this file.
 
     Module-scoped on purpose. A full bootstrap is about twenty seconds of Spark, and
     almost everything here only *reads* the catalogue it produced — so paying for it
     once is the difference between this file taking a minute and taking five. The
-    two tests that mutate anything run their own setup instead.
+    two tests that mutate anything run their own initialisation instead.
     """
 
     _drop_catalogue_schema(spark)
     try:
-        yield _bootstrap(spark, tmp_path_factory.mktemp("weaver-setup"))
+        yield _bootstrap(spark, tmp_path_factory.mktemp("weaver-initialise"))
     finally:
         _drop_catalogue_schema(spark)
 
@@ -117,38 +117,33 @@ def _failures(report) -> str:
 # --- it installs --------------------------------------------------------------
 
 
-def test_setup_succeeds(setup):
-    assert setup.result.succeeded, _failures(setup.result.report)
+def test_initialisation_succeeds(initialised):
+    assert initialised.result.succeeded, _failures(initialised.result.report)
 
 
-def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup):
-    root = setup.resolver.weaver_items_root
-    assert setup.store.exists(root.join("Lakehouse", "_weaver", "schemas", "_.yml"))
+def test_the_package_owned_item_is_not_written_into_authored_source(initialised):
+    root = initialised.resolver.weaver_items_root
+    assert not initialised.store.exists(root.join("Lakehouse", "_weaver"))
+
+
+def test_the_bundle_is_kept_where_bundles_belong(initialised):
+    expected = initialised.resolver.build_bundle(INITIALISE_BUNDLE_NAME)
+    assert initialised.result.bundle.location.value == expected.value
+
+
+def test_every_catalogue_table_exists_and_matches_the_representation(initialised, spark):
     for table in CATALOGUE_TABLES:
-        assert setup.store.exists(
-            root.join("Lakehouse", "_weaver", f"{table.qualified}.sql")
-        )
-    assert "Lakehouse/_weaver/schemas/_.yml" in setup.result.materialised
-
-
-def test_the_bundle_is_kept_where_bundles_belong(setup):
-    expected = setup.resolver.build_bundle(BUNDLE_NAME)
-    assert setup.result.bundle.location.value == expected.value
-
-
-def test_every_catalogue_table_exists_and_matches_the_representation(setup, spark):
-    for table in CATALOGUE_TABLES:
-        fields = spark.table(setup.catalogue.qualify("_", table.name)).schema.fields
+        fields = spark.table(initialised.catalogue.qualify("_", table.name)).schema.fields
         assert [field.name for field in fields] == list(table.physical_columns), table.name
 
 
 # --- and then describes itself -------------------------------------------------
 
 
-def test_the_catalogue_registers_its_own_tables(setup, spark):
+def test_the_catalogue_registers_its_own_tables(initialised, spark):
     """The recursion, made visible: ten tables, each certified in its own Registry."""
 
-    rows = read_table(setup.catalogue, REGISTRY, scope=SCOPE)
+    rows = read_table(initialised.catalogue, REGISTRY, scope=SCOPE)
     assert {row["object_name"] for row in rows} == {
         table.name for table in CATALOGUE_TABLES
     }
@@ -159,22 +154,25 @@ def test_the_catalogue_registers_its_own_tables(setup, spark):
         assert row["signature"]
 
 
-def test_the_catalogue_records_its_own_installation(setup, spark):
-    (row,) = read_table(setup.catalogue, INSTALLATION, scope=SCOPE)
+def test_the_catalogue_records_its_own_installation(initialised, spark):
+    (row,) = read_table(initialised.catalogue, INSTALLATION, scope=SCOPE)
     assert row["target_name"] == "Weaver"
     assert row["weaver_version"]
     assert row["signature"]
 
 
-def test_the_catalogue_describes_its_own_schema(setup, spark):
-    (row,) = read_table(setup.catalogue, SCHEMA_DICTIONARY, scope=SCOPE)
+def test_the_catalogue_describes_its_own_schema(initialised, spark):
+    (row,) = read_table(initialised.catalogue, SCHEMA_DICTIONARY, scope=SCOPE)
     assert row["schema_name"] == "_"
     assert "control plane" in row["description"]
 
 
-def test_the_catalogue_describes_its_own_tables_and_their_keys(setup, spark):
+def test_the_catalogue_describes_its_own_tables_and_their_keys(initialised, spark):
     rows = {
-        row["object_name"]: row for row in read_table(setup.catalogue, TABLE_DICTIONARY, scope=SCOPE)
+        row["object_name"]: row
+        for row in read_table(
+            initialised.catalogue, TABLE_DICTIONARY, scope=SCOPE
+        )
     }
     for table in CATALOGUE_TABLES:
         row = rows[table.name]
@@ -187,62 +185,62 @@ def test_the_catalogue_describes_its_own_tables_and_their_keys(setup, spark):
         assert row["is_incremental"] is False
 
 
-def test_the_catalogue_describes_every_one_of_its_own_columns(setup, spark):
+def test_the_catalogue_describes_every_one_of_its_own_columns(initialised, spark):
     from weaver.catalogue.tables import COLUMN_DICTIONARY
 
-    rows = read_table(setup.catalogue, COLUMN_DICTIONARY, scope=SCOPE)
+    rows = read_table(initialised.catalogue, COLUMN_DICTIONARY, scope=SCOPE)
     described = {(row["object_name"], row["column_name"]) for row in rows}
     for table in CATALOGUE_TABLES:
         for column in table.columns:
             assert (table.name, column.name) in described, f"{table.name}.{column.name}"
 
 
-def test_the_catalogue_records_its_own_logical_keys(setup, spark):
+def test_the_catalogue_records_its_own_logical_keys(initialised, spark):
     from weaver.catalogue.tables import INDEX_DICTIONARY
 
-    rows = read_table(setup.catalogue, INDEX_DICTIONARY, scope=SCOPE)
+    rows = read_table(initialised.catalogue, INDEX_DICTIONARY, scope=SCOPE)
     keys = {(row["object_name"], row["column_set"]) for row in rows}
     for table in CATALOGUE_TABLES:
         assert (table.name, ", ".join(table.key)) in keys, table.name
     assert {row["index_type"] for row in rows} == {"primary_key"}
 
 
-def test_the_catalogue_declares_no_dependencies_and_records_none(setup, spark):
+def test_the_catalogue_declares_no_dependencies_and_records_none(initialised, spark):
     """`Dependencies: []` all the way through — the bodies are literals."""
 
-    assert read_table(setup.catalogue, DEPENDENCY, scope=SCOPE) == ()
+    assert read_table(initialised.catalogue, DEPENDENCY, scope=SCOPE) == ()
 
 
-def test_no_alias_or_relationship_rows_are_invented(setup, spark):
-    read = read_installation(setup.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
+def test_no_alias_or_relationship_rows_are_invented(initialised, spark):
+    read = read_installation(initialised.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
     assert read["Alias"] == ()
     assert read["ForeignKeyDictionary"] == ()
 
 
-def test_no_folder_rows_since_the_catalogue_has_no_folders(setup, spark):
-    read = read_installation(setup.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
+def test_no_folder_rows_since_the_catalogue_has_no_folders(initialised, spark):
+    read = read_installation(initialised.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
     assert read["FolderDictionary"] == ()
 
 
 # --- ordering, as installed ----------------------------------------------------
 
 
-def test_registry_is_published_after_the_dictionaries_and_the_installation(setup):
-    numbers = [sequence.number for sequence in setup.result.report.sequences]
+def test_registry_is_published_after_the_dictionaries_and_the_installation(initialised):
+    numbers = [sequence.number for sequence in initialised.result.report.sequences]
     assert numbers == sorted(numbers)
     assert numbers[-1] == 9020
     statuses = {
-        sequence.number: sequence.status for sequence in setup.result.report.sequences
+        sequence.number: sequence.status for sequence in initialised.result.report.sequences
     }
     assert all(status == "succeeded" for status in statuses.values())
 
 
-def test_setup_prunes_nothing(setup):
+def test_initialisation_prunes_nothing(initialised):
     """The Weaver Lakehouse belongs to the installation, not to this repository."""
 
     kinds = {
         action.action_id
-        for sequence in setup.result.report.sequences
+        for sequence in initialised.result.report.sequences
         for action in sequence.actions
     }
     assert not [name for name in kinds if name.startswith("prune-")]
@@ -257,17 +255,17 @@ def test_setup_prunes_nothing(setup):
 # shared catalogue would find it gone. Only a test needing no Spark may follow.
 
 
-def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(spark, tmp_path):
+def test_a_users_own_schema_in_the_weaver_lakehouse_survives_initialisation(spark, tmp_path):
     """The consequence of not pruning, asserted rather than assumed."""
 
     _drop_catalogue_schema(spark)
-    host, resolver, store = _environment(tmp_path)
+    workspace, resolver, store = _environment(tmp_path)
     weaver = SparkCatalogue(spark, resolver.spark_destination(ItemRef("Weaver")))
     weaver.create_schema("Scratch")
-    weaver.sql("CREATE OR REPLACE TABLE {{object:Scratch.Notes}} (x int) USING delta")
+    weaver.sql("CREATE TABLE IF NOT EXISTS {{object:Scratch.Notes}} (x int) USING delta")
     try:
         result = initialise_weaver_lakehouse(
-            weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
+            weaver_lakehouse=ItemRef("Weaver"), workspace=workspace, store=store, spark=spark
         )
         assert result.succeeded, _failures(result.report)
         assert weaver.sql("SELECT * FROM {{object:Scratch.Notes}}").count() == 0
@@ -276,14 +274,8 @@ def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(spark, tmp_pa
         _drop_catalogue_schema(spark)
 
 
-def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_path):
-    """Idempotent in shape: same package, same bundle identity, same catalogue.
-
-    Not yet idempotent in *rows* for anything else — build still emits
-    ``CREATE OR REPLACE TABLE``, so a re-run empties the tables before
-    repopulating this repository's own rows. Only setup does that, and only until
-    drop policy reads the signatures this catalogue now holds.
-    """
+def test_re_running_initialisation_preserves_the_same_rows(spark, tmp_path):
+    """Non-destructive table creation preserves the published catalogue."""
 
     _drop_catalogue_schema(spark)
     try:
@@ -299,13 +291,11 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
 
         again = initialise_weaver_lakehouse(
             weaver_lakehouse=ItemRef("Weaver"),
-            host=first.host,
+            workspace=first.workspace,
             store=first.store,
             spark=spark,
         )
         assert again.succeeded, _failures(again.report)
-        assert again.bundle.plan.bundle_id == first.result.bundle.plan.bundle_id
-
         after = {
             name: tuple(sorted(map(repr, rows)))
             for name, rows in read_installation(
@@ -317,8 +307,8 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
         _drop_catalogue_schema(spark)
 
 
-def test_the_result_serialises_for_a_cli_without_owning_any_semantics(setup):
-    mapping = setup.result.to_mapping()
+def test_the_result_serialises_for_a_cli_without_owning_any_semantics(initialised):
+    mapping = initialised.result.to_mapping()
     assert mapping["item"] == "Lakehouse/_weaver"
     assert mapping["weaver_lakehouse"] == "Weaver"
     assert mapping["status"] == "succeeded"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from weaver.locations import Location
-from weaver.declaration import read_weaver_repository
+from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.catalogue.projection import project_item_installation
 from weaver.catalogue.reconcile import reconcile
@@ -45,7 +45,7 @@ def test_every_catalogue_table_is_keyed_by_exact_item_without_repository():
 
 
 def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
-    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     rows = projection.for_table(REGISTRY)
 
@@ -54,7 +54,7 @@ def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
 
 
 def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
-    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
 
     schemas = {
@@ -75,7 +75,7 @@ def test_no_catalogue_table_keeps_a_hidden_namespace_dimension():
 
 
 def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
-    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
     raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     curated = _project(repository, "Lakehouse/Curated", "Curated_Dev")
 
@@ -88,7 +88,7 @@ def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
 
 
 def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
-    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
     first = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     second = _project(repository, "Lakehouse/Raw", "Raw_Prod")
 
@@ -105,7 +105,7 @@ def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
 
 
 def test_installation_records_the_item_signature_not_the_repository_signature(tmp_path):
-    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     row = projection.for_table(INSTALLATION)[0]
 
@@ -114,7 +114,7 @@ def test_installation_records_the_item_signature_not_the_repository_signature(tm
 
 
 def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
     row = projection.for_table(ALIAS)[0]
 
@@ -129,7 +129,7 @@ def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path
 
 
 def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
     row = projection.for_table(DEPENDENCY)[0]
 
@@ -140,7 +140,7 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
-    repository = read_weaver_repository(Location(str(_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
     reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
 
     assert reconciliation.registry.table is REGISTRY

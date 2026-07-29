@@ -91,23 +91,20 @@ recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-Weaver materialises `Lakehouse/_weaver` beneath `Files/weaver_items` from the
-authoritative table definitions and parses those generated schema and source files through the same
-static readers as authored content. The **ordinary item planner and installer**
-then build it. There is no second "create the control tables" path, and that
-recursion is the point.
+Weaver composes `Lakehouse/_weaver` in memory from the authoritative table
+definitions and parses those generated schema and source files through the same
+static readers as authored content. It never mutates authored source to make the
+built-in visible. The **ordinary item planner and installer** then build it.
+There is no second "create the control tables" path.
 
-On a new control plane, bind `Lakehouse/_weaver` to the control Lakehouse in the
-first coordinated item build. Its physical actions create the tables before the
-same bundle reaches the catalogue tail. Ordinary later builds leave `_weaver`
-unbound and reconcile rows in those existing tables. Rebinding `_weaver` is the
-explicit destructive catalogue-evolution operation while no migration promise
-exists.
+Every build implicitly binds `Lakehouse/_weaver` to the control Lakehouse. Its
+non-destructive physical actions create missing tables before the same bundle
+reaches the catalogue tail; existing tables and rows remain in place.
 
 One bundle does the whole bootstrap, because the barriers already order it:
 
 ```text
-sequence   20   create schema `_`
+sequence   10   create schema `_`
 sequence   40   create the ten catalogue tables
 sequence 9000   describe them in their own dictionaries
 sequence 9010   record the installation
@@ -118,9 +115,9 @@ The catalogue's own DML runs after the tables it writes to exist, so no first-ru
 mode is needed. Generation reads nothing, so an absent catalogue is not a special
 case — the statements are correct against it either way.
 
-Setup never prunes. The Weaver Lakehouse belongs to the installation, not to the
-built-in item, so a reconciling build would treat anything else there as an
-orphan.
+Initialisation never prunes. The Weaver Lakehouse belongs to the installation,
+not to the built-in item, so a reconciling build would treat anything else there
+as an orphan.
 
 ## How a build writes it
 
@@ -268,7 +265,7 @@ them: Fabric refuses `SHOW SCHEMAS IN `workspace`.`lakehouse``, and a bare
 `SHOW SCHEMAS` answers for the attached Lakehouse only, so schema discovery reads
 the destination's `Tables/` area through the store instead.
 
-Responsibilities stay separated. `ItemRef` identifies the logical item; the host
+Responsibilities stay separated. `ItemRef` identifies the logical item; the workspace
 adapter resolves both addresses; the plan carries the item; the installation
 context resolves it once per target; the executor uses it. An executor deriving
 either for itself would be re-deciding where an action lands, which is a planning
@@ -288,16 +285,11 @@ Two things worth knowing:
 
 ## What this branch does not do yet
 
-Build still emits `CREATE OR REPLACE TABLE`, so an explicit `_weaver` rebuild
-empties the catalogue tables before the same coordinated build repopulates the
-workspace declaration's rows. Ordinary builds leave `_weaver` unbound.
-
-Dropping only what changed is the next branch, and it is what the signatures in
-this catalogue exist for: compare the recorded signature with the source, drop the
-changed objects and their descendants, honour `Prohibit rebuild`, and dirty the
-catalogue before mutating anything. Certification is then per object rather than
-per build — a rebuild of `A` in `A → B → C` uncertifies all three, and each
-returns only after it builds.
+Delta table creation is non-destructive (`CREATE TABLE IF NOT EXISTS`) and the
+implicit `_weaver` binding recreates missing structures. This branch does not yet
+use recorded signatures for incremental build selection or general schema
+evolution. Those require explicit change classification and `Prohibit rebuild`
+policy rather than inferring intent from a create statement.
 
 ## See also
 
@@ -305,4 +297,4 @@ returns only after it builds.
   build implementation must preserve.
 - [weaver-repository.md](weaver-repository.md) — where a repository lives and how it is
   installed.
-- [journal.md](journal.md) — why each of these decisions was taken.
+- [weaver_master_cli_plan.md](weaver_master_cli_plan.md) — the authoritative lifecycle plan.

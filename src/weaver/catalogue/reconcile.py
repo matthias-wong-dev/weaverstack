@@ -224,7 +224,9 @@ def prune_installation(scope: InstallationScope) -> tuple[str, ...]:
     ever left certified while what described it is gone.
     """
 
-    ordered = (REGISTRY, INSTALLATION, *reversed(DICTIONARY_TABLES))
+    # Uncertify first, remove dependent dictionaries next, and remove the
+    # installation root last. Delta does not enforce foreign keys, so this is
+    # the explicit ordered equivalent of ON DELETE CASCADE.
+    ordered = (REGISTRY, *reversed(DICTIONARY_TABLES), INSTALLATION)
     return tuple(render_delete_scope(table, scope=scope) for table in ordered)
-
 

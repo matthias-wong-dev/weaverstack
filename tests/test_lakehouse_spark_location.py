@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver
+from weaver import ItemRef, LocalWorkspace, LocalResolver
 from weaver.errors import IdentityError
 from weaver.locations import LakehouseSparkLocation
 
 
 @pytest.fixture
 def resolver(tmp_path):
-    return LocalResolver(LocalHost(root=tmp_path, weaver_lakehouse="Weaver"))
+    return LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
 
 
 def test_a_target_resolves_to_its_two_roots(resolver, tmp_path):
@@ -69,7 +69,7 @@ def test_two_destinations_resolve_separately(resolver):
 def test_the_weaver_lakehouse_resolves_like_any_other_item(resolver):
     """It is the attached one, not a special case of resolution.
 
-    Setup builds the catalogue *into* the Weaver Lakehouse, so it is a destination
+    Initialisation builds the catalogue *into* the Weaver Lakehouse, so it is a destination
     on that one occasion. Nothing about resolving it differs.
     """
 
@@ -133,8 +133,8 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
     from weaver.build_bundle.installer import InstallationEnvironment
     from weaver.build_bundle.targets import BoundTarget
 
-    host = LocalHost(root=tmp_path, weaver_lakehouse="Weaver")
-    environment = InstallationEnvironment(store=None, resolver=LocalResolver(host))
+    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    environment = InstallationEnvironment(store=None, resolver=LocalResolver(workspace))
     resolved = environment.resolve_target(
         BoundTarget(
             id="lakehouse-Sales_LH",
@@ -152,8 +152,8 @@ def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
     from weaver.build_bundle.installer import InstallationEnvironment
     from weaver.build_bundle.targets import BoundTarget
 
-    host = LocalHost(root=tmp_path, weaver_lakehouse="Weaver")
-    environment = InstallationEnvironment(store=None, resolver=LocalResolver(host))
+    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    environment = InstallationEnvironment(store=None, resolver=LocalResolver(workspace))
     resolved = environment.resolve_target(
         BoundTarget(id="warehouse-Sales_WH", kind="warehouse", item_id="Sales_WH")
     )

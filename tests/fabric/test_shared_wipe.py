@@ -1,4 +1,4 @@
-"""The same populated-Lakehouse wipe lifecycle on local and Fabric hosts."""
+"""The same populated-Lakehouse wipe lifecycle on local and Fabric workspaces."""
 
 from __future__ import annotations
 

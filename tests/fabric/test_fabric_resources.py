@@ -10,12 +10,12 @@ from weaver.fabric import LAKEHOUSE, find_item, list_items
 pytestmark = pytest.mark.fabric
 
 
-def test_the_workspace_resolves_to_an_id(fabric_workspace):
-    assert fabric_workspace.id
-    assert fabric_workspace.name
+def test_the_workspace_resolves_to_an_id(fabric_workspace_item):
+    assert fabric_workspace_item.id
+    assert fabric_workspace_item.name
 
 
-def test_an_unknown_workspace_lists_what_there_is(fabric_workspace):
+def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
     """Takes the fixture it does not read, to inherit its skip.
 
     Listing what there is needs a reachable tenant, so without one this cannot

@@ -20,8 +20,8 @@ from typing import Iterator, Mapping
 
 from ..errors import BuildError
 from ..locations import Location
-from ..declaration.model import WeaverItemId
-from ..declaration.repository import read_weaver_repository
+from ..declaration.model import WeaverItemId, WeaverRepository
+from ..declaration.repository import parse_item_repository
 from ..store import LocalStore, Store
 from .bundle import BuildBundle, load_bundle
 from .installer import InstallationEnvironment, install_bundle
@@ -29,6 +29,17 @@ from .planner import generate_item_build_bundle
 from .models import BuildPlan
 from .report import InstallationReport
 from .targets import ItemBindings, LakehouseBinding
+from .targets import WAREHOUSE_TARGET
+from .prune import (
+    TargetInventory,
+    read_lakehouse_inventory,
+    read_warehouse_inventory,
+)
+from ..catalogue.state import (
+    ReconciledCatalogue,
+    read_catalogue_state,
+    reconcile_catalogue_state,
+)
 
 ARCHIVE_SUFFIX = ".weaver.zip"
 
@@ -185,58 +196,154 @@ def install_bundle_archive(
 
 
 def build_item_repository(
+    repository: WeaverRepository,
+    *,
+    bindings: ItemBindings,
+    target_inventories: Mapping[WeaverItemId, TargetInventory],
+    reconciled_catalogue: ReconciledCatalogue,
+    environment: InstallationEnvironment,
+    source_store: Store,
+    prune: bool = True,
+    control_lakehouse: LakehouseBinding,
+    archive: Location | None = None,
+    archive_store: Store | None = None,
+) -> ItemBuildResult:
+    """Generate and install from already parsed source and already read state.
+
+    This is the planner/executor seam.  It deliberately cannot materialise or
+    parse authored files, inspect a Workspace, or discover target state.
+    """
+
+    with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
+        bundle = generate_item_build_bundle(
+            repository,
+            bindings=bindings,
+            output=Location((Path(temporary) / "bundle").as_posix()),
+            store=source_store,
+            target_inventories=target_inventories,
+            reconciled_catalogue=reconciled_catalogue,
+            prune=prune,
+            control_lakehouse=control_lakehouse,
+        )
+        report = install_bundle(bundle, environment=environment)
+        persisted = None
+        if archive is not None:
+            persisted = persist_bundle_archive(
+                bundle,
+                archive,
+                store=archive_store or environment.store,
+            )
+        return ItemBuildResult(
+            plan=bundle.plan,
+            report=report,
+            repository_signature=repository.signature,
+            item_signatures={item.identity: item.signature for item in repository.items},
+            archive=persisted,
+        )
+
+
+def build_uploaded_item_repository(
     repository_root: Location,
     *,
     bindings: ItemBindings,
     environment: InstallationEnvironment,
     prune: bool = True,
-    catalogue: bool = False,
-    control_lakehouse: LakehouseBinding | None = None,
+    control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
     sql_by_item=None,
 ) -> ItemBuildResult:
-    """Materialise, plan and install one coordinated item build in this session."""
+    """Materialise and prepare one uploaded repository, then build it."""
 
-    from ..catalogue.builtin import materialise_builtin_item
-
-    materialise_builtin_item(repository_root, store=environment.store)
     with materialise_tree(repository_root, store=environment.store) as materialised:
-        repository = read_weaver_repository(
-            materialised.location, store=materialised.store
+        repository = parse_item_repository(materialised.location, store=materialised.store)
+        inventories = read_target_inventories(
+            bindings, environment=environment, sql_by_item=sql_by_item
         )
-        with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
-            bundle = generate_item_build_bundle(
-                repository,
-                bindings=bindings,
-                output=Location((Path(temporary) / "bundle").as_posix()),
-                store=materialised.store,
-                target_store=environment.store,
-                prune=prune,
-                catalogue=catalogue,
-                control_lakehouse=control_lakehouse,
-                resolver=environment.resolver,
-                spark=environment.spark,
-                host=environment.host,
-                sql_by_item=sql_by_item,
-            )
-            report = install_bundle(bundle, environment=environment)
-            persisted = None
-            if archive is not None:
-                persisted = persist_bundle_archive(
-                    bundle,
-                    archive,
-                    store=archive_store or environment.store,
+        reconciled = read_reconciled_catalogue(
+            bindings, inventories=inventories, environment=environment
+        )
+        return build_item_repository(
+            repository,
+            bindings=bindings,
+            target_inventories=inventories,
+            reconciled_catalogue=reconciled,
+            environment=environment,
+            source_store=materialised.store,
+            prune=prune,
+            control_lakehouse=control_lakehouse,
+            archive=archive,
+            archive_store=archive_store,
+        )
+
+
+def read_reconciled_catalogue(
+    bindings: ItemBindings,
+    *,
+    inventories,
+    environment: InstallationEnvironment,
+) -> ReconciledCatalogue:
+    """Read the Weaver Lakehouse catalogue and prove selected claims physically."""
+
+    if environment.spark is None:
+        raise BuildError("every build needs Spark to read and publish the catalogue")
+    workspace = environment.workspace
+    if workspace is None or not workspace.weaver_lakehouse:
+        raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
+    from ..spark import SparkCatalogue
+    from ..targets import ItemRef
+
+    catalogue = SparkCatalogue(
+        environment.spark,
+        environment.resolver.spark_destination(ItemRef(workspace.weaver_lakehouse)),
+    )
+    state = read_catalogue_state(
+        catalogue, (binding.item for binding in bindings.entries)
+    )
+    return reconcile_catalogue_state(state, inventories=inventories)
+
+
+def read_target_inventories(
+    bindings: ItemBindings,
+    *,
+    environment: InstallationEnvironment,
+    sql_by_item=None,
+) -> dict:
+    """Read every selected physical target before planning begins."""
+
+    supplied_sql = sql_by_item or {}
+    inventories = {}
+    owned = []
+    try:
+        for binding in bindings.entries:
+            target = binding.to_bound_target()
+            if target.kind == WAREHOUSE_TARGET:
+                sql = supplied_sql.get(binding.item)
+                if sql is None:
+                    if environment.workspace is None:
+                        raise BuildError(
+                            f"reading Warehouse inventory for {binding.item} needs a Workspace"
+                        )
+                    from ..fabric.sql import fabric_sql_executor
+                    from ..targets import WarehouseTarget
+
+                    sql = fabric_sql_executor(
+                        WarehouseTarget.parse(target.item_id), environment.workspace
+                    )
+                    owned.append(sql)
+                inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
+            else:
+                inventories[binding.item] = read_lakehouse_inventory(
+                    target,
+                    resolver=environment.resolver,
+                    store=environment.store,
+                    spark=environment.spark,
                 )
-            return ItemBuildResult(
-                plan=bundle.plan,
-                report=report,
-                repository_signature=repository.signature,
-                item_signatures={
-                    item.identity: item.signature for item in repository.items
-                },
-                archive=persisted,
-            )
+        return inventories
+    finally:
+        for sql in owned:
+            if hasattr(sql, "close"):
+                sql.close()
 
 
 @contextmanager

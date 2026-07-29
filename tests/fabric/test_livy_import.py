@@ -48,14 +48,14 @@ def test_the_core_public_surface_is_importable_there(livy_session):
         "emit({\n"
         "  'folder': str(FolderTarget.parse('Sales_LH/Files/Extracts')),\n"
         "  'delta': str(DeltaTarget.parse('Sales_LH')),\n"
-        "  'joined': (Location('abfss://ws@host/lh') / 'Files' / 'x').value,\n"
+        "  'joined': (Location('abfss://ws@workspace/lh') / 'Files' / 'x').value,\n"
         "})\n"
     )
     result = livy_session.run(body)
     assert result.payload == {
         "folder": "Sales_LH/Files/Extracts",
         "delta": "Sales_LH",
-        "joined": "abfss://ws@host/lh/Files/x",
+        "joined": "abfss://ws@workspace/lh/Files/x",
     }
 
 
@@ -63,7 +63,7 @@ def test_the_weaver_contract_parses_there(livy_session):
     """The heart of Weaver, running in Fabric rather than described to it."""
 
     body = (
-        "from weaver.ses import parse_document\n"
+        "from weaver.declaration import parse_document\n"
         "doc = parse_document('''\n"
         "Table ID: Sales.Order\n\n"
         "Description: One row per order.\n\n"

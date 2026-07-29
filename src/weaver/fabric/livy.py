@@ -158,7 +158,7 @@ def list_livy_sessions(
 
 
 def list_workspace_livy_sessions(
-    host,
+    workspace,
     *,
     client=None,
     active_only: bool = False,
@@ -167,7 +167,7 @@ def list_workspace_livy_sessions(
 
     Fabric capacities can apply a session limit across the workspace, while the
     API exposes collections per Lakehouse. Looking only at the Lakehouse about
-    to host Weaver would therefore miss a notebook occupying the same slot.
+    that will run Weaver would therefore miss a notebook occupying the same slot.
     """
 
     from .client import FabricClient
@@ -175,7 +175,7 @@ def list_workspace_livy_sessions(
     from .resources import LAKEHOUSE, list_items
 
     client = client or FabricClient()
-    resolver = FabricResolver(host, client=client)
+    resolver = FabricResolver(workspace, client=client)
     found = tuple(
         WorkspaceLivySession(lakehouse.id, lakehouse.name, session)
         for lakehouse in list_items(
@@ -237,15 +237,15 @@ class LivySession:
         self.session_url: str | None = None
 
     @classmethod
-    def for_host(cls, host, *, resolver=None, **kwargs) -> "LivySession":
-        """A session against a host's Weaver Lakehouse, ready to ``import weaver``.
+    def for_workspace(cls, workspace, *, resolver=None, **kwargs) -> "LivySession":
+        """A session against a workspace's Weaver Lakehouse, ready to ``import weaver``.
 
         The session is created against the Weaver Lakehouse (its default), and
-        the host's ``fabric_environment`` is attached so a plain ``import
+        the workspace's ``environment`` is attached so a plain ``import
         weaver`` finds the installed package — put there by ``weaver install``.
         Nothing is copied into the workspace.
 
-        The Environment is required: a host without one, or an unresolvable one,
+        The Environment is required: a workspace without one, or an unresolvable one,
         is an error rather than a silent fall back to copied source. The
         bootstrap runs once when the session starts, so callers submit their
         work and nothing else.
@@ -256,17 +256,17 @@ class LivySession:
         from .resolution import FabricResolver
         from .resources import LAKEHOUSE
 
-        resolver = resolver or FabricResolver(host)
-        home = resolver.resolve(ItemRef(host.weaver_lakehouse), item_type=LAKEHOUSE)
+        resolver = resolver or FabricResolver(workspace)
+        home = resolver.resolve(ItemRef(workspace.weaver_lakehouse), item_type=LAKEHOUSE)
 
         environment_id = kwargs.pop("environment_id", None)
         if environment_id is None:
-            if not getattr(host, "fabric_environment", None):
+            if not getattr(workspace, "environment", None):
                 raise CommandError(
-                    "this host names no fabric_environment; set one and run "
+                    "this workspace names no environment; set one and run "
                     "`weaver install --workspace <ws> --environment <env>`"
                 )
-            environment_id = _resolve_environment_id(host, resolver)
+            environment_id = _resolve_environment_id(workspace, resolver)
 
         return cls(
             resolver.workspace.id,
@@ -414,8 +414,8 @@ def emit_source() -> str:
     )
 
 
-def _resolve_environment_id(host, resolver) -> str:
-    """The item id of the host's named Environment.
+def _resolve_environment_id(workspace, resolver) -> str:
+    """The item id of the workspace's named Environment.
 
     Resolved by type, so a same-named Lakehouse or Warehouse cannot be picked up
     by mistake — identity is ``workspace + type + name``.
@@ -425,7 +425,7 @@ def _resolve_environment_id(host, resolver) -> str:
 
     item = find_item(
         resolver.workspace,
-        host.fabric_environment,
+        workspace.environment,
         item_type=ENVIRONMENT,
         client=resolver.client,
     )

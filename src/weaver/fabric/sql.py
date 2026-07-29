@@ -20,7 +20,7 @@ FABRIC_SQL_AUDIENCE = "https://database.windows.net/"
 
 def desktop_sql_pool(
     target,
-    host,
+    workspace,
     *,
     credential=None,
     resolver=None,
@@ -32,7 +32,7 @@ def desktop_sql_pool(
     from ..resolution import resolver_for
     from ..sql.connection import connect
 
-    resolver = resolver or resolver_for(host)
+    resolver = resolver or resolver_for(workspace)
     endpoint = resolver.sql_endpoint(target)
     authentication = AccessTokenAuthentication(
         lambda: get_token(SQL_SCOPE, credential)
@@ -45,18 +45,18 @@ def desktop_sql_pool(
     )
 
 
-def desktop_sql_executor(target, host, **kwargs) -> PooledSqlExecutor:
+def desktop_sql_executor(target, workspace, **kwargs) -> PooledSqlExecutor:
     """An explicitly cross-boundary desktop executor."""
 
     return PooledSqlExecutor(
-        desktop_sql_pool(target, host, **kwargs),
+        desktop_sql_pool(target, workspace, **kwargs),
         owns_pool=True,
     )
 
 
 def fabric_sql_pool(
     target,
-    host,
+    workspace,
     *,
     resolver=None,
     runtime: Any | None = None,
@@ -73,7 +73,7 @@ def fabric_sql_pool(
     if resolver is None:
         try:
             resolver = FabricSessionResolver(
-                host,
+                workspace,
                 runtime=runtime,
                 lakehouse=lakehouse,
                 credentials=credentials,
@@ -109,10 +109,10 @@ def fabric_sql_pool(
     )
 
 
-def fabric_sql_executor(target, host, **kwargs) -> PooledSqlExecutor:
+def fabric_sql_executor(target, workspace, **kwargs) -> PooledSqlExecutor:
     """An explicitly within-Fabric executor."""
 
     return PooledSqlExecutor(
-        fabric_sql_pool(target, host, **kwargs),
+        fabric_sql_pool(target, workspace, **kwargs),
         owns_pool=True,
     )

@@ -28,9 +28,9 @@ def test_the_declaration_installs_into_the_weaver_lakehouse(installed_repository
 
 
 def test_an_installed_declaration_reads_back(installed_repository):
-    from weaver.declaration import read_weaver_repository
+    from weaver.declaration import parse_item_repository
 
-    repository = read_weaver_repository(installed_repository)
+    repository = parse_item_repository(installed_repository)
     assert repository.name == "weaver_items"
     assert "Lakehouse/Raw/DWG.Customer" in repository.dependency_graph.nodes
 

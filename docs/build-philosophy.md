@@ -545,15 +545,15 @@ frozen contract.
 Some structural policies are intentionally versioned decisions rather than
 eternal rules.
 
-For example, an early implementation may use:
+Delta creation currently uses:
 
 ```sql
-CREATE OR REPLACE TABLE
+CREATE TABLE IF NOT EXISTS
 ```
 
 for every declared Delta table. A later implementation may add change
-classification, schema reshaping, data-preservation policy or prohibited
-rebuilds.
+classification, schema reshaping or prohibited rebuilds without returning to
+replace-style creation as the ordinary path.
 
 Those policies can evolve while preserving the deeper invariants:
 
@@ -582,7 +582,7 @@ The same bundle model should support:
 
 Transports and capabilities differ. Semantics should not.
 
-A capability that is unavailable on one host should produce an explicit
+A capability that is unavailable on one workspace should produce an explicit
 unsupported result during planning or pre-installation validation. It should not
 be simulated through behaviour that changes the meaning of the build.
 
@@ -592,7 +592,7 @@ rows before Weaver can materialise them. A retained action that uses such an
 alias must fail explicitly before mutation; it must not run the consumer's
 two-part name against whichever physical item happens to be bound.
 
-Host-specific adapters may determine **how** an action runs. They do not
+Workspace-specific adapters may determine **how** an action runs. They do not
 determine **what** the action means.
 
 On Fabric, both phases run inside the session. The session copies the OneLake

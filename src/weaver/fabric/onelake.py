@@ -5,7 +5,7 @@ HTTPS against the ADLS Gen2 DFS endpoint. It is what the CLI uses to push
 repository files up and to inspect results from a test on the laptop. It is not
 the path Weaver should use when it is *running inside* Fabric — there the native
 in-session mechanisms (``notebookutils.fs``, Spark) apply — so this store is a
-cross-into-Fabric transport, not the canonical in-host Fabric implementation.
+cross-into-Fabric transport, not the canonical in-workspace Fabric implementation.
 
 Two things OneLake does over DFS that a plain filesystem does not:
 
@@ -111,7 +111,7 @@ class OneLakeDfsClient:
     session-native store is a separate implementation for when it exists.
 
     Because it crosses a boundary, it is constructed explicitly by the caller
-    that crosses — never returned by a host-to-store factory, which returns the
+    that crosses — never returned by a workspace-to-store factory, which returns the
     NotebookUtils-backed ``FabricStore`` only inside a Fabric session.
     """
 
