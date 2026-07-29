@@ -6,7 +6,7 @@ import pytest
 
 from weaver.errors import BuildError, GraphError
 from weaver.locations import Location
-from weaver.declaration import project_bound_documents, read_weaver_repository
+from weaver.declaration import project_bound_documents, parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 
 from test_item_repository import (
@@ -73,7 +73,7 @@ def _edge(repository, consumer: str, reference: str):
 
 
 def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
 
     delta_to_folder = _edge(
         repository,
@@ -98,7 +98,7 @@ def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
 
 
 def test_lib_import_creates_no_object_edge(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     landing = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Landing")
     assert not any(
         edge.consumer == landing and "lib" in edge.reference
@@ -107,7 +107,7 @@ def test_lib_import_creates_no_object_edge(tmp_path):
 
 
 def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     edge = _edge(
         repository,
         "Warehouse/Reporting/Sales.Customer",
@@ -121,7 +121,7 @@ def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
 
 
 def test_three_part_sql_reference_is_preserved_as_physical(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     edge = _edge(
         repository,
         "Warehouse/Audit/Sales.Change",
@@ -134,7 +134,7 @@ def test_three_part_sql_reference_is_preserved_as_physical(tmp_path):
 
 
 def test_sparse_projection_selects_only_exact_bound_items(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     selected = project_bound_documents(
         repository, [WeaverItemId.parse("Warehouse/Reporting")]
     )
@@ -146,7 +146,7 @@ def test_sparse_projection_selects_only_exact_bound_items(tmp_path):
 
 
 def test_projection_requires_at_least_one_binding(tmp_path):
-    repository = read_weaver_repository(Location(str(_dependency_estate(tmp_path))))
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     with pytest.raises(BuildError, match="at least one Weaver item"):
         project_bound_documents(repository, [])
 
@@ -174,4 +174,4 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
         "aliases:\n  Sales.Curated: Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(GraphError, match="dependency cycle"):
-        read_weaver_repository(Location(str(root)))
+        parse_item_repository(Location(str(root)))

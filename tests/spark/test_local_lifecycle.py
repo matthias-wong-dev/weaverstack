@@ -72,7 +72,7 @@ def test_wipe_removes_the_real_tables(spark, lakehouses):
     run_script(spark, "build.spark.sql", tables_root(lakehouses))
     run_script(spark, "load.spark.sql", tables_root(lakehouses))
 
-    report = wipe_delta_target(DeltaTarget.parse("Sales_LH"), lakehouses.host)
+    report = wipe_delta_target(DeltaTarget.parse("Sales_LH"), lakehouses.workspace)
     assert set(report.removed) == {"Sales", "Reporting"}
 
     tables = lakehouses.resolver.tables_root(ItemRef("Sales_LH"))
@@ -88,7 +88,7 @@ def test_the_environment_recovers_on_a_second_pass(spark, lakehouses):
     run_script(spark, "load.spark.sql", root)
     assert count(spark, table_path(lakehouses, "Sales", "Order")) == 3
 
-    wipe_delta_target(DeltaTarget.parse("Sales_LH"), lakehouses.host)
+    wipe_delta_target(DeltaTarget.parse("Sales_LH"), lakehouses.workspace)
     assert not (lakehouses.root / "Sales_LH" / "Tables" / "Sales").exists()
 
     run_script(spark, "build.spark.sql", root)

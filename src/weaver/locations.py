@@ -1,6 +1,6 @@
 """Resolved physical locations.
 
-A :class:`Location` is what a host resolution produces: the concrete place an
+A :class:`Location` is what a workspace resolution produces: the concrete place an
 item, folder or table lives. It exists because ``pathlib.Path`` cannot be the
 common currency — ``Path("abfss://ws@onelake.dfs.fabric.microsoft.com/lh")``
 silently collapses the double slash and yields a broken root with no error.
@@ -37,7 +37,7 @@ class Location:
         if not value:
             raise IdentityError("location must not be empty")
         # One separator, everywhere. A Windows caller reaches this with
-        # backslashes — `LocalHost` normalises its root through `Path`, and
+        # backslashes — `LocalWorkspace` normalises its root through `Path`, and
         # `str()` of a `WindowsPath` uses them — while everything downstream
         # treats "/" as the only separator: `join`, `name`, and the segment
         # splitting in the Weaver document reader. Left alone, a repository read from a

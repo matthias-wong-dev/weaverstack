@@ -5,251 +5,155 @@ pip install 'weaverstack[cli]'
 weaver --help
 ```
 
-Everything below is optional depending on what you are doing. Working against a
-local filesystem needs no Azure at all; working against Fabric needs `az login`
-and nothing else.
+Fabric commands use the identity from `az login`. Local commands need no Azure
+credentials.
 
----
+## Workspace resolution
 
-## Signing in to Azure
+Commands accept the applicable subset of:
 
-Weaver uses whatever identity the Azure CLI is signed in as. There is no Weaver
-credential, no service principal to register, no secret to store.
-
-```bash
-brew install azure-cli
-az login
+```text
+--workspace <Fabric-name-or-local-folder>
+--workspace-type <fabric|local>
+--workspace-config <path>
+--environment <Fabric-Environment>
+--weaver-lakehouse <control-Lakehouse>
 ```
 
-That opens a browser once. Afterwards:
+`workspace_type` defaults to `fabric`. Explicit CLI values override the one
+Workspace described by the configuration file. A local Workspace is simply a
+folder path:
 
 ```bash
-az account show
+weaver initialise \
+  --workspace .local \
+  --workspace-type local \
+  --weaver-lakehouse Weaver
 ```
 
-should name your subscription and tenant. If it names the wrong subscription:
-
-```bash
-az account set --subscription "<name or id>"
-```
-
-### Why Weaver pins the credential
-
-Under the hood this is `DefaultAzureCredential`, which walks a chain of possible
-identities — environment variables, managed identity, the Azure CLI, and others
-— and uses the first that answers. The chain does not always settle on the one
-you signed in as, and the symptom is confusing: ARM calls and `az` both work,
-but a OneLake write fails with `401 Access token validation failed`.
-
-So Weaver sets `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` when nothing else
-has, which makes the identity the same one `az account show` reports. If you set
-that variable yourself, your choice stands and Weaver does not touch it.
-
-If a call still returns 401, refresh the CLI's cache for the storage audience:
-
-```bash
-az account get-access-token --resource https://storage.azure.com/
-```
-
----
-
-## Naming where the work happens
-
-Every command that touches something takes a **host** — the workspace or local
-root the work happens in.
-
-```bash
---host MyFabric --hosts env.yml    # a host named in a hosts file
---root .local                      # a local host, no file needed
-```
-
-A hosts file is a convenience, never a requirement — see
-[`examples/env.yml`](../examples/env.yml). It holds only level four, the
-workspace or root. Lakehouses, Warehouses and Environments are named directly
-wherever they are used. Item identity is typed: a Lakehouse and Warehouse may
-share a display name, and the command flag says which one is meant.
+A configuration is shorthand for the same values. Physical target names are
+the keys and their default logical bindings are the values:
 
 ```yaml
-hosts:
-  MyLocal:
-    type: Local
-    root: .local
-    weaver_lakehouse: Weaver
+workspace: Analytics
+workspace_type: fabric
+environment: Runtime
+weaver_lakehouse: Control
 
-  MyFabric:
-    type: Fabric
-    workspace: Analytics
-    weaver_lakehouse: Control
-    fabric_environment: Runtime
+lakehouses:
+  Sales_Dev: Lakehouse/Sales
+warehouses:
+  Reporting_Dev: Warehouse/Reporting
 ```
 
----
+See [`examples/env.yml`](../examples/env.yml) for the expanded form.
+
+## Install and initialise
+
+Install Weaver into a Fabric Environment:
+
+```bash
+weaver install --workspace Analytics --environment Runtime
+```
+
+Create or prepare the Weaver Lakehouse and build its package-owned catalogue:
+
+```bash
+weaver initialise \
+  --workspace Analytics \
+  --environment Runtime \
+  --weaver-lakehouse Control
+```
+
+Use `--exists-ok` when the Lakehouse may already exist. It does not suppress
+invalid or incompatible catalogue structures. An ordinary build also recreates
+missing catalogue tables non-destructively.
+
+## Push
+
+Push validates the complete authored repository before replacing
+`Files/weaver_items/`:
+
+```bash
+weaver push ./estate --workspace-config examples/env.yml
+```
+
+Push is whole-repository only. It does not build targets or mutate catalogue
+rows, and the local source folder name is not added as another remote level.
+`Lakehouse/_weaver` is package-owned and is composed in memory; it must not be
+authored or uploaded.
 
 ## Build
 
-A build reads the workspace's fixed declaration and repeats one exact logical-to-physical
-binding for every item it should materialise:
+Bindings are physical-first:
 
 ```bash
 weaver build \
-  --bind Lakehouse/Raw=Raw_Dev \
-  --bind Warehouse/Reporting=Reporting_Dev \
-  --host Development --hosts env.yml
+  --workspace-config examples/env.yml \
+  --bind Lakehouses/Sales_Dev \
+  --bind Warehouses/Reporting_Dev=Warehouse/Alternative
 ```
 
-The left side is exact-case logical item identity; the right side is a physical
-Fabric item name. Unmentioned items are ordinary and remain unbound.
-At least one `--bind` is required. Prune and catalogue publication are on by
-default; `--no-prune` is the explicit unsafe sharing escape hatch, and
-`--no-catalogue` is for controlled bootstrap/diagnostic work.
+Without `=`, the physical target uses its configured logical default. With `=`,
+the right side is an invocation-only logical override. Lakehouse and Warehouse
+types must match.
 
-The desktop CLI starts one Environment-backed Fabric session. Discovery, bundle
-generation and installation all run there; the laptop never plans a lesser copy
-of a Fabric build. The host therefore names both `weaver_lakehouse` and
-`fabric_environment`. For the local emulator use the public Python API with its
-caller-owned Spark session.
+Every build adds the implicit binding from `Lakehouse/_weaver` to the configured
+Weaver Lakehouse. Catalogue publication is mandatory and registry certification
+is last. Prune is enabled by default; `--no-prune` is the explicit escape hatch.
+Delta tables use `CREATE TABLE IF NOT EXISTS`, so repeating a build does not
+replace an existing table or erase its rows. Views retain replace semantics.
 
-Before requesting that session, the CLI reads every Lakehouse's Livy collection
-and reports any active or queued session to stderr, including its states and
-submitter where Fabric supplies one. This is advisory: Weaver neither cancels a
-notebook session it does not own nor mistakes an occupied one-session capacity
-for a build failure.
+Fabric generation and installation run inside one Environment-backed Livy
+session. Local generation and installation run in-process against the emulator;
+the CLI creates one local Spark session and always stops it in `finally`.
+Warehouses remain Fabric-only.
 
-The declaration must already be installed at
-`<Control Lakehouse>/Files/weaver_items/`. There is no repository-name level or
-repository selector inside one control plane.
+Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
+`--bundle <name>` to choose its name.
 
-Inside that one Fabric session Weaver copies the declaration once to a temporary
-driver-local directory, plans and installs from local files, then removes them.
-The usual development build does not upload or download a bundle.
+## Unbind
 
-To preserve the completed bundle as a handover or audit record, add `--bundle`.
-With no value Weaver uses a UTC `<timestamp>.weaver.zip` name; supplying a name
-uses that name (and appends `.weaver.zip` when omitted):
+Unbind removes catalogue state for explicitly named physical targets without
+inspecting or deleting those targets:
 
 ```bash
-weaver build ... --bundle
-weaver build ... --bundle estate-review
+weaver unbind \
+  --workspace-config examples/env.yml \
+  --lakehouse Sales_Dev \
+  --warehouse Reporting_Dev
 ```
 
-The archive is written beneath the control plane's build-bundle area only after
-the local bundle exists. It is not required for installation.
+It works even when the physical target has already disappeared. Unrelated
+installations remain.
 
-On a new control plane, include the generated built-in item once so the same
-bundle creates the catalogue before its catalogue tail runs:
+## Wipe
+
+Wipe is intentionally broader: it clears everything in each selected target for
+the object types Weaver knows how to remove, then automatically unbinds that
+target from the catalogue.
 
 ```bash
---bind Lakehouse/_weaver=Control
+weaver wipe \
+  --workspace-config examples/env.yml \
+  --lakehouse Sales_Dev \
+  --warehouse Reporting_Dev \
+  --dry-run
 ```
 
-Do not bind `_weaver` on ordinary later builds: catalogue evolution is currently
-an explicit destructive rebuild, while normal builds reconcile rows in the
-existing tables.
+Lakehouse wipe clears its Files and Tables areas. Warehouse wipe removes all
+user-created object types covered by Weaver's Warehouse wipe implementation,
+not only objects previously registered by Weaver. Use `--yes` for unattended
+execution; otherwise a non-interactive process refuses the destructive action.
 
----
-
-## Capacity
-
-A Fabric capacity is billed while it runs, so a session starts and ends with it.
+## Capacity and diagnostics
 
 ```bash
 weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
 weaver capacity status  --resource-group <rg> --capacity-name <capacity>
 weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
-```
 
-```text
-datawithoutguessing: Active, F2
-```
-
-`resume` returns before the capacity is actually `Active` — it takes about half
-a minute — so `status` is the confirmation, not the return value.
-
-Find your capacity with:
-
-```bash
-az fabric capacity list --query "[].{name:name, rg:resourceGroup}" -o table
-```
-
----
-
-## Wipe
-
-Clears a target. **It removes everything there, not only what Weaver
-manages**, so it prints the plan first and asks before acting.
-
-```bash
-weaver wipe --lakehouse-target Sales_LH --host MyLocal --hosts env.yml --dry-run
-```
-
-```text
-wipe on MyLocal
-
-  folder:Sales_LH/Files
-    .local/Sales_LH/Files
-      - Sales
-  delta:Sales_LH
-    .local/Sales_LH/Tables
-      - Sales
-
-2 item(s) would be removed. Nothing was changed.
-```
-
-Target type is explicit because a Fabric workspace may contain a Lakehouse and
-a Warehouse with the same display name:
-
-```bash
-weaver wipe --lakehouse-target Sales_LH
-weaver wipe --warehouse-target "Play Warehouse"
-
-# Repeat or mix typed flags.
-weaver wipe --lakehouse-target A --lakehouse-target B \
-  --warehouse-target Reporting
-```
-
-The underscore spellings (`--lakehouse_target` and `--warehouse_target`) are
-accepted compatibility aliases. A Folder is not independently wipeable: it is
-owned by its Lakehouse, and a Lakehouse wipe clears both Tables and Files.
-
-Add `--yes` to skip the confirmation. Without a terminal to ask on — in a script
-or CI — the command **refuses** rather than proceeding, so nothing is destroyed
-by omission.
-
-`--dry-run` prints a selected Warehouse but does not connect to SQL or enumerate
-its catalogue. There is no Warehouse dry-run operation in core.
-
----
-
-## Checking a machine
-
-```bash
 weaver doctor
 ```
 
-Reports whether local Spark and Delta will work: Python, PySpark, delta-spark
-and Java, each failure naming the command that fixes it. `--json` for scripting;
-the exit status is non-zero when something is missing.
-
-None of it is needed to use Weaver on Fabric — it is for local development.
-
----
-
-## A session, end to end
-
-```bash
-az login
-
-weaver capacity resume --resource-group <rg> --capacity-name <capacity>
-weaver capacity status --resource-group <rg> --capacity-name <capacity>
-
-# … work …
-
-weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
-```
-
-## See also
-
-- [Where your Weaver repository lives](weaver-repository.md) — item layout and installation
-
-- [Local development setup](local-setup.md) — Java, Spark, and the local tests
-- [Fabric integration tests](fabric-testing.md) — running the opt-in suite
+`doctor` reports whether local Spark, Delta and a supported JDK are available.

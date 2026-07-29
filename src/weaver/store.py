@@ -57,13 +57,13 @@ class Entry:
 
 @runtime_checkable
 class Store(Protocol):
-    """File transport within one host.
+    """File transport within one workspace.
 
-    A within-host store operates beneath a local root or through Fabric's
+    A within-workspace store operates beneath a local root or through Fabric's
     session-native utilities. A cross-boundary caller may also implement this
     protocol (the desktop's OneLake DFS client) and inject it explicitly, but
     moving files from a laptop into Fabric remains CLI orchestration rather than
-    a host default.
+    a workspace default.
     """
 
     def exists(self, location: Location) -> bool: ...
@@ -84,7 +84,7 @@ class Store(Protocol):
 class LocalStore:
     """Filesystem implementation.
 
-    Not sandboxed to a host root, because push reads from arbitrary source
+    Not sandboxed to a workspace root, because push reads from arbitrary source
     directories. Containment comes from name validation in
     :mod:`weaver.targets`, which rejects separators and traversal.
     """

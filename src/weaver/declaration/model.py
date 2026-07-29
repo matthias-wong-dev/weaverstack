@@ -1,7 +1,7 @@
 """Pure logical repository, item and document identities.
 
 These values describe authored Weaver structure. They deliberately know
-nothing about Fabric item names, hosts, stores or build execution: those are
+nothing about Fabric item names, workspaces, stores or build execution: those are
 physical bindings applied later.
 """
 

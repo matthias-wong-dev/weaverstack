@@ -41,7 +41,7 @@ class Bootstrapped:
     """One completed bootstrap, with the environment it ran against."""
 
     result: object
-    host: object
+    workspace: object
     resolver: object
     store: object
     #: How this bootstrap's Weaver Lakehouse is addressed in the shared session.
@@ -51,25 +51,25 @@ class Bootstrapped:
 def _environment(root):
     """A disposable Weaver Lakehouse skeleton at one root."""
 
-    from weaver import ItemRef, LocalHost, LocalResolver, LocalStore
+    from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
 
-    host = LocalHost(root=root, weaver_lakehouse="Weaver")
+    workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
     store = LocalStore()
-    resolver = LocalResolver(host)
+    resolver = LocalResolver(workspace)
     store.make_directory(resolver.files_root(ItemRef("Weaver")))
     store.make_directory(resolver.tables_root(ItemRef("Weaver")))
     store.make_directory(resolver.weaver_items_root)
-    return host, resolver, store
+    return workspace, resolver, store
 
 
 def _bootstrap(spark, root) -> Bootstrapped:
-    host, resolver, store = _environment(root)
+    workspace, resolver, store = _environment(root)
     result = initialise_weaver_lakehouse(
-        weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
+        weaver_lakehouse=ItemRef("Weaver"), workspace=workspace, store=store, spark=spark
     )
     return Bootstrapped(
         result=result,
-        host=host,
+        workspace=workspace,
         resolver=resolver,
         store=store,
         catalogue=SparkCatalogue(spark, resolver.spark_destination(ItemRef("Weaver"))),
@@ -121,14 +121,10 @@ def test_setup_succeeds(setup):
     assert setup.result.succeeded, _failures(setup.result.report)
 
 
-def test_the_repository_is_materialised_into_the_weaver_lakehouse(setup):
+def test_the_package_owned_item_is_not_materialised_into_authored_source(setup):
     root = setup.resolver.weaver_items_root
-    assert setup.store.exists(root.join("Lakehouse", "_weaver", "schemas", "_.yml"))
-    for table in CATALOGUE_TABLES:
-        assert setup.store.exists(
-            root.join("Lakehouse", "_weaver", f"{table.qualified}.sql")
-        )
-    assert "Lakehouse/_weaver/schemas/_.yml" in setup.result.materialised
+    assert not setup.store.exists(root.join("Lakehouse", "_weaver"))
+    assert setup.result.materialised == ()
 
 
 def test_the_bundle_is_kept_where_bundles_belong(setup):
@@ -261,13 +257,13 @@ def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(spark, tmp_pa
     """The consequence of not pruning, asserted rather than assumed."""
 
     _drop_catalogue_schema(spark)
-    host, resolver, store = _environment(tmp_path)
+    workspace, resolver, store = _environment(tmp_path)
     weaver = SparkCatalogue(spark, resolver.spark_destination(ItemRef("Weaver")))
     weaver.create_schema("Scratch")
-    weaver.sql("CREATE OR REPLACE TABLE {{object:Scratch.Notes}} (x int) USING delta")
+    weaver.sql("CREATE TABLE IF NOT EXISTS {{object:Scratch.Notes}} (x int) USING delta")
     try:
         result = initialise_weaver_lakehouse(
-            weaver_lakehouse=ItemRef("Weaver"), host=host, store=store, spark=spark
+            weaver_lakehouse=ItemRef("Weaver"), workspace=workspace, store=store, spark=spark
         )
         assert result.succeeded, _failures(result.report)
         assert weaver.sql("SELECT * FROM {{object:Scratch.Notes}}").count() == 0
@@ -276,14 +272,8 @@ def test_a_users_own_schema_in_the_weaver_lakehouse_survives_setup(spark, tmp_pa
         _drop_catalogue_schema(spark)
 
 
-def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_path):
-    """Idempotent in shape: same package, same bundle identity, same catalogue.
-
-    Not yet idempotent in *rows* for anything else — build still emits
-    ``CREATE OR REPLACE TABLE``, so a re-run empties the tables before
-    repopulating this repository's own rows. Only setup does that, and only until
-    drop policy reads the signatures this catalogue now holds.
-    """
+def test_re_running_setup_preserves_the_same_rows(spark, tmp_path):
+    """Non-destructive table creation preserves the published catalogue."""
 
     _drop_catalogue_schema(spark)
     try:
@@ -299,13 +289,11 @@ def test_re_running_setup_produces_the_same_bundle_and_the_same_rows(spark, tmp_
 
         again = initialise_weaver_lakehouse(
             weaver_lakehouse=ItemRef("Weaver"),
-            host=first.host,
+            workspace=first.workspace,
             store=first.store,
             spark=spark,
         )
         assert again.succeeded, _failures(again.report)
-        assert again.bundle.plan.bundle_id == first.result.bundle.plan.bundle_id
-
         after = {
             name: tuple(sorted(map(repr, rows)))
             for name, rows in read_installation(

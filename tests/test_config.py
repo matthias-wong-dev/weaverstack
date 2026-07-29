@@ -1,121 +1,103 @@
-"""The hosts file is a named lookup, expressing nothing the constructors can't."""
-
-from __future__ import annotations
+"""One configuration file describes exactly one Workspace."""
 
 from pathlib import Path
 
 import pytest
 
-from weaver import FabricHost, LocalHost, load_hosts, parse_hosts
+from weaver import FabricWorkspace, LocalWorkspace, load_workspace, parse_workspace
 from weaver.errors import ConfigError
 
-PAYLOAD = {
-    "hosts": {
-        "MyFabric": {
-            "type": "Fabric",
+
+def test_fabric_is_the_default_workspace_type():
+    workspace = parse_workspace({"workspace": "Analytics"})
+    assert isinstance(workspace, FabricWorkspace)
+    assert workspace.workspace == "Analytics"
+    assert workspace.workspace_type == "fabric"
+
+
+def test_local_workspace_value_is_its_folder_path():
+    workspace = parse_workspace(
+        {"workspace": ".local", "workspace_type": "local"}
+    )
+    assert isinstance(workspace, LocalWorkspace)
+    assert workspace.workspace == Path(".local")
+
+
+def test_typical_configuration_parses_physical_defaults():
+    workspace = parse_workspace(
+        {
             "workspace": "Analytics",
+            "environment": "WeaverRuntime",
             "weaver_lakehouse": "Weaver",
-            "fabric_environment": "Weaver_Env",
-            "warehouse_config": {"Reporting": {"degrees_of_parallelism": 8}},
-        },
-        "MyLocal": {
-            "type": "Local",
-            "root": ".local",
-            "weaver_lakehouse": "Weaver",
-        },
-    }
-}
-
-
-def test_parses_both_host_types():
-    hosts = parse_hosts(PAYLOAD)
-    assert isinstance(hosts["MyFabric"], FabricHost)
-    assert isinstance(hosts["MyLocal"], LocalHost)
-
-
-def test_the_alias_is_carried_for_diagnostics():
-    assert parse_hosts(PAYLOAD)["MyFabric"].alias == "MyFabric"
-
-
-def test_warehouse_settings_survive_parsing():
-    host = parse_hosts(PAYLOAD)["MyFabric"]
-    assert host.settings_for_warehouse("Reporting").degrees_of_parallelism == 8
-
-
-def test_a_configured_host_equals_the_constructed_one():
-    """Nothing is expressible in the file that the constructor cannot express."""
-    from weaver import WarehouseSettings
-
-    configured = parse_hosts(PAYLOAD)["MyFabric"]
-    constructed = FabricHost(
-        alias="MyFabric",
-        workspace="Analytics",
-        weaver_lakehouse="Weaver",
-        fabric_environment="Weaver_Env",
-        warehouse_config={"Reporting": WarehouseSettings(degrees_of_parallelism=8)},
-    )
-    assert configured == constructed
-
-
-def test_unknown_keys_are_named_not_ignored():
-    payload = {"hosts": {"H": {"type": "Fabric", "workspace": "W", "wraehouse_config": {}}}}
-    with pytest.raises(ConfigError, match="wraehouse_config"):
-        parse_hosts(payload)
-
-
-def test_a_key_from_the_wrong_host_type_is_rejected():
-    payload = {"hosts": {"H": {"type": "Local", "root": ".local", "workspace": "W"}}}
-    with pytest.raises(ConfigError, match="workspace"):
-        parse_hosts(payload)
-
-
-def test_unknown_warehouse_settings_are_rejected():
-    payload = {
-        "hosts": {
-            "H": {
-                "type": "Fabric",
-                "workspace": "W",
-                "warehouse_config": {"T2": {"degrees_of_parallelisim": 8}},
-            }
+            "execution": {"parallel_workers": 8},
+            "lakehouses": {"Dev_Data": "Lakehouse/Sales"},
+            "warehouses": {
+                "Dev_Reporting": {
+                    "item": "Warehouse/Reporting",
+                    "execution": {"parallel_workers": 4},
+                }
+            },
         }
-    }
-    with pytest.raises(ConfigError, match="degrees_of_parallelisim"):
-        parse_hosts(payload)
+    )
+    assert workspace.environment == "WeaverRuntime"
+    assert workspace.execution.parallel_workers == 8
+    assert str(workspace.lakehouses["Dev_Data"].item) == "Lakehouse/Sales"
+    assert workspace.warehouses["Dev_Reporting"].execution.parallel_workers == 4
 
 
-def test_an_unknown_host_type_is_rejected():
-    with pytest.raises(ConfigError, match="type"):
-        parse_hosts({"hosts": {"H": {"type": "Snowflake", "workspace": "W"}}})
+def test_physical_names_can_overlap_across_types():
+    workspace = parse_workspace(
+        {
+            "workspace": "Analytics",
+            "lakehouses": {"Data": "Lakehouse/Sales"},
+            "warehouses": {"Data": "Warehouse/Reporting"},
+        }
+    )
+    assert "Data" in workspace.lakehouses
+    assert "Data" in workspace.warehouses
 
 
-def test_a_missing_required_field_is_reported():
-    with pytest.raises(ConfigError, match="incomplete"):
-        parse_hosts({"hosts": {"H": {"type": "Fabric"}}})
+def test_target_type_mismatch_is_rejected():
+    with pytest.raises(ConfigError, match="must name a Lakehouse"):
+        parse_workspace(
+            {
+                "workspace": "Analytics",
+                "lakehouses": {"Data": "Warehouse/Reporting"},
+            }
+        )
 
 
-def test_an_empty_hosts_mapping_is_rejected():
-    with pytest.raises(ConfigError, match="non-empty"):
-        parse_hosts({"hosts": {}})
+def test_unknown_keys_are_rejected():
+    with pytest.raises(ConfigError, match="wraehouses"):
+        parse_workspace({"workspace": "Analytics", "wraehouses": {}})
 
 
-def test_relative_local_roots_resolve_against_the_file(tmp_path: Path):
-    config = tmp_path / "hosts.yml"
+def test_unknown_workspace_type_is_rejected():
+    with pytest.raises(ConfigError, match="workspace_type"):
+        parse_workspace({"workspace": "Analytics", "workspace_type": "snowflake"})
+
+
+def test_workspace_is_required():
+    with pytest.raises(ConfigError, match="define 'workspace'"):
+        parse_workspace({})
+
+
+def test_parallel_workers_must_be_positive():
+    with pytest.raises(ConfigError, match="parallel_workers"):
+        parse_workspace(
+            {"workspace": "Analytics", "execution": {"parallel_workers": 0}}
+        )
+
+
+def test_relative_local_workspace_resolves_against_file(tmp_path: Path):
+    config = tmp_path / "workspace.yml"
     config.write_text(
-        "hosts:\n  MyLocal:\n    type: Local\n    root: .local\n",
+        "workspace: .local\nworkspace_type: local\nweaver_lakehouse: Weaver\n",
         encoding="utf-8",
     )
-    assert load_hosts(config)["MyLocal"].root == tmp_path / ".local"
+    assert load_workspace(config).workspace == tmp_path / ".local"
 
 
-def test_absolute_local_roots_are_left_alone(tmp_path: Path):
-    config = tmp_path / "hosts.yml"
-    config.write_text(
-        f"hosts:\n  MyLocal:\n    type: Local\n    root: {tmp_path / 'elsewhere'}\n",
-        encoding="utf-8",
-    )
-    assert load_hosts(config)["MyLocal"].root == tmp_path / "elsewhere"
-
-
-def test_a_missing_file_is_reported(tmp_path: Path):
+def test_missing_file_is_reported(tmp_path: Path):
     with pytest.raises(ConfigError, match="not found"):
-        load_hosts(tmp_path / "absent.yml")
+        load_workspace(tmp_path / "absent.yml")

@@ -22,7 +22,7 @@ def test_item_repository_and_build_are_the_primary_public_surface():
         "WeaverDocument",
         "WeaverItemId",
         "WeaverDocumentId",
-        "read_weaver_repository",
+        "parse_item_repository",
         "ItemBinding",
         "ItemBindings",
         "LakehouseBinding",
@@ -43,8 +43,12 @@ def test_item_repository_and_build_are_the_primary_public_surface():
 
 
 def test_public_binding_parser_separates_logical_and_physical_identity():
-    lakehouse = weaver.parse_item_binding("Lakehouse/Curated=Curated_Dev")
-    warehouse = weaver.parse_item_binding("Warehouse/Reporting=Reporting_Dev")
+    lakehouse = weaver.parse_item_binding(
+        "Lakehouses/Curated_Dev=Lakehouse/Curated"
+    )
+    warehouse = weaver.parse_item_binding(
+        "Warehouses/Reporting_Dev=Warehouse/Reporting"
+    )
 
     assert str(lakehouse.item) == "Lakehouse/Curated"
     assert lakehouse.target.lakehouse.name == "Curated_Dev"

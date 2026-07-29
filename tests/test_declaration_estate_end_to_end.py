@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from weaver import Location
-from weaver.declaration import PYTHON, SPARK_SQL, SQL, read_weaver_repository
+from weaver.declaration import PYTHON, SPARK_SQL, SQL, parse_item_repository
 
 FIXTURE = Location(str(Path(__file__).parent / "fixtures" / "estate-item"))
 
@@ -31,7 +31,7 @@ BUILTIN = "Lakehouse/_weaver"
 
 @pytest.fixture(scope="module")
 def repository():
-    return read_weaver_repository(FIXTURE)
+    return parse_item_repository(FIXTURE)
 
 
 @pytest.fixture(scope="module")
@@ -215,12 +215,12 @@ def test_the_signature_covers_every_file(repository, tmp_path):
 
     copy = tmp_path / "estate"
     shutil.copytree(FIXTURE.value, copy)
-    assert read_weaver_repository(Location(str(copy))).signature == repository.signature
+    assert parse_item_repository(Location(str(copy))).signature == repository.signature
 
     (copy / "Lakehouse" / "Sales" / "lib" / "dates.py").write_text(
         "# changed\n", encoding="utf-8"
     )
-    assert read_weaver_repository(Location(str(copy))).signature != repository.signature
+    assert parse_item_repository(Location(str(copy))).signature != repository.signature
 
 
 def test_an_item_signature_moves_only_for_its_own_content(repository, tmp_path):
@@ -234,7 +234,7 @@ def test_an_item_signature_moves_only_for_its_own_content(repository, tmp_path):
         .replace("without deleted rows", "without deleted rows, revised"),
         encoding="utf-8",
     )
-    after = read_weaver_repository(Location(str(copy)))
+    after = parse_item_repository(Location(str(copy)))
 
     assert after["Warehouse/Reporting"].signature != repository["Warehouse/Reporting"].signature
     assert after["Lakehouse/Sales"].signature == repository["Lakehouse/Sales"].signature

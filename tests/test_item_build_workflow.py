@@ -14,7 +14,7 @@ from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
-    build_item_repository,
+    build_uploaded_item_repository,
     generate_item_build_bundle,
     install_bundle_archive,
     materialise_bundle_archive,
@@ -22,9 +22,10 @@ from weaver.build_bundle import (
     timestamped_archive_name,
 )
 from weaver.errors import BuildError
-from weaver.declaration import read_weaver_repository
+from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
-from weaver.catalogue.builtin import item_repository_files
+from weaver.build_bundle.prune import TargetInventory
+from weaver.catalogue.state import ReconciledCatalogue
 
 from test_item_repository import _estate
 
@@ -87,7 +88,37 @@ def _bindings():
     )
 
 
-def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(tmp_path):
+def _control():
+    return LakehouseBinding(ItemRef("Weaver_Control"))
+
+
+def _inventories(bindings=None):
+    bindings = bindings or _bindings()
+    return {
+        binding.item: TargetInventory(
+            target_id=binding.to_bound_target().id,
+            kind=binding.to_bound_target().kind,
+            target_name=binding.to_bound_target().name,
+        )
+        for binding in bindings.entries
+    }
+
+
+@pytest.fixture
+def prepared_state(monkeypatch):
+    monkeypatch.setattr(
+        "weaver.build_bundle.workflow.read_target_inventories",
+        lambda bindings, **_kwargs: _inventories(bindings),
+    )
+    monkeypatch.setattr(
+        "weaver.build_bundle.workflow.read_reconciled_catalogue",
+        lambda *_args, **_kwargs: ReconciledCatalogue({}),
+    )
+
+
+def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
+    tmp_path, prepared_state
+):
     root = Location(str(_estate(tmp_path)))
     remote = CountingStore()
     expected_files = {
@@ -95,22 +126,18 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
         for entry in LocalStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    expected_files.update(
-        root.join(*relative.split("/")).value
-        for relative in item_repository_files()
-    )
     environment = InstallationEnvironment(
         store=remote,
         resolver=None,
         executors=_executors(),
     )
 
-    result = build_item_repository(
+    result = build_uploaded_item_repository(
         root,
         bindings=_bindings(),
         environment=environment,
         prune=False,
-        catalogue=False,
+        control_lakehouse=_control(),
     )
 
     assert result.report.status == "succeeded"
@@ -121,7 +148,7 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
 
 
 def test_direct_build_can_upload_one_archive_after_install_without_rereading_source(
-    tmp_path,
+    tmp_path, prepared_state
 ):
     root = Location(str(_estate(tmp_path)))
     remote = CountingStore()
@@ -131,13 +158,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
         for entry in LocalStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    generated = {
-        root.join(*relative.split("/")).value
-        for relative in item_repository_files()
-    }
-    expected_files.update(generated)
-
-    result = build_item_repository(
+    result = build_uploaded_item_repository(
         root,
         bindings=_bindings(),
         environment=InstallationEnvironment(
@@ -146,7 +167,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
             executors=_executors(),
         ),
         prune=False,
-        catalogue=False,
+        control_lakehouse=_control(),
         archive=archive,
     )
 
@@ -154,21 +175,22 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     assert result.archive == archive
     assert set(remote.reads) == expected_files
     assert set(remote.reads.values()) == {1}
-    assert set(remote.writes[:-1]) == generated
-    assert remote.writes[-1] == archive.value
+    assert remote.writes == [archive.value]
 
 
 def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_path):
     root = Location(str(_estate(tmp_path)))
     store = LocalStore()
-    repository = read_weaver_repository(root, store=store)
+    repository = parse_item_repository(root, store=store)
     bundle = generate_item_build_bundle(
         repository,
         bindings=_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=store,
         prune=False,
-        catalogue=False,
+        target_inventories=_inventories(),
+        reconciled_catalogue=ReconciledCatalogue({}),
+        control_lakehouse=_control(),
     )
     archive = Location(str(tmp_path / "20260727T010203000004Z.weaver.zip"))
 
@@ -191,14 +213,16 @@ def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_
 def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path):
     root = Location(str(_estate(tmp_path)))
     store = LocalStore()
-    repository = read_weaver_repository(root, store=store)
+    repository = parse_item_repository(root, store=store)
     bundle = generate_item_build_bundle(
         repository,
         bindings=_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=store,
         prune=False,
-        catalogue=False,
+        target_inventories=_inventories(),
+        reconciled_catalogue=ReconciledCatalogue({}),
+        control_lakehouse=_control(),
     )
     archive = Location(str(tmp_path / "handover.weaver.zip"))
     persist_bundle_archive(bundle, archive, store=store)

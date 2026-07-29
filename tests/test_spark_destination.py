@@ -4,7 +4,7 @@ The behaviour under test is the one the whole multi-target change rests on: a
 statement says which Lakehouse it means, instead of inheriting one from whatever
 the session is attached to.
 
-The two hosts answer differently, and the difference is data:
+The two workspaces answer differently, and the difference is data:
 
 ===========  ==================================================
 Fabric       ```Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer```
@@ -283,7 +283,7 @@ def test_listing_tables_takes_the_views_back_out(fabric):
 
 
 def test_a_schema_that_is_not_there_holds_nothing(fabric):
-    """Both hosts raise for an absent schema; an inventory wants "empty"."""
+    """Both workspaces raise for an absent schema; an inventory wants "empty"."""
 
     assert SparkCatalogue(_Spark(), fabric).views("Sales") == ()
 

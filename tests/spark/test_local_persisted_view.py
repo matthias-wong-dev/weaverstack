@@ -3,7 +3,7 @@
 Weaver addresses Delta by explicit path and shares one Spark session across
 tests, but a persistent Spark view is a *catalog* object referenced by its
 two-part name. In Fabric, declaring a Lakehouse table makes ``Schema.Table``
-immediately queryable; the build bundle relies on the local host mirroring that,
+immediately queryable; the build bundle relies on the local workspace mirroring that,
 so a Spark SQL view can read ``DWG.Customer`` by name.
 
 This spike proves the strategy the installer will use: register a path-addressed
@@ -14,7 +14,7 @@ up after itself, so it neither depends on nor pollutes cross-test state.
 Decision recorded: registration is *in-session*. Cross-process catalog
 persistence is explicitly not a prerequisite for bundle v1 — the session-scoped
 fixture and the installer test prove the logical deployment chain, and whether
-the local host should stand up a durable metastore is left open.
+the local workspace should stand up a durable metastore is left open.
 """
 
 from __future__ import annotations

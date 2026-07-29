@@ -181,7 +181,7 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     details = _run(spark, _payload())
 
     statement = _create_statement(spark)
-    assert statement.startswith(f"CREATE OR REPLACE TABLE {CUSTOMER} (\n")
+    assert statement.startswith(f"CREATE TABLE IF NOT EXISTS {CUSTOMER} (\n")
     # CustomerId is the primary key, so it is not null even when inferred;
     # CustomerName is not, so it stays nullable.
     assert "`CustomerId` int NOT NULL" in statement
@@ -207,7 +207,7 @@ def test_fabric_creation_preserves_identifier_case_and_restores_the_session_sett
     assert spark.conf.changes == ["true", "false"]
 
 
-def test_fabric_creation_drops_a_legacy_case_variant_before_replacing_it():
+def test_fabric_creation_never_drops_a_legacy_case_variant_implicitly():
     spark = _FakeSpark(
         [("CustomerId", "int"), ("CustomerName", "string")],
         existing_tables=("customer",),
@@ -215,11 +215,7 @@ def test_fabric_creation_drops_a_legacy_case_variant_before_replacing_it():
 
     _run(spark, _payload(), destination=FABRIC_DESTINATION)
 
-    drop = next(s for s in spark.executed if s.lstrip().upper().startswith("DROP"))
-    assert drop == (
-        "DROP TABLE `Analytics`.`Sales_LH`.`Sales`.`customer`"
-    )
-    assert spark.case_at_drop == "true"
+    assert not any(s.lstrip().upper().startswith("DROP") for s in spark.executed)
     assert spark.case_at_create == "true"
     assert spark.conf.value == "false"
 
@@ -230,7 +226,7 @@ def test_local_creation_uses_the_registered_folded_schema_and_pascal_table_name(
     _run(spark, _payload())
 
     assert _create_statement(spark).startswith(
-        "CREATE OR REPLACE TABLE `sales_lh__sales`.`Customer`"
+        "CREATE TABLE IF NOT EXISTS `sales_lh__sales`.`Customer`"
     )
     assert spark.case_at_create == "true"
     assert spark.conf.value == "true"
@@ -282,7 +278,7 @@ def test_the_identity_column_leads_as_a_not_null_bigint():
     # The Weaver-managed surrogate is created first, as a plain not-null bigint —
     # no GENERATED/identity keyword; a later load populates it.
     assert statement.startswith(
-        f"CREATE OR REPLACE TABLE {CUSTOMER} (\n    `CustomerKey` bigint NOT NULL,\n"
+        f"CREATE TABLE IF NOT EXISTS {CUSTOMER} (\n    `CustomerKey` bigint NOT NULL,\n"
     )
     assert "generated" not in statement.lower()
     assert "identity" not in statement.lower()

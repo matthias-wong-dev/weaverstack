@@ -17,7 +17,7 @@ Fabric it cannot be: a schema is a three-level name under ``spark_catalog``, and
 ``SHOW SCHEMAS IN `workspace`.`lakehouse``` is refused — a bare ``SHOW SCHEMAS``
 lists the *attached* Lakehouse and nothing else. Schema discovery therefore reads
 the destination's ``Tables/`` area through the store, which works across
-Lakehouses on both hosts and is what prune already does. Offering a
+Lakehouses on both workspaces and is what prune already does. Offering a
 ``list_schemas`` here that silently answered for the wrong Lakehouse would be the
 ambient-context mistake wearing an abstraction (build-philosophy §16).
 """
@@ -144,7 +144,7 @@ class SparkCatalogue:
         """Run a listing, reading an absent schema as an empty one.
 
         A schema that is not there holds nothing, which is the answer an inventory
-        wants — and both hosts raise for it rather than returning no rows. So the
+        wants — and both workspaces raise for it rather than returning no rows. So the
         absence is tolerated and everything else propagates, narrowly, for the same
         reason :mod:`weaver.catalogue.reader` does it that way: a real failure read
         as "nothing here" tells the next build that nothing is managed.

@@ -1,6 +1,6 @@
 """The Fabric substrate: authentication, capacity, and workspace resources.
 
-Everything here is optional. The core imports without it, and a local host
+Everything here is optional. The core imports without it, and a local workspace
 never reaches it. Install with the ``fabric`` extra.
 """
 

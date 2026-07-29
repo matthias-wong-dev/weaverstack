@@ -51,7 +51,7 @@ class InstallationEnvironment:
     with Spark work supplies one. ``sql`` is likewise optional: a Warehouse
     install acquires it **Fabric-natively** from the session identity, and only a
     desktop caller crossing into Fabric injects ``desktop_sql_executor``
-    explicitly (``host`` is then unnecessary). ``executors`` defaults to the
+    explicitly (``workspace`` is then unnecessary). ``executors`` defaults to the
     built-in registry.
     """
 
@@ -59,7 +59,7 @@ class InstallationEnvironment:
     resolver: Any
     spark: Any = None
     sql: Any = None
-    host: Any = None
+    workspace: Any = None
     executors: dict[str, ActionExecutor] = field(default_factory=default_executors)
     #: Set when this environment opened its own Fabric-native SQL, so it closes it.
     _owned_sql: Any = field(default=None, init=False, repr=False)
@@ -79,7 +79,7 @@ class InstallationEnvironment:
         )
 
     def _resolved(self, bound: BoundTarget, item: ItemRef, method: str):
-        """One of the destination's two addresses, where the host can give it.
+        """One of the destination's two addresses, where the workspace can give it.
 
         A Warehouse has neither — it is reached over TDS — and a resolver may not
         implement the method at all. Neither is a failure here, because the
@@ -111,7 +111,7 @@ class InstallationEnvironment:
             from ..targets import WarehouseTarget
 
             self._owned_sql = fabric_sql_executor(
-                WarehouseTarget(warehouse=ItemRef(bound.item_id)), self.host
+                WarehouseTarget(warehouse=ItemRef(bound.item_id)), self.workspace
             )
         return self._owned_sql
 

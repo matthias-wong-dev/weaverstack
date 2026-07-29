@@ -6,7 +6,7 @@ returned value is told from printed output — verified without a workspace.
 
 from __future__ import annotations
 
-from weaver import FabricHost
+from weaver import FabricWorkspace
 from weaver.fabric.livy import (
     RESULT_PREFIX,
     LivySessionInfo,
@@ -85,18 +85,18 @@ def test_livy_collection_preserves_scheduler_details():
 def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
     monkeypatch,
 ):
-    host = FabricHost(workspace="Analytics", weaver_lakehouse="Control")
+    workspace = FabricWorkspace(workspace="Analytics", weaver_lakehouse="Control")
     client = _CollectionClient()
 
     # Keep the test pure: the fake resolver already knows the workspace identity.
     from weaver.fabric.resources import Workspace
 
     class _Resolver:
-        def __init__(self, host, client):
-            self.workspace = Workspace("ws-id", host.workspace)
+        def __init__(self, workspace, client):
+            self.workspace = Workspace("ws-id", workspace.workspace)
 
     monkeypatch.setattr("weaver.fabric.resolution.FabricResolver", _Resolver)
-    active = list_workspace_livy_sessions(host, client=client, active_only=True)
+    active = list_workspace_livy_sessions(workspace, client=client, active_only=True)
 
     assert [(entry.lakehouse_name, entry.session.id) for entry in active] == [
         ("Sales", "22")

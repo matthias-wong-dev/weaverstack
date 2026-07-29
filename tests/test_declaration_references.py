@@ -18,7 +18,7 @@ from weaver.errors import DiscoveryError
 from weaver.declaration import (
     IDENTITY_COLUMN_NOTE,
     declared_column_notes,
-    read_weaver_repository,
+    parse_item_repository,
     resolve_text,
 )
 from weaver.declaration.model import WeaverDocumentId
@@ -54,7 +54,7 @@ def _repo(tmp_path, files: dict[str, str], schemas=("Sales",)):
         _write(root, f"{ITEM}/schemas/{schema}.yml", f"Schema ID: {schema}\n")
     for name, text in files.items():
         _write(root, f"{ITEM}/{name}", text)
-    return _Documents(read_weaver_repository(Location(value=str(root)), store=LocalStore()))
+    return _Documents(parse_item_repository(Location(value=str(root)), store=LocalStore()))
 
 
 PARENT = """\
@@ -190,7 +190,7 @@ def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
     ).replace("Dependencies: []\n\n", "")
     _write(root, "Warehouse/Reporting/Sales.Order.sql", warehouse_source)
 
-    repository = read_weaver_repository(Location(value=str(root)), store=LocalStore())
+    repository = parse_item_repository(Location(value=str(root)), store=LocalStore())
     warehouse = repository.source_documents[
         WeaverDocumentId.parse("Warehouse/Reporting/Sales.Order")
     ]

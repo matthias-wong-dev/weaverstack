@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver, LocalStore, Location
+from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore, Location
 
 WEAVER_LAKEHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
@@ -84,9 +84,9 @@ def populate_folder_files():
 
 @dataclass(frozen=True)
 class LocalLakehouses:
-    """A local host holding a Weaver Lakehouse and a target Lakehouse."""
+    """A local workspace holding a Weaver Lakehouse and a target Lakehouse."""
 
-    host: LocalHost
+    workspace: LocalWorkspace
     resolver: LocalResolver
     store: LocalStore
     root: Path
@@ -119,16 +119,16 @@ def lakehouses(tmp_path: Path) -> LocalLakehouses:
     so the same resolution serves local and Fabric.
     """
 
-    host = LocalHost(root=tmp_path, weaver_lakehouse=WEAVER_LAKEHOUSE)
+    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER_LAKEHOUSE)
     store = LocalStore()
-    resolver = LocalResolver(host)
+    resolver = LocalResolver(workspace)
 
     for item in (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
     store.make_directory(resolver.weaver_items_root)
 
-    return LocalLakehouses(host=host, resolver=resolver, store=store, root=tmp_path)
+    return LocalLakehouses(workspace=workspace, resolver=resolver, store=store, root=tmp_path)
 
 
 @pytest.fixture

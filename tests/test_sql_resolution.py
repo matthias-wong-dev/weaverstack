@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from weaver import FabricHost, ItemRef, WarehouseTarget
+from weaver import FabricWorkspace, ItemRef, WarehouseTarget
 from weaver.fabric import FabricResolver, FabricSessionResolver
 
 
@@ -37,7 +37,7 @@ class Client:
 def test_desktop_resolution_uses_the_typed_connection_string_endpoint():
     client = Client()
     resolver = FabricResolver(
-        FabricHost(workspace="Analytics"),
+        FabricWorkspace(workspace="Analytics"),
         client=client,
     )
 
@@ -61,7 +61,7 @@ def test_session_resolution_uses_session_context_and_session_authenticated_rest(
         }
     )
     resolver = FabricSessionResolver(
-        FabricHost(workspace="Analytics"),
+        FabricWorkspace(workspace="Analytics"),
         runtime=runtime,
         lakehouse=object(),
         client=client,

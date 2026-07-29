@@ -1,7 +1,7 @@
-"""LivySession chooses its bootstrap from the host, without touching Fabric.
+"""LivySession chooses its bootstrap from the workspace, without touching Fabric.
 
-A host that names a ``fabric_environment`` attaches that Environment and boots
-with a plain ``import weaver``; a host without one falls back to shipping the
+A workspace that names a ``environment`` attaches that Environment and boots
+with a plain ``import weaver``; a workspace without one falls back to shipping the
 package into the Lakehouse. Both branches are exercised here with a fake
 resolver, so no workspace or capacity is needed.
 """
@@ -12,7 +12,7 @@ import types
 
 import pytest
 
-from weaver import FabricHost
+from weaver import FabricWorkspace
 from weaver.fabric import livy
 from weaver.fabric.livy import LivySession, environment_bootstrap
 from weaver.fabric.resources import Item
@@ -37,14 +37,14 @@ def test_environment_bootstrap_only_imports_weaver():
     assert "sys.path" not in boot
 
 
-def test_a_host_with_an_environment_attaches_it(monkeypatch):
+def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
     monkeypatch.setattr(
         "weaver.fabric.resources.find_item",
         lambda ws, name, *, item_type, client: Item("env99", name, item_type, ws.id),
     )
-    host = FabricHost(workspace="WS", weaver_lakehouse="Weaver", fabric_environment="Weaver")
+    workspace = FabricWorkspace(workspace="WS", weaver_lakehouse="Weaver", environment="Weaver")
 
-    session = LivySession.for_host(host, resolver=_FakeResolver(), token="t")
+    session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
     assert session.environment_id == "env99"
     assert "import weaver" in session.bootstrap
@@ -91,10 +91,10 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
     assert "conf" not in create
 
 
-def test_a_host_without_an_environment_is_an_error():
+def test_a_workspace_without_an_environment_is_an_error():
     from weaver.errors import CommandError
 
-    host = FabricHost(workspace="WS", weaver_lakehouse="Weaver")
+    workspace = FabricWorkspace(workspace="WS", weaver_lakehouse="Weaver")
 
-    with pytest.raises(CommandError, match="fabric_environment"):
-        LivySession.for_host(host, resolver=_FakeResolver(), token="t")
+    with pytest.raises(CommandError, match="environment"):
+        LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")

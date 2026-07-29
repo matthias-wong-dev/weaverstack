@@ -24,13 +24,14 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalHost, LocalResolver, LocalStore
+from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
 from weaver.build_bundle import (
     InstallationEnvironment,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
-    build_item_repository,
+    build_uploaded_item_repository,
+    effective_item_bindings,
 )
 from weaver.catalogue import INSTALLATION, REGISTRY, InstallationScope
 from weaver.catalogue.reader import read_table
@@ -52,8 +53,8 @@ SCOPE = InstallationScope(item_type="Lakehouse", item_name="Raw")
 def estate(tmp_path, spark):
     """A Weaver Lakehouse and two destinations, all reachable from one session."""
 
-    host = LocalHost(root=tmp_path, weaver_lakehouse=WEAVER)
-    store, resolver = LocalStore(), LocalResolver(host)
+    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER)
+    store, resolver = LocalStore(), LocalResolver(workspace)
     for name in (WEAVER, FIRST, SECOND):
         store.make_directory(resolver.files_root(ItemRef(name)))
         store.make_directory(resolver.tables_root(ItemRef(name)))
@@ -66,10 +67,10 @@ def estate(tmp_path, spark):
     )
 
     initialise_weaver_lakehouse(
-        weaver_lakehouse=ItemRef(WEAVER), host=host, store=store, spark=spark
+        weaver_lakehouse=ItemRef(WEAVER), workspace=workspace, store=store, spark=spark
     )
     try:
-        yield host, store, resolver
+        yield workspace, store, resolver
     finally:
         # A succession of temporary directories share one logical Lakehouse name
         # in one long-lived session, so the harness forgets each schema it
@@ -82,26 +83,26 @@ def estate(tmp_path, spark):
                 )
 
 
-def _build(host, store, resolver, spark, lakehouse: str):
+def _build(workspace, store, resolver, spark, lakehouse: str):
     control = LakehouseBinding(lakehouse=ItemRef(WEAVER))
-    result = build_item_repository(
+    selected = ItemBindings(
+        (
+            ItemBinding(
+                LOGICAL_ITEM,
+                LakehouseBinding(lakehouse=ItemRef(lakehouse)),
+            ),
+        )
+    )
+    result = build_uploaded_item_repository(
         resolver.weaver_items_root,
-        bindings=ItemBindings(
-            (
-                ItemBinding(
-                    LOGICAL_ITEM,
-                    LakehouseBinding(lakehouse=ItemRef(lakehouse)),
-                ),
-            )
-        ),
+        bindings=effective_item_bindings(selected, weaver_lakehouse=WEAVER),
         environment=InstallationEnvironment(
             store=store,
             resolver=resolver,
             spark=spark,
-            host=host,
+            workspace=workspace,
         ),
         prune=True,
-        catalogue=True,
         control_lakehouse=control,
     )
     report = result.report
@@ -115,9 +116,9 @@ def _build(host, store, resolver, spark, lakehouse: str):
 
 
 def test_two_lakehouses_declaring_one_schema_get_two_tables(estate, spark):
-    host, store, resolver = estate
-    _build(host, store, resolver, spark, FIRST)
-    _build(host, store, resolver, spark, SECOND)
+    workspace, store, resolver = estate
+    _build(workspace, store, resolver, spark, FIRST)
+    _build(workspace, store, resolver, spark, SECOND)
 
     first = SparkCatalogue(spark, resolver.spark_destination(ItemRef(FIRST)))
     second = SparkCatalogue(spark, resolver.spark_destination(ItemRef(SECOND)))
@@ -140,9 +141,9 @@ def test_two_lakehouses_declaring_one_schema_get_two_tables(estate, spark):
 def test_each_destination_keeps_its_own_storage(estate, spark):
     """The fold is in the name; the bytes still land under each Lakehouse."""
 
-    host, store, resolver = estate
-    _build(host, store, resolver, spark, FIRST)
-    _build(host, store, resolver, spark, SECOND)
+    workspace, store, resolver = estate
+    _build(workspace, store, resolver, spark, FIRST)
+    _build(workspace, store, resolver, spark, SECOND)
 
     for lakehouse in (FIRST, SECOND):
         table = resolver.tables_root(ItemRef(lakehouse)).join("DWG", "Customer")
@@ -162,14 +163,14 @@ def test_the_catalogue_records_the_installation_it_is_currently_bound_to(estate,
     from it by name rather than from wherever the session might be pointed.
     """
 
-    host, store, resolver = estate
-    _build(host, store, resolver, spark, FIRST)
+    workspace, store, resolver = estate
+    _build(workspace, store, resolver, spark, FIRST)
     catalogue = SparkCatalogue(spark, resolver.spark_destination(ItemRef(WEAVER)))
 
     (installation,) = read_table(catalogue, INSTALLATION, scope=SCOPE)
     assert installation["target_name"] == FIRST
 
-    _build(host, store, resolver, spark, SECOND)
+    _build(workspace, store, resolver, spark, SECOND)
 
     # One row still: the item bound is an attribute of the installation, not its
     # identity, so rebinding updates rather than inserting.
@@ -184,9 +185,9 @@ def test_the_catalogue_records_the_installation_it_is_currently_bound_to(estate,
 
 
 def test_the_catalogue_is_not_written_into_either_destination(estate, spark):
-    host, store, resolver = estate
-    _build(host, store, resolver, spark, FIRST)
-    _build(host, store, resolver, spark, SECOND)
+    workspace, store, resolver = estate
+    _build(workspace, store, resolver, spark, FIRST)
+    _build(workspace, store, resolver, spark, SECOND)
 
     for lakehouse in (FIRST, SECOND):
         place = SparkCatalogue(spark, resolver.spark_destination(ItemRef(lakehouse)))

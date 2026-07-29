@@ -8,20 +8,13 @@ the authoritative catalogue. Destination Lakehouses and Warehouses hold only
 materialised output — no copied runtime, no per-target catalogue, no attachment
 requirements.
 
-```python
-import weaver
-
-weaver.initialise_weaver_lakehouse("Weaver")
-```
-
 Folder, Delta and SQL Warehouse are materialisation targets. You
 describe objects in one repository; Weaver routes them to the physical targets
 you name, builds one global dependency graph across all three forms, and
 certifies each object in the central catalogue only once it has built.
 
-> **Status: pre-alpha.** Under construction against
-> [a step-by-step checkpoint plan](backlog/weaverstack-step-by-step-implementation-plan.md).
-> The public API above is the destination, not yet the current surface.
+> **Status: pre-alpha.** The current CLI, Workspace and catalogue work follows
+> [the Weaver master plan](docs/weaver_master_cli_plan.md).
 
 ## Installation
 
@@ -51,12 +44,27 @@ weaver doctor
 reports what is present and what to install. See
 [docs/local-setup.md](docs/local-setup.md).
 
+## CLI lifecycle
+
+One Workspace configuration can abbreviate the full desktop lifecycle:
+
+```bash
+weaver install     --workspace-config workspace.yml
+weaver initialise  --workspace-config workspace.yml --exists-ok
+weaver push ./estate --workspace-config workspace.yml
+weaver build --workspace-config workspace.yml --bind Lakehouses/Sales_Dev
+```
+
+The same commands work against a local folder with `--workspace-type local`,
+except Warehouse work, which remains Fabric-only. See
+[CLI usage](docs/cli-usage.md) for push, physical-first bindings, wipe and
+unbind.
+
 ## Documentation
 
-- [Architecture summary](backlog/weaver-architecture-summary.md)
-- [Implementation plan](backlog/weaverstack-step-by-step-implementation-plan.md)
+- [Authoritative master plan](docs/weaver_master_cli_plan.md)
 - [Where your Weaver document repository lives](docs/weaver-repository.md) — a folder of files, and how it reaches Fabric
-- [CLI usage](docs/cli-usage.md) — signing in, hosts, capacity, wipe
+- [CLI usage](docs/cli-usage.md) — signing in, workspaces, capacity, wipe
 - [Local development setup](docs/local-setup.md)
 - [Fabric integration tests](docs/fabric-testing.md)
 - [Agent guide](AGENTS.md)

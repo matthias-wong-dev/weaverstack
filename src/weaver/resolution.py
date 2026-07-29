@@ -1,9 +1,9 @@
-"""Local host resolution — names to locations.
+"""Local workspace resolution — names to locations.
 
-Turns a :class:`~weaver.hosts.LocalHost` plus the level-three identities into
+Turns a :class:`~weaver.workspaces.LocalWorkspace` plus the level-three identities into
 concrete :class:`~weaver.locations.Location` values::
 
-    LocalResolver(LocalHost(root=".local"))
+    LocalResolver(LocalWorkspace(workspace=".local"))
 
     DeltaTarget("Sales") + Budget.Expense
         -> .local/Sales/Tables/Budget/Expense
@@ -27,7 +27,7 @@ explicit" enforceable rather than aspirational.
 from __future__ import annotations
 
 from .errors import CommandError
-from .hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, LocalHost
+from .workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, LocalWorkspace
 from .locations import LakehouseSparkLocation, Location
 from .spark import SparkDestination, local_destination
 from .targets import (
@@ -45,23 +45,23 @@ TABLES_AREA = "Tables"
 
 
 class LocalResolver:
-    """Resolves level-three identities against a local host root.
+    """Resolves level-three identities against a local workspace root.
 
     Checkpoint 7 adds a Fabric resolver with the same surface, returning URL
     locations. No shared protocol is declared yet: one implementation is a
     guess at the shape, two make it visible.
     """
 
-    def __init__(self, host: LocalHost) -> None:
-        if not isinstance(host, LocalHost):
-            raise CommandError(f"LocalResolver needs a LocalHost, got {type(host).__name__}")
-        self.host = host
+    def __init__(self, workspace: LocalWorkspace) -> None:
+        if not isinstance(workspace, LocalWorkspace):
+            raise CommandError(f"LocalResolver needs a LocalWorkspace, got {type(workspace).__name__}")
+        self.workspace = workspace
 
     # --- level four ------------------------------------------------------
 
     @property
     def root(self) -> Location:
-        return Location(str(self.host.root))
+        return Location(str(self.workspace.workspace))
 
     # --- level three -----------------------------------------------------
 
@@ -145,14 +145,14 @@ class LocalResolver:
     # --- warehouse targets -----------------------------------------------
 
     def warehouse(self, target: WarehouseTarget) -> Location:
-        """Always fails: a local host has no SQL implementation.
+        """Always fails: a local workspace has no SQL implementation.
 
         Explicit rather than silently skipped, so a build carrying SQL objects
-        against a local host reports the reason.
+        against a local workspace reports the reason.
         """
 
         raise CommandError(
-            f"local host has no SQL implementation, so warehouse target "
+            f"local Workspace has no SQL implementation, so Warehouse target "
             f"{target.warehouse.name!r} cannot be resolved — Warehouse work is Fabric-only"
         )
 
@@ -204,32 +204,32 @@ class LocalResolver:
         return self.tables_root(ItemRef(self._weaver_lakehouse_name()))
 
     def _weaver_lakehouse_name(self) -> str:
-        name = self.host.weaver_lakehouse
+        name = self.workspace.weaver_lakehouse
         if name is None:
             raise CommandError(
-                "no Weaver Lakehouse for this host — set weaver_lakehouse on the host "
+                "no Weaver Lakehouse for this Workspace — set weaver_lakehouse on the Workspace "
                 "or supply it explicitly"
             )
         return name
 
 
-# --- choosing an implementation for a host -----------------------------------
+# --- choosing an implementation for a workspace -----------------------------------
 
 
-def resolver_for(host):
-    """The resolver for a host in the current executor.
+def resolver_for(workspace):
+    """The resolver for a workspace in the current executor.
 
     A Fabric session resolves within its current workspace through
     NotebookUtils. A desktop process uses the REST-backed Fabric resolver; that
     cross-boundary caller supplies its DFS store explicitly.
     """
 
-    from .hosts import FabricHost, LocalHost
+    from .workspaces import FabricWorkspace, LocalWorkspace
 
-    if isinstance(host, LocalHost):
-        return LocalResolver(host)
+    if isinstance(workspace, LocalWorkspace):
+        return LocalResolver(workspace)
 
-    if isinstance(host, FabricHost):
+    if isinstance(workspace, FabricWorkspace):
         try:
             from notebookutils import lakehouse, runtime
         except ImportError:
@@ -238,33 +238,33 @@ def resolver_for(host):
             from .fabric.session import FabricSessionResolver
 
             return FabricSessionResolver(
-                host, lakehouse=lakehouse, runtime=runtime
+                workspace, lakehouse=lakehouse, runtime=runtime
             )
 
     from .fabric.resolution import FabricResolver
 
-    return FabricResolver(host)
+    return FabricResolver(workspace)
 
 
-def store_for(host):
-    """The **within-host** default store for a host.
+def store_for(workspace):
+    """The **within-workspace** default store for a workspace.
 
     Local execution uses the filesystem. Fabric execution uses NotebookUtils,
     which is available only inside a Fabric session. A desktop caller crossing
     into Fabric still constructs ``OneLakeDfsClient`` and injects it explicitly,
-    so DFS is never mistaken for the within-host default.
+    so DFS is never mistaken for the within-workspace default.
     """
 
-    from .hosts import FabricHost, LocalHost
+    from .workspaces import FabricWorkspace, LocalWorkspace
     from .store import LocalStore
 
-    if isinstance(host, LocalHost):
+    if isinstance(workspace, LocalWorkspace):
         return LocalStore()
-    if isinstance(host, FabricHost):
+    if isinstance(workspace, FabricWorkspace):
         from .fabric.store import FabricStore
 
         return FabricStore()
 
     raise CommandError(
-        f"{type(host).__name__} has no within-host store"
+        f"{type(workspace).__name__} has no within-workspace store"
     )

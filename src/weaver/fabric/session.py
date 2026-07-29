@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ..errors import CommandError
-from ..hosts import FabricHost
+from ..workspaces import FabricWorkspace
 from ..locations import Location
 from ..targets import ItemRef
 from .onelake import abfss_root
@@ -29,16 +29,16 @@ class FabricSessionResolver(FabricResolver):
 
     def __init__(
         self,
-        host: FabricHost,
+        workspace: FabricWorkspace,
         *,
         runtime: Any | None = None,
         lakehouse: Any | None = None,
         credentials: Any | None = None,
         client: Any | None = None,
     ) -> None:
-        if not isinstance(host, FabricHost):
+        if not isinstance(workspace, FabricWorkspace):
             raise CommandError(
-                f"FabricSessionResolver needs a FabricHost, got {type(host).__name__}"
+                f"FabricSessionResolver needs a FabricWorkspace, got {type(workspace).__name__}"
             )
         if runtime is None or lakehouse is None:
             try:
@@ -58,13 +58,13 @@ class FabricSessionResolver(FabricResolver):
         workspace_id = _value(context, "currentWorkspaceId")
         if not workspace_name or not workspace_id:
             raise CommandError("Fabric runtime context carries no current workspace")
-        if workspace_name != host.workspace:
+        if workspace_name != workspace.workspace:
             raise CommandError(
                 f"this session runs in workspace {workspace_name!r}, "
-                f"not host workspace {host.workspace!r}"
+                f"not configured Workspace {workspace.workspace!r}"
             )
 
-        self.host = host
+        self.configuration = workspace
         self._workspace = Workspace(id=str(workspace_id), name=str(workspace_name))
         self._lakehouse_utils = lakehouse
         self._credentials = credentials

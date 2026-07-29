@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from typing import Mapping
 
 from ..errors import BuildError
 from ..locations import Location
@@ -32,9 +33,12 @@ from .payloads import (
     CATALOGUE_SEQUENCE,
     INSTALLATION_SEQUENCE,
     PRUNE_SEQUENCE,
+    RECONCILIATION_SEQUENCE,
     REGISTRY_SEQUENCE,
 )
 from .targets import LAKEHOUSE_TARGET, ItemBindings, LakehouseBinding, WAREHOUSE_TARGET
+from .prune import TargetInventory
+from ..catalogue.state import ReconciledCatalogue
 
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
 
@@ -45,25 +49,22 @@ def generate_item_build_bundle(
     bindings: ItemBindings,
     output: Location,
     store: Store,
-    target_store: Store | None = None,
+    target_inventories: Mapping[WeaverItemId, TargetInventory] | None = None,
+    reconciled_catalogue: ReconciledCatalogue,
     prune: bool = True,
-    catalogue: bool = False,
-    control_lakehouse: LakehouseBinding | None = None,
-    resolver=None,
-    spark=None,
-    host=None,
-    sql_by_item=None,
+    control_lakehouse: LakehouseBinding,
 ) -> BuildBundle:
     """Freeze all bound items into one manifest and certified snapshot.
 
     Prune reconciles each bound physical item against only the documents owned by
     its logical item. Inventory is frozen into the bundle; install never lists a
     target. Lakehouse planning needs a resolver, supplied directly or obtained
-    from ``host``. Warehouse planning opens Fabric-native SQL from ``host`` unless
+    from ``workspace``. Warehouse planning opens Fabric-native SQL from ``workspace`` unless
     the caller supplies an executor in ``sql_by_item``.
     """
 
-    target_store = target_store or store
+    if control_lakehouse is None:
+        raise BuildError("every build needs an explicit control-plane Lakehouse")
 
     by_item = bindings.by_item
     if not by_item:
@@ -95,35 +96,37 @@ def generate_item_build_bundle(
     }
     payloads: dict[str, bytes] = {}
     sequences: list[BuildSequence] = []
+    control_target = _control_target(control_lakehouse, targets)
+    if all(target.id != control_target.id for target in targets):
+        targets = targets + (control_target,)
 
+    prune_sequence = None
     if prune:
-        if resolver is None and host is not None:
-            from ..resolution import resolver_for
-
-            resolver = resolver_for(host)
         prune_sequence = _item_prune_sequence(
             repository,
             selected_ids,
             target_by_item,
-            resolver=resolver,
-            store=target_store,
-            spark=spark,
-            host=host,
-            sql_by_item=sql_by_item,
+            target_inventories=target_inventories or {},
             payloads=payloads,
         )
-        if prune_sequence is not None:
-            sequences.append(prune_sequence)
 
     schema_sequence = _schema_sequence(repository, selected_ids, target_by_item, payloads)
     if schema_sequence is not None:
         sequences.append(schema_sequence)
 
+    reconciliation_sequence = _reconciliation_sequence(
+        reconciled_catalogue.delete_dml, control_target, payloads
+    )
+    if reconciliation_sequence is not None:
+        sequences.append(reconciliation_sequence)
+    if prune_sequence is not None:
+        sequences.append(prune_sequence)
+
     if selected_ids:
         selected_nodes = {str(identity) for identity in selected_ids}
         graph = repository.dependency_graph.subgraph(selected_nodes)
         for layer_index, layer in enumerate(graph.layers()):
-            number = 30 + layer_index * 10
+            number = 40 + layer_index * 10
             sequences.append(
                 _item_layer_sequence(
                     number,
@@ -143,21 +146,15 @@ def generate_item_build_bundle(
         for identity in sorted(repository.source_documents, key=str)
         if identity not in selected_ids
     )
-    if catalogue:
-        if control_lakehouse is None:
-            raise BuildError("catalogue publication requires the control-plane Lakehouse binding")
-        control_target = _control_target(control_lakehouse, targets)
-        sequences.extend(
-            _catalogue_sequences(
-                repository,
-                selected_ids,
-                target_by_item,
-                control_target,
-                payloads,
-            )
+    sequences.extend(
+        _catalogue_sequences(
+            repository,
+            selected_ids,
+            target_by_item,
+            control_target,
+            payloads,
         )
-        if all(target.id != control_target.id for target in targets):
-            targets = targets + (control_target,)
+    )
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
@@ -174,6 +171,43 @@ def generate_item_build_bundle(
         payloads=payloads,
         snapshot=_snapshot(repository, store),
         store=store,
+    )
+
+
+def _reconciliation_sequence(
+    statements: tuple[str, ...], control_target, payloads: dict[str, bytes]
+) -> BuildSequence | None:
+    actions = []
+    for index, statement in enumerate(statements, start=1):
+        content = (statement.rstrip() + "\n").encode("utf-8")
+        path = payload_path(
+            RECONCILIATION_SEQUENCE,
+            "catalogue-reconciliation",
+            f"delete-stale-{index:04d}.spark.sql",
+        )
+        payloads[path] = content
+        actions.append(
+            BuildAction(
+                id=f"catalogue-delete-stale-{index:04d}",
+                kind=RECONCILE_CATALOGUE,
+                resource_node_id=None,
+                executor="spark_sql",
+                payload=path,
+                payload_sha256=sha256_hex(content),
+            )
+        )
+    if not actions:
+        return None
+    return BuildSequence(
+        number=RECONCILIATION_SEQUENCE,
+        description="remove catalogue claims disproved by target inventory",
+        batches=(
+            BuildBatch(
+                id=f"{RECONCILIATION_SEQUENCE:03d}-catalogue-reconciliation",
+                target_id=control_target.id,
+                actions=tuple(actions),
+            ),
+        ),
     )
 
 
@@ -400,11 +434,7 @@ def _item_prune_sequence(
     selected_ids,
     target_by_item,
     *,
-    resolver,
-    store,
-    spark,
-    host,
-    sql_by_item,
+    target_inventories,
     payloads,
 ):
     """Freeze one item-owned inventory diff per bound physical item.
@@ -415,10 +445,9 @@ def _item_prune_sequence(
     payload paths even when their physical targets differ.
     """
 
-    from .prune import _managed_sets, _prune_sequence, _warehouse_prune_sequence
+    from .prune import _managed_sets, render_inventory_prune
 
     batches = []
-    supplied_sql = sql_by_item or {}
     for item in sorted(target_by_item, key=str):
         target = target_by_item[item]
         documents = {
@@ -429,25 +458,16 @@ def _item_prune_sequence(
         target_kind = SQL_TARGET if target.kind == WAREHOUSE_TARGET else DELTA_TARGET
         managed = _managed_sets(documents, target_kind)
         temporary_payloads = {}
-        if target.kind == WAREHOUSE_TARGET:
-            sql = supplied_sql.get(item)
-            if sql is None and host is None:
-                raise BuildError(
-                    f"pruning Warehouse item {item} requires host or sql_by_item[{item}]"
-                )
-            sequence = _warehouse_prune_sequence(
-                target, sql, host, managed, temporary_payloads
+        if item not in target_inventories:
+            raise BuildError(f"pruning {item} requires a prepared target inventory")
+        inventory = target_inventories[item]
+        if inventory.target_id != target.id:
+            raise BuildError(
+                f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
-        else:
-            if target.kind != LAKEHOUSE_TARGET:
-                raise BuildError(f"unsupported physical target kind for {item}: {target.kind}")
-            if resolver is None:
-                raise BuildError(
-                    f"pruning Lakehouse item {item} requires resolver or host"
-                )
-            sequence = _prune_sequence(
-                target, resolver, store, spark, managed, temporary_payloads
-            )
+        sequence = render_inventory_prune(
+            target, inventory, managed, temporary_payloads
+        )
         if sequence is None:
             continue
 

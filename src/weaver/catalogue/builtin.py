@@ -7,8 +7,8 @@ Weaver object rather than a privileged one.
 
 The item is rendered from :mod:`weaver.catalogue.tables`, so the declaration and
 the table definitions cannot drift: there is one source of truth and the text is
-derived from it. ``Lakehouse/_weaver`` is materialised into the workspace
-declaration alongside authored items and built through the ordinary planner.
+derived from it. ``Lakehouse/_weaver`` is composed into the parsed repository
+in memory and built through the ordinary planner.
 
 Every table declares:
 
@@ -17,8 +17,8 @@ Every table declares:
     the DML a build appends.
 
 ``Prohibit rebuild: true``
-    Once drop policy lands, this is what stops an ordinary build treating the
-    catalogue as a disposable application object.
+    This stops an ordinary build treating the catalogue as a disposable
+    application object.
 
 ``Dependencies: []``
     Explicitly nothing. The body is literals, so there is nothing to discover

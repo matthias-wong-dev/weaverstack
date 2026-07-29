@@ -1,6 +1,6 @@
 """Session-native storage for Weaver running inside Microsoft Fabric.
 
-This is the within-host counterpart to :class:`OneLakeDfsClient`.  It uses the
+This is the within-workspace counterpart to :class:`OneLakeDfsClient`.  It uses the
 ``notebookutils.fs`` object already present in a Fabric Spark session and never
 authenticates back across the workspace boundary.
 
@@ -29,7 +29,7 @@ _MAX_READ_BYTES = 256 * 1024 * 1024
 
 
 class FabricStore:
-    """Within-host Fabric storage, backed by ``notebookutils.fs``."""
+    """Within-workspace Fabric storage, backed by ``notebookutils.fs``."""
 
     def __init__(self, fs: Any | None = None) -> None:
         if fs is None:

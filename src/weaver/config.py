@@ -1,134 +1,178 @@
-"""The ``hosts:`` file — a named lookup of host records.
-
-The file is a convenience, never a layer. It holds nothing the host
-constructors cannot express, so everything here is optional: a caller may build
-a host directly and never write a file at all.
-
-::
-
-    hosts:
-      MyFabric:
-        type: Fabric
-        workspace: Analytics
-        weaver_lakehouse: Weaver
-        fabric_environment: Weaver_Env
-        warehouse_config:
-          Reporting:
-            degrees_of_parallelism: 8
-
-      MyLocal:
-        type: Local
-        root: .local
-        weaver_lakehouse: Weaver
-
-A host entry is a dictionary of keyword arguments under a name. Unknown keys are
-rejected rather than ignored, and the accepted set is derived from the host
-records themselves (:meth:`weaver.hosts.Host.configurable_keys`), so a new host
-field becomes configurable without touching this module.
-"""
+"""Parse one Workspace configuration file into one Workspace value."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
+from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
-from .hosts import FabricHost, Host, LocalHost, WarehouseSettings
+from .workspaces import (
+    FABRIC,
+    LOCAL,
+    WORKSPACE_TYPES,
+    ExecutionSettings,
+    FabricWorkspace,
+    LocalWorkspace,
+    TargetDeclaration,
+    Workspace,
+)
 
-HOST_TYPES: Mapping[str, type[Host]] = {
-    "Fabric": FabricHost,
-    "Local": LocalHost,
+_KEYS = {
+    "workspace",
+    "workspace_type",
+    "environment",
+    "weaver_lakehouse",
+    "execution",
+    "lakehouses",
+    "warehouses",
 }
 
 
-def load_hosts(path: str | Path) -> dict[str, Host]:
-    """Load a hosts file. Relative local roots resolve against its directory."""
+def load_workspace(path: str | Path) -> Workspace:
+    """Load one Workspace file; local paths resolve beside that file."""
 
     import yaml
 
     config_path = Path(path).expanduser().resolve()
     if not config_path.is_file():
-        raise ConfigError(f"hosts file not found: {config_path}")
+        raise ConfigError(f"Workspace configuration not found: {config_path}")
     payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    return parse_hosts(payload, base_dir=config_path.parent)
+    return parse_workspace(payload, base_dir=config_path.parent)
 
 
-def parse_hosts(payload: Any, base_dir: str | Path | None = None) -> dict[str, Host]:
-    """Parse an already-loaded hosts mapping."""
+def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspace:
+    """Parse a one-Workspace mapping."""
 
     if not isinstance(payload, dict):
-        raise ConfigError("hosts config must be a mapping")
-
-    raw_hosts = payload.get("hosts")
-    if not isinstance(raw_hosts, dict) or not raw_hosts:
-        raise ConfigError("hosts config must define a non-empty 'hosts' mapping")
-
-    return {
-        str(alias): _parse_host(str(alias), raw, base_dir)
-        for alias, raw in raw_hosts.items()
-    }
-
-
-def _parse_host(alias: str, raw: Any, base_dir: str | Path | None) -> Host:
-    if not isinstance(raw, dict):
-        raise ConfigError(f"host {alias!r} must be a mapping")
-
-    type_value = raw.get("type")
-    if type_value not in HOST_TYPES:
-        raise ConfigError(
-            f"host {alias!r} type must be one of {', '.join(sorted(HOST_TYPES))}, "
-            f"got {type_value!r}"
-        )
-    host_class = HOST_TYPES[type_value]
-
-    unknown = set(raw) - set(host_class.configurable_keys())
+        raise ConfigError("Workspace configuration must be a mapping")
+    unknown = set(payload) - _KEYS
     if unknown:
         raise ConfigError(
-            f"host {alias!r} has keys that do not belong in a {type_value} host: "
-            + ", ".join(sorted(unknown))
+            "Workspace configuration has unknown keys: " + ", ".join(sorted(unknown))
+        )
+    if "workspace" not in payload:
+        raise ConfigError("Workspace configuration must define 'workspace'")
+
+    workspace_type = payload.get("workspace_type", FABRIC)
+    if workspace_type not in WORKSPACE_TYPES:
+        raise ConfigError(
+            "workspace_type must be one of "
+            f"{', '.join(WORKSPACE_TYPES)}, got {workspace_type!r}"
         )
 
-    kwargs = {key: value for key, value in raw.items() if key != "type"}
-    if "warehouse_config" in kwargs:
-        kwargs["warehouse_config"] = _parse_warehouse_config(alias, kwargs["warehouse_config"])
-    if host_class is LocalHost:
-        kwargs["root"] = _resolve_root(alias, kwargs.get("root"), base_dir)
+    workspace_value = payload["workspace"]
+    if workspace_type == LOCAL:
+        workspace_value = _local_path(workspace_value, base_dir)
 
+    common = {
+        "workspace": workspace_value,
+        "environment": payload.get("environment"),
+        "weaver_lakehouse": payload.get("weaver_lakehouse"),
+        "execution": _execution(payload.get("execution"), where="execution"),
+        "lakehouses": _targets(payload.get("lakehouses"), item_type=LAKEHOUSE),
+        "warehouses": _targets(payload.get("warehouses"), item_type=WAREHOUSE),
+    }
+    workspace_class = LocalWorkspace if workspace_type == LOCAL else FabricWorkspace
     try:
-        return host_class(alias=alias, **kwargs)
-    except TypeError as exc:  # missing a required field
-        raise ConfigError(f"host {alias!r} is incomplete: {exc}") from exc
+        return workspace_class(**common)
+    except TypeError as exc:
+        raise ConfigError(f"Workspace configuration is incomplete: {exc}") from exc
 
 
-def _parse_warehouse_config(alias: str, raw: Any) -> dict[str, WarehouseSettings]:
-    if not isinstance(raw, dict):
-        raise ConfigError(f"host {alias!r} warehouse_config must be a mapping")
+def resolve_workspace(
+    *,
+    workspace: str | Path | None = None,
+    workspace_type: str | None = None,
+    environment: str | None = None,
+    weaver_lakehouse: str | None = None,
+    workspace_config: str | Path | None = None,
+) -> Workspace:
+    """Apply CLI-over-configuration precedence and return one Workspace."""
 
-    settings: dict[str, WarehouseSettings] = {}
-    for name, values in raw.items():
-        if values is None:
-            values = {}
-        if not isinstance(values, dict):
-            raise ConfigError(
-                f"host {alias!r} warehouse_config[{name!r}] must be a mapping"
-            )
-        allowed = {f for f in WarehouseSettings.__dataclass_fields__}
-        unknown = set(values) - allowed
-        if unknown:
-            raise ConfigError(
-                f"host {alias!r} warehouse_config[{name!r}] has unknown keys: "
-                + ", ".join(sorted(unknown))
-            )
-        settings[str(name)] = WarehouseSettings(**values)
-    return settings
+    configured = load_workspace(workspace_config) if workspace_config else None
+    resolved_type = workspace_type or (
+        configured.workspace_type if configured is not None else FABRIC
+    )
+    if resolved_type not in WORKSPACE_TYPES:
+        raise ConfigError(
+            "workspace_type must be one of "
+            f"{', '.join(WORKSPACE_TYPES)}, got {resolved_type!r}"
+        )
+    resolved_identity = workspace if workspace is not None else (
+        configured.workspace if configured is not None else None
+    )
+    if resolved_identity is None:
+        raise ConfigError("give --workspace or --workspace-config containing workspace")
+
+    common = {
+        "workspace": resolved_identity,
+        "environment": environment
+        if environment is not None
+        else (configured.environment if configured is not None else None),
+        "weaver_lakehouse": weaver_lakehouse
+        if weaver_lakehouse is not None
+        else (configured.weaver_lakehouse if configured is not None else None),
+        "execution": configured.execution
+        if configured is not None
+        else ExecutionSettings(),
+        "lakehouses": configured.lakehouses if configured is not None else {},
+        "warehouses": configured.warehouses if configured is not None else {},
+    }
+    return (LocalWorkspace if resolved_type == LOCAL else FabricWorkspace)(**common)
 
 
-def _resolve_root(alias: str, root: Any, base_dir: str | Path | None) -> Path:
-    if root is None:
-        raise ConfigError(f"host {alias!r} must define 'root'")
-    if not isinstance(root, str) or not root.strip():
-        raise ConfigError(f"host {alias!r} root must be a non-empty string")
-    path = Path(root.strip()).expanduser()
+def _local_path(value: Any, base_dir: str | Path | None) -> Path:
+    if not isinstance(value, (str, Path)) or not str(value).strip():
+        raise ConfigError("local workspace must be a non-empty folder path")
+    path = Path(str(value).strip()).expanduser()
     if not path.is_absolute() and base_dir is not None:
         path = Path(base_dir) / path
     return path
+
+
+def _execution(raw: Any, *, where: str) -> ExecutionSettings:
+    if raw is None:
+        return ExecutionSettings()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a mapping")
+    unknown = set(raw) - {"parallel_workers"}
+    if unknown:
+        raise ConfigError(f"{where} has unknown keys: " + ", ".join(sorted(unknown)))
+    return ExecutionSettings(parallel_workers=raw.get("parallel_workers"))
+
+
+def _targets(raw: Any, *, item_type: str) -> dict[str, TargetDeclaration]:
+    field_name = "lakehouses" if item_type == LAKEHOUSE else "warehouses"
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{field_name} must be a mapping")
+    declarations: dict[str, TargetDeclaration] = {}
+    for physical_name, value in raw.items():
+        where = f"{field_name}[{physical_name!r}]"
+        if isinstance(value, str):
+            item_text = value
+            execution = ExecutionSettings()
+        elif isinstance(value, dict):
+            unknown = set(value) - {"item", "execution"}
+            if unknown:
+                raise ConfigError(
+                    f"{where} has unknown keys: " + ", ".join(sorted(unknown))
+                )
+            if "item" not in value:
+                raise ConfigError(f"{where} must define 'item'")
+            item_text = value["item"]
+            execution = _execution(value.get("execution"), where=f"{where}.execution")
+        else:
+            raise ConfigError(f"{where} must be an item name or mapping")
+        try:
+            item = WeaverItemId.parse(item_text)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"{where} has invalid logical item {item_text!r}") from exc
+        if item.item_type != item_type:
+            raise ConfigError(
+                f"{where} must name a {item_type} item, got {item}"
+            )
+        declarations[str(physical_name)] = TargetDeclaration(item, execution)
+    return declarations

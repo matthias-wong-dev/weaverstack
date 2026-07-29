@@ -77,13 +77,13 @@ shadow a document that item already declares natively. Two items may each alias
 the same source under their own local names.
 
 The built-in `Lakehouse/_weaver` item is generated and managed by Weaver inside
-this same tree. It declares the ten catalogue tables; authored changes to it are
-replaced or rejected.
+the parsed repository in memory. It declares the catalogue tables and is never
+written into authored source; an authored `Lakehouse/_weaver` is rejected.
 
 ## Build binds logical items
 
-The workspace declaration is immutable build input. A build supplies any non-empty
-set of logical-to-physical bindings:
+The workspace declaration is immutable build input. A build selects physical
+targets and resolves each to one logical item:
 
 ```text
 Lakehouse/Raw       -> Raw_Dev
@@ -99,18 +99,19 @@ From the CLI:
 
 ```bash
 weaver build \
-  --bind Lakehouse/Raw=Raw_Dev \
-  --bind Warehouse/Reporting=Reporting_Dev \
-  --host Development --hosts env.yml
+  --bind Lakehouses/Raw_Dev=Lakehouse/Raw \
+  --bind Warehouses/Reporting_Dev=Warehouse/Reporting \
+  --workspace Analytics --environment Runtime \
+  --weaver-lakehouse Control
 ```
 
-From Python inside the target environment, use `build_item_repository()` for the
-ordinary coordinated path. It copies `Files/weaver_items` once to a
-session-local temporary directory, reads and plans there, installs from a local
-bundle and removes the working files. The generated bundle contains a certified
-repository snapshot, so installation never reopens or reinterprets the source
-repository. Persisting a `.weaver.zip` archive is optional and intended for a
-record or handover rather than the normal development build.
+From Python inside the target environment,
+`build_uploaded_item_repository()` is the full application workflow. It copies
+`Files/weaver_items` once to a session-local temporary directory, parses it,
+reads target and catalogue state, reconciles, and then calls the narrower
+`build_item_repository()` planner/executor seam. The generated bundle contains a
+certified repository snapshot, so installation never reopens or reinterprets
+the source repository.
 
 ## Migrating a flat repository
 
@@ -130,6 +131,6 @@ would make physical deployment history part of logical identity.
 
 ## See also
 
-- [CLI usage](cli-usage.md) — hosts, build, wipe and capacity
-- [Architecture summary](../backlog/weaver-architecture-summary.md) — the full model
+- [CLI usage](cli-usage.md) — workspaces, build, wipe and capacity
+- [Master CLI plan](weaver_master_cli_plan.md) — the authoritative current model
 - [Agent guide](../AGENTS.md) — implementation invariants

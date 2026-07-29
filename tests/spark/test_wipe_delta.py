@@ -21,14 +21,14 @@ def test_the_fixture_really_has_delta_tables(spark, populated_lakehouse):
 def test_the_transaction_log_goes_with_the_table(populated_lakehouse):
     location = populated_lakehouse.resolver.delta_table(delta_target(), "Sales", "Order")
     assert (location / "_delta_log").path.is_dir()
-    wipe_delta_target(delta_target(), populated_lakehouse.host)
+    wipe_delta_target(delta_target(), populated_lakehouse.workspace)
     assert not location.path.exists()
 
 
 def test_a_wiped_table_can_be_written_again(spark, populated_lakehouse):
     """Nothing is left behind to conflict with the next build."""
     location = populated_lakehouse.resolver.delta_table(delta_target(), "Sales", "Order")
-    wipe_delta_target(delta_target(), populated_lakehouse.host)
+    wipe_delta_target(delta_target(), populated_lakehouse.workspace)
 
     spark.createDataFrame([("B1",)], "Order_id string").write.format("delta").save(
         location.value
@@ -37,14 +37,14 @@ def test_a_wiped_table_can_be_written_again(spark, populated_lakehouse):
 
 
 def test_a_dry_run_leaves_the_tables_readable(spark, populated_lakehouse):
-    report = wipe_delta_target(delta_target(), populated_lakehouse.host, dry_run=True)
+    report = wipe_delta_target(delta_target(), populated_lakehouse.workspace, dry_run=True)
     assert set(report.removed) == {"Sales", "Reporting"}
     location = populated_lakehouse.resolver.delta_table(delta_target(), "Sales", "Order")
     assert spark.read.format("delta").load(location.value).count() == 3
 
 
 def test_wiping_delta_leaves_the_folders_alone(populated_lakehouse):
-    wipe_delta_target(delta_target(), populated_lakehouse.host)
+    wipe_delta_target(delta_target(), populated_lakehouse.workspace)
     files = populated_lakehouse.resolver.files_root(populated_lakehouse.target)
     assert (files / "notes.txt").path.exists()
     assert (files / "Sales" / "OrderExport").path.is_dir()
@@ -52,7 +52,7 @@ def test_wiping_delta_leaves_the_folders_alone(populated_lakehouse):
 
 def test_both_targets_wipe_together_when_both_are_given(populated_lakehouse):
     reports = wipe(
-        populated_lakehouse.host,
+        populated_lakehouse.workspace,
         folder_target=FolderTarget.parse("Sales_LH/Files"),
         delta_target=delta_target(),
     )

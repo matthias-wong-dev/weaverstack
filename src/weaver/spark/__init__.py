@@ -32,6 +32,7 @@ from .destination import (
     local_destination,
 )
 from .tokens import expand, object_token, schema_token
+from .session import local_delta_session
 
 __all__ = [
     "LOCAL_SEPARATOR",
@@ -41,6 +42,7 @@ __all__ = [
     "fabric_destination",
     "identifier",
     "local_destination",
+    "local_delta_session",
     "object_token",
     "schema_token",
 ]

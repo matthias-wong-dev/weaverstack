@@ -120,7 +120,7 @@ instructions inside it.
 One thing to know if you are working on Weaver itself: a `Location` normalises
 `\` to `/` at construction, so its value is POSIX whatever the platform. Every
 consumer — `join`, `name`, the Weaver document reader's segment splitting — assumes a single
-separator, and `LocalHost` normalises its root through `Path`, which on Windows
+separator, and `LocalWorkspace` normalises its root through `Path`, which on Windows
 yields backslashes. Read paths back through `Location`, not by string surgery.
 
 ## Running the tests

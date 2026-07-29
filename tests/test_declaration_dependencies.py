@@ -213,7 +213,7 @@ def test_a_string_literal_mentioning_from_is_ignored():
 @pytest.mark.parametrize("prefix", ["delta", "parquet", "csv", "json"])
 def test_a_spark_path_read_is_not_an_object_reference(prefix):
     """`delta.`abfss://…`` is a format and a path, not schema and object."""
-    assert refs(f"select * from {prefix}.`abfss://ws@host/lh/Files/x`") == set()
+    assert refs(f"select * from {prefix}.`abfss://ws@workspace/lh/Files/x`") == set()
 
 
 def test_a_variable_is_not_a_relation():

@@ -1,4 +1,4 @@
-"""Within-host Fabric resolution and storage, without a live tenant."""
+"""Within-workspace Fabric resolution and storage, without a live tenant."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver import FabricHost, ItemRef, Location, Store
+from weaver import FabricWorkspace, ItemRef, Location, Store
 from weaver.errors import CommandError
 from weaver.fabric import FabricSessionResolver, FabricStore
 
@@ -37,7 +37,7 @@ def _runtime(name="Analytics"):
 def test_session_resolution_stays_in_the_current_workspace():
     lakehouse = _LakehouseUtils()
     resolver = FabricSessionResolver(
-        FabricHost(workspace="Analytics"),
+        FabricWorkspace(workspace="Analytics"),
         runtime=_runtime(),
         lakehouse=lakehouse,
     )
@@ -51,10 +51,10 @@ def test_session_resolution_stays_in_the_current_workspace():
     assert lakehouse.calls == [("Sales", "workspace-id")]
 
 
-def test_session_resolution_refuses_a_different_host_workspace():
-    with pytest.raises(CommandError, match="not host workspace"):
+def test_session_resolution_refuses_a_different_configured_workspace():
+    with pytest.raises(CommandError, match="not configured Workspace"):
         FabricSessionResolver(
-            FabricHost(workspace="Other"),
+            FabricWorkspace(workspace="Other"),
             runtime=_runtime(),
             lakehouse=_LakehouseUtils(),
         )

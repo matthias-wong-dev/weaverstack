@@ -146,7 +146,7 @@ def test_a_path_read_is_a_format_and_a_path_not_an_object(fmt):
 def test_a_path_read_beside_a_real_relation():
     assert refs("""
         select *
-          from delta.`abfss://ws@host/lh/Tables/raw`
+          from delta.`abfss://ws@workspace/lh/Tables/raw`
           join Sales.Customer c on c.Id = raw.CustomerId
     """) == {"Sales.Customer"}
 

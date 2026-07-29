@@ -52,12 +52,12 @@ def test_installed_weaver_wipes_a_desktop_populated_warehouse(
     )
 
     body = (
-        "from weaver import FabricHost, WarehouseTarget, wipe_sql_target\n"
-        f"host = FabricHost(workspace={warehouse.host.workspace!r}, "
-        f"weaver_lakehouse={warehouse.host.weaver_lakehouse!r}, "
-        f"fabric_environment={warehouse.host.fabric_environment!r})\n"
+        "from weaver import FabricWorkspace, WarehouseTarget, wipe_sql_target\n"
+        f"workspace = FabricWorkspace(workspace={warehouse.workspace.workspace!r}, "
+        f"weaver_lakehouse={warehouse.workspace.weaver_lakehouse!r}, "
+        f"environment={warehouse.workspace.environment!r})\n"
         f"target = WarehouseTarget.parse({warehouse.target.warehouse.name!r})\n"
-        "result = wipe_sql_target(target, host)\n"
+        "result = wipe_sql_target(target, workspace)\n"
         "emit({'completed': result is None})\n"
     )
     started = time.monotonic()

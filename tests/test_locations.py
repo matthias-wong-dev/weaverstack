@@ -52,7 +52,7 @@ def test_the_filesystem_root_survives_normalisation():
 def test_backslashes_are_separators_like_any_other():
     """A Windows caller arrives with them, and everything here splits on "/".
 
-    `LocalHost` normalises its root through `Path`, so on Windows `str()` of it
+    `LocalWorkspace` normalises its root through `Path`, so on Windows `str()` of it
     uses backslashes. Left alone they are not separators to `join` or `name`,
     and an Weaver document repository read from a Windows checkout takes its whole path as
     its catalogue name.

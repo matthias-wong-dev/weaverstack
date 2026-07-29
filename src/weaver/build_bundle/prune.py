@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..catalogue.tables import CATALOGUE_SCHEMA
-from ..hosts import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Host
+from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Workspace
 from ..spark import SparkCatalogue, object_token, schema_token
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.source import SourceDocument
@@ -60,6 +60,268 @@ class _Managed:
     folders: frozenset[str]
     tables: frozenset[str]
     views: frozenset[str]
+
+
+@dataclass(frozen=True)
+class TargetInventory:
+    """Transport-neutral physical state prepared before bundle generation."""
+
+    target_id: str
+    kind: str
+    target_name: str
+    schemas: tuple[str, ...] = ()
+    folder_schemas: tuple[str, ...] = ()
+    folders: tuple[str, ...] = ()
+    tables: tuple[str, ...] = ()
+    views: tuple[str, ...] = ()
+
+    def has_object(self, schema: str, name: str, object_type: str) -> bool:
+        qualified = f"{schema}.{name}".casefold()
+        values = self.views if object_type == "view" else self.tables
+        if object_type == "folder":
+            values = self.folders
+        return qualified in {value.casefold() for value in values}
+
+
+def read_lakehouse_inventory(
+    target: BoundTarget, *, resolver, store: Store, spark=None
+) -> TargetInventory:
+    """Read every Weaver-manageable object in one Lakehouse."""
+
+    lakehouse = ItemRef(target.item_id)
+    tables_root = resolver.tables_root(lakehouse)
+    files_root = resolver.files_root(lakehouse)
+    schemas = tuple(
+        entry.name
+        for entry in _child_dirs(store, tables_root)
+        if entry.name.casefold() not in _RESERVED_SCHEMAS
+    )
+    tables = tuple(
+        f"{schema}.{entry.name}"
+        for schema in schemas
+        for entry in _child_dirs(store, tables_root / schema)
+    )
+    folder_schema_entries = tuple(
+        entry
+        for entry in _child_dirs(store, files_root)
+        if entry.name not in _RESERVED_FILES_AREAS
+    )
+    folders = tuple(
+        f"{entry.name}.{child.name}"
+        for entry in folder_schema_entries
+        for child in _child_dirs(store, entry.location)
+    )
+    views: tuple[str, ...] = ()
+    catalogue = _catalogue_for(resolver, lakehouse, spark)
+    if catalogue is not None:
+        views = tuple(
+            f"{schema}.{view}"
+            for schema in schemas
+            for view in catalogue.views(schema)
+        )
+    return TargetInventory(
+        target_id=target.id,
+        kind=target.kind,
+        target_name=target.name,
+        schemas=tuple(sorted(schemas, key=str.casefold)),
+        folder_schemas=tuple(
+            sorted((entry.name for entry in folder_schema_entries), key=str.casefold)
+        ),
+        folders=tuple(sorted(folders, key=str.casefold)),
+        tables=tuple(sorted(tables, key=str.casefold)),
+        views=tuple(sorted(views, key=str.casefold)),
+    )
+
+
+def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
+    """Read every Weaver-manageable schema, table and view in one Warehouse."""
+
+    rows = sql.query(
+        """
+        select schema_name(objects.schema_id) as schema_name,
+               objects.name as object_name,
+               objects.type as object_type
+        from sys.objects as objects
+        where objects.is_ms_shipped = 0
+          and objects.type in (N'U', N'V')
+        order by schema_name(objects.schema_id), objects.name
+        """
+    )
+    objects = [
+        (
+            str(row["schema_name"]),
+            str(row["object_name"]),
+            str(row["object_type"]).strip(),
+        )
+        for row in rows
+        if str(row["schema_name"]).casefold() not in _RESERVED_SQL_SCHEMAS
+    ]
+    schema_rows = sql.query(
+        """
+        select schemas.name as name
+        from sys.schemas as schemas
+        left join sys.database_principals as owners
+          on owners.principal_id = schemas.principal_id
+        where owners.is_fixed_role is null or owners.is_fixed_role = 0
+        """
+    )
+    schemas = tuple(
+        sorted(
+            {
+                str(row["name"])
+                for row in schema_rows
+                if str(row["name"]).casefold() not in _RESERVED_SQL_SCHEMAS
+            },
+            key=str.casefold,
+        )
+    )
+    return TargetInventory(
+        target_id=target.id,
+        kind=target.kind,
+        target_name=target.name,
+        schemas=schemas,
+        tables=tuple(
+            sorted(
+                (f"{schema}.{name}" for schema, name, kind in objects if kind == "U"),
+                key=str.casefold,
+            )
+        ),
+        views=tuple(
+            sorted(
+                (f"{schema}.{name}" for schema, name, kind in objects if kind == "V"),
+                key=str.casefold,
+            )
+        ),
+    )
+
+
+def render_inventory_prune(
+    target: BoundTarget,
+    inventory: TargetInventory,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> BuildSequence | None:
+    """Purely render prune actions from one already-read inventory."""
+
+    actions: list[BuildAction] = []
+    if target.kind == "warehouse":
+        for qualified in inventory.views:
+            if qualified.casefold() not in managed.views:
+                schema, name = qualified.split(".", 1)
+                actions.append(
+                    _drop_action(
+                        target,
+                        PRUNE_VIEW,
+                        "view",
+                        qualified,
+                        f"drop view if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
+                        payloads,
+                        executor="tsql",
+                        extension=".sql",
+                    )
+                )
+        for qualified in inventory.tables:
+            if qualified.casefold() not in managed.tables:
+                schema, name = qualified.split(".", 1)
+                actions.append(
+                    _drop_action(
+                        target,
+                        PRUNE_TABLE,
+                        "table",
+                        qualified,
+                        f"drop table if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
+                        payloads,
+                        executor="tsql",
+                        extension=".sql",
+                    )
+                )
+        for schema in inventory.schemas:
+            if schema.casefold() not in managed.schemas:
+                actions.append(
+                    _drop_action(
+                        target,
+                        PRUNE_SCHEMA,
+                        "schema",
+                        schema,
+                        f"drop schema if exists {_tsql_ident(schema)};",
+                        payloads,
+                        executor="tsql",
+                        extension=".sql",
+                    )
+                )
+    else:
+        orphan_schemas = {
+            schema.casefold()
+            for schema in inventory.schemas
+            if schema.casefold() not in managed.schemas
+        }
+        for qualified in inventory.views:
+            schema, name = qualified.split(".", 1)
+            if (
+                schema.casefold() not in orphan_schemas
+                and qualified.casefold() not in managed.views
+            ):
+                actions.append(
+                    _drop_action(
+                        target,
+                        PRUNE_VIEW,
+                        "view",
+                        qualified,
+                        f"DROP VIEW IF EXISTS {object_token(schema, name)}",
+                        payloads,
+                    )
+                )
+        for qualified in inventory.tables:
+            schema, name = qualified.split(".", 1)
+            if (
+                schema.casefold() not in orphan_schemas
+                and qualified.casefold() not in managed.tables
+            ):
+                actions.append(
+                    _drop_action(
+                        target,
+                        PRUNE_TABLE,
+                        "table",
+                        qualified,
+                        f"DROP TABLE IF EXISTS {object_token(schema, name)}",
+                        payloads,
+                    )
+                )
+        for schema in inventory.folder_schemas:
+            if schema.casefold() not in managed.folder_schemas:
+                actions.append(_prune_folder_action(target, f"folder:{schema}"))
+        for qualified in inventory.folders:
+            schema, _name = qualified.split(".", 1)
+            if (
+                schema.casefold() in managed.folder_schemas
+                and qualified.casefold() not in managed.folders
+            ):
+                actions.append(_prune_folder_action(target, f"folder:{qualified}"))
+        for schema in inventory.schemas:
+            if schema.casefold() in orphan_schemas:
+                actions.append(
+                    _drop_action(
+                        target,
+                        PRUNE_SCHEMA,
+                        "schema",
+                        schema,
+                        f"DROP SCHEMA IF EXISTS {schema_token(schema)} CASCADE",
+                        payloads,
+                    )
+                )
+    if not actions:
+        return None
+    return BuildSequence(
+        number=PRUNE_SEQUENCE,
+        description="prune unmanaged objects",
+        batches=(
+            BuildBatch(
+                id=f"{PRUNE_SEQUENCE:03d}-{target.id}",
+                target_id=target.id,
+                actions=tuple(actions),
+            ),
+        ),
+    )
 
 
 def _managed_sets(
@@ -107,7 +369,7 @@ def _prune_sequence(
     # conflating them would have prune listing a URL Spark cannot read a directory
     # from.
     #
-    # Schemas come from storage on both hosts, and have to: Fabric refuses
+    # Schemas come from storage on both workspaces, and have to: Fabric refuses
     # `SHOW SCHEMAS IN `workspace`.`lakehouse`` — a bare `SHOW SCHEMAS` answers
     # only for the *attached* Lakehouse — so asking the catalogue would have
     # reconciled the destination against the control plane's inventory.
@@ -190,7 +452,7 @@ def _prune_sequence(
 def _warehouse_prune_sequence(
     target: BoundTarget,
     sql,
-    host: Host,
+    workspace: Workspace,
     managed: _Managed,
     payloads: dict[str, bytes],
 ) -> BuildSequence | None:
@@ -220,7 +482,7 @@ def _warehouse_prune_sequence(
         from ..targets import WarehouseTarget
 
         sql = fabric_sql_executor(
-            WarehouseTarget(warehouse=ItemRef(target.item_id)), host
+            WarehouseTarget(warehouse=ItemRef(target.item_id)), workspace
         )
     try:
         return _warehouse_prune_actions(target, sql, managed, payloads)

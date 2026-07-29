@@ -2,7 +2,7 @@
 
 The boundary is deliberate::
 
-    WeaverRepository -> planner -> BuildBundle -> installer -> hosts
+    WeaverRepository -> planner -> BuildBundle -> installer -> workspaces
 
 The planner owns every decision — item selection, ordering, executable
 generation, certification. The installer owns execution only: it validates a
@@ -33,6 +33,7 @@ from .report import InstallationReport
 from .workflow import (
     ItemBuildResult,
     build_item_repository,
+    build_uploaded_item_repository,
     install_bundle_archive,
     materialise_bundle_archive,
     materialise_tree,
@@ -45,6 +46,7 @@ from .targets import (
     ItemBinding,
     ItemBindings,
     parse_item_binding,
+    effective_item_bindings,
     WarehouseBinding,
 )
 
@@ -54,6 +56,7 @@ __all__ = [
     "ItemBinding",
     "ItemBindings",
     "parse_item_binding",
+    "effective_item_bindings",
     "WarehouseBinding",
     "OmittedNode",
     "BuildAction",
@@ -72,6 +75,7 @@ __all__ = [
     "InstallationReport",
     "ItemBuildResult",
     "build_item_repository",
+    "build_uploaded_item_repository",
     "materialise_tree",
     "persist_bundle_archive",
     "materialise_bundle_archive",

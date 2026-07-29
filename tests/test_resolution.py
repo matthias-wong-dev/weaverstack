@@ -8,7 +8,7 @@ from weaver import (
     DeltaTarget,
     FolderTarget,
     ItemRef,
-    LocalHost,
+    LocalWorkspace,
     LocalResolver,
     WarehouseTarget,
 )
@@ -17,7 +17,7 @@ from weaver.errors import CommandError
 
 @pytest.fixture
 def resolver() -> LocalResolver:
-    return LocalResolver(LocalHost(root="/srv/.local", weaver_lakehouse="Weaver"))
+    return LocalResolver(LocalWorkspace(workspace="/srv/.local", weaver_lakehouse="Weaver"))
 
 
 def test_an_item_holds_files_and_tables(resolver):
@@ -118,22 +118,22 @@ def test_the_weaver_lakehouse_is_just_another_item(resolver):
     assert resolver.weaver_lakehouse == resolver.lakehouse(ItemRef("Weaver"))
 
 
-def test_a_host_without_a_weaver_lakehouse_says_so():
-    resolver = LocalResolver(LocalHost(root="/srv/.local"))
+def test_a_workspace_without_a_weaver_lakehouse_says_so():
+    resolver = LocalResolver(LocalWorkspace(workspace="/srv/.local"))
     with pytest.raises(CommandError, match="weaver_lakehouse"):
         resolver.weaver_items_root
 
 
 def test_resolution_touches_nothing(tmp_path):
     """Locations are computed for paths that do not exist."""
-    resolver = LocalResolver(LocalHost(root=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
     location = resolver.delta_table(DeltaTarget.parse("Sales"), "Budget", "Expense")
     assert not location.path.exists()
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_fabric_host_is_refused():
-    from weaver import FabricHost
+def test_a_fabric_workspace_is_refused():
+    from weaver import FabricWorkspace
 
-    with pytest.raises(CommandError, match="LocalHost"):
-        LocalResolver(FabricHost(workspace="Analytics"))
+    with pytest.raises(CommandError, match="LocalWorkspace"):
+        LocalResolver(FabricWorkspace(workspace="Analytics"))
