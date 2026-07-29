@@ -36,6 +36,16 @@ WAREHOUSE_READY_TIMEOUT = 600.0
 WAREHOUSE_POLL_INTERVAL = 5.0
 
 
+def _timed_session_run(session, label: str, body: str):
+    """Run one meaningful Fabric phase and leave a compact timing breadcrumb."""
+
+    started = time.monotonic()
+    try:
+        return session.run(body)
+    finally:
+        print(f"Fabric {label}: {time.monotonic() - started:.2f}s")
+
+
 @pytest.fixture(scope="session")
 def fabric_workspace_item():
     """The workspace named by WEAVER_FABRIC_WORKSPACE."""
@@ -589,9 +599,6 @@ class BuildEnv:
     #: an absent schema is the answer a prune assertion wants and both workspaces raise
     #: for `SHOW TABLES` in one.
     run_schema_exists: Callable[[str], bool] = None
-    #: Ensure Weaver's own catalogue is installed in the Weaver Lakehouse.
-    #: Ordinary generation also does this because the catalogue is mandatory.
-    setup_weaver: Callable[[], None] = None
     #: The destination Lakehouse being built, and the Weaver Lakehouse holding the
     #: catalogue. Two, always — even the simplest install writes to both.
     destination: Any = None
@@ -809,16 +816,6 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             reconciled_catalogue=reconciled,
         )
 
-    def setup_weaver() -> None:
-        """Install Weaver's own catalogue into the Weaver Lakehouse."""
-
-        from weaver.setup import initialise_weaver_lakehouse
-
-        result = initialise_weaver_lakehouse(
-            weaver_lakehouse=weaver, workspace=workspace, store=store, spark=spark
-        )
-        assert result.succeeded, result.report.status
-
     def install(bundle) -> InstallOutcome:
         report = install_bundle(
             load_bundle(bundle.location, store=store),
@@ -858,7 +855,6 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
             install=install, run_query=query, run_columns=columns,
             seed_orphans=seed_orphans, run_schema_exists=schema_exists,
-            setup_weaver=setup_weaver,
             destination=destination, weaver_destination=weaver_destination,
         )
     finally:
@@ -990,7 +986,9 @@ def _fabric_build_context(
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
-        payload = session.run(body).payload
+        payload = _timed_session_run(
+            session, "Lakehouse bundle generation", body
+        ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         # A desktop-addressed (https) handle to the same physical bundle, so the
         # test can read it and the install can re-resolve it by name in-session.
@@ -1018,7 +1016,9 @@ def _fabric_build_context(
             "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
             "for a in report.action_results()]})\n"
         )
-        payload = session.run(body).payload
+        payload = _timed_session_run(
+            session, "Lakehouse bundle installation", body
+        ).payload
         outcome = InstallOutcome(
             status=payload["status"],
             bundle_id=payload["bundle_id"],
@@ -1045,25 +1045,6 @@ def _fabric_build_context(
     def schema_exists(qualified: str) -> bool:
         body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
         return session.run(body).payload
-
-    def setup_weaver() -> None:
-        """Install Weaver's own catalogue into the Weaver Lakehouse, in-session."""
-
-        body = (
-            "from weaver import ItemRef, FabricWorkspace\n"
-            "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.setup import initialise_weaver_lakehouse\n"
-            f"workspace = {_workspace_literal()}\n"
-            "result = initialise_weaver_lakehouse(\n"
-            f"    weaver_lakehouse=ItemRef({weaver.name!r}), workspace=workspace,\n"
-            "    store=store_for(workspace), spark=spark)\n"
-            "emit({'status': result.report.status, 'tables': list(result.tables), "
-            "'errors': [a.action_id + ': ' + str(a.error_message) "
-            "for s in result.report.sequences for a in s.actions "
-            "if a.status == 'failed']})\n"
-        )
-        payload = session.run(body).payload
-        assert payload["status"] == "succeeded", payload["errors"]
 
     def seed_orphans() -> None:
         # Seeded in the *destination*, by its four-part name — the session is
@@ -1092,7 +1073,6 @@ def _fabric_build_context(
         install_repo=install_repo, remove_repo=remove_repo, generate=generate,
         install=install, run_query=query, run_columns=columns,
         seed_orphans=seed_orphans, run_schema_exists=schema_exists,
-        setup_weaver=setup_weaver,
         destination=destination, weaver_destination=weaver_destination,
     )
 
@@ -1227,7 +1207,9 @@ def _warehouse_build_env(
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
-        payload = session.run(body).payload
+        payload = _timed_session_run(
+            session, "Warehouse bundle generation", body
+        ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
 
@@ -1253,7 +1235,9 @@ def _warehouse_build_env(
             "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
             "for a in report.action_results()]})\n"
         )
-        payload = session.run(body).payload
+        payload = _timed_session_run(
+            session, "Warehouse bundle installation", body
+        ).payload
         outcome = InstallOutcome(
             status=payload["status"],
             bundle_id=payload["bundle_id"],

@@ -21,9 +21,9 @@ from .workspaces import (
 from .locations import Location
 from .objects import Folder, ObjectContext, Table, View, WeaverObject
 from .resolution import LocalResolver
-from .setup import (
+from .initialise import (
+    InitialiseResult,
     PreparedWeaverLakehouse,
-    SetupResult,
     initialise_weaver_lakehouse,
     prepare_weaver_lakehouse,
 )
@@ -149,6 +149,8 @@ __all__ = [
     "InstallationEnvironment",
     "install_bundle",
     "InstallationReport",
+    "InitialiseResult",
+    "initialise_weaver_lakehouse",
     "PreparedWeaverLakehouse",
     "prepare_weaver_lakehouse",
     # resolved locations and transport

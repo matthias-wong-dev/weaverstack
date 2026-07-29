@@ -86,10 +86,10 @@ def test_a_column_note_naming_a_missing_column_fails_at_build():
         Description: x
         Lineage: y
         Column notes:
-          Gworkspace: nothing here
+          Ghost: nothing here
         """
     )
-    with pytest.raises(BuildError, match="Column notes names column 'Gworkspace'"):
+    with pytest.raises(BuildError, match="Column notes names column 'Ghost'"):
         resolve_build_columns(document, ("Order id",))
 
 

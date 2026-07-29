@@ -186,7 +186,7 @@ class LocalResolver:
     def build_bundle(self, name: str) -> Location:
         """One named bundle directory beneath ``build_bundles_root``.
 
-        Setup uses this because its bootstrap bundle is idempotent and there is
+        Initialisation uses this because its bootstrap bundle is idempotent and there is
         no value in a new name each run. A build that keeps its bundle for
         handover or audit uses a timestamped archive instead.
         """

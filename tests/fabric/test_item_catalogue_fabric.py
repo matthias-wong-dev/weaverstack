@@ -132,7 +132,7 @@ def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
         "    store.write(root.join(*relative.split('/')), data)\n"
         "catalogue = SparkCatalogue(spark, resolver.spark_destination(target))\n"
         "catalogue.create_schema('Sales')\n"
-        "catalogue.sql(\"CREATE TABLE {{object:Sales.Gworkspace}} (`Id` string) USING delta\")\n"
+        "catalogue.sql(\"CREATE TABLE {{object:Sales.Ghost}} (`Id` string) USING delta\")\n"
         "old_folder = resolver.files_root(target) / 'Sales' / 'OldFolder'\n"
         "store.make_directory(old_folder)\n"
         "binding = LakehouseBinding(target)\n"

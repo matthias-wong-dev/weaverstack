@@ -233,7 +233,7 @@ def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
     files = lakehouses.resolver.files_root(lakehouses.target)
     for relative in (
         tables / "Sales" / "Customer",
-        tables / "Sales" / "Gworkspace",
+        tables / "Sales" / "Ghost",
         files / "Sales" / "Customer",
         files / "Sales" / "OldFolder",
     ):
@@ -269,7 +269,7 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
 ):
     repository = _repository(_estate(tmp_path))
     lakehouses.store.make_directory(
-        lakehouses.resolver.tables_root(lakehouses.target) / "Sales" / "Gworkspace"
+        lakehouses.resolver.tables_root(lakehouses.target) / "Sales" / "Ghost"
     )
     binding = ItemBindings((_binding("Lakehouse/Raw", lakehouses.target.name),))
 
@@ -295,7 +295,7 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
 def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses):
     repository = _repository(_estate(tmp_path))
     second = ItemRef("Curated_Dev")
-    for target, orphan in ((lakehouses.target, "RawGworkspace"), (second, "CuratedGworkspace")):
+    for target, orphan in ((lakehouses.target, "RawGhost"), (second, "CuratedGhost")):
         lakehouses.store.make_directory(lakehouses.resolver.files_root(target))
         lakehouses.store.make_directory(lakehouses.resolver.tables_root(target) / "Sales" / orphan)
 
@@ -319,9 +319,9 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses
         batch.target_id: {action.id for action in batch.actions}
         for batch in prune.batches
     }
-    assert any("Lakehouse--Raw-prune-table-Sales.RawGworkspace" in ids for ids in by_target.values())
+    assert any("Lakehouse--Raw-prune-table-Sales.RawGhost" in ids for ids in by_target.values())
     assert any(
-        "Lakehouse--Curated-prune-table-Sales.CuratedGworkspace" in ids
+        "Lakehouse--Curated-prune-table-Sales.CuratedGhost" in ids
         for ids in by_target.values()
     )
 
@@ -333,7 +333,7 @@ def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(tmp_path, la
     for target in (old, new):
         lakehouses.store.make_directory(lakehouses.resolver.files_root(target))
         lakehouses.store.make_directory(
-            lakehouses.resolver.tables_root(target) / "Sales" / "Gworkspace"
+            lakehouses.resolver.tables_root(target) / "Sales" / "Ghost"
         )
 
     bundle = generate_item_build_bundle(
@@ -353,7 +353,7 @@ def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(tmp_path, la
     }
     assert prune_targets == {"Lakehouse-Raw--lakehouse-Raw_New"}
     assert lakehouses.store.exists(
-        lakehouses.resolver.tables_root(old) / "Sales" / "Gworkspace"
+        lakehouses.resolver.tables_root(old) / "Sales" / "Ghost"
     )
 
 
@@ -362,7 +362,7 @@ class _WarehouseInventory:
         if "from sys.objects" in statement:
             return [
                 {"schema_name": "Sales", "object_name": "Change", "object_type": "U"},
-                {"schema_name": "Sales", "object_name": "Gworkspace", "object_type": "U"},
+                {"schema_name": "Sales", "object_name": "Ghost", "object_type": "U"},
             ]
         return [{"name": "Sales"}]
 
@@ -385,7 +385,7 @@ def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
         if sequence.number == 30
     ]
     assert [action.kind for action in actions] == ["prune_table"]
-    assert actions[0].id == "Warehouse--Audit-prune-table-Sales.Gworkspace"
+    assert actions[0].id == "Warehouse--Audit-prune-table-Sales.Ghost"
 
 
 def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):

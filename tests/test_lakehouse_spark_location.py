@@ -69,7 +69,7 @@ def test_two_destinations_resolve_separately(resolver):
 def test_the_weaver_lakehouse_resolves_like_any_other_item(resolver):
     """It is the attached one, not a special case of resolution.
 
-    Setup builds the catalogue *into* the Weaver Lakehouse, so it is a destination
+    Initialisation builds the catalogue *into* the Weaver Lakehouse, so it is a destination
     on that one occasion. Nothing about resolving it differs.
     """
 

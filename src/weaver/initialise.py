@@ -1,7 +1,7 @@
 """Bootstrapping the Weaver Lakehouse — Weaver installing its own control plane.
 
-Setup composes the package-owned catalogue item into the parsed repository in
-memory and builds it through the *ordinary* planner and installer. There is
+Initialisation composes the package-owned catalogue item into the parsed
+repository in memory and builds it through the *ordinary* planner and installer. There is
 deliberately no second "create the control tables" path: if the catalogue needed
 privileged machinery to exist, the claim that a catalogue table is an ordinary
 Weaver object would be false, and every later assumption resting on that claim
@@ -23,10 +23,10 @@ first-run mode is needed and generation reads nothing — the statements are
 rendered from the projection and are correct against an absent catalogue as much
 as a populated one.
 
-**Setup never prunes.** The Weaver Lakehouse belongs to the installation, not to
-the built-in item — a reconciling build would treat every schema that item does
-not declare as an orphan, including anything a user put there. So prune is off,
-and setup only ever adds.
+**Initialisation never prunes.** The Weaver Lakehouse belongs to the installation,
+not to the built-in item — a reconciling build would treat every schema that item
+does not declare as an orphan, including anything a user put there. So prune is
+off, and initialisation only ever adds.
 """
 
 from __future__ import annotations
@@ -37,35 +37,33 @@ from typing import Any
 from .build_bundle.bundle import BuildBundle, load_bundle
 from .build_bundle.installer import InstallationEnvironment, install_bundle
 from .build_bundle.planner import generate_item_build_bundle
-from .build_bundle.workflow import read_reconciled_catalogue, read_target_inventories
 from .build_bundle.report import InstallationReport
 from .build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
+from .build_bundle.workflow import read_reconciled_catalogue, read_target_inventories
 from .catalogue.tables import CATALOGUE_TABLES
+from .declaration import parse_item_repository
+from .declaration.model import WeaverItemId
+from .errors import CommandError
 from .locations import Location
 from .resolution import resolver_for
 from .store import Store
-from .declaration import parse_item_repository
-from .declaration.model import WeaverItemId
 from .targets import ItemRef
-from .errors import CommandError
 from .workspaces import FabricWorkspace, LocalWorkspace
 
-#: The bundle directory setup writes under the Weaver Lakehouse's build_bundles
-#: area. A fixed name, because setup is idempotent and there is no value in
-#: accumulating one bundle per run.
-BUNDLE_NAME = "weaver-setup"
+#: The bundle directory initialisation writes under the Weaver Lakehouse's
+#: build_bundles area. A fixed name, because initialisation is idempotent and
+#: there is no value in accumulating one bundle per run.
+INITIALISE_BUNDLE_NAME = "weaver-initialise"
 
 
 @dataclass(frozen=True)
-class SetupResult:
-    """What setup did, in terms a caller can print or assert on."""
+class InitialiseResult:
+    """What initialisation did, in terms a caller can print or assert on."""
 
     item: str
     weaver_lakehouse: str
     bundle: BuildBundle
     report: InstallationReport
-    #: Source-root-relative paths written into ``Files/weaver_items``.
-    materialised: tuple[str, ...]
 
     @property
     def succeeded(self) -> bool:
@@ -84,7 +82,6 @@ class SetupResult:
             "bundle_id": self.bundle.plan.bundle_id,
             "status": self.report.status,
             "tables": list(self.tables),
-            "materialised": list(self.materialised),
         }
 
 
@@ -155,21 +152,19 @@ def initialise_weaver_lakehouse(
     store: Store,
     spark: Any = None,
     output: Location | None = None,
-) -> SetupResult:
+) -> InitialiseResult:
     """Install Weaver's catalogue into the Weaver Lakehouse, through the normal build.
 
     Idempotent to re-run in *shape*: the same package produces the same bundle, and
     the catalogue's own reconciliation is a no-op when nothing changed.
 
-    Table creation is non-destructive, so re-running setup preserves existing
-    catalogue rows while its catalogue tail reconciles the built-in item.
+    Table creation is non-destructive, so re-running initialisation preserves
+    existing catalogue rows while its catalogue tail reconciles the built-in item.
     """
 
     resolver = resolver_for(workspace)
     if not store.exists(resolver.weaver_items_root):
         store.make_directory(resolver.weaver_items_root)
-    materialised: tuple[str, ...] = ()
-
     repository = parse_item_repository(resolver.weaver_items_root, store=store)
     control = LakehouseBinding(lakehouse=weaver_lakehouse)
     bindings = ItemBindings(
@@ -190,11 +185,11 @@ def initialise_weaver_lakehouse(
     bundle = generate_item_build_bundle(
         repository,
         bindings=bindings,
-        output=output or resolver.build_bundle(BUNDLE_NAME),
+        output=output or resolver.build_bundle(INITIALISE_BUNDLE_NAME),
         store=store,
         # Never: the Weaver Lakehouse belongs to the installation, not to this
         # repository, so a reconciling build would treat a user's own schema as an
-        # orphan. Setup only adds.
+        # orphan. Initialisation only adds.
         prune=False,
         control_lakehouse=control,
         target_inventories=inventories,
@@ -206,10 +201,9 @@ def initialise_weaver_lakehouse(
         environment=environment,
     )
 
-    return SetupResult(
+    return InitialiseResult(
         item="Lakehouse/_weaver",
         weaver_lakehouse=weaver_lakehouse.name,
         bundle=bundle,
         report=report,
-        materialised=materialised,
     )

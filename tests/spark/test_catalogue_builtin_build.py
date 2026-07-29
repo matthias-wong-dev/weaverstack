@@ -20,7 +20,7 @@ import pytest
 
 from weaver import ItemRef
 from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
-from weaver.setup import initialise_weaver_lakehouse
+from weaver.initialise import initialise_weaver_lakehouse
 
 pytestmark = pytest.mark.spark
 

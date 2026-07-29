@@ -39,7 +39,7 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
 
     repository_root = lakehouses.location("Estate")
     lakehouses.store.make_directory(repository_root)
-    from weaver.setup import initialise_weaver_lakehouse
+    from weaver.initialise import initialise_weaver_lakehouse
 
     result = initialise_weaver_lakehouse(
         weaver_lakehouse=lakehouses.weaver,
@@ -117,7 +117,7 @@ def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
     )
     target_catalogue.create_schema("Sales")
     target_catalogue.sql(
-        "CREATE TABLE {{object:Sales.Gworkspace}} (`Id` string) USING delta"
+        "CREATE TABLE {{object:Sales.Ghost}} (`Id` string) USING delta"
     )
     old_folder = lakehouses.resolver.files_root(lakehouses.target) / "Sales" / "OldFolder"
     lakehouses.store.make_directory(old_folder)

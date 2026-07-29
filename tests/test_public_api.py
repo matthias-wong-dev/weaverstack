@@ -38,8 +38,8 @@ def test_item_repository_and_build_are_the_primary_public_surface():
         "DeltaTarget",
         "wipe_folder_target",
         "wipe_delta_target",
-        "initialise_weaver_lakehouse",
     }.isdisjoint(weaver.__all__)
+    assert {"InitialiseResult", "initialise_weaver_lakehouse"} <= set(weaver.__all__)
 
 
 def test_public_binding_parser_separates_logical_and_physical_identity():

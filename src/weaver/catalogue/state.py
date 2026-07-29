@@ -29,6 +29,19 @@ class ReconciledCatalogue:
     stale_objects: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, order=True)
+class _StaleObject:
+    """Typed physical evidence attached to one unchanged four-part catalogue key."""
+
+    object_type: str
+    schema_name: str
+    object_name: str
+
+    @property
+    def catalogue_key(self) -> tuple[str, str]:
+        return (self.schema_name, self.object_name)
+
+
 def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
     """Read selected scopes and distinguish absent, partial and invalid shape."""
 
@@ -87,14 +100,15 @@ def reconcile_catalogue_state(
     stale_labels: list[str] = []
     for item, tables in state.rows.items():
         inventory = inventories.get(item)
-        stale: set[tuple[str, str]] = set()
+        stale: set[_StaleObject] = set()
         if inventory is not None:
             for row in tables.get(REGISTRY.name, ()):
                 schema = str(row.get("schema_name") or "")
                 name = str(row.get("object_name") or "")
                 object_type = str(row.get("object_type") or "")
                 if not inventory.has_object(schema, name, object_type):
-                    stale.add((schema, name))
+                    stale.add(_StaleObject(object_type, schema, name))
+        stale_keys = {obj.catalogue_key for obj in stale}
         filtered = {}
         scope = InstallationScope(item.item_type, item.item_name)
         for table in CATALOGUE_TABLES:
@@ -106,13 +120,19 @@ def reconcile_catalogue_state(
                 row
                 for row in rows
                 if (str(row.get("schema_name")), str(row.get("object_name")))
-                not in stale
+                not in stale_keys
             )
             if table.name in state.present_tables:
-                for schema, name in sorted(stale):
-                    deletes.append(_delete_object(table, scope, schema, name))
+                for obj in sorted(stale):
+                    deletes.append(
+                        _delete_object(
+                            table, scope, obj.schema_name, obj.object_name
+                        )
+                    )
         reconciled[item] = MappingProxyType(filtered)
-        stale_labels.extend(f"{item}/{schema}.{name}" for schema, name in stale)
+        stale_labels.extend(
+            f"{item}/{obj.schema_name}.{obj.object_name}" for obj in stale
+        )
     return ReconciledCatalogue(
         rows=MappingProxyType(reconciled),
         delete_dml=tuple(dict.fromkeys(deletes)),

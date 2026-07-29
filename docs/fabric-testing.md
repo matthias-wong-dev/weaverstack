@@ -152,8 +152,8 @@ The build tests share a single reusable harness so the same assertions run
 locally and on Fabric, and so a Fabric run costs as little as possible.
 
 `BuildEnv` (in `tests/fabric/conftest.py`) is a small record of callables —
-`install_repo`, `generate`, `install`, `run_query`, `run_columns`, `seed_orphans`,
-`setup_weaver` — with the transport hidden behind them, plus the two destinations
+`install_repo`, `generate`, `install`, `run_query`, `run_columns` and `seed_orphans`
+— with the transport hidden behind them, plus the two destinations
 the environment addresses. A test body drives it and never mentions Livy, Spark or
 ODBC. Three environments implement it:
 

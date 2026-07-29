@@ -115,9 +115,9 @@ The catalogue's own DML runs after the tables it writes to exist, so no first-ru
 mode is needed. Generation reads nothing, so an absent catalogue is not a special
 case — the statements are correct against it either way.
 
-Setup never prunes. The Weaver Lakehouse belongs to the installation, not to the
-built-in item, so a reconciling build would treat anything else there as an
-orphan.
+Initialisation never prunes. The Weaver Lakehouse belongs to the installation,
+not to the built-in item, so a reconciling build would treat anything else there
+as an orphan.
 
 ## How a build writes it
 
