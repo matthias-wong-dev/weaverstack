@@ -31,7 +31,7 @@ EXPECTED_OBJECTS = {
 def test_installed_weaver_wipes_a_desktop_populated_warehouse(
     clean_disposable_warehouse,
     fabric_client,
-    fabric_workspace,
+    fabric_workspace_item,
     livy_session,
 ):
     """Exercise installed Weaver, not a duplicate test-side SQL implementation."""
@@ -78,7 +78,7 @@ def test_installed_weaver_wipes_a_desktop_populated_warehouse(
 
     # Wipe preserves the physical item; the fixture owns its later deletion.
     still_there = find_item(
-        fabric_workspace,
+        fabric_workspace_item,
         warehouse.item.name,
         item_type=WAREHOUSE,
         client=fabric_client,

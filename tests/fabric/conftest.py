@@ -781,7 +781,6 @@ def _local_build_context(root, spark, weaver_repo_fixture):
         *,
         prune: bool = True,
     ):
-        setup_weaver()
         root_location = resolver.weaver_items_root
         repository = parse_item_repository(root_location, store=store)
         control = LakehouseBinding(lakehouse=weaver)
@@ -955,7 +954,6 @@ def _fabric_build_context(
         prune: bool = True,
     ):
         # Generation runs IN the session, against the native Spark catalogue.
-        setup_weaver()
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
             f"LakehouseBinding(lakehouse=ItemRef({target.name!r})))"
@@ -1201,7 +1199,6 @@ def _warehouse_build_env(
             "from weaver import ItemRef, FabricWorkspace, WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
-            "from weaver.setup import initialise_weaver_lakehouse\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
             "WarehouseBinding, LakehouseBinding, InstallationEnvironment, "
             "effective_item_bindings\n"
@@ -1211,8 +1208,6 @@ def _warehouse_build_env(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            "initialise_weaver_lakehouse(weaver_lakehouse=ItemRef("
-            "workspace.weaver_lakehouse), workspace=workspace, store=store, spark=spark)\n"
             "repository = parse_item_repository(resolver.weaver_items_root, store=store)\n"
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("

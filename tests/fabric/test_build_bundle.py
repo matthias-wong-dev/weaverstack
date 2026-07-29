@@ -206,8 +206,14 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(build_env):
     assert outcome.sequence_status[10] == "succeeded"  # create schemas
     assert outcome.sequence_status[40] == "succeeded"  # DWG.Customer
     assert outcome.sequence_status[50] == "succeeded"  # ActiveCustomer
-    assert outcome.sequence_status[60] == "failed"     # ActiveCustomerSummary
-    assert outcome.action_status["object-Lakehouse--Raw--DWG.ActiveCustomerSummary"] == "failed"
+    failed_action = "object-Lakehouse--Raw--DWG.ActiveCustomerSummary"
+    failed_sequence = next(
+        sequence.number
+        for sequence in broken.plan.sequences
+        if any(action.id == failed_action for batch in sequence.batches for action in batch.actions)
+    )
+    assert outcome.sequence_status[failed_sequence] == "failed"
+    assert outcome.action_status[failed_action] == "failed"
 
     views = {
         row["viewName"].lower()
