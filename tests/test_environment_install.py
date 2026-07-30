@@ -20,6 +20,7 @@ from weaver.fabric.environment import (
     find_or_create_environment,
     is_weaver_wheel,
     read_published,
+    read_staging,
     staged_wheels,
 )
 from weaver.errors import CommandError
@@ -146,6 +147,24 @@ def test_never_published_environment_is_empty():
 def test_published_library_failures_other_than_404_are_re_raised(status_code):
     with pytest.raises(FabricError, match="lookup failed"):
         read_published(_env(), client=_PublishedClient(status_code))
+
+
+def test_a_freshly_created_environment_has_nothing_staged():
+    """The first install into a new Environment, which is the one that failed.
+
+    Fabric answers 404 with ``This environment does not have any staged
+    libraries``, which is the same "nothing yet" a never-published Environment
+    reports — and had to be read the same way. Treating it as fatal meant the
+    only path that had never been exercised was the only one that could not work.
+    """
+
+    assert read_staging(_env(), client=_PublishedClient(404)) == {}
+
+
+@pytest.mark.parametrize("status_code", [401, 429, 500, None])
+def test_staging_failures_other_than_404_are_re_raised(status_code):
+    with pytest.raises(FabricError, match="lookup failed"):
+        read_staging(_env(), client=_PublishedClient(status_code))
 
 
 def test_fabric_client_preserves_failure_status(monkeypatch):

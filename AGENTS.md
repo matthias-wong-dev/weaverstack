@@ -219,6 +219,30 @@ API URLs, auth scopes, Livy version, timeouts, polling intervals, parallelism).
 This covers **examples, docstrings and test fixtures**, not just code paths. Use
 neutral item names — `Sales`, `Inventory`, `Reporting`.
 
+**One deliberate exception: the Fabric integration harness.** `tests/fabric`
+names a fixed workspace and a fixed set of items (`PYTEST_WORKSPACE`,
+`PYTEST_WEAVER`, `PYTEST_LH_*`, `PYTEST_WH_*`) rather than generating disposable
+ones. The rule exists so no *product* behaviour depends on a name from one
+tenant; these names are neither product behaviour nor tenant-specific, and every
+one is overridable by environment variable, so another tenant runs the suite by
+exporting its own.
+
+Fixed items buy two things that generated ones cannot. They take provisioning
+out of the measurement — a run that spends 157s creating a Warehouse to do 7s of
+work tells you nothing about how the *code* performs. And they stop the suite
+churning workspace artifacts underneath a long-lived Spark session, which is a
+documented cause of Fabric's namespace resolver intermittently reporting
+`Artifact not found` for an item that demonstrably exists.
+
+Isolation therefore comes from **emptying** an item rather than from having a new
+one. That is not a weaker guarantee, but it is a different one, so the cleaning
+path is load-bearing and asserted rather than assumed: residue is possible in
+Fabric in a way it never is locally, where a target is a fresh `tmp_path`
+directory costing a fraction of a millisecond. Local stays disposable for exactly
+that reason — copying the Fabric arrangement there would import a workaround for
+a provisioning cost that does not exist, which is contorting the emulator to
+match Fabric's *mechanics* rather than its *behaviour*.
+
 Weaver also has no opinion about data architecture: Folder, Delta and SQL are
 materialisation forms, not tiers. `T0`/`T1`/`T2` naming is house jargon and is
 rejected by `tests/test_neutrality.py`; widely-understood naming such as

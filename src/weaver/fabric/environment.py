@@ -203,9 +203,22 @@ def _staging_base(env: Item) -> str:
 
 
 def read_staging(env: Item, *, client: FabricClient) -> dict:
-    """What the Environment currently has staged: custom wheels and the env yml."""
+    """What the Environment currently has staged: custom wheels and the env yml.
 
-    return client.get_json(f"{_staging_base(env)}/libraries")
+    A **freshly created** Environment answers 404 here — ``This environment does
+    not have any staged libraries`` — which is the same "nothing yet" that
+    :func:`read_published` already reads from a 404, and has to be read the same
+    way. Treating it as fatal made the very first ``weaver install`` into a new
+    Environment fail, so the one path that had never been exercised was the one
+    that could not work.
+    """
+
+    try:
+        return client.get_json(f"{_staging_base(env)}/libraries")
+    except FabricError as exc:
+        if exc.status_code == 404:
+            return {}
+        raise
 
 
 def read_published(env: Item, *, client: FabricClient) -> dict:

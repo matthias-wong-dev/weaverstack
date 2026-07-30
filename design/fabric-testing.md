@@ -25,9 +25,65 @@ source and does nothing without a JDK.
 credential chain is pinned.
 
 You need a Fabric workspace where the test identity can create and delete
-Lakehouses and Warehouses and connect to Warehouse SQL. It can be empty; the
-tests bring their own. The workspace capacity must already be running and
-usable. Pytest never starts, resumes, suspends, or waits for capacity.
+Lakehouses and Warehouses and connect to Warehouse SQL. The workspace capacity
+must already be running and usable. Pytest never starts, resumes, suspends, or
+waits for capacity.
+
+## Provision the fixed estate, once
+
+The suite reuses a fixed set of items rather than creating disposable ones per
+run. Provisioning is slow and, worse, it is *noise*: a run that spends 157s
+making a Warehouse to do 7s of work says nothing about how the code performs.
+Reusing items also stops the suite churning workspace artifacts underneath a
+long-lived Spark session, which makes Fabric's namespace resolver intermittently
+report `Artifact not found` for an item that is plainly there.
+
+Create these once, in the workspace you will point the suite at:
+
+| Item | Type | Role |
+|---|---|---|
+| `PYTEST_WEAVER` | Lakehouse | the Weaver Lakehouse — the control plane |
+| `PYTEST_LH_1` | Lakehouse | destination target |
+| `PYTEST_LH_2` | Lakehouse | cross-item alias producer |
+| `PYTEST_LH_3` | Lakehouse | cross-item alias consumer |
+| `PYTEST_HOUSE` | Lakehouse | second alias producer, for the Warehouse case |
+| `PYTEST_WH_1` | Warehouse | Warehouse destination |
+
+Every Lakehouse must be **schema-enabled** (`creationPayload.enableSchemas`),
+because a managed table has to land at `Tables/<schema>/<table>` and the
+catalogue lives in a schema called `_`.
+
+> A Warehouse **cannot** share a display name with a Lakehouse. A Lakehouse
+> generates a `SQLEndpoint` facet of the same name, so the name is already taken
+> and Fabric answers `ItemDisplayNameAlreadyInUse`. The only cross-type name
+> sharing in Fabric is a Lakehouse and *its own* endpoint.
+
+`scripts/` has no provisioning helper; the REST calls are three lines each
+(`POST workspaces/{id}/lakehouses`, `POST workspaces/{id}/warehouses`) and the
+whole estate builds in about fifteen seconds.
+
+Isolation comes from **emptying** these between runs, not from replacing them.
+That is the same reconciliation the build itself performs, so the cleaning path
+is exercised rather than bypassed — but it does mean residue is possible here in
+a way it never is locally, where every target is a fresh temporary directory.
+
+## Naming the estate
+
+Everything is overridable, so another tenant runs the suite with its own items:
+
+```bash
+export WEAVER_FABRIC_WORKSPACE=PYTEST_WORKSPACE   # required
+export WEAVER_FABRIC_ENVIRONMENT=weaver           # default: weaver
+```
+
+The item names above are defaults; each has a matching
+`WEAVER_PYTEST_<ROLE>` override.
+
+**Put the suite's workspace on its own capacity if you can.** A trial capacity
+works and costs nothing — it is not an Azure resource, so it cannot bill a
+subscription — and it keeps the suite off whatever capacity real work uses. On a
+small shared capacity (an F2 permits one Spark session at a time) a long test run
+and a scheduled job contend for the same slot.
 
 ## Install Weaver once, whenever the code changes
 
