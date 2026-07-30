@@ -91,6 +91,7 @@ testpaths = ["tests"]
 markers = [
     "spark: local Spark/Delta tests, need a JDK (run with: pytest -m spark)",
     "fabric: opt-in Fabric integration tests, need a workspace and a running capacity (run with: pytest -m fabric)",
+    "provisioning: Fabric item lifecycle — creating and deleting Lakehouses. Opt-in separately from `fabric` (run with: pytest -m provisioning), because it exercises Fabric's resource management rather than Weaver's, changes rarely, and its create/delete churn slows every other run",
 ]
 # Default runs stay fast and need no JVM.
-addopts = ["-m", "not spark and not fabric"]
+addopts = ["-m", "not spark and not fabric and not provisioning"]

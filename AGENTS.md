@@ -227,12 +227,18 @@ tenant; these names are neither product behaviour nor tenant-specific, and every
 one is overridable by environment variable, so another tenant runs the suite by
 exporting its own.
 
-Fixed items buy two things that generated ones cannot. They take provisioning
-out of the measurement — a run that spends 157s creating a Warehouse to do 7s of
-work tells you nothing about how the *code* performs. And they stop the suite
-churning workspace artifacts underneath a long-lived Spark session, which is a
-documented cause of Fabric's namespace resolver intermittently reporting
-`Artifact not found` for an item that demonstrably exists.
+Fixed items buy two things that generated ones cannot. They remove the
+*variance*: creating an item is quick, but waiting for its SQL endpoint to
+provision is not bounded — the harness tolerates ten minutes for a Warehouse —
+and a fixed item's endpoint already exists. And they stop the suite churning
+workspace artifacts underneath a long-lived Spark session, which is a documented
+cause of Fabric's namespace resolver intermittently reporting `Artifact not
+found` for an item that demonstrably exists.
+
+Item *lifecycle* cover — creating and deleting Lakehouses — is marked
+`provisioning` and opted into separately from `fabric`. It exercises Fabric's
+resource management rather than Weaver's, changes rarely, and its create/delete
+churn would otherwise slow every run of the code actually under development.
 
 Isolation therefore comes from **emptying** an item rather than from having a new
 one. That is not a weaker guarantee, but it is a different one, so the cleaning

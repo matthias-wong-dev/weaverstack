@@ -32,11 +32,13 @@ waits for capacity.
 ## Provision the fixed estate, once
 
 The suite reuses a fixed set of items rather than creating disposable ones per
-run. Provisioning is slow and, worse, it is *noise*: a run that spends 157s
-making a Warehouse to do 7s of work says nothing about how the code performs.
-Reusing items also stops the suite churning workspace artifacts underneath a
-long-lived Spark session, which makes Fabric's namespace resolver intermittently
-report `Artifact not found` for an item that is plainly there.
+run. Creating an item is quick — a Lakehouse in about two seconds — but waiting
+for its **SQL endpoint** to provision is not bounded, and the harness tolerates
+up to ten minutes for a Warehouse. A fixed item's endpoint already exists, so
+that variance leaves the measurement entirely. Reusing items also stops the suite
+churning workspace artifacts underneath a long-lived Spark session, which makes
+Fabric's namespace resolver intermittently report `Artifact not found` for an
+item that is plainly there.
 
 Create these once, in the workspace you will point the suite at:
 
@@ -75,6 +77,20 @@ Everything is overridable, so another tenant runs the suite with its own items:
 export WEAVER_FABRIC_WORKSPACE=PYTEST_WORKSPACE   # required
 export WEAVER_FABRIC_ENVIRONMENT=weaver           # default: weaver
 ```
+
+Item **lifecycle** tests — creating and deleting Lakehouses — carry their own
+`provisioning` marker and are not selected by `-m fabric`:
+
+```bash
+pytest -m fabric          # what Weaver does with items that exist
+pytest -m provisioning    # Fabric creating and deleting them
+```
+
+They are separated because they exercise Fabric's resource management rather
+than Weaver's and change rarely, while their create/delete churn slows every run
+of the code actually under development. `create_lakehouse` is still real product
+surface — `weaver initialise` makes the Weaver Lakehouse with it — so this says
+*when* to run the cover, not that it is unnecessary.
 
 The item names above are defaults; each has a matching
 `WEAVER_PYTEST_<ROLE>` override.
