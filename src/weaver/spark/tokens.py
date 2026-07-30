@@ -5,12 +5,12 @@ which Lakehouse, in which workspace, at which path: that is bound by the batch's
 target, resolved at install time, and different in every environment. Writing it
 into the SQL would make two bundles of the same repository differ in every
 payload merely for having been generated somewhere else, which is exactly the
-comparison build-philosophy §10 exists to protect.
+comparison how-does-build-work §15 exists to protect.
 
 So a payload names an object logically, and the executor asks the batch's
 destination what that is called there::
 
-    CREATE OR REPLACE VIEW {{object:Sales.ActiveCustomer}} AS
+    CREATE VIEW {{object:Sales.ActiveCustomer}} AS
     SELECT * FROM {{object:Sales.Customer}} WHERE IsActive
 
     Fabric   ->  `Weaver`.`Play_Lakehouse_1`.`Sales`.`ActiveCustomer`

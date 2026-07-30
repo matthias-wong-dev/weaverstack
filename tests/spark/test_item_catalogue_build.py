@@ -69,7 +69,7 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
 
 
 def test_public_workflow_materialises_then_installs_from_driver_local_files(
-    tmp_path, lakehouses, spark
+    tmp_path, lakehouses, spark, weaver_catalogue
 ):
     repository_root = Location(str(_estate(tmp_path)))
     binding = LakehouseBinding(lakehouses.target)
@@ -92,7 +92,6 @@ def test_public_workflow_materialises_then_installs_from_driver_local_files(
                 spark=spark,
                 workspace=lakehouses.workspace,
             ),
-            prune=False,
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
 
@@ -108,7 +107,7 @@ def test_public_workflow_materialises_then_installs_from_driver_local_files(
 
 
 def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
-    tmp_path, lakehouses, spark
+    tmp_path, lakehouses, spark, weaver_catalogue
 ):
     from weaver import wipe_lakehouse
 
@@ -140,7 +139,6 @@ def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
                 spark=spark,
                 workspace=lakehouses.workspace,
             ),
-            prune=True,
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
         report = result.report

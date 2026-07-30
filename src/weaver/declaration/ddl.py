@@ -2,7 +2,7 @@
 
 Build creates structure; it does not load data. So the create definition for a
 source is pure structure: a table becomes an empty table of the right shape, a
-view becomes ``CREATE OR REPLACE VIEW`` over its query body. Nothing here runs an
+view becomes ``CREATE VIEW`` over its query body. Nothing here runs an
 object's ``read()`` or reads a row — populating a table is *load*, a separate
 phase, and the repository is read once to freeze a bundle, never again.
 
@@ -17,7 +17,7 @@ Two invariants hold:
 - **destination-free** — a table or view is named ``{{object:Schema.Object}}`` and
   the executor resolves that against whichever Lakehouse the batch is bound to.
   No Lakehouse, workspace or filesystem path is baked into a payload, so the same
-  repository generates the same bytes in every environment (build-philosophy §10)
+  repository generates the same bytes in every environment (how-does-build-work §15)
   and two bundles can be diffed for what actually differs.
 
 The second used to read "path-free", and a bare ``Schema.Object`` was taken to
@@ -35,13 +35,13 @@ comments, same casing, same delimiters. Three- and four-part references are left
 exactly as written: the author named a physical thing deliberately, and Weaver
 does not second-guess it.
 
-Schema is **declared or inferred** (build-philosophy §7). A Python-backed Delta
+Schema is **declared or inferred** (how-does-build-work §2). A Python-backed Delta
 table has no query and must declare its schema; the generated DDL is a concrete
-``CREATE OR REPLACE TABLE`` over the declared columns. A Spark SQL table has a
+strict ``CREATE TABLE`` over the declared columns. A Spark SQL table has a
 query, so it may declare its schema or leave it to be inferred at build — either
 way the shape is only settled by running the query in the target session, so its
 payload is not finished SQL but a deterministic instruction the ``spark_table``
-executor completes in one self-contained install action (build-philosophy §7.3).
+executor completes in one self-contained install action (how-does-build-work §2).
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def _tsql_ddl(document: "SourceDocument") -> GeneratedDdl:
     """A Warehouse object's build: a self-contained T-SQL script.
 
     A table materialises and inspects its own query shape server-side and creates
-    only its main table; a view is a ``CREATE OR ALTER VIEW`` over its body.
+    only its main table; a view is a strict ``CREATE VIEW`` over its body.
     """
 
     from .tsql_ddl import generate_tsql_table_script, generate_tsql_view_script
@@ -194,7 +194,7 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
     query, read the ``DataFrame`` schema, validate the columns (the same guards a
     declared schema passes at parse), choose the physical business columns,
     append the audit columns, and create the table. Everything the executor needs
-    is frozen here, so it never reopens the Weaver document source (build-philosophy §7.3).
+    is frozen here, so it never reopens the Weaver document source (how-does-build-work §2).
     """
 
     ses = document.document
@@ -231,7 +231,7 @@ def _view_ddl(document: "SourceDocument") -> GeneratedDdl:
     """
 
     body = _addressed((document.sql_body or "").rstrip())
-    content = f"CREATE OR REPLACE VIEW {_object_name(document)} AS\n{body}\n"
+    content = f"CREATE VIEW {_object_name(document)} AS\n{body}\n"
     return GeneratedDdl(
         executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
     )
@@ -249,14 +249,14 @@ def _column_entry(column) -> list:
 
 
 def _create_table_sql(qualified: str, columns) -> str:
-    """A non-destructive ``CREATE TABLE IF NOT EXISTS`` over concrete columns."""
+    """A strict ``CREATE TABLE`` over concrete columns."""
 
     column_lines = ",\n".join(
         f"    {_ident(c.name)} {c.type}{' NOT NULL' if c.not_null else ''}"
         for c in columns
     )
     return (
-        f"CREATE TABLE IF NOT EXISTS {qualified} (\n"
+        f"CREATE TABLE {qualified} (\n"
         f"{column_lines}\n"
         ")\n"
         "USING delta\n"

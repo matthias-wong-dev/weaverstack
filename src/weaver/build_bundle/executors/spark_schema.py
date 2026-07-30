@@ -12,7 +12,7 @@ Freezing it meant a bundle generated on a laptop carried
 
 — a temporary directory, in the hashed plan, deciding where a managed table
 lands. Two runs of the same repository produced different bundles, and a bundle
-kept overnight named a path that no longer existed (build-philosophy §10). On
+kept overnight named a path that no longer existed (how-does-build-work §15). On
 Fabric it froze the opposite mistake: no clause at all, and a bare two-part name,
 so the schema was created in whatever Lakehouse the session was attached to
 rather than in the destination.
@@ -52,7 +52,7 @@ class SparkSchemaExecutor:
             )
         schema = json.loads(payload.decode("utf-8"))["schema"]
         catalogue = context.catalogue
-        statement = catalogue.create_schema(schema)
+        statement = catalogue.create_schema(schema, if_not_exists=False)
         return {
             "destination": catalogue.destination.item,
             "schema": catalogue.qualified_schema(schema),

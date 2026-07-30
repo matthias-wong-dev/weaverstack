@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.spark_sql import SparkSqlExecutor
+from weaver.build_bundle.executors.spark_sql_batch import SparkSqlBatchExecutor
 from weaver.build_bundle.models import BuildAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.spark import fabric_destination, local_destination
@@ -99,3 +100,38 @@ def test_local_view_uses_the_emulator_session_policy_without_mutating_it():
     # Constructing the local catalogue establishes the emulator's session-wide
     # exact-case policy; the executor does not toggle it back.
     assert spark.conf.changes == ["true"]
+
+
+def test_catalogue_batch_executes_each_statement_in_payload_order():
+    spark = _Spark()
+    destination = fabric_destination(workspace="Analytics", lakehouse="Control")
+    action = BuildAction(
+        id="publish-catalogue",
+        kind="publish_catalogue",
+        resource_node_id=None,
+        executor="spark_sql_batch",
+        payload="payload/catalogue.spark-sql-batch.json",
+        payload_sha256="x",
+    )
+    target = ResolvedTarget(
+        bound=BoundTarget(id="control", kind="lakehouse", item_id="Control"),
+        lakehouse=ItemRef("Control"),
+        destination=destination,
+    )
+    context = InstallationContext(
+        spark=spark, resolver=None, store=None, snapshot=None, target=target
+    )
+
+    details = SparkSqlBatchExecutor().execute(
+        action,
+        b'["DELETE FROM {{object:_.Registry}}", "MERGE INTO {{object:_.Registry}}"]',
+        context,
+    )
+
+    assert [statement.split()[0] for statement, _case in spark.executed] == [
+        "DELETE",
+        "MERGE",
+    ]
+    assert all(case == "true" for _statement, case in spark.executed)
+    assert details["statement_count"] == 2
+    assert spark.conf.value == "false"

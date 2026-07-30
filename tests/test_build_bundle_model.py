@@ -14,6 +14,7 @@ import hashlib
 from dataclasses import replace
 
 import pytest
+import yaml
 
 from weaver import LocalStore, Location
 from weaver.build_bundle import (
@@ -22,6 +23,8 @@ from weaver.build_bundle import (
     BuildBatch,
     BuildPlan,
     BuildSequence,
+    BuildSelection,
+    Impact,
     OmittedNode,
     compute_bundle_id,
     load_bundle,
@@ -80,8 +83,16 @@ def _plan(bundle_id: str = "") -> BuildPlan:
         repository_signature="sig-abc",
         targets=(TARGET,),
         sequences=sequences,
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
         omitted_nodes=(OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),),
     )
+
+
+def test_plan_without_selection_is_rejected():
+    mapping = _plan().to_mapping()
+    mapping.pop("selection")
+    with pytest.raises(BuildError, match="missing a required field: 'selection'"):
+        plan_from_yaml(yaml.safe_dump(mapping))
 
 
 def _identified_plan() -> BuildPlan:

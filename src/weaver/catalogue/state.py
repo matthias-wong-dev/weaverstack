@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from ..declaration.model import WeaverItemId
+from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..errors import BuildError
 from ..spark.tokens import object_token
+from .claims import CatalogueClaim, claim_rules_for_object_type
 from .reader import _is_absent, read_installation
-from .render import InstallationScope, identifier, literal
-from .tables import CATALOGUE_TABLES, REGISTRY, CatalogueTable
+from .render import InstallationScope
+from .tables import CATALOGUE_TABLES, OBJECT_TYPES, REGISTRY
 
 
 @dataclass(frozen=True)
@@ -22,24 +23,66 @@ class CatalogueState:
     missing_tables: frozenset[str]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ReconciledCatalogue:
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
-    delete_dml: tuple[str, ...] = ()
-    stale_objects: tuple[str, ...] = ()
+    registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
+    stale_claims: tuple[CatalogueClaim, ...]
+    stale_objects: tuple[str, ...]
+
+    def __init__(
+        self,
+        rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]],
+        *,
+        registered: Mapping[WeaverDocumentId, "RegisteredDocument"] | None = None,
+        stale_claims: tuple[CatalogueClaim, ...] = (),
+        stale_objects: tuple[str, ...] = (),
+    ) -> None:
+        frozen_rows = MappingProxyType(dict(rows))
+        object.__setattr__(self, "rows", frozen_rows)
+        object.__setattr__(
+            self,
+            "registered",
+            _registered_documents(frozen_rows)
+            if registered is None
+            else MappingProxyType(dict(registered)),
+        )
+        object.__setattr__(self, "stale_claims", tuple(stale_claims))
+        object.__setattr__(self, "stale_objects", tuple(stale_objects))
 
 
-@dataclass(frozen=True, order=True)
-class _StaleObject:
-    """Typed physical evidence attached to one unchanged four-part catalogue key."""
+@dataclass(frozen=True)
+class RegisteredDocument:
+    """One validated Registry row, parsed once at the catalogue boundary."""
 
+    identity: WeaverDocumentId
     object_type: str
-    schema_name: str
-    object_name: str
+    signature: str
 
-    @property
-    def catalogue_key(self) -> tuple[str, str]:
-        return (self.schema_name, self.object_name)
+
+def _registered_documents(
+    rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
+) -> Mapping[WeaverDocumentId, RegisteredDocument]:
+    registered: dict[WeaverDocumentId, RegisteredDocument] = {}
+    for item, tables in rows.items():
+        for row in tables.get(REGISTRY.name, ()):
+            identity = _row_identity(item, row)
+            object_type = str(row.get("object_type") or "")
+            if object_type not in OBJECT_TYPES:
+                expected = ", ".join(OBJECT_TYPES)
+                raise BuildError(
+                    f"Registry row for {identity} has unsupported object_type "
+                    f"{object_type!r}; expected one of {expected}"
+                )
+            signature = str(row.get("signature") or "")
+            if not signature:
+                raise BuildError(f"Registry row for {identity} has no signature")
+            document = RegisteredDocument(identity, object_type, signature)
+            prior = registered.get(identity)
+            if prior is not None and prior != document:
+                raise BuildError(f"Registry contains conflicting rows for {identity}")
+            registered[identity] = document
+    return MappingProxyType(registered)
 
 
 def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
@@ -95,65 +138,75 @@ def reconcile_catalogue_state(
 ) -> ReconciledCatalogue:
     """Discard catalogue roots disproved by prepared target inventories."""
 
+    registered = _registered_documents(state.rows)
     reconciled = {}
-    deletes: list[str] = []
+    stale_claims: list[CatalogueClaim] = []
     stale_labels: list[str] = []
     for item, tables in state.rows.items():
         inventory = inventories.get(item)
-        stale: set[_StaleObject] = set()
+        stale: dict[WeaverDocumentId, RegisteredDocument] = {}
         if inventory is not None:
-            for row in tables.get(REGISTRY.name, ()):
-                schema = str(row.get("schema_name") or "")
-                name = str(row.get("object_name") or "")
-                object_type = str(row.get("object_type") or "")
-                if not inventory.has_object(schema, name, object_type):
-                    stale.add(_StaleObject(object_type, schema, name))
-        stale_keys = {obj.catalogue_key for obj in stale}
+            for identity, document in registered.items():
+                if identity.item != item:
+                    continue
+                schema = (
+                    f"Files/{identity.object_id.schema}"
+                    if identity.is_files
+                    else identity.object_id.schema
+                )
+                if not inventory.has_object(
+                    schema, identity.object_id.object, document.object_type
+                ):
+                    stale[identity] = document
         filtered = {}
-        scope = InstallationScope(item.item_type, item.item_name)
         for table in CATALOGUE_TABLES:
             rows = tables.get(table.name, ())
-            if not stale or not _object_columns(table):
+            rules = {
+                rule
+                for document in stale.values()
+                for rule in claim_rules_for_object_type(document.object_type)
+                if rule.table == table
+            }
+            if not rules:
                 filtered[table.name] = tuple(rows)
                 continue
             filtered[table.name] = tuple(
                 row
                 for row in rows
-                if (str(row.get("schema_name")), str(row.get("object_name")))
-                not in stale_keys
+                if not any(
+                    rule.owns(row, identity)
+                    for identity, document in stale.items()
+                    for rule in claim_rules_for_object_type(document.object_type)
+                    if rule.table == table
+                )
             )
             if table.name in state.present_tables:
-                for obj in sorted(stale):
-                    deletes.append(
-                        _delete_object(
-                            table, scope, obj.schema_name, obj.object_name
-                        )
-                    )
+                stale_claims.extend(
+                    CatalogueClaim(identity, rule)
+                    for identity, document in stale.items()
+                    for rule in claim_rules_for_object_type(document.object_type)
+                    if rule.table == table
+                )
         reconciled[item] = MappingProxyType(filtered)
-        stale_labels.extend(
-            f"{item}/{obj.schema_name}.{obj.object_name}" for obj in stale
-        )
+        stale_labels.extend(str(identity) for identity in stale)
+    retained = {
+        identity: document
+        for identity, document in registered.items()
+        if identity not in {claim.identity for claim in stale_claims}
+    }
     return ReconciledCatalogue(
         rows=MappingProxyType(reconciled),
-        delete_dml=tuple(dict.fromkeys(deletes)),
+        registered=retained,
+        stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),
     )
 
 
-def _object_columns(table: CatalogueTable) -> bool:
-    names = set(table.column_names)
-    return {"schema_name", "object_name"} <= names
-
-
-def _delete_object(
-    table: CatalogueTable,
-    scope: InstallationScope,
-    schema: str,
-    name: str,
-) -> str:
-    return (
-        f"DELETE FROM {object_token('_', table.name)}\n"
-        f"WHERE {scope.predicate}\n"
-        f"  AND {identifier('schema_name')} = {literal(schema)}\n"
-        f"  AND {identifier('object_name')} = {literal(name)}"
+def _row_identity(item: WeaverItemId, row: Mapping[str, object]) -> WeaverDocumentId:
+    schema = str(row.get("schema_name") or "")
+    is_files = schema.startswith("Files/")
+    logical_schema = schema[len("Files/") :] if is_files else schema
+    prefix = "Files/" if is_files else ""
+    return WeaverDocumentId.parse(
+        f"{item}/{prefix}{logical_schema}.{row.get('object_name')}"
     )

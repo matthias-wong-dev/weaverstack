@@ -537,7 +537,7 @@ def test_a_spark_sql_table_parses():
 
 def test_a_spark_sql_table_may_omit_schema():
     """Unlike Python, a Spark SQL table has a query, so it may omit Schema and
-    take its shape from the query at build (build-philosophy §7.2)."""
+    take its shape from the query at build (how-does-build-work §2)."""
     without = SPARK_YAML.split("Schema:")[0]
     document = parse(without, language=SPARK_SQL)
     assert document.has_declared_schema is False

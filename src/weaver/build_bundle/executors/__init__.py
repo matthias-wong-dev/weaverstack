@@ -1,9 +1,9 @@
 """Executor dispatch for build actions — all build, none load.
 
-Four executors do the work: ``spark_sql`` runs a create or a frozen prune
-``DROP``, ``spark_schema`` makes one schema in the destination, ``spark_table``
-completes a Spark SQL table whose shape only the session knows, and ``folder``
-makes or removes a directory. ``tsql`` is the Warehouse counterpart of the first.
+``spark_sql`` runs one create or frozen ``DROP``; ``spark_sql_batch`` runs an
+ordered catalogue payload as one reported action. ``spark_schema`` makes one
+schema, ``spark_table`` completes a table whose shape only the session knows,
+and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse SQL path.
 
 There is no prune executor — a build freezes its drops as payloads, so the
 installer never enumerates the target.
@@ -18,6 +18,7 @@ from .base import ActionExecutor, InstallationContext, ResolvedTarget
 from .folder import FolderExecutor
 from .spark_schema import SparkSchemaExecutor
 from .spark_sql import SparkSqlExecutor
+from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
 from .tsql import TSqlExecutor
 
@@ -27,6 +28,7 @@ def default_executors() -> dict[str, ActionExecutor]:
 
     return {
         SparkSqlExecutor.name: SparkSqlExecutor(),
+        SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
         SparkSchemaExecutor.name: SparkSchemaExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
@@ -40,6 +42,7 @@ __all__ = [
     "ResolvedTarget",
     "SparkSchemaExecutor",
     "SparkSqlExecutor",
+    "SparkSqlBatchExecutor",
     "SparkTableExecutor",
     "FolderExecutor",
     "TSqlExecutor",

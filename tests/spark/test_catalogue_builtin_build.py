@@ -133,17 +133,18 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
 ):
     """No privileged path: every action is one the planner emits for any repository.
 
-    The catalogue tables are created by ``create_schema`` and ``build_table``,
-    through ``spark_schema`` and ``spark_table`` — the same actions and the same
-    executors an application repository gets. Nothing here knows it is building a
-    catalogue.
+    The catalogue tables are created by ``build_table`` through ``spark_table``
+    — the same action and executor an application repository gets. The prepared
+    inventory already contains schema ``_``, so the ordinary planner correctly
+    omits a schema creation action. Nothing here knows it is building a catalogue.
     """
 
     bundle, _report = built_catalogue
     kinds = {action.kind for _s, _b, action in bundle.plan.actions()}
-    assert {"create_schema", "build_table", "record_installation", "publish_registry"} <= kinds
+    assert {"build_table", "publish_catalogue", "publish_registry"} <= kinds
+    assert "create_schema" not in kinds
     executors = {action.executor for _s, _b, action in bundle.plan.actions()}
-    assert executors == {"spark_schema", "spark_table", "spark_sql"}
+    assert executors == {"spark_table", "spark_sql_batch"}
 
 
 def test_the_tables_land_under_the_weaver_lakehouse_tables_area(

@@ -4,7 +4,7 @@ A SQL-backed table's physical business columns are known in two ways. A declared
 schema states them up front and is validated at parse time by
 :func:`weaver.ses.metadata._validate_columns`. An *inferred* table has no
 declared schema, so the same guards cannot run until the query's output shape is
-known — which, per build-philosophy §7.3, is at build, inside the install action.
+known — which, per how-does-build-work §2, is at build, inside the install action.
 
 This module is that deferred guard, expressed once so Spark and T-SQL agree. The
 Spark executor calls :func:`resolve_build_columns` directly with the columns its
@@ -91,7 +91,7 @@ def resolve_build_columns(
     A convenience wrapper over :func:`validate_build_columns` that reads the
     declared columns and metadata references off ``document``. The installer never
     uses this — it holds no document — and calls the data-level function with the
-    values the bundle froze (build-philosophy §7.3).
+    values the bundle froze (how-does-build-work §2).
     """
 
     declared = (

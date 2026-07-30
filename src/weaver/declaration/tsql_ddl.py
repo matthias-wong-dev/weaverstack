@@ -1,7 +1,7 @@
 """T-SQL create generation — one self-contained script per Warehouse object.
 
 A Warehouse table's build is a single T-SQL script that finishes itself on the
-server (build-philosophy §7.3): it materialises the object's query in shape-only
+server (how-does-build-work §2): it materialises the object's query in shape-only
 form into a temp table, reads that temp table's column metadata back, validates
 the authored metadata against it, and creates the one physical table — all in one
 execution, so the installer makes no round-trip. This is the Warehouse
@@ -67,10 +67,10 @@ def generate_tsql_table_script(document: SesDocument, body: str) -> str:
 
 
 def generate_tsql_view_script(document: SesDocument, body: str) -> str:
-    """A ``CREATE OR ALTER VIEW`` over the validated query body."""
+    """A strict ``CREATE VIEW`` over the validated query body."""
 
     return (
-        f"create or alter view {_quote_multipart(document.qualified)} as\n"
+        f"create view {_quote_multipart(document.qualified)} as\n"
         f"{_normalise_view_body(body)}\n"
     )
 
@@ -183,13 +183,8 @@ def _render_declared_pk(document: SesDocument, target: str) -> str:
         return ""
     columns = ", ".join(_quote_part(name) for name in document.primary_key)
     constraint = _pk_constraint_name(document.qualified)
-    target_literal = _sql_literal(target)
     return (
-        f"\nif not exists (\n"
-        f"    select 1 from sys.key_constraints\n"
-        f"    where parent_object_id = object_id({target_literal}) and type = 'PK'\n"
-        f")\n"
-        f"    alter table {target} add constraint {constraint} "
+        f"\nalter table {target} add constraint {constraint} "
         f"primary key nonclustered ({columns}) not enforced;\n"
     )
 

@@ -87,19 +87,10 @@ select
         from primary_key_columns
     );
 
-if object_id($target_table_literal, N'U') is null
-begin
-    print @weaver_create_sql;
-    exec sys.sp_executesql @weaver_create_sql;
-end;
+print @weaver_create_sql;
+exec sys.sp_executesql @weaver_create_sql;
 
 if @weaver_pk_sql is not null
-    and not exists (
-        select 1
-        from sys.key_constraints
-        where parent_object_id = object_id($target_table_literal)
-            and type = 'PK'
-    )
 begin
     print @weaver_pk_sql;
     exec sys.sp_executesql @weaver_pk_sql;

@@ -164,6 +164,10 @@ class SourceDocument:
     text: str
     source_hash: str
     document: SesDocument
+    #: The signature build compares with the installed Registry row.  For a
+    #: Python document this also covers every in-item ``lib/`` module reachable
+    #: through static imports; for every other document it is ``source_hash``.
+    build_signature: str | None = None
     class_name: str | None = None
     imported_modules: tuple[str, ...] = ()
     python_imports: tuple[PythonImport, ...] = ()
@@ -194,6 +198,12 @@ class SourceDocument:
         """Which physical destination this object materialises into."""
 
         return target_kind_for(self.language, self.document.kind)
+
+    @property
+    def effective_signature(self) -> str:
+        """The exact authored implementation this physical object represents."""
+
+        return self.build_signature or self.source_hash
 
     @property
     def node_id(self) -> str:

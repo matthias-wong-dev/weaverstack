@@ -82,7 +82,7 @@ class InstallationContext:
         Built per access rather than stored, so the context stays a frozen record
         of what was resolved. Failing here — rather than falling back to the
         session's own catalogue — is the point: an action with nowhere to go must
-        stop, not land somewhere plausible (build-philosophy §9).
+        stop, not land somewhere plausible (how-does-build-work §4).
         """
 
         if self.target.destination is None:

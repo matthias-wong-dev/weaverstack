@@ -94,7 +94,6 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
-        prune=False,
     )
 
     assert {
@@ -127,7 +126,6 @@ def test_at_least_one_binding_is_required(tmp_path):
             bindings=ItemBindings(()),
             output=Location(str(tmp_path / "bundle")),
             store=LocalStore(),
-            prune=False,
         )
 
 
@@ -142,7 +140,6 @@ def test_retained_alias_use_fails_before_writing_any_bundle(tmp_path):
             ),
             output=Location(str(output)),
             store=LocalStore(),
-            prune=False,
         )
     assert not output.exists()
 
@@ -154,7 +151,6 @@ def test_authored_three_part_name_is_preserved_in_payload(tmp_path):
         bindings=ItemBindings((_binding("Warehouse/Audit", "Audit_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
-        prune=False,
     )
     payloads = [
         LocalStore().read(bundle.location.join(*action.payload.split("/"))).decode()
@@ -172,14 +168,12 @@ def test_bundle_identity_is_deterministic_for_same_repository_and_bindings(tmp_p
         bindings=bindings,
         output=Location(str(tmp_path / "first")),
         store=LocalStore(),
-        prune=False,
     )
     second = generate_item_build_bundle(
         repository,
         bindings=bindings,
         output=Location(str(tmp_path / "second")),
         store=LocalStore(),
-        prune=False,
     )
     assert first.bundle_id == second.bundle_id
 
@@ -206,7 +200,6 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
         bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
         store=store,
-        prune=False,
     )
     shutil.rmtree(root)
     reloaded = load_bundle(bundle.location, store=store)
@@ -217,6 +210,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
         executors={
             "spark_schema": noop,
             "spark_sql": noop,
+            "spark_sql_batch": noop,
             "spark_table": noop,
             "folder": noop,
         },
@@ -244,7 +238,6 @@ def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
         bindings=ItemBindings((_binding("Lakehouse/Raw", lakehouses.target.name),)),
         output=Location(str(tmp_path / "bundle")),
         store=lakehouses.store,
-        prune=True,
         resolver=lakehouses.resolver,
     )
 
@@ -285,7 +278,6 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
         bindings=binding,
         output=Location(str(tmp_path / "jammed")),
         store=lakehouses.store,
-        prune=False,
     )
 
     assert any(action.kind.startswith("prune") for _s, _b, action in reconciled.plan.actions())
@@ -309,7 +301,6 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses
         ),
         output=Location(str(tmp_path / "bundle")),
         store=lakehouses.store,
-        prune=True,
         resolver=lakehouses.resolver,
     )
 
@@ -341,7 +332,6 @@ def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(tmp_path, la
         bindings=ItemBindings((_binding("Lakehouse/Raw", new.name),)),
         output=Location(str(tmp_path / "bundle")),
         store=lakehouses.store,
-        prune=True,
         resolver=lakehouses.resolver,
     )
 
@@ -375,7 +365,6 @@ def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
         bindings=ItemBindings((_binding(str(item), "Audit_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
-        prune=True,
         sql_by_item={item: _WarehouseInventory()},
     )
 
@@ -400,26 +389,24 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
-        prune=False,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
 
-    assert bundle.plan.sequences[-3].number == 9000
-    assert bundle.plan.sequences[-2].number == 9010
-    assert bundle.plan.sequences[-1].number == 9020
+    assert bundle.plan.sequences[-2].number == 9000
+    assert bundle.plan.sequences[-1].number == 9010
     assert all(
         action.kind == "publish_registry"
         for batch in bundle.plan.sequences[-1].batches
         for action in batch.actions
     )
-    assert len(bundle.plan.sequences[-1].batches) == 2
+    assert len(bundle.plan.sequences[-1].batches) == 1
     registry_payloads = [
         LocalStore().read(bundle.location.join(*action.payload.split("/"))).decode()
         for batch in bundle.plan.sequences[-1].batches
         for action in batch.actions
     ]
-    assert any("`item_name` = 'Raw'" in payload for payload in registry_payloads)
-    assert any("`item_name` = 'Audit'" in payload for payload in registry_payloads)
+    assert "`item_name` = 'Raw'" in registry_payloads[0]
+    assert "`item_name` = 'Audit'" in registry_payloads[0]
 
 
 def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
@@ -430,7 +417,6 @@ def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
             bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
             output=Location(str(tmp_path / "bundle")),
             store=LocalStore(),
-            prune=False,
             control_lakehouse=None,
         )
 
@@ -445,7 +431,6 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
-        prune=False,
         control_lakehouse=control,
     )
 
@@ -455,5 +440,5 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         if sequence.number < 9000 and action.kind == "build_table"
     ]
     assert len(physical) == 10
-    assert bundle.plan.sequences[-1].number == 9020
+    assert bundle.plan.sequences[-1].number == 9010
     assert bundle.plan.targets[0].logical_item_name == "_weaver"

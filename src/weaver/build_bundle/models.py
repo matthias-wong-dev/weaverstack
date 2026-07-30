@@ -23,12 +23,20 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .targets import BoundTarget
+from .incremental import BuildSelection
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"
 BUILD_FOLDER = "build_folder"
 BUILD_TABLE = "build_table"
 BUILD_VIEW = "build_view"
+
+#: Managed rebuild drops.  They are deliberately distinct from prune: these
+#: objects remain desired and are removed only so a selected definition can be
+#: recreated.
+DROP_FOLDER = "drop_folder"
+DROP_TABLE = "drop_table"
+DROP_VIEW = "drop_view"
 
 #: Prune kinds. Each names one frozen drop the build computed against the target:
 #: a Spark SQL DROP for a table/view/schema, a directory removal for a folder.
@@ -38,14 +46,17 @@ PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
 #: Catalogue kinds. These write the central catalogue in the Weaver Lakehouse
-#: rather than the destination, and they conclude a build. They are three kinds
-#: rather than one so the ordering invariant is assertable from a manifest: a
-#: reviewer, and a test, can see that registry publication is last.
-RECONCILE_CATALOGUE = "reconcile_catalogue"
-RECORD_INSTALLATION = "record_installation"
+#: rather than the destination. Claim deletion leads physical work; batched
+#: publication concludes it, with Registry visibly last in the manifest.
+DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
+PUBLISH_CATALOGUE = "publish_catalogue"
 PUBLISH_REGISTRY = "publish_registry"
 CATALOGUE_KINDS = frozenset(
-    {RECONCILE_CATALOGUE, RECORD_INSTALLATION, PUBLISH_REGISTRY}
+    {
+        DELETE_CATALOGUE_CLAIMS,
+        PUBLISH_CATALOGUE,
+        PUBLISH_REGISTRY,
+    }
 )
 
 #: Reasons a repository node is not in the plan. A missing target is visible,
@@ -177,10 +188,11 @@ class BuildPlan:
     repository_signature: str
     targets: tuple[BoundTarget, ...]
     sequences: tuple[BuildSequence, ...]
+    selection: BuildSelection
     omitted_nodes: tuple[OmittedNode, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
-        return {
+        mapping = {
             "format_version": self.format_version,
             "bundle_id": self.bundle_id,
             "repository_name": self.repository_name,
@@ -189,6 +201,8 @@ class BuildPlan:
             "sequences": [sequence.to_mapping() for sequence in self.sequences],
             "omitted_nodes": [node.to_mapping() for node in self.omitted_nodes],
         }
+        mapping["selection"] = self.selection.to_mapping()
+        return mapping
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildPlan":
@@ -199,6 +213,7 @@ class BuildPlan:
             repository_signature=mapping["repository_signature"],
             targets=tuple(BoundTarget.from_mapping(t) for t in mapping.get("targets", ())),
             sequences=tuple(BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())),
+            selection=BuildSelection.from_mapping(mapping["selection"]),
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
             ),

@@ -184,7 +184,7 @@ def test_a_bound_target_carries_no_resolved_root():
 
     On Fabric a root embeds workspace and item ids; locally it embeds a temporary
     directory. A bundle whose identity moved with a temporary path would not be
-    comparable between environments (build-philosophy §10), and a bundle carrying
+    comparable between environments (how-does-build-work §15), and a bundle carrying
     a stale root would install somewhere the caller no longer means.
     """
 

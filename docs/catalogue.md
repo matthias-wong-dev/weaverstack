@@ -68,7 +68,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 **`_.ColumnDictionary` holds only described columns.** It is documentation, not a
 physical column list. That matters architecturally: a SQL-backed table may infer
 its shape from its query, and those columns are not known until install time
-(build-philosophy §7.3). Keeping ordinals, types and nullability out is what
+([How Weaver Build Works](how-does-build-work.md), section 2). Keeping ordinals, types and nullability out is what
 allows the *whole* catalogue to be projected when the bundle is generated rather
 than half of it waiting on the engine. Whether every column *should* carry a note
 is a quality question to ask of this table, not a precondition for filling it.
@@ -97,27 +97,28 @@ static readers as authored content. It never mutates authored source to make the
 built-in visible. The **ordinary item planner and installer** then build it.
 There is no second "create the control tables" path.
 
-Every build implicitly binds `Lakehouse/_weaver` to the control Lakehouse. Its
-non-destructive physical actions create missing tables before the same bundle
-reaches the catalogue tail; existing tables and rows remain in place.
+Every build implicitly binds `Lakehouse/_weaver` to the control Lakehouse.
+Missing tables are classified as new and created before the same bundle reaches
+the catalogue tail. Certified unchanged tables emit no physical action, so their
+existing rows remain in place.
 
 One bundle does the whole bootstrap, because the barriers already order it:
 
 ```text
-sequence   10   create schema `_`
-sequence   40   create the ten catalogue tables
-sequence 9000   describe them in their own dictionaries
-sequence 9010   record the installation
-sequence 9020   certify them in their own registry
+first physical phase   create schema `_` when inventory says it is absent
+dependency layers      create the ten new catalogue tables
+sequence 9000          publish dictionaries and Installation as one batch
+sequence 9010          certify them in their own Registry
 ```
 
 The catalogue's own DML runs after the tables it writes to exist, so no first-run
 mode is needed. Generation reads nothing, so an absent catalogue is not a special
 case — the statements are correct against it either way.
 
-Initialisation never prunes. The Weaver Lakehouse belongs to the installation,
-not to the built-in item, so a reconciling build would treat anything else there
-as an orphan.
+Initialisation uses the ordinary authoritative prune, but the built-in
+`_weaver` inventory is restricted to the reserved `_` schema. Application
+schemas and Files areas in the same control Lakehouse are therefore outside its
+scope and cannot be treated as orphans.
 
 ## How a build writes it
 
@@ -129,7 +130,7 @@ does.
 Those statements deliberately **do not depend on reading the catalogue first**. The
 pair is correct against any prior state, including one the planner could not see. A
 build that derived its deletes from an inventory would have its deletion scope
-widened by a failed read, which is what build-philosophy §6 exists to prevent.
+widened by a failed read, which is what [How Weaver Build Works](how-does-build-work.md), section 6 exists to prevent.
 
 Generation therefore does not read the catalogue at all. It briefly did, to put a
 row count in each sequence description — but a description is part of the hashed
@@ -279,21 +280,23 @@ Two things worth knowing:
   the first.
 - Neither address is in the bundle. Both embed workspace and item ids on Fabric,
   and a temporary directory locally, so a bundle carrying one would not be
-  comparable between environments (build-philosophy §10). The bundle names the
+  comparable between environments ([How Weaver Build Works](how-does-build-work.md), section 15). The bundle names the
   item; the installer resolves it. That is why a payload says
   `{{object:_.Registry}}` and not the qualified name.
 
-## What this branch does not do yet
+## Incremental installation
 
-Delta table creation is non-destructive (`CREATE TABLE IF NOT EXISTS`) and the
-implicit `_weaver` binding recreates missing structures. This branch does not yet
-use recorded signatures for incremental build selection or general schema
-evolution. Those require explicit change classification and `Prohibit rebuild`
-policy rather than inferring intent from a create statement.
+The reconciled Registry supplies the certified effective signatures used for
+incremental selection. New objects are created; changed objects and their
+same-item descendants are uncertified, dropped, and rebuilt; unchanged objects
+receive no physical action. `Prohibit Rebuild` suppresses only the physical
+replacement of an existing object, while the incoming catalogue projection still
+advances. Planned creates and managed drops are strict, so an unexpected physical
+collision fails rather than being hidden.
 
 ## See also
 
-- [build-philosophy.md](build-philosophy.md) — the governing properties every
+- [How Weaver Build Works](how-does-build-work.md) — the mechanics and governing properties every
   build implementation must preserve.
 - [weaver-repository.md](weaver-repository.md) — where a repository lives and how it is
   installed.

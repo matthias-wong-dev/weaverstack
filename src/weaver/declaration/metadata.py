@@ -583,7 +583,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 
     # A Warehouse (T-SQL) table may declare Schema or omit it: with a declaration
     # the declared types are authoritative; without one the table takes its shape
-    # from its query, inferred at build (see build-philosophy §7.2).
+    # from its query, inferred at build (see how-does-build-work §2).
 
     declares_dependencies = "Dependencies" in loaded
     dependencies = _parse_dependencies(loaded.get("Dependencies"), object_id)

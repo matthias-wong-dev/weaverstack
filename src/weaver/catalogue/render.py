@@ -1,12 +1,13 @@
 """Rendering catalogue rows as deterministic, scoped Spark SQL.
 
 Every statement this module produces is frozen into a build bundle at generation
-time and executed unchanged (build-philosophy §3, §4). Three properties follow,
+time and executed unchanged (how-does-build-work §11, §12). Three properties follow,
 and each is enforced here rather than trusted to a caller:
 
 **Deterministic.** The same rows always render the same text, byte for byte. Rows
 are sorted by their key before rendering, so a mapping's iteration order cannot
-change a payload — and therefore cannot change a bundle's identity (§10).
+change a payload — and therefore cannot change a bundle's identity
+(how-does-build-work §15).
 
 **Scoped.** Every ``DELETE`` and every ``MERGE`` predicate names one
 ``repository`` and one ``target_type``. A Lakehouse build physically cannot touch

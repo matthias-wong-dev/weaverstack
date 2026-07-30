@@ -19,7 +19,7 @@ lists the *attached* Lakehouse and nothing else. Schema discovery therefore read
 the destination's ``Tables/`` area through the store, which works across
 Lakehouses on both workspaces and is what prune already does. Offering a
 ``list_schemas`` here that silently answered for the wrong Lakehouse would be the
-ambient-context mistake wearing an abstraction (build-philosophy §16).
+ambient-context mistake wearing an abstraction (how-does-build-work §4).
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ class SparkCatalogue:
 
     # --- structure ---------------------------------------------------------
 
-    def create_schema(self, schema: str) -> str:
+    def create_schema(self, schema: str, *, if_not_exists: bool = True) -> str:
         """Create a schema in this destination, and return the statement run.
 
         The ``LOCATION`` clause is the destination's business, not the planner's:
@@ -80,10 +80,11 @@ class SparkCatalogue:
         ``Tables`` area, and a schema-enabled Fabric Lakehouse pins it natively and
         must not be given one. It is also a resolved path, so it could not have
         been frozen into a payload without tying the bundle to the machine that
-        generated it (build-philosophy §10).
+        generated it (how-does-build-work §15).
         """
 
-        statement = f"CREATE SCHEMA IF NOT EXISTS {self.qualified_schema(schema)}"
+        qualifier = " IF NOT EXISTS" if if_not_exists else ""
+        statement = f"CREATE SCHEMA{qualifier} {self.qualified_schema(schema)}"
         location = self.destination.schema_location(schema)
         if location is not None:
             statement += f" LOCATION '{_escaped(location)}'"

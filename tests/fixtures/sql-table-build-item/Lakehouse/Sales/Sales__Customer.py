@@ -18,6 +18,6 @@ from weaver import Table
 class Sales__Customer(Table):
     def read(self):
         # Build must never call read(): it creates structure, not data
-        # (build-philosophy §1, §15). If a build ever loaded, this would prove
+        # (how-does-build-work §1, §15). If a build ever loaded, this would prove
         # it by failing loudly rather than silently reading rows.
         raise RuntimeError("read() must not run during build")

@@ -50,6 +50,7 @@ from .tables import (
 )
 from .state import (
     CatalogueState,
+    RegisteredDocument,
     ReconciledCatalogue,
     read_catalogue_state,
     reconcile_catalogue_state,
@@ -65,5 +66,6 @@ __all__ = [
     "SCHEMA_DICTIONARY", "SIGNATURE", "TABLE_DICTIONARY", "column_set",
     "identifier", "literal", "qualified_name", "render_delete_obsolete",
     "render_delete_scope", "render_merge", "sorted_rows", "table", "typed_literal",
-    "ReconciledCatalogue", "read_catalogue_state", "reconcile_catalogue_state",
+    "RegisteredDocument", "ReconciledCatalogue",
+    "read_catalogue_state", "reconcile_catalogue_state",
 ]

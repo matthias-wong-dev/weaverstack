@@ -12,21 +12,18 @@ the barriers already order it correctly:
 
 .. code-block:: text
 
-    sequence 10    create schema `_`
-    sequence 40    create the ten catalogue tables
-    sequence 9000  describe them in their own dictionaries
-    sequence 9010  record the installation
-    sequence 9020  certify them in their own registry
+    sequence 50+   create schema `_` and the catalogue tables
+    sequence 9000  publish dictionaries and Installation as one batch
+    sequence 9010  certify them in Registry last
 
 The catalogue's own DML runs after the tables it writes to exist, so no special
 first-run mode is needed and generation reads nothing — the statements are
 rendered from the projection and are correct against an absent catalogue as much
 as a populated one.
 
-**Initialisation never prunes.** The Weaver Lakehouse belongs to the installation,
-not to the built-in item — a reconciling build would treat every schema that item
-does not declare as an orphan, including anything a user put there. So prune is
-off, and initialisation only ever adds.
+The built-in ``_weaver`` item's inventory is scoped to the reserved ``_`` schema,
+so the ordinary authoritative prune cannot touch application schemas that happen
+to share the control Lakehouse.
 """
 
 from __future__ import annotations
@@ -158,8 +155,9 @@ def initialise_weaver_lakehouse(
     Idempotent to re-run in *shape*: the same package produces the same bundle, and
     the catalogue's own reconciliation is a no-op when nothing changed.
 
-    Table creation is non-destructive, so re-running initialisation preserves
-    existing catalogue rows while its catalogue tail reconciles the built-in item.
+    An unchanged incremental plan emits no physical table work, so re-running
+    initialisation preserves existing catalogue rows while its catalogue tail
+    reconciles the built-in item.
     """
 
     resolver = resolver_for(workspace)
@@ -187,10 +185,6 @@ def initialise_weaver_lakehouse(
         bindings=bindings,
         output=output or resolver.build_bundle(INITIALISE_BUNDLE_NAME),
         store=store,
-        # Never: the Weaver Lakehouse belongs to the installation, not to this
-        # repository, so a reconciling build would treat a user's own schema as an
-        # orphan. Initialisation only adds.
-        prune=False,
         control_lakehouse=control,
         target_inventories=inventories,
         reconciled_catalogue=reconciled_catalogue,
