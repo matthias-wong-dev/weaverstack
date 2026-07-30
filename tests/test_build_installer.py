@@ -12,7 +12,7 @@ from dataclasses import replace
 
 import pytest
 
-from weaver import LocalStore, Location
+from weaver import LocalResolver, LocalStore, LocalWorkspace, Location
 from weaver.build_bundle import (
     BoundTarget,
     BuildAction,
@@ -155,3 +155,76 @@ def test_preflight_rejects_a_corrupt_bundle_before_running(tmp_path):
     with pytest.raises(BuildError, match="hash mismatch"):
         install_bundle(bundle, environment=env)
     assert recorder.calls == []  # nothing ran
+
+
+def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
+    class Resolver:
+        def lakehouse_spark_location(self, _item):
+            return None
+
+        def spark_destination(self, _item):
+            return None
+
+        def refresh_sql_endpoint(self, _item):
+            pytest.fail("the installer must not infer an endpoint refresh")
+
+    location, store = _bundle(tmp_path)
+    report = install_bundle(
+        load_bundle(location, store=store),
+        environment=InstallationEnvironment(
+            store=store,
+            resolver=Resolver(),
+            executors={"spark_sql": Recorder()},
+        ),
+    )
+
+    assert report.status == SUCCEEDED
+
+
+def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path):
+    action = BuildAction(
+        id="refresh-application-sql-endpoint",
+        kind="refresh_sql_endpoint",
+        resource_node_id=None,
+        executor="sql_endpoint_refresh",
+        payload=None,
+        payload_sha256=None,
+    )
+    sequence = BuildSequence(
+        number=8990,
+        description="refresh affected application Lakehouse SQL endpoints",
+        batches=(BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),),
+    )
+    plan = BuildPlan(
+        format_version=1,
+        bundle_id="",
+        repository_name="MyRepo",
+        repository_signature="sig",
+        targets=(TARGET,),
+        sequences=(sequence,),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    store = LocalStore()
+    location = Location(str(tmp_path / "refresh-bundle"))
+    bundle = write_bundle(
+        location, plan=plan, payloads={}, snapshot={}, store=store
+    )
+    workspace = LocalWorkspace(
+        workspace=tmp_path / "local", weaver_lakehouse="Weaver"
+    )
+
+    report = install_bundle(
+        bundle,
+        environment=InstallationEnvironment(
+            store=store,
+            resolver=LocalResolver(workspace),
+            workspace=workspace,
+        ),
+    )
+
+    assert report.status == SUCCEEDED
+    assert report.sequences[0].status == SKIPPED
+    result = next(report.action_results())
+    assert result.status == SKIPPED
+    assert "unsupported" in result.details["reason"]

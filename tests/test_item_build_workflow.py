@@ -80,6 +80,7 @@ def _executors():
             "spark_table",
             "tsql",
             "folder",
+            "sql_endpoint_refresh",
         )
     }
 

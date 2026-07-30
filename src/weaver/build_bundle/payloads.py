@@ -17,18 +17,21 @@ PRUNE_SEQUENCE = 30
 MANAGED_DROP_SEQUENCE_START = 50
 OBJECT_SEQUENCE_STEP = 10
 
-#: Catalogue work concludes a build, and its numbers sit far above the object
-#: layers because there is no bound on how deep a repository's dependency chain
-#: is — the SQL Server system this ports from ran past thirty layers. At ten per
-#: layer that leaves room for hundreds more, and :func:`check_sequence_headroom`
-#: refuses a plan that ever gets close rather than letting a deep repository
-#: silently reorder its own catalogue.
+#: Endpoint and catalogue work conclude a build, and their numbers sit far above
+#: the object layers because there is no bound on how deep a repository's
+#: dependency chain is — the SQL Server system this ports from ran past thirty
+#: layers. At ten per layer that leaves room for hundreds more, and
+#: :func:`check_sequence_headroom` refuses a plan that ever gets close rather than
+#: letting a deep repository silently reorder its own tail.
 #:
-#: The order within the tail is the invariant: dictionaries describe, Installation
-#: records the binding, Registry certifies. Registry is last, so a row in it
-#: cannot outrun the work it attests to.
+#: The order within the tail is the invariant: application endpoints see their
+#: completed Delta mutations before catalogue DML starts; dictionaries describe,
+#: Installation records the binding, Registry certifies; then the Weaver
+#: Lakehouse endpoint sees that catalogue DML.
+APPLICATION_ENDPOINT_REFRESH_SEQUENCE = 8990
 CATALOGUE_SEQUENCE = 9000
 REGISTRY_SEQUENCE = 9010
+CONTROL_ENDPOINT_REFRESH_SEQUENCE = 9020
 
 PAYLOAD_ROOT = "payload"
 

@@ -45,6 +45,12 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
+#: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
+#: have changed. The action is target-bound and payloadless: the planner decides
+#: which Lakehouses need it, while the executor performs or explicitly skips it
+#: for the current host.
+REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
+
 #: Catalogue kinds. These write the central catalogue in the Weaver Lakehouse
 #: rather than the destination. Claim deletion leads physical work; batched
 #: publication concludes it, with Registry visibly last in the manifest.

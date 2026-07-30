@@ -29,7 +29,16 @@ from ..targets import (
 )
 from .client import ONELAKE_DFS, FabricClient
 from .onelake import abfss_root, lakehouse_artifact_segment
-from .resources import LAKEHOUSE, WAREHOUSE, Item, Workspace, find_item, find_workspace
+from .resources import (
+    LAKEHOUSE,
+    SQL_ENDPOINT,
+    WAREHOUSE,
+    Item,
+    Workspace,
+    find_item,
+    find_workspace,
+    refresh_sql_endpoint_metadata,
+)
 
 
 class FabricResolver:
@@ -85,6 +94,21 @@ class FabricResolver:
                 self.workspace, item.name, item_type=item_type, client=self.client
             )
         return self._items[key]
+
+    def _rest_client(self) -> FabricClient:
+        return self.client
+
+    def refresh_sql_endpoint(self, item: ItemRef) -> dict:
+        """Refresh the SQL analytics endpoint paired with a named Lakehouse."""
+
+        client = self._rest_client()
+        endpoint = find_item(
+            self.workspace,
+            item.name,
+            item_type=SQL_ENDPOINT,
+            client=client,
+        )
+        return refresh_sql_endpoint_metadata(endpoint, client=client)
 
     def lakehouse(self, item: ItemRef) -> Location:
         return self.root / lakehouse_artifact_segment(

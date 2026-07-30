@@ -28,7 +28,12 @@ from ..store import Store
 from ..targets import ItemRef
 from .bundle import BuildBundle, load_bundle, validate_bundle
 from .executors import default_executors
-from .executors.base import ActionExecutor, InstallationContext, ResolvedTarget
+from .executors.base import (
+    ActionExecutor,
+    InstallationContext,
+    ResolvedTarget,
+    SkippedExecution,
+)
 from .models import BuildAction, BuildBatch, BuildPlan, BuildSequence
 from .report import (
     FAILED,
@@ -206,10 +211,13 @@ def _run_sequence(
             if result.status == FAILED:
                 failed = True
 
+    skipped = bool(action_results) and all(
+        result.status == SKIPPED for result in action_results
+    )
     return SequenceResult(
         number=sequence.number,
         description=sequence.description,
-        status=FAILED if failed else SUCCEEDED,
+        status=FAILED if failed else SKIPPED if skipped else SUCCEEDED,
         actions=tuple(action_results),
     )
 
@@ -234,11 +242,23 @@ def _run_action(
             payload = (bundle.store or environment.store).read(
                 bundle.location.join(*action.payload.split("/"))
             )
-        details = executor.execute(action, payload, context)
+        execution = executor.execute(action, payload, context)
     except Exception as exc:  # a failing action is data, not a crash
         return _failed(action, batch, started, exc)
 
     finished = _now()
+    if isinstance(execution, SkippedExecution):
+        return ActionResult(
+            action_id=action.id,
+            resource_node_id=action.resource_node_id,
+            target_id=batch.target_id,
+            executor=action.executor,
+            status=SKIPPED,
+            started_at=started,
+            finished_at=finished,
+            duration_seconds=(finished - started).total_seconds(),
+            details=execution.details,
+        )
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
@@ -248,7 +268,7 @@ def _run_action(
         started_at=started,
         finished_at=finished,
         duration_seconds=(finished - started).total_seconds(),
-        details=details or None,
+        details=execution or None,
     )
 
 

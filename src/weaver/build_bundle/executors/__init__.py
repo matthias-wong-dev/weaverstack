@@ -14,13 +14,14 @@ relies on what the session is attached to.
 
 from __future__ import annotations
 
-from .base import ActionExecutor, InstallationContext, ResolvedTarget
+from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .folder import FolderExecutor
 from .spark_schema import SparkSchemaExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
 from .tsql import TSqlExecutor
+from .sql_endpoint_refresh import SqlEndpointRefreshExecutor
 
 
 def default_executors() -> dict[str, ActionExecutor]:
@@ -33,6 +34,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
+        SqlEndpointRefreshExecutor.name: SqlEndpointRefreshExecutor(),
     }
 
 
@@ -40,11 +42,13 @@ __all__ = [
     "ActionExecutor",
     "InstallationContext",
     "ResolvedTarget",
+    "SkippedExecution",
     "SparkSchemaExecutor",
     "SparkSqlExecutor",
     "SparkSqlBatchExecutor",
     "SparkTableExecutor",
     "FolderExecutor",
     "TSqlExecutor",
+    "SqlEndpointRefreshExecutor",
     "default_executors",
 ]

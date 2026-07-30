@@ -38,6 +38,7 @@ from .onelake import (
 from .resources import (
     LAKEHOUSE,
     WAREHOUSE,
+    SQL_ENDPOINT,
     Item,
     ItemNotFoundError,
     Workspace,
@@ -47,6 +48,7 @@ from .resources import (
     find_item,
     find_workspace,
     list_items,
+    refresh_sql_endpoint_metadata,
 )
 from .sql import (
     FABRIC_SQL_AUDIENCE,
@@ -89,9 +91,11 @@ __all__ = [
     "ItemNotFoundError",
     "LAKEHOUSE",
     "WAREHOUSE",
+    "SQL_ENDPOINT",
     "find_workspace",
     "find_item",
     "list_items",
+    "refresh_sql_endpoint_metadata",
     "create_lakehouse",
     "create_warehouse",
     "delete_item",

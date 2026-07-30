@@ -186,6 +186,31 @@ def delete_item(item: Item, *, client: FabricClient | None = None) -> None:
     )
 
 
+def refresh_sql_endpoint_metadata(
+    endpoint: Item, *, client: FabricClient | None = None
+) -> dict:
+    """Refresh every table in one SQL analytics endpoint and await completion."""
+
+    if endpoint.type != SQL_ENDPOINT:
+        raise CommandError(
+            f"SQL endpoint refresh needs a {SQL_ENDPOINT} item, got {endpoint.type!r}"
+        )
+    client = client or FabricClient()
+    response = client.request(
+        "POST",
+        f"workspaces/{endpoint.workspace_id}/sqlEndpoints/{endpoint.id}/refreshMetadata",
+        payload={"recreateTables": False},
+        expected=(200, 202),
+    )
+    result = client.wait_for_operation(response)
+    return {
+        "lakehouse": endpoint.name,
+        "sql_endpoint_id": endpoint.id,
+        "operation_id": response.headers.get("x-ms-operation-id"),
+        "status": result.get("status", "Succeeded"),
+    }
+
+
 def _await_item(
     workspace: Workspace,
     name: str,
