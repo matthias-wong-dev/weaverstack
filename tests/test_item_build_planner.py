@@ -213,6 +213,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "spark_sql_batch": noop,
             "spark_table": noop,
             "folder": noop,
+            "sql_endpoint_refresh": noop,
         },
     )
     report = install_bundle(reloaded, environment=environment)
@@ -392,21 +393,78 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
 
-    assert bundle.plan.sequences[-2].number == 9000
-    assert bundle.plan.sequences[-1].number == 9010
+    assert bundle.plan.sequences[-3].number == 9000
+    assert bundle.plan.sequences[-2].number == 9010
+    assert bundle.plan.sequences[-1].number == 9020
     assert all(
         action.kind == "publish_registry"
-        for batch in bundle.plan.sequences[-1].batches
+        for batch in bundle.plan.sequences[-2].batches
         for action in batch.actions
     )
-    assert len(bundle.plan.sequences[-1].batches) == 1
+    assert len(bundle.plan.sequences[-2].batches) == 1
     registry_payloads = [
         LocalStore().read(bundle.location.join(*action.payload.split("/"))).decode()
-        for batch in bundle.plan.sequences[-1].batches
+        for batch in bundle.plan.sequences[-2].batches
         for action in batch.actions
     ]
     assert "`item_name` = 'Raw'" in registry_payloads[0]
     assert "`item_name` = 'Audit'" in registry_payloads[0]
+    control_refresh = bundle.plan.sequences[-1]
+    assert [
+        (batch.target_id, action.kind)
+        for batch in control_refresh.batches
+        for action in batch.actions
+    ] == [("control-lakehouse-Weaver_Control", "refresh_sql_endpoint")]
+
+
+def test_affected_application_lakehouses_refresh_once_before_catalogue(tmp_path):
+    repository = _repository(_estate(tmp_path))
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", "Raw_Dev"),
+                _binding("Lakehouse/Curated", "Curated_Dev"),
+                _binding("Warehouse/Audit", "Audit_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+    )
+
+    refresh = next(sequence for sequence in bundle.plan.sequences if sequence.number == 8990)
+    assert [batch.target_id for batch in refresh.batches] == [
+        "Lakehouse-Curated--lakehouse-Curated_Dev",
+        "Lakehouse-Raw--lakehouse-Raw_Dev",
+    ]
+    assert all(
+        len(batch.actions) == 1
+        and batch.actions[0].kind == "refresh_sql_endpoint"
+        for batch in refresh.batches
+    )
+    assert refresh.number < 9000
+
+
+def test_lakehouse_without_delta_mutations_gets_no_application_refresh(tmp_path):
+    root = _estate(tmp_path)
+    (root / "Lakehouse/Curated/Sales__Customer.py").unlink()
+    repository = _repository(root)
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", "Raw_Dev"),
+                _binding("Lakehouse/Curated", "Curated_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+    )
+
+    refresh = next(sequence for sequence in bundle.plan.sequences if sequence.number == 8990)
+    assert [batch.target_id for batch in refresh.batches] == [
+        "Lakehouse-Raw--lakehouse-Raw_Dev"
+    ]
 
 
 def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
@@ -440,5 +498,5 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         if sequence.number < 9000 and action.kind == "build_table"
     ]
     assert len(physical) == 10
-    assert bundle.plan.sequences[-1].number == 9010
+    assert bundle.plan.sequences[-1].number == 9020
     assert bundle.plan.targets[0].logical_item_name == "_weaver"

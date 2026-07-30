@@ -67,7 +67,12 @@ def test_generate_and_install_lakehouse_bundle(build_env):
 
     planned = [action.id for _, _, action in bundle.plan.actions()]
     assert list(outcome.action_order) == planned
-    assert all(status == "succeeded" for status in outcome.action_status.values())
+    refresh_status = "skipped" if build_env.label == "local" else "succeeded"
+    assert all(
+        status
+        == (refresh_status if action_id.startswith("refresh-") else "succeeded")
+        for action_id, status in outcome.action_status.items()
+    )
     assert outcome.bundle_id == bundle.bundle_id
 
     # Build creates structure, not data. A Folder is a directory Weaver makes at

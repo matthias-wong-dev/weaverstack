@@ -51,6 +51,7 @@ SPARK_SCHEMA_EXECUTOR = "spark_schema"
 SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
 FOLDER_EXECUTOR = "folder"
+SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 #: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
 #: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
 #: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
@@ -66,6 +67,7 @@ VALID_EXECUTORS = frozenset(
         SPARK_TABLE_EXECUTOR,
         TSQL_EXECUTOR,
         FOLDER_EXECUTOR,
+        SQL_ENDPOINT_REFRESH_EXECUTOR,
     }
 )
 #: Executors that run a payload, and the extension that payload must carry.
@@ -77,7 +79,9 @@ _EXECUTOR_EXTENSION = {
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",
 }
-_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
+_PAYLOADLESS_EXECUTORS = frozenset(
+    {FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR}
+)
 
 
 @dataclass(frozen=True)

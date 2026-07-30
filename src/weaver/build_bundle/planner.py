@@ -17,6 +17,10 @@ from .catalogue_actions import (
 )
 from .incremental import select_build
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, BuildSequence, OmittedNode
+from .endpoint_actions import (
+    render_application_endpoint_refresh,
+    render_control_endpoint_refresh,
+)
 from .payloads import MANAGED_DROP_SEQUENCE_START, OBJECT_SEQUENCE_STEP
 from .physical import (
     render_inventory_prune_sequence,
@@ -102,6 +106,7 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         sequences.append(catalogue_before)
 
+    physical_sequences: list[BuildSequence] = []
     prune = render_inventory_prune_sequence(
         repository,
         selected_ids,
@@ -110,7 +115,7 @@ def generate_item_build_bundle(
         payloads=payloads,
     )
     if prune is not None:
-        sequences.append(prune)
+        physical_sequences.append(prune)
 
     drops = render_selected_drops(
         repository,
@@ -120,9 +125,9 @@ def generate_item_build_bundle(
         start=MANAGED_DROP_SEQUENCE_START,
         payloads=payloads,
     )
-    sequences.extend(drops)
+    physical_sequences.extend(drops)
     build_start = MANAGED_DROP_SEQUENCE_START + len(drops) * OBJECT_SEQUENCE_STEP
-    sequences.extend(
+    physical_sequences.extend(
         render_selected_builds(
             repository,
             selected_for_build,
@@ -132,6 +137,14 @@ def generate_item_build_bundle(
             payloads=payloads,
         )
     )
+    sequences.extend(physical_sequences)
+    application_refresh = render_application_endpoint_refresh(
+        physical_sequences,
+        targets=targets,
+        control_target=control_target,
+    )
+    if application_refresh is not None:
+        sequences.append(application_refresh)
     sequences.extend(
         render_catalogue_after_build(
             repository,
@@ -141,6 +154,7 @@ def generate_item_build_bundle(
             payloads=payloads,
         )
     )
+    sequences.append(render_control_endpoint_refresh(control_target))
 
     omitted = tuple(
         OmittedNode(

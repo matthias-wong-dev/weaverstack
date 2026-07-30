@@ -225,14 +225,20 @@ def test_no_folder_rows_since_the_catalogue_has_no_folders(initialised, spark):
 # --- ordering, as installed ----------------------------------------------------
 
 
-def test_registry_is_published_after_the_dictionaries_and_the_installation(initialised):
+def test_registry_is_published_before_the_local_control_refresh(initialised):
     numbers = [sequence.number for sequence in initialised.result.report.sequences]
     assert numbers == sorted(numbers)
-    assert numbers[-1] == 9010
+    assert numbers[-2:] == [9010, 9020]
     statuses = {
         sequence.number: sequence.status for sequence in initialised.result.report.sequences
     }
-    assert all(status == "succeeded" for status in statuses.values())
+    assert statuses[9010] == "succeeded"
+    assert statuses[9020] == "skipped"
+    assert all(
+        status == "succeeded"
+        for number, status in statuses.items()
+        if number != 9020
+    )
 
 
 def test_initialisation_has_no_undeclared_catalogue_objects_to_prune(initialised):
