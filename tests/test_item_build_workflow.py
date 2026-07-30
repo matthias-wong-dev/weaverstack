@@ -81,7 +81,8 @@ def _executors():
             "tsql",
             "folder",
             "alias",
-            "sql_endpoint",
+            "tsql_batch",
+            "sql_endpoint_refresh",
         )
     }
 

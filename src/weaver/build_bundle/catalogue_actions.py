@@ -218,7 +218,7 @@ def _control_refresh_stage(control_target) -> PlannedStage:
                         id="refresh-sql-endpoint-control",
                         kind=REFRESH_SQL_ENDPOINT,
                         resource_node_id=None,
-                        executor="sql_endpoint",
+                        executor="sql_endpoint_refresh",
                         payload=None,
                         payload_sha256=None,
                     ),

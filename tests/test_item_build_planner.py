@@ -423,7 +423,8 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "spark_table": noop,
             "folder": noop,
             "alias": noop,
-            "sql_endpoint": noop,
+            "tsql_batch": noop,
+            "sql_endpoint_refresh": noop,
         },
     )
     report = install_bundle(reloaded, environment=environment)
@@ -751,6 +752,84 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     ]
     assert "`item_name` = 'Raw'" in registry_payloads[0]
     assert "`item_name` = 'Audit'" in registry_payloads[0]
+    control_refresh = bundle.plan.sequences[-1]
+    assert [
+        (batch.target_id, action.kind)
+        for batch in control_refresh.batches
+        for action in batch.actions
+    ] == [("control-lakehouse-Weaver_Control", "refresh_sql_endpoint")]
+
+
+def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
+    """The refresh moved from a global tail into each item's group.
+
+    A single barrier after all physical work is correct for one item and wrong the
+    moment a second reads the first: the consumer would be built against endpoint
+    metadata that had not caught up. So each mutated Lakehouse is closed by its own
+    refresh, before anything in a later item layer starts.
+    """
+
+    repository = _repository(_estate(tmp_path))
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", "Raw_Dev"),
+                _binding("Lakehouse/Curated", "Curated_Dev"),
+                _binding("Warehouse/Audit", "Audit_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+    )
+
+    refreshed = {
+        batch.target_id
+        for _sequence, batch, action in bundle.plan.actions()
+        if action.kind == "refresh_sql_endpoint"
+    }
+    # Both Lakehouses, and the control plane after catalogue DML. The Warehouse
+    # gets none: it *is* reached over SQL and has no endpoint of its own to sync.
+    assert refreshed == {
+        "Lakehouse-Raw--lakehouse-Raw_Dev",
+        "Lakehouse-Curated--lakehouse-Curated_Dev",
+        "control-lakehouse-Weaver_Control",
+    }
+
+    at = {
+        action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
+    }
+    # Each item's refresh closes that item, before the catalogue tail.
+    assert (
+        at["object-Lakehouse--Raw--Sales.Customer"]
+        < at["refresh-sql-endpoint-Lakehouse--Raw"]
+        < at["refresh-sql-endpoint-control"]
+    )
+
+
+def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
+    root = _estate(tmp_path)
+    (root / "Lakehouse/Curated/Sales__Customer.py").unlink()
+    repository = _repository(root)
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", "Raw_Dev"),
+                _binding("Lakehouse/Curated", "Curated_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+    )
+
+    refreshed = {
+        batch.target_id
+        for _sequence, batch, action in bundle.plan.actions()
+        if action.kind == "refresh_sql_endpoint"
+    }
+    assert "Lakehouse-Curated--lakehouse-Curated_Dev" not in refreshed
+    assert "Lakehouse-Raw--lakehouse-Raw_Dev" in refreshed
 
 
 def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):

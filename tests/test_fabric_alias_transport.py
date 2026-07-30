@@ -6,7 +6,7 @@ import pytest
 
 from weaver.errors import CommandError
 from weaver.fabric.client import FabricError
-from weaver.fabric.endpoints import refresh_sql_endpoint_metadata, sql_endpoint_id
+from weaver.fabric.resources import SQL_ENDPOINT, refresh_sql_endpoint_metadata
 from weaver.fabric.resources import LAKEHOUSE, Item
 from weaver.fabric.shortcuts import create_shortcut, delete_shortcut
 
@@ -96,89 +96,3 @@ def test_removing_an_absent_shortcut_is_the_intended_state_not_a_fault():
     )
 
     assert client.calls[0][0] == "DELETE"
-
-
-# --- endpoint refresh ---------------------------------------------------------
-
-_LAKEHOUSE_PATH = "workspaces/ws1/lakehouses/lh1"
-
-
-def test_the_endpoint_id_comes_from_the_lakehouses_own_properties():
-    client = _Client(
-        json_by_path={
-            _LAKEHOUSE_PATH: {"properties": {"sqlEndpointProperties": {"id": "ep1"}}}
-        }
-    )
-
-    assert sql_endpoint_id(_lakehouse("Raw", "lh1"), client=client) == "ep1"
-
-
-def test_a_lakehouse_without_an_endpoint_yet_fails_rather_than_silently_skipping():
-    client = _Client(json_by_path={_LAKEHOUSE_PATH: {"properties": {}}})
-
-    with pytest.raises(CommandError, match="no SQL analytics endpoint yet"):
-        sql_endpoint_id(_lakehouse("Raw", "lh1"), client=client)
-
-
-def test_an_accepted_refresh_returns_only_once_the_operation_has_settled():
-    """The barrier is the point: returning on 202 would put it in the wrong place."""
-
-    client = _Client(
-        responses=[_Response(202, {"Operation-Location": "operations/op1"})],
-        json_by_path={
-            _LAKEHOUSE_PATH: {"properties": {"sqlEndpointProperties": {"id": "ep1"}}},
-            "operations/op1": {"status": "Succeeded"},
-        },
-    )
-
-    details = refresh_sql_endpoint_metadata(
-        _lakehouse("Raw", "lh1"), client=client, poll_interval=0
-    )
-
-    assert details == {
-        "lakehouse": "Raw",
-        "sql_endpoint_id": "ep1",
-        "state": "Succeeded",
-    }
-    assert ("GET", "operations/op1", None) in client.calls
-
-
-def test_a_refresh_that_settles_as_failed_fails_the_action():
-    client = _Client(
-        responses=[_Response(202, {"Location": "operations/op1"})],
-        json_by_path={
-            _LAKEHOUSE_PATH: {"properties": {"sqlEndpointProperties": {"id": "ep1"}}},
-            "operations/op1": {"status": "Failed"},
-        },
-    )
-
-    with pytest.raises(FabricError, match="finished as 'Failed'"):
-        refresh_sql_endpoint_metadata(
-            _lakehouse("Raw", "lh1"), client=client, poll_interval=0
-        )
-
-
-def test_an_accepted_refresh_with_nothing_to_poll_is_a_fault():
-    client = _Client(
-        responses=[_Response(202)],
-        json_by_path={
-            _LAKEHOUSE_PATH: {"properties": {"sqlEndpointProperties": {"id": "ep1"}}}
-        },
-    )
-
-    with pytest.raises(FabricError, match="no operation to poll"):
-        refresh_sql_endpoint_metadata(_lakehouse("Raw", "lh1"), client=client)
-
-
-def test_a_synchronous_refresh_needs_no_polling_at_all():
-    client = _Client(
-        responses=[_Response(200)],
-        json_by_path={
-            _LAKEHOUSE_PATH: {"properties": {"sqlEndpointProperties": {"id": "ep1"}}}
-        },
-    )
-
-    details = refresh_sql_endpoint_metadata(_lakehouse("Raw", "lh1"), client=client)
-
-    assert details["state"] == "succeeded"
-    assert not any(method == "GET" and "operations" in path for method, path, _ in client.calls)

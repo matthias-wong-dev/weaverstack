@@ -7,6 +7,7 @@ failure says what failed rather than surfacing a bare HTTP status.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from ..errors import WeaverError
@@ -16,6 +17,8 @@ from .auth import FABRIC_SCOPE, token_source
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
 ONELAKE_DFS = "https://onelake.dfs.fabric.microsoft.com"
 DEFAULT_TIMEOUT = 60.0
+DEFAULT_OPERATION_TIMEOUT = 900.0
+DEFAULT_OPERATION_POLL_INTERVAL = 2.0
 
 
 class FabricError(WeaverError):
@@ -93,3 +96,52 @@ class FabricClient:
             items.extend(payload.get(key, []))
             next_path = payload.get("continuationUri")
         return items
+
+    def wait_for_operation(
+        self,
+        response,
+        *,
+        timeout: float = DEFAULT_OPERATION_TIMEOUT,
+        poll_interval: float = DEFAULT_OPERATION_POLL_INTERVAL,
+    ) -> dict:
+        """Wait for a Fabric long-running-operation response to settle."""
+
+        if response.status_code != 202:
+            return response.json() if response.content else {}
+
+        location = response.headers.get("Location")
+        operation_id = response.headers.get("x-ms-operation-id")
+        if not location and operation_id:
+            location = f"operations/{operation_id}"
+        if not location:
+            raise FabricError(
+                "Fabric accepted a long-running operation without a polling location"
+            )
+
+        deadline = time.monotonic() + timeout
+        current = response
+        while time.monotonic() < deadline:
+            retry_after = current.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after is not None else poll_interval
+            except (TypeError, ValueError):
+                delay = poll_interval
+            time.sleep(max(0.0, delay))
+            current = self.request("GET", location, expected=(200,))
+            body = current.json() if current.content else {}
+            status = str(body.get("status") or "").casefold()
+            if status == "succeeded":
+                return body
+            if status in {"failed", "cancelled", "canceled"}:
+                error = body.get("error") or {}
+                message = error.get("message") if isinstance(error, dict) else None
+                raise FabricError(
+                    f"Fabric operation {operation_id or location} {status}"
+                    + (f": {message}" if message else "")
+                )
+            location = current.headers.get("Location") or location
+
+        raise FabricError(
+            f"Fabric operation {operation_id or location} did not finish within "
+            f"{int(timeout)}s"
+        )

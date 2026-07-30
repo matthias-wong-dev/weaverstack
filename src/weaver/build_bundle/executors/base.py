@@ -110,6 +110,13 @@ class InstallationContext:
         return SparkCatalogue(self.spark, self.target.destination)
 
 
+@dataclass(frozen=True)
+class SkippedExecution:
+    """An executor's explicit, non-failing decision not to run on this host."""
+
+    details: dict[str, Any] | None = None
+
+
 class ActionExecutor(Protocol):
     name: str
 
@@ -118,4 +125,4 @@ class ActionExecutor(Protocol):
         action: BuildAction,
         payload: bytes | None,
         context: InstallationContext,
-    ) -> dict[str, Any] | None: ...
+    ) -> dict[str, Any] | SkippedExecution | None: ...

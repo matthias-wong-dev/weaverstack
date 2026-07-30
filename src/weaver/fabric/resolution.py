@@ -29,7 +29,16 @@ from ..targets import (
 )
 from .client import ONELAKE_DFS, FabricClient
 from .onelake import abfss_root, lakehouse_artifact_segment
-from .resources import LAKEHOUSE, WAREHOUSE, Item, Workspace, find_item, find_workspace
+from .resources import (
+    LAKEHOUSE,
+    SQL_ENDPOINT,
+    WAREHOUSE,
+    Item,
+    Workspace,
+    find_item,
+    find_workspace,
+    refresh_sql_endpoint_metadata,
+)
 
 
 class FabricResolver:
@@ -85,6 +94,21 @@ class FabricResolver:
                 self.workspace, item.name, item_type=item_type, client=self.client
             )
         return self._items[key]
+
+    def _rest_client(self) -> FabricClient:
+        return self.client
+
+    def refresh_sql_endpoint(self, item: ItemRef) -> dict:
+        """Refresh the SQL analytics endpoint paired with a named Lakehouse."""
+
+        client = self._rest_client()
+        endpoint = find_item(
+            self.workspace,
+            item.name,
+            item_type=SQL_ENDPOINT,
+            client=client,
+        )
+        return refresh_sql_endpoint_metadata(endpoint, client=client)
 
     def lakehouse(self, item: ItemRef) -> Location:
         return self.root / lakehouse_artifact_segment(
@@ -159,7 +183,7 @@ class FabricResolver:
             name=name,
             source=self.resolve(source, item_type=LAKEHOUSE),
             source_path=source_path,
-            client=self._fabric_client(),
+            client=self._rest_client(),
         )
 
     def onelake_shortcuts(self, item: ItemRef) -> tuple:
@@ -168,7 +192,7 @@ class FabricResolver:
         from .shortcuts import list_shortcuts
 
         return list_shortcuts(
-            self.resolve(item, item_type=LAKEHOUSE), client=self._fabric_client()
+            self.resolve(item, item_type=LAKEHOUSE), client=self._rest_client()
         )
 
     def remove_onelake_shortcut(self, item: ItemRef, *, path: str, name: str) -> None:
@@ -183,22 +207,9 @@ class FabricResolver:
             self.resolve(item, item_type=LAKEHOUSE),
             path=path,
             name=name,
-            client=self._fabric_client(),
+            client=self._rest_client(),
         )
 
-    def refresh_sql_endpoint_metadata(self, item: ItemRef) -> dict:
-        """Sync one Lakehouse's SQL analytics endpoint, and wait for the sync."""
-
-        from .endpoints import refresh_sql_endpoint_metadata
-
-        return refresh_sql_endpoint_metadata(
-            self.resolve(item, item_type=LAKEHOUSE), client=self._fabric_client()
-        )
-
-    def _fabric_client(self) -> FabricClient:
-        """The REST client this resolver reaches its workspace with."""
-
-        return self.client
 
     def sql_endpoint(self, target: WarehouseTarget):
         """Resolve a typed Warehouse to the common SQL endpoint record."""

@@ -233,9 +233,14 @@ def test_the_local_endpoint_refresh_is_skipped_rather_than_faked(built):
         action
         for sequence in result.report.sequences
         for action in sequence.actions
-        if action.executor == "sql_endpoint"
+        if action.executor == "sql_endpoint_refresh"
     ]
 
     assert refreshes
-    assert all(action.status == "succeeded" for action in refreshes)
-    assert all("no SQL analytics endpoint" in action.details["skipped"] for action in refreshes)
+    # Explicitly skipped, not quietly succeeded: the emulator has no endpoint, and
+    # a step claiming to have refreshed one that does not exist would make the
+    # local suite stop testing the thing that matters.
+    assert all(action.status == "skipped" for action in refreshes)
+    assert all(
+        "unsupported" in str(action.details).casefold() for action in refreshes
+    )

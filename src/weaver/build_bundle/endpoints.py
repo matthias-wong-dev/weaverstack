@@ -14,6 +14,12 @@ behind that item and ahead of anything in a later item layer.
 It is planned host-independently, exactly like the rest of the bundle. The
 emulator has no SQL analytics endpoint at all, and the executor says so and skips
 rather than inventing a local equivalent that would keep no promise.
+
+The *placement* is this module's business; the refresh itself belongs to
+:mod:`weaver.build_bundle.executors.sql_endpoint_refresh`. An earlier design put
+one refresh in a global tail after all physical work, which is correct for a
+single item and wrong the moment a second item reads the first: the consumer's
+Warehouse view would be created against endpoint metadata that had not caught up.
 """
 
 from __future__ import annotations
@@ -67,7 +73,7 @@ def item_refresh_stage(
                         id=f"refresh-sql-endpoint-{slug}",
                         kind=REFRESH_SQL_ENDPOINT,
                         resource_node_id=None,
-                        executor="sql_endpoint",
+                        executor="sql_endpoint_refresh",
                         payload=None,
                         payload_sha256=None,
                     ),

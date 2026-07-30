@@ -53,7 +53,7 @@ TSQL_EXECUTOR = "tsql"
 TSQL_BATCH_EXECUTOR = "tsql_batch"
 FOLDER_EXECUTOR = "folder"
 ALIAS_EXECUTOR = "alias"
-SQL_ENDPOINT_EXECUTOR = "sql_endpoint"
+SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 #: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
 #: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
 #: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
@@ -62,7 +62,7 @@ SQL_ENDPOINT_EXECUTOR = "sql_endpoint"
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
 #: ordered array of them, each as its own batch; ``folder`` makes or removes a
 #: directory; ``alias`` points one Lakehouse name at another item's object;
-#: ``sql_endpoint`` syncs a Lakehouse's SQL analytics endpoint with the Delta
+#: ``sql_endpoint_refresh`` syncs a Lakehouse's SQL analytics endpoint with the Delta
 #: mutations just made in it. All are build, not load.
 VALID_EXECUTORS = frozenset(
     {
@@ -74,11 +74,11 @@ VALID_EXECUTORS = frozenset(
         TSQL_BATCH_EXECUTOR,
         FOLDER_EXECUTOR,
         ALIAS_EXECUTOR,
-        SQL_ENDPOINT_EXECUTOR,
+        SQL_ENDPOINT_REFRESH_EXECUTOR,
     }
 )
 #: Executors that run a payload, and the extension that payload must carry.
-#: ``folder`` acts on the resolved target and carries none; ``sql_endpoint`` acts
+#: ``folder`` acts on the resolved target and carries none; ``sql_endpoint_refresh`` acts
 #: on the target itself.
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
@@ -89,7 +89,9 @@ _EXECUTOR_EXTENSION = {
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
     ALIAS_EXECUTOR: ".alias.json",
 }
-_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_EXECUTOR})
+_PAYLOADLESS_EXECUTORS = frozenset(
+    {FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR}
+)
 
 
 @dataclass(frozen=True)

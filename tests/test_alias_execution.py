@@ -7,7 +7,7 @@ import json
 import pytest
 
 from weaver.build_bundle.executors import alias as alias_module
-from weaver.build_bundle.executors import AliasExecutor, SqlEndpointExecutor
+from weaver.build_bundle.executors import AliasExecutor
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, BuildAction
 from weaver.build_bundle.targets import BoundTarget
@@ -374,44 +374,3 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
         "create or alter view [Rpt].[A] as select 1 as x;",
         "create or alter view [Rpt].[B] as select 1 as x;",
     ]
-
-
-# --- the endpoint refresh ----------------------------------------------------
-
-
-def _refresh_action() -> BuildAction:
-    return BuildAction(
-        id="refresh-sql-endpoint-Lakehouse--Raw",
-        kind=REFRESH_SQL_ENDPOINT,
-        resource_node_id=None,
-        executor="sql_endpoint",
-        payload=None,
-        payload_sha256=None,
-    )
-
-
-class _RefreshingResolver:
-    def __init__(self):
-        self.refreshed = []
-
-    def refresh_sql_endpoint_metadata(self, item):
-        self.refreshed.append(item.name)
-        return {"lakehouse": item.name, "state": "Succeeded"}
-
-
-def test_the_refresh_asks_the_environment_for_the_batchs_own_lakehouse(tmp_path):
-    resolver = _RefreshingResolver()
-    context = _local_context(tmp_path, resolver=resolver)
-
-    details = SqlEndpointExecutor().execute(_refresh_action(), None, context)
-
-    assert resolver.refreshed == ["Curated_Dev"]
-    assert details["state"] == "Succeeded"
-
-
-def test_the_emulator_skips_the_refresh_rather_than_inventing_an_equivalent(tmp_path):
-    context = _local_context(tmp_path)
-
-    details = SqlEndpointExecutor().execute(_refresh_action(), None, context)
-
-    assert "no SQL analytics endpoint" in details["skipped"]
