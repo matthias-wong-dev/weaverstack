@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .targets import BoundTarget
-from .incremental import IncrementalSelection
+from .incremental import BuildSelection
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"
@@ -46,18 +46,15 @@ PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
 #: Catalogue kinds. These write the central catalogue in the Weaver Lakehouse
-#: rather than the destination, and they conclude a build. They are three kinds
-#: rather than one so the ordering invariant is assertable from a manifest: a
-#: reviewer, and a test, can see that registry publication is last.
-RECONCILE_CATALOGUE = "reconcile_catalogue"
+#: rather than the destination. Claim deletion leads physical work; batched
+#: publication concludes it, with Registry visibly last in the manifest.
 DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
-RECORD_INSTALLATION = "record_installation"
+PUBLISH_CATALOGUE = "publish_catalogue"
 PUBLISH_REGISTRY = "publish_registry"
 CATALOGUE_KINDS = frozenset(
     {
-        RECONCILE_CATALOGUE,
         DELETE_CATALOGUE_CLAIMS,
-        RECORD_INSTALLATION,
+        PUBLISH_CATALOGUE,
         PUBLISH_REGISTRY,
     }
 )
@@ -191,8 +188,8 @@ class BuildPlan:
     repository_signature: str
     targets: tuple[BoundTarget, ...]
     sequences: tuple[BuildSequence, ...]
+    selection: BuildSelection
     omitted_nodes: tuple[OmittedNode, ...] = ()
-    incremental_selection: IncrementalSelection | None = None
 
     def to_mapping(self) -> dict[str, Any]:
         mapping = {
@@ -204,8 +201,7 @@ class BuildPlan:
             "sequences": [sequence.to_mapping() for sequence in self.sequences],
             "omitted_nodes": [node.to_mapping() for node in self.omitted_nodes],
         }
-        if self.incremental_selection is not None:
-            mapping["incremental_selection"] = self.incremental_selection.to_mapping()
+        mapping["selection"] = self.selection.to_mapping()
         return mapping
 
     @classmethod
@@ -217,13 +213,13 @@ class BuildPlan:
             repository_signature=mapping["repository_signature"],
             targets=tuple(BoundTarget.from_mapping(t) for t in mapping.get("targets", ())),
             sequences=tuple(BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())),
+            selection=BuildSelection.from_mapping(
+                mapping.get("selection")
+                or mapping.get("incremental_selection")
+                or {}
+            ),
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
-            ),
-            incremental_selection=(
-                IncrementalSelection.from_mapping(mapping["incremental_selection"])
-                if mapping.get("incremental_selection") is not None
-                else None
             ),
         )
 

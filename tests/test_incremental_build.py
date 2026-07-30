@@ -10,7 +10,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_incremental_build
+from weaver.build_bundle.incremental import select_build
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -98,18 +98,20 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
         for identity in repository.source_documents
         if str(identity.item) == "Lakehouse/Raw"
     }
-    empty = determine_impact(repository, ReconciledCatalogue({}), selected=raw)
+    empty = determine_impact(
+        repository, ReconciledCatalogue({}).registered, selected=raw
+    )
     assert set(empty.new) == raw
-    assert empty.changed == empty.impacted == empty.unchanged == ()
+    assert empty.changed == empty.impacted == ()
 
     installed = _catalogue(
         repository, "Lakehouse/Raw", old=(("Sales", "Customer"),)
     )
-    impact = determine_impact(repository, installed, selected=raw)
+    impact = determine_impact(repository, installed.registered, selected=raw)
     assert [str(value) for value in impact.changed] == [
         "Lakehouse/Raw/Sales.Customer"
     ]
-    assert set(impact.unchanged) == raw - set(impact.changed)
+    assert set(impact.to_mapping()) == {"new", "changed", "impacted_descendants"}
 
 
 def test_changed_root_expands_through_same_item_descendants(tmp_path):
@@ -122,7 +124,7 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     catalogue = _catalogue(
         repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
     )
-    impact = determine_impact(repository, catalogue, selected=raw)
+    impact = determine_impact(repository, catalogue.registered, selected=raw)
     assert [str(value) for value in impact.changed] == [
         "Lakehouse/Raw/Files/Sales.Landing"
     ]
@@ -140,12 +142,12 @@ def test_cross_item_descendants_are_deferred(tmp_path):
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
         rows.update(_catalogue(repository, item_text).rows)
-    catalogue = ReconciledCatalogue(rows)
-    catalogue.rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
+    rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
         "signature"
     ] = "old-signature"
+    catalogue = ReconciledCatalogue(rows)
     impact = determine_impact(
-        repository, catalogue, selected=(curated, reporting)
+        repository, catalogue.registered, selected=(curated, reporting)
     )
     assert impact.changed == (curated,)
     assert reporting not in impact.impacted
@@ -156,7 +158,17 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     existing_path = root / "Lakehouse/Raw/Sales__Customer.py"
     existing_path.write_text(
         existing_path.read_text().replace(
+            "Description: A declared table.",
+            "Description: The current governed declaration.",
+        ).replace(
+            "Lineage: A source system.",
+            "Lineage: A revised source.",
+        ).replace(
             "Primary key: Id", "Primary key: Id\nProhibit rebuild: true"
+        ).replace(
+            "from weaver import Table",
+            "from weaver import Table\n"
+            "from .Files.Sales__Customer import Sales__Customer as SourceCustomer",
         ),
         encoding="utf-8",
     )
@@ -183,9 +195,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         row for row in tables[REGISTRY.name] if row["object_name"] != "Protected"
     )
     catalogue = ReconciledCatalogue({item: tables})
-    selection = select_incremental_build(
-        repository, catalogue, selected=selected
-    )
+    selection = select_build(repository, catalogue.registered, selected=selected)
     existing = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
     new = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Protected")
     assert selection.prohibited == (existing,)
@@ -193,17 +203,55 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     assert existing not in selection.selected_for_build
     assert new in selection.selected_for_build
 
-
-def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
-    repository = _repository(_estate(tmp_path))
+    store = LocalStore()
     bundle = generate_item_build_bundle(
         repository,
         bindings=_raw_binding(),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=store,
+        target_inventories=_raw_inventory(repository),
+        reconciled_catalogue=catalogue,
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+    )
+    customer_actions = [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.resource_node_id == str(existing)
+    ]
+    assert not any(
+        action.kind in {DROP_TABLE, BUILD_TABLE} for action in customer_actions
+    )
+    catalogue_action = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_catalogue"
+    )
+    catalogue_payload = store.read(
+        bundle.location.join(*catalogue_action.payload.split("/"))
+    ).decode()
+    assert "The current governed declaration." in catalogue_payload
+    assert ".Files.Sales__Customer" in catalogue_payload
+    registry_action = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    registry_payload = store.read(
+        bundle.location.join(*registry_action.payload.split("/"))
+    ).decode()
+    assert repository.source_documents[existing].effective_signature in registry_payload
+
+
+def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
+    repository = _repository(_estate(tmp_path))
+    store = LocalStore()
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=_raw_binding(),
+        output=Location(str(tmp_path / "bundle")),
+        store=store,
         target_inventories=_raw_inventory(repository),
         reconciled_catalogue=_catalogue(repository, "Lakehouse/Raw"),
-        prune=True,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     physical = {
@@ -213,9 +261,9 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
         DROP_TABLE,
     }
     assert not any(action.kind in physical for _sequence, _batch, action in bundle.plan.actions())
-    assert bundle.plan.incremental_selection.selected_for_build == ()
+    assert bundle.plan.selection.selected_for_build == ()
     restored = BuildPlan.from_mapping(bundle.plan.to_mapping())
-    assert restored.incremental_selection == bundle.plan.incremental_selection
+    assert restored.selection == bundle.plan.selection
 
 
 def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_path):
@@ -239,7 +287,6 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         reconciled_catalogue=_catalogue(
             repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
         ),
-        prune=False,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     actions = [
@@ -249,6 +296,7 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
     catalogue_numbers = [
         number for number, kind, _identity in actions if kind == DELETE_CATALOGUE_CLAIMS
     ]
+    assert len(catalogue_numbers) == 1
     drop_numbers = [
         number for number, kind, _identity in actions if kind in {DROP_FOLDER, DROP_TABLE}
     ]
@@ -288,14 +336,14 @@ select 1 as Id
 """,
     )
     desired = _repository(root)
+    store = LocalStore()
     bundle = generate_item_build_bundle(
         desired,
         bindings=_raw_binding(),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=store,
         target_inventories=_raw_inventory(installed),
         reconciled_catalogue=catalogue,
-        prune=False,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     actions = [action for _sequence, _batch, action in bundle.plan.actions()]
@@ -336,49 +384,6 @@ def test_registered_document_removed_from_repository_is_uncertified_before_prune
         folders=inventory.folders + ("Sales.Retired",),
     )
 
-    bundle = generate_item_build_bundle(
-        desired,
-        bindings=_raw_binding(),
-        output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
-        target_inventories=inventories,
-        reconciled_catalogue=catalogue,
-        prune=True,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
-    )
-    actions = [
-        (sequence.number, action.kind, action.resource_node_id)
-        for sequence, _batch, action in bundle.plan.actions()
-    ]
-    delete_numbers = [
-        number
-        for number, kind, identity in actions
-        if kind == DELETE_CATALOGUE_CLAIMS
-        and identity == "Lakehouse/Raw/Files/Sales.Retired"
-    ]
-    prune_number = next(
-        number
-        for number, kind, identity in actions
-        if kind == PRUNE_FOLDER and identity == "folder:Sales.Retired"
-    )
-    assert delete_numbers
-    assert max(delete_numbers) < prune_number
-
-
-def test_no_prune_preserves_removed_physical_object_and_its_catalogue_claims(
-    tmp_path,
-):
-    root = _estate(tmp_path)
-    _write(
-        root,
-        "Lakehouse/Raw/Files/Sales__Retired.py",
-        _folder("Sales.Retired"),
-    )
-    installed = _repository(root)
-    catalogue = _catalogue(installed, "Lakehouse/Raw")
-    inventories = _raw_inventory(installed)
-    (root / "Lakehouse/Raw/Files/Sales__Retired.py").unlink()
-    desired = _repository(root)
     store = LocalStore()
     bundle = generate_item_build_bundle(
         desired,
@@ -387,25 +392,24 @@ def test_no_prune_preserves_removed_physical_object_and_its_catalogue_claims(
         store=store,
         target_inventories=inventories,
         reconciled_catalogue=catalogue,
-        prune=False,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
-
-    actions = [action for _sequence, _batch, action in bundle.plan.actions()]
-    retired = "Lakehouse/Raw/Files/Sales.Retired"
-    assert not any(
-        action.resource_node_id == retired
-        and action.kind in {DELETE_CATALOGUE_CLAIMS, PRUNE_FOLDER}
-        for action in actions
+    actions = [
+        (sequence.number, action.kind, action.resource_node_id)
+        for sequence, _batch, action in bundle.plan.actions()
+    ]
+    delete_action = next(
+        (sequence.number, action)
+        for sequence, _batch, action in bundle.plan.actions()
+        if action.kind == DELETE_CATALOGUE_CLAIMS
     )
-    registry_delete = next(
-        action
-        for action in actions
-        if action.id == "catalogue-Lakehouse--Raw-Registry-delete"
+    prune_number = next(
+        number
+        for number, kind, identity in actions
+        if kind == PRUNE_FOLDER and identity == "folder:Sales.Retired"
     )
     payload = store.read(
-        bundle.location.join(*registry_delete.payload.split("/"))
-    ).decode("utf-8")
-    assert "Sales.Retired" not in payload  # identity is rendered as separate keys
-    assert "'Files/Sales'" in payload
-    assert "'Retired'" in payload
+        bundle.location.join(*delete_action[1].payload.split("/"))
+    ).decode()
+    assert "'Files/Sales'" in payload and "'Retired'" in payload
+    assert delete_action[0] < prune_number

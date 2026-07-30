@@ -228,15 +228,15 @@ def test_no_folder_rows_since_the_catalogue_has_no_folders(initialised, spark):
 def test_registry_is_published_after_the_dictionaries_and_the_installation(initialised):
     numbers = [sequence.number for sequence in initialised.result.report.sequences]
     assert numbers == sorted(numbers)
-    assert numbers[-1] == 9020
+    assert numbers[-1] == 9010
     statuses = {
         sequence.number: sequence.status for sequence in initialised.result.report.sequences
     }
     assert all(status == "succeeded" for status in statuses.values())
 
 
-def test_initialisation_prunes_nothing(initialised):
-    """The Weaver Lakehouse belongs to the installation, not to this repository."""
+def test_initialisation_has_no_undeclared_catalogue_objects_to_prune(initialised):
+    """The reserved catalogue scope already matches its built-in declaration."""
 
     kinds = {
         action.action_id
@@ -256,7 +256,7 @@ def test_initialisation_prunes_nothing(initialised):
 
 
 def test_a_users_own_schema_in_the_weaver_lakehouse_survives_initialisation(spark, tmp_path):
-    """The consequence of not pruning, asserted rather than assumed."""
+    """The built-in item's authoritative prune is restricted to schema `_`."""
 
     _drop_catalogue_schema(spark)
     workspace, resolver, store = _environment(tmp_path)

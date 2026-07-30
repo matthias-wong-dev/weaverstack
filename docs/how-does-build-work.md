@@ -176,8 +176,6 @@ flowchart TD
 
     I --> N["New"]
     I --> H["Changed"]
-    I --> U["Unchanged"]
-
     H --> D["Add same-item transitive descendants"]
     D --> A["Impacted existing documents"]
 
@@ -189,9 +187,11 @@ flowchart TD
     DROP --> BUILD
 ```
 
-The inspectable `Impact` records `new`, `changed`, `impacted`, and `unchanged`.
-`impacted` contains changed existing roots and affected existing descendants;
-new objects stay separate because they need creation but no managed drop.
+The inspectable `Impact` records `new`, `changed`, and `impacted_descendants`.
+Unchanged documents are implicit rather than copied into the manifest.
+`impacted` is a convenience view over changed existing roots plus affected
+existing descendants; new objects stay separate because they need creation but
+no managed drop.
 
 Only descendants are added. Upstream dependencies are not rebuilt merely
 because one of their consumers changed. Deterministic graph ordering is applied
@@ -202,7 +202,7 @@ after filtering to the selected subset.
 `Prohibit Rebuild` is applied after logical impact is known. For an existing
 impacted document it suppresses the physical managed drop and physical rebuild.
 The document remains visible in the impact result and in `plan.yml` under the
-incremental selection.
+mandatory build selection.
 
 This policy protects the existing data or physical object. It does not freeze
 the authored declaration or the catalogue. Final dictionary rows, notes, ETL
@@ -249,11 +249,6 @@ claims are dropped before its physical prune action. An orphan has no claims to
 remove. Prune drops retain `IF EXISTS` because their contract is idempotent
 reconciliation of undesired state.
 
-With `--no-prune`, both halves are retained: Weaver emits neither the physical
-prune nor catalogue-claim deletion for a registered document removed from the
-incoming repository. Incoming desired documents still publish their current
-metadata normally.
-
 A managed drop removes a desired, installed object only because incremental
 selection chose it for rebuild. Its catalogue claims are deleted first, then its
 physical object is dropped strictly. Dependants drop before dependencies.
@@ -263,7 +258,7 @@ physical object is dropped strictly. Dependants drop before dependencies.
 A bundle is the complete contract between planning and execution. It contains:
 
 - bound target descriptors;
-- the full incremental selection;
+- the full build selection;
 - ordered sequences, batches, and actions;
 - exact DDL, DML, filesystem operations, and payload hashes;
 - the repository snapshot and deterministic bundle identity;
@@ -280,8 +275,9 @@ then also created strictly. An unexpected collision proves the prepared state or
 an earlier action was wrong and fails visibly. Managed drops are strict for the
 same reason. Only prune remains idempotent.
 
-The bundle format version remains unchanged; `incremental_selection` is an
-additive optional field in `plan.yml`, so earlier pre-alpha plans still load.
+Every newly generated plan carries mandatory `selection`. Deserialisation alone
+accepts an older pre-alpha plan with `incremental_selection` or no selection and
+normalises it to the current model.
 
 ## 12. Bundle execution order
 
@@ -289,18 +285,15 @@ The frozen phases execute in this order:
 
 ```mermaid
 flowchart TD
-    A["Reconcile stale catalogue claims"]
-    B["Delete claims for registered prune objects"]
-    C["Prune removed objects and physical orphans"]
-    D["Delete claims for selected rebuilds"]
-    E["Drop selected physical objects"]
-    F["Create required schemas"]
-    G["Build selected documents"]
-    H["Publish catalogue dictionaries"]
-    I["Publish installation"]
-    J["Publish Registry"]
+    A["Batch stale, removed, and rebuild claim deletion"]
+    B["Prune removed objects and physical orphans"]
+    C["Drop selected physical objects"]
+    D["Create required schemas"]
+    E["Build selected documents"]
+    F["Batch dictionaries and Installation publication"]
+    G["Publish Registry last"]
 
-    A --> B --> C --> D --> E --> F --> G --> H --> I --> J
+    A --> B --> C --> D --> E --> F --> G
 ```
 
 Empty phases are omitted. Managed drops use reverse dependency layers;

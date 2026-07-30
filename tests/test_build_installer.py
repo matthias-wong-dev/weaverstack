@@ -19,6 +19,8 @@ from weaver.build_bundle import (
     BuildBatch,
     BuildPlan,
     BuildSequence,
+    BuildSelection,
+    Impact,
     InstallationEnvironment,
     compute_bundle_id,
     install_bundle,
@@ -87,6 +89,7 @@ def _bundle(tmp_path):
         repository_signature="sig",
         targets=(TARGET,),
         sequences=sequences,
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
 

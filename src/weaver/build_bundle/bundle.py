@@ -46,12 +46,14 @@ REPOSITORY_DIR = "repository"
 PAYLOAD_DIR = "payload"
 
 SPARK_SQL_EXECUTOR = "spark_sql"
+SPARK_SQL_BATCH_EXECUTOR = "spark_sql_batch"
 SPARK_SCHEMA_EXECUTOR = "spark_schema"
 SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
 FOLDER_EXECUTOR = "folder"
 #: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
-#: DROP; ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
+#: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
+#: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
 #: is a resolved path and so cannot be frozen; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script; ``folder`` makes or removes a
@@ -59,6 +61,7 @@ FOLDER_EXECUTOR = "folder"
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
+        SPARK_SQL_BATCH_EXECUTOR,
         SPARK_SCHEMA_EXECUTOR,
         SPARK_TABLE_EXECUTOR,
         TSQL_EXECUTOR,
@@ -69,6 +72,7 @@ VALID_EXECUTORS = frozenset(
 #: ``folder`` acts on the resolved target and carries none.
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
+    SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
     SPARK_SCHEMA_EXECUTOR: ".schema.json",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",

@@ -73,7 +73,14 @@ class NoopExecutor:
 def _executors():
     return {
         name: NoopExecutor(name)
-        for name in ("spark_sql", "spark_schema", "spark_table", "tsql", "folder")
+        for name in (
+            "spark_sql",
+            "spark_sql_batch",
+            "spark_schema",
+            "spark_table",
+            "tsql",
+            "folder",
+        )
     }
 
 
@@ -136,7 +143,6 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
         root,
         bindings=_bindings(),
         environment=environment,
-        prune=False,
         control_lakehouse=_control(),
     )
 
@@ -166,7 +172,6 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
             resolver=None,
             executors=_executors(),
         ),
-        prune=False,
         control_lakehouse=_control(),
         archive=archive,
     )
@@ -187,7 +192,6 @@ def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_
         bindings=_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=store,
-        prune=False,
         target_inventories=_inventories(),
         reconciled_catalogue=ReconciledCatalogue({}),
         control_lakehouse=_control(),
@@ -219,7 +223,6 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
         bindings=_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=store,
-        prune=False,
         target_inventories=_inventories(),
         reconciled_catalogue=ReconciledCatalogue({}),
         control_lakehouse=_control(),

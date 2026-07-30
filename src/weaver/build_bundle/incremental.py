@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 
-from ..catalogue.state import ReconciledCatalogue
-from ..catalogue.tables import REGISTRY
+from ..catalogue.state import RegisteredDocument
 from ..declaration.model import WeaverDocumentId, WeaverRepository
 
 
@@ -20,42 +19,44 @@ class Impact:
 
     new: tuple[WeaverDocumentId, ...]
     changed: tuple[WeaverDocumentId, ...]
-    impacted: tuple[WeaverDocumentId, ...]
-    unchanged: tuple[WeaverDocumentId, ...]
+    impacted_descendants: tuple[WeaverDocumentId, ...]
 
     @property
-    def impacted_descendants(self) -> tuple[WeaverDocumentId, ...]:
-        return _ordered(set(self.impacted) - set(self.changed))
+    def impacted(self) -> tuple[WeaverDocumentId, ...]:
+        return _ordered(set(self.changed) | set(self.impacted_descendants))
 
     def to_mapping(self) -> dict[str, list[str]]:
         return {
             "new": [str(value) for value in self.new],
             "changed": [str(value) for value in self.changed],
-            "impacted": [str(value) for value in self.impacted],
             "impacted_descendants": [
                 str(value) for value in self.impacted_descendants
             ],
-            "unchanged": [str(value) for value in self.unchanged],
         }
 
     @classmethod
     def from_mapping(cls, mapping) -> "Impact":
+        changed = tuple(
+            WeaverDocumentId.parse(value) for value in mapping.get("changed", ())
+        )
+        descendants = mapping.get("impacted_descendants")
+        if descendants is None:
+            descendants = tuple(
+                value
+                for value in mapping.get("impacted", ())
+                if WeaverDocumentId.parse(value) not in set(changed)
+            )
         return cls(
             new=tuple(WeaverDocumentId.parse(value) for value in mapping.get("new", ())),
-            changed=tuple(
-                WeaverDocumentId.parse(value) for value in mapping.get("changed", ())
-            ),
-            impacted=tuple(
-                WeaverDocumentId.parse(value) for value in mapping.get("impacted", ())
-            ),
-            unchanged=tuple(
-                WeaverDocumentId.parse(value) for value in mapping.get("unchanged", ())
+            changed=changed,
+            impacted_descendants=tuple(
+                WeaverDocumentId.parse(value) for value in descendants
             ),
         )
 
 
 @dataclass(frozen=True)
-class IncrementalSelection:
+class BuildSelection:
     """The complete, inspectable decision before bundle actions are rendered."""
 
     impact: Impact
@@ -72,7 +73,7 @@ class IncrementalSelection:
         }
 
     @classmethod
-    def from_mapping(cls, mapping) -> "IncrementalSelection":
+    def from_mapping(cls, mapping) -> "BuildSelection":
         return cls(
             impact=Impact.from_mapping(mapping.get("impact", {})),
             prohibited=tuple(
@@ -92,7 +93,7 @@ class IncrementalSelection:
 
 def determine_impact(
     repository: WeaverRepository,
-    reconciled_catalogue: ReconciledCatalogue,
+    registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     selected: Iterable[WeaverDocumentId],
 ) -> Impact:
@@ -104,30 +105,20 @@ def determine_impact(
     """
 
     selected_set = set(selected)
-    installed: dict[WeaverDocumentId, str] = {}
-    for item, tables in reconciled_catalogue.rows.items():
-        for row in tables.get(REGISTRY.name, ()):
-            schema = str(row.get("schema_name") or "")
-            is_files = schema.startswith("Files/")
-            logical_schema = schema[len("Files/") :] if is_files else schema
-            identity = WeaverDocumentId.parse(
-                f"{item}/{'Files/' if is_files else ''}"
-                f"{logical_schema}.{row.get('object_name')}"
-            )
-            if identity in selected_set:
-                installed[identity] = str(row.get("signature") or "")
+    installed = {
+        identity: document.signature
+        for identity, document in registered.items()
+        if identity in selected_set
+    }
 
     new: set[WeaverDocumentId] = set()
     changed: set[WeaverDocumentId] = set()
-    unchanged: set[WeaverDocumentId] = set()
     for identity in selected_set:
         signature = installed.get(identity)
         if signature is None:
             new.add(identity)
         elif signature != repository.source_documents[identity].effective_signature:
             changed.add(identity)
-        else:
-            unchanged.add(identity)
 
     existing = set(installed)
     impacted = set(changed)
@@ -147,19 +138,18 @@ def determine_impact(
     return Impact(
         new=_ordered(new),
         changed=_ordered(changed),
-        impacted=_ordered(impacted),
-        unchanged=_ordered(unchanged),
+        impacted_descendants=_ordered(impacted - changed),
     )
 
 
-def select_incremental_build(
+def select_build(
     repository: WeaverRepository,
-    reconciled_catalogue: ReconciledCatalogue,
+    registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     selected: Iterable[WeaverDocumentId],
-) -> IncrementalSelection:
+) -> BuildSelection:
     impact = determine_impact(
-        repository, reconciled_catalogue, selected=selected
+        repository, registered, selected=selected
     )
     prohibited = {
         identity
@@ -167,7 +157,7 @@ def select_incremental_build(
         if repository.source_documents[identity].document.prohibit_rebuild
     }
     selected_for_drop = set(impact.impacted) - prohibited
-    return IncrementalSelection(
+    return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),
         selected_for_drop=_ordered(selected_for_drop),

@@ -141,10 +141,10 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
 
     bundle, _report = built_catalogue
     kinds = {action.kind for _s, _b, action in bundle.plan.actions()}
-    assert {"build_table", "record_installation", "publish_registry"} <= kinds
+    assert {"build_table", "publish_catalogue", "publish_registry"} <= kinds
     assert "create_schema" not in kinds
     executors = {action.executor for _s, _b, action in bundle.plan.actions()}
-    assert executors == {"spark_table", "spark_sql"}
+    assert executors == {"spark_table", "spark_sql_batch"}
 
 
 def test_the_tables_land_under_the_weaver_lakehouse_tables_area(

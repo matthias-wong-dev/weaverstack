@@ -102,7 +102,6 @@ def _build(workspace, store, resolver, spark, lakehouse: str):
             spark=spark,
             workspace=workspace,
         ),
-        prune=True,
         control_lakehouse=control,
     )
     report = result.report

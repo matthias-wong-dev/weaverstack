@@ -28,7 +28,7 @@ from .models import (
     OmittedNode,
 )
 from .installer import InstallationEnvironment, install_bundle
-from .incremental import Impact, IncrementalSelection, determine_impact
+from .incremental import BuildSelection, Impact, determine_impact
 from .planner import generate_item_build_bundle
 from .report import InstallationReport
 from .workflow import (
@@ -66,7 +66,7 @@ __all__ = [
     "BuildPlan",
     "BuildBundle",
     "Impact",
-    "IncrementalSelection",
+    "BuildSelection",
     "determine_impact",
     "compute_bundle_id",
     "load_bundle",

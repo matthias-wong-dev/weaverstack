@@ -92,7 +92,6 @@ def test_public_workflow_materialises_then_installs_from_driver_local_files(
                 spark=spark,
                 workspace=lakehouses.workspace,
             ),
-            prune=False,
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
 
@@ -140,7 +139,6 @@ def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
                 spark=spark,
                 workspace=lakehouses.workspace,
             ),
-            prune=True,
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
         report = result.report

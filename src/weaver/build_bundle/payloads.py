@@ -13,9 +13,7 @@ import hashlib
 #: Sequence numbers for the foundational waves. Catalogue reconciliation and
 #: prune lead; managed drops and selected build layers follow in fixed steps.
 RECONCILIATION_SEQUENCE = 10
-PRUNE_CATALOGUE_SEQUENCE = 20
 PRUNE_SEQUENCE = 30
-MANAGED_CATALOGUE_SEQUENCE = 40
 MANAGED_DROP_SEQUENCE_START = 50
 OBJECT_SEQUENCE_STEP = 10
 
@@ -30,8 +28,7 @@ OBJECT_SEQUENCE_STEP = 10
 #: records the binding, Registry certifies. Registry is last, so a row in it
 #: cannot outrun the work it attests to.
 CATALOGUE_SEQUENCE = 9000
-INSTALLATION_SEQUENCE = 9010
-REGISTRY_SEQUENCE = 9020
+REGISTRY_SEQUENCE = 9010
 
 PAYLOAD_ROOT = "payload"
 

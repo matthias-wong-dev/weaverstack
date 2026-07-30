@@ -107,18 +107,18 @@ One bundle does the whole bootstrap, because the barriers already order it:
 ```text
 first physical phase   create schema `_` when inventory says it is absent
 dependency layers      create the ten new catalogue tables
-sequence 9000   describe them in their own dictionaries
-sequence 9010   record the installation
-sequence 9020   certify them in their own registry
+sequence 9000          publish dictionaries and Installation as one batch
+sequence 9010          certify them in their own Registry
 ```
 
 The catalogue's own DML runs after the tables it writes to exist, so no first-run
 mode is needed. Generation reads nothing, so an absent catalogue is not a special
 case — the statements are correct against it either way.
 
-Initialisation never prunes. The Weaver Lakehouse belongs to the installation,
-not to the built-in item, so a reconciling build would treat anything else there
-as an orphan.
+Initialisation uses the ordinary authoritative prune, but the built-in
+`_weaver` inventory is restricted to the reserved `_` schema. Application
+schemas and Files areas in the same control Lakehouse are therefore outside its
+scope and cannot be treated as orphans.
 
 ## How a build writes it
 

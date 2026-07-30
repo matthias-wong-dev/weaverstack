@@ -59,9 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
             "timestamp"
         ),
     )
-    build.add_argument(
-        "--no-prune", action="store_true", help="do not reconcile undeclared target objects"
-    )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
     build.set_defaults(handler=handle_build)
@@ -587,14 +584,12 @@ def handle_build(args: argparse.Namespace) -> int:
             workspace,
             bindings=bindings,
             bundle_name=args.bundle,
-            prune=not args.no_prune,
         )
     else:
         result = _run_local_item_build(
             workspace,
             bindings=bindings,
             bundle_name=args.bundle,
-            prune=not args.no_prune,
         )
     if args.json:
         print(json.dumps(result, indent=2))
@@ -610,9 +605,7 @@ def handle_build(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "succeeded" else 1
 
 
-def _run_local_item_build(
-    workspace, *, bindings, bundle_name: str | None, prune: bool
-) -> dict:
+def _run_local_item_build(workspace, *, bindings, bundle_name: str | None) -> dict:
     """Run generation and installation in-process and always close the session."""
 
     from weaver import ItemRef, LocalStore
@@ -653,7 +646,6 @@ def _run_local_item_build(
             environment=InstallationEnvironment(
                 store=store, resolver=resolver, spark=session, workspace=workspace
             ),
-            prune=prune,
             control_lakehouse=control,
             archive=archive,
         )
@@ -681,7 +673,6 @@ def _run_fabric_item_build(
     *,
     bindings,
     bundle_name: str | None,
-    prune: bool,
 ) -> dict:
     """Run both build phases inside the workspace's Environment-backed session."""
 
@@ -732,7 +723,6 @@ def _run_fabric_item_build(
         "result = build_uploaded_item_repository(\n"
         "    resolver.weaver_items_root,\n"
         "    bindings=bindings, environment=environment,\n"
-        f"    prune={prune!r},\n"
         "    control_lakehouse=control,\n"
         "    archive=archive)\n"
         "report = result.report\n"

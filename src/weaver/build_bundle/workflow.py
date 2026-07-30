@@ -203,7 +203,6 @@ def build_item_repository(
     reconciled_catalogue: ReconciledCatalogue,
     environment: InstallationEnvironment,
     source_store: Store,
-    prune: bool = True,
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
@@ -222,7 +221,6 @@ def build_item_repository(
             store=source_store,
             target_inventories=target_inventories,
             reconciled_catalogue=reconciled_catalogue,
-            prune=prune,
             control_lakehouse=control_lakehouse,
         )
         report = install_bundle(bundle, environment=environment)
@@ -247,7 +245,6 @@ def build_uploaded_item_repository(
     *,
     bindings: ItemBindings,
     environment: InstallationEnvironment,
-    prune: bool = True,
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
@@ -270,7 +267,6 @@ def build_uploaded_item_repository(
             reconciled_catalogue=reconciled,
             environment=environment,
             source_store=materialised.store,
-            prune=prune,
             control_lakehouse=control_lakehouse,
             archive=archive,
             archive_store=archive_store,

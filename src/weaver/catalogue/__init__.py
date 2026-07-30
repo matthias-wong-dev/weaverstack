@@ -49,14 +49,11 @@ from .tables import (
     table,
 )
 from .state import (
-    CatalogueClaimDelete,
     CatalogueState,
+    RegisteredDocument,
     ReconciledCatalogue,
-    registered_document_types,
-    registered_documents,
     read_catalogue_state,
     reconcile_catalogue_state,
-    render_catalogue_claim_deletes,
 )
 
 __all__ = [
@@ -69,8 +66,6 @@ __all__ = [
     "SCHEMA_DICTIONARY", "SIGNATURE", "TABLE_DICTIONARY", "column_set",
     "identifier", "literal", "qualified_name", "render_delete_obsolete",
     "render_delete_scope", "render_merge", "sorted_rows", "table", "typed_literal",
-    "CatalogueClaimDelete", "ReconciledCatalogue", "registered_document_types",
-    "registered_documents",
+    "RegisteredDocument", "ReconciledCatalogue",
     "read_catalogue_state", "reconcile_catalogue_state",
-    "render_catalogue_claim_deletes",
 ]

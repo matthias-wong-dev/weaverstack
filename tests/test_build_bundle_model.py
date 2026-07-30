@@ -22,6 +22,8 @@ from weaver.build_bundle import (
     BuildBatch,
     BuildPlan,
     BuildSequence,
+    BuildSelection,
+    Impact,
     OmittedNode,
     compute_bundle_id,
     load_bundle,
@@ -80,8 +82,16 @@ def _plan(bundle_id: str = "") -> BuildPlan:
         repository_signature="sig-abc",
         targets=(TARGET,),
         sequences=sequences,
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
         omitted_nodes=(OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),),
     )
+
+
+def test_legacy_plan_without_selection_deserialises_at_the_boundary():
+    mapping = _plan().to_mapping()
+    mapping.pop("selection")
+    restored = BuildPlan.from_mapping(mapping)
+    assert restored.selection == BuildSelection(Impact((), (), ()), (), (), ())
 
 
 def _identified_plan() -> BuildPlan:

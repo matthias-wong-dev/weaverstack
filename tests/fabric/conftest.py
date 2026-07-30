@@ -783,11 +783,7 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
 
-    def generate(
-        bundle_name: str = "buildtest",
-        *,
-        prune: bool = True,
-    ):
+    def generate(bundle_name: str = "buildtest"):
         root_location = resolver.weaver_items_root
         repository = parse_item_repository(root_location, store=store)
         control = LakehouseBinding(lakehouse=weaver)
@@ -810,7 +806,6 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             bindings=bindings,
             output=resolver.build_bundle(bundle_name),
             store=store,
-            prune=prune,
             control_lakehouse=control,
             target_inventories=inventories,
             reconciled_catalogue=reconciled,
@@ -944,11 +939,7 @@ def _fabric_build_context(
             f"environment={workspace.environment!r})"
         )
 
-    def generate(
-        bundle_name: str = "buildtest",
-        *,
-        prune: bool = True,
-    ):
+    def generate(bundle_name: str = "buildtest"):
         # Generation runs IN the session, against the native Spark catalogue.
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
@@ -981,7 +972,7 @@ def _fabric_build_context(
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
-            f"    store=store, prune={prune!r}, control_lakehouse=control,\n"
+            "    store=store, control_lakehouse=control,\n"
             "    target_inventories=inventories, reconciled_catalogue=reconciled)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
@@ -1167,9 +1158,9 @@ def _warehouse_build_env(
     def remove_repo() -> None:
         store.delete(resolver.weaver_items_root, recursive=True)
 
-    def generate(bundle_name: str = "whtest", *, prune: bool = False):
-        # Generation runs IN Fabric. With prune on, Weaver reads the Warehouse
-        # catalogue there through its own Fabric-native SQL — no sql= injection.
+    def generate(bundle_name: str = "whtest"):
+        # Generation runs IN Fabric and reads the Warehouse catalogue there
+        # through its own Fabric-native SQL — no sql= injection.
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
             f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r})))"
@@ -1202,7 +1193,7 @@ def _warehouse_build_env(
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
-            f"    store=store, prune={prune!r}, control_lakehouse=control,\n"
+            "    store=store, control_lakehouse=control,\n"
             "    target_inventories=inventories, reconciled_catalogue=reconciled)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
@@ -1301,11 +1292,11 @@ def _warehouse_build_env(
     )
 
 
-def _install_estate(env, *, prune: bool = True) -> InstalledEstate:
+def _install_estate(env) -> InstalledEstate:
     """Install one estate through a BuildEnv, once, and assert it succeeded."""
 
     env.install_repo()
-    bundle = env.generate(prune=prune)
+    bundle = env.generate()
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
     return InstalledEstate(env=env, bundle=bundle)
@@ -1359,7 +1350,7 @@ def warehouse_estate(
         weaver_repo_fixture,
         livy_session,
     )
-    yield _install_estate(env, prune=True)
+    yield _install_estate(env)
 
 
 @pytest.fixture

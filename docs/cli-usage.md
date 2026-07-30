@@ -100,9 +100,9 @@ types must match.
 
 Every build adds the implicit binding from `Lakehouse/_weaver` to the configured
 Weaver Lakehouse. Catalogue publication is mandatory and registry certification
-is last. Prune is enabled by default; `--no-prune` is the explicit escape hatch.
-It retains both undesired physical objects and their existing catalogue claims.
-The build planner compares effective signatures with the reconciled Registry.
+is last. Every build treats the repository as authoritative: a document removed
+from it loses its catalogue claims and its physical object is pruned. The build
+planner compares effective signatures with the reconciled Registry.
 Unchanged objects receive no physical action; selected changes use an explicit
 drop followed by a strict create. `Prohibit Rebuild` protects an existing
 physical object while allowing its incoming catalogue metadata to advance.

@@ -31,7 +31,6 @@ def test_build_parser_accepts_repeatable_physical_first_bindings():
         "Lakehouses/Raw_Dev=Lakehouse/Raw",
         "Warehouses/Reporting_Dev=Warehouse/Reporting",
     ]
-    assert args.no_prune is False
     assert not hasattr(args, "no_catalogue")
 
 
@@ -70,6 +69,7 @@ def test_public_help_has_workspace_type_and_no_removed_host_or_root_flags():
     assert "--host" not in combined
     assert "--root" not in combined
     assert "--no-catalogue" not in combined
+    assert "--no-prune" not in combined
 
 
 def test_build_handler_adds_implicit_weaver_binding_and_emits_json(monkeypatch, capsys):
@@ -105,13 +105,12 @@ def test_build_handler_adds_implicit_weaver_binding_and_emits_json(monkeypatch, 
             "Runtime",
             "--weaver-lakehouse",
             "Control",
-            "--no-prune",
             "--json",
         ]
     ) == 0
 
     assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
-    assert captured["prune"] is False
+    assert "prune" not in captured
     assert [str(entry.item) for entry in captured["bindings"].entries] == [
         "Lakehouse/Raw",
         "Lakehouse/_weaver",
@@ -149,7 +148,7 @@ def test_local_build_routes_in_process(monkeypatch):
             "Control",
         ]
     ) == 0
-    assert captured["prune"] is True
+    assert "prune" not in captured
 
 
 def test_fabric_build_requires_environment(monkeypatch, capsys):
@@ -208,7 +207,6 @@ def test_fabric_adapter_submits_complete_uploaded_workflow(monkeypatch):
             (parse_item_binding("Lakehouses/Raw_Dev=Lakehouse/Raw"),)
         ),
         bundle_name="estate-build",
-        prune=True,
     )
 
     assert result["status"] == "succeeded"
@@ -267,7 +265,6 @@ def test_fabric_adapter_reports_queued_session_before_starting(monkeypatch, caps
             (parse_item_binding("Lakehouses/Raw_Dev=Lakehouse/Raw"),)
         ),
         bundle_name=None,
-        prune=True,
     )
 
     assert events == ["inspect", "start"]
