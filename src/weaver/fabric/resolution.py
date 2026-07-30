@@ -162,20 +162,13 @@ class FabricResolver:
             client=self._fabric_client(),
         )
 
-    def onelake_shortcuts(self, item: ItemRef, *, area: str | None = None) -> tuple:
-        """Every shortcut a Lakehouse holds, optionally in one area only."""
+    def onelake_shortcuts(self, item: ItemRef) -> tuple:
+        """Every shortcut a Lakehouse holds. Scoping is the caller's business."""
 
         from .shortcuts import list_shortcuts
 
-        found = list_shortcuts(
+        return list_shortcuts(
             self.resolve(item, item_type=LAKEHOUSE), client=self._fabric_client()
-        )
-        if area is None:
-            return found
-        return tuple(
-            shortcut
-            for shortcut in found
-            if shortcut.area.casefold() == area.casefold()
         )
 
     def remove_onelake_shortcut(self, item: ItemRef, *, path: str, name: str) -> None:

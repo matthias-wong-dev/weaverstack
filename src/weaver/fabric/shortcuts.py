@@ -34,12 +34,6 @@ class Shortcut:
     def qualified(self) -> str:
         return f"{self.path}/{self.name}"
 
-    @property
-    def area(self) -> str:
-        """``Tables`` or ``Files`` — the Lakehouse area the shortcut appears in."""
-
-        return self.path.split("/", 1)[0]
-
 
 def list_shortcuts(item: Item, *, client: FabricClient) -> tuple[Shortcut, ...]:
     """Every shortcut this item holds.

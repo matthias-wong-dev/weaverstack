@@ -104,15 +104,20 @@ def _clear(
 
 
 def _remove_shortcuts(
-    resolver, lakehouse: ItemRef, *, area: str, dry_run: bool
+    resolver, lakehouse: ItemRef, *, prefix: str, dry_run: bool
 ) -> tuple[str, ...]:
-    """Take away this Lakehouse's shortcuts in one area, before storage is swept.
+    """Take away this Lakehouse's shortcuts beneath ``prefix``, before storage is swept.
+
+    Scoped by path prefix rather than by area, because a folder target may be a
+    root *within* Files — ``Sales_LH/Files/Extracts`` clears only beneath itself,
+    and its shortcuts have to be scoped the same way or a narrow wipe would take
+    away a pointer it never reached.
 
     Reported as ``shortcut:<path>/<name>`` so a dry run distinguishes a pointer
     being taken away from a directory being deleted — they are not the same act,
     and only one of them destroys data.
 
-    An environment that has no shortcuts to remove offers no capability and this
+    An environment with no shortcuts to remove offers no capability and this
     answers nothing: the emulator's links are removed by the storage sweep, which
     unlinks rather than follows.
     """
@@ -122,7 +127,13 @@ def _remove_shortcuts(
     if enumerate_shortcuts is None or remove is None:
         return ()
 
-    shortcuts = enumerate_shortcuts(lakehouse, area=area)
+    within = prefix.strip("/").casefold()
+    shortcuts = tuple(
+        shortcut
+        for shortcut in enumerate_shortcuts(lakehouse)
+        if shortcut.path.casefold() == within
+        or shortcut.path.casefold().startswith(within + "/")
+    )
     if not dry_run:
         for shortcut in shortcuts:
             remove(lakehouse, path=shortcut.path, name=shortcut.name)
@@ -142,7 +153,10 @@ def wipe_folder_target(
     resolver = resolver_for(workspace)
     location = resolver.folder_root(target)
     shortcuts = _remove_shortcuts(
-        resolver, target.lakehouse, area=FILES_AREA, dry_run=dry_run
+        resolver,
+        target.lakehouse,
+        prefix="/".join((FILES_AREA, *target.subpath)),
+        dry_run=dry_run,
     )
     return WipeReport(
         target=f"folder:{target}",
@@ -171,7 +185,7 @@ def wipe_delta_target(
     resolver = resolver_for(workspace)
     location = resolver.tables_root(target.lakehouse)
     shortcuts = _remove_shortcuts(
-        resolver, target.lakehouse, area=TABLES_AREA, dry_run=dry_run
+        resolver, target.lakehouse, prefix=TABLES_AREA, dry_run=dry_run
     )
     return WipeReport(
         target=f"delta:{target}",
