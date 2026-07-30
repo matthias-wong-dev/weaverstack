@@ -24,7 +24,7 @@ from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
 from .sql_endpoint import SqlEndpointExecutor
-from .tsql import TSqlExecutor
+from .tsql import TSqlBatchExecutor, TSqlExecutor
 
 
 def default_executors() -> dict[str, ActionExecutor]:
@@ -37,6 +37,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
+        TSqlBatchExecutor.name: TSqlBatchExecutor(),
         AliasExecutor.name: AliasExecutor(),
         SqlEndpointExecutor.name: SqlEndpointExecutor(),
     }
@@ -54,5 +55,6 @@ __all__ = [
     "SqlEndpointExecutor",
     "FolderExecutor",
     "TSqlExecutor",
+    "TSqlBatchExecutor",
     "default_executors",
 ]

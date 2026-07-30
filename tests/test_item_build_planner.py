@@ -218,14 +218,17 @@ def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
         for _s, _b, action in bundle.plan.actions()
         if action.kind == "create_alias"
     )
-    assert alias.executor == "tsql"
-    assert alias.resource_node_id == "alias:Warehouse/Reporting/Sales.PortableCustomer"
-    payload = store.read(bundle.location.join(*alias.payload.split("/"))).decode()
-    assert "drop view if exists [Sales].[PortableCustomer];" in payload
-    assert (
-        "create view [Sales].[PortableCustomer] as select * from "
-        "[Curated_Dev].[Sales].[Customer];" in payload
+    # One action for the item's aliases, and each statement its own batch —
+    # T-SQL will not accept a CREATE VIEW that is not first in its batch.
+    assert alias.executor == "tsql_batch"
+    assert alias.id == "aliases-Warehouse--Reporting"
+    statements = json.loads(
+        store.read(bundle.location.join(*alias.payload.split("/"))).decode()
     )
+    assert statements == [
+        "create or alter view [Sales].[PortableCustomer] as select * from "
+        "[Curated_Dev].[Sales].[Customer];"
+    ]
     assert not bundle.plan.omitted_nodes or all(
         node.reason != "alias_unsupported" for node in bundle.plan.omitted_nodes
     )
@@ -261,7 +264,8 @@ def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
     frozen = json.loads(
         store.read(bundle.location.join(*alias.payload.split("/"))).decode()
     )
-    assert frozen == {
+    assert len(frozen["aliases"]) == 1
+    assert frozen["aliases"][0] == {
         "alias": "Lakehouse/Curated/Sales.Landed",
         "area": "Tables",
         "object": "Landed",
@@ -296,7 +300,7 @@ def test_an_alias_is_materialised_before_the_documents_that_use_it(tmp_path):
     assert (
         at["object-Lakehouse--Curated--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Curated"]
-        < at["alias-Warehouse--Reporting--Sales.PortableCustomer"]
+        < at["aliases-Warehouse--Reporting"]
         < at["object-Warehouse--Reporting--Sales.Customer"]
     )
 
@@ -320,7 +324,7 @@ def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
     }
     assert (
         at["schema-Warehouse--Reporting-Sales"]
-        < at["alias-Warehouse--Reporting--Sales.PortableCustomer"]
+        < at["aliases-Warehouse--Reporting"]
     )
 
 

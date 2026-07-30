@@ -88,9 +88,8 @@ def plan_item_aliases(
     if not aliases:
         return ItemAliasPlan()
 
-    payloads: dict[str, bytes] = {}
-    actions: list[BuildAction] = []
     omitted: list[OmittedNode] = []
+    supported: list[tuple] = []
     schemas: list[str] = []
 
     for alias in aliases:
@@ -105,12 +104,16 @@ def plan_item_aliases(
                 )
             )
             continue
-        action = _alias_action(alias, target=target, source_target=source_target, payloads=payloads)
-        actions.append(action)
+        supported.append((alias, source_target))
         schemas.append(alias.destination.object_id.schema)
 
     stage = None
-    if actions:
+    if supported:
+        item_slug = _slug(item)
+        payloads: dict[str, bytes] = {}
+        action = _alias_action(
+            supported, item=item, target=target, payloads=payloads
+        )
         stage = PlannedStage(
             phase=ALIAS,
             slug="item-aliases",
@@ -118,9 +121,9 @@ def plan_item_aliases(
             payloads=payloads,
             batches=(
                 BuildBatch(
-                    id=f"item-aliases-{_slug(item)}",
+                    id=f"item-aliases-{item_slug}",
                     target_id=target.id,
-                    actions=tuple(actions),
+                    actions=(action,),
                 ),
             ),
         )
@@ -153,33 +156,58 @@ def _unsupported(alias, *, target: BoundTarget, source_target: BoundTarget | Non
 
 
 def _alias_action(
-    alias,
+    supported,
     *,
+    item: WeaverItemId,
     target: BoundTarget,
-    source_target: BoundTarget,
     payloads: dict[str, bytes],
 ) -> BuildAction:
-    action_slug = _slug(alias.destination)
+    """One action for all of this item's aliases.
+
+    One rather than one-per-alias, because materialising an alias is not
+    instantaneous and the cost is per *wait*, not per create. A Lakehouse alias
+    becomes usable some seconds after the shortcut exists (measured at 6–31s), so
+    N actions run serially pay N waits while one action that creates everything and
+    then waits pays roughly one. A Warehouse alias is a script, and the executor
+    already runs a multi-statement script as one unit.
+
+    The action reports each alias it made in its details, so the manifest loses no
+    traceability by grouping them.
+    """
+
+    item_slug = _slug(item)
     if target.kind == WAREHOUSE_TARGET:
-        content = _view_script(alias, source_target).encode("utf-8")
-        filename = f"alias-{action_slug}.sql"
-        executor = "tsql"
+        content = (
+            json.dumps(
+                [
+                    _view_statement(alias, source_target)
+                    for alias, source_target in supported
+                ],
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        filename = f"aliases-{item_slug}.tsql-batch.json"
+        executor = "tsql_batch"
     else:
-        content = _shortcut_payload(alias, target=target, source_target=source_target)
-        filename = f"alias-{action_slug}.alias.json"
+        content = _shortcut_payload(supported, target=target)
+        filename = f"aliases-{item_slug}.alias.json"
         executor = "alias"
     payloads[filename] = content
     return BuildAction(
-        id=f"alias-{action_slug}",
+        id=f"aliases-{item_slug}",
         kind=CREATE_ALIAS,
-        resource_node_id=alias_node_id(alias.destination),
+        # No single resource: this action stands for every alias the item
+        # consumes, and the payload names them.
+        resource_node_id=None,
         executor=executor,
         payload=filename,
         payload_sha256=sha256_hex(content),
     )
 
 
-def _view_script(alias, source_target: BoundTarget) -> str:
+def _view_statement(alias, source_target: BoundTarget) -> str:
     """A Warehouse alias, as the one statement that makes it exist.
 
     The source is named by its bound item's three-part spelling, which is how a
@@ -187,10 +215,13 @@ def _view_script(alias, source_target: BoundTarget) -> str:
     here for the same reason an authored three-part reference is: it is the
     semantic decision, not transport.
 
-    Dropped first rather than created strictly. An alias holds no data — it is a
-    pointer — so replacing one is not a destructive transition needing proof of
-    prior state, and a build that could not re-run over its own aliases would not
-    be re-runnable at all.
+    ``CREATE OR ALTER`` rather than a drop and a create. An alias holds no data —
+    it is a pointer — so replacing one is not a destructive transition needing
+    proof of prior state, and a build that could not run twice over its own
+    aliases would not be re-runnable at all. It is also the only *single-statement*
+    way to say that, and T-SQL requires ``CREATE VIEW`` to be the first statement
+    in its batch: ``drop …; create view …;`` in one batch is rejected outright,
+    which is exactly how this was found.
     """
 
     schema = _tsql_ident(alias.destination.object_id.schema)
@@ -203,32 +234,33 @@ def _view_script(alias, source_target: BoundTarget) -> str:
             alias.source.object_id.object,
         )
     )
-    return (
-        f"drop view if exists {schema}.{name};\n"
-        f"create view {schema}.{name} as select * from {source};\n"
-    )
+    return f"create or alter view {schema}.{name} as select * from {source};"
 
 
-def _shortcut_payload(alias, *, target: BoundTarget, source_target: BoundTarget) -> bytes:
-    """A Lakehouse alias, as the frozen pair of addresses it stands for.
+def _shortcut_payload(supported, *, target: BoundTarget) -> bytes:
+    """This item's Lakehouse aliases, as the frozen pairs of addresses they stand for.
 
-    Named by target id rather than by resolved path: the installer already
-    resolves every target the plan declares through its own environment, so the
+    Each is named by target id rather than by resolved path: the installer already
+    resolves every target the plan declares through its own environment, so a
     source is addressed exactly as the destination is, and a bundle carries no
     path from the machine that wrote it.
     """
 
-    area = FILES_AREA if alias.destination.is_files else TABLES_AREA
     mapping = {
-        "alias": str(alias.destination),
-        "source": str(alias.source),
-        "source_target_id": source_target.id,
-        "area": area,
-        "schema": alias.destination.object_id.schema,
-        "object": alias.destination.object_id.object,
-        "source_area": FILES_AREA if alias.source.is_files else TABLES_AREA,
-        "source_schema": alias.source.object_id.schema,
-        "source_object": alias.source.object_id.object,
+        "aliases": [
+            {
+                "alias": str(alias.destination),
+                "source": str(alias.source),
+                "source_target_id": source_target.id,
+                "area": FILES_AREA if alias.destination.is_files else TABLES_AREA,
+                "schema": alias.destination.object_id.schema,
+                "object": alias.destination.object_id.object,
+                "source_area": FILES_AREA if alias.source.is_files else TABLES_AREA,
+                "source_schema": alias.source.object_id.schema,
+                "source_object": alias.source.object_id.object,
+            }
+            for alias, source_target in supported
+        ]
     }
     return (json.dumps(mapping, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
         "utf-8"

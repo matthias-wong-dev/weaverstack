@@ -279,7 +279,7 @@ def test_the_consumer_items_whole_group_ran_after_the_producers(alias_estate):
     assert (
         at["object-Lakehouse--Raw--DWG.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["alias-Lakehouse--Curated--DWG.PortableCustomer"]
+        < at["aliases-Lakehouse--Curated"]
         < at["object-Lakehouse--Curated--DWG.CustomerName"]
     )
 
@@ -398,7 +398,7 @@ def test_the_producers_endpoint_is_refreshed_before_the_warehouse_alias(
     assert (
         at["object-Lakehouse--Raw--DWG.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["alias-Warehouse--Reporting--Rpt.PortableCustomer"]
+        < at["aliases-Warehouse--Reporting"]
         < at["object-Warehouse--Reporting--Rpt.CustomerReport"]
     )
 

@@ -64,38 +64,49 @@ class AliasExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"alias action {action.id!r} has no payload")
-        frozen = json.loads(payload.decode("utf-8"))
-        source = context.resolved(frozen["source_target_id"])
+        frozen = json.loads(payload.decode("utf-8"))["aliases"]
+        if not frozen:
+            return {"aliases": []}
 
         shortcut = getattr(context.resolver, "create_onelake_shortcut", None)
-        if shortcut is not None:
-            details = shortcut(
-                context.target.lakehouse,
-                path=f"{frozen['area']}/{frozen['schema']}",
-                name=frozen["object"],
-                source=source.lakehouse,
-                source_path=(
-                    f"{frozen['source_area']}/{frozen['source_schema']}"
-                    f"/{frozen['source_object']}"
-                ),
-            )
-            details = {
-                "alias": frozen["alias"],
-                "source": frozen["source"],
-                **(details or {}),
-            }
-            if frozen["area"] != FILES_AREA and context.spark is not None:
-                details["addressable_after_seconds"] = self._await_addressable(
-                    context, frozen
-                )
-            return details
-
         link = getattr(context.store, "link", None)
-        if link is None:
+        if shortcut is None and link is None:
             raise InstallError(
                 f"alias action {action.id!r} cannot be materialised here: this "
                 "environment offers neither a OneLake shortcut nor a store link"
             )
+
+        made = []
+        for each in frozen:
+            source = context.resolved(each["source_target_id"])
+            if shortcut is not None:
+                made.append(self._shortcut(shortcut, each, context, source))
+            else:
+                made.append(self._link(link, each, context, source))
+
+        details: dict[str, Any] = {"aliases": made}
+        # Every shortcut is created before anything waits, so the cost is one
+        # discovery window rather than one per alias.
+        if shortcut is not None and context.spark is not None:
+            waited = self._await_addressable(context, frozen)
+            if waited is not None:
+                details["addressable_after_seconds"] = waited
+        return details
+
+    def _shortcut(self, shortcut, frozen: dict, context, source) -> dict:
+        made = shortcut(
+            context.target.lakehouse,
+            path=f"{frozen['area']}/{frozen['schema']}",
+            name=frozen["object"],
+            source=source.lakehouse,
+            source_path=(
+                f"{frozen['source_area']}/{frozen['source_schema']}"
+                f"/{frozen['source_object']}"
+            ),
+        )
+        return {"alias": frozen["alias"], "source": frozen["source"], **(made or {})}
+
+    def _link(self, link, frozen: dict, context, source) -> dict:
         destination = _location(context.target, frozen, context, source=False)
         producer = _location(source, frozen, context, source=True)
         if not context.store.exists(producer):
@@ -106,7 +117,7 @@ class AliasExecutor:
         if context.store.exists(destination):
             context.store.delete(destination, recursive=True)
         link(producer, destination)
-        details = {
+        made = {
             "alias": frozen["alias"],
             "source": frozen["source"],
             "linked": destination.value,
@@ -121,41 +132,55 @@ class AliasExecutor:
                 context.spark,
                 enabled=catalogue.destination.preserve_table_identifier_case,
             ):
-                details["registered"] = catalogue.register_external_table(
+                made["registered"] = catalogue.register_external_table(
                     frozen["schema"], frozen["object"], destination.value
                 )
-        return details
+        return made
 
-    def _await_addressable(self, context: InstallationContext, frozen: dict) -> float:
-        """Wait until a statement in this destination can actually read the alias.
+    def _await_addressable(self, context: InstallationContext, frozen: list) -> float | None:
+        """Wait until every table alias just created can actually be read.
 
         The probe is a read, not a catalogue lookup, because the catalogue is the
         thing that is briefly wrong: Fabric reports the shortcut's metadata
         location while still refusing it as a relation. Only a read that succeeds
         proves the alias is usable, and a read is what the next action does.
+
+        All of them are waited on together, so several aliases cost one discovery
+        window instead of one each.
         """
 
         catalogue = context.catalogue
-        qualified = catalogue.qualify(frozen["schema"], frozen["object"])
+        pending = {
+            each["alias"]: catalogue.qualify(each["schema"], each["object"])
+            for each in frozen
+            if each["area"] != FILES_AREA
+        }
+        if not pending:
+            return None
+
         started = time.monotonic()
         deadline = started + ADDRESSABLE_TIMEOUT
         failure: Exception | None = None
-        while True:
-            try:
-                with exact_identifier_case(
-                    context.spark,
-                    enabled=catalogue.destination.preserve_table_identifier_case,
-                ):
-                    context.spark.sql(f"SELECT * FROM {qualified} LIMIT 0").collect()
-                return round(time.monotonic() - started, 1)
-            except Exception as exc:  # discovery has not caught up — or never will
-                failure = exc
+        while pending:
+            for alias, qualified in list(pending.items()):
+                try:
+                    with exact_identifier_case(
+                        context.spark,
+                        enabled=catalogue.destination.preserve_table_identifier_case,
+                    ):
+                        context.spark.sql(f"SELECT * FROM {qualified} LIMIT 0").collect()
+                    del pending[alias]
+                except Exception as exc:  # not discovered yet — or never will be
+                    failure = exc
+            if not pending:
+                break
             if time.monotonic() >= deadline:
                 raise InstallError(
-                    f"alias {frozen['alias']} was created but did not become "
-                    f"readable within {int(ADDRESSABLE_TIMEOUT)}s: {failure}"
+                    f"alias(es) {', '.join(sorted(pending))} were created but did "
+                    f"not become readable within {int(ADDRESSABLE_TIMEOUT)}s: {failure}"
                 ) from failure
             time.sleep(ADDRESSABLE_POLL_INTERVAL)
+        return round(time.monotonic() - started, 1)
 
 
 def _location(

@@ -129,7 +129,7 @@ therefore made by the planner:
 | Destination | Materialisation |
 |---|---|
 | Lakehouse | a `create_alias` action — a OneLake shortcut in Fabric, a filesystem link plus catalogue registration in the emulator |
-| Warehouse | a frozen view over the bound source's three-part name |
+| Warehouse | a frozen `CREATE OR ALTER VIEW` over the bound source's three-part name |
 
 Only the Warehouse form is spelled out in SQL, because there the statement *is*
 the semantic decision. A shortcut and a link are two transports for one frozen
@@ -148,13 +148,21 @@ a build must not prune the shortcut or view it is about to create. An alias hold
 no data, so materialisation replaces rather than colliding: a build has to be able
 to run twice.
 
+**One action materialises all of an item's aliases.** The cost of an alias is not
+the create — that is about a second — but the wait after it, so N actions running
+serially would pay N waits where one action that creates everything and then waits
+pays roughly one. For a Warehouse the statements go in an ordered array run through
+`tsql_batch`, one batch each, because T-SQL requires `CREATE VIEW` to be the first
+statement in its batch and will reject two of them sharing one.
+
 **An alias action is not finished until the alias can be read.** Fabric creates a
 shortcut synchronously and discovers it asynchronously, and in between the
 Lakehouse reports the name as neither a view nor a table. The action therefore
 polls a real read of the alias before returning. Without that wait the barrier the
 plan puts around the alias means nothing, and the failure surfaces in the next
 item's DDL instead — which is where it did surface, in Fabric, before the wait
-existed.
+existed. Measured against a real workspace, the shortcut exists in about a second
+and becomes readable 6–31 seconds later.
 
 ## 5. Target inventory
 

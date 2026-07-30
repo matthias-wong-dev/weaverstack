@@ -23,6 +23,8 @@ DESTINATION_TARGET_ID = "Lakehouse-Curated--lakehouse-Curated_Dev"
 
 
 def _payload(**overrides) -> bytes:
+    """One alias, in the batched shape the action now carries."""
+
     mapping = {
         "alias": "Lakehouse/Curated/Sales.Landed",
         "source": "Lakehouse/Raw/Sales.Customer",
@@ -35,7 +37,7 @@ def _payload(**overrides) -> bytes:
         "source_object": "Customer",
     }
     mapping.update(overrides)
-    return json.dumps(mapping).encode("utf-8")
+    return json.dumps({"aliases": [mapping]}).encode("utf-8")
 
 
 def _target(target_id: str, item: str) -> ResolvedTarget:
@@ -47,11 +49,11 @@ def _target(target_id: str, item: str) -> ResolvedTarget:
 
 def _action() -> BuildAction:
     return BuildAction(
-        id="alias-Lakehouse--Curated--Sales.Landed",
+        id="aliases-Lakehouse--Curated",
         kind=CREATE_ALIAS,
-        resource_node_id="alias:Lakehouse/Curated/Sales.Landed",
+        resource_node_id=None,
         executor="alias",
-        payload="alias.alias.json",
+        payload="aliases-Lakehouse--Curated.alias.json",
         payload_sha256="0" * 64,
     )
 
@@ -86,7 +88,7 @@ def test_a_local_alias_links_the_destination_to_the_source_table(tmp_path):
     assert linked.path.is_symlink()
     assert linked.path.resolve() == produced.path.resolve()
     assert store.read(linked / "_delta_log" / "00.json") == b"{}"
-    assert details["alias"] == "Lakehouse/Curated/Sales.Landed"
+    assert details["aliases"][0]["alias"] == "Lakehouse/Curated/Sales.Landed"
 
 
 def test_a_local_alias_replaces_one_that_is_already_there(tmp_path):
@@ -144,13 +146,19 @@ def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
 
 
 class _ShortcutResolver:
-    """A resolver that can make a shortcut, as the Fabric ones can."""
+    """A resolver that can make a shortcut, as the Fabric ones can.
 
-    def __init__(self):
+    ``events`` is shared with the fake session so a test can prove the ordering
+    between creating shortcuts and reading them.
+    """
+
+    def __init__(self, events=None):
         self.calls = []
+        self.events = events if events is not None else []
 
     def create_onelake_shortcut(self, item, *, path, name, source, source_path):
         self.calls.append((item.name, path, name, source.name, source_path))
+        self.events.append("create")
         return {"shortcut": f"{path}/{name}"}
 
 
@@ -163,8 +171,8 @@ def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
     assert resolver.calls == [
         ("Curated_Dev", "Tables/Sales", "Landed", "Raw_Dev", "Tables/Sales/Customer")
     ]
-    assert details["shortcut"] == "Tables/Sales/Landed"
-    assert details["source"] == "Lakehouse/Raw/Sales.Customer"
+    assert details["aliases"][0]["shortcut"] == "Tables/Sales/Landed"
+    assert details["aliases"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
 
 
 class _Conf:
@@ -186,13 +194,15 @@ class _LateSpark:
     nor a table.
     """
 
-    def __init__(self, failures: int):
+    def __init__(self, failures: int, events=None):
         self.remaining = failures
         self.statements: list[str] = []
         self.conf = _Conf()
+        self.events = events if events is not None else []
 
     def sql(self, statement):
         self.statements.append(statement)
+        self.events.append("read")
         if self.remaining > 0:
             self.remaining -= 1
             raise RuntimeError("requirement failed: it's neither a view nor a table")
@@ -284,6 +294,86 @@ def test_an_environment_with_neither_transport_says_so(tmp_path):
 
     with pytest.raises(InstallError, match="neither a OneLake shortcut nor a store link"):
         AliasExecutor().execute(_action(), _payload(), context)
+
+
+# --- several aliases, one action ----------------------------------------------
+
+
+def _two_aliases() -> bytes:
+    first = json.loads(_payload().decode())["aliases"][0]
+    second = dict(first, alias="Lakehouse/Curated/Sales.Second", object="Second")
+    return json.dumps({"aliases": [first, second]}).encode("utf-8")
+
+
+def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
+    """The cost of an alias is the wait, so the waits must not serialise.
+
+    Two aliases through one action means one discovery window, not two — which is
+    only true if both shortcuts exist before the first read is attempted.
+    """
+
+    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    events: list[str] = []
+    resolver = _ShortcutResolver(events=events)
+    spark = _LateSpark(failures=2, events=events)
+    context = _addressable_context(tmp_path, spark, resolver)
+
+    details = AliasExecutor().execute(_action(), _two_aliases(), context)
+
+    assert [detail["alias"] for detail in details["aliases"]] == [
+        "Lakehouse/Curated/Sales.Landed",
+        "Lakehouse/Curated/Sales.Second",
+    ]
+    # Every create precedes every read: two aliases, one discovery window.
+    creates = [index for index, event in enumerate(events) if event == "create"]
+    reads = [index for index, event in enumerate(events) if event == "read"]
+    assert len(creates) == 2 and reads
+    assert max(creates) < min(reads)
+
+
+def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
+    """T-SQL refuses a CREATE VIEW that is not first in its batch."""
+
+    from weaver.build_bundle.executors import TSqlBatchExecutor
+
+    class _Sql:
+        def __init__(self):
+            self.scripts = []
+
+        def execute_script(self, script):
+            self.scripts.append(script)
+
+    sql = _Sql()
+    context = InstallationContext(
+        spark=None,
+        resolver=None,
+        store=LocalStore(),
+        snapshot=Location("/tmp/snapshot"),
+        target=_target(DESTINATION_TARGET_ID, "Reporting_WH"),
+        sql=sql,
+    )
+    payload = json.dumps(
+        [
+            "create or alter view [Rpt].[A] as select 1 as x;",
+            "create or alter view [Rpt].[B] as select 1 as x;",
+        ]
+    ).encode("utf-8")
+    action = BuildAction(
+        id="aliases-Warehouse--Reporting",
+        kind=CREATE_ALIAS,
+        resource_node_id=None,
+        executor="tsql_batch",
+        payload="aliases.tsql-batch.json",
+        payload_sha256="0" * 64,
+    )
+
+    details = TSqlBatchExecutor().execute(action, payload, context)
+
+    assert details == {"statements": 2}
+    assert sql.scripts == [
+        "create or alter view [Rpt].[A] as select 1 as x;",
+        "create or alter view [Rpt].[B] as select 1 as x;",
+    ]
 
 
 # --- the endpoint refresh ----------------------------------------------------
