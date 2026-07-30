@@ -227,13 +227,13 @@ tenant; these names are neither product behaviour nor tenant-specific, and every
 one is overridable by environment variable, so another tenant runs the suite by
 exporting its own.
 
-Fixed items buy two things that generated ones cannot. They remove the
-*variance*: creating an item is quick, but waiting for its SQL endpoint to
-provision is not bounded — the harness tolerates ten minutes for a Warehouse —
-and a fixed item's endpoint already exists. And they stop the suite churning
-workspace artifacts underneath a long-lived Spark session, which is a documented
-cause of Fabric's namespace resolver intermittently reporting `Artifact not
-found` for an item that demonstrably exists.
+Fixed items remove *variance*, not time — and the distinction was learned the
+hard way, having been claimed twice before it was measured. Provisioning cost
+about seven seconds in a twenty-four minute run. What reuse removes is the tail
+risk (an endpoint wait that is unbounded, and which the harness tolerates ten
+minutes for) and the artifact churn that makes Fabric's namespace resolver
+intermittently report `Artifact not found` for an item that demonstrably exists.
+The suite's real cost is bundle generate/install round trips through Livy.
 
 Item *lifecycle* cover — creating and deleting Lakehouses — is marked
 `provisioning` and opted into separately from `fabric`. It exercises Fabric's

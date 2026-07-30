@@ -32,13 +32,20 @@ waits for capacity.
 ## Provision the fixed estate, once
 
 The suite reuses a fixed set of items rather than creating disposable ones per
-run. Creating an item is quick — a Lakehouse in about two seconds — but waiting
-for its **SQL endpoint** to provision is not bounded, and the harness tolerates
-up to ten minutes for a Warehouse. A fixed item's endpoint already exists, so
-that variance leaves the measurement entirely. Reusing items also stops the suite
-churning workspace artifacts underneath a long-lived Spark session, which makes
-Fabric's namespace resolver intermittently report `Artifact not found` for an
-item that is plainly there.
+run.
+
+**This is not a speed-up, and it is worth being exact about that.** Measured, item
+provisioning was about seven seconds in a twenty-four minute run: a Lakehouse
+takes ~2s and a Warehouse's endpoint answered in 0.45s. What reuse removes is the
+*tail* — that endpoint wait is unbounded and the harness tolerates ten minutes for
+it, so 0.45s was luck rather than a budget — and the artifact churn that makes
+Fabric's namespace resolver intermittently report `Artifact not found` for an item
+that is plainly there.
+
+The run's time is dominated by something else entirely: nine bundle
+generate/install round trips through Livy, most installs 75–123s, roughly twenty
+of the thirty-two minutes. If you want the suite meaningfully faster, that is the
+lever — fewer full build cycles, not fewer items.
 
 Create these once, in the workspace you will point the suite at:
 
@@ -65,9 +72,15 @@ catalogue lives in a schema called `_`.
 whole estate builds in about fifteen seconds.
 
 Isolation comes from **emptying** these between runs, not from replacing them.
-That is the same reconciliation the build itself performs, so the cleaning path
-is exercised rather than bypassed — but it does mean residue is possible here in
-a way it never is locally, where every target is a fresh temporary directory.
+That is the same reconciliation the build itself performs, so the cleaning path is
+exercised rather than bypassed — but it does mean residue is possible here in a
+way it never is locally, where every target is a fresh temporary directory. And
+emptying is not free: it is part of why reuse did not make the suite faster.
+
+Residue is not inert, either. A producer whose table already matches is correctly
+*not* rebuilt, so a test asserting build order then finds no build action in the
+plan. `fabric_empty_lakehouse` exists for exactly that case; ask for it wherever
+freshness is the premise.
 
 ## Naming the estate
 

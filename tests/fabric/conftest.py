@@ -79,9 +79,51 @@ def fabric_client(fabric_workspace_item):
 
 
 def _disposable_name(role: str) -> str:
-    """A name no human would have chosen, so cleanup is unambiguous."""
+    """A name no human would have chosen, so cleanup is unambiguous.
+
+    Still used by the ``provisioning`` tests, whose subject *is* creating and
+    deleting items.
+    """
 
     return f"{TEST_PREFIX}_{role}_{uuid.uuid4().hex[:8]}"
+
+
+#: The estate the suite expects to already exist, by role. Fixed rather than
+#: generated because creating an item is quick but waiting for its SQL endpoint
+#: to provision is not bounded — and a reused item's endpoint is already there.
+#: Reuse also stops the suite churning workspace artifacts underneath a
+#: long-lived Spark session, which Fabric's namespace resolver reacts badly to.
+#:
+#: Every name is overridable, so another tenant runs the suite against its own.
+FIXED_ITEMS = {
+    "weaver": "PYTEST_WEAVER",
+    "target": "PYTEST_LH_1",
+    "producer": "PYTEST_LH_2",
+    "consumer": "PYTEST_LH_3",
+    "warehouse_producer": "PYTEST_HOUSE",
+    "warehouse": "PYTEST_WH_1",
+}
+
+
+def _fixed_name(role: str) -> str:
+    return os.environ.get(f"WEAVER_PYTEST_{role.upper()}", FIXED_ITEMS[role])
+
+
+def _ensure_lakehouse(client, workspace, role: str):
+    """The fixed Lakehouse for a role, created if this tenant has not got it yet.
+
+    Self-healing rather than a precondition, so a first run against a new
+    workspace works without a provisioning ritual — and so a run is never left
+    guessing whether an absent item is a setup mistake or a test failure.
+    """
+
+    from weaver.fabric.resources import LAKEHOUSE, find_item
+
+    name = _fixed_name(role)
+    try:
+        return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
+    except Exception:
+        return _create_schema_enabled_lakehouse(client, workspace, name)
 
 
 def _warehouse_name() -> str:
@@ -142,59 +184,33 @@ def fabric_lakehouses(fabric_workspace_item, fabric_client):
 
 @pytest.fixture(scope="session")
 def fabric_weaver_lakehouse(fabric_workspace_item, fabric_client):
-    """One Lakehouse standing in as the Weaver Lakehouse for the whole run.
+    """The fixed Lakehouse standing in as the Weaver Lakehouse for the run.
 
-    The Livy session is created against it; Weaver itself comes from the
-    attached Environment, not from here.
+    The Livy session is created against it; Weaver itself comes from the attached
+    Environment, not from here.
 
     **Schema-enabled**, because the catalogue lives in a schema called ``_`` and a
-    Lakehouse without schemas cannot hold one. Also because there is exactly one of
-    these per run: production has one Weaver Lakehouse for the life of a session,
-    and a suite that made a new one per test would be modelling something else.
+    Lakehouse without schemas cannot hold one. **Reused, not recreated** — which is
+    also the more faithful arrangement: production has one Weaver Lakehouse for the
+    life of a session, and its catalogue is meant to persist. ``initialise`` is
+    idempotent, so an existing catalogue reconciles rather than collides.
     """
 
-    from weaver.fabric import delete_item
-
-    item = _create_schema_enabled_lakehouse(
-        fabric_client, fabric_workspace_item, _disposable_name("home")
-    )
-    try:
-        yield item
-    finally:
-        try:
-            delete_item(item, client=fabric_client)
-        except Exception as exc:
-            print(f"warning: could not delete {item}: {exc}")
+    return _ensure_lakehouse(fabric_client, fabric_workspace_item, "weaver")
 
 
 @pytest.fixture(scope="session")
 def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
-    """One disposable destination Lakehouse for the whole run.
+    """The fixed destination Lakehouse for the run.
 
-    Created **before** the Livy session, and never re-created. A Lakehouse made
-    after a session has started is addressable — that was checked directly, and it
-    works — but a run that creates and deletes one per test churns the workspace's
-    artifacts underneath a long-lived session, and Fabric's namespace resolver
-    then intermittently reports `Artifact not found` for a Lakehouse that demonstrably
-    exists.
-
-    So nothing is re-provisioned and isolation comes from cleaning up instead —
-    which is what the local context has always done, and what a real installation
-    does: you do not get a new Lakehouse per build.
+    Isolation comes from **emptying** it on the way into each build context
+    (``_empty_the_target``) rather than from replacing it. That is the same
+    reconciliation a build performs, so the cleaning path is exercised rather than
+    bypassed — and it is what a real installation looks like, since you do not get
+    a new Lakehouse per build.
     """
 
-    from weaver.fabric import delete_item
-
-    item = _create_schema_enabled_lakehouse(
-        fabric_client, fabric_workspace_item, _disposable_name("target")
-    )
-    try:
-        yield item
-    finally:
-        try:
-            delete_item(item, client=fabric_client)
-        except Exception as exc:
-            print(f"warning: could not delete {item}: {exc}")
+    return _ensure_lakehouse(fabric_client, fabric_workspace_item, "target")
 
 
 #: The roles a cross-item alias run needs its own Lakehouses for.
@@ -211,28 +227,21 @@ ALIAS_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
 
 @pytest.fixture(scope="session")
 def fabric_alias_lakehouses(fabric_workspace_item, fabric_client):
-    """Disposable destination Lakehouses for the cross-item alias runs, by role.
+    """The fixed Lakehouses a cross-item alias run needs, by role.
 
-    Session-scoped and created before the Livy session for the same reason
-    ``fabric_target_lakehouse`` is — see its note on churning artifacts underneath
-    a long-lived session — and only instantiated when a test asks for them.
+    A producer and a consumer, because a cross-item alias is the one thing a
+    single destination cannot express — there has to be something to point across
+    to. And a *second* producer for the Warehouse case, because sharing one would
+    leave that estate building into a Lakehouse the Lakehouse estate had already
+    built: the producer's table would be unchanged, incremental selection would
+    correctly emit no work and no endpoint refresh for it, and the ordering that
+    test is about would not be in the plan at all.
     """
 
-    from weaver.fabric import delete_item
-
-    made: dict[str, Any] = {}
-    try:
-        for role in ALIAS_LAKEHOUSE_ROLES:
-            made[role] = _create_schema_enabled_lakehouse(
-                fabric_client, fabric_workspace_item, _disposable_name(role)
-            )
-        yield made
-    finally:
-        for item in made.values():
-            try:
-                delete_item(item, client=fabric_client)
-            except Exception as exc:
-                print(f"warning: could not delete {item}: {exc}")
+    return {
+        role: _ensure_lakehouse(fabric_client, fabric_workspace_item, role)
+        for role in ("producer", "consumer", "warehouse_producer")
+    }
 
 
 @pytest.fixture(scope="session")
@@ -325,29 +334,43 @@ class DisposableWarehouse:
 
 @pytest.fixture(scope="session")
 def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace):
-    """Create, await, expose, and always delete one disposable Warehouse per session.
+    """The fixed Warehouse for the run, found or created, and never deleted.
 
-    A Warehouse takes minutes to provision, so it is shared across a session's
-    tests rather than recreated per test."""
+    Named ``disposable`` for history: its contents are, its existence is not.
+    Creating a Warehouse is quick, but waiting for its SQL endpoint to become
+    connectable is not bounded — the loop below tolerates ten minutes — and that
+    wait is pure variance in every measurement the suite takes. A Warehouse that
+    already exists has already paid it.
+
+    The readiness loops stay, because a *first* run on a new tenant creates the
+    Warehouse and must still wait. They simply cost nothing on the runs after.
+    """
 
     from weaver import WarehouseTarget
     from weaver.fabric import (
         FabricResolver,
+        WAREHOUSE,
         create_warehouse,
-        delete_item,
         desktop_sql_executor,
+        find_item,
     )
 
     started = time.monotonic()
     timings: dict[str, float] = {}
-    item = None
     executor = None
-    name = _warehouse_name()
+    name = _fixed_name("warehouse")
     try:
         stage = time.monotonic()
-        item = create_warehouse(fabric_workspace_item, name, client=fabric_client)
-        timings["item creation"] = time.monotonic() - stage
-        print(f"Warehouse {name} item creation: {timings['item creation']:.2f}s")
+        try:
+            item = find_item(
+                fabric_workspace_item, name, item_type=WAREHOUSE, client=fabric_client
+            )
+            timings["item creation"] = 0.0
+            print(f"Warehouse {name}: reused")
+        except Exception:
+            item = create_warehouse(fabric_workspace_item, name, client=fabric_client)
+            timings["item creation"] = time.monotonic() - stage
+            print(f"Warehouse {name} item creation: {timings['item creation']:.2f}s")
 
         target = WarehouseTarget.parse(name)
         deadline = time.monotonic() + WAREHOUSE_READY_TIMEOUT
@@ -423,21 +446,39 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
     finally:
         if executor is not None:
             executor.close()
-        if item is not None:
-            deletion_started = time.monotonic()
-            try:
-                delete_item(item, client=fabric_client)
-                deletion = time.monotonic() - deletion_started
-                total = time.monotonic() - started
-                print(
-                    f"Warehouse {name} deletion: {deletion:.2f}s; "
-                    f"total fixture lifetime: {total:.2f}s"
-                )
-            except Exception as exc:
-                print(
-                    f"warning: leaked Warehouse {name!r} ({item.id}); "
-                    f"cleanup failed: {exc}"
-                )
+        print(
+            f"Warehouse {name} kept; total fixture lifetime: "
+            f"{time.monotonic() - started:.2f}s"
+        )
+
+
+@pytest.fixture(scope="session")
+def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
+    """Empty one fixed Lakehouse, leaving it as though nothing had been built.
+
+    Reusing items makes residue possible in a way disposable ones never allowed,
+    and residue is not inert. A producer whose table already matches leaves
+    incremental selection with nothing to do — correctly — so a test asserting
+    *build order* then finds no build action in the plan at all. That is not a
+    hypothetical: it is exactly how the Warehouse alias tests failed when two
+    estates shared a producer.
+
+    So ask for this wherever freshness is the premise, and say so in the test.
+    """
+
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
+
+    resolver = FabricResolver(fabric_workspace, client=fabric_client)
+    store = OneLakeDfsClient()
+
+    def empty(name: str) -> None:
+        target = ItemRef(name)
+        _empty_the_target(
+            livy_session, store, resolver, target, resolver.spark_destination(target)
+        )
+
+    return empty
+
 
 @pytest.fixture(scope="module")
 def clean_disposable_warehouse(disposable_warehouse):

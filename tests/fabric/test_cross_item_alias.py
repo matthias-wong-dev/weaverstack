@@ -92,7 +92,7 @@ def _await_addressable_lakehouse(session, destination, *, attempts=40, pause=5.0
     )
 
 
-def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bindings):
+def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bindings, empty=None):
     """Push one repository, then generate **and** install it inside the session.
 
     Both phases run in Fabric because that is the product: the desktop only
@@ -108,8 +108,14 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
     resolver = FabricResolver(fabric_workspace, client=fabric_client)
     store = OneLakeDfsClient()
 
+    # Fixed Lakehouses carry whatever the last run left. Emptied here because
+    # every ordering assertion below presumes there is work to do: a producer
+    # whose table already matches is correctly not rebuilt, and then the build
+    # action the test looks for is simply not in the plan.
     for kind, name in bindings.values():
         if kind == "Lakehouse":
+            if empty is not None:
+                empty(name)
             _await_addressable_lakehouse(session, resolver.spark_destination(ItemRef(name)))
 
     root = resolver.weaver_items_root
@@ -187,7 +193,13 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
 
 
 @pytest.fixture(scope="module")
-def alias_estate(fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session):
+def alias_estate(
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    fabric_empty_lakehouse,
+    livy_session,
+):
     """Two Lakehouse items in one bundle, the second aliasing the first."""
 
     producer = fabric_alias_lakehouses["producer"]
@@ -201,6 +213,7 @@ def alias_estate(fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_
             PRODUCER: ("Lakehouse", producer.name),
             CONSUMER: ("Lakehouse", consumer.name),
         },
+        empty=fabric_empty_lakehouse,
     )
     return {**estate, "producer": producer, "consumer": consumer}
 
@@ -331,6 +344,7 @@ def warehouse_alias_estate(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
+    fabric_empty_lakehouse,
     clean_disposable_warehouse,
     livy_session,
 ):
@@ -355,6 +369,7 @@ def warehouse_alias_estate(
             PRODUCER: ("Lakehouse", producer.name),
             WAREHOUSE_CONSUMER: ("Warehouse", warehouse.item.name),
         },
+        empty=fabric_empty_lakehouse,
     )
     return {**estate, "producer": producer, "warehouse": warehouse}
 
