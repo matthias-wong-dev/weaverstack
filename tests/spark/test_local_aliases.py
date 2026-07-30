@@ -193,7 +193,7 @@ def test_the_alias_is_planned_after_the_producer_item_and_before_its_consumers(b
 
     assert (
         at["object-Lakehouse--Raw--DWG.Customer"]
-        < at["alias-Lakehouse--Curated--DWG.PortableCustomer"]
+        < at["aliases-Lakehouse--Curated"]
         < at["object-Lakehouse--Curated--DWG.CustomerName"]
     )
 
