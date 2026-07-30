@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ..errors import CommandError
+from ..lakehouse import FUSE_DEFAULT_ROOT
 from ..workspaces import FabricWorkspace
 from ..locations import Location
 from ..targets import ItemRef
@@ -70,6 +71,9 @@ class FabricSessionResolver(FabricResolver):
         self._credentials = credentials
         self.client = client
         self._items: dict[str, Item] = {}
+        #: The Lakehouse this session has attached, if any — the one item that is
+        #: also reachable as ordinary files. See :meth:`fuse_root`.
+        self._attached_id = str(_value(context, "defaultLakehouseId") or "")
 
     @property
     def workspace(self) -> Workspace:
@@ -119,6 +123,21 @@ class FabricSessionResolver(FabricResolver):
     def lakehouse(self, item: ItemRef) -> Location:
         resolved = self.resolve(item, item_type=LAKEHOUSE)
         return Location(abfss_root(self.workspace.id, resolved.id))
+
+    def fuse_root(self, item: ItemRef) -> str | None:
+        """``/lakehouse/default`` for this session's attachment, None otherwise.
+
+        The desktop resolver always answers None — it cannot mount anything. From
+        inside a session there is exactly one Lakehouse that ordinary file calls
+        reach, and this is the only resolver that can tell whether the item asked
+        about is that one. Anything else stays None rather than being handed a
+        mount that belongs to a different Lakehouse.
+        """
+
+        if not self._attached_id:
+            return None
+        resolved = self.resolve(item, item_type=LAKEHOUSE)
+        return FUSE_DEFAULT_ROOT if resolved.id == self._attached_id else None
 
     def sql_endpoint(self, target):
         self.client = self._rest_client()

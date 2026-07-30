@@ -25,13 +25,17 @@ class _LakehouseUtils:
         )
 
 
-def _runtime(name="Analytics"):
-    return SimpleNamespace(
-        context={
-            "currentWorkspaceName": name,
-            "currentWorkspaceId": "workspace-id",
-        }
-    )
+def _runtime(name="Analytics", attached: str | None = None):
+    context = {
+        "currentWorkspaceName": name,
+        "currentWorkspaceId": "workspace-id",
+    }
+    if attached is not None:
+        context["defaultLakehouseId"] = attached
+    return SimpleNamespace(context=context)
+
+
+ATTACHED_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def test_session_resolution_stays_in_the_current_workspace():
@@ -49,6 +53,72 @@ def test_session_resolution_stays_in_the_current_workspace():
         "11111111-1111-1111-1111-111111111111/Tables"
     )
     assert lakehouse.calls == [("Sales", "workspace-id")]
+
+
+class _NamedLakehouses:
+    """A workspace where each Lakehouse name has its own id."""
+
+    def get(self, name, *, workspaceId):
+        return SimpleNamespace(id=f"id-of-{name}", displayName=name)
+
+
+def test_only_the_attached_lakehouse_has_a_filesystem_root():
+    resolver = FabricSessionResolver(
+        FabricWorkspace(workspace="Analytics"),
+        runtime=_runtime(attached="id-of-Sales"),
+        lakehouse=_NamedLakehouses(),
+    )
+
+    assert resolver.fuse_root(ItemRef("Sales")) == "/lakehouse/default"
+    assert resolver.fuse_root(ItemRef("Other")) is None
+
+
+def test_a_session_with_nothing_attached_mounts_nothing():
+    resolver = FabricSessionResolver(
+        FabricWorkspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_NamedLakehouses(),
+    )
+
+    assert resolver.fuse_root(ItemRef("Sales")) is None
+
+
+def test_the_attached_lakehouse_resolves_to_both_of_its_roots():
+    """What ``lakehouse_for`` composes for authored code, inside a session."""
+
+    from weaver import lakehouse_for
+
+    resolver = FabricSessionResolver(
+        FabricWorkspace(workspace="Analytics"),
+        runtime=_runtime(attached="id-of-Sales"),
+        lakehouse=_NamedLakehouses(),
+    )
+
+    lakehouse = lakehouse_for(resolver, ItemRef("Sales"))
+
+    assert lakehouse.table_path("Sales", "Order") == (
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/"
+        "id-of-Sales/Tables/Sales/Order"
+    )
+    assert lakehouse.folder_path("Sales", "Export") == "/lakehouse/default/Files/Sales/Export"
+    assert lakehouse.qualify("Sales", "Order") == "`Analytics`.`Sales`.`Sales`.`Order`"
+
+
+def test_a_lakehouse_that_is_not_attached_is_reached_through_spark_only():
+    from weaver import lakehouse_for
+    from weaver.errors import LoadError
+
+    resolver = FabricSessionResolver(
+        FabricWorkspace(workspace="Analytics"),
+        runtime=_runtime(attached="id-of-Sales"),
+        lakehouse=_NamedLakehouses(),
+    )
+
+    lakehouse = lakehouse_for(resolver, ItemRef("Other"))
+
+    assert lakehouse.table_path("Sales", "Order").startswith("abfss://")
+    with pytest.raises(LoadError, match="no FUSE mount"):
+        lakehouse.folder_path("Sales", "Export")
 
 
 def test_session_resolution_refuses_a_different_configured_workspace():

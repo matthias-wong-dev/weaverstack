@@ -678,6 +678,11 @@ class BuildEnv:
     #: an absent schema is the answer a prune assertion wants and both workspaces raise
     #: for `SHOW TABLES` in one.
     run_schema_exists: Callable[[str], bool] = None
+    #: Python source, run wherever this environment runs, returning whatever it
+    #: ``emit``s. The namespace carries ``spark``, ``resolver`` and ``target``, so
+    #: one body serves both transports — the only way to exercise code that must
+    #: behave identically in a notebook and on a laptop.
+    run_python: Callable[[str], Any] = None
     #: The destination Lakehouse being built, and the Weaver Lakehouse holding the
     #: catalogue. Two, always — even the simplest install writes to both.
     destination: Any = None
@@ -909,6 +914,24 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     def schema_exists(qualified: str) -> bool:
         return bool(spark.catalog.databaseExists(qualified))
 
+    def run_python(body: str):
+        """Run a shared body in this process, against the local session.
+
+        The Fabric side sends the same text to a Livy session, where ``emit`` is
+        part of the bootstrap. Here it is a local closure, so a body written once
+        runs unchanged either side.
+        """
+
+        emitted = []
+        namespace = {
+            "spark": spark,
+            "resolver": resolver,
+            "target": target,
+            "emit": emitted.append,
+        }
+        exec(compile(body, "<shared body>", "exec"), namespace)
+        return emitted[-1] if emitted else None
+
     def seed_orphans() -> None:
         # Seeded *in the destination*, through the same addressing the build uses,
         # so what prune has to find is genuinely in the Lakehouse under test.
@@ -929,6 +952,7 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
             install=install, run_query=query, run_columns=columns,
             seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+            run_python=run_python,
             destination=destination, weaver_destination=weaver_destination,
         )
     finally:
@@ -1116,6 +1140,22 @@ def _fabric_build_context(
         body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
         return session.run(body).payload
 
+    def run_python(body: str):
+        """Run a shared body *in Fabric*, with the session's own resolver bound.
+
+        The preamble is the whole transport difference: ``resolver_for`` returns
+        the session-native resolver here and the local one on a laptop, so the
+        body that follows is byte-identical either side.
+        """
+
+        preamble = (
+            "from weaver import FabricWorkspace, ItemRef\n"
+            "from weaver.resolution import resolver_for\n"
+            f"resolver = resolver_for({_workspace_literal()})\n"
+            f"target = ItemRef({target.name!r})\n"
+        )
+        return _timed_session_run(session, "shared body", preamble + body).payload
+
     def seed_orphans() -> None:
         # Seeded in the *destination*, by its four-part name — the session is
         # attached to the Weaver Lakehouse, so an unqualified create here would
@@ -1143,6 +1183,7 @@ def _fabric_build_context(
         install_repo=install_repo, remove_repo=remove_repo, generate=generate,
         install=install, run_query=query, run_columns=columns,
         seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+        run_python=run_python,
         destination=destination, weaver_destination=weaver_destination,
     )
 
