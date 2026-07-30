@@ -197,31 +197,38 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
             print(f"warning: could not delete {item}: {exc}")
 
 
+#: The roles a cross-item alias run needs its own Lakehouses for.
+#:
+#: A producer and a consumer, because a cross-item alias is the one thing a single
+#: destination cannot express — there has to be something to point across to. And a
+#: *second* producer for the Warehouse case, because sharing one would leave that
+#: estate building into a Lakehouse the Lakehouse estate had already built: the
+#: producer's table would be unchanged, incremental selection would correctly emit
+#: no work and no endpoint refresh for it, and the ordering that test is about would
+#: not be in the plan at all. Cheaper to give it its own than to weaken the test.
+ALIAS_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
+
+
 @pytest.fixture(scope="session")
 def fabric_alias_lakehouses(fabric_workspace_item, fabric_client):
-    """Two disposable destination Lakehouses, for a cross-item alias.
+    """Disposable destination Lakehouses for the cross-item alias runs, by role.
 
-    Two, because a cross-item alias is the one thing a single destination cannot
-    express: the producer and the consumer have to be different physical items or
-    there is nothing to point across. Session-scoped and created before the Livy
-    session for the same reason ``fabric_target_lakehouse`` is — see its note on
-    churning artifacts underneath a long-lived session — and only instantiated when
-    a test asks for them.
+    Session-scoped and created before the Livy session for the same reason
+    ``fabric_target_lakehouse`` is — see its note on churning artifacts underneath
+    a long-lived session — and only instantiated when a test asks for them.
     """
 
     from weaver.fabric import delete_item
 
-    made = []
+    made: dict[str, Any] = {}
     try:
-        for role in ("producer", "consumer"):
-            made.append(
-                _create_schema_enabled_lakehouse(
-                    fabric_client, fabric_workspace_item, _disposable_name(role)
-                )
+        for role in ALIAS_LAKEHOUSE_ROLES:
+            made[role] = _create_schema_enabled_lakehouse(
+                fabric_client, fabric_workspace_item, _disposable_name(role)
             )
-        yield tuple(made)
+        yield made
     finally:
-        for item in made:
+        for item in made.values():
             try:
                 delete_item(item, client=fabric_client)
             except Exception as exc:

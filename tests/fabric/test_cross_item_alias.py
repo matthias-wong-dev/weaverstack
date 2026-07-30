@@ -190,7 +190,8 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
 def alias_estate(fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session):
     """Two Lakehouse items in one bundle, the second aliasing the first."""
 
-    producer, consumer = fabric_alias_lakehouses
+    producer = fabric_alias_lakehouses["producer"]
+    consumer = fabric_alias_lakehouses["consumer"]
     estate = _build_in_session(
         fabric_workspace,
         fabric_client,
@@ -341,7 +342,9 @@ def warehouse_alias_estate(
     endpoint has caught up with the table Spark just made.
     """
 
-    producer = fabric_alias_lakehouses[0]
+    # Its own producer: sharing the Lakehouse estate's would leave nothing for
+    # incremental selection to build, and the ordering below is the subject here.
+    producer = fabric_alias_lakehouses["warehouse_producer"]
     warehouse = clean_disposable_warehouse
     estate = _build_in_session(
         fabric_workspace,
@@ -441,7 +444,8 @@ def test_wiping_the_consumer_takes_the_shortcut_and_leaves_the_producer(
     from weaver.fabric import OneLakeDfsClient
     from weaver.fabric.shortcuts import list_shortcuts
 
-    producer, consumer = fabric_alias_lakehouses
+    producer = fabric_alias_lakehouses["producer"]
+    consumer = fabric_alias_lakehouses["consumer"]
     resolver = alias_estate["resolver"]
     store = OneLakeDfsClient()
     produced = resolver.tables_root(ItemRef(producer.name)) / "DWG" / "Customer"
