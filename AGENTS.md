@@ -219,6 +219,36 @@ API URLs, auth scopes, Livy version, timeouts, polling intervals, parallelism).
 This covers **examples, docstrings and test fixtures**, not just code paths. Use
 neutral item names — `Sales`, `Inventory`, `Reporting`.
 
+**One deliberate exception: the Fabric integration harness.** `tests/fabric`
+names a fixed workspace and a fixed set of items (`PYTEST_WORKSPACE`,
+`PYTEST_WEAVER`, `PYTEST_LH_*`, `PYTEST_WH_*`) rather than generating disposable
+ones. The rule exists so no *product* behaviour depends on a name from one
+tenant; these names are neither product behaviour nor tenant-specific, and every
+one is overridable by environment variable, so another tenant runs the suite by
+exporting its own.
+
+Fixed items remove *variance*, not time — and the distinction was learned the
+hard way, having been claimed twice before it was measured. Provisioning cost
+about seven seconds in a twenty-four minute run. What reuse removes is the tail
+risk (an endpoint wait that is unbounded, and which the harness tolerates ten
+minutes for) and the artifact churn that makes Fabric's namespace resolver
+intermittently report `Artifact not found` for an item that demonstrably exists.
+The suite's real cost is bundle generate/install round trips through Livy.
+
+Item *lifecycle* cover — creating and deleting Lakehouses — is marked
+`provisioning` and opted into separately from `fabric`. It exercises Fabric's
+resource management rather than Weaver's, changes rarely, and its create/delete
+churn would otherwise slow every run of the code actually under development.
+
+Isolation therefore comes from **emptying** an item rather than from having a new
+one. That is not a weaker guarantee, but it is a different one, so the cleaning
+path is load-bearing and asserted rather than assumed: residue is possible in
+Fabric in a way it never is locally, where a target is a fresh `tmp_path`
+directory costing a fraction of a millisecond. Local stays disposable for exactly
+that reason — copying the Fabric arrangement there would import a workaround for
+a provisioning cost that does not exist, which is contorting the emulator to
+match Fabric's *mechanics* rather than its *behaviour*.
+
 Weaver also has no opinion about data architecture: Folder, Delta and SQL are
 materialisation forms, not tiers. `T0`/`T1`/`T2` naming is house jargon and is
 rejected by `tests/test_neutrality.py`; widely-understood naming such as

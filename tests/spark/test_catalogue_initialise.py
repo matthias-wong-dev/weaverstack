@@ -228,17 +228,46 @@ def test_no_folder_rows_since_the_catalogue_has_no_folders(initialised, spark):
 def test_registry_is_published_before_the_local_control_refresh(initialised):
     numbers = [sequence.number for sequence in initialised.result.report.sequences]
     assert numbers == sorted(numbers)
-    assert numbers[-2:] == [9010, 9020]
-    statuses = {
-        sequence.number: sequence.status for sequence in initialised.result.report.sequences
+    # Sequence numbers describe the assembled plan now, so the barriers are named
+    # by what they are rather than by a reserved number.
+    descriptions = [
+        sequence.description for sequence in initialised.result.report.sequences
+    ]
+    assert descriptions[-2:] == [
+        "publish item registry last",
+        "refresh the Weaver Lakehouse SQL endpoint after catalogue DML",
+    ]
+    by_description = {
+        sequence.description: sequence
+        for sequence in initialised.result.report.sequences
     }
-    assert statuses[9010] == "succeeded"
-    assert statuses[9020] == "skipped"
-    assert all(
-        status == "succeeded"
-        for number, status in statuses.items()
-        if number != 9020
+    assert by_description["publish item registry last"].status == "succeeded"
+    # The emulator has no SQL analytics endpoint, so its refresh is explicitly
+    # skipped rather than pretended.
+    assert (
+        by_description[
+            "refresh the Weaver Lakehouse SQL endpoint after catalogue DML"
+        ].status
+        == "skipped"
     )
+    # Everything that was not a refresh really ran. Both refreshes are skipped:
+    # the built-in item's own, closing its Delta work, and the control plane's
+    # after catalogue DML — the emulator has no endpoint for either.
+    by_kind = {
+        "refresh": [
+            sequence
+            for sequence in initialised.result.report.sequences
+            if "refresh" in sequence.description
+        ],
+        "other": [
+            sequence
+            for sequence in initialised.result.report.sequences
+            if "refresh" not in sequence.description
+        ],
+    }
+    assert all(sequence.status == "succeeded" for sequence in by_kind["other"])
+    assert by_kind["refresh"]
+    assert all(sequence.status == "skipped" for sequence in by_kind["refresh"])
 
 
 def test_initialisation_has_no_undeclared_catalogue_objects_to_prune(initialised):

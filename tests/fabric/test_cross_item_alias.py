@@ -1,0 +1,478 @@
+"""Cross-item aliases, built for real in Fabric, in both forms.
+
+**Lakehouse to Lakehouse.** ``Lakehouse/Raw`` produces ``DWG.Customer``, and
+``Lakehouse/Curated`` aliases it and builds a view over that alias by its own local
+name. The alias is a OneLake shortcut.
+
+**Lakehouse to Warehouse.** The same producer, consumed by ``Warehouse/Reporting``
+through a T-SQL view over the Lakehouse's SQL analytics endpoint.
+
+This is the Fabric half of the multi-item build claim, and it is the half only a
+real workspace can answer. Three things exist nowhere else:
+
+**A OneLake shortcut is a workspace API call**, not a file operation, so the
+emulator's filesystem link proves nothing about it.
+
+**An alias has to be created after the object it points at exists**, which is what
+the item layers are for — and each consumer's whole group sits behind Raw's.
+
+**A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
+item that mutated Delta is closed by a refresh. The emulator has no endpoint and
+skips it, so the refresh itself is unexercised until here — and the Warehouse case
+is where it does the most work, because a Warehouse reads a Lakehouse *through*
+that endpoint.
+
+Fabric also turned out to create a shortcut synchronously and discover it
+asynchronously: the consumer's next statement failed with "neither a view nor a
+table" until the alias action learned to wait for a real read to succeed.
+
+The suite's own Weaver Lakehouse, Livy session and disposable Warehouse are
+reused; the two destination Lakehouses are disposable and are deleted when the run
+ends.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from weaver import ItemRef
+
+pytestmark = pytest.mark.fabric
+
+_FIXTURES = Path(__file__).parent.parent / "fixtures"
+FIXTURE = _FIXTURES / "cross-item-alias"
+WAREHOUSE_FIXTURE = _FIXTURES / "cross-item-alias-warehouse"
+PRODUCER = "Lakehouse/Raw"
+CONSUMER = "Lakehouse/Curated"
+WAREHOUSE_CONSUMER = "Warehouse/Reporting"
+
+
+def _workspace_literal(workspace) -> str:
+    return (
+        f"FabricWorkspace(workspace={workspace.workspace!r}, "
+        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"environment={workspace.environment!r})"
+    )
+
+
+def _await_addressable_lakehouse(session, destination, *, attempts=40, pause=5.0):
+    """Wait until a Spark statement in the session can address this Lakehouse.
+
+    Test infrastructure, not product behaviour. ``_create_schema_enabled_lakehouse``
+    waits for the item to appear in the REST item list, which is not the same thing
+    as the session's Spark metadata service knowing about it — and a Lakehouse
+    created into an already-warm session gets asked much sooner than one created
+    before the session started. Without this the first ``CREATE SCHEMA`` against a
+    fresh destination fails, and it fails as a Fabric metadata error that looks
+    nothing like a provisioning race.
+    """
+
+    import time
+
+    # The probe reads the default schema every schema-enabled Lakehouse has, so it
+    # must resolve the artifact and changes nothing. `databaseExists` is not enough:
+    # it can answer False for a Lakehouse the session cannot address at all, which
+    # is indistinguishable from an absent schema.
+    probe = (
+        "try:\n"
+        f"    spark.sql('SHOW TABLES IN {destination.qualified_schema('dbo')}').collect()\n"
+        "    emit(True)\n"
+        "except Exception as exc:\n"
+        "    emit(str(exc)[:300])\n"
+    )
+    for _ in range(attempts):
+        answer = session.run(probe).payload
+        if answer is True:
+            return
+        time.sleep(pause)
+    raise AssertionError(
+        f"{destination.item} never became addressable in the session: {answer}"
+    )
+
+
+def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bindings, empty=None):
+    """Push one repository, then generate **and** install it inside the session.
+
+    Both phases run in Fabric because that is the product: the desktop only
+    uploads the declaration and reads results back for assertions. ``bindings``
+    maps a logical item to ``("Lakehouse" | "Warehouse", physical name)``, which is
+    what lets one helper serve a Lakehouse alias and a Warehouse one — the single
+    shared harness binds every item to one target, and a cross-item alias needs two.
+    """
+
+    from weaver.build_bundle import BuildPlan
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
+
+    resolver = FabricResolver(fabric_workspace, client=fabric_client)
+    store = OneLakeDfsClient()
+
+    # Fixed Lakehouses carry whatever the last run left. Emptied here because
+    # every ordering assertion below presumes there is work to do: a producer
+    # whose table already matches is correctly not rebuilt, and then the build
+    # action the test looks for is simply not in the plan.
+    for kind, name in bindings.values():
+        if kind == "Lakehouse":
+            if empty is not None:
+                empty(name)
+            _await_addressable_lakehouse(session, resolver.spark_destination(ItemRef(name)))
+
+    root = resolver.weaver_items_root
+    if store.exists(root):
+        store.delete(root, recursive=True)
+    for path in sorted(fixture.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts:
+            store.write(root.join(*path.relative_to(fixture).parts), path.read_bytes())
+
+    binds = ", ".join(
+        (
+            f"ItemBinding(WeaverItemId.parse({item!r}), "
+            f"LakehouseBinding(lakehouse=ItemRef({name!r})))"
+            if kind == "Lakehouse"
+            else f"ItemBinding(WeaverItemId.parse({item!r}), "
+            f"WarehouseBinding(warehouse=ItemRef({name!r})))"
+        )
+        for item, (kind, name) in bindings.items()
+    )
+    body = (
+        "from weaver import ItemRef, FabricWorkspace, WeaverItemId\n"
+        "from weaver.resolution import resolver_for, store_for\n"
+        "from weaver.declaration import parse_item_repository\n"
+        "from weaver.build_bundle import (ItemBinding, ItemBindings, LakehouseBinding, "
+        "WarehouseBinding, InstallationEnvironment, effective_item_bindings, "
+        "install_bundle)\n"
+        "from weaver.build_bundle.workflow import (read_target_inventories, "
+        "read_reconciled_catalogue)\n"
+        "from weaver.build_bundle.planner import generate_item_build_bundle\n"
+        f"workspace = {_workspace_literal(fabric_workspace)}\n"
+        "store = store_for(workspace)\n"
+        "resolver = resolver_for(workspace)\n"
+        "repository = parse_item_repository(resolver.weaver_items_root, store=store)\n"
+        "control = LakehouseBinding("
+        "lakehouse=ItemRef(workspace.weaver_lakehouse))\n"
+        f"selected = ItemBindings(({binds},))\n"
+        "bindings = effective_item_bindings("
+        "selected, weaver_lakehouse=workspace.weaver_lakehouse)\n"
+        "environment = InstallationEnvironment("
+        "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
+        "inventories = read_target_inventories(bindings, environment=environment)\n"
+        "reconciled = read_reconciled_catalogue("
+        "bindings, inventories=inventories, environment=environment)\n"
+        "bundle = generate_item_build_bundle(\n"
+        "    repository, bindings=bindings,\n"
+        "    output=resolver.build_bundle('aliastest'),\n"
+        "    store=store, control_lakehouse=control,\n"
+        "    target_inventories=inventories, reconciled_catalogue=reconciled)\n"
+        "report = install_bundle(bundle, environment=environment)\n"
+        "emit({'plan': bundle.plan.to_mapping(), 'status': report.status,\n"
+        "      'actions': [{'id': a.action_id, 'status': a.status, 'details': a.details,\n"
+        "                   'error': (a.error_type + ': ' + str(a.error_message))\n"
+        "                             if a.error_type else None}\n"
+        "                  for a in report.action_results()]})\n"
+    )
+    payload = session.run(body).payload
+    plan = BuildPlan.from_mapping(payload["plan"])
+    failures = {a["id"]: a["error"] for a in payload["actions"] if a["error"]}
+    if failures:
+        # Printed as well as asserted: pytest truncates a long repr, and a Fabric
+        # stack trace is the only thing that says what actually went wrong.
+        for name, error in failures.items():
+            print(f"ALIAS INSTALL FAILURE {name}:\n{error}")
+    assert payload["status"] == "succeeded", sorted(failures)
+    return {
+        "plan": plan,
+        "actions": {a["id"]: a for a in payload["actions"]},
+        "at": {
+            action.id: sequence.number
+            for sequence, _batch, action in plan.actions()
+        },
+        "resolver": resolver,
+        "session": session,
+    }
+
+
+@pytest.fixture(scope="module")
+def alias_estate(
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    fabric_empty_lakehouse,
+    livy_session,
+):
+    """Two Lakehouse items in one bundle, the second aliasing the first."""
+
+    producer = fabric_alias_lakehouses["producer"]
+    consumer = fabric_alias_lakehouses["consumer"]
+    estate = _build_in_session(
+        fabric_workspace,
+        fabric_client,
+        livy_session,
+        fixture=FIXTURE,
+        bindings={
+            PRODUCER: ("Lakehouse", producer.name),
+            CONSUMER: ("Lakehouse", consumer.name),
+        },
+        empty=fabric_empty_lakehouse,
+    )
+    return {**estate, "producer": producer, "consumer": consumer}
+
+
+# --- the alias itself ---------------------------------------------------------
+
+
+def test_the_alias_exists_as_a_onelake_shortcut_in_the_consumer(
+    alias_estate, fabric_client
+):
+    """Asked of the workspace, not of the plan: the shortcut is really there."""
+
+    consumer = alias_estate["consumer"]
+    shortcuts = fabric_client.paged(
+        f"workspaces/{consumer.workspace_id}/items/{consumer.id}/shortcuts"
+    )
+    # Fabric echoes the path back rooted — "/Tables/DWG" for the "Tables/DWG" it
+    # was given — so the leading separator is normalised rather than asserted on.
+    found = {
+        ((entry.get("path") or "").strip("/"), entry.get("name")): entry.get(
+            "target", {}
+        ).get("oneLake", {})
+        for entry in shortcuts
+    }
+
+    assert ("Tables/DWG", "PortableCustomer") in found
+    target = found[("Tables/DWG", "PortableCustomer")]
+    assert target.get("itemId") == alias_estate["producer"].id
+    assert target.get("path") == "Tables/DWG/Customer"
+
+
+def test_the_consumer_reads_the_producers_table_through_its_own_name(alias_estate):
+    """The claim an alias makes, checked where it has to hold: in Fabric."""
+
+    session, resolver = alias_estate["session"], alias_estate["resolver"]
+    destination = resolver.spark_destination(ItemRef(alias_estate["consumer"].name))
+    view = destination.qualify("DWG", "CustomerName")
+    aliased = destination.qualify("DWG", "PortableCustomer")
+
+    rows = session.run(
+        f"emit({{'view': spark.sql('SELECT count(*) AS n FROM {view}').collect()[0][0],\n"
+        f"       'alias': spark.sql('SELECT count(*) AS n FROM {aliased}').collect()[0][0]}})\n"
+    ).payload
+
+    # Build creates structure, never data — an empty read is the success case.
+    assert rows == {"view": 0, "alias": 0}
+
+
+def test_the_producers_table_is_not_moved_or_duplicated(alias_estate):
+    """An alias adds a name in the consumer; the object stays where it is."""
+
+    session, resolver = alias_estate["session"], alias_estate["resolver"]
+    producer = resolver.spark_destination(ItemRef(alias_estate["producer"].name))
+    consumer = resolver.spark_destination(ItemRef(alias_estate["consumer"].name))
+
+    answers = session.run(
+        "emit({"
+        f"'produced': spark.catalog.tableExists({producer.qualify('DWG', 'Customer')!r}),"
+        f"'alias_in_producer': spark.catalog.tableExists({producer.qualify('DWG', 'PortableCustomer')!r}),"
+        f"'source_in_consumer': spark.catalog.tableExists({consumer.qualify('DWG', 'Customer')!r})"
+        "})\n"
+    ).payload
+
+    assert answers == {
+        "produced": True,
+        "alias_in_producer": False,
+        "source_in_consumer": False,
+    }
+
+
+# --- item order and the endpoint barrier --------------------------------------
+
+
+def test_the_consumer_items_whole_group_ran_after_the_producers(alias_estate):
+    at = alias_estate["at"]
+
+    assert (
+        at["object-Lakehouse--Raw--DWG.Customer"]
+        < at["refresh-sql-endpoint-Lakehouse--Raw"]
+        < at["aliases-Lakehouse--Curated"]
+        < at["object-Lakehouse--Curated--DWG.CustomerName"]
+    )
+
+
+def test_each_mutated_lakehouse_had_its_sql_endpoint_refreshed(alias_estate):
+    """The emulator skips this; Fabric is where it does something."""
+
+    refreshes = {
+        name: action
+        for name, action in alias_estate["actions"].items()
+        if name.startswith("refresh-sql-endpoint-")
+    }
+
+    assert set(refreshes) >= {
+        "refresh-sql-endpoint-Lakehouse--Raw",
+        "refresh-sql-endpoint-Lakehouse--Curated",
+        "refresh-sql-endpoint-control",
+    }
+    for name, action in refreshes.items():
+        assert action["status"] == "succeeded", name
+        details = action["details"] or {}
+        assert "skipped" not in details, f"{name} was skipped in Fabric"
+        assert details.get("sql_endpoint_id"), f"{name} refreshed no endpoint"
+
+
+def test_the_consumers_endpoint_reports_the_aliased_table(alias_estate):
+    """What the refresh is for: the SQL side sees what Spark just created.
+
+    A Warehouse view over another item, a report, a downstream shortcut — all read
+    this metadata, and Fabric syncs it behind the mutation rather than with it.
+    """
+
+    session, resolver = alias_estate["session"], alias_estate["resolver"]
+    destination = resolver.spark_destination(ItemRef(alias_estate["consumer"].name))
+    names = session.run(
+        "emit(sorted(row.tableName for row in spark.sql("
+        f"'SHOW TABLES IN {destination.qualified_schema('DWG')}').collect()))\n"
+    ).payload
+
+    assert "PortableCustomer" in names
+
+
+# --- the other alias form: a Warehouse view over a Lakehouse -------------------
+
+
+@pytest.fixture(scope="module")
+def warehouse_alias_estate(
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    fabric_empty_lakehouse,
+    clean_disposable_warehouse,
+    livy_session,
+):
+    """A Lakehouse producer and a Warehouse consumer, in one bundle.
+
+    The mirror image of the shortcut case, and the one that most needs the
+    producer's endpoint refresh: a Warehouse reads a Lakehouse through the
+    Lakehouse's *SQL analytics endpoint*, so the view cannot be created until that
+    endpoint has caught up with the table Spark just made.
+    """
+
+    # Its own producer: sharing the Lakehouse estate's would leave nothing for
+    # incremental selection to build, and the ordering below is the subject here.
+    producer = fabric_alias_lakehouses["warehouse_producer"]
+    warehouse = clean_disposable_warehouse
+    estate = _build_in_session(
+        fabric_workspace,
+        fabric_client,
+        livy_session,
+        fixture=WAREHOUSE_FIXTURE,
+        bindings={
+            PRODUCER: ("Lakehouse", producer.name),
+            WAREHOUSE_CONSUMER: ("Warehouse", warehouse.item.name),
+        },
+        empty=fabric_empty_lakehouse,
+    )
+    return {**estate, "producer": producer, "warehouse": warehouse}
+
+
+def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(warehouse_alias_estate):
+    """Asked of the Warehouse itself: the view exists and names the producer."""
+
+    warehouse = warehouse_alias_estate["warehouse"]
+    rows = warehouse.executor.query(
+        "select v.TABLE_SCHEMA as s, v.TABLE_NAME as n, v.VIEW_DEFINITION as d "
+        "from INFORMATION_SCHEMA.VIEWS as v "
+        "where v.TABLE_SCHEMA = N'Rpt'"
+    )
+    views = {(row["s"], row["n"]): row["d"] or "" for row in rows}
+
+    assert ("Rpt", "PortableCustomer") in views
+    assert warehouse_alias_estate["producer"].name in views[("Rpt", "PortableCustomer")]
+
+
+def test_the_warehouse_reads_the_lakehouse_table_through_its_alias(
+    warehouse_alias_estate,
+):
+    """The claim, end to end: T-SQL in one item reading Delta owned by another."""
+
+    warehouse = warehouse_alias_estate["warehouse"]
+
+    through_alias = warehouse.executor.query(
+        "select count(*) as n from [Rpt].[PortableCustomer]"
+    )
+    through_view = warehouse.executor.query(
+        "select count(*) as n from [Rpt].[CustomerReport]"
+    )
+
+    # Build creates structure, never data — an empty read is the success case.
+    assert through_alias[0]["n"] == 0
+    assert through_view[0]["n"] == 0
+
+
+def test_the_producers_endpoint_is_refreshed_before_the_warehouse_alias(
+    warehouse_alias_estate,
+):
+    at = warehouse_alias_estate["at"]
+
+    assert (
+        at["object-Lakehouse--Raw--DWG.Customer"]
+        < at["refresh-sql-endpoint-Lakehouse--Raw"]
+        < at["aliases-Warehouse--Reporting"]
+        < at["object-Warehouse--Reporting--Rpt.CustomerReport"]
+    )
+
+
+def test_the_warehouse_item_gets_no_endpoint_refresh_of_its_own(
+    warehouse_alias_estate,
+):
+    """A Warehouse *is* reached over SQL; it has no endpoint to sync."""
+
+    refreshes = {
+        name
+        for name in warehouse_alias_estate["actions"]
+        if name.startswith("refresh-sql-endpoint-")
+    }
+
+    assert "refresh-sql-endpoint-Warehouse--Reporting" not in refreshes
+    assert {
+        "refresh-sql-endpoint-Lakehouse--Raw",
+        "refresh-sql-endpoint-control",
+    } <= refreshes
+
+
+# --- wiping a Lakehouse that holds a shortcut ----------------------------------
+#
+# Last in the module deliberately: it destroys the estate the tests above assert
+# on, and it is the one case where getting it wrong destroys someone else's data.
+
+
+def test_wiping_the_consumer_takes_the_shortcut_and_leaves_the_producer(
+    alias_estate, fabric_workspace, fabric_client, fabric_alias_lakehouses
+):
+    """The guarantee that matters: a wipe never reaches through a pointer.
+
+    Removing a shortcut takes away this Lakehouse's *name* for another item's
+    data. Sweeping the storage it appears in would instead operate on the
+    producer's bytes — so the shortcut has to go first, through the workspace.
+    """
+
+    from weaver import wipe_lakehouse
+    from weaver.fabric import OneLakeDfsClient
+    from weaver.fabric.shortcuts import list_shortcuts
+
+    producer = fabric_alias_lakehouses["producer"]
+    consumer = fabric_alias_lakehouses["consumer"]
+    resolver = alias_estate["resolver"]
+    store = OneLakeDfsClient()
+    produced = resolver.tables_root(ItemRef(producer.name)) / "DWG" / "Customer"
+    assert store.exists(produced), "the producer's table must exist before the wipe"
+
+    reports = wipe_lakehouse(
+        ItemRef(consumer.name), fabric_workspace, store=store
+    )
+
+    removed = {name for report in reports for name in report.removed}
+    assert "shortcut:Tables/DWG/PortableCustomer" in removed
+    assert list_shortcuts(consumer, client=fabric_client) == ()
+    # The whole point: the producer still has its table, and its rows.
+    assert store.exists(produced)
+    assert store.exists(produced / "_delta_log")

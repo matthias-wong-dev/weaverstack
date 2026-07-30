@@ -141,6 +141,11 @@ class LocalStore:
 
     def delete(self, location: Location, *, recursive: bool = False) -> None:
         path = self._local(location)
+        if path.is_symlink():
+            # A link is removed, never followed: the alias it stands for is
+            # disposable, the object it points at belongs to another item.
+            path.unlink()
+            return
         if not path.exists():
             return
         if path.is_dir():
@@ -174,3 +179,31 @@ class LocalStore:
             shutil.copytree(source, destination_path)
         else:
             shutil.copy2(source, destination_path)
+
+    def link(self, source: Location, destination: Location) -> None:
+        """Make ``destination`` refer to ``source`` without copying it.
+
+        The emulator's counterpart of a OneLake shortcut, and the reason it is a
+        link rather than a copy: a shortcut has no bytes of its own, so a copy
+        would drift the moment the source was rebuilt and would make the emulator
+        stop reproducing what Fabric does.
+
+        Not part of the :class:`Store` protocol. A shortcut in Fabric is made
+        through the workspace API, not through file transport, so an environment
+        either offers this or offers that — see
+        :mod:`weaver.build_bundle.executors.alias`.
+        """
+
+        source_path = self._local(source)
+        if not source_path.exists():
+            raise StoreError(f"cannot link to something that does not exist: {source.value}")
+        destination_path = self._local(destination)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        if destination_path.is_symlink():
+            destination_path.unlink()
+        try:
+            destination_path.symlink_to(source_path, target_is_directory=source_path.is_dir())
+        except OSError as exc:
+            raise StoreError(
+                f"cannot link {destination.value} to {source.value}: {exc}"
+            ) from exc

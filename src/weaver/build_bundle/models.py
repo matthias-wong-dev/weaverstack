@@ -27,9 +27,16 @@ from .incremental import BuildSelection
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"
+CREATE_ALIAS = "create_alias"
 BUILD_FOLDER = "build_folder"
 BUILD_TABLE = "build_table"
 BUILD_VIEW = "build_view"
+
+#: One Lakehouse's SQL analytics endpoint catching up with the Delta mutations
+#: just made in it. It closes an item's physical work: a dependent item's
+#: Warehouse view or OneLake shortcut reads that endpoint's metadata, so it must
+#: not be created while the endpoint still describes the previous shape.
+REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
 #: Managed rebuild drops.  They are deliberately distinct from prune: these
 #: objects remain desired and are removed only so a selected definition can be
@@ -70,8 +77,17 @@ CATALOGUE_KINDS = frozenset(
 OMIT_TARGET_UNBOUND = "target_unbound"
 OMIT_DEPENDS_ON_OMITTED = "depends_on_omitted_node"
 OMIT_UNSUPPORTED_EXECUTOR = "unsupported_executor"
+#: An alias the current bindings give no physical form. The planner decides this
+#: — never the installer, which may only run an alias action already frozen for
+#: it — and records it so the absence is a stated decision rather than a gap.
+OMIT_ALIAS_UNSUPPORTED = "alias_unsupported"
 OMISSION_REASONS = frozenset(
-    {OMIT_TARGET_UNBOUND, OMIT_DEPENDS_ON_OMITTED, OMIT_UNSUPPORTED_EXECUTOR}
+    {
+        OMIT_TARGET_UNBOUND,
+        OMIT_DEPENDS_ON_OMITTED,
+        OMIT_UNSUPPORTED_EXECUTOR,
+        OMIT_ALIAS_UNSUPPORTED,
+    }
 )
 
 

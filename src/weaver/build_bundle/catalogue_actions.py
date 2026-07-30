@@ -18,11 +18,12 @@ from .models import (
     DELETE_CATALOGUE_CLAIMS,
     PUBLISH_CATALOGUE,
     PUBLISH_REGISTRY,
+    REFRESH_SQL_ENDPOINT,
     BuildAction,
     BuildBatch,
-    BuildSequence,
 )
-from .payloads import CATALOGUE_SEQUENCE, RECONCILIATION_SEQUENCE, REGISTRY_SEQUENCE, payload_path, sha256_hex
+from .payloads import sha256_hex
+from .stages import CATALOGUE, PlannedStage
 
 
 def collect_claims(
@@ -94,39 +95,36 @@ def _batch_payload(statements: Iterable[str]) -> bytes:
     )
 
 
-def _sequence(
+def _stage(
     *,
-    number: int,
+    index: int,
     slug: str,
     description: str,
     kind: str,
     statements: Iterable[str],
     control_target,
-    payloads: dict[str, bytes],
-) -> BuildSequence | None:
+) -> PlannedStage | None:
     statements = tuple(statements)
     if not statements:
         return None
     content = _batch_payload(statements)
-    path = payload_path(number, slug, f"{slug}.spark-sql-batch.json")
-    payloads[path] = content
+    filename = f"{slug}.spark-sql-batch.json"
     action = BuildAction(
         id=slug,
         kind=kind,
         resource_node_id=None,
         executor="spark_sql_batch",
-        payload=path,
+        payload=filename,
         payload_sha256=sha256_hex(content),
     )
-    return BuildSequence(
-        number=number,
+    return PlannedStage(
+        phase=CATALOGUE,
+        index=index,
+        slug=slug,
         description=description,
+        payloads={filename: content},
         batches=(
-            BuildBatch(
-                id=f"{number:03d}-{slug}",
-                target_id=control_target.id,
-                actions=(action,),
-            ),
+            BuildBatch(id=slug, target_id=control_target.id, actions=(action,)),
         ),
     )
 
@@ -136,17 +134,15 @@ def render_catalogue_before_build(
     identities: Iterable[WeaverDocumentId],
     *,
     control_target,
-    payloads: dict[str, bytes],
-) -> BuildSequence | None:
+) -> PlannedStage | None:
     claims = collect_claims(catalogue, identities)
-    return _sequence(
-        number=RECONCILIATION_SEQUENCE,
+    return _stage(
+        index=0,
         slug="catalogue-before-build",
         description="reconcile and remove catalogue claims before physical work",
         kind=DELETE_CATALOGUE_CLAIMS,
         statements=_claim_statements(claims),
         control_target=control_target,
-        payloads=payloads,
     )
 
 
@@ -156,9 +152,14 @@ def render_catalogue_after_build(
     target_by_item: Mapping,
     *,
     control_target,
-    payloads: dict[str, bytes],
-) -> tuple[BuildSequence, ...]:
-    """Publish dictionaries and Installation in one batch, Registry last."""
+) -> tuple[PlannedStage, ...]:
+    """Publish dictionaries and Installation in one batch, Registry last.
+
+    A final refresh of the Weaver Lakehouse's own SQL analytics endpoint closes
+    the build: the catalogue is a set of Delta tables like any other, and the next
+    reader of it — a report, a GUI, the next build — reaches it through that
+    endpoint.
+    """
 
     from .. import __version__
 
@@ -179,23 +180,49 @@ def render_catalogue_after_build(
         registry_statements.extend(result.registry.statements)
 
     rendered = (
-        _sequence(
-            number=CATALOGUE_SEQUENCE,
+        _stage(
+            index=1,
             slug="publish-catalogue",
             description="publish catalogue dictionaries and installations",
             kind=PUBLISH_CATALOGUE,
             statements=catalogue_statements,
             control_target=control_target,
-            payloads=payloads,
         ),
-        _sequence(
-            number=REGISTRY_SEQUENCE,
+        _stage(
+            index=2,
             slug="publish-registry",
             description="publish item registry last",
             kind=PUBLISH_REGISTRY,
             statements=registry_statements,
             control_target=control_target,
-            payloads=payloads,
         ),
     )
-    return tuple(sequence for sequence in rendered if sequence is not None)
+    published = tuple(stage for stage in rendered if stage is not None)
+    if not published:
+        return ()
+    return published + (_control_refresh_stage(control_target),)
+
+
+def _control_refresh_stage(control_target) -> PlannedStage:
+    return PlannedStage(
+        phase=CATALOGUE,
+        index=3,
+        slug="refresh-control-endpoint",
+        description="refresh the Weaver Lakehouse SQL endpoint after catalogue DML",
+        batches=(
+            BuildBatch(
+                id="refresh-control-endpoint",
+                target_id=control_target.id,
+                actions=(
+                    BuildAction(
+                        id="refresh-sql-endpoint-control",
+                        kind=REFRESH_SQL_ENDPOINT,
+                        resource_node_id=None,
+                        executor="sql_endpoint_refresh",
+                        payload=None,
+                        payload_sha256=None,
+                    ),
+                ),
+            ),
+        ),
+    )

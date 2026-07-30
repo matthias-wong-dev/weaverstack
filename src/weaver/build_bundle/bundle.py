@@ -50,15 +50,20 @@ SPARK_SQL_BATCH_EXECUTOR = "spark_sql_batch"
 SPARK_SCHEMA_EXECUTOR = "spark_schema"
 SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
+TSQL_BATCH_EXECUTOR = "tsql_batch"
 FOLDER_EXECUTOR = "folder"
+ALIAS_EXECUTOR = "alias"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 #: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
 #: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
 #: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
 #: is a resolved path and so cannot be frozen; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
-#: ``tsql`` runs a self-contained Warehouse script; ``folder`` makes or removes a
-#: directory. All are build, not load.
+#: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
+#: ordered array of them, each as its own batch; ``folder`` makes or removes a
+#: directory; ``alias`` points one Lakehouse name at another item's object;
+#: ``sql_endpoint_refresh`` syncs a Lakehouse's SQL analytics endpoint with the Delta
+#: mutations just made in it. All are build, not load.
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
@@ -66,18 +71,23 @@ VALID_EXECUTORS = frozenset(
         SPARK_SCHEMA_EXECUTOR,
         SPARK_TABLE_EXECUTOR,
         TSQL_EXECUTOR,
+        TSQL_BATCH_EXECUTOR,
         FOLDER_EXECUTOR,
+        ALIAS_EXECUTOR,
         SQL_ENDPOINT_REFRESH_EXECUTOR,
     }
 )
 #: Executors that run a payload, and the extension that payload must carry.
-#: ``folder`` acts on the resolved target and carries none.
+#: ``folder`` acts on the resolved target and carries none; ``sql_endpoint_refresh`` acts
+#: on the target itself.
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
     SPARK_SCHEMA_EXECUTOR: ".schema.json",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",
+    TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
+    ALIAS_EXECUTOR: ".alias.json",
 }
 _PAYLOADLESS_EXECUTORS = frozenset(
     {FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR}

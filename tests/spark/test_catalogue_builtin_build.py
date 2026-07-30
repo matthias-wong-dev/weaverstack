@@ -136,7 +136,9 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     The catalogue tables are created by ``build_table`` through ``spark_table``
     — the same action and executor an application repository gets. The prepared
     inventory already contains schema ``_``, so the ordinary planner correctly
-    omits a schema creation action. Nothing here knows it is building a catalogue.
+    omits a schema creation action. The endpoint refresh is likewise the ordinary
+    one: the control Lakehouse is a Lakehouse, and its own tables just changed.
+    Nothing here knows it is building a catalogue.
     """
 
     bundle, _report = built_catalogue

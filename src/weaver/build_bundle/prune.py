@@ -13,12 +13,13 @@ in the environment the build is running in.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA
 from ..spark import SparkCatalogue, object_token, schema_token
-from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, TABLE, VIEW
+from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
+from ..declaration.model import WeaverDocumentId
 from ..declaration.source import SourceDocument
 from ..store import Store
 from ..targets import ItemRef
@@ -28,10 +29,8 @@ from .models import (
     PRUNE_TABLE,
     PRUNE_VIEW,
     BuildAction,
-    BuildBatch,
-    BuildSequence,
 )
-from .payloads import PRUNE_SEQUENCE, payload_path, sha256_hex
+from .payloads import sha256_hex
 from .targets import BoundTarget
 
 #: Files areas a prune never touches: they are Weaver's own, not an item's
@@ -228,8 +227,13 @@ def render_inventory_prune(
     inventory: TargetInventory,
     managed: _Managed,
     payloads: dict[str, bytes],
-) -> BuildSequence | None:
-    """Purely render prune actions from one already-read inventory."""
+) -> tuple[BuildAction, ...]:
+    """Purely render prune actions from one already-read inventory.
+
+    ``payloads`` is filled with the frozen drops, keyed by bare filename: the
+    caller owns which sequence these actions land in and therefore which payload
+    directory they live under.
+    """
 
     actions: list[BuildAction] = []
     if target.kind == "warehouse":
@@ -337,29 +341,36 @@ def render_inventory_prune(
                         payloads,
                     )
                 )
-    if not actions:
-        return None
-    return BuildSequence(
-        number=PRUNE_SEQUENCE,
-        description="prune unmanaged objects",
-        batches=(
-            BuildBatch(
-                id=f"{PRUNE_SEQUENCE:03d}-{target.id}",
-                target_id=target.id,
-                actions=tuple(actions),
-            ),
-        ),
-    )
+    return tuple(actions)
 
 
-def _managed_sets(
-    documents: Mapping[str, SourceDocument], object_target_kind: str = DELTA_TARGET
+def managed_sets(
+    documents: Mapping[str, SourceDocument],
+    object_target_kind: str = DELTA_TARGET,
+    *,
+    alias_destinations: Iterable[WeaverDocumentId] = (),
 ) -> _Managed:
-    """The keep-set for one physical side: Delta objects, or Warehouse ones."""
+    """The keep-set for one physical side: Delta objects, or Warehouse ones.
+
+    ``alias_destinations`` are the item's alias destinations. They belong in the
+    keep-set because they are desired state in this item exactly as a declared
+    document is — merely produced somewhere else — and a build that pruned the
+    shortcut or view it was about to create would be both destructive and
+    pointless. Which set an alias joins follows its physical form: a folder under
+    Files, a view in a Warehouse, a table directory in a Lakehouse.
+    """
 
     tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
     views = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == VIEW}
     folders = {d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET}
+    for destination in alias_destinations:
+        qualified = destination.object_id.qualified
+        if destination.is_files:
+            folders.add(qualified)
+        elif object_target_kind == SQL_TARGET:
+            views.add(qualified)
+        else:
+            tables.add(qualified)
     return _Managed(
         schemas=frozenset(name.split(".", 1)[0].lower() for name in tables | views),
         folder_schemas=frozenset(name.split(".", 1)[0].lower() for name in folders),
@@ -381,14 +392,14 @@ def _drop_action(
     extension: str = ".spark.sql",
 ) -> BuildAction:
     content = (statement + "\n").encode("utf-8")
-    path = payload_path(PRUNE_SEQUENCE, "prune", f"{slug}-{name}{extension}")
-    payloads[path] = content
+    filename = f"{slug}-{name}{extension}"
+    payloads[filename] = content
     return BuildAction(
         id=f"prune-{slug}-{name}",
         kind=kind,
         resource_node_id=None,
         executor=executor,
-        payload=path,
+        payload=filename,
         payload_sha256=sha256_hex(content),
     )
 

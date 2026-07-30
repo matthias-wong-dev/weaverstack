@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from ..errors import WeaverError
-from .auth import FABRIC_SCOPE, get_token
+from .auth import FABRIC_SCOPE, token_source
 
 #: Generic technical defaults, not environment-specific.
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
@@ -41,13 +41,17 @@ class FabricClient:
     ) -> None:
         self.api_base_url = api_base_url.rstrip("/")
         self.timeout = timeout
-        self._token = token
+        self._token_source = token_source(token, scope=FABRIC_SCOPE)
 
     @property
     def token(self) -> str:
-        if self._token is None:
-            self._token = get_token(FABRIC_SCOPE)
-        return self._token
+        """A currently-valid bearer, renewed when it is close to expiring.
+
+        Read per request rather than cached: a client outlives its token, and a
+        stale one surfaces as ``401`` in whatever call happens to be next.
+        """
+
+        return self._token_source()
 
     def request(
         self,

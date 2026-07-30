@@ -149,6 +149,12 @@ user-created object types covered by Weaver's Warehouse wipe implementation,
 not only objects previously registered by Weaver. Use `--yes` for unattended
 execution; otherwise a non-interactive process refuses the destructive action.
 
+A Lakehouse's **shortcuts go first**, and they are reported as
+`shortcut:<path>/<name>` so a dry run distinguishes a pointer being taken away
+from a directory being deleted. Only the pointer goes: the data belongs to the
+item that produced it, and wiping one Lakehouse never reaches through a shortcut
+into another.
+
 ## Capacity and diagnostics
 
 ```bash

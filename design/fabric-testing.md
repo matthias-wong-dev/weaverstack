@@ -25,9 +25,94 @@ source and does nothing without a JDK.
 credential chain is pinned.
 
 You need a Fabric workspace where the test identity can create and delete
-Lakehouses and Warehouses and connect to Warehouse SQL. It can be empty; the
-tests bring their own. The workspace capacity must already be running and
-usable. Pytest never starts, resumes, suspends, or waits for capacity.
+Lakehouses and Warehouses and connect to Warehouse SQL. The workspace capacity
+must already be running and usable. Pytest never starts, resumes, suspends, or
+waits for capacity.
+
+## Provision the fixed estate, once
+
+The suite reuses a fixed set of items rather than creating disposable ones per
+run.
+
+**This is not a speed-up, and it is worth being exact about that.** Measured, item
+provisioning was about seven seconds in a twenty-four minute run: a Lakehouse
+takes ~2s and a Warehouse's endpoint answered in 0.45s. What reuse removes is the
+*tail* — that endpoint wait is unbounded and the harness tolerates ten minutes for
+it, so 0.45s was luck rather than a budget — and the artifact churn that makes
+Fabric's namespace resolver intermittently report `Artifact not found` for an item
+that is plainly there.
+
+The run's time is dominated by something else entirely: nine bundle
+generate/install round trips through Livy, most installs 75–123s, roughly twenty
+of the thirty-two minutes. If you want the suite meaningfully faster, that is the
+lever — fewer full build cycles, not fewer items.
+
+Create these once, in the workspace you will point the suite at:
+
+| Item | Type | Role |
+|---|---|---|
+| `PYTEST_WEAVER` | Lakehouse | the Weaver Lakehouse — the control plane |
+| `PYTEST_LH_1` | Lakehouse | destination target |
+| `PYTEST_LH_2` | Lakehouse | cross-item alias producer |
+| `PYTEST_LH_3` | Lakehouse | cross-item alias consumer |
+| `PYTEST_HOUSE` | Lakehouse | second alias producer, for the Warehouse case |
+| `PYTEST_WH_1` | Warehouse | Warehouse destination |
+
+Every Lakehouse must be **schema-enabled** (`creationPayload.enableSchemas`),
+because a managed table has to land at `Tables/<schema>/<table>` and the
+catalogue lives in a schema called `_`.
+
+> A Warehouse **cannot** share a display name with a Lakehouse. A Lakehouse
+> generates a `SQLEndpoint` facet of the same name, so the name is already taken
+> and Fabric answers `ItemDisplayNameAlreadyInUse`. The only cross-type name
+> sharing in Fabric is a Lakehouse and *its own* endpoint.
+
+`scripts/` has no provisioning helper; the REST calls are three lines each
+(`POST workspaces/{id}/lakehouses`, `POST workspaces/{id}/warehouses`) and the
+whole estate builds in about fifteen seconds.
+
+Isolation comes from **emptying** these between runs, not from replacing them.
+That is the same reconciliation the build itself performs, so the cleaning path is
+exercised rather than bypassed — but it does mean residue is possible here in a
+way it never is locally, where every target is a fresh temporary directory. And
+emptying is not free: it is part of why reuse did not make the suite faster.
+
+Residue is not inert, either. A producer whose table already matches is correctly
+*not* rebuilt, so a test asserting build order then finds no build action in the
+plan. `fabric_empty_lakehouse` exists for exactly that case; ask for it wherever
+freshness is the premise.
+
+## Naming the estate
+
+Everything is overridable, so another tenant runs the suite with its own items:
+
+```bash
+export WEAVER_FABRIC_WORKSPACE=PYTEST_WORKSPACE   # required
+export WEAVER_FABRIC_ENVIRONMENT=weaver           # default: weaver
+```
+
+Item **lifecycle** tests — creating and deleting Lakehouses — carry their own
+`provisioning` marker and are not selected by `-m fabric`:
+
+```bash
+pytest -m fabric          # what Weaver does with items that exist
+pytest -m provisioning    # Fabric creating and deleting them
+```
+
+They are separated because they exercise Fabric's resource management rather
+than Weaver's and change rarely, while their create/delete churn slows every run
+of the code actually under development. `create_lakehouse` is still real product
+surface — `weaver initialise` makes the Weaver Lakehouse with it — so this says
+*when* to run the cover, not that it is unnecessary.
+
+The item names above are defaults; each has a matching
+`WEAVER_PYTEST_<ROLE>` override.
+
+**Put the suite's workspace on its own capacity if you can.** A trial capacity
+works and costs nothing — it is not an Azure resource, so it cannot bill a
+subscription — and it keeps the suite off whatever capacity real work uses. On a
+small shared capacity (an F2 permits one Spark session at a time) a long test run
+and a scheduled job contend for the same slot.
 
 ## Install Weaver once, whenever the code changes
 
@@ -124,6 +209,24 @@ Both Lakehouses are created **schema-enabled**: the target so a managed table
 lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver
 Lakehouse because the catalogue lives in a schema called `_` and a Lakehouse
 without schemas cannot hold one.
+
+## Cross-item aliases need two destinations
+
+`tests/fabric/test_cross_item_alias.py` builds two Lakehouse items in one bundle,
+where the consumer aliases a table the producer makes. It takes its own pair of
+disposable Lakehouses (`fabric_alias_lakehouses`) rather than the shared target,
+because a cross-item alias is the one thing a single destination cannot express.
+
+Three things only a real workspace answers, and this is where they are answered:
+a OneLake shortcut is a workspace API call rather than a file operation; the
+shortcut has to be created after the table it points at exists; and a Lakehouse's
+SQL analytics endpoint lags its Delta tables, so an item that mutated Delta is
+closed by a refresh the emulator can only skip.
+
+It also found the asynchrony: Fabric returns from the shortcut call before the
+Lakehouse will accept the name as a relation, and the consumer's very next
+statement failed with *"neither a view nor a table"*. The alias action now waits
+for a real read to succeed before reporting success.
 
 **The session attaches to the Weaver Lakehouse**, which is the production model —
 the control plane is the fixed attachment, destinations are the variable data

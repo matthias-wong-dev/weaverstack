@@ -4,6 +4,8 @@
 ordered catalogue payload as one reported action. ``spark_schema`` makes one
 schema, ``spark_table`` completes a table whose shape only the session knows,
 and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse SQL path.
+``alias`` points one Lakehouse name at another item's object, and ``sql_endpoint``
+closes an item by syncing its SQL analytics endpoint.
 
 There is no prune executor — a build freezes its drops as payloads, so the
 installer never enumerates the target.
@@ -14,14 +16,15 @@ relies on what the session is attached to.
 
 from __future__ import annotations
 
+from .alias import AliasExecutor
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .folder import FolderExecutor
 from .spark_schema import SparkSchemaExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
-from .tsql import TSqlExecutor
 from .sql_endpoint_refresh import SqlEndpointRefreshExecutor
+from .tsql import TSqlBatchExecutor, TSqlExecutor
 
 
 def default_executors() -> dict[str, ActionExecutor]:
@@ -34,6 +37,8 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
+        TSqlBatchExecutor.name: TSqlBatchExecutor(),
+        AliasExecutor.name: AliasExecutor(),
         SqlEndpointRefreshExecutor.name: SqlEndpointRefreshExecutor(),
     }
 
@@ -42,13 +47,15 @@ __all__ = [
     "ActionExecutor",
     "InstallationContext",
     "ResolvedTarget",
+    "AliasExecutor",
     "SkippedExecution",
     "SparkSchemaExecutor",
     "SparkSqlExecutor",
     "SparkSqlBatchExecutor",
     "SparkTableExecutor",
+    "SqlEndpointRefreshExecutor",
     "FolderExecutor",
     "TSqlExecutor",
-    "SqlEndpointRefreshExecutor",
+    "TSqlBatchExecutor",
     "default_executors",
 ]

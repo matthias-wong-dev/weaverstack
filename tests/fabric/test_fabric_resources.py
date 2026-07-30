@@ -1,4 +1,16 @@
-"""Workspace and item resolution against a real Fabric workspace."""
+"""Workspace and item resolution against a real Fabric workspace.
+
+Resolution is Weaver's business and stays in the ordinary Fabric suite. Creating
+and deleting Lakehouses is **Fabric's**, and is marked ``provisioning`` so it is
+opt-in separately: it changes rarely, and because ``fabric_lakehouses`` is
+function-scoped, these few tests alone make and destroy eight Lakehouses — churn
+that slows every run and that Fabric's namespace resolver reacts badly to
+underneath a long-lived session.
+
+``create_lakehouse`` is still real product surface (``weaver initialise`` makes
+the Weaver Lakehouse with it), so this is a statement about *when* to run the
+cover, not about it being unnecessary.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +19,15 @@ import pytest
 from weaver.errors import CommandError
 from weaver.fabric import LAKEHOUSE, find_item, list_items
 
-pytestmark = pytest.mark.fabric
 
 
+@pytest.mark.fabric
 def test_the_workspace_resolves_to_an_id(fabric_workspace_item):
     assert fabric_workspace_item.id
     assert fabric_workspace_item.name
 
 
+@pytest.mark.fabric
 def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
     """Takes the fixture it does not read, to inherit its skip.
 
@@ -29,6 +42,7 @@ def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
         find_workspace("weavertest_no_such_workspace")
 
 
+@pytest.mark.provisioning
 def test_created_lakehouses_appear_in_the_workspace(fabric_lakehouses, fabric_client):
     names = {
         item.name
@@ -40,6 +54,7 @@ def test_created_lakehouses_appear_in_the_workspace(fabric_lakehouses, fabric_cl
     assert fabric_lakehouses["target"].name in names
 
 
+@pytest.mark.provisioning
 def test_a_lakehouse_is_findable_by_name(fabric_lakehouses, fabric_client):
     found = find_item(
         fabric_lakehouses["workspace"],
@@ -50,6 +65,7 @@ def test_a_lakehouse_is_findable_by_name(fabric_lakehouses, fabric_client):
     assert found.id == fabric_lakehouses["target"].id
 
 
+@pytest.mark.provisioning
 def test_creating_an_existing_lakehouse_returns_it(fabric_lakehouses, fabric_client):
     """Idempotent, so a rerun after an interruption does not fail."""
     from weaver.fabric import create_lakehouse
@@ -62,6 +78,7 @@ def test_creating_an_existing_lakehouse_returns_it(fabric_lakehouses, fabric_cli
     assert again.id == fabric_lakehouses["target"].id
 
 
+@pytest.mark.provisioning
 def test_an_unknown_item_says_which_workspace(fabric_lakehouses, fabric_client):
     with pytest.raises(CommandError, match="no Lakehouse named"):
         find_item(

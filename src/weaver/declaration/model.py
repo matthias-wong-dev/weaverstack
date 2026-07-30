@@ -257,6 +257,12 @@ class WeaverRepository:
     aliases: tuple[RepositoryAlias, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
+    #: The item-level graph over :attr:`items`, and its topological layers.
+    #: The document graph orders work *inside* an item; this orders the items
+    #: themselves, and is the outer structure a build is planned against. It is
+    #: derived once, here, so no later stage reconstructs an ordering of its own.
+    item_graph: object | None = None
+    item_layers: tuple[tuple[WeaverItemId, ...], ...] = ()
     generated_files: Mapping[str, bytes] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

@@ -96,15 +96,73 @@ therefore changes the object; changing an unused helper does not. A reachable
 helper that cannot be parsed fails discovery. Authored modules are never executed
 to calculate this closure.
 
-Cross-item dependencies are represented in the repository graph, but incremental
-impact currently remains item-scoped. A changed object expands only to existing
-descendants in its own item. Coordinated cross-item rebuild propagation is
-deliberately deferred.
+Discovery also derives an **item-level** dependency graph and its topological
+layers. One item depends on another when one of its documents resolves to a
+document that other item owns, or when it declares an alias whose source lives
+there. Within-item edges do not appear: the document graph already orders those.
+
+A circular item graph is a repository error, rejected while the whole declaration
+is in view rather than at the point some incremental selection happens to exercise
+it. A repository whose items cannot be ordered has no correct build, not merely no
+correct build today. The parsed repository retains the resulting layers so every
+later stage consumes one authoritative ordering rather than reconstructing one.
+
+Cross-item dependencies are represented in both graphs, but incremental *impact*
+remains item-scoped. A changed object expands only to existing descendants in its
+own item. Coordinated cross-item rebuild propagation is deliberately deferred;
+cross-item *ordering* is not.
 
 Bindings are typed. A Lakehouse item binds to a Lakehouse and a Warehouse item
 binds to a Warehouse; Weaver never infers a destructive target from a bare
 display name. The package-owned `Lakehouse/_weaver` item is bound implicitly to
 the mandatory control Lakehouse.
+
+## 4a. Aliases
+
+An alias is a consuming item's own name for something another item produces. It
+is declared in that item's `alias.yml`, is owned by the destination item, and
+leaves the source as the canonical producer.
+
+What an alias becomes is a decision about the destination's target kind, and is
+therefore made by the planner:
+
+| Destination | Materialisation |
+|---|---|
+| Lakehouse | a `create_alias` action — a OneLake shortcut in Fabric, a filesystem link plus catalogue registration in the emulator |
+| Warehouse | a frozen `CREATE OR ALTER VIEW` over the bound source's three-part name |
+
+Only the Warehouse form is spelled out in SQL, because there the statement *is*
+the semantic decision. A shortcut and a link are two transports for one frozen
+decision — this destination, that source — resolved at install time the same way a
+schema's `LOCATION` is.
+
+An alias whose source item is not bound, or whose destination and source disagree
+about the `Files`/table namespace, has no physical form under the current
+bindings. It is omitted from the plan with the reason `alias_unsupported`. That
+decision belongs to the planner; the installer may only run an alias action
+already frozen for it.
+
+Alias destinations join the prune keep-set. They are desired state in the
+consuming item exactly as a declared document is — merely produced elsewhere — so
+a build must not prune the shortcut or view it is about to create. An alias holds
+no data, so materialisation replaces rather than colliding: a build has to be able
+to run twice.
+
+**One action materialises all of an item's aliases.** The cost of an alias is not
+the create — that is about a second — but the wait after it, so N actions running
+serially would pay N waits where one action that creates everything and then waits
+pays roughly one. For a Warehouse the statements go in an ordered array run through
+`tsql_batch`, one batch each, because T-SQL requires `CREATE VIEW` to be the first
+statement in its batch and will reject two of them sharing one.
+
+**An alias action is not finished until the alias can be read.** Fabric creates a
+shortcut synchronously and discovers it asynchronously, and in between the
+Lakehouse reports the name as neither a view nor a table. The action therefore
+polls a real read of the alias before returning. Without that wait the barrier the
+plan puts around the alias means nothing, and the failure surfaces in the next
+item's DDL instead — which is where it did surface, in Fabric, before the wait
+existed. Measured against a real workspace, the shortcut exists in about a second
+and becomes readable 6–31 seconds later.
 
 ## 5. Target inventory
 
@@ -278,26 +336,65 @@ same reason. Only prune remains idempotent.
 Every plan carries mandatory `selection`. Deserialisation rejects a plan that
 omits it.
 
+Sequence numbers are assigned last, from the assembled plan, and are consecutive
+from 1. Planning components return ordered logical stages and choose no numbers,
+so nothing has to leave arithmetic headroom for a repository's dependency depth
+and no phase can collide with a region another phase claimed. A number *describes*
+the order the plan already has; it does not create it.
+
 ## 12. Bundle execution order
 
-The frozen phases execute in this order:
+A build is an ordered series of **item** builds. The item graph is the outer
+structure; the document graph orders work inside each item:
 
-```mermaid
-flowchart TD
-    A["Batch stale, removed, and rebuild claim deletion"]
-    B["Prune removed objects and physical orphans"]
-    C["Drop selected physical objects"]
-    D["Create required schemas"]
-    E["Build selected documents"]
-    F["Batch dictionaries and Installation publication"]
-    G["Publish Registry last"]
+```text
+catalogue claim removal, when required
 
-    A --> B --> C --> D --> E --> F --> G
+item layer 0
+    producer item A
+        prune, managed drops, schemas, aliases, documents, SQL endpoint refresh
+    independent producer item B
+        prune, managed drops, schemas, aliases, documents, SQL endpoint refresh
+
+item layer 1
+    consumer item C
+        prune, managed drops, schemas, aliases, documents, SQL endpoint refresh
+
+final batched catalogue publication
+Weaver Lakehouse SQL endpoint refresh
 ```
 
-Empty phases are omitted. Managed drops use reverse dependency layers;
-physical builds use forward layers. A sequence is a barrier: later sequences do
-not begin after a failed action.
+Items in the same topological layer share their barriers — one batch each —
+because nothing orders them against one another. Items in different layers never
+do. That is the one invariant multi-item build rests on: no item in a later layer
+begins before every item it reaches into has completed, endpoint included.
+
+Within an item, prune and managed drops lead because they are the destructive
+reconciliation of what is already there. Schemas precede aliases so a
+Warehouse-backed alias has a schema to be created in, and aliases precede the
+item's own documents so those are built against a namespace that already holds
+what the item imports.
+
+Empty phases are omitted. Managed drops use reverse dependency layers; physical
+builds use forward layers. A sequence is a barrier: later sequences do not begin
+after a failed action.
+
+### The SQL endpoint refresh
+
+A Fabric Lakehouse presents its Delta tables twice: natively to Spark, and through
+a SQL analytics endpoint whose metadata is synchronised behind the mutation rather
+than with it. Everything that reads a Lakehouse *as SQL* — a Warehouse view over
+another item, a report, a downstream shortcut — reads that endpoint.
+
+So when an item's planned work mutates Delta, one refresh closes that item,
+immediately after its physical work and before any dependent item starts. A
+Warehouse item has no endpoint of its own to refresh, and an item whose only work
+was a folder or a schema has changed nothing the endpoint describes.
+
+The refresh is planned host-independently, like the rest of the bundle. The local
+emulator has no SQL analytics endpoint at all, and the executor says so and skips
+rather than inventing a local equivalent that would keep no promise. The Weaver
+Lakehouse's own refresh closes the build, after catalogue publication.
 
 The installer validates bundle shape and payload hashes, resolves the already
 bound targets in its own environment, executes actions, and writes the install
@@ -334,10 +431,15 @@ published with the rest of the desired repository.
 
 Weaver fails before mutation where possible:
 
-- invalid metadata, identity, helper imports, or dependency cycles fail parsing;
+- invalid metadata, identity, helper imports, and document or item dependency
+  cycles fail parsing;
 - missing bindings or inventories fail planning;
+- an alias the current bindings give no physical form is omitted at planning, with
+  its reason recorded;
 - payload tampering fails bundle validation;
 - unexpected create and managed-drop collisions fail execution;
+- an alias that never becomes readable, or an endpoint refresh that settles as
+  failed, fails its own action rather than the next item's;
 - an action failure stops later dependency barriers and final certification.
 
 The install report describes execution rather than intention: each action is
@@ -389,8 +491,11 @@ The design condenses to these rules:
 6. Remove certification before deliberate physical removal.
 7. Use strict state transitions where the planner knows the expected state.
 8. Bind every physical target explicitly.
-9. Keep installation mechanical and unable to broaden scope.
-10. Certify successful desired state last.
+9. Order items by the repository's item graph, and work within an item by its
+   document graph.
+10. Complete a mutated Lakehouse before anything depends on it.
+11. Keep installation mechanical and unable to broaden scope.
+12. Certify successful desired state last.
 
 These constraints move risk earlier. They make consequential actions visible,
 keep environment behavior comparable, and turn unexpected state into a clear
