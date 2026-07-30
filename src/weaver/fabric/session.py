@@ -124,6 +124,11 @@ class FabricSessionResolver(FabricResolver):
         self.client = self._rest_client()
         return super().sql_endpoint(target)
 
+    def _fabric_client(self):
+        """Shortcuts and endpoint refresh are REST, even from inside a session."""
+
+        return self._rest_client()
+
     def _rest_client(self):
         """Fabric REST using the identity of this Fabric session."""
 

@@ -198,6 +198,37 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
 
 
 @pytest.fixture(scope="session")
+def fabric_alias_lakehouses(fabric_workspace_item, fabric_client):
+    """Two disposable destination Lakehouses, for a cross-item alias.
+
+    Two, because a cross-item alias is the one thing a single destination cannot
+    express: the producer and the consumer have to be different physical items or
+    there is nothing to point across. Session-scoped and created before the Livy
+    session for the same reason ``fabric_target_lakehouse`` is — see its note on
+    churning artifacts underneath a long-lived session — and only instantiated when
+    a test asks for them.
+    """
+
+    from weaver.fabric import delete_item
+
+    made = []
+    try:
+        for role in ("producer", "consumer"):
+            made.append(
+                _create_schema_enabled_lakehouse(
+                    fabric_client, fabric_workspace_item, _disposable_name(role)
+                )
+            )
+        yield tuple(made)
+    finally:
+        for item in made:
+            try:
+                delete_item(item, client=fabric_client)
+            except Exception as exc:
+                print(f"warning: could not delete {item}: {exc}")
+
+
+@pytest.fixture(scope="session")
 def environment_name():
     return os.environ.get(ENVIRONMENT_ENV, DEFAULT_ENVIRONMENT)
 

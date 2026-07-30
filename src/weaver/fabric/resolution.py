@@ -131,6 +131,82 @@ class FabricResolver:
 
         return self.resolve(target.warehouse, item_type=WAREHOUSE)
 
+    # --- what a Fabric workspace can do that a filesystem cannot -----------
+    #
+    # Two operations an installed bundle needs that are neither path arithmetic
+    # nor a SQL statement: pointing one Lakehouse at another's data, and asking a
+    # Lakehouse's SQL analytics endpoint to catch up. Both belong here because
+    # this is the adapter that already knows how to reach this workspace, and the
+    # local resolver deliberately offers neither — the emulator links files, and
+    # has no SQL endpoint at all.
+
+    def create_onelake_shortcut(
+        self,
+        item: ItemRef,
+        *,
+        path: str,
+        name: str,
+        source: ItemRef,
+        source_path: str,
+    ) -> dict:
+        """Point ``item``'s ``path/name`` at ``source``'s ``source_path``."""
+
+        from .shortcuts import create_shortcut
+
+        return create_shortcut(
+            self.resolve(item, item_type=LAKEHOUSE),
+            path=path,
+            name=name,
+            source=self.resolve(source, item_type=LAKEHOUSE),
+            source_path=source_path,
+            client=self._fabric_client(),
+        )
+
+    def onelake_shortcuts(self, item: ItemRef, *, area: str | None = None) -> tuple:
+        """Every shortcut a Lakehouse holds, optionally in one area only."""
+
+        from .shortcuts import list_shortcuts
+
+        found = list_shortcuts(
+            self.resolve(item, item_type=LAKEHOUSE), client=self._fabric_client()
+        )
+        if area is None:
+            return found
+        return tuple(
+            shortcut
+            for shortcut in found
+            if shortcut.area.casefold() == area.casefold()
+        )
+
+    def remove_onelake_shortcut(self, item: ItemRef, *, path: str, name: str) -> None:
+        """Take away this Lakehouse's name for another item's data.
+
+        Never the data: see :func:`weaver.fabric.shortcuts.delete_shortcut`.
+        """
+
+        from .shortcuts import delete_shortcut
+
+        delete_shortcut(
+            self.resolve(item, item_type=LAKEHOUSE),
+            path=path,
+            name=name,
+            client=self._fabric_client(),
+        )
+
+    def refresh_sql_endpoint_metadata(self, item: ItemRef) -> dict:
+        """Sync one Lakehouse's SQL analytics endpoint, and wait for the sync."""
+
+        from .endpoints import refresh_sql_endpoint_metadata
+
+        return refresh_sql_endpoint_metadata(
+            self.resolve(item, item_type=LAKEHOUSE), client=self._fabric_client()
+        )
+
+    def _fabric_client(self) -> FabricClient:
+        """The REST client this resolver reaches its workspace with."""
+
+        return self.client
+
     def sql_endpoint(self, target: WarehouseTarget):
         """Resolve a typed Warehouse to the common SQL endpoint record."""
 

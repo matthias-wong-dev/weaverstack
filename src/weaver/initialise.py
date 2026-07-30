@@ -12,9 +12,9 @@ the barriers already order it correctly:
 
 .. code-block:: text
 
-    sequence 50+   create schema `_` and the catalogue tables
-    sequence 9000  publish dictionaries and Installation as one batch
-    sequence 9010  certify them in Registry last
+    create schema `_` and the catalogue tables
+    publish dictionaries and Installation as one batch
+    certify them in Registry last
 
 The catalogue's own DML runs after the tables it writes to exist, so no special
 first-run mode is needed and generation reads nothing — the statements are

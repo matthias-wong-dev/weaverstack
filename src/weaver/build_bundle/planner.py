@@ -1,4 +1,30 @@
-"""Orchestrate one item-oriented repository into a coordinated build bundle."""
+"""Orchestrate one item-oriented repository into a coordinated build bundle.
+
+A build is planned as an ordered series of **item** builds. The repository owns
+an acyclic item dependency graph and its topological layers; this walks those
+layers and plans each item as one coherent group of stages:
+
+.. code-block:: text
+
+    catalogue claim removal, when required
+
+    item layer 0
+        producer item A          prune, drops, schemas, aliases, documents, refresh
+        independent producer B   prune, drops, schemas, aliases, documents, refresh
+    item layer 1
+        consumer item C          prune, drops, schemas, aliases, documents, refresh
+
+    final batched catalogue publication
+    Weaver Lakehouse SQL endpoint refresh
+
+Items in the same layer share their barriers — one batch each — because nothing
+orders them against each other. Items in different layers never do, which is the
+one invariant multi-item build rests on: a consumer's aliases and documents
+cannot begin until every item it reaches into has finished, endpoint included.
+
+Inside an item the document dependency graph still decides everything. The item
+graph is the outer boundary, not a replacement for it.
+"""
 
 from __future__ import annotations
 
@@ -10,20 +36,23 @@ from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..locations import Location
 from ..store import Store
+from .aliases import plan_item_aliases
 from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
 from .catalogue_actions import (
     render_catalogue_after_build,
     render_catalogue_before_build,
 )
+from .endpoints import item_refresh_stage
 from .incremental import select_build
-from .models import OMIT_TARGET_UNBOUND, BuildPlan, BuildSequence, OmittedNode
-from .payloads import MANAGED_DROP_SEQUENCE_START, OBJECT_SEQUENCE_STEP
+from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .physical import (
-    render_inventory_prune_sequence,
-    render_selected_builds,
-    render_selected_drops,
+    item_build_stages,
+    item_drop_stages,
+    item_prune_stage,
+    item_schema_stage,
 )
 from .prune import TargetInventory
+from .stages import PlannedStage, enumerate_stages, merge_layer_stages
 from .targets import ItemBindings, LakehouseBinding
 
 
@@ -55,11 +84,6 @@ def generate_item_build_bundle(
     selected_ids = {
         identity for identity in repository.source_documents if identity.item in by_item
     }
-    if any(
-        edge.consumer in selected_ids and edge.uses_alias
-        for edge in repository.dependency_edges
-    ):
-        raise NotImplementedError("Alias usage is not yet supported")
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -87,62 +111,51 @@ def generate_item_build_bundle(
     selected_for_build = set(selection.selected_for_build)
     removed = set(registered) - selected_ids
 
-    payloads: dict[str, bytes] = {}
-    sequences: list[BuildSequence] = []
     control_target = _control_target(control_lakehouse, targets)
     if all(target.id != control_target.id for target in targets):
         targets = targets + (control_target,)
+
+    stages: list[PlannedStage] = []
+    omitted: list[OmittedNode] = []
 
     catalogue_before = render_catalogue_before_build(
         reconciled_catalogue,
         removed | selected_for_drop,
         control_target=control_target,
-        payloads=payloads,
     )
     if catalogue_before is not None:
-        sequences.append(catalogue_before)
+        stages.append(catalogue_before)
 
-    prune = render_inventory_prune_sequence(
-        repository,
-        selected_ids,
-        target_by_item,
-        target_inventories=inventories,
-        payloads=payloads,
-    )
-    if prune is not None:
-        sequences.append(prune)
+    for layer in _item_layers(repository, target_by_item):
+        layer_stages: list[PlannedStage] = []
+        for item in layer:
+            item_stages, item_omitted = _plan_item(
+                repository,
+                item=item,
+                target=target_by_item[item],
+                inventory=inventories[item],
+                target_by_item=target_by_item,
+                selected_ids=selected_ids,
+                selected_for_drop=selected_for_drop,
+                selected_for_build=selected_for_build,
+                registered=registered,
+            )
+            layer_stages.extend(item_stages)
+            omitted.extend(item_omitted)
+        stages.extend(merge_layer_stages(layer_stages))
 
-    drops = render_selected_drops(
-        repository,
-        selected_for_drop,
-        target_by_item,
-        registered=registered,
-        start=MANAGED_DROP_SEQUENCE_START,
-        payloads=payloads,
-    )
-    sequences.extend(drops)
-    build_start = MANAGED_DROP_SEQUENCE_START + len(drops) * OBJECT_SEQUENCE_STEP
-    sequences.extend(
-        render_selected_builds(
-            repository,
-            selected_for_build,
-            target_by_item,
-            inventories,
-            start=build_start,
-            payloads=payloads,
-        )
-    )
-    sequences.extend(
+    stages.extend(
         render_catalogue_after_build(
             repository,
             selected_ids,
             target_by_item,
             control_target=control_target,
-            payloads=payloads,
         )
     )
 
-    omitted = tuple(
+    sequences, payloads = enumerate_stages(stages)
+
+    omitted.extend(
         OmittedNode(
             node_id=str(identity),
             reason=OMIT_TARGET_UNBOUND,
@@ -157,9 +170,9 @@ def generate_item_build_bundle(
         repository_name=repository.name,
         repository_signature=repository.signature,
         targets=targets,
-        sequences=tuple(sequences),
+        sequences=sequences,
         selection=selection,
-        omitted_nodes=omitted,
+        omitted_nodes=tuple(sorted(omitted, key=lambda node: (node.node_id, node.reason))),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(
@@ -169,6 +182,96 @@ def generate_item_build_bundle(
         snapshot=_snapshot(repository, store),
         store=store,
     )
+
+
+def _item_layers(
+    repository: WeaverRepository,
+    target_by_item: Mapping[WeaverItemId, object],
+) -> tuple[tuple[WeaverItemId, ...], ...]:
+    """The bound items, grouped by their repository topological layer.
+
+    Selection is document-based and the bindings are sparse, so an unbound
+    producer simply drops out — but the items that remain keep the repository's
+    order rather than being re-derived here. That is the point of the repository
+    owning the graph: one authoritative ordering, consumed rather than rebuilt.
+    """
+
+    layers = repository.item_layers
+    if not layers:
+        raise BuildError(
+            f"repository {repository.name!r} carries no item dependency layers, so "
+            "the order its items must be built in is unknown"
+        )
+    placed = {item for layer in layers for item in layer}
+    missing = set(target_by_item) - placed
+    if missing:
+        raise BuildError(
+            "bound item(s) absent from the repository item graph: "
+            + ", ".join(sorted(map(str, missing)))
+        )
+    return tuple(
+        selected
+        for selected in (
+            tuple(item for item in layer if item in target_by_item) for layer in layers
+        )
+        if selected
+    )
+
+
+def _plan_item(
+    repository: WeaverRepository,
+    *,
+    item: WeaverItemId,
+    target,
+    inventory: TargetInventory,
+    target_by_item,
+    selected_ids,
+    selected_for_drop,
+    selected_for_build,
+    registered,
+) -> tuple[tuple[PlannedStage, ...], tuple[OmittedNode, ...]]:
+    """One item's contiguous group of stages, in the order they must run."""
+
+    aliases = plan_item_aliases(
+        repository, item=item, target=target, target_by_item=target_by_item
+    )
+    stages: list[PlannedStage] = []
+
+    prune = item_prune_stage(
+        repository, selected_ids, item=item, target=target, inventory=inventory
+    )
+    if prune is not None:
+        stages.append(prune)
+    stages.extend(
+        item_drop_stages(
+            repository,
+            selected_for_drop,
+            item=item,
+            target=target,
+            registered=registered,
+        )
+    )
+    schemas = item_schema_stage(
+        selected_ids,
+        item=item,
+        target=target,
+        inventory=inventory,
+        extra_schemas=aliases.schemas,
+    )
+    if schemas is not None:
+        stages.append(schemas)
+    if aliases.stage is not None:
+        stages.append(aliases.stage)
+    stages.extend(
+        item_build_stages(
+            repository, selected_for_build, item=item, target=target
+        )
+    )
+
+    refresh = item_refresh_stage(stages, item=item, target=target)
+    if refresh is not None:
+        stages.append(refresh)
+    return tuple(stages), aliases.omitted
 
 
 def _snapshot(repository: WeaverRepository, store: Store) -> dict[str, bytes]:

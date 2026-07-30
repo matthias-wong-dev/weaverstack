@@ -51,13 +51,17 @@ SPARK_SCHEMA_EXECUTOR = "spark_schema"
 SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
 FOLDER_EXECUTOR = "folder"
+ALIAS_EXECUTOR = "alias"
+SQL_ENDPOINT_EXECUTOR = "sql_endpoint"
 #: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
 #: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
 #: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
 #: is a resolved path and so cannot be frozen; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script; ``folder`` makes or removes a
-#: directory. All are build, not load.
+#: directory; ``alias`` points one Lakehouse name at another item's object;
+#: ``sql_endpoint`` syncs a Lakehouse's SQL analytics endpoint with the Delta
+#: mutations just made in it. All are build, not load.
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
@@ -66,18 +70,22 @@ VALID_EXECUTORS = frozenset(
         SPARK_TABLE_EXECUTOR,
         TSQL_EXECUTOR,
         FOLDER_EXECUTOR,
+        ALIAS_EXECUTOR,
+        SQL_ENDPOINT_EXECUTOR,
     }
 )
 #: Executors that run a payload, and the extension that payload must carry.
-#: ``folder`` acts on the resolved target and carries none.
+#: ``folder`` acts on the resolved target and carries none; ``sql_endpoint`` acts
+#: on the target itself.
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
     SPARK_SCHEMA_EXECUTOR: ".schema.json",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",
+    ALIAS_EXECUTOR: ".alias.json",
 }
-_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
+_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_EXECUTOR})
 
 
 @dataclass(frozen=True)

@@ -13,8 +13,22 @@ what appears under ``Tables/``, so removing the directory is expected to
 de-register it; that is worth confirming against a real workspace before relying
 on it.
 
+**Shortcuts, first.** A shortcut is the one thing in a Lakehouse that is not the
+Lakehouse's own data: it is a name this item holds for data another item owns. So
+it cannot be removed by deleting a directory, and *must not be* — a recursive
+delete of a directory holding one would be reaching through the pointer at the
+producer's data, which is the one outcome a wipe of *this* Lakehouse must never
+have. Shortcuts are therefore removed through the workspace, and removed before
+any storage is swept, so the sweep can never meet one.
+
+The local emulator materialises an alias as a symbolic link, and
+:meth:`weaver.store.LocalStore.delete` unlinks a link rather than following it —
+so the emulator reaches the same guarantee by a different mechanism, and neither
+needs the other's.
+
 **Folders.** The configured root is kept and its contents removed, so the target
-survives and only what it held goes.
+survives and only what it held goes. Shortcuts under ``Files/`` go first, for the
+same reason.
 
 **Warehouse.** One dynamic statement enumerates and removes user objects in
 dependency-safe order while preserving the Warehouse item and system schemas.
@@ -32,9 +46,9 @@ from typing import Iterable
 from .errors import CommandError
 from .workspaces import Workspace, LocalWorkspace
 from .locations import Location
-from .resolution import LocalResolver, resolver_for, store_for
+from .resolution import TABLES_AREA, LocalResolver, resolver_for, store_for
 from .store import LocalStore, Store
-from .targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
+from .targets import FILES_AREA, DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 
 
 @dataclass(frozen=True)
@@ -89,6 +103,32 @@ def _clear(
     return removed
 
 
+def _remove_shortcuts(
+    resolver, lakehouse: ItemRef, *, area: str, dry_run: bool
+) -> tuple[str, ...]:
+    """Take away this Lakehouse's shortcuts in one area, before storage is swept.
+
+    Reported as ``shortcut:<path>/<name>`` so a dry run distinguishes a pointer
+    being taken away from a directory being deleted — they are not the same act,
+    and only one of them destroys data.
+
+    An environment that has no shortcuts to remove offers no capability and this
+    answers nothing: the emulator's links are removed by the storage sweep, which
+    unlinks rather than follows.
+    """
+
+    enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)
+    remove = getattr(resolver, "remove_onelake_shortcut", None)
+    if enumerate_shortcuts is None or remove is None:
+        return ()
+
+    shortcuts = enumerate_shortcuts(lakehouse, area=area)
+    if not dry_run:
+        for shortcut in shortcuts:
+            remove(lakehouse, path=shortcut.path, name=shortcut.name)
+    return tuple(f"shortcut:{shortcut.qualified}" for shortcut in shortcuts)
+
+
 def wipe_folder_target(
     target: FolderTarget,
     workspace: Workspace,
@@ -101,10 +141,13 @@ def wipe_folder_target(
     store = store or store_for(workspace)
     resolver = resolver_for(workspace)
     location = resolver.folder_root(target)
+    shortcuts = _remove_shortcuts(
+        resolver, target.lakehouse, area=FILES_AREA, dry_run=dry_run
+    )
     return WipeReport(
         target=f"folder:{target}",
         location=location,
-        removed=_clear(store, location, resolver.root, dry_run=dry_run),
+        removed=shortcuts + _clear(store, location, resolver.root, dry_run=dry_run),
         dry_run=dry_run,
     )
 
@@ -119,16 +162,21 @@ def wipe_delta_target(
     """Remove every Delta table in a Lakehouse, keeping the Tables area.
 
     A table is a directory. There is no catalogue to enumerate from and none to
-    leave behind, because Weaver never registered one.
+    leave behind, because Weaver never registered one — with one exception, and it
+    is the reason shortcuts go first: a table shortcut is a directory whose bytes
+    belong to another item.
     """
 
     store = store or store_for(workspace)
     resolver = resolver_for(workspace)
     location = resolver.tables_root(target.lakehouse)
+    shortcuts = _remove_shortcuts(
+        resolver, target.lakehouse, area=TABLES_AREA, dry_run=dry_run
+    )
     return WipeReport(
         target=f"delta:{target}",
         location=location,
-        removed=_clear(store, location, resolver.root, dry_run=dry_run),
+        removed=shortcuts + _clear(store, location, resolver.root, dry_run=dry_run),
         dry_run=dry_run,
     )
 

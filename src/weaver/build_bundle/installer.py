@@ -196,6 +196,7 @@ def _run_sequence(
             target=target,
             sql=environment.sql_for(target.bound),
             snapshot_store=bundle.store or environment.store,
+            targets=resolved,
         )
         for action in batch.actions:
             if failed:

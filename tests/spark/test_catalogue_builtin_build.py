@@ -136,7 +136,9 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     The catalogue tables are created by ``build_table`` through ``spark_table``
     — the same action and executor an application repository gets. The prepared
     inventory already contains schema ``_``, so the ordinary planner correctly
-    omits a schema creation action. Nothing here knows it is building a catalogue.
+    omits a schema creation action. The endpoint refresh is likewise the ordinary
+    one: the control Lakehouse is a Lakehouse, and its own tables just changed.
+    Nothing here knows it is building a catalogue.
     """
 
     bundle, _report = built_catalogue
@@ -144,7 +146,7 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     assert {"build_table", "publish_catalogue", "publish_registry"} <= kinds
     assert "create_schema" not in kinds
     executors = {action.executor for _s, _b, action in bundle.plan.actions()}
-    assert executors == {"spark_table", "spark_sql_batch"}
+    assert executors == {"spark_table", "spark_sql_batch", "sql_endpoint"}
 
 
 def test_the_tables_land_under_the_weaver_lakehouse_tables_area(

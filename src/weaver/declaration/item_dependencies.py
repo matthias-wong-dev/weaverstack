@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Iterable, Mapping
 
-from ..errors import BuildError, DiscoveryError
+from ..errors import BuildError, DiscoveryError, GraphError
 from .graph import Graph
 from .metadata import ObjectId
 from .model import (
@@ -100,7 +100,53 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             if edge.producer is not None
         ),
     )
-    return replace(repository, dependency_edges=resolved, dependency_graph=graph)
+    item_graph = _item_graph(repository, resolved)
+    by_name = {str(item.identity): item.identity for item in repository.items}
+    return replace(
+        repository,
+        dependency_edges=resolved,
+        dependency_graph=graph,
+        item_graph=item_graph,
+        item_layers=tuple(
+            tuple(by_name[node] for node in layer) for layer in item_graph.layers()
+        ),
+    )
+
+
+def _item_graph(repository: WeaverRepository, resolved: tuple[ItemDependency, ...]) -> Graph:
+    """The acyclic item-level graph a multi-item build is planned against.
+
+    One item depends on another when it reaches into it: either a document
+    resolves to a document that other item owns, or this item declares an alias
+    whose source lives there. The alias edge matters on its own — an alias with
+    no consumer yet still has to be materialised after its source exists — so it
+    is not left to be implied by the dependency edges.
+
+    Within-item edges are absent by construction: the document graph already
+    orders those, and an item cannot wait for itself.
+
+    A circular item graph is a **repository** fault. It is rejected here, while
+    the whole declaration is in view, rather than at the point some incremental
+    selection happens to exercise it — a repository whose items cannot be
+    ordered has no correct build, not merely no correct build today.
+    """
+
+    edges: set[tuple[str, str]] = set()
+    for edge in resolved:
+        if edge.producer is None or edge.producer.item == edge.consumer.item:
+            continue
+        edges.add((str(edge.producer.item), str(edge.consumer.item)))
+    for alias in repository.aliases:
+        if alias.source.item == alias.destination.item:
+            continue
+        edges.add((str(alias.source.item), str(alias.destination.item)))
+
+    try:
+        return Graph(
+            (str(item.identity) for item in repository.items), sorted(edges)
+        )
+    except GraphError as exc:
+        raise GraphError(f"item {exc}") from exc
 
 
 def _resolve_destination(

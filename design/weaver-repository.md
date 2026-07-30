@@ -76,6 +76,12 @@ The destination schema must be declared by the owning item, and an alias may not
 shadow a document that item already declares natively. Two items may each alias
 the same source under their own local names.
 
+An alias also orders the two items: the consuming item is built after the item
+that produces the source, and a cycle between items is a repository error. Build
+materialises the alias as a OneLake shortcut for a Lakehouse destination and as a
+view for a Warehouse one — see
+[how build works](how-does-build-work.md#4a-aliases).
+
 The built-in `Lakehouse/_weaver` item is generated and managed by Weaver inside
 the parsed repository in memory. It declares the catalogue tables and is never
 written into authored source; an authored `Lakehouse/_weaver` is rejected.

@@ -125,6 +125,24 @@ lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver
 Lakehouse because the catalogue lives in a schema called `_` and a Lakehouse
 without schemas cannot hold one.
 
+## Cross-item aliases need two destinations
+
+`tests/fabric/test_cross_item_alias.py` builds two Lakehouse items in one bundle,
+where the consumer aliases a table the producer makes. It takes its own pair of
+disposable Lakehouses (`fabric_alias_lakehouses`) rather than the shared target,
+because a cross-item alias is the one thing a single destination cannot express.
+
+Three things only a real workspace answers, and this is where they are answered:
+a OneLake shortcut is a workspace API call rather than a file operation; the
+shortcut has to be created after the table it points at exists; and a Lakehouse's
+SQL analytics endpoint lags its Delta tables, so an item that mutated Delta is
+closed by a refresh the emulator can only skip.
+
+It also found the asynchrony: Fabric returns from the shortcut call before the
+Lakehouse will accept the name as a relation, and the consumer's very next
+statement failed with *"neither a view nor a table"*. The alias action now waits
+for a real read to succeed before reporting success.
+
 **The session attaches to the Weaver Lakehouse**, which is the production model —
 the control plane is the fixed attachment, destinations are the variable data
 plane. It used to attach to the *target*, and that made the suite structurally

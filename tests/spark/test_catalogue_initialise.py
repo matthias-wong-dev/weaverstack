@@ -228,7 +228,13 @@ def test_no_folder_rows_since_the_catalogue_has_no_folders(initialised, spark):
 def test_registry_is_published_after_the_dictionaries_and_the_installation(initialised):
     numbers = [sequence.number for sequence in initialised.result.report.sequences]
     assert numbers == sorted(numbers)
-    assert numbers[-1] == 9010
+    descriptions = [
+        sequence.description for sequence in initialised.result.report.sequences
+    ]
+    assert descriptions[-2:] == [
+        "publish item registry last",
+        "refresh the Weaver Lakehouse SQL endpoint after catalogue DML",
+    ]
     statuses = {
         sequence.number: sequence.status for sequence in initialised.result.report.sequences
     }

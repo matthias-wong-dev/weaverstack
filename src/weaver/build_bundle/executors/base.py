@@ -12,8 +12,8 @@ batch is bound to. It carries no planning input.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Protocol
 
 from ...errors import InstallError
 from ...locations import LakehouseSparkLocation, Location
@@ -65,6 +65,12 @@ class InstallationContext:
 
     ``spark`` runs Lakehouse work; ``sql`` runs Warehouse (T-SQL) work. A batch
     names one target, so only the capability its actions need has to be present.
+
+    ``targets`` holds every target the plan declared, already resolved. It exists
+    for the one action that legitimately spans two of them — an alias, which
+    points a name in ``target`` at an object in another — and it carries resolved
+    targets rather than ids so that a second destination is addressed exactly as
+    the batch's own is, and never derived by an executor.
     """
 
     spark: Any
@@ -74,6 +80,17 @@ class InstallationContext:
     target: ResolvedTarget
     sql: Any = None
     snapshot_store: Store | None = None
+    targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
+
+    def resolved(self, target_id: str) -> ResolvedTarget:
+        """Another target this plan declared, by the id an action names."""
+
+        found = self.targets.get(target_id)
+        if found is None:
+            raise InstallError(
+                f"action names target {target_id!r}, which this plan does not declare"
+            )
+        return found
 
     @property
     def catalogue(self) -> SparkCatalogue:

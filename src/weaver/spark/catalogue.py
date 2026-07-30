@@ -91,6 +91,29 @@ class SparkCatalogue:
         self.spark.sql(statement)
         return statement
 
+    def register_external_table(self, schema: str, name: str, location: str) -> str:
+        """Name a table in this destination whose storage it does not own.
+
+        This exists for one thing: an alias in the local emulator. Fabric
+        discovers a OneLake shortcut placed under a Lakehouse's ``Tables`` area by
+        itself, and the table simply appears in the catalogue; local Spark
+        discovers nothing, so the emulator has to say out loud what Fabric infers.
+
+        Unregistered first rather than created strictly, because an alias is a
+        pointer and re-pointing one is not a destructive transition. Dropping an
+        *external* table removes the registration and never the storage, which is
+        exactly the distinction that makes this safe: the data belongs to the item
+        that produced it.
+        """
+
+        qualified = self.qualify(schema, name)
+        self.spark.sql(f"DROP TABLE IF EXISTS {qualified}")
+        statement = (
+            f"CREATE TABLE {qualified} USING DELTA LOCATION '{_escaped(location)}'"
+        )
+        self.spark.sql(statement)
+        return statement
+
     # --- discovery ---------------------------------------------------------
 
     def schema_exists(self, schema: str) -> bool:
