@@ -19,7 +19,8 @@ from .workspaces import (
     Workspace,
 )
 from .locations import Location
-from .objects import Folder, ObjectContext, Table, View, WeaverObject
+from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
+from .objects import Folder, Table, View, WeaverObject
 from .resolution import LocalResolver
 from .initialise import (
     InitialiseResult,
@@ -161,7 +162,9 @@ __all__ = [
     "Folder",
     "Table",
     "View",
-    "ObjectContext",
+    "Lakehouse",
+    "default_lakehouse",
+    "lakehouse_for",
     "Store",
     "LocalStore",
     "Entry",

@@ -198,6 +198,16 @@ These become enforceable as the corresponding code lands:
   Lakehouse into its one namespace level. A bare `Schema.Object` resolves through
   whatever the session is attached to — which is the Weaver Lakehouse — so it is
   the ambient-context anti-pattern in disguise.
+
+  There is one narrow exception, and it is bounded by the same rule.
+  `weaver.lakehouse.default_lakehouse` reads a notebook's *own* attachment, so a
+  developer writing an object interactively does not have to resolve their one
+  Lakehouse by hand. It converts the attachment into an explicit `Lakehouse`
+  value at construction, and fails when there is nothing attached rather than
+  guessing; from that point on nothing is inherited. Two-part naming is
+  permitted only for the Lakehouse that inference produced, because there the
+  session's catalogue *is* the destination. Every other `Lakehouse` carries a
+  resolved destination or refuses to name an object at all.
 - **Level-three identity is workspace + type + name.** An item name is unique per
   *type*, not across types — a Lakehouse and its generated SQL endpoint share a
   display name. Resolution is typed: the slot supplies the type (a `DeltaTarget`

@@ -22,5 +22,5 @@ from weaver import Table
 
 class Sales__Customer(Table):
     def read(self):
-        source = Sales__OrderExport.folder_path()
+        source = Sales__OrderExport(self).path()
         return [], []

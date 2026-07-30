@@ -24,145 +24,165 @@ An object is a class in a file named for its ID::
 
     class Sales__Order(Table):
         def read(self):
-            customers = Sales__Customer.dataframe()
+            customers = Sales__Customer(self).dataframe()
+            existing = self.dataframe()
             ...
             return upserts, deletes
 
-An object reaches its *own* destination through ``self.path``; it reaches a
-*dependency's* through that object's classmethod — ``dataframe()`` for a table
-or view, ``folder_path()`` for a folder. The two are deliberately different
-names: a classmethod named ``path`` would replace the inherited ``self.path``
-property on every Folder.
+**An object is an ordinary Python object bound to a Spark session.** The session
+is the one mandatory argument, because authored code executes through it::
 
-**Dependencies are imports.** Importing another object's module declares a
-dependency on it; Weaver reads that from the source without executing it. There
-are no string keys to mistype, and an IDE can autocomplete and navigate to the
-object being depended on — which a string never could.
+    Sales__Order(spark).read()
 
-**Accessors are classmethods, not properties.** A class-level property would
-need a metaclass, since Python no longer chains ``classmethod`` and
-``property``. ``Customer.dataframe()`` is the plainer construction, and it is
-inherited, so tooling can see it.
+That is the whole runtime model. There is no hidden active object, no ambient
+resolver, and no context injected around a call — an object holds a session, a
+destination Lakehouse and its own identity, and every physical access is an
+ordinary instance method on it.
+
+**The destination is a resolved Lakehouse, never a name.** In a notebook it is
+the one attached to the session, and Weaver reads it
+(:func:`weaver.lakehouse.default_lakehouse`); with no unique attachment,
+construction fails rather than guessing which Lakehouse a load should land in. An
+orchestrator, or anyone addressing more than one Lakehouse, resolves it *outside*
+the object and passes it in::
+
+    Sales__Order(spark, lakehouse=resolved_lakehouse)
+
+A string is refused: looking a name up needs a workspace resolver, and that is
+not a decision authored code makes.
+
+**Dependencies are imports, and a dependency is constructed from its dependent**::
+
+    Another__Table(self).dataframe()
+    My__Folder(self).path()
+
+Importing another object's module declares the dependency; Weaver reads that from
+the source without executing it. Passing ``self`` hands over the session and the
+resolved Lakehouse together, so a dependency always resolves against the same
+target environment as the object reading it. A Python import only ever names an
+object in the *same* item, which is why nothing more is needed here — a
+cross-item dependency is an alias, and aliases are resolved during build.
+
+**Identity comes from the class name.** ``Sales__Order`` is ``Sales.Order``: the
+same rule the repository parser applies to the filename, and the parser has
+already refused any file where the two disagree. Nothing is re-parsed, and
+nothing is looked up in the catalogue, to know what an object is.
 
 **Objects never mutate the target.** ``read()`` proposes; Weaver owns writing,
-CRUD accounting, staging and logging. A Folder stages into a Weaver-issued
-directory and returns it; a Table returns rows.
+CRUD accounting, staging and logging. A Folder writes into its staging directory
+and returns it; a Table returns rows.
 
-Nothing here imports PySpark. Every accessor delegates to a context Weaver
-injects for the step, so this module is importable anywhere.
+Nothing here imports PySpark. The session is used through its ordinary API, so
+this module stays importable anywhere.
 """
 
 from __future__ import annotations
 
-from contextvars import ContextVar
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 from .errors import LoadError
+from .lakehouse import Lakehouse, default_lakehouse
 
-#: The resolver for the object currently executing. Weaver sets this for the
-#: duration of a step; a ContextVar rather than a global so concurrent steps
-#: cannot see each other's dependencies.
-_active_resolver: ContextVar[Any] = ContextVar("weaver_dependency_resolver", default=None)
-
-
-@runtime_checkable
-class ObjectContext(Protocol):
-    """What Weaver injects for one executing object.
-
-    Declared as a protocol so the authoring surface does not depend on the
-    runtime that satisfies it.
-    """
-
-    @property
-    def spark(self) -> Any: ...
-
-    @property
-    def object_path(self) -> Any: ...
-
-    @property
-    def schema(self) -> tuple[Any, ...]: ...
-
-    @property
-    def primary_key(self) -> tuple[str, ...]: ...
-
-    @property
-    def is_incremental(self) -> bool: ...
-
-    def current_dataframe(self) -> Any: ...
-
-    def empty_frame(self) -> Any: ...
-
-    def staging_folder(self) -> Any: ...
+#: What separates schema from object in a class name. A module name cannot carry
+#: a dot, so a Python object spells ``Sales.Order`` as ``Sales__Order`` — the rule
+#: :func:`weaver.declaration.source.object_id_for_filename` applies to the
+#: filename, repeated here because the authoring surface must not import the
+#: parser (the parser imports it, for the base classes).
+CLASS_ID_SEPARATOR = "__"
 
 
 class WeaverObject:
-    """Base for every authored object."""
+    """Base for every authored object.
 
-    def __init__(self, context: ObjectContext | None = None) -> None:
-        self._context = context
+    ``spark`` is the session authored code runs through, and it is mandatory.
+    Another Weaver object may be passed in its place — ``Another__Table(self)`` —
+    inheriting that object's session and Lakehouse, which is how one object
+    reaches another.
+    """
 
-    # --- depending on this object ---------------------------------------
-
-    @classmethod
-    def _resolve(cls, accessor: str) -> Any:
-        resolver = _active_resolver.get()
-        if resolver is None:
+    def __init__(self, spark: Any, *, lakehouse: Lakehouse | None = None) -> None:
+        if isinstance(spark, WeaverObject):
+            owner = spark
+            spark = owner.spark
+            if lakehouse is None:
+                lakehouse = owner.lakehouse
+        if spark is None:
             raise LoadError(
-                f"{cls.__name__}.{accessor}() is only available while Weaver is "
-                "executing an object. It resolves a dependency from the running "
-                "workflow, so it cannot be called from ordinary code."
+                f"{type(self).__name__} needs the Spark session it runs through — "
+                f"construct it as {type(self).__name__}(spark), or as "
+                f"{type(self).__name__}(self) from another object"
             )
-        return resolver(cls, accessor)
-
-    # --- this object's own context ---------------------------------------
-
-    @property
-    def context(self) -> ObjectContext:
-        if self._context is None:
+        if isinstance(lakehouse, str):
             raise LoadError(
-                f"{type(self).__name__} has no Weaver context — objects are "
-                "constructed by Weaver, not directly."
+                f"{type(self).__name__} takes a resolved Lakehouse, not the name "
+                f"{lakehouse!r} — resolve it first with "
+                f"weaver.lakehouse_for(resolver, {lakehouse!r})"
             )
-        return self._context
+        if lakehouse is not None and not isinstance(lakehouse, Lakehouse):
+            raise LoadError(
+                f"{type(self).__name__} takes a resolved Lakehouse, got "
+                f"{type(lakehouse).__name__}"
+            )
+
+        #: The session this object reads and writes through.
+        self.spark = spark
+        #: The destination this object materialises into, resolved once.
+        self.lakehouse: Lakehouse = (
+            lakehouse if lakehouse is not None else default_lakehouse(spark)
+        )
+        #: The destination's root, as Spark addresses it.
+        self.spark_root = self.lakehouse.spark_root
+        #: The same root as ordinary file access addresses it, when it is mounted.
+        self.fuse_root = self.lakehouse.fuse_root
+
+    # --- identity ---------------------------------------------------------
 
     @property
-    def path(self) -> Any:
-        """This object's destination. Read-only: do not write here."""
+    def identity(self) -> tuple[str, str]:
+        """The schema and object name this class declares."""
 
-        return self.context.object_path
+        return _identity(type(self).__name__)
 
     @property
-    def spark(self) -> Any:
-        return self.context.spark
+    def object_id(self) -> str:
+        """This object's ``Schema.Object`` ID, from its class name."""
+
+        return "{}.{}".format(*self.identity)
 
     def read(self):
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement read()"
-        )
+        raise NotImplementedError(f"{type(self).__name__} must implement read()")
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} {self.object_id} in {self.lakehouse.name}>"
 
 
 class Folder(WeaverObject):
     """Files materialised into a Lakehouse Files directory.
 
-    ``read()`` writes into the staging directory Weaver issues and returns
+    ``read()`` writes into this object's staging directory and returns
     ``(staging_folder, files_to_delete)``.
     """
 
-    @classmethod
-    def folder_path(cls) -> Any:
-        """This folder's materialised location, for a dependent object.
+    def path(self) -> str:
+        """This folder's materialised location, as an ordinary filesystem path.
 
-        Not ``path()``: that name belongs to the instance property every object
-        uses for its *own* destination, and a classmethod of the same name
-        would replace it — silently, since a bound method is truthy.
+        A folder is written and read with ordinary file calls, so this is the FUSE
+        path rather than the Spark one. A Lakehouse that is not mounted has none,
+        and says so rather than composing a path that does not exist.
         """
 
-        return cls._resolve("path")
+        return self.lakehouse.folder_path(*self.identity)
 
-    def staging_folder(self) -> Any:
-        """A fresh, empty, object-local staging directory to write into."""
+    def staging_folder(self) -> str:
+        """The object-local staging directory to write into.
 
-        return self.context.staging_folder()
+        The destination's own path with ``_Staging`` appended — the same sibling
+        :meth:`weaver.resolution.LocalResolver.folder_staging` issues. There is no
+        shared staging area and no run identifier: staging belongs to the object,
+        so a failed load leaves exactly one directory to look at.
+        """
+
+        return f"{self.path()}_Staging"
 
 
 class Table(WeaverObject):
@@ -171,34 +191,28 @@ class Table(WeaverObject):
     ``read()`` returns ``(upserts, deletes)``.
     """
 
-    @classmethod
-    def dataframe(cls) -> Any:
-        """This table's contents, for a dependent object."""
+    def dataframe(self) -> Any:
+        """This table as it currently stands, read from its Delta files.
 
-        return cls._resolve("dataframe")
+        Addressed by path rather than by catalogue name, which is how Weaver
+        reaches Delta everywhere else: a path needs nothing attached, so the same
+        call serves any resolved Lakehouse.
+        """
 
-    @property
-    def schema(self) -> tuple[Any, ...]:
-        return self.context.schema
+        return self.spark.read.format("delta").load(
+            self.lakehouse.table_path(*self.identity)
+        )
 
-    @property
-    def primary_key(self) -> tuple[str, ...]:
-        return self.context.primary_key
+    def empty_dataframe(self) -> Any:
+        """This table's shape with no rows — an incremental load's no-op result.
 
-    @property
-    def is_incremental(self) -> bool:
-        return self.context.is_incremental
+        Taken from the table itself, so the columns are exactly the ones the load
+        has to match. That means the physical table must already exist, which is no
+        constraint at all: a load returning *this* table's empty shape is by
+        definition running against a target that has been built.
+        """
 
-    @property
-    def current_dataframe(self) -> Any:
-        """The persisted table, or None if it has never been written."""
-
-        return self.context.current_dataframe()
-
-    def empty_frame(self) -> Any:
-        """An empty DataFrame in this object's declared schema."""
-
-        return self.context.empty_frame()
+        return self.dataframe().limit(0)
 
 
 class View(WeaverObject):
@@ -207,11 +221,26 @@ class View(WeaverObject):
     A view has no ``read()``: its definition is its query.
     """
 
-    @classmethod
-    def dataframe(cls) -> Any:
-        """This view's contents, for a dependent object."""
+    def dataframe(self) -> Any:
+        """This view's contents.
 
-        return cls._resolve("dataframe")
+        By name, not by path: a view exists only in the catalogue, so unlike a
+        table there is nothing on disk to address.
+        """
+
+        return self.spark.table(self.lakehouse.qualify(*self.identity))
+
+
+def _identity(class_name: str) -> tuple[str, str]:
+    """``Sales__Order`` → ``("Sales", "Order")``."""
+
+    parts = [part.strip() for part in class_name.split(CLASS_ID_SEPARATOR)]
+    if len(parts) != 2 or not all(parts):
+        raise LoadError(
+            f"{class_name!r} does not name an object: a Weaver class separates "
+            f"schema and object with {CLASS_ID_SEPARATOR!r}, as in Sales__Order"
+        )
+    return parts[0], parts[1]
 
 
 #: The authoring base classes, by the metadata kind that selects them.

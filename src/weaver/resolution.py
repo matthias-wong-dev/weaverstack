@@ -83,6 +83,26 @@ class LocalResolver:
     def tables_root(self, item: ItemRef) -> Location:
         return self.lakehouse(item) / TABLES_AREA
 
+    def spark_root(self, item: ItemRef) -> str:
+        """The root Spark writes through, for a Lakehouse.
+
+        The local counterpart of the Fabric ``abfss://`` root: same contract,
+        filesystem transport, and the same reason for existing — a destination is
+        addressed explicitly rather than by attaching the session to it.
+        """
+
+        return self.lakehouse(item).value
+
+    def fuse_root(self, item: ItemRef) -> str:
+        """The root ordinary file access reaches, for a Lakehouse.
+
+        Locally the two roots are the same directory: there is no mount to cross,
+        which is exactly what makes the emulator a faithful stand-in for the
+        notebook's attached Lakehouse.
+        """
+
+        return self.lakehouse(item).value
+
     # --- folder targets --------------------------------------------------
 
     def folder_root(self, target: FolderTarget) -> Location:
