@@ -14,6 +14,7 @@ import hashlib
 from dataclasses import replace
 
 import pytest
+import yaml
 
 from weaver import LocalStore, Location
 from weaver.build_bundle import (
@@ -87,11 +88,11 @@ def _plan(bundle_id: str = "") -> BuildPlan:
     )
 
 
-def test_legacy_plan_without_selection_deserialises_at_the_boundary():
+def test_plan_without_selection_is_rejected():
     mapping = _plan().to_mapping()
     mapping.pop("selection")
-    restored = BuildPlan.from_mapping(mapping)
-    assert restored.selection == BuildSelection(Impact((), (), ()), (), (), ())
+    with pytest.raises(BuildError, match="missing a required field: 'selection'"):
+        plan_from_yaml(yaml.safe_dump(mapping))
 
 
 def _identified_plan() -> BuildPlan:

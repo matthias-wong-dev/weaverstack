@@ -213,11 +213,7 @@ class BuildPlan:
             repository_signature=mapping["repository_signature"],
             targets=tuple(BoundTarget.from_mapping(t) for t in mapping.get("targets", ())),
             sequences=tuple(BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())),
-            selection=BuildSelection.from_mapping(
-                mapping.get("selection")
-                or mapping.get("incremental_selection")
-                or {}
-            ),
+            selection=BuildSelection.from_mapping(mapping["selection"]),
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
             ),

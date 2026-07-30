@@ -275,9 +275,8 @@ then also created strictly. An unexpected collision proves the prepared state or
 an earlier action was wrong and fails visibly. Managed drops are strict for the
 same reason. Only prune remains idempotent.
 
-Every newly generated plan carries mandatory `selection`. Deserialisation alone
-accepts an older pre-alpha plan with `incremental_selection` or no selection and
-normalises it to the current model.
+Every plan carries mandatory `selection`. Deserialisation rejects a plan that
+omits it.
 
 ## 12. Bundle execution order
 

@@ -68,10 +68,16 @@ def _claim_statements(claims: Iterable[CatalogueClaim]) -> tuple[str, ...]:
                     for claim in claims
                     if claim.identity == identity and claim.rule.table == table
                 )
-                schema, name = rule.values(identity)
+                values = rule.values(identity)
                 predicates.append(
-                    "(" + f"{identifier('schema_name')} = {literal(schema)} AND "
-                    f"{identifier('object_name')} = {literal(name)}" + ")"
+                    "("
+                    + " AND ".join(
+                        f"{identifier(column)} = {literal(value)}"
+                        for column, value in zip(
+                            rule.predicate_columns, values, strict=True
+                        )
+                    )
+                    + ")"
                 )
             statements.append(
                 f"DELETE FROM {object_token('_', table.name)}\n"

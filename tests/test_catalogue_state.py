@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from weaver.build_bundle.catalogue_actions import _claim_statements
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue import (
     CATALOGUE_TABLES,
@@ -11,8 +12,9 @@ from weaver.catalogue import (
     REGISTRY,
     TABLE_DICTIONARY,
 )
+from weaver.catalogue.claims import CatalogueClaim, CatalogueClaimRule
 from weaver.catalogue.state import CatalogueState, reconcile_catalogue_state
-from weaver.declaration.model import WeaverItemId
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import BuildError
 
 
@@ -145,3 +147,18 @@ def test_registry_rejects_an_unsupported_installed_object_type():
             _state(_row("Load", object_type="procedure")),
             inventories={ITEM: _inventory()},
         )
+
+
+def test_claim_deletion_uses_the_rule_predicate_columns():
+    identity = WeaverDocumentId.parse("Lakehouse/Sales/Sales.Customer")
+    rule = CatalogueClaimRule(
+        REGISTRY,
+        predicate_columns=("owned_schema", "owned_object"),
+    )
+
+    statement = _claim_statements((CatalogueClaim(identity, rule),))[0]
+
+    assert "`owned_schema` = 'Sales'" in statement
+    assert "`owned_object` = 'Customer'" in statement
+    assert "`schema_name`" not in statement
+    assert "`object_name`" not in statement
