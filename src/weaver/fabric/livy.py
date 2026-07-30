@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..errors import WeaverError
-from .auth import FABRIC_SCOPE, get_token
+from .auth import FABRIC_SCOPE, token_source
 from .client import FABRIC_API
 
 DEFAULT_LIVY_API_VERSION = "2023-12-01"
@@ -229,12 +229,23 @@ class LivySession:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         bootstrap: str | None = None,
     ) -> None:
-        self.token = token or get_token(FABRIC_SCOPE)
+        self._token_source = token_source(token, scope=FABRIC_SCOPE)
         self.base = sessions_url(workspace_id, lakehouse_id, api_base_url=api_base_url)
         self.environment_id = environment_id
         self.poll_interval = poll_interval
         self.bootstrap = bootstrap
         self.session_url: str | None = None
+
+    @property
+    def token(self) -> str:
+        """A currently-valid bearer, renewed when it is close to expiring.
+
+        A session is the longest-lived thing here: it is held open across a whole
+        suite, so a snapshotted token expires mid-run and every statement after
+        that fails with ``401``, downstream tests included.
+        """
+
+        return self._token_source()
 
     @classmethod
     def for_workspace(cls, workspace, *, resolver=None, **kwargs) -> "LivySession":

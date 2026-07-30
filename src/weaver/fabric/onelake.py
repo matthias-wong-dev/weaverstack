@@ -29,7 +29,7 @@ from urllib.parse import quote, urlencode
 from ..errors import CommandError
 from ..locations import Location
 from ..store import Entry, StoreError
-from .auth import STORAGE_SCOPE, get_token
+from .auth import STORAGE_SCOPE, token_source
 from .client import ONELAKE_DFS
 
 STORAGE_API_VERSION = "2023-11-03"
@@ -124,13 +124,17 @@ class OneLakeDfsClient:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._token = token
+        self._token_source = token_source(token, scope=STORAGE_SCOPE)
 
     @property
     def token(self) -> str:
-        if self._token is None:
-            self._token = get_token(STORAGE_SCOPE)
-        return self._token
+        """A currently-valid bearer, renewed when it is close to expiring.
+
+        A push or a repository upload can run for a long time on one client, so
+        the token has to be read per request rather than snapshotted.
+        """
+
+        return self._token_source()
 
     def _request(
         self,

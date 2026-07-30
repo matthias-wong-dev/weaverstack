@@ -144,5 +144,9 @@ class FabricSessionResolver(FabricResolver):
                 credentials = notebook_credentials
             from .client import FabricClient
 
-            self.client = FabricClient(token=credentials.getToken("pbi"))
+            # A callable, not the string it answers: a session-native token
+            # expires like any other, and an install running inside Fabric can
+            # outlive one. NotebookUtils serves from its own cache, so asking per
+            # request is cheap.
+            self.client = FabricClient(token=lambda: credentials.getToken("pbi"))
         return self.client
