@@ -72,7 +72,7 @@ def create_shortcut(
     """Point ``destination``'s ``path/name`` at ``source``'s ``source_path``."""
 
     delete_shortcut(destination, path=path, name=name, client=client)
-    client.request(
+    response = client.request(
         "POST",
         f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts",
         payload={
@@ -91,6 +91,13 @@ def create_shortcut(
         "shortcut": f"{path}/{name}",
         "in": destination.name,
         "target": f"{source.name}/{source_path}",
+        # Reported because it says which contract Fabric honoured. Creating one
+        # shortcut is documented as synchronous — a 201 — while bulk creation is
+        # not; so a 202 here would mean the shortcut itself is still being made,
+        # which is a different thing from the destination Lakehouse not yet having
+        # registered it as a table. Only the second is what the readability wait
+        # in `weaver.build_bundle.executors.alias` exists for.
+        "status": response.status_code,
     }
 
 

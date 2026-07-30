@@ -71,6 +71,10 @@ def test_a_shortcut_is_replaced_rather_than_created_strictly():
         },
     }
     assert details["shortcut"] == "Tables/Sales/Landed"
+    # Creating one shortcut is documented as synchronous; the status says whether
+    # Fabric honoured that, and distinguishes it from the destination Lakehouse
+    # not yet having registered the shortcut as a table.
+    assert details["status"] == 200
 
 
 def test_a_shortcut_path_is_escaped_into_one_url_segment():
