@@ -14,7 +14,7 @@ you name, builds one global dependency graph across all three forms, and
 certifies each object in the central catalogue only once it has built.
 
 > **Status: pre-alpha.** The current CLI, Workspace and catalogue work follows
-> [the Weaver master plan](docs/weaver_master_cli_plan.md).
+> [the Weaver master plan](design/weaver_master_cli_plan.md).
 
 ## Installation
 
@@ -42,7 +42,7 @@ weaver doctor
 ```
 
 reports what is present and what to install. See
-[docs/local-setup.md](docs/local-setup.md).
+[design/local-setup.md](design/local-setup.md).
 
 ## CLI lifecycle
 
@@ -57,17 +57,17 @@ weaver build --workspace-config workspace.yml --bind Lakehouses/Sales_Dev
 
 The same commands work against a local folder with `--workspace-type local`,
 except Warehouse work, which remains Fabric-only. See
-[CLI usage](docs/cli-usage.md) for push, physical-first bindings, wipe and
+[CLI usage](design/cli-usage.md) for push, physical-first bindings, wipe and
 unbind.
 
 ## Documentation
 
-- [Authoritative master plan](docs/weaver_master_cli_plan.md)
-- [How Weaver build works](docs/how-does-build-work.md) — incremental selection, bundle order and certification
-- [Where your Weaver document repository lives](docs/weaver-repository.md) — a folder of files, and how it reaches Fabric
-- [CLI usage](docs/cli-usage.md) — signing in, workspaces, capacity, wipe
-- [Local development setup](docs/local-setup.md)
-- [Fabric integration tests](docs/fabric-testing.md)
+- [Authoritative master plan](design/weaver_master_cli_plan.md)
+- [How Weaver build works](design/how-does-build-work.md) — incremental selection, bundle order and certification
+- [Where your Weaver document repository lives](design/weaver-repository.md) — a folder of files, and how it reaches Fabric
+- [CLI usage](design/cli-usage.md) — signing in, workspaces, capacity, wipe
+- [Local development setup](design/local-setup.md)
+- [Fabric integration tests](design/fabric-testing.md)
 - [Agent guide](AGENTS.md)
 
 ## Licence

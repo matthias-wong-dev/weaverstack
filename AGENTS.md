@@ -24,7 +24,7 @@ dwg-platform/
 `weaver` is consulted for proven algorithms, Fabric/OneLake/Spark/Warehouse edge
 cases, Weaver document fixtures and behavioural intent. Never change it as part of
 weaverstack work, and never import from it. Where the two disagree, the
-architecture in [the master CLI plan](docs/weaver_master_cli_plan.md) is
+architecture in [the master CLI plan](design/weaver_master_cli_plan.md) is
 authoritative.
 
 Reference baseline: `a97ba8a0b00dd66dff1b2c5e818403694562fd30` (the plan's
@@ -33,7 +33,7 @@ revision you are reading before treating it as the baseline.
 
 ## Implementation authority
 
-[The master CLI plan](docs/weaver_master_cli_plan.md) is the authoritative plan
+[The master CLI plan](design/weaver_master_cli_plan.md) is the authoritative plan
 for the current CLI, Workspace, repository parsing and catalogue reconciliation
 work. The underlying system has run in production on SQL Server for years and
 the sibling `weaver` implementation proved it works on Fabric. This is
@@ -282,13 +282,13 @@ properties, a proxied cloud workspace can report an unresolved
 `io.delta#delta-spark_2.12` dependency followed by `JAVA_GATEWAY_EXITED`, even
 though `pip install` worked. Ivy caches the download under `~/.ivy2`, so later
 runs in the same workspace normally start without another download. See
-[the cloud-workspace notes](docs/local-setup.md#codex-cloud-workspaces) for
+[the cloud-workspace notes](design/local-setup.md#codex-cloud-workspaces) for
 individual commands and troubleshooting.
 
 Spark tests are deselected by default (`addopts = ["-m", "not spark"]`) and skip
 themselves if PySpark or a supported JDK is missing, so a contributor without a
 JVM is never blocked. `weaver doctor` reports what is present and what to
-install; see [docs/local-setup.md](docs/local-setup.md).
+install; see [design/local-setup.md](design/local-setup.md).
 
 Versions are declared as ranges, not pins — Spark 3.5.x with delta-spark 3.2.x,
 on Java 11 or 17 — so an existing local install is not disturbed.
