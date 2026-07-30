@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f1e8">
     <meta name="description" content="Weaver is the open-source control plane for declaring, building and orchestrating a Microsoft Fabric data estate.">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+    <meta name="author" content="Weaver contributors">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://weaverstack.dev/">
+    <meta property="og:site_name" content="Weaver">
+    <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="Weaver — Fabric, declared.">
     <meta property="og:description" content="One repository for your whole Microsoft Fabric data estate.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
@@ -18,8 +23,40 @@
     <meta name="twitter:description" content="One repository for your whole Microsoft Fabric data estate.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="canonical" href="https://weaverstack.dev/">
-    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="sitemap" type="application/xml" href="https://weaverstack.dev/sitemap.xml">
+    <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
+    <link rel="manifest" href="site.webmanifest">
     <title>Weaver — Fabric, declared.</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://weaverstack.dev/#website",
+            "url": "https://weaverstack.dev/",
+            "name": "Weaver",
+            "alternateName": "weaverstack",
+            "description": "The open-source control plane for declaring, building and orchestrating a Microsoft Fabric data estate.",
+            "inLanguage": "en-AU"
+          },
+          {
+            "@type": "SoftwareSourceCode",
+            "@id": "https://weaverstack.dev/#software",
+            "name": "Weaver",
+            "alternateName": "weaverstack",
+            "description": "A central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses.",
+            "url": "https://weaverstack.dev/",
+            "codeRepository": "https://github.com/matthias-wong-dev/weaverstack",
+            "license": "https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE",
+            "programmingLanguage": ["Python", "SQL"],
+            "runtimePlatform": "Microsoft Fabric",
+            "isAccessibleForFree": true,
+            "mainEntityOfPage": { "@id": "https://weaverstack.dev/#website" }
+          }
+        ]
+      }
+    </script>
     <style>
       :root {
         --ink: #111b27;
