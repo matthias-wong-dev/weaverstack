@@ -1,0 +1,279 @@
+"""What a build writes to the catalogue, before and after its physical work.
+
+Two renderings, both pure. The *before* stage removes claims: the ones
+reconciliation disproved, and the ones held by objects this build is about to
+drop. The *after* stage publishes what the build now certifies.
+
+Neither needs a session. The old Fabric tests reached these by installing an
+estate and reading the catalogue back, which meant a claim about statement
+*ordering* was paid for with a full build and could fail for any reason a build
+can fail.
+
+The ordering is the strict invariant here and most of what is asserted: the
+dictionaries describe, Installation records the binding, and Registry certifies
+— so Registry is written last, and a row in it can never outrun the work it
+attests to.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from factories import (
+    FixtureCatalogue,
+    bound_target,
+    document_id,
+    item_id,
+    lakehouse_table,
+    registry_row,
+    single_document_repository,
+    target_inventory,
+)
+
+from weaver.build_bundle.catalogue_actions import (
+    collect_claims,
+    render_catalogue_after_build,
+    render_catalogue_before_build,
+)
+from weaver.catalogue.state import reconcile_catalogue_state
+
+CUSTOMER = "DWG.Customer"
+
+
+@pytest.fixture
+def repository(tmp_path):
+    return single_document_repository(
+        tmp_path, documents={"DWG__Customer.py": lakehouse_table(CUSTOMER)}
+    )
+
+
+def statements(stage) -> list[str]:
+    """The SQL a catalogue stage carries, which is its whole payload."""
+
+    if stage is None:
+        return []
+    return [
+        line
+        for content in stage.payloads.values()
+        for line in json.loads(content)
+    ]
+
+
+def after(repository, *names):
+    item = item_id()
+    target = bound_target()
+    return render_catalogue_after_build(
+        repository,
+        {document_id(name) for name in names},
+        {item: target},
+        control_target=target,
+    )
+
+
+# --- before the build: removing claims ----------------------------------------
+
+
+def test_a_build_that_removes_nothing_writes_no_deletes(repository):
+    """No stage at all, rather than a stage with no statements.
+
+    An empty barrier would still be a barrier the installer had to run and the
+    report had to record, for nothing.
+    """
+
+    stage = render_catalogue_before_build(
+        FixtureCatalogue.from_registry_rows(), (), control_target=bound_target()
+    )
+
+    assert stage is None
+
+
+def test_an_objects_claims_are_deleted_when_it_is_being_dropped(repository):
+    """Uncertify first: nothing may stay certified while its description goes."""
+
+    catalogue = FixtureCatalogue.from_registry_rows(registry_row(CUSTOMER))
+
+    stage = render_catalogue_before_build(
+        catalogue, {document_id(CUSTOMER)}, control_target=bound_target()
+    )
+
+    assert stage is not None
+    assert all(line.startswith("DELETE FROM") for line in statements(stage))
+    assert any("Registry" in line for line in statements(stage))
+
+
+def test_the_registry_claim_is_deleted_before_the_dictionaries(repository):
+    """Prune runs the publication order backwards, and that is the invariant.
+
+    Registry certifies; the dictionaries describe. Removing a description while
+    the object is still certified would leave the catalogue claiming something it
+    could no longer describe.
+    """
+
+    # Both tables must actually hold a row: a claim is only collected where one
+    # exists, so a Registry-only catalogue cannot demonstrate the ordering.
+    catalogue = FixtureCatalogue.holding(
+        Registry=[registry_row(CUSTOMER)],
+        TableDictionary=[registry_row(CUSTOMER)],
+    )
+
+    lines = statements(
+        render_catalogue_before_build(
+            catalogue, {document_id(CUSTOMER)}, control_target=bound_target()
+        )
+    )
+
+    registry = next(i for i, line in enumerate(lines) if "Registry" in line)
+    dictionary = next(i for i, line in enumerate(lines) if "Dictionary" in line)
+    assert registry < dictionary
+
+
+def test_a_claim_the_catalogue_never_held_produces_no_delete(repository):
+    """The build asks to remove an object with no rows: there is nothing to do."""
+
+    stage = render_catalogue_before_build(
+        FixtureCatalogue.from_registry_rows(),
+        {document_id(CUSTOMER)},
+        control_target=bound_target(),
+    )
+
+    assert stage is None
+
+
+def test_claims_disproved_by_reconciliation_are_deleted_too(repository):
+    """The two claim sources meet here, and both must reach the same stage.
+
+    One is found by diffing the inventory, the other by the build's own
+    selection. A stage carrying only one of them would leave the catalogue
+    certifying an object that is demonstrably absent.
+    """
+
+    catalogue = FixtureCatalogue.from_registry_rows(registry_row(CUSTOMER))
+    reconciled = reconcile_catalogue_state(
+        catalogue, inventories={item_id(): target_inventory(schemas=("DWG",))}
+    )
+    assert reconciled.stale_claims, "the fixture should have disproved the claim"
+
+    stage = render_catalogue_before_build(
+        reconciled.catalogue,
+        (),  # this build drops nothing itself
+        control_target=bound_target(),
+        stale_claims=reconciled.stale_claims,
+    )
+
+    assert stage is not None
+    assert any("Registry" in line for line in statements(stage))
+
+
+def test_collecting_claims_takes_both_sources_without_duplicating(repository):
+    catalogue = FixtureCatalogue.from_registry_rows(registry_row(CUSTOMER))
+    reconciled = reconcile_catalogue_state(
+        catalogue, inventories={item_id(): target_inventory(schemas=("DWG",))}
+    )
+
+    claims = collect_claims(
+        catalogue,
+        {document_id(CUSTOMER)},
+        stale_claims=reconciled.stale_claims,
+    )
+
+    assert len(claims) == len(set(claims))
+
+
+# --- after the build: publishing what it certifies ----------------------------
+
+
+def test_the_registry_is_published_in_its_own_later_stage(repository):
+    """The ordering invariant, stated as barriers rather than as statements.
+
+    Registry is written last so a row in it cannot outrun the work it attests
+    to. Sharing a stage with the dictionaries would let the installer run them
+    together and lose that.
+    """
+
+    stages = after(repository, CUSTOMER)
+
+    slugs = [stage.slug for stage in stages]
+    assert slugs.index("publish-catalogue") < slugs.index("publish-registry")
+
+
+def test_publication_closes_with_a_control_endpoint_refresh(repository):
+    """The catalogue is Delta like anything else, and its next reader — a report,
+    a GUI, the next build — reaches it through the endpoint."""
+
+    stages = after(repository, CUSTOMER)
+
+    assert stages[-1].slug == "refresh-control-endpoint"
+
+
+def test_a_build_certifying_nothing_still_removes_what_it_no_longer_claims(
+    repository,
+):
+    """Not "nothing to publish, nothing to do" — the opposite.
+
+    Publication is delete-then-merge per table, and the delete keeps exactly the
+    keys this installation projects. Projecting none means the scope's rows are
+    all obsolete, so the build must say so. Skipping the stage would leave the
+    catalogue certifying an item that no longer declares anything, which is the
+    one state nothing else would ever correct.
+    """
+
+    stages = after(repository)
+
+    assert stages, "an empty projection still has removals to publish"
+    lines = statements(stages[0]) + statements(stages[1])
+
+    # Every description and certification the item held is removed...
+    for table in ("TableDictionary", "ColumnDictionary", "Registry", "Alias"):
+        assert any(
+            line.startswith("DELETE FROM") and table in line for line in lines
+        ), table
+
+    # ...and the Installation row survives, because it records *which target this
+    # item was built against*, which remains true of a build that certified
+    # nothing. Losing it would make the item look as though it had never been
+    # bound at all.
+    assert any(line.startswith("MERGE INTO") and "Installation" in line for line in lines)
+
+
+def test_every_published_statement_is_scoped_to_its_item(repository):
+    """The reach of a build's catalogue work is bounded by construction.
+
+    Every statement carries the item scope, so a build cannot touch another
+    item's rows even by mistake — which matters because the catalogue is keyed
+    by logical item and two estates can share one.
+    """
+
+    lines = statements(after(repository, CUSTOMER)[0])
+
+    assert lines
+    assert all("`item_name` = 'Sales'" in line for line in lines)
+
+
+def test_the_publication_epoch_stays_a_token(repository):
+    """Rendered at install, not at plan time — and the bundle's identity is its
+    bytes, so a clock in a payload would make every build differ.
+
+    It also has to be one value across the whole installation, which a token
+    resolved once by the installer guarantees and a per-statement literal could
+    not.
+    """
+
+    lines = statements(after(repository, CUSTOMER)[1])
+
+    assert any("{{epoch}}" in line for line in lines)
+
+
+def test_publication_both_removes_and_merges(repository):
+    """Two statements per table: delete what this installation no longer claims,
+    then merge what it does.
+
+    Neither depends on having read the catalogue — the delete keeps exactly the
+    keys the projection claims and the merge is idempotent — so the pair is
+    correct against any prior state, including one the planner could not see.
+    """
+
+    lines = statements(after(repository, CUSTOMER)[1])
+
+    assert any(line.startswith("DELETE FROM") for line in lines)
+    assert any("MERGE" in line for line in lines)

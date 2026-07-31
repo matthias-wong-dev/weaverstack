@@ -22,20 +22,32 @@ from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarg
 from weaver.locations import Location
 
 
-def resolved_for(lakehouses, item: str) -> ResolvedTarget:
+def resolved_for(lakehouses, item: str, *, target_id: str = "target-1") -> ResolvedTarget:
     """One local Lakehouse, resolved exactly as the installer resolves it."""
 
     reference = ItemRef(item)
     return ResolvedTarget(
-        bound=bound_target(id="target-1", item_id=item),
+        bound=bound_target(id=target_id, item_id=item),
         lakehouse=reference,
         location=lakehouses.resolver.lakehouse_spark_location(reference),
         destination=lakehouses.resolver.spark_destination(reference),
     )
 
 
-def context_for(lakehouses, spark, item: str) -> InstallationContext:
-    target = resolved_for(lakehouses, item)
+def context_for(
+    lakehouses, spark, item: str, *, target_id: str = "target-1", epoch: str | None = None
+) -> InstallationContext:
+    """The context an installer builds for one batch.
+
+    ``epoch`` matters for catalogue work and nothing else: the publication
+    statements carry `{{epoch}}` so a bundle's bytes stay stable, and the
+    installer resolves it once per installation. Executing such a payload without
+    one sends `{{` to the engine, which is not Spark SQL — deliberately, so an
+    unresolved token is a syntax error rather than a name that quietly means
+    something else.
+    """
+
+    target = resolved_for(lakehouses, item, target_id=target_id)
     return InstallationContext(
         spark=spark,
         resolver=lakehouses.resolver,
@@ -43,6 +55,7 @@ def context_for(lakehouses, spark, item: str) -> InstallationContext:
         snapshot=Location(str(lakehouses.root)),
         target=target,
         targets={target.bound.id: target},
+        epoch=epoch,
     )
 
 

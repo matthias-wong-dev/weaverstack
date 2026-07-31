@@ -150,6 +150,24 @@ class FixtureCatalogue(Catalogue):
         )
 
     @classmethod
+    def holding(cls, item: str | WeaverItemId = ITEM, **tables) -> "Catalogue":
+        """A catalogue holding the named tables' rows — Registry and beyond.
+
+        `from_registry_rows` is the common case; this is for the claims that are
+        *about* more than the Registry, such as the order in which a build
+        removes a certification and the description behind it. A claim is only
+        collected where a row actually exists, so a catalogue with no dictionary
+        rows cannot demonstrate dictionary ordering.
+        """
+
+        if isinstance(item, str):
+            item = item_id(item)
+        return cls(
+            rows={item: {name: tuple(rows) for name, rows in tables.items()}},
+            present_tables=frozenset(tables),
+        )
+
+    @classmethod
     def certifying(cls, *registered: RegisteredDocument) -> "Catalogue":
         """A catalogue certifying exactly these documents, with no row data.
 
@@ -444,6 +462,51 @@ class {class_name}(Folder):
     def read(self):
         return self.staging_folder(), []
 '''
+
+
+def alias_declaration(**aliases: str) -> str:
+    """An item's ``alias.yml``: local name to the document it points at."""
+
+    lines = "\n".join(
+        f"  {local}: {source}" for local, source in sorted(aliases.items())
+    )
+    return f"aliases:\n{lines}\n"
+
+
+def alias_repository(
+    root: Path,
+    *,
+    producer: str = "Lakehouse/Raw",
+    consumer: str = "Lakehouse/Curated",
+    schema: str = "DWG",
+):
+    """Two items, the second aliasing a table in the first.
+
+    The smallest repository that can express a cross-item alias, which is the
+    one shape a single-item fixture cannot reach: an alias that did not cross
+    would not be one. The consumer also builds a view over the aliased name, so
+    the ordering claim — the consumer's whole group waits for the producer's —
+    has something to order.
+    """
+
+    _write(root, f"{producer}/schemas/{schema}.yml", schema_document(schema))
+    _write(
+        root,
+        f"{producer}/{schema}__Customer.py",
+        lakehouse_table(f"{schema}.Customer"),
+    )
+    _write(root, f"{consumer}/schemas/{schema}.yml", schema_document(schema))
+    _write(
+        root,
+        f"{consumer}/alias.yml",
+        alias_declaration(**{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}),
+    )
+    _write(
+        root,
+        f"{consumer}/{schema}.CustomerName.sql",
+        spark_view(f"{schema}.CustomerName", depends_on=f"{schema}.PortableCustomer"),
+    )
+    return parse_item_repository(Location(str(root)))
 
 
 def single_document_repository(
