@@ -86,10 +86,20 @@ Measured across every marker:
 
 Fabric transport, before and after this work:
 
-| | Livy calls | Livy elapsed | wall |
-|---|---|---|---|
-| before | 23 | 852s | 16m37s |
-| after | 19 | 661s | 13m28s |
+| | Livy calls | wall |
+|---|---|---|
+| before | 23 | 16m37s |
+| after | 20 | 17m35s |
+
+**The suite is not yet materially faster, and the number should not be dressed
+up.** Four calls and 195s went with `test_warehouse_build.py`; one call and 111s
+came back to keep the row-3 claim it carried. Net ~85s — less than the variance
+between runs, where the same generate-and-install submissions have ranged
+614–707s.
+
+What changed is not the total. It is that a component layer now exists, the
+transport is countable, and 97% of the remaining Fabric time sits in three named
+modules rather than being spread invisibly.
 
 The journey alone is 14 calls / 446s of that, and 408s of *those* are the eight
 generate-and-install submissions — genuine build work, not transport. Merging
