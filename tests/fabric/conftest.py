@@ -642,6 +642,107 @@ class InstalledEstate:
 
 
 @dataclass
+class Step:
+    """One transition of a journey, and what it produced.
+
+    Assertions read this rather than doing the work themselves, which is what
+    lets a dozen checks share one build.
+    """
+
+    name: str
+    bundle: Any = None
+    outcome: "InstallOutcome | None" = None
+    #: Set when the transition raised. Later steps then report *this* name, so a
+    #: journey fails once and says where.
+    error: BaseException | None = None
+
+    @property
+    def actions(self) -> dict:
+        """Planned action kind by action id, for order and presence assertions."""
+
+        return {
+            action.id: action.kind
+            for _sequence, _batch, action in self.bundle.plan.actions()
+        }
+
+    @property
+    def sequence_of(self) -> dict:
+        """Which barrier each action landed in, for ordering assertions."""
+
+        return {
+            action.id: sequence.number
+            for sequence, _batch, action in self.bundle.plan.actions()
+        }
+
+    def kinds(self) -> set:
+        return set(self.actions.values())
+
+
+class Journey:
+    """One estate driven through an ordered series of transitions.
+
+    The suite's cost is *estates*, not assertions: a module-scoped Fabric estate
+    is one full generate-and-install, and six checks over it cost exactly what
+    one does. The old shape therefore paid an install per module and could only
+    ever ask "what did a first build do?" — which is the question the local suite
+    already answers, and not the one incremental logic lives in.
+
+    A journey inverts that. It installs once, then *moves* the estate — change a
+    document, seed an orphan, break a payload, wipe — and each move costs one
+    round trip while every assertion about it costs nothing. So it is both
+    cheaper and able to ask the questions that matter: what did the *second*
+    build do, and did it correctly do nothing?
+
+    **A journey owns its state.** Its own repository root, its own logical item
+    names, its own physical targets. Estates in one run otherwise collide through
+    three shared things — the ``weaver_items`` root, where the last writer wins;
+    the Registry, which is keyed by logical item so identically-named items in
+    two fixtures are one row; and the fixed Lakehouses. Each of those has already
+    produced a confusing failure.
+
+    **A failed transition does not cascade.** The step records the exception and
+    every later step is skipped with its name, so a broken journey reports one
+    failure naming the move that broke rather than a screen of errors whose cause
+    is the first of them.
+    """
+
+    def __init__(self, env: "BuildEnv", name: str) -> None:
+        self.env = env
+        self.name = name
+        self.steps: dict[str, Step] = {}
+        self._failed: str | None = None
+
+    def run(self, name: str, *, before=None) -> Step:
+        """Take one transition: optionally change something, then build.
+
+        ``before`` mutates the repository or the target — it is the *move*, and
+        the build that follows is what the assertions are about.
+        """
+
+        if self._failed is not None:
+            step = Step(name=name, error=RuntimeError(f"upstream step {self._failed!r} failed"))
+            self.steps[name] = step
+            return step
+        try:
+            if before is not None:
+                before(self.env)
+            bundle = self.env.generate(f"{self.name}-{name}")
+            outcome = self.env.install(bundle)
+            step = Step(name=name, bundle=bundle, outcome=outcome)
+        except BaseException as exc:  # recorded, not raised: the journey continues
+            self._failed = name
+            step = Step(name=name, error=exc)
+        self.steps[name] = step
+        return step
+
+    def __getitem__(self, name: str) -> Step:
+        step = self.steps[name]
+        if step.error is not None:
+            raise AssertionError(f"journey step {name!r} failed: {step.error}")
+        return step
+
+
+@dataclass
 class InstallOutcome:
     """An environment-neutral view of an installation report."""
 
