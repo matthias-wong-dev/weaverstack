@@ -107,10 +107,29 @@ it. A repository whose items cannot be ordered has no correct build, not merely 
 correct build today. The parsed repository retains the resulting layers so every
 later stage consumes one authoritative ordering rather than reconstructing one.
 
-Cross-item dependencies are represented in both graphs, but incremental *impact*
-remains item-scoped. A changed object expands only to existing descendants in its
-own item. Coordinated cross-item rebuild propagation is deliberately deferred;
-cross-item *ordering* is not.
+Cross-item dependencies are represented in both graphs, and impact crosses them.
+The document graph carries alias destinations as nodes, so the path from a
+producer to another item's consumer is an ordinary one:
+
+```text
+source document -> alias destination -> consumer document
+```
+
+A changed object therefore expands to its descendants wherever they are, and the
+planner needs no cross-item special case. Items *not* in the build are still
+deferred, but by construction rather than by rule: they are not selected, so
+nothing reaches them.
+
+**The graph is not a projection of the published dependency rows.** `_.Dependency`
+records what the author wrote and where it resolved to, so an alias edge names the
+*source document* as its producer — that is the truth about lineage. The graph
+answers what must be built and in what order, and there the alias destination is a
+thing in its own right. The two are deliberately allowed to differ.
+
+A same-item alias is rejected at parse. An alias exists to cross an item boundary;
+within one item the document graph already orders producer before consumer, and
+the alias stage runs ahead of every document an item declares — so a same-item
+alias would be planned before its own source was built.
 
 Bindings are typed. A Lakehouse item binds to a Lakehouse and a Warehouse item
 binds to a Warehouse; Weaver never infers a destructive target from a bare
@@ -142,11 +161,33 @@ bindings. It is omitted from the plan with the reason `alias_unsupported`. That
 decision belongs to the planner; the installer may only run an alias action
 already frozen for it.
 
-Alias destinations join the prune keep-set. They are desired state in the
-consuming item exactly as a declared document is — merely produced elsewhere — so
-a build must not prune the shortcut or view it is about to create. An alias holds
+Alias destinations join the prune keep-set — *all* of them, not only the ones a
+build selected. They are desired state in the consuming item exactly as a declared
+document is, merely produced elsewhere, so a build must not prune the shortcut or
+view it is about to create, nor the one it just decided to keep. An alias holds
 no data, so materialisation replaces rather than colliding: a build has to be able
 to run twice.
+
+**An alias is an ordinary registered object, built incrementally.** It gets a
+`_.Registry` row like any other, typed as what it physically is — a `folder` under
+`Files`, a `view` in a Warehouse, a `table` in a Lakehouse. There is no `shortcut`
+type: to every reader of the catalogue a Lakehouse alias *is* a table, and that it
+is implemented as a shortcut is execution detail. Its alias-ness lives in `_.Alias`
+and nowhere else.
+
+Its signature is its declaration — this destination, that source — and nothing
+about the source's content. A reloaded source does not redefine an alias, and
+signing it with the source's hash would replace every downstream shortcut whenever
+a table was rebuilt.
+
+An alias is therefore rebuilt only when it is new, when its declaration changed,
+when its destination is missing from the target, or when its source has been
+rebuilt since the alias was last published. That last one cannot come from a
+signature — see [§6a](#6a-cross-item-freshness).
+
+It is materialised by the alias executor, never by the generic drop-and-build
+pipeline: it holds no data, so it is replaced in place rather than dropped and
+recreated, and there is no source document for a build stage to render.
 
 **One action materialises all of an item's aliases.** The cost of an alias is not
 the create — that is about a second — but the wait after it, so N actions running
@@ -219,23 +260,66 @@ helper closure extends it as described in section 4.
 
 Removed documents are not incoming impact candidates. They are handled by prune.
 
+An alias destination is compared the same way, against the signature of its own
+declaration. See [§4a](#4a-aliases).
+
+## 7a. Cross-item freshness
+
+A signature says whether a *declaration* changed. It cannot say whether an object
+was **rebuilt** — reloading a table changes no declaration — and that is exactly
+what a consumer in another item needs to know about the thing behind its alias.
+
+So every `_.Registry` row carries the build that published it. Registry
+publication is Weaver's completion boundary — a row is written last, after
+everything the object needed succeeded — so "when was this published" is "when was
+this last built", and two rows can be ordered against each other.
+
+An alias whose source is dated *later* than the alias itself is stale: its
+consumers were built against something that has since moved on. It joins the
+ordinary changed roots, and its consumers are picked up by the ordinary descendant
+walk.
+
+This applies whether or not the producer is in the build. The descendant walk only
+starts from a node whose declaration changed, and a producer rebuilt by some
+earlier build is, to this one, entirely unchanged.
+
+**Deferral falls out of it.** Build only the producer and nothing about the
+consumer is touched: its alias keeps its old epoch and stays stale until the
+consumer is next built, when the comparison selects it.
+
+The epoch is set on **insert and never on update**. Every rebuild reaches the
+merge as an insert, because a rebuilt object has its Registry claim deleted before
+any physical work — so an update can only be a row whose projection moved while
+the object stood still, and dating it would claim a rebuild that never happened.
+
+It is written as an `{{epoch}}` token resolved once per installation, not a
+literal frozen at generation time and not `current_timestamp()`. A literal would
+give the same repository different payload bytes every run and destroy bundle
+identity; a clock call is read per statement, and one build publishes Registry
+rows in several statements, so an alias and its source could be dated apart and
+then order against each other. A row written before epochs existed reads as null,
+which orders as older than any epoch and is not compared against another null.
+
 ## 8. Impact determination
 
-`determine_impact()` classifies incoming documents and expands each changed
-existing document through same-item transitive descendants:
+`determine_impact()` classifies incoming nodes and expands each changed existing
+node through its transitive descendants:
 
 ```mermaid
 flowchart TD
-    R["Incoming Weaver documents"]
+    R["Incoming documents and alias destinations"]
     C["Reconciled Registry"]
+    E["Stale aliases, by build epoch"]
 
     R --> I["determine_impact"]
     C --> I
+    C --> E
+    E --> I
 
     I --> N["New"]
     I --> H["Changed"]
-    H --> D["Add same-item transitive descendants"]
-    D --> A["Impacted existing documents"]
+    H --> D["Add transitive descendants, across items"]
+    D --> A["Impacted existing nodes"]
 
     A --> P{"Prohibit Rebuild?"}
     P -->|No| DROP["Selected for drop"]
@@ -243,10 +327,17 @@ flowchart TD
 
     N --> BUILD["Selected for build"]
     DROP --> BUILD
+
+    BUILD --> AL["Alias destinations: alias executor"]
+    BUILD --> DOC["Documents: drop and build stages"]
 ```
 
 The inspectable `Impact` records `new`, `changed`, and `impacted_descendants`.
-Unchanged documents are implicit rather than copied into the manifest.
+Unchanged nodes are implicit rather than copied into the manifest.
+
+An alias destination has no source document and therefore no `prohibit_rebuild`:
+nothing an author writes can forbid replacing a pointer, because replacing one
+destroys nothing.
 `impacted` is a convenience view over changed existing roots plus affected
 existing descendants; new objects stay separate because they need creation but
 no managed drop.

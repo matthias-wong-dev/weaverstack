@@ -53,7 +53,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | Table | One row per | Notes |
 |---|---|---|
 | `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
-| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. |
+| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. `build_epoch` dates the build that published the row. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
 | `_.FolderDictionary` | managed folder | Keeps the folder's two-part identity, and its file key — the scope of what Weaver manages inside it. |
@@ -62,6 +62,14 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
 | `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
 | `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from the consuming item's `alias.yml`. |
+
+An alias destination also gets a `_.Registry` row, typed as what it physically is
+— a folder under `Files`, a view in a Warehouse, a table in a Lakehouse. There is
+no `shortcut` type: to a reader of the catalogue a Lakehouse alias *is* a table,
+and that it is implemented as a OneLake shortcut is execution detail. Its
+alias-ness is recorded in `_.Alias` and nowhere else, which keeps installed object
+state and cross-item relationship separate. It describes nothing further: no
+dictionary, column, key or dependency rows, because it declares none of them.
 
 ### Why some tables look sparse
 
@@ -155,6 +163,14 @@ build's ordinary row comparison.
 An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by a
 comparison of every non-key column, so rebuilding unchanged Weaver document writes nothing and
 does not move `row_update_datetime`.
+
+`build_epoch` is a **published** column: declared and created like any other, but
+supplied by the installer rather than projected, and excluded from that
+comparison. One that compared would differ on every build by construction — its
+value is new each time — and every row would update every build, which would
+destroy the no-op above. It is written on insert only; see
+[how-does-build-work §7a](how-does-build-work.md#7a-cross-item-freshness) for why
+that is what makes it true rather than merely cheap.
 
 The Installation signature is deliberately item-scoped. The repository signature
 still certifies the complete coordinated source and bundle snapshot, while object
