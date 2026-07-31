@@ -60,7 +60,7 @@ def warehouse_target(warehouse) -> ResolvedTarget:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def build_warehouse_item(clean_disposable_warehouse):
     """Plan one Warehouse item and run its actions over TDS. No Livy."""
 
@@ -117,10 +117,20 @@ def build_warehouse_item(clean_disposable_warehouse):
     return run
 
 
-@pytest.fixture
-def customer(tmp_path):
-    return single_document_repository(
-        tmp_path / "repo",
+@pytest.fixture(scope="module")
+def estate(tmp_path_factory, build_warehouse_item):
+    """One Warehouse estate, built once, that every assertion below reads.
+
+    Module-scoped deliberately. A Warehouse is emptied per module, not per test,
+    so a per-test build would plan against an inventory that no longer matches
+    what is there — asking for a schema that already exists, which is a thing the
+    planner never does. And the estate is the cost here: seven assertions over
+    one build cost what one does.
+    """
+
+    root = tmp_path_factory.mktemp("warehouse-estate")
+    repository = single_document_repository(
+        root / "repo",
         item=ITEM,
         documents={
             "DWG.Customer.sql": warehouse_table(
@@ -130,9 +140,18 @@ def customer(tmp_path):
                     "cast('a' as varchar(50)) as CustomerName, "
                     "cast(1.5 as decimal(10,2)) as Score"
                 ),
-            )
+            ),
+            "DWG.ActiveCustomer.sql": warehouse_view(
+                "DWG.ActiveCustomer",
+                select="select CustomerId from [DWG].[Customer]",
+                depends_on="DWG.Customer",
+            ),
         },
     )
+    results = build_warehouse_item(repository)
+    failures = {r.action_id: r.error_message for r in results if r.status == "failed"}
+    assert not failures, failures
+    return repository
 
 
 def columns_of(warehouse, schema: str, name: str) -> dict:
@@ -152,26 +171,26 @@ def columns_of(warehouse, schema: str, name: str) -> dict:
 # --- does Fabric accept what Weaver generates? --------------------------------
 
 
-def test_a_declared_warehouse_table_builds(customer, build_warehouse_item):
+def test_a_declared_warehouse_table_builds(estate, clean_disposable_warehouse):
     """The narrowest Fabric-only claim there is: this T-SQL is valid there.
 
     Weaver's table script materialises and inspects its own query shape
-    server-side, so nothing local can say whether Fabric accepts it.
+    server-side, so nothing local can say whether Fabric accepts it. The estate
+    fixture asserts the build succeeded; this asserts the object is really there
+    and answers a read.
     """
 
-    results = build_warehouse_item(customer)
+    rows = clean_disposable_warehouse.executor.query(
+        "select count(*) as n from [DWG].[Customer]"
+    )
 
-    assert results, "the item planned no actions"
-    failures = {r.action_id: r.error_message for r in results if r.status == "failed"}
-    assert not failures, failures
+    assert rows[0]["n"] == 0
 
 
 def test_the_declared_types_are_what_the_warehouse_creates(
-    customer, build_warehouse_item, clean_disposable_warehouse
+    estate, clean_disposable_warehouse
 ):
     """Types are inferred from the query, server-side — only Fabric can confirm."""
-
-    build_warehouse_item(customer)
 
     columns = columns_of(clean_disposable_warehouse, "DWG", "Customer")
     assert columns["customerid"]["type_name"] == "int"
@@ -180,10 +199,8 @@ def test_the_declared_types_are_what_the_warehouse_creates(
 
 
 def test_the_primary_key_and_audit_columns_are_not_nullable(
-    customer, build_warehouse_item, clean_disposable_warehouse
+    estate, clean_disposable_warehouse
 ):
-    build_warehouse_item(customer)
-
     columns = columns_of(clean_disposable_warehouse, "DWG", "Customer")
     assert columns["customerid"]["is_nullable"] is False
     for audit in AUDIT:
@@ -191,7 +208,7 @@ def test_the_primary_key_and_audit_columns_are_not_nullable(
 
 
 def test_a_warehouse_view_builds_over_the_table_it_reads(
-    tmp_path, build_warehouse_item, clean_disposable_warehouse
+    estate, clean_disposable_warehouse
 ):
     """A view is one CREATE VIEW and must be the first statement in its batch.
 
@@ -199,26 +216,10 @@ def test_a_warehouse_view_builds_over_the_table_it_reads(
     batch executor exists. Only a real engine rejects the alternative.
     """
 
-    repository = single_document_repository(
-        tmp_path / "repo",
-        item=ITEM,
-        documents={
-            "DWG.Customer.sql": warehouse_table("DWG.Customer"),
-            "DWG.ActiveCustomer.sql": warehouse_view(
-                "DWG.ActiveCustomer",
-                select="select CustomerId from [DWG].[Customer]",
-                depends_on="DWG.Customer",
-            ),
-        },
-    )
-
-    results = build_warehouse_item(repository)
-
-    failures = {r.action_id: r.error_message for r in results if r.status == "failed"}
-    assert not failures, failures
     rows = clean_disposable_warehouse.executor.query(
         "select count(*) as n from [DWG].[ActiveCustomer]"
     )
+
     assert rows[0]["n"] == 0
 
 
@@ -226,18 +227,16 @@ def test_a_warehouse_view_builds_over_the_table_it_reads(
 
 
 def test_a_built_warehouse_reads_back_as_the_fixture_predicts(
-    customer, build_warehouse_item, clean_disposable_warehouse
+    estate, clean_disposable_warehouse
 ):
     """The Warehouse half of the fidelity claim the prune suite rests on."""
-
-    build_warehouse_item(customer)
 
     actual = read_warehouse_inventory(
         warehouse_target(clean_disposable_warehouse).bound,
         sql=clean_disposable_warehouse.executor,
     )
     predicted = FixtureInventory.from_repository(
-        customer,
+        estate,
         item=ITEM,
         target_kind=SQL_TARGET,
         target_id="target-1",
@@ -250,36 +249,56 @@ def test_a_built_warehouse_reads_back_as_the_fixture_predicts(
     assert folded(actual.schemas) == folded(predicted.schemas)
 
 
-def test_an_unmanaged_object_shows_up_in_the_read(
-    customer, build_warehouse_item, clean_disposable_warehouse
+def test_an_unmanaged_object_is_seen_and_would_be_pruned(
+    estate, clean_disposable_warehouse
 ):
-    """The reader reports what is there, not what Weaver expected to be there."""
+    """The reader reports what is there, not what Weaver expected to be there.
 
-    build_warehouse_item(customer)
-    clean_disposable_warehouse.executor.execute_script(
-        "create table [DWG].[OldTable] ([x] int not null);"
-    )
+    Cleans up after itself rather than relying on running last: the estate is
+    shared, and a test that left an orphan behind would make the *next* test's
+    prune assertion fail for a reason that has nothing to do with it.
+    """
 
-    actual = read_warehouse_inventory(
-        warehouse_target(clean_disposable_warehouse).bound,
-        sql=clean_disposable_warehouse.executor,
-    )
+    from weaver.build_bundle.physical import item_prune_stage
 
-    assert "dwg.oldtable" in {name.casefold() for name in actual.tables}
+    executor = clean_disposable_warehouse.executor
+    executor.execute_script("create table [DWG].[OldTable] ([x] int not null);")
+    try:
+        actual = read_warehouse_inventory(
+            warehouse_target(clean_disposable_warehouse).bound,
+            sql=executor,
+        )
+        assert "dwg.oldtable" in {name.casefold() for name in actual.tables}
+
+        # And the diff turns that into a removal — the pure-Python claim, now
+        # against an object a real Warehouse really has.
+        stage = item_prune_stage(
+            estate,
+            set(estate.source_documents),
+            item=item_id(ITEM),
+            target=warehouse_target(clean_disposable_warehouse).bound,
+            inventory=actual,
+        )
+        assert stage is not None
+        assert any(
+            "OldTable" in action.id
+            for batch in stage.batches
+            for action in batch.actions
+        )
+    finally:
+        executor.execute_script("drop table if exists [DWG].[OldTable];")
 
 
 def test_prune_against_a_freshly_built_warehouse_finds_nothing(
-    customer, build_warehouse_item, clean_disposable_warehouse
+    estate, clean_disposable_warehouse
 ):
     """Pure-Python prune, restated against a genuine Warehouse read."""
 
     from weaver.build_bundle.physical import item_prune_stage
 
-    build_warehouse_item(customer)
-
     stage = item_prune_stage(
-        customer,
-        set(customer.source_documents),
+        estate,
+        set(estate.source_documents),
         item=item_id(ITEM),
         target=warehouse_target(clean_disposable_warehouse).bound,
         inventory=read_warehouse_inventory(
