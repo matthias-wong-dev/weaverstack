@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from ...errors import InstallError
+from ...spark.tokens import substitute_epoch
 from ..models import BuildAction
 from .base import InstallationContext
 from .spark_case import exact_identifier_case
@@ -44,7 +45,12 @@ class SparkSqlBatchExecutor:
             enabled=context.catalogue.destination.preserve_table_identifier_case,
         ):
             for statement in statements:
-                context.spark.sql(context.catalogue.expand(statement.strip()))
+                # The epoch first: it is scoped to this installation rather than
+                # to a destination, and ``expand`` rejects every token it does
+                # not itself resolve — so one left behind here would be reported
+                # as an unresolvable name instead of quietly reaching the engine.
+                dated = substitute_epoch(statement.strip(), context.epoch)
+                context.spark.sql(context.catalogue.expand(dated))
         return {
             "destination": context.catalogue.destination.item,
             "statement_count": len(statements),

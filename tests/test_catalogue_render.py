@@ -160,6 +160,65 @@ def test_the_clock_is_a_call_not_a_rendered_instant():
     assert statement.count("current_timestamp()") == 3  # one update, two inserts
 
 
+# --- the published build epoch ------------------------------------------------
+
+
+def _clauses(statement: str) -> tuple[str, str, str]:
+    """The merge split into the three places a column can appear."""
+
+    matched = statement.index("WHEN MATCHED")
+    not_matched = statement.index("WHEN NOT MATCHED")
+    guard, update = statement[matched:not_matched].split("THEN UPDATE SET", 1)
+    return statement[:matched], guard, update
+
+
+def test_the_epoch_is_a_token_so_the_payload_stays_frozen():
+    """Same reason the clock is a call: a rendered instant would give the same
+    repository different bytes every run, and a bundle's identity is its bytes.
+    The installer resolves it, once, for the whole run."""
+
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
+    assert "CAST('{{epoch}}' AS TIMESTAMP)" in statement
+    assert statement.count("{{epoch}}") == 1
+
+
+def test_the_epoch_is_written_on_insert_and_nowhere_else():
+    """The decision the whole freshness comparison rests on.
+
+    Every object a build actually rebuilds arrives here as an insert — it is new,
+    or its claim was deleted before the physical work. So an *update* is a row
+    whose projection moved while the object stood still, and dating it to this
+    build would claim a rebuild that never happened.
+    """
+
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+    source, guard, update = _clauses(statement)
+
+    assert "build_epoch" not in source, "not projected — no row carries one"
+    assert "build_epoch" not in guard, "not compared — it differs every build"
+    assert "build_epoch" not in update, "not updated — that is the whole point"
+    assert "`build_epoch`" in statement[statement.index("WHEN NOT MATCHED") :]
+
+
+def test_a_table_without_a_published_column_is_rendered_exactly_as_before():
+    """Only Registry carries an epoch. Nothing else gained a column."""
+
+    row = {
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
+        "schema_name": "Sales",
+        "object_name": "Customer",
+        "dependency_name": "Sales.Order",
+        "is_within_item": True,
+        "signature": "abc",
+    }
+    statement = render_merge(DEPENDENCY, [row], scope=LAKEHOUSE_SCOPE)
+
+    assert "{{epoch}}" not in statement
+    assert "build_epoch" not in statement
+
+
 # --- scope -------------------------------------------------------------------
 
 

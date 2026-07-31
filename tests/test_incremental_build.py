@@ -457,6 +457,37 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
     )
 
 
+def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
+    """Generating twice must give the same bytes, or a bundle could not be
+    compared against another built from the same source. The epoch is a token in
+    the payload for exactly this reason — the installer resolves it, not the
+    planner."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    first = _alias_bundle(tmp_path, repository, rows=rows, name="first")
+    second = _alias_bundle(tmp_path, repository, rows=rows, name="second")
+
+    assert first.plan.bundle_id == second.plan.bundle_id
+
+
+def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
+    repository = _repository(_dependency_estate(tmp_path))
+    store = LocalStore()
+    bundle = _alias_bundle(tmp_path, repository, rows={})
+    registry = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    payload = store.read(
+        bundle.location.join(*registry.payload.split("/"))
+    ).decode()
+
+    assert "{{epoch}}" in payload
+    assert "build_epoch" in payload
+
+
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
     repository = _repository(_estate(tmp_path))
     store = LocalStore()

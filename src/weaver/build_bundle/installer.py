@@ -130,6 +130,17 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _epoch(started: datetime) -> str:
+    """This installation's instant, as a Spark timestamp literal.
+
+    Naive rather than offset-carrying: the column is a plain ``timestamp`` and a
+    trailing offset would be parsed against the session's zone, which differs
+    between a desktop and a Fabric driver. UTC throughout, spelled without one.
+    """
+
+    return started.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
 def install_bundle(
     bundle: BuildBundle | Location,
     *,
@@ -152,6 +163,12 @@ def install_bundle(
     resolved = {target.id: environment.resolve_target(target) for target in plan.targets}
 
     started = _now()
+    # One instant for the whole installation, taken once and handed to every
+    # batch. Registry rows are published across several statements — one pair per
+    # item — and rows written by one build have to be indistinguishable in age,
+    # or an alias and the source it points at could order against each other
+    # merely for having been written a few milliseconds apart.
+    epoch = _epoch(started)
     sequence_results: list[SequenceResult] = []
     stop = False
 
@@ -160,7 +177,7 @@ def install_bundle(
             if stop:
                 sequence_results.append(_skipped_sequence(sequence))
                 continue
-            result = _run_sequence(sequence, resolved, bundle, environment)
+            result = _run_sequence(sequence, resolved, bundle, environment, epoch=epoch)
             sequence_results.append(result)
             if result.status == FAILED:
                 stop = True
@@ -187,6 +204,8 @@ def _run_sequence(
     resolved: dict[str, ResolvedTarget],
     bundle: BuildBundle,
     environment: InstallationEnvironment,
+    *,
+    epoch: str | None = None,
 ) -> SequenceResult:
     action_results: list[ActionResult] = []
     failed = False
@@ -202,6 +221,7 @@ def _run_sequence(
             sql=environment.sql_for(target.bound),
             snapshot_store=bundle.store or environment.store,
             targets=resolved,
+            epoch=epoch,
         )
         for action in batch.actions:
             if failed:
