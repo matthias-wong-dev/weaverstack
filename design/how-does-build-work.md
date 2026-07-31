@@ -161,6 +161,12 @@ bindings. It is omitted from the plan with the reason `alias_unsupported`. That
 decision belongs to the planner; the installer may only run an alias action
 already frozen for it.
 
+**An omitted alias is not certified.** A `_.Registry` row means the object's work
+succeeded, and for an omitted alias no work was planned at all — so the row is
+withheld. Only for one this build was also asked to build: an alias already
+installed by an earlier build, whose source item simply is not bound this time,
+is still physically there and stays certified.
+
 Alias destinations join the prune keep-set — *all* of them, not only the ones a
 build selected. They are desired state in the consuming item exactly as a declared
 document is, merely produced elsewhere, so a build must not prune the shortcut or
@@ -183,7 +189,7 @@ a table was rebuilt.
 An alias is therefore rebuilt only when it is new, when its declaration changed,
 when its destination is missing from the target, or when its source has been
 rebuilt since the alias was last published. That last one cannot come from a
-signature — see [§6a](#6a-cross-item-freshness).
+signature — see [§7a](#7a-cross-item-freshness).
 
 It is materialised by the alias executor, never by the generic drop-and-build
 pipeline: it holds no data, so it is replaced in place rather than dropped and
