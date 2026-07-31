@@ -611,7 +611,10 @@ def populated_lakehouse(request):
 # run in that environment. For Fabric, the desktop only stages the repository and
 # reads results.
 
-from build_envs import BUILD_FIXTURE  # the default fixture a build env installs
+# The default a build env installs when a module does not name one. The journey
+# fixture, because it is the one Lakehouse estate that carries every shape a
+# build has to handle — and the only Fabric fixture declaring Lakehouse/Sales.
+from build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
 
 @pytest.fixture(scope="module")
@@ -625,7 +628,7 @@ def weaver_repo_fixture(request):
         @pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)
     """
 
-    return getattr(request, "param", BUILD_FIXTURE)
+    return getattr(request, "param", LAKEHOUSE_JOURNEY_FIXTURE)
 
 
 @dataclass
@@ -639,6 +642,124 @@ class InstalledEstate:
 
     env: "BuildEnv"
     bundle: Any
+
+
+@dataclass
+class Step:
+    """One transition of a journey, and what it produced.
+
+    Assertions read this rather than doing the work themselves, which is what
+    lets a dozen checks share one build.
+    """
+
+    name: str
+    bundle: Any = None
+    outcome: "InstallOutcome | None" = None
+    #: Set when the transition raised. Later steps then report *this* name, so a
+    #: journey fails once and says where.
+    error: BaseException | None = None
+
+    @property
+    def actions(self) -> dict:
+        """Planned action kind by action id, for order and presence assertions."""
+
+        return {
+            action.id: action.kind
+            for _sequence, _batch, action in self.bundle.plan.actions()
+        }
+
+    @property
+    def sequence_of(self) -> dict:
+        """Which barrier each action landed in, for ordering assertions."""
+
+        return {
+            action.id: sequence.number
+            for sequence, _batch, action in self.bundle.plan.actions()
+        }
+
+    def kinds(self) -> set:
+        return set(self.actions.values())
+
+
+class Journey:
+    """One estate driven through an ordered series of transitions.
+
+    The suite's cost is *estates*, not assertions: a module-scoped Fabric estate
+    is one full generate-and-install, and six checks over it cost exactly what
+    one does. The old shape therefore paid an install per module and could only
+    ever ask "what did a first build do?" — which is the question the local suite
+    already answers, and not the one incremental logic lives in.
+
+    A journey inverts that. It installs once, then *moves* the estate — change a
+    document, seed an orphan, break a payload, wipe — and each move costs one
+    round trip while every assertion about it costs nothing. So it is both
+    cheaper and able to ask the questions that matter: what did the *second*
+    build do, and did it correctly do nothing?
+
+    **A journey owns its state.** Its own repository root, its own logical item
+    names, its own physical targets. Estates in one run otherwise collide through
+    three shared things — the ``weaver_items`` root, where the last writer wins;
+    the Registry, which is keyed by logical item so identically-named items in
+    two fixtures are one row; and the fixed Lakehouses. Each of those has already
+    produced a confusing failure.
+
+    **A failed transition does not cascade.** The step records the exception and
+    every later step is skipped with its name, so a broken journey reports one
+    failure naming the move that broke rather than a screen of errors whose cause
+    is the first of them.
+    """
+
+    def __init__(self, env: "BuildEnv", name: str) -> None:
+        self.env = env
+        self.name = name
+        self.steps: dict[str, Step] = {}
+        self._failed: str | None = None
+
+    def run(self, name: str, *, before=None, between=None) -> Step:
+        """Take one transition: optionally change something, then build.
+
+        ``before`` mutates the repository or the target — it is the *move*, and
+        the build that follows is what the assertions are about.
+
+        ``between(env, bundle)`` runs after generation and before installation,
+        for the two claims that need the world to change mid-transition. It may
+        return a bundle to install *instead* of the generated one:
+
+        - removing the source repository, to prove a bundle installs from itself
+        - substituting a corrupted bundle, to prove a failing action stops its
+          barrier
+
+        A transition whose installation reports failure is recorded in full — the
+        step keeps its bundle and outcome, so the test that expects a failure can
+        inspect it — but the journey is marked failed, so anything after it is
+        skipped rather than asserting against a part-built estate.
+        """
+
+        if self._failed is not None:
+            step = Step(name=name, error=RuntimeError(f"upstream step {self._failed!r} failed"))
+            self.steps[name] = step
+            return step
+        try:
+            if before is not None:
+                before(self.env)
+            bundle = self.env.generate(f"{self.name}-{name}")
+            if between is not None:
+                bundle = between(self.env, bundle) or bundle
+            outcome = self.env.install(bundle)
+            step = Step(name=name, bundle=bundle, outcome=outcome)
+            if outcome.status != "succeeded":
+                self._failed = name
+        except BaseException as exc:  # recorded, not raised: the journey continues
+            self._failed = name
+            step = Step(name=name, error=exc)
+        self.steps[name] = step
+        return step
+
+    def __getitem__(self, name: str) -> Step:
+        step = self.steps[name]
+        if step.error is not None:
+            raise AssertionError(f"journey step {name!r} failed: {step.error}")
+        return step
 
 
 @dataclass
@@ -1455,6 +1576,82 @@ def _install_estate(env) -> InstalledEstate:
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
     return InstalledEstate(env=env, bundle=bundle)
+
+
+@pytest.fixture(
+    scope="module",
+    params=[
+        pytest.param("local", marks=pytest.mark.spark, id="local"),
+        pytest.param("fabric", marks=pytest.mark.fabric, id="fabric"),
+    ],
+)
+def lakehouse_journey(request, weaver_repo_fixture):
+    """One Lakehouse estate for a journey to drive.
+
+    **The transitions are deliberately not run here.** A fixture that took every
+    move up front and then handed the result to a set of tests would leave every
+    one of them inspecting the *final* estate, whatever transition each claimed
+    to be about — and a later move could then repair what an earlier one broke,
+    so the earlier assertion would pass on evidence that no longer existed. The
+    physical state has to be read at the point it is claimed about, which means
+    the moves and the assertions have to be interleaved by the test.
+
+    What is shared is the estate: one target Lakehouse, installed from nothing
+    once, with every move after it an incremental build over a target that is
+    already correct.
+    """
+
+    with _journey_context(request, weaver_repo_fixture) as env:
+        yield Journey(env, "lakehouse")
+
+
+@contextmanager
+def _journey_context(request, weaver_repo_fixture):
+    """The build environment a journey drives, on whichever transport it asked for."""
+
+    if request.param == "local":
+        spark = request.getfixturevalue("spark")
+        root = request.getfixturevalue("tmp_path_factory").mktemp("journey")
+        with _local_build_context(root, spark, weaver_repo_fixture) as env:
+            yield env
+    else:
+        with _fabric_build_context(
+            request.getfixturevalue("fabric_workspace_item"),
+            request.getfixturevalue("fabric_client"),
+            request.getfixturevalue("fabric_workspace"),
+            request.getfixturevalue("fabric_target_lakehouse"),
+            request.getfixturevalue("livy_session"),
+            weaver_repo_fixture,
+        ) as env:
+            yield env
+
+
+@pytest.fixture(
+    scope="module",
+    params=[pytest.param("local", marks=pytest.mark.spark, id="local")],
+)
+def local_lakehouse_estate(request, weaver_repo_fixture):
+    """One Lakehouse estate on local Spark only.
+
+    For modules whose subject is transport-independent — what the planner
+    decides, what DDL is emitted, how a dependency chain orders — where the
+    Fabric half of :func:`lakehouse_estate` runs the same body against the same
+    assertions and proves nothing further.
+
+    That duplicate is not free. Each module-scoped Fabric estate is one full
+    generate-and-install, 75–123s, and the *estate* is the cost rather than the
+    tests: six assertions over one estate cost exactly what one does. So a module
+    that has no Fabric-specific claim to make is a whole install that can go,
+    while its coverage stays exactly where it was.
+
+    Reach for :func:`lakehouse_estate` when the claim genuinely differs by
+    transport — a resolver path, a SQL endpoint, a real catalogue read.
+    """
+
+    spark = request.getfixturevalue("spark")
+    root = request.getfixturevalue("tmp_path_factory").mktemp("estate")
+    with _local_build_context(root, spark, weaver_repo_fixture) as env:
+        yield _install_estate(env)
 
 
 @pytest.fixture(

@@ -64,6 +64,23 @@ MIXED_ESTATE_FIXTURE = SesFixture(
 WAREHOUSE_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "warehouse-estate-item", ("Warehouse/Reporting",)
 )
+#: The one Lakehouse estate a journey drives, and deliberately the only Fabric
+#: fixture that declares ``Lakehouse/Sales``.
+#:
+#: Its logical name matters as much as its content. The catalogue is keyed by
+#: logical item — the physical target is never identity — so two fixtures naming
+#: the same item describe the *same registered objects*, and building one makes
+#: the other's rows look rebuilt. ``BUILD_FIXTURE`` declared ``Lakehouse/Raw``,
+#: which is exactly what the alias fixtures declare; this one does not collide
+#: with anything.
+#:
+#: It carries one of each shape a Lakehouse build has to handle, so a single
+#: estate can answer for all of them: a Folder, two Python tables (the second
+#: importing the first, so there is a real within-item dependency), and a view
+#: over a view.
+LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
+    _FIXTURES / "lakehouse-journey", ("Lakehouse/Sales",)
+)
 #: A producer and the consumer that aliases it, in two Lakehouses. The emulator
 #: materialises the alias as a filesystem link where Fabric makes a OneLake
 #: shortcut, so the same body proves incremental alias behaviour either side.

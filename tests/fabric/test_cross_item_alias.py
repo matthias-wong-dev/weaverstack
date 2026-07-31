@@ -375,6 +375,53 @@ def test_the_consumers_endpoint_reports_the_aliased_table(alias_estate):
     assert "PortableCustomer" in names
 
 
+# --- building the same estate again --------------------------------------------
+#
+# Before the Warehouse section, and that ordering is load-bearing. Both fixtures
+# declare the *same logical item* — `Lakehouse/Raw` producing `DWG.Customer` — and
+# the catalogue is keyed by logical item, never by physical target. So building
+# the Warehouse estate republishes the very Registry row this alias points at,
+# with a later build epoch, and the alias is then correctly stale. Asserting "an
+# unchanged alias is not replaced" after that would be asserting against a source
+# that genuinely moved.
+#
+# The estates interfering through the catalogue is the real problem; running in a
+# safe order is the cheap fix. Giving each estate its own logical identity is the
+# proper one.
+
+
+def test_a_second_build_leaves_the_shortcut_alone(alias_estate, fabric_client, fabric_alias_lakehouses):
+    """The incremental claim, against a real OneLake shortcut.
+
+    The emulator proves the *decision* — no alias action is planned — and does so
+    cheaply, over several scenarios, in ``test_cross_item_alias_incremental``.
+    What only a workspace can show is that the shortcut Fabric actually made is
+    still the same shortcut afterwards: not deleted and recreated, and still
+    pointing at the same item.
+
+    It costs one extra generate-and-install over the estate already provisioned
+    here, rather than a second pair of Lakehouses.
+    """
+
+    from weaver.fabric.shortcuts import list_shortcuts
+
+    consumer = alias_estate["consumer"]
+    before = list_shortcuts(consumer, client=fabric_client)
+    assert [shortcut.qualified for shortcut in before] == ["Tables/DWG/PortableCustomer"]
+
+    again = alias_estate["rebuild"]("aliasrebuild")
+
+    planned = [
+        action.kind for _sequence, _batch, action in again["plan"].actions()
+    ]
+    assert "create_alias" not in planned, (
+        "an unchanged alias over an unchanged source must not be replaced"
+    )
+
+    after = list_shortcuts(consumer, client=fabric_client)
+    assert after == before, "the shortcut itself must be untouched, not remade"
+
+
 # --- the other alias form: a Warehouse view over a Lakehouse -------------------
 
 
@@ -476,41 +523,6 @@ def test_the_warehouse_item_gets_no_endpoint_refresh_of_its_own(
         "refresh-sql-endpoint-Lakehouse--Raw",
         "refresh-sql-endpoint-control",
     } <= refreshes
-
-
-# --- building the same estate again --------------------------------------------
-
-
-def test_a_second_build_leaves_the_shortcut_alone(alias_estate, fabric_client, fabric_alias_lakehouses):
-    """The incremental claim, against a real OneLake shortcut.
-
-    The emulator proves the *decision* — no alias action is planned — and does so
-    cheaply, over several scenarios, in ``test_cross_item_alias_incremental``.
-    What only a workspace can show is that the shortcut Fabric actually made is
-    still the same shortcut afterwards: not deleted and recreated, and still
-    pointing at the same item.
-
-    It costs one extra generate-and-install over the estate already provisioned
-    here, rather than a second pair of Lakehouses.
-    """
-
-    from weaver.fabric.shortcuts import list_shortcuts
-
-    consumer = alias_estate["consumer"]
-    before = list_shortcuts(consumer, client=fabric_client)
-    assert [shortcut.qualified for shortcut in before] == ["Tables/DWG/PortableCustomer"]
-
-    again = alias_estate["rebuild"]("aliasrebuild")
-
-    planned = [
-        action.kind for _sequence, _batch, action in again["plan"].actions()
-    ]
-    assert "create_alias" not in planned, (
-        "an unchanged alias over an unchanged source must not be replaced"
-    )
-
-    after = list_shortcuts(consumer, client=fabric_client)
-    assert after == before, "the shortcut itself must be untouched, not remade"
 
 
 # --- wiping a Lakehouse that holds a shortcut ----------------------------------

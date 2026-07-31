@@ -1,8 +1,10 @@
 """The notebook case: an object with no ``lakehouse=``, in a real Fabric session.
 
-Everything else about authored objects is transport-neutral and lives in
-``test_authored_object_access.py``. This one cannot be: inference reads the
-Lakehouse the session has attached, and only Fabric attaches one.
+Everything else about authored objects — identity from the class name, the paths
+a table and a folder resolve to — is asserted against the estate in
+``test_lakehouse_journey``, where it costs nothing extra. This one cannot join it:
+inference reads the Lakehouse the session has attached, only Fabric attaches one,
+and it needs no built estate at all.
 """
 
 from __future__ import annotations
