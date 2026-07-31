@@ -70,6 +70,10 @@ class ItemAliasPlan:
     stage: PlannedStage | None = None
     schemas: tuple[str, ...] = ()
     omitted: tuple[OmittedNode, ...] = ()
+    #: The destinations behind ``omitted``, as identities rather than node ids.
+    #: The caller needs them because an alias with no physical form must not be
+    #: certified as installed — see :attr:`omitted`.
+    omitted_destinations: tuple[WeaverDocumentId, ...] = ()
 
 
 def plan_item_aliases(
@@ -101,6 +105,7 @@ def plan_item_aliases(
 
     chosen = set(selected)
     omitted: list[OmittedNode] = []
+    omitted_destinations: list[WeaverDocumentId] = []
     supported: list[tuple] = []
     schemas: list[str] = []
 
@@ -115,6 +120,7 @@ def plan_item_aliases(
                     detail=reason,
                 )
             )
+            omitted_destinations.append(alias.destination)
             continue
         schemas.append(alias.destination.object_id.schema)
         if alias.destination in chosen:
@@ -144,6 +150,7 @@ def plan_item_aliases(
         stage=stage,
         schemas=tuple(sorted(set(schemas))),
         omitted=tuple(omitted),
+        omitted_destinations=tuple(omitted_destinations),
     )
 
 

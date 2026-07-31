@@ -197,6 +197,19 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
         action.kind == "create_alias" for _s, _b, action in bundle.plan.actions()
     )
 
+    # And it is not certified either. A Registry row means the object's work
+    # succeeded; here no work was even planned, so a row would claim an
+    # installation that never happened.
+    registry = next(
+        action
+        for _s, _b, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    payload = LocalStore().read(
+        bundle.location.join(*registry.payload.split("/"))
+    ).decode()
+    assert "PortableCustomer" not in payload
+
 
 def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))

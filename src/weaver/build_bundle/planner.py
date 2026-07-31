@@ -144,10 +144,15 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
+    # Alias destinations this build wanted but could not materialise. They must
+    # not reach the Registry: a row there means the object's work succeeded, and
+    # for these no work was even planned.
+    uncertified: set = set()
+
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
         for item in layer:
-            item_stages, item_omitted = _plan_item(
+            item_stages, item_omitted, item_uncertified = _plan_item(
                 repository,
                 item=item,
                 target=target_by_item[item],
@@ -161,12 +166,13 @@ def generate_item_build_bundle(
             )
             layer_stages.extend(item_stages)
             omitted.extend(item_omitted)
+            uncertified |= item_uncertified
         stages.extend(merge_layer_stages(layer_stages))
 
     stages.extend(
         render_catalogue_after_build(
             repository,
-            selected_ids,
+            selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
         )
@@ -249,8 +255,16 @@ def _plan_item(
     selected_for_drop,
     selected_for_build,
     registered,
-) -> tuple[tuple[PlannedStage, ...], tuple[OmittedNode, ...]]:
-    """One item's contiguous group of stages, in the order they must run."""
+) -> tuple[tuple[PlannedStage, ...], tuple[OmittedNode, ...], set]:
+    """One item's contiguous group of stages, in the order they must run.
+
+    The third return is the alias destinations this item could not materialise
+    *and* was asked to build. They are withheld from certification: an alias
+    whose source item is unbound has no physical form under these bindings, and
+    a Registry row for it would claim an installation that never happened. One
+    already installed from an earlier build is left certified — it is still
+    there — so only the intersection with the build selection is withheld.
+    """
 
     aliases = plan_item_aliases(
         repository,
@@ -302,7 +316,11 @@ def _plan_item(
     refresh = item_refresh_stage(stages, item=item, target=target)
     if refresh is not None:
         stages.append(refresh)
-    return tuple(stages), aliases.omitted
+    return (
+        tuple(stages),
+        aliases.omitted,
+        set(aliases.omitted_destinations) & set(selected_for_build),
+    )
 
 
 def _snapshot(repository: WeaverRepository, store: Store) -> dict[str, bytes]:
