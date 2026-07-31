@@ -69,6 +69,19 @@ class WipeReport:
         return f"{self.target}: {verb} {self.count} from {self.location}"
 
 
+#: Schemas a wipe empties but does not remove. A schema-enabled Fabric Lakehouse
+#: is created holding ``dbo``; Fabric owns it, Weaver never manages it, and
+#: nothing recreates it once its directory is gone — the Lakehouse is simply left
+#: unable to resolve a schema it is supposed to have. Deleting it is therefore
+#: not "clearing the target" but damaging it, which is a different act and not
+#: one a wipe is asking for.
+#:
+#: This is the same judgement :data:`weaver.build_bundle.prune._RESERVED_SCHEMAS`
+#: already makes for prune. The two agreeing is the point: an operator should not
+#: have to know which of Weaver's destructive paths respects the default schema.
+_KEPT_SCHEMAS = ("dbo",)
+
+
 def _guard(location: Location, root: Location) -> None:
     """Never remove anything outside the workspace root.
 
@@ -87,14 +100,22 @@ def _guard(location: Location, root: Location) -> None:
 
 
 def _clear(
-    store: Store, location: Location, root: Location, *, dry_run: bool
+    store: Store, location: Location, root: Location, *, dry_run: bool, keep=()
 ) -> tuple[str, ...]:
-    """Remove the contents of a location, keeping the location itself."""
+    """Remove the contents of a location, keeping the location itself.
+
+    ``keep`` names entries the wipe passes over. It is not a scoping of what a
+    wipe is *for* — a wipe still clears the target — but a recognition that not
+    everything under an area belongs to the target. See :data:`_KEPT_SCHEMAS`.
+    """
 
     _guard(location, root)
     if not store.exists(location):
         return ()
-    entries = store.list(location)
+    kept = {name.casefold() for name in keep}
+    entries = [
+        entry for entry in store.list(location) if entry.location.name.casefold() not in kept
+    ]
     removed = tuple(sorted(entry.location.name for entry in entries))
     if not dry_run:
         for entry in entries:
@@ -185,7 +206,10 @@ def wipe_delta_target(
     return WipeReport(
         target=f"delta:{target}",
         location=location,
-        removed=shortcuts + _clear(store, location, resolver.root, dry_run=dry_run),
+        removed=shortcuts
+        + _clear(
+            store, location, resolver.root, dry_run=dry_run, keep=_KEPT_SCHEMAS
+        ),
         dry_run=dry_run,
     )
 
