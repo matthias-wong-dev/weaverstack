@@ -393,3 +393,134 @@ def test_the_whole_module_spends_no_livy_at_all():
         if "test_warehouse_boundary" in call.nodeid
     ]
     assert mine == []
+
+
+# --- row 3: Weaver running *in* Fabric ----------------------------------------
+#
+# Everything above runs Weaver on this machine and reaches into the workspace
+# over TDS. That is row 2, and it is the right place for the DDL and shape
+# claims — they are transport-independent, and paying a session for them buys
+# nothing.
+#
+# It is *not* the product claim. Inside a session, `sql_for` acquires its
+# executor from the session's own identity through `fabric_sql_executor`; only a
+# desktop caller injects one. Different authentication, different code path, and
+# nothing above exercises it.
+#
+# So one test does. The bundle is generated on the desktop — free, pure Python,
+# and the actions are provably the ones the build produces — and *installed
+# inside Fabric*, which is the part that has to be real. One Livy call for what
+# used to take four.
+
+
+def test_a_locally_generated_bundle_installs_inside_fabric(
+    tmp_path, fabric_workspace, clean_disposable_warehouse, livy_session
+):
+    """Weaver installing a Warehouse from inside a session, on its own identity.
+
+    The generation is local because it is pure Python and costs nothing there.
+    The installation is remote because that is where the claim lives: the frozen
+    T-SQL runs through the session's Fabric-native connector, not through a
+    connection this process opened.
+
+    The same body reads the inventory back Fabric-natively, so one call answers
+    both — did the install work, and does an in-session read agree with the
+    desktop read the tests above rely on.
+    """
+
+    from weaver.build_bundle import generate_item_build_bundle, write_bundle  # noqa: F401
+    from weaver.declaration import parse_item_repository
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
+    from factories import FixtureCatalogue, item_bindings
+
+    resolver = FabricResolver(fabric_workspace)
+    store = OneLakeDfsClient()
+    warehouse = clean_disposable_warehouse
+
+    # The declaration goes into the Weaver Lakehouse, as a user's would.
+    root = resolver.weaver_items_root
+    if store.exists(root):
+        store.delete(root, recursive=True)
+    local = tmp_path / "repo"
+    single_document_repository(
+        local,
+        item=ITEM,
+        documents={
+            "DWG.Customer.sql": warehouse_table(
+                "DWG.Customer",
+                select="select cast(1 as int) as CustomerId",
+            )
+        },
+    )
+    for path in sorted(local.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts:
+            store.write(root.join(*path.relative_to(local).parts), path.read_bytes())
+
+    repository = parse_item_repository(root, store=store)
+    bindings = item_bindings((ITEM, warehouse.item.name))
+    from weaver.build_bundle import LakehouseBinding, effective_item_bindings
+
+    bindings = effective_item_bindings(
+        bindings, weaver_lakehouse=fabric_workspace.weaver_lakehouse
+    )
+    inventory = read_warehouse_inventory(
+        warehouse_target(warehouse).bound, sql=warehouse.executor
+    )
+    item = item_id(ITEM)
+    bound = next(
+        binding.to_bound_target()
+        for binding in bindings.entries
+        if binding.item == item
+    )
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=bindings,
+        output=resolver.build_bundle("whrow3"),
+        store=store,
+        target_inventories={
+            item: read_warehouse_inventory(bound, sql=warehouse.executor),
+            **{
+                binding.item: FixtureInventory.from_repository(
+                    repository, item=str(binding.item), target_kind=SQL_TARGET
+                )
+                for binding in bindings.entries
+                if binding.item != item
+            },
+        },
+        catalogue=FixtureCatalogue.from_registry_rows(item=ITEM),
+        control_lakehouse=LakehouseBinding(
+            lakehouse=ItemRef(fabric_workspace.weaver_lakehouse)
+        ),
+    )
+
+    payload = livy_session.run(
+        "from weaver import FabricWorkspace, ItemRef\n"
+        "from weaver.resolution import resolver_for, store_for\n"
+        "from weaver.build_bundle import (InstallationEnvironment, install_bundle, "
+        "load_bundle)\n"
+        "from weaver.build_bundle.prune import read_warehouse_inventory\n"
+        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"environment={fabric_workspace.environment!r})\n"
+        "store = store_for(workspace)\n"
+        "resolver = resolver_for(workspace)\n"
+        "environment = InstallationEnvironment("
+        "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
+        f"bundle = load_bundle(resolver.build_bundle('whrow3'), store=store)\n"
+        "report = install_bundle(bundle, environment=environment)\n"
+        # The same session, its own identity, reading the target back.
+        "target = next(t for t in bundle.plan.targets if t.kind == 'warehouse')\n"
+        "sql = environment.sql_for(target)\n"
+        "seen = read_warehouse_inventory(target, sql=sql)\n"
+        "emit({'status': report.status,\n"
+        "      'errors': {a.action_id: a.error_message\n"
+        "                 for a in report.action_results() if a.error_type},\n"
+        "      'tables': list(seen.tables), 'schemas': list(seen.schemas)})\n",
+        label="install in session",
+    ).payload
+
+    assert payload["status"] == "succeeded", payload["errors"]
+    # The in-session read agrees with the desktop read the rest of this file uses.
+    assert "DWG.Customer" in payload["tables"] or "dwg.customer" in {
+        name.casefold() for name in payload["tables"]
+    }
