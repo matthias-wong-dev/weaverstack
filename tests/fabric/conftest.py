@@ -125,13 +125,16 @@ def _ensure_lakehouse(client, workspace, role: str):
     guessing whether an absent item is a setup mistake or a test failure.
     """
 
-    from weaver.fabric.resources import LAKEHOUSE, find_item
+    from weaver.fabric.resources import LAKEHOUSE, create_lakehouse, find_item
 
     name = _fixed_name(role)
     try:
         return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
     except Exception:
-        return _create_schema_enabled_lakehouse(client, workspace, name)
+        # The product's own creation, deliberately: the harness used to carry a
+        # copy that passed enableSchemas, which is how create_lakehouse went on
+        # omitting it without anything noticing.
+        return create_lakehouse(workspace, name, client=client)
 
 
 def _warehouse_name() -> str:
@@ -794,31 +797,6 @@ def _bindings_for(weaver_repo_fixture, *, lakehouse=None, warehouse=None):
                 raise AssertionError(f"{item} needs a Warehouse this env does not have")
             entries.append(ItemBinding(item, WarehouseBinding(warehouse=warehouse)))
     return ItemBindings(tuple(entries))
-
-
-def _create_schema_enabled_lakehouse(client, workspace, name):
-    """A Lakehouse with schemas enabled, so `schema.table` resolves and a managed
-    table lands under Tables/<schema>/<table> — which plain create_lakehouse omits."""
-
-    import time as _time
-
-    from weaver.fabric.resources import LAKEHOUSE, Item, find_item
-
-    resp = client.request(
-        "POST",
-        f"workspaces/{workspace.id}/lakehouses",
-        payload={"displayName": name, "creationPayload": {"enableSchemas": True}},
-        expected=(200, 201, 202, 409),
-    )
-    if resp.status_code == 202:
-        for _ in range(40):
-            try:
-                return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
-            except Exception:
-                _time.sleep(3)
-        raise RuntimeError(f"schema-enabled Lakehouse {name!r} never appeared")
-    body = resp.json()
-    return Item(id=body["id"], name=name, type=LAKEHOUSE, workspace_id=workspace.id)
 
 
 #: Every schema any build fixture registers, in either Lakehouse. Dropped on

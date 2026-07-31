@@ -121,7 +121,18 @@ def find_item(
 def create_lakehouse(
     workspace: Workspace, name: str, *, client: FabricClient | None = None
 ) -> Item:
-    """Create a Lakehouse. Returns the existing one if the name is taken."""
+    """Create a **schema-enabled** Lakehouse. Returns the existing one if the name is taken.
+
+    Schemas are not optional and so are not a parameter. Weaver's catalogue lives
+    in a schema called ``_``, and a Lakehouse created without schema support
+    cannot hold one — so a Weaver Lakehouse made without ``enableSchemas`` is
+    unusable, and a destination made without it puts managed tables somewhere
+    other than ``Tables/<schema>/<table>``, which is the layout every resolved
+    location assumes. There is no Weaver use for a Lakehouse that has neither.
+
+    Fabric decides this only at creation, so getting it wrong means deleting the
+    item and making it again.
+    """
 
     client = client or FabricClient()
     try:
@@ -134,7 +145,7 @@ def create_lakehouse(
     response = client.request(
         "POST",
         f"workspaces/{workspace.id}/lakehouses",
-        payload={"displayName": name},
+        payload={"displayName": name, "creationPayload": {"enableSchemas": True}},
         expected=(200, 201, 202, 409),
     )
     if response.status_code == 409:
