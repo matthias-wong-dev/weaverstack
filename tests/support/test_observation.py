@@ -12,7 +12,7 @@ names, not how it spells the loop.
 from __future__ import annotations
 
 import pytest
-from observation import Observation, observation_from, observe_body, observe_in_session
+from .observation import Observation, observation_from, observe_body, observe_in_session
 
 
 class FakeRow:

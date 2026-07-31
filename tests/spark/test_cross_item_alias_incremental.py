@@ -23,7 +23,7 @@ and asserts the no-rebuild once there rather than repeating this.
 from __future__ import annotations
 
 import pytest
-from build_envs import CROSS_ITEM_ALIAS_FIXTURE
+from support.build_envs import CROSS_ITEM_ALIAS_FIXTURE
 
 pytestmark = [
     pytest.mark.spark,

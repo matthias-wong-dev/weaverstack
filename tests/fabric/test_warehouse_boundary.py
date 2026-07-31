@@ -385,7 +385,7 @@ def test_the_whole_module_spends_no_livy_at_all():
     session — where the module this replaces spent two submissions and minutes.
     """
 
-    from livy_telemetry import LEDGER
+    from support.livy_telemetry import LEDGER
 
     mine = [
         call

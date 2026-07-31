@@ -1,14 +1,10 @@
-"""Building a real estate out of the narrow seams, for boundary tests to read.
+"""Boundary tests: a real estate, built out of the narrow seams and read back.
 
-The layer below this proves what Weaver *decides*; these tests prove that a real
-engine, asked to do it, produces what was decided — and that reading the result
-back gives the same objects a fixture builds.
-
-The estate is assembled by planning one item and executing its actions, not by
-generating and installing a bundle. That is deliberate twice over. It keeps these
-tests about the boundary rather than about bundle assembly, so a failure here
-means Spark disagreed with Weaver; and it means the seams are exercised in
-composition, which is the one thing testing them separately cannot show.
+Its own directory, and the reason is the autouse cleanup below. These tests
+create schemas ad hoc and must drop them per test; the estate-based suites
+alongside install once per *module* and are torn down by an autouse fixture that
+did not know the difference — which is exactly what merging the two conftests
+caused, and how a module's second test came to find nothing.
 """
 
 from __future__ import annotations
@@ -20,6 +16,7 @@ from weaver import ItemRef
 from weaver.build_bundle import execute_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.locations import Location
+
 
 
 def resolved_for(lakehouses, item: str, *, target_id: str = "target-1") -> ResolvedTarget:

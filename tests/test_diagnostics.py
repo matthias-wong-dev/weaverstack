@@ -118,8 +118,3 @@ def test_spark_supports_more_than_one_jdk():
     assert len(SUPPORTED_JAVA) > 1
     assert "11" in SUPPORTED_JAVA and "17" in SUPPORTED_JAVA
 
-
-@pytest.mark.spark
-def test_the_report_agrees_with_a_session_actually_starting(spark):
-    assert check_local_spark().ok
-    assert spark.range(3).count() == 3

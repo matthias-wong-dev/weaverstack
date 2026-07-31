@@ -17,7 +17,7 @@ storage is where the resolver says — is asserted in ``test_build_bundle``.
 from __future__ import annotations
 
 import pytest
-from build_envs import SQL_TABLE_FIXTURE
+from support.build_envs import SQL_TABLE_FIXTURE
 
 pytestmark = pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)
 
