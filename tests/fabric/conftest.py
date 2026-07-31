@@ -19,9 +19,9 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
 import pytest
 
@@ -698,6 +698,11 @@ class BuildEnv:
     #: catalogue. Two, always — even the simplest install writes to both.
     destination: Any = None
     weaver_destination: Any = None
+    #: Every Lakehouse this fixture bound, by the item that owns it. Empty unless
+    #: the fixture asked for more than one — a cross-item alias is the only thing
+    #: that does, and it needs both ends addressable to prove the alias points
+    #: across rather than at itself.
+    destinations: Mapping[str, Any] = field(default_factory=dict)
 
     def at(self, destination=None):
         return destination or self.destination
@@ -730,6 +735,20 @@ class BuildEnv:
 
     def schema_exists(self, schema: str, *, destination=None) -> bool:
         return self.run_schema_exists(self.schema_name(schema, destination=destination))
+
+    def write_repo_file(self, relative: str, content: str) -> None:
+        """Change the installed declaration between two builds.
+
+        Incremental behaviour can only be asserted across builds, and what
+        changes between them is the repository — so a test needs to edit it in
+        place rather than install a second fixture. Both transports write through
+        the same store abstraction, so this needs no per-environment form.
+        """
+
+        self.store.write(
+            self.resolver.weaver_items_root.join(*relative.split("/")),
+            content.encode("utf-8"),
+        )
 
 
 def _outcome_from_report(report) -> InstallOutcome:
@@ -768,13 +787,21 @@ def _upload_tree(store, source: Path, destination) -> None:
             store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
 
 
-def _bindings_for(weaver_repo_fixture, *, lakehouse=None, warehouse=None):
+def _bindings_for(
+    weaver_repo_fixture, *, lakehouse=None, warehouse=None, lakehouses=None
+):
     """Bind the fixture's declared items to whichever targets this env has.
 
     The item type chooses the binding, so one environment serves a Lakehouse
     fixture, a Warehouse fixture or a mixed one without a test naming a target
     kind. Items the fixture does not list stay unbound, which is how the mixed
     estate proves its Warehouse leaves are omitted.
+
+    ``lakehouses`` maps a specific item to its own Lakehouse, for the one thing a
+    single destination cannot express: a cross-item alias needs the producer and
+    the consumer in *different* Lakehouses, or the alias would point a name at
+    something already in the same place. ``lakehouse`` remains the default for
+    every item not named there, so single-target fixtures are untouched.
     """
 
     from weaver.build_bundle import (
@@ -785,13 +812,15 @@ def _bindings_for(weaver_repo_fixture, *, lakehouse=None, warehouse=None):
     )
     from weaver.declaration.model import LAKEHOUSE, WeaverItemId
 
+    by_item = {WeaverItemId.parse(name): ref for name, ref in (lakehouses or {}).items()}
     entries = []
     for name in weaver_repo_fixture.items:
         item = WeaverItemId.parse(name)
         if item.item_type == LAKEHOUSE:
-            if lakehouse is None:
+            bound = by_item.get(item, lakehouse)
+            if bound is None:
                 raise AssertionError(f"{item} needs a Lakehouse this env does not have")
-            entries.append(ItemBinding(item, LakehouseBinding(lakehouse=lakehouse)))
+            entries.append(ItemBinding(item, LakehouseBinding(lakehouse=bound)))
         else:
             if warehouse is None:
                 raise AssertionError(f"{item} needs a Warehouse this env does not have")
@@ -807,14 +836,14 @@ def _bindings_for(weaver_repo_fixture, *, lakehouse=None, warehouse=None):
 _LOCAL_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting", "Wh", "Rpt", "_")
 
 
-def _local_lakehouse_setup(root):
+def _local_lakehouse_setup(root, extra=()):
     from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
 
     workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
     store = LocalStore()
     resolver = LocalResolver(workspace)
     weaver, target = ItemRef("Weaver"), ItemRef("Sales_LH")
-    for item in (weaver, target):
+    for item in (weaver, target, *(ItemRef(name) for name in extra)):
         store.make_directory(resolver.files_root(item))
         store.make_directory(resolver.tables_root(item))
     store.make_directory(resolver.weaver_items_root)
@@ -840,9 +869,17 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     from weaver.build_bundle.planner import generate_item_build_bundle
     from weaver.declaration import parse_item_repository
 
-    workspace, weaver, target, resolver, store = _local_lakehouse_setup(root)
+    workspace, weaver, target, resolver, store = _local_lakehouse_setup(
+        root, extra=weaver_repo_fixture.extra_lakehouses
+    )
     destination = resolver.spark_destination(target)
     weaver_destination = resolver.spark_destination(weaver)
+    from weaver import ItemRef as _ItemRef
+
+    named_lakehouses = {
+        item: _ItemRef(name)
+        for item, name in weaver_repo_fixture.lakehouse_names.items()
+    }
 
     def install_repo() -> None:
         destination = resolver.weaver_items_root
@@ -858,7 +895,9 @@ def _local_build_context(root, spark, weaver_repo_fixture):
         repository = parse_item_repository(root_location, store=store)
         control = LakehouseBinding(lakehouse=weaver)
         bindings = effective_item_bindings(
-            _bindings_for(weaver_repo_fixture, lakehouse=target),
+            _bindings_for(
+                weaver_repo_fixture, lakehouse=target, lakehouses=named_lakehouses
+            ),
             weaver_lakehouse=weaver.name,
         )
         environment = InstallationEnvironment(
@@ -869,7 +908,10 @@ def _local_build_context(root, spark, weaver_repo_fixture):
         )
         inventories = read_target_inventories(bindings, environment=environment)
         reconciled = read_reconciled_catalogue(
-            bindings, inventories=inventories, environment=environment
+            bindings,
+            inventories=inventories,
+            environment=environment,
+            repository=repository,
         )
         return generate_item_build_bundle(
             repository,
@@ -931,6 +973,10 @@ def _local_build_context(root, spark, weaver_repo_fixture):
         store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
         store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
 
+    named_destinations = {
+        item: resolver.spark_destination(ref)
+        for item, ref in named_lakehouses.items()
+    }
     try:
         yield BuildEnv(
             label="local", workspace=workspace, weaver=weaver, target=target,
@@ -940,10 +986,11 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             seed_orphans=seed_orphans, run_schema_exists=schema_exists,
             run_python=run_python,
             destination=destination, weaver_destination=weaver_destination,
+            destinations=named_destinations,
         )
     finally:
         for schema in _LOCAL_SCHEMAS:
-            for place in (destination, weaver_destination):
+            for place in (destination, weaver_destination, *named_destinations.values()):
                 spark.sql(
                     f"DROP SCHEMA IF EXISTS {place.qualified_schema(schema)} CASCADE"
                 )
@@ -1056,7 +1103,8 @@ def _fabric_build_context(
             "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
             "inventories = read_target_inventories(bindings, environment=environment)\n"
             "reconciled = read_reconciled_catalogue("
-            "bindings, inventories=inventories, environment=environment)\n"
+            "bindings, inventories=inventories, environment=environment, "
+            "repository=repository)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
@@ -1294,7 +1342,8 @@ def _warehouse_build_env(
             "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
             "inventories = read_target_inventories(bindings, environment=environment)\n"
             "reconciled = read_reconciled_catalogue("
-            "bindings, inventories=inventories, environment=environment)\n"
+            "bindings, inventories=inventories, environment=environment, "
+            "repository=repository)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"

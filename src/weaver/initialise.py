@@ -178,7 +178,7 @@ def initialise_weaver_lakehouse(
     )
     inventories = read_target_inventories(bindings, environment=environment)
     reconciled_catalogue = read_reconciled_catalogue(
-        bindings, inventories=inventories, environment=environment
+        bindings, inventories=inventories, environment=environment, repository=repository
     )
     bundle = generate_item_build_bundle(
         repository,

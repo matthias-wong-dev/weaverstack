@@ -173,6 +173,7 @@ def render_catalogue_after_build(
             retained=(identity for identity in selected_ids if identity.item == item),
             target_name=target_by_item[item].name,
             weaver_version=__version__,
+            target_kind=target_by_item[item].kind,
         )
         result = reconcile(projection)
         for table_plan in (*result.dictionaries, result.installation):

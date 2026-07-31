@@ -462,6 +462,24 @@ def test_alias_destination_must_not_collide_with_a_native_document(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+def test_an_alias_may_not_name_a_source_its_own_item_owns(tmp_path):
+    """An alias crosses items. Within one, the document graph already orders
+    producer before consumer — and the alias stage runs before every document
+    the item declares, so a same-item alias would be planned before its own
+    source was built."""
+
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        """aliases:
+  Sales.PortableCustomer: Warehouse/Reporting/Sales.Customer
+""",
+    )
+    with pytest.raises(DiscoveryError, match="are both owned by Warehouse/Reporting"):
+        parse_item_repository(Location(str(root)))
+
+
 def test_alias_source_must_resolve_with_exact_case(tmp_path):
     root = _estate(tmp_path)
     _write(

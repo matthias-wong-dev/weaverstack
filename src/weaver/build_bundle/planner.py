@@ -43,7 +43,7 @@ from .catalogue_actions import (
     render_catalogue_before_build,
 )
 from .endpoints import item_refresh_stage
-from .incremental import select_build
+from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .physical import (
     item_build_stages,
@@ -81,9 +81,20 @@ def generate_item_build_bundle(
             + ", ".join(sorted(map(str, unknown)))
         )
 
-    selected_ids = {
+    # Two kinds of node are selectable, and most of what follows needs exactly
+    # one of them. Documents are what prune, schemas and the physical build
+    # pipelines are about; alias destinations are registered objects too — so
+    # they take part in selection and certification — but they are materialised
+    # by the alias executor rather than by any document stage.
+    selected_documents = {
         identity for identity in repository.source_documents if identity.item in by_item
     }
+    selected_aliases = {
+        alias.destination
+        for alias in repository.aliases
+        if alias.destination.item in by_item
+    }
+    selected_ids = selected_documents | selected_aliases
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -101,12 +112,19 @@ def generate_item_build_bundle(
                 f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
 
+    # Freshness is read before ``registered`` is narrowed, because the whole
+    # point is to compare against an item this build does *not* include.
+    stale_aliases = stale_alias_destinations(
+        repository, reconciled_catalogue.registered, bound_items=by_item
+    )
     registered = {
         identity: document
         for identity, document in reconciled_catalogue.registered.items()
         if identity.item in by_item
     }
-    selection = select_build(repository, registered, selected=selected_ids)
+    selection = select_build(
+        repository, registered, selected=selected_ids, stale_aliases=stale_aliases
+    )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
     removed = set(registered) - selected_ids
@@ -126,28 +144,35 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
+    # Alias destinations this build wanted but could not materialise. They must
+    # not reach the Registry: a row there means the object's work succeeded, and
+    # for these no work was even planned.
+    uncertified: set = set()
+
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
         for item in layer:
-            item_stages, item_omitted = _plan_item(
+            item_stages, item_omitted, item_uncertified = _plan_item(
                 repository,
                 item=item,
                 target=target_by_item[item],
                 inventory=inventories[item],
                 target_by_item=target_by_item,
-                selected_ids=selected_ids,
+                selected_documents=selected_documents,
+                selected_aliases=selected_aliases,
                 selected_for_drop=selected_for_drop,
                 selected_for_build=selected_for_build,
                 registered=registered,
             )
             layer_stages.extend(item_stages)
             omitted.extend(item_omitted)
+            uncertified |= item_uncertified
         stages.extend(merge_layer_stages(layer_stages))
 
     stages.extend(
         render_catalogue_after_build(
             repository,
-            selected_ids,
+            selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
         )
@@ -225,34 +250,51 @@ def _plan_item(
     target,
     inventory: TargetInventory,
     target_by_item,
-    selected_ids,
+    selected_documents,
+    selected_aliases,
     selected_for_drop,
     selected_for_build,
     registered,
-) -> tuple[tuple[PlannedStage, ...], tuple[OmittedNode, ...]]:
-    """One item's contiguous group of stages, in the order they must run."""
+) -> tuple[tuple[PlannedStage, ...], tuple[OmittedNode, ...], set]:
+    """One item's contiguous group of stages, in the order they must run.
+
+    The third return is the alias destinations this item could not materialise
+    *and* was asked to build. They are withheld from certification: an alias
+    whose source item is unbound has no physical form under these bindings, and
+    a Registry row for it would claim an installation that never happened. One
+    already installed from an earlier build is left certified — it is still
+    there — so only the intersection with the build selection is withheld.
+    """
 
     aliases = plan_item_aliases(
-        repository, item=item, target=target, target_by_item=target_by_item
+        repository,
+        item=item,
+        target=target,
+        target_by_item=target_by_item,
+        selected=selected_for_build & selected_aliases,
     )
     stages: list[PlannedStage] = []
 
+    # Prune is given every *declared* alias destination, never only the selected
+    # ones: an alias this build decided not to touch is still desired state, and
+    # a prune that could not see it would delete the very thing incremental
+    # selection just chose to keep.
     prune = item_prune_stage(
-        repository, selected_ids, item=item, target=target, inventory=inventory
+        repository, selected_documents, item=item, target=target, inventory=inventory
     )
     if prune is not None:
         stages.append(prune)
     stages.extend(
         item_drop_stages(
             repository,
-            selected_for_drop,
+            selected_for_drop - selected_aliases,
             item=item,
             target=target,
             registered=registered,
         )
     )
     schemas = item_schema_stage(
-        selected_ids,
+        selected_documents,
         item=item,
         target=target,
         inventory=inventory,
@@ -264,14 +306,21 @@ def _plan_item(
         stages.append(aliases.stage)
     stages.extend(
         item_build_stages(
-            repository, selected_for_build, item=item, target=target
+            repository,
+            selected_for_build - selected_aliases,
+            item=item,
+            target=target,
         )
     )
 
     refresh = item_refresh_stage(stages, item=item, target=target)
     if refresh is not None:
         stages.append(refresh)
-    return tuple(stages), aliases.omitted
+    return (
+        tuple(stages),
+        aliases.omitted,
+        set(aliases.omitted_destinations) & set(selected_for_build),
+    )
 
 
 def _snapshot(repository: WeaverRepository, store: Store) -> dict[str, bytes]:

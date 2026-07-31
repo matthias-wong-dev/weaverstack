@@ -8,8 +8,9 @@ second conftest.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Mapping
 
 import pytest
 
@@ -24,14 +25,26 @@ class SesFixture:
     environment cannot derive them, and which items a fixture leaves unbound is
     sometimes the whole subject — the mixed estate binds only its Lakehouse item
     so that the Warehouse leaves must be omitted.
+
+    ``lakehouse_names`` gives a named item its own Lakehouse instead of the
+    environment's single default. Only a cross-item alias needs it, and it needs
+    it essentially: an alias is one item's name for what another item owns, so
+    with both items in one Lakehouse there is nothing for the alias to cross.
     """
 
     path: Path
     items: tuple[str, ...]
+    lakehouse_names: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
         return self.path.name
+
+    @property
+    def extra_lakehouses(self) -> tuple[str, ...]:
+        """Lakehouse names this fixture needs beyond the environment's default."""
+
+        return tuple(sorted(set(self.lakehouse_names.values())))
 
 
 #: The declaration fixtures a build env can install. One place, so no test
@@ -50,6 +63,17 @@ MIXED_ESTATE_FIXTURE = SesFixture(
 )
 WAREHOUSE_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "warehouse-estate-item", ("Warehouse/Reporting",)
+)
+#: A producer and the consumer that aliases it, in two Lakehouses. The emulator
+#: materialises the alias as a filesystem link where Fabric makes a OneLake
+#: shortcut, so the same body proves incremental alias behaviour either side.
+CROSS_ITEM_ALIAS_FIXTURE = SesFixture(
+    _FIXTURES / "cross-item-alias",
+    ("Lakehouse/Raw", "Lakehouse/Curated"),
+    lakehouse_names={
+        "Lakehouse/Raw": "Producer_LH",
+        "Lakehouse/Curated": "Consumer_LH",
+    },
 )
 
 #: Run one transport-neutral build test against both local Spark and Fabric. The

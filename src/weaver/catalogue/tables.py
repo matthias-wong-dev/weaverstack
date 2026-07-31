@@ -67,6 +67,22 @@ TIMESTAMP = "timestamp"
 #: The signature column, on every table.
 SIGNATURE = "signature"
 
+#: When the Registry row was last published — one value shared by every row a
+#: completed build writes, so two rows can be ordered against each other.
+#:
+#: Registry publication is Weaver's completion boundary: a row is written last,
+#: after everything the object needed succeeded. So "when was this published"
+#: *is* "when was this last built", and comparing two rows answers the one
+#: question a cross-item build cannot answer from signatures alone — has this
+#: alias's source been rebuilt since the alias was made? A signature cannot say
+#: that, because reloading a source changes no declaration.
+#:
+#: It advances only when the row is inserted. Every rebuild goes through an
+#: insert — a rebuilt object has its Registry claim removed before any physical
+#: work — so an object that was not rebuilt keeps the epoch it had, even if some
+#: other column of its row changed.
+BUILD_EPOCH = "build_epoch"
+
 #: Weaver's audit columns as this Delta table actually spells them. They are not
 #: business columns — the build appends them to every table it creates — but the
 #: catalogue writes them, so it has to know them.
@@ -86,6 +102,12 @@ class CatalogueColumn:
     #: could not say which installation it belonged to would be unusable.
     not_null: bool = False
     description: str = ""
+    #: Supplied by the installer when the row is written, rather than projected
+    #: from the declaration — so it is created and described like any other
+    #: column, but never appears in a projected row and never takes part in the
+    #: comparison that decides whether a row changed. See
+    #: :data:`BUILD_EPOCH`, the only one.
+    published: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,9 +128,10 @@ class CatalogueTable:
         names = [column.name for column in self.columns]
         if len(set(names)) != len(names):
             raise ValueError(f"{self.name}: duplicate column")
-        if names[-1] != SIGNATURE:
+        business = [column.name for column in self.columns if not column.published]
+        if business[-1] != SIGNATURE:
             raise ValueError(f"{self.name}: signature must be the last business column")
-        if names[: len(self.key)] != list(self.key):
+        if business[: len(self.key)] != list(self.key):
             raise ValueError(f"{self.name}: key columns must lead, in key order")
         if self.key[:2] != ITEM_SCOPE_COLUMNS:
             raise ValueError(
@@ -132,9 +155,15 @@ class CatalogueTable:
 
     @property
     def column_names(self) -> tuple[str, ...]:
-        """The business columns, in order."""
+        """The business columns, in order — those a projection supplies."""
 
-        return tuple(column.name for column in self.columns)
+        return tuple(column.name for column in self.columns if not column.published)
+
+    @property
+    def published_column_names(self) -> tuple[str, ...]:
+        """Columns the installer supplies when it writes the row."""
+
+        return tuple(column.name for column in self.columns if column.published)
 
     @property
     def comparison_columns(self) -> tuple[str, ...]:
@@ -142,15 +171,20 @@ class CatalogueTable:
 
         ``signature`` is one of them, which is the point: a row whose source file
         changed differs here even when every projected value happens to match.
+
+        A published column is deliberately absent. One that compared would differ
+        on every build by construction — its value is new each time — so every
+        row would update every build and the no-op that makes an unchanged
+        installation cheap would be gone.
         """
 
         return tuple(name for name in self.column_names if name not in self.key)
 
     @property
     def physical_columns(self) -> tuple[str, ...]:
-        """Every column the built table has: business, then Weaver's audit trio."""
+        """Every column the built table has: business, published, audit trio."""
 
-        return self.column_names + AUDIT_COLUMN_NAMES
+        return self.column_names + self.published_column_names + AUDIT_COLUMN_NAMES
 
     def column(self, name: str) -> CatalogueColumn:
         for column in self.columns:
@@ -304,6 +338,16 @@ REGISTRY = CatalogueTable(
             ),
         ),
         _signature("the object's source file"),
+        CatalogueColumn(
+            BUILD_EPOCH,
+            TIMESTAMP,
+            published=True,
+            description=(
+                "When this row was published, shared by every row one completed "
+                "build wrote. Null for a row published before epochs existed, "
+                "which orders as older than any epoch."
+            ),
+        ),
     ),
 )
 

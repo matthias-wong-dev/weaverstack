@@ -258,7 +258,10 @@ def build_uploaded_item_repository(
             bindings, environment=environment, sql_by_item=sql_by_item
         )
         reconciled = read_reconciled_catalogue(
-            bindings, inventories=inventories, environment=environment
+            bindings,
+            inventories=inventories,
+            environment=environment,
+            repository=repository,
         )
         return build_item_repository(
             repository,
@@ -278,8 +281,29 @@ def read_reconciled_catalogue(
     *,
     inventories,
     environment: InstallationEnvironment,
+    repository=None,
 ) -> ReconciledCatalogue:
-    """Read the Weaver Lakehouse catalogue and prove selected claims physically."""
+    """Read the Weaver Lakehouse catalogue and prove selected claims physically.
+
+    The read covers the bound items and, when a ``repository`` is given, the
+    items that *produce* what those items alias. Those producers are not being
+    built and nothing about them will be written — but their Registry rows carry
+    the build that published them, and comparing that against the alias's own row
+    is the only way to learn that a producer moved on while this consumer was not
+    looking (see
+    :func:`~weaver.build_bundle.incremental.stale_alias_destinations`).
+
+    They are read without an inventory, so nothing about them is reconciled away:
+    a build has no business proving claims about a target it was not pointed at.
+    """
+
+    items = {binding.item for binding in bindings.entries}
+    if repository is not None:
+        items |= {
+            alias.source.item
+            for alias in repository.aliases
+            if alias.destination.item in items and alias.source.item not in items
+        }
 
     if environment.spark is None:
         raise BuildError("every build needs Spark to read and publish the catalogue")
@@ -293,9 +317,7 @@ def read_reconciled_catalogue(
         environment.spark,
         environment.resolver.spark_destination(ItemRef(workspace.weaver_lakehouse)),
     )
-    state = read_catalogue_state(
-        catalogue, (binding.item for binding in bindings.entries)
-    )
+    state = read_catalogue_state(catalogue, sorted(items, key=str))
     return reconcile_catalogue_state(state, inventories=inventories)
 
 

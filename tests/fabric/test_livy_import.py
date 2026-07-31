@@ -46,14 +46,17 @@ def test_the_core_public_surface_is_importable_there(livy_session):
     body = (
         "from weaver import FolderTarget, DeltaTarget, Location\n"
         "emit({\n"
-        "  'folder': str(FolderTarget.parse('Sales_LH/Files/Extracts')),\n"
+        "  'folder': str(FolderTarget.parse('Sales_LH/Files')),\n"
         "  'delta': str(DeltaTarget.parse('Sales_LH')),\n"
         "  'joined': (Location('abfss://ws@workspace/lh') / 'Files' / 'x').value,\n"
         "})\n"
     )
     result = livy_session.run(body)
     assert result.payload == {
-        "folder": "Sales_LH/Files/Extracts",
+        # A folder target is the area, not a path within it: a folder object
+        # lands at Files/<Schema>/<Object>, so there is nothing beneath Files
+        # left to configure.
+        "folder": "Sales_LH/Files",
         "delta": "Sales_LH",
         "joined": "abfss://ws@workspace/lh/Files/x",
     }

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
-from ..spark.tokens import object_token
+from ..spark.tokens import EPOCH_TOKEN, object_token
 from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,
@@ -182,6 +182,16 @@ def render_merge(
     null-safe comparison of every non-key column, so it neither writes nor
     advances ``row_update_datetime``. That is what makes a rebuild of unchanged
     Weaver document leave the catalogue alone.
+
+    **A published column is set on insert and never on update.** That is not an
+    optimisation, it is what makes the value mean what it claims. Every object a
+    build actually rebuilds reaches this statement as an *insert*: it is either
+    new, or its Registry claim was deleted before any physical work began. So an
+    update can only be a row whose projection changed while the object itself was
+    left alone — a document that forbids rebuilding is the case that exists — and
+    dating such a row to this build would say it was rebuilt when it was not.
+    Leaving published columns out of ``UPDATE SET`` keeps the old value, which is
+    the true one.
     """
 
     rows = sorted_rows(table, rows)
@@ -214,7 +224,7 @@ def render_merge(
     # Named rather than positional: the audit columns are appended by the build in
     # a fixed order, and pairing values to that order by position would put the
     # sentinel in the wrong column the day the order changed.
-    audit = {
+    supplied = {
         AUDIT_INSERT_COLUMN: "current_timestamp()",
         AUDIT_UPDATE_COLUMN: "current_timestamp()",
         # A live row's delete datetime is a sentinel maximum, never null — all
@@ -223,11 +233,22 @@ def render_merge(
             f"CAST({literal(AUDIT_LIVE_DELETE_DATETIME)} AS {TIMESTAMP.upper()})"
         ),
     }
+    # A published column appears here and in *no* other clause. Not in the source
+    # relation, because no projection knows it; not in the comparison, because a
+    # value that is new every build would make every row differ; and not in the
+    # UPDATE, which is the substantive decision — see the note above the
+    # statement.
+    supplied.update(
+        {
+            name: f"CAST('{EPOCH_TOKEN}' AS {TIMESTAMP.upper()})"
+            for name in table.published_column_names
+        }
+    )
     insert_columns = ", ".join(
         identifier(name) for name in table.physical_columns
     )
     insert_values = ", ".join(
-        audit[name] if name in audit else f"source.{identifier(name)}"
+        supplied[name] if name in supplied else f"source.{identifier(name)}"
         for name in table.physical_columns
     )
 

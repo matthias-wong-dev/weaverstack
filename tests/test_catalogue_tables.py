@@ -110,7 +110,10 @@ def test_the_audit_columns_are_physical_but_not_declared(each: CatalogueTable):
     """
 
     assert not set(each.column_names) & set(AUDIT_COLUMN_NAMES)
-    assert each.physical_columns == each.column_names + AUDIT_COLUMN_NAMES
+    assert (
+        each.physical_columns
+        == each.column_names + each.published_column_names + AUDIT_COLUMN_NAMES
+    )
 
 
 def test_the_audit_columns_use_the_delta_snake_case_spelling():

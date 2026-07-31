@@ -12,7 +12,7 @@ from ..spark.tokens import object_token
 from .claims import CatalogueClaim, claim_rules_for_object_type
 from .reader import _is_absent, read_installation
 from .render import InstallationScope
-from .tables import CATALOGUE_TABLES, OBJECT_TYPES, REGISTRY
+from .tables import BUILD_EPOCH, CATALOGUE_TABLES, OBJECT_TYPES, REGISTRY
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,9 @@ class RegisteredDocument:
     identity: WeaverDocumentId
     object_type: str
     signature: str
+    #: When the build that last certified this object published it. ``None`` for
+    #: a row written before epochs existed, which orders as older than any epoch.
+    build_epoch: object = None
 
 
 def _registered_documents(
@@ -77,7 +80,9 @@ def _registered_documents(
             signature = str(row.get("signature") or "")
             if not signature:
                 raise BuildError(f"Registry row for {identity} has no signature")
-            document = RegisteredDocument(identity, object_type, signature)
+            document = RegisteredDocument(
+                identity, object_type, signature, row.get(BUILD_EPOCH)
+            )
             prior = registered.get(identity)
             if prior is not None and prior != document:
                 raise BuildError(f"Registry contains conflicting rows for {identity}")
@@ -102,7 +107,18 @@ def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
             raise
         present.add(table.name)
         folded = {column.casefold() for column in columns}
-        required = {column.name.casefold() for column in table.columns}
+        # Published columns are required too, and deliberately: the merge writes
+        # one on every insert, so a catalogue without it can be *read* but not
+        # *written*. Exempting it here would let planning succeed and push the
+        # failure into the install, where it surfaces as an engine complaint
+        # about an unknown column rather than as a statement about the
+        # catalogue's shape. The reader's null tolerance answers a different
+        # question — a column that exists but predates some rows — and both hold
+        # at once: require the column, tolerate the value.
+        required = {
+            name.casefold()
+            for name in table.column_names + table.published_column_names
+        }
         absent_columns = sorted(required - folded)
         if absent_columns:
             incompatible.append(f"{table.name}.{absent_columns[0]}")

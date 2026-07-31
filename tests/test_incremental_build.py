@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from weaver import ItemRef, LocalStore, Location
 from weaver.build_bundle import (
     ItemBinding,
@@ -10,7 +12,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_build
+from weaver.build_bundle.incremental import select_build, stale_alias_destinations
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -23,13 +25,17 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import project_item_installation
-from weaver.catalogue.state import ReconciledCatalogue
+from weaver.catalogue.state import (
+    CatalogueState,
+    ReconciledCatalogue,
+    reconcile_catalogue_state,
+)
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 
 from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate, _folder, _write
+from test_item_repository import _estate, _folder, _table, _write
 
 
 def _repository(root):
@@ -37,14 +43,27 @@ def _repository(root):
 
 
 def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
+    """One item's catalogue as a completed build would have left it.
+
+    Both kinds of registered object are included — documents and the item's alias
+    destinations — because that is what a real installation holds, and selection
+    reads the two the same way.
+    """
+
     item = WeaverItemId.parse(item_text)
     retained = [identity for identity in repository.source_documents if identity.item == item]
+    retained.extend(
+        alias.destination
+        for alias in repository.aliases
+        if alias.destination.item == item
+    )
     projection = project_item_installation(
         repository,
         item=item,
         retained=retained,
         target_name=f"{item.item_name}_Target",
         weaver_version="test",
+        target_kind="warehouse" if item.item_type == "Warehouse" else "lakehouse",
     )
     old = set(old)
     rows = {}
@@ -135,7 +154,14 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     }
 
 
-def test_cross_item_descendants_are_deferred(tmp_path):
+def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
+    """Impact crosses the alias, because the alias is in the graph.
+
+    The consumer is in another item and reaches its producer only through
+    ``Sales.PortableCustomer``. Nothing here special-cases that: the walk is the
+    ordinary descendant walk, and the alias is an ordinary hop on it.
+    """
+
     repository = _repository(_dependency_estate(tmp_path))
     curated = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Customer")
     reporting = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
@@ -149,6 +175,29 @@ def test_cross_item_descendants_are_deferred(tmp_path):
     impact = determine_impact(
         repository, catalogue.registered, selected=(curated, reporting)
     )
+    assert impact.changed == (curated,)
+    assert reporting in impact.impacted_descendants
+
+
+def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
+    """Deferral is now by construction rather than by rule.
+
+    The same changed producer, with the consumer simply not selected: nothing
+    reaches it, because impact only ever names nodes the build was asked about.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    curated = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Customer")
+    reporting = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+    rows = {}
+    for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
+        rows.update(_catalogue(repository, item_text).rows)
+    rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
+        "signature"
+    ] = "old-signature"
+    catalogue = ReconciledCatalogue(rows)
+    impact = determine_impact(repository, catalogue.registered, selected=(curated,))
+
     assert impact.changed == (curated,)
     assert reporting not in impact.impacted
 
@@ -240,6 +289,369 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         bundle.location.join(*registry_action.payload.split("/"))
     ).decode()
     assert repository.source_documents[existing].effective_signature in registry_payload
+
+
+ALIAS_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
+
+#: Two publication instants, in order. Datetimes because that is what Spark
+#: hands back for a timestamp column.
+EARLIER = datetime(2026, 7, 30, 9, 0, 0)
+LATER = datetime(2026, 7, 31, 9, 0, 0)
+
+
+def _alias_bindings():
+    """The producer and the consumer that aliases it, both bound."""
+
+    from weaver.build_bundle import WarehouseBinding
+
+    return ItemBindings(
+        (
+            ItemBinding(
+                WeaverItemId.parse("Lakehouse/Curated"),
+                LakehouseBinding(ItemRef("Curated_Target")),
+            ),
+            ItemBinding(
+                WeaverItemId.parse("Warehouse/Reporting"),
+                WarehouseBinding(ItemRef("Reporting_Target")),
+            ),
+        )
+    )
+
+
+def _alias_inventories(repository, *, alias_installed=True):
+    """Both targets as they stand, with the alias view present or absent.
+
+    The alias destination is an ordinary view in the Warehouse's inventory —
+    which is exactly the point of registering it as one — so leaving it out is
+    how "somebody deleted the alias" is expressed.
+    """
+
+    inventories = {}
+    for binding in _alias_bindings().entries:
+        target = binding.to_bound_target()
+        item = binding.item
+        objects = [
+            repository.source_documents[identity].qualified
+            for identity in repository.source_documents
+            if identity.item == item and not identity.is_files
+        ]
+        views = list(objects) if target.kind == "warehouse" else []
+        tables = [] if target.kind == "warehouse" else list(objects)
+        if alias_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
+            views.append("Sales.PortableCustomer")
+        inventories[item] = TargetInventory(
+            target_id=target.id,
+            kind=target.kind,
+            target_name=target.name,
+            schemas=("Sales",),
+            tables=tuple(tables),
+            views=tuple(views),
+        )
+    return inventories
+
+
+def _alias_catalogue(repository):
+    rows = {}
+    for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
+        rows.update(_catalogue(repository, item_text).rows)
+    return rows
+
+
+def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bundle"):
+    return generate_item_build_bundle(
+        repository,
+        bindings=_alias_bindings(),
+        output=Location(str(tmp_path / name)),
+        store=LocalStore(),
+        target_inventories=_alias_inventories(
+            repository, alias_installed=alias_installed
+        ),
+        reconciled_catalogue=ReconciledCatalogue(rows),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+    )
+
+
+def _alias_actions(bundle):
+    return [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "create_alias"
+    ]
+
+
+def test_an_unchanged_alias_is_not_replaced(tmp_path):
+    """The behaviour this whole change exists for.
+
+    An alias used to be remade on every build. Now its declaration is unchanged,
+    its destination is present and its source was not rebuilt — so there is
+    nothing to do, and a shortcut that takes seconds to become readable is not
+    torn down and remade for nothing.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    bundle = _alias_bundle(tmp_path, repository, rows=_alias_catalogue(repository))
+
+    assert _alias_actions(bundle) == []
+
+
+def test_a_repointed_alias_is_replaced(tmp_path):
+    """The declaration *is* the alias, so changing what it points at changes it."""
+
+    root = _dependency_estate(tmp_path)
+    _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
+    installed = _alias_catalogue(_repository(root))
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+    )
+    repository = _repository(root)
+    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+
+    assert len(_alias_actions(bundle)) == 1
+
+
+def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
+    """Registered but not there: reconciliation drops the row, so it reads as new.
+
+    Nothing alias-specific does this — the alias is registered as a view, and the
+    Warehouse inventory simply does not hold one.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    state = CatalogueState(
+        status="valid",
+        rows=_alias_catalogue(repository),
+        present_tables=frozenset({REGISTRY.name}),
+        missing_tables=frozenset(),
+    )
+    reconciled = reconcile_catalogue_state(
+        state, inventories=_alias_inventories(repository, alias_installed=False)
+    )
+
+    assert ALIAS_DESTINATION in reconciled.stale_objects
+
+    bundle = _alias_bundle(
+        tmp_path, repository, rows=reconciled.rows, alias_installed=False
+    )
+    assert len(_alias_actions(bundle)) == 1
+
+
+def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
+    """Replacing an alias is the alias executor's job, not a drop and a build.
+
+    It holds no data, so it is remade in place; routing it through the generic
+    drop would emit a ``drop view`` for a shortcut and ask the build pipeline for
+    a source document that does not exist.
+    """
+
+    root = _dependency_estate(tmp_path)
+    _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
+    installed = _alias_catalogue(_repository(root))
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+    )
+    repository = _repository(root)
+    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+
+    assert len(_alias_actions(bundle)) == 1
+    assert all(
+        action.resource_node_id != ALIAS_DESTINATION
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind != "create_alias"
+    )
+
+
+def _dated(rows, item_text, schema, name, epoch):
+    """Stamp one Registry row with a build epoch, as a publication would."""
+
+    item = WeaverItemId.parse(item_text)
+    tables = dict(rows[item])
+    tables[REGISTRY.name] = tuple(
+        {**row, "build_epoch": epoch}
+        if (row["schema_name"], row["object_name"]) == (schema, name)
+        else row
+        for row in tables[REGISTRY.name]
+    )
+    return {**rows, item: tables}
+
+
+def _consumer_only_selection(repository, rows):
+    """Select as a build of the consumer item alone would."""
+
+    consumer = WeaverItemId.parse("Warehouse/Reporting")
+    registered = ReconciledCatalogue(rows).registered
+    return select_build(
+        repository,
+        {
+            identity: document
+            for identity, document in registered.items()
+            if identity.item == consumer
+        },
+        selected=(
+            {
+                identity
+                for identity in repository.source_documents
+                if identity.item == consumer
+            }
+            | {
+                alias.destination
+                for alias in repository.aliases
+                if alias.destination.item == consumer
+            }
+        ),
+        stale_aliases=stale_alias_destinations(
+            repository, registered, bound_items={consumer}
+        ),
+    )
+
+
+def test_an_alias_is_stale_when_its_unbound_source_was_published_later(tmp_path):
+    """The case the graph cannot answer.
+
+    The producer is not in this build, so there is no walk from it. It was
+    rebuilt at some earlier time by some earlier build, and the only surviving
+    evidence is that its Registry row is dated after the alias's.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    selection = _consumer_only_selection(repository, rows)
+    destination = WeaverDocumentId.parse(ALIAS_DESTINATION)
+
+    assert destination in selection.impact.changed
+    assert destination in selection.selected_for_build
+
+
+def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
+    """It joins the ordinary changed roots, so the ordinary walk does the rest —
+    there is no separate cross-item descendant handling."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    selection = _consumer_only_selection(repository, rows)
+    consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+
+    assert consumer in selection.impact.impacted_descendants
+    assert consumer in selection.selected_for_build
+
+
+def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
+    """The ordinary case, and the one that has to stay cheap."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", LATER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", EARLIER)
+
+    selection = _consumer_only_selection(repository, rows)
+
+    assert selection.selected_for_build == ()
+
+
+def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
+    """Upgrading from a catalogue written before epochs existed must not rebuild
+    the estate. Both rows read as null, and null is not newer than null."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    registered = ReconciledCatalogue(_alias_catalogue(repository)).registered
+
+    assert all(document.build_epoch is None for document in registered.values())
+    assert stale_alias_destinations(
+        repository, registered, bound_items={WeaverItemId.parse("Warehouse/Reporting")}
+    ) == ()
+
+
+def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
+    """A producer rebuilt by an *earlier* build is unchanged to this one.
+
+    Binding it changes nothing: its signature matches the repository, so the
+    descendant walk never starts from it, and only the epochs record that it
+    moved after the alias was made. Were the comparison skipped whenever the
+    producer happened to be bound, that estate would stay stale forever.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+    both = {
+        WeaverItemId.parse("Warehouse/Reporting"),
+        WeaverItemId.parse("Lakehouse/Curated"),
+    }
+
+    assert stale_alias_destinations(
+        repository, ReconciledCatalogue(rows).registered, bound_items=both
+    ) == (WeaverDocumentId.parse(ALIAS_DESTINATION),)
+
+
+def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
+    """Deferral: only the producer is bound, so nothing about the consumer is
+    touched and its alias stays stale until the consumer is next built."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    assert stale_alias_destinations(
+        repository,
+        ReconciledCatalogue(rows).registered,
+        bound_items={WeaverItemId.parse("Lakehouse/Curated")},
+    ) == ()
+
+
+def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
+    """End to end through the planner: the freshness comparison reaches the
+    physical action, and reaches it as an alias action rather than a drop."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    bundle = _alias_bundle(tmp_path, repository, rows=rows)
+
+    assert len(_alias_actions(bundle)) == 1
+
+
+def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
+    """Generating twice must give the same bytes, or a bundle could not be
+    compared against another built from the same source. The epoch is a token in
+    the payload for exactly this reason — the installer resolves it, not the
+    planner."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    first = _alias_bundle(tmp_path, repository, rows=rows, name="first")
+    second = _alias_bundle(tmp_path, repository, rows=rows, name="second")
+
+    assert first.plan.bundle_id == second.plan.bundle_id
+
+
+def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
+    repository = _repository(_dependency_estate(tmp_path))
+    store = LocalStore()
+    bundle = _alias_bundle(tmp_path, repository, rows={})
+    registry = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    payload = store.read(
+        bundle.location.join(*registry.payload.split("/"))
+    ).decode()
+
+    assert "{{epoch}}" in payload
+    assert "build_epoch" in payload
 
 
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):

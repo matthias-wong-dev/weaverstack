@@ -660,6 +660,18 @@ def _read_item_aliases(
                 raise DiscoveryError(
                     f"{relative}: alias source {source} is not a document{detail}"
                 )
+            if source.item == item:
+                # An alias exists to cross an item boundary. Within one item the
+                # document graph already orders producer before consumer, and a
+                # document can name its own item's object directly — so a
+                # same-item alias would be a second name for something already
+                # reachable, ordered by an alias stage that runs before every
+                # document the item declares and therefore before its own source.
+                raise DiscoveryError(
+                    f"{relative}: alias destination {destination} and its source "
+                    f"{source} are both owned by {item} — an alias crosses items, "
+                    "so reference the source directly instead"
+                )
             if local.schema not in declared_schemas:
                 raise DiscoveryError(
                     f"{relative}: alias destination schema {local.schema!r} is not "

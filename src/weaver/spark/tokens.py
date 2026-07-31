@@ -42,6 +42,24 @@ OBJECT = re.compile(r"\{\{object:([^.{}]+)\.([^.{}]+)\}\}")
 #: ``{{schema:Name}}`` — one managed schema.
 SCHEMA = re.compile(r"\{\{schema:([^.{}]+)\}\}")
 
+#: ``{{epoch}}`` — the instant this installation published its Registry.
+#:
+#: The one token that is not about a destination, which is why :func:`expand`
+#: does not resolve it: it is scoped to the *installation*, and every statement
+#: in a build must receive the same value however many destinations they name.
+#: :func:`substitute_epoch` puts it in, and it has to run first — ``expand``
+#: rejects any token it does not recognise, so an epoch that reached it would be
+#: an error rather than silently surviving into the engine.
+#:
+#: It is a token rather than a literal frozen at generation time for the reason
+#: this whole module exists: a rendered clock would make the same repository
+#: produce different payload bytes on every run, and a bundle's identity is its
+#: bytes.
+EPOCH = re.compile(r"\{\{epoch\}\}")
+
+#: The payload spelling of the publication epoch.
+EPOCH_TOKEN = "{{epoch}}"
+
 #: Anything else in token shape. Matched only so an unknown one is reported
 #: rather than passed through to the engine as mystery syntax.
 ANY = re.compile(r"\{\{[^{}]*\}\}")
@@ -80,6 +98,29 @@ def expand(text: str, destination: SparkDestination) -> str:
             f"resolve against {destination.item!r}"
         )
     return text
+
+
+def substitute_epoch(text: str, epoch: str | None) -> str:
+    """Resolve ``{{epoch}}`` to one installation's publication instant.
+
+    Separate from :func:`expand` because the value is not a destination's
+    business: one install writes Registry rows for several items against several
+    targets, and they all have to carry the same instant or two rows published
+    by one build would order against each other.
+
+    A statement carrying the token when no epoch was supplied is a fault worth
+    naming here — the alternative is ``expand`` reporting it as an unresolvable
+    name, which says nothing about the missing value.
+    """
+
+    if not EPOCH.search(text):
+        return text
+    if epoch is None:
+        raise InstallError(
+            "a statement names {{epoch}} but this installation supplied none, so "
+            "the row it writes could not be dated"
+        )
+    return EPOCH.sub(epoch.replace("\\", "\\\\"), text)
 
 
 def _part(value: str, what: str) -> str:
