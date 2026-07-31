@@ -75,12 +75,25 @@ discarded **claim by claim**: an old test goes when a new test asserts its claim
 at the lowest layer that can answer it. Old tests passing proves the refactor is
 sound; it does **not** prove the claim moved. Nothing has been deleted yet.
 
+Measured across every marker:
+
 | | tests | runtime |
 |---|---|---|
-| `tests/targeted/` (new) | 67 | 2.1s |
-| whole default suite (new + old) | 1153 | 11s |
-| `pytest -m fabric` | 46 | 19m31s |
-| `pytest -m full_integration -k fabric` | 1 | ~8m |
+| `pytest` (pure Python, incl. 68 targeted) | 1154 | 11s |
+| `pytest -m spark` (incl. 13 boundary) | 89 | 5m33s |
+| `pytest -m fabric` | 51 | ~15m |
+| `pytest -m full_integration` (both transports) | 2 | 9m23s |
+
+Fabric transport, before and after this work:
+
+| | Livy calls | Livy elapsed | wall |
+|---|---|---|---|
+| before | 23 | 852s | 16m37s |
+| after | 19 | 661s | 13m28s |
+
+The journey alone is 14 calls / 446s of that, and 408s of *those* are the eight
+generate-and-install submissions — genuine build work, not transport. Merging
+submissions would save the round trips (~4s each), not the builds.
 
 ## Layer by layer
 
