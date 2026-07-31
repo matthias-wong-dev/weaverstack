@@ -31,19 +31,6 @@ def test_the_configured_root_survives_its_own_wipe(populated_folders):
     assert root.path.is_dir()
 
 
-def test_a_subpath_target_wipes_only_beneath_itself(populated_folders):
-    """A folder target may be a root within Files; a wipe respects that."""
-    store, resolver = populated_folders.store, populated_folders.resolver
-    narrow = folder_target("Sales_LH/Files/Extracts")
-    store.write(resolver.folder_root(narrow) / "landing" / "a.csv", b"x")
-
-    wipe_folder_target(narrow, populated_folders.workspace)
-
-    assert resolver.folder_root(narrow).path.is_dir()
-    assert not (resolver.folder_root(narrow) / "landing").path.exists()
-    assert (resolver.files_root(populated_folders.target) / "notes.txt").path.exists()
-
-
 def test_a_dry_run_reports_without_removing(populated_folders):
     report = wipe_folder_target(folder_target(), populated_folders.workspace, dry_run=True)
     assert report.dry_run is True
@@ -59,7 +46,7 @@ def test_wiping_an_empty_target_is_quiet(lakehouses):
 
 
 def test_wiping_a_target_that_was_never_created_is_quiet(lakehouses):
-    report = wipe_folder_target(folder_target("Sales_LH/Files/Never"), lakehouses.workspace)
+    report = wipe_folder_target(folder_target("Never_LH/Files"), lakehouses.workspace)
     assert report.removed == ()
 
 

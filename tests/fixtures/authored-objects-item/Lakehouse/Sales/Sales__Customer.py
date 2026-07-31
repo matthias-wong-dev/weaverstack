@@ -12,7 +12,7 @@ Schema:
   Customer name: string
 
 Revision notes:
-  - 2026-07-23 Created.
+  - 2026-07-30 Created.
 """
 
 from .Files.Sales__OrderExport import Sales__OrderExport
@@ -23,4 +23,7 @@ from weaver import Table
 class Sales__Customer(Table):
     def read(self):
         source = Sales__OrderExport(self).path()
-        return [], []
+        rows = self.spark.read.csv(source, header=True).selectExpr(
+            "`Customer id` as `Customer id`", "`Customer name` as `Customer name`"
+        )
+        return rows, []

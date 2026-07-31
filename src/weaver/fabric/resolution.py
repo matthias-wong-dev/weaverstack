@@ -132,7 +132,7 @@ class FabricResolver:
     # --- targets ----------------------------------------------------------
 
     def folder_root(self, target: FolderTarget) -> Location:
-        return self.files_root(target.lakehouse).join(*target.subpath)
+        return self.files_root(target.lakehouse)
 
     def folder_object(self, target: FolderTarget, schema: str, name: str) -> Location:
         return self.folder_root(target).join(

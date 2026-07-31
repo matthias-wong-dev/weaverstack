@@ -84,10 +84,12 @@ freshness is the premise.
 
 ## Naming the estate
 
-Everything is overridable, so another tenant runs the suite with its own items:
+The estate is permanent and the suite knows its names, so a run needs no
+environment at all. Everything is still overridable, so another tenant runs the
+suite with its own items:
 
 ```bash
-export WEAVER_FABRIC_WORKSPACE=PYTEST_WORKSPACE   # required
+export WEAVER_FABRIC_WORKSPACE=PYTEST_WORKSPACE   # default: PYTEST_WORKSPACE
 export WEAVER_FABRIC_ENVIRONMENT=weaver           # default: weaver
 ```
 
@@ -136,8 +138,7 @@ Capacity is billed while it runs, so turn it on, work, turn it off.
 weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
 weaver capacity status  --resource-group <rg> --capacity-name <capacity>
 
-WEAVER_FABRIC_WORKSPACE=<workspace> WEAVER_FABRIC_ENVIRONMENT=weaver \
-  .venv/bin/python -m pytest -m fabric
+.venv/bin/python -m pytest -m fabric
 
 weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 ```
@@ -145,10 +146,11 @@ weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 Resuming takes about half a minute and `resume` returns before the capacity is
 `Active`, so `status` is the confirmation.
 
-Without `WEAVER_FABRIC_WORKSPACE` the suite skips with a message saying so,
-rather than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy
-tests skip (rather than fail) if that Environment has no Weaver installed yet,
-pointing at `weaver install`.
+The suite runs against `PYTEST_WORKSPACE` unless `WEAVER_FABRIC_WORKSPACE` names
+another, and skips with the reason if that workspace cannot be reached rather
+than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy tests
+skip (rather than fail) if that Environment has no Weaver installed yet, pointing
+at `weaver install`.
 
 Immediately before it requests its shared Livy session, the harness reads the
 sessions collection for every Lakehouse in the workspace. It prints active or
@@ -160,8 +162,7 @@ cancels someone else's session.
 To run only the Warehouse SQL vertical and see its stage timings:
 
 ```bash
-WEAVER_FABRIC_WORKSPACE=<workspace> WEAVER_FABRIC_ENVIRONMENT=weaver \
-  .venv/bin/python -m pytest -m fabric -s tests/fabric/test_warehouse_wipe.py
+.venv/bin/python -m pytest -m fabric -s tests/fabric/test_warehouse_wipe.py
 ```
 
 ## What the tests do to your workspace

@@ -25,7 +25,7 @@ from weaver import Table
 
 class DWG__Customer(Table):
     def read(self):
-        source = Path(Raw__CustomerCsv.folder_path()) / "customers.csv"
+        source = Path(Raw__CustomerCsv(self).path()) / "customers.csv"
         raw = self.spark.read.csv(str(source), header=True, inferSchema=False)
         shaped = raw.selectExpr(
             "cast(CustomerId as int) as CustomerId",

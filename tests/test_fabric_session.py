@@ -51,6 +51,41 @@ def test_session_resolution_stays_in_the_current_workspace():
     assert lakehouse.calls == [("Sales", "workspace-id")]
 
 
+class _NamedLakehouses:
+    """A workspace where each Lakehouse name has its own id."""
+
+    def get(self, name, *, workspaceId):
+        return SimpleNamespace(id=f"id-of-{name}", displayName=name)
+
+
+def test_a_lakehouse_resolves_to_what_authored_code_addresses():
+    """What ``lakehouse_for`` composes inside a session — attached or not.
+
+    Both areas hang off the one OneLake root, so an object reaches a Lakehouse
+    this session never attached exactly as it reaches the one it did.
+    """
+
+    from weaver import lakehouse_for
+
+    resolver = FabricSessionResolver(
+        FabricWorkspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_NamedLakehouses(),
+    )
+
+    lakehouse = lakehouse_for(resolver, ItemRef("Sales"))
+
+    assert lakehouse.table_path("Sales", "Order") == (
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/"
+        "id-of-Sales/Tables/Sales/Order"
+    )
+    assert lakehouse.folder_path("Sales", "Export") == (
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/"
+        "id-of-Sales/Files/Sales/Export"
+    )
+    assert lakehouse.qualify("Sales", "Order") == "`Analytics`.`Sales`.`Sales`.`Order`"
+
+
 def test_session_resolution_refuses_a_different_configured_workspace():
     with pytest.raises(CommandError, match="not configured Workspace"):
         FabricSessionResolver(

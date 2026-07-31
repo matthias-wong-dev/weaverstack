@@ -8,8 +8,8 @@ concrete :class:`~weaver.locations.Location` values::
     DeltaTarget("Sales") + Budget.Expense
         -> .local/Sales/Tables/Budget/Expense
 
-    FolderTarget("Sales/Files/Extracts") + Budget.BudgetPaper
-        -> .local/Sales/Files/Extracts/Budget/BudgetPaper
+    FolderTarget("Sales/Files") + Budget.BudgetPaper
+        -> .local/Sales/Files/Budget/BudgetPaper
 
     Weaver items
         -> .local/Weaver/Files/weaver_items
@@ -83,15 +83,25 @@ class LocalResolver:
     def tables_root(self, item: ItemRef) -> Location:
         return self.lakehouse(item) / TABLES_AREA
 
+    def spark_root(self, item: ItemRef) -> str:
+        """The root Spark writes through, for a Lakehouse.
+
+        The local counterpart of the Fabric ``abfss://`` root: same contract,
+        filesystem transport, and the same reason for existing — a destination is
+        addressed explicitly rather than by attaching the session to it.
+        """
+
+        return self.lakehouse(item).value
+
     # --- folder targets --------------------------------------------------
 
     def folder_root(self, target: FolderTarget) -> Location:
-        """The configured folder root, including any subpath."""
+        """The Files area a folder target names. There is nothing below it to configure."""
 
-        return self.files_root(target.lakehouse).join(*target.subpath)
+        return self.files_root(target.lakehouse)
 
     def folder_object(self, target: FolderTarget, schema: str, name: str) -> Location:
-        """Where one Folder object materialises, beneath the configured root."""
+        """Where one Folder object materialises — ``Files/<Schema>/<Object>``."""
 
         return self.folder_root(target).join(
             validate_name(schema, what="schema"),

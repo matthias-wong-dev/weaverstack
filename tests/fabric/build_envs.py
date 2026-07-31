@@ -40,6 +40,11 @@ BUILD_FIXTURE = SesFixture(_FIXTURES / "build-lakehouse-item", ("Lakehouse/Raw",
 SQL_TABLE_FIXTURE = SesFixture(
     _FIXTURES / "sql-table-build-item", ("Lakehouse/Sales",)
 )
+#: Three documents and nothing else — two Python tables and a Python folder — so
+#: an authored-object test builds the smallest thing that has one of each.
+AUTHORED_OBJECTS_FIXTURE = SesFixture(
+    _FIXTURES / "authored-objects-item", ("Lakehouse/Sales",)
+)
 MIXED_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "mixed-estate-item", ("Lakehouse/Sales",)
 )

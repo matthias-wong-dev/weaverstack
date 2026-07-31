@@ -61,7 +61,7 @@ def test_two_tables_in_one_lakehouse_stay_separate(spark, lakehouses):
 
 
 def test_a_folder_object_materialises_under_its_target(lakehouses):
-    target = FolderTarget.parse("Sales_LH/Files/Extracts")
+    target = FolderTarget.parse("Sales_LH/Files")
     destination = lakehouses.resolver.folder_object(target, "Sales", "OrderExport")
     lakehouses.store.write(destination / "order_20260723.csv", b"id,amount\n1,10\n")
 

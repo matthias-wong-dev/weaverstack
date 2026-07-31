@@ -1,4 +1,11 @@
-"""The authoring surface: what a developer writes and what it delegates to."""
+"""The authoring surface: what a developer writes, and what it reaches.
+
+Fakes rather than a session: every call an authored object makes is an ordinary
+one on the Spark object it was handed, so the assertions here are about *which*
+call is made with *which* address. That a real session and a real Delta table
+answer those calls is proved under ``pytest -m spark`` in
+``tests/spark/test_authored_objects.py``.
+"""
 
 from __future__ import annotations
 
@@ -7,35 +14,59 @@ from typing import Any
 
 import pytest
 
-from weaver import Folder, Table, View, WeaverObject
+from weaver import Folder, Lakehouse, Table, View, WeaverObject
 from weaver.errors import LoadError
-from weaver.objects import _active_resolver
+from weaver.spark import fabric_destination
 
 
 @dataclass
-class FakeContext:
-    """Stands in for what Weaver injects per step."""
+class FakeFrame:
+    """Just enough DataFrame for ``empty_dataframe`` to be observable."""
 
-    spark: Any = "spark-session"
-    object_path: Any = "/srv/.local/Sales/Tables/Sales/Order"
-    schema: tuple = ()
-    primary_key: tuple = ("Order id",)
-    is_incremental: bool = False
-    staged: Any = "/tmp/staging"
-    frame: Any = None
+    rows: tuple = ((1,), (2,))
+
+    def limit(self, count: int) -> "FakeFrame":
+        return FakeFrame(rows=self.rows[:count])
+
+
+@dataclass
+class FakeReader:
     calls: list = field(default_factory=list)
+    fmt: str | None = None
 
-    def current_dataframe(self):
-        self.calls.append("current_dataframe")
-        return self.frame
+    def format(self, fmt: str) -> "FakeReader":
+        return FakeReader(calls=self.calls, fmt=fmt)
 
-    def empty_frame(self):
-        self.calls.append("empty_frame")
-        return "empty"
+    def load(self, path: str) -> FakeFrame:
+        self.calls.append((self.fmt, path))
+        return FakeFrame()
 
-    def staging_folder(self):
-        self.calls.append("staging_folder")
-        return self.staged
+
+@dataclass
+class FakeSpark:
+    """A session that records what it was asked for."""
+
+    settings: dict = field(default_factory=dict)
+    read: FakeReader = field(default_factory=FakeReader)
+    tables: list = field(default_factory=list)
+
+    def table(self, name: str) -> str:
+        self.tables.append(name)
+        return f"rows of {name}"
+
+    @property
+    def conf(self):
+        return self
+
+    def get(self, key: str, default=None):
+        return self.settings.get(key, default)
+
+
+LAKEHOUSE = Lakehouse(
+    name="Sales_LH",
+    spark_root="abfss://ws@onelake.dfs.fabric.microsoft.com/lh",
+    destination=fabric_destination(workspace="Weaver", lakehouse="Sales_LH"),
+)
 
 
 class Sales__Order(Table):
@@ -43,118 +74,231 @@ class Sales__Order(Table):
         return [], []
 
 
-class Sales__Export(Folder):
+class Sales__Customer(Table):
+    def read(self):
+        return [], []
+
+
+class Sales__OrderExport(Folder):
     def read(self):
         return self.staging_folder(), []
 
 
-# --- depending on another object -------------------------------------------
+class Sales__Enriched(View):
+    pass
 
 
-def test_a_dependency_resolves_through_the_running_workflow():
-    resolved = []
-
-    def resolver(cls, accessor):
-        resolved.append((cls, accessor))
-        return "the dataframe"
-
-    token = _active_resolver.set(resolver)
-    try:
-        assert Sales__Order.dataframe() == "the dataframe"
-    finally:
-        _active_resolver.reset(token)
-    assert resolved == [(Sales__Order, "dataframe")]
+@pytest.fixture
+def spark() -> FakeSpark:
+    return FakeSpark()
 
 
-def test_a_folder_dependency_resolves_a_path():
-    token = _active_resolver.set(lambda cls, accessor: f"{cls.__name__}:{accessor}")
-    try:
-        assert Sales__Export.folder_path() == "Sales__Export:path"
-    finally:
-        _active_resolver.reset(token)
+# --- construction -----------------------------------------------------------
 
 
-def test_a_folders_own_path_is_not_shadowed_by_the_accessor():
-    """A classmethod named `path` would replace the inherited property —
-    silently, because a bound method is truthy."""
-    context = FakeContext(object_path="/srv/.local/Sales/Files/Sales/Export")
-    assert Sales__Export(context).path == "/srv/.local/Sales/Files/Sales/Export"
+def test_an_object_binds_a_session_and_a_resolved_lakehouse(spark):
+    order = Sales__Order(spark, lakehouse=LAKEHOUSE)
+
+    assert order.spark is spark
+    assert order.lakehouse is LAKEHOUSE
+    assert order.spark_root == "abfss://ws@onelake.dfs.fabric.microsoft.com/lh"
 
 
-def test_the_two_path_concepts_have_different_names():
-    assert "path" in vars(WeaverObject)
-    assert "path" not in vars(Folder)
-    assert "folder_path" in vars(Folder)
+def test_the_session_is_mandatory():
+    with pytest.raises(LoadError, match="needs the Spark session"):
+        Sales__Order(None, lakehouse=LAKEHOUSE)
 
 
-def test_accessors_explain_themselves_outside_a_workflow():
-    with pytest.raises(LoadError, match="only available while Weaver is executing"):
-        Sales__Order.dataframe()
+def test_a_lakehouse_name_is_refused(spark):
+    """Resolving a name needs a workspace resolver, which authored code has not."""
+
+    with pytest.raises(LoadError, match="not the name 'Sales_LH'"):
+        Sales__Order(spark, lakehouse="Sales_LH")
 
 
-def test_views_are_readable_as_dependencies():
-    token = _active_resolver.set(lambda cls, accessor: accessor)
-    try:
-        class Sales__OrderView(View):
-            pass
-
-        assert Sales__OrderView.dataframe() == "dataframe"
-    finally:
-        _active_resolver.reset(token)
+def test_an_unresolved_lakehouse_is_refused(spark):
+    with pytest.raises(LoadError, match="takes a resolved Lakehouse, got dict"):
+        Sales__Order(spark, lakehouse={"name": "Sales_LH"})
 
 
-def test_concurrent_steps_do_not_share_a_resolver():
-    """A ContextVar, so one step's dependencies are invisible to another."""
-    token = _active_resolver.set(lambda cls, accessor: "outer")
-    try:
-        assert Sales__Order.dataframe() == "outer"
-    finally:
-        _active_resolver.reset(token)
-    with pytest.raises(LoadError):
-        Sales__Order.dataframe()
+def test_no_lakehouse_and_no_attachment_fails_rather_than_guessing(spark):
+    with pytest.raises(LoadError, match="no Lakehouse is attached"):
+        Sales__Order(spark)
 
 
-# --- an object's own context ------------------------------------------------
+def test_the_notebook_case_infers_the_attached_lakehouse():
+    spark = FakeSpark(
+        settings={
+            "trident.workspace.id": "ws-id",
+            "trident.lakehouse.id": "lh-id",
+            "trident.lakehouse.name": "Sales_LH",
+        }
+    )
+
+    order = Sales__Order(spark)
+
+    assert order.lakehouse.name == "Sales_LH"
+    assert order.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
 
 
-def test_the_object_surface_delegates_to_the_context():
-    context = FakeContext(schema=(("Order id", "string"),))
-    order = Sales__Order(context)
-    assert order.spark == "spark-session"
-    assert order.path == "/srv/.local/Sales/Tables/Sales/Order"
-    assert order.schema == (("Order id", "string"),)
-    assert order.primary_key == ("Order id",)
-    assert order.is_incremental is False
+# --- depending on another object --------------------------------------------
 
 
-def test_table_accessors_call_through():
-    context = FakeContext(frame="persisted")
-    order = Sales__Order(context)
-    assert order.current_dataframe == "persisted"
-    assert order.empty_frame() == "empty"
-    assert context.calls == ["current_dataframe", "empty_frame"]
+def test_a_dependency_inherits_the_session_and_the_lakehouse(spark):
+    order = Sales__Order(spark, lakehouse=LAKEHOUSE)
+
+    customer = Sales__Customer(order)
+
+    assert customer.spark is order.spark
+    assert customer.lakehouse is order.lakehouse
 
 
-def test_a_folder_stages_through_the_context():
-    context = FakeContext()
-    export = Sales__Export(context)
-    staged, deletes = export.read()
-    assert staged == "/tmp/staging"
-    assert deletes == []
-    assert context.calls == ["staging_folder"]
+def test_a_dependency_resolves_against_the_callers_environment(spark):
+    """Same class, two destinations — whichever the dependent was given."""
+
+    other = Lakehouse(name="Sales_Prod", spark_root="/srv/.local/Sales_Prod")
+
+    Sales__Customer(Sales__Order(spark, lakehouse=LAKEHOUSE)).dataframe()
+    Sales__Customer(Sales__Order(spark, lakehouse=other)).dataframe()
+
+    assert [path for _, path in spark.read.calls] == [
+        "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Customer",
+        "/srv/.local/Sales_Prod/Tables/Sales/Customer",
+    ]
 
 
-def test_an_object_without_a_context_says_so():
-    with pytest.raises(LoadError, match="constructed by Weaver"):
-        Sales__Order().path
+# --- identity ---------------------------------------------------------------
 
 
-def test_read_must_be_implemented():
+def test_identity_comes_from_the_class_name(spark):
+    order = Sales__Order(spark, lakehouse=LAKEHOUSE)
+
+    assert order.identity == ("Sales", "Order")
+    assert order.object_id == "Sales.Order"
+
+
+def test_a_class_that_names_no_object_says_so(spark):
+    class Order(Table):
+        def read(self):
+            return [], []
+
+    with pytest.raises(LoadError, match="does not name an object"):
+        Order(spark, lakehouse=LAKEHOUSE).object_id
+
+
+# --- tables -----------------------------------------------------------------
+
+
+def test_a_table_reads_its_own_delta_files(spark):
+    Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe()
+
+    assert spark.read.calls == [
+        ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Order")
+    ]
+
+
+def test_a_dependencys_table_is_read_the_same_way(spark):
+    order = Sales__Order(spark, lakehouse=LAKEHOUSE)
+
+    Sales__Customer(order).dataframe()
+
+    assert spark.read.calls == [
+        ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Customer")
+    ]
+
+
+def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
+    empty = Sales__Order(spark, lakehouse=LAKEHOUSE).empty_dataframe()
+
+    assert empty.rows == ()
+    assert spark.read.calls == [
+        ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Order")
+    ]
+
+
+# --- views ------------------------------------------------------------------
+
+
+def test_a_view_is_read_by_name_because_it_has_no_path(spark):
+    Sales__Enriched(spark, lakehouse=LAKEHOUSE).dataframe()
+
+    assert spark.tables == ["`Weaver`.`Sales_LH`.`Sales`.`Enriched`"]
+
+
+# --- folders ----------------------------------------------------------------
+
+
+def test_a_folder_is_addressed_from_the_lakehouse_root(spark):
+    """Hadoop-compatible, so a detached load reaches it as readily as a notebook."""
+
+    export = Sales__OrderExport(spark, lakehouse=LAKEHOUSE)
+
+    assert export.path() == (
+        "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/Sales/OrderExport"
+    )
+
+
+def test_staging_is_the_folder_path_with_a_staging_suffix(spark):
+    export = Sales__OrderExport(spark, lakehouse=LAKEHOUSE)
+
+    assert export.staging_folder() == f"{export.path()}_Staging"
+    assert export.read() == (f"{export.path()}_Staging", [])
+
+
+def test_a_folder_needs_no_mount_at_all(spark):
+    """The Lakehouse nobody attached is reached exactly like the one somebody did."""
+
+    export = Sales__OrderExport(
+        spark, lakehouse=Lakehouse(name="Other", spark_root="abfss://ws@host/other")
+    )
+
+    assert export.path() == "abfss://ws@host/other/Files/Sales/OrderExport"
+
+
+# --- the surface is only what is documented ---------------------------------
+
+
+def test_read_must_be_implemented(spark):
     class Sales__Unfinished(Table):
         pass
 
     with pytest.raises(NotImplementedError, match="must implement read"):
-        Sales__Unfinished(FakeContext()).read()
+        Sales__Unfinished(spark, lakehouse=LAKEHOUSE).read()
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "current_dataframe",
+        "empty_frame",
+        "folder_path",
+        "context",
+        "path",
+        "fuse_root",
+        "schema",
+        "primary_key",
+        "is_incremental",
+    ],
+)
+def test_the_context_era_surface_is_gone(removed):
+    """Removed outright rather than deprecated — pre-alpha, and one API is enough."""
+
+    assert not any(hasattr(base, removed) for base in (WeaverObject, Table, View))
+
+
+def test_the_folder_keeps_only_its_two_methods():
+    assert not hasattr(Folder, "folder_path")
+    assert callable(Folder.path)
+    assert callable(Folder.staging_folder)
+
+
+def test_there_is_no_ambient_resolver_or_context():
+    import weaver
+    import weaver.objects as objects
+
+    assert not hasattr(objects, "_active_resolver")
+    assert not hasattr(objects, "ObjectContext")
+    assert not hasattr(weaver, "ObjectContext")
 
 
 # --- the module stays light -------------------------------------------------

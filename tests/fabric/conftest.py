@@ -1,11 +1,15 @@
 """Fixtures for opt-in Fabric integration tests.
 
 These touch a real workspace and a running capacity, so they are deselected by
-default and skip unless `WEAVER_FABRIC_WORKSPACE` names a workspace to use.
+default: `-m fabric` is what asks for them.
 
-They create their own Lakehouses and delete them afterwards. Nothing
-pre-existing in the workspace is touched, and the names are prefixed so a
-leftover from an interrupted run is recognisable.
+The estate is permanent and named by default — `PYTEST_WORKSPACE`, holding
+`PYTEST_WEAVER` and the `PYTEST_LH_*` Lakehouses — so a run needs no environment
+at all. Every name is still overridable (`WEAVER_FABRIC_WORKSPACE`,
+`WEAVER_PYTEST_<ROLE>`) for a tenant that arranges its items differently.
+
+Items are found rather than made, and emptied rather than re-created. The
+lifecycle tests that do create and delete carry their own `provisioning` marker.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ from weaver import Workspace, ItemRef, Store
 from weaver.spark import SparkCatalogue
 
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
+#: The permanent suite workspace. A default rather than a required export: the
+#: estate it holds is permanent too, so naming it per run was ceremony.
+DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 #: The Environment the session attaches to — installed once with `weaver install`
 #: and consumed by the suite, never uploaded by it.
 ENVIRONMENT_ENV = "WEAVER_FABRIC_ENVIRONMENT"
@@ -48,7 +55,7 @@ def _timed_session_run(session, label: str, body: str):
 
 @pytest.fixture(scope="session")
 def fabric_workspace_item():
-    """The workspace named by WEAVER_FABRIC_WORKSPACE."""
+    """The suite's workspace — ``PYTEST_WORKSPACE`` unless one is named."""
 
     pytest.importorskip("azure.identity", reason="install the [fabric] extra")
     pytest.importorskip("requests", reason="install the [fabric] extra")
@@ -58,17 +65,18 @@ def fabric_workspace_item():
 
     prefer_cli_credential()
 
-    name = os.environ.get(WORKSPACE_ENV)
-    if not name:
-        pytest.skip(f"set {WORKSPACE_ENV} to run Fabric tests")
+    name = os.environ.get(WORKSPACE_ENV, DEFAULT_WORKSPACE)
 
-    from weaver.errors import WeaverError
     from weaver.fabric import find_workspace
 
     try:
         return find_workspace(name)
-    except WeaverError as exc:
-        pytest.skip(f"cannot reach workspace {name!r}: {exc}")
+    except Exception as exc:
+        # Any reason at all: no credential, no network, no such workspace. Every
+        # one of them means "this machine cannot run the Fabric suite", which is a
+        # skip — only a WeaverError was caught before, so an unauthenticated
+        # machine raised azure's ClientAuthenticationError and errored instead.
+        pytest.skip(f"cannot reach workspace {name!r}: {type(exc).__name__}: {exc}")
 
 
 @pytest.fixture(scope="session")
@@ -117,13 +125,16 @@ def _ensure_lakehouse(client, workspace, role: str):
     guessing whether an absent item is a setup mistake or a test failure.
     """
 
-    from weaver.fabric.resources import LAKEHOUSE, find_item
+    from weaver.fabric.resources import LAKEHOUSE, create_lakehouse, find_item
 
     name = _fixed_name(role)
     try:
         return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
     except Exception:
-        return _create_schema_enabled_lakehouse(client, workspace, name)
+        # The product's own creation, deliberately: the harness used to carry a
+        # copy that passed enableSchemas, which is how create_lakehouse went on
+        # omitting it without anything noticing.
+        return create_lakehouse(workspace, name, client=client)
 
 
 def _warehouse_name() -> str:
@@ -678,6 +689,11 @@ class BuildEnv:
     #: an absent schema is the answer a prune assertion wants and both workspaces raise
     #: for `SHOW TABLES` in one.
     run_schema_exists: Callable[[str], bool] = None
+    #: Python source, run wherever this environment runs, returning whatever it
+    #: ``emit``s. The namespace carries ``spark``, ``resolver`` and ``target``, so
+    #: one body serves both transports — the only way to exercise code that must
+    #: behave identically in a notebook and on a laptop.
+    run_python: Callable[[str], Any] = None
     #: The destination Lakehouse being built, and the Weaver Lakehouse holding the
     #: catalogue. Two, always — even the simplest install writes to both.
     destination: Any = None
@@ -783,31 +799,6 @@ def _bindings_for(weaver_repo_fixture, *, lakehouse=None, warehouse=None):
     return ItemBindings(tuple(entries))
 
 
-def _create_schema_enabled_lakehouse(client, workspace, name):
-    """A Lakehouse with schemas enabled, so `schema.table` resolves and a managed
-    table lands under Tables/<schema>/<table> — which plain create_lakehouse omits."""
-
-    import time as _time
-
-    from weaver.fabric.resources import LAKEHOUSE, Item, find_item
-
-    resp = client.request(
-        "POST",
-        f"workspaces/{workspace.id}/lakehouses",
-        payload={"displayName": name, "creationPayload": {"enableSchemas": True}},
-        expected=(200, 201, 202, 409),
-    )
-    if resp.status_code == 202:
-        for _ in range(40):
-            try:
-                return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
-            except Exception:
-                _time.sleep(3)
-        raise RuntimeError(f"schema-enabled Lakehouse {name!r} never appeared")
-    body = resp.json()
-    return Item(id=body["id"], name=name, type=LAKEHOUSE, workspace_id=workspace.id)
-
-
 #: Every schema any build fixture registers, in either Lakehouse. Dropped on
 #: local-env teardown, so a shared Spark catalogue never leaks one test's objects
 #: into the next — the one place catalogue cleanup lives; tests never do it
@@ -909,6 +900,24 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     def schema_exists(qualified: str) -> bool:
         return bool(spark.catalog.databaseExists(qualified))
 
+    def run_python(body: str):
+        """Run a shared body in this process, against the local session.
+
+        The Fabric side sends the same text to a Livy session, where ``emit`` is
+        part of the bootstrap. Here it is a local closure, so a body written once
+        runs unchanged either side.
+        """
+
+        emitted = []
+        namespace = {
+            "spark": spark,
+            "resolver": resolver,
+            "target": target,
+            "emit": emitted.append,
+        }
+        exec(compile(body, "<shared body>", "exec"), namespace)
+        return emitted[-1] if emitted else None
+
     def seed_orphans() -> None:
         # Seeded *in the destination*, through the same addressing the build uses,
         # so what prune has to find is genuinely in the Lakehouse under test.
@@ -929,6 +938,7 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
             install=install, run_query=query, run_columns=columns,
             seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+            run_python=run_python,
             destination=destination, weaver_destination=weaver_destination,
         )
     finally:
@@ -1116,6 +1126,22 @@ def _fabric_build_context(
         body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
         return session.run(body).payload
 
+    def run_python(body: str):
+        """Run a shared body *in Fabric*, with the session's own resolver bound.
+
+        The preamble is the whole transport difference: ``resolver_for`` returns
+        the session-native resolver here and the local one on a laptop, so the
+        body that follows is byte-identical either side.
+        """
+
+        preamble = (
+            "from weaver import FabricWorkspace, ItemRef\n"
+            "from weaver.resolution import resolver_for\n"
+            f"resolver = resolver_for({_workspace_literal()})\n"
+            f"target = ItemRef({target.name!r})\n"
+        )
+        return _timed_session_run(session, "shared body", preamble + body).payload
+
     def seed_orphans() -> None:
         # Seeded in the *destination*, by its four-part name — the session is
         # attached to the Weaver Lakehouse, so an unqualified create here would
@@ -1143,6 +1169,7 @@ def _fabric_build_context(
         install_repo=install_repo, remove_repo=remove_repo, generate=generate,
         install=install, run_query=query, run_columns=columns,
         seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+        run_python=run_python,
         destination=destination, weaver_destination=weaver_destination,
     )
 
