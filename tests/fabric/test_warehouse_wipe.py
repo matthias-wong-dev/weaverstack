@@ -61,7 +61,7 @@ def test_installed_weaver_wipes_a_desktop_populated_warehouse(
         "emit({'completed': result is None})\n"
     )
     started = time.monotonic()
-    result = livy_session.run(body)
+    result = livy_session.run(body, label="wipe")
     warehouse.timings["Fabric wipe execution"] = time.monotonic() - started
     assert result.payload == {"completed": True}
     print(

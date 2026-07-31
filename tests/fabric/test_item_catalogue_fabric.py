@@ -94,7 +94,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "})\n"
     )
 
-    payload = livy_session.run(body).payload
+    payload = livy_session.run(body, label="generate and install").payload
     assert payload["status"] == "succeeded", payload["errors"]
     assert payload["tables"] == payload["expected"]
     assert {name.casefold() for name in payload["physical_tables"]} == {
@@ -171,7 +171,7 @@ def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
         "})\n"
     )
 
-    payload = livy_session.run(body).payload
+    payload = livy_session.run(body, label="generate and install").payload
     assert payload["status"] == "succeeded", payload["errors"]
     assert payload["tables_after_build"] == ["customer"]
     assert payload["folders_after_build"] == {"customer": True, "old": False}

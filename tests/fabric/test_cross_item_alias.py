@@ -36,6 +36,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from observation import observe_in_session
 
 from weaver import ItemRef
 
@@ -83,7 +84,7 @@ def _await_addressable_lakehouse(session, destination, *, attempts=40, pause=5.0
         "    emit(str(exc)[:300])\n"
     )
     for _ in range(attempts):
-        answer = session.run(probe).payload
+        answer = session.run(probe, label="await lakehouse").payload
         if answer is True:
             return
         time.sleep(pause)
@@ -151,7 +152,10 @@ def _build_in_session(
 
     def run(bundle_name: str) -> dict:
         install_repository()
-        payload = session.run(_build_body(fabric_workspace, bindings, bundle_name)).payload
+        payload = session.run(
+            _build_body(fabric_workspace, bindings, bundle_name),
+            label="generate and install",
+        ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         failures = {a["id"]: a["error"] for a in payload["actions"] if a["error"]}
         if failures:
@@ -254,7 +258,51 @@ def alias_estate(
         },
         empty=fabric_empty_lakehouse,
     )
-    return {**estate, "producer": producer, "consumer": consumer}
+    return {
+        **estate,
+        "producer": producer,
+        "consumer": consumer,
+        "observed": _observe_the_alias(estate, producer, consumer),
+    }
+
+
+def _observe_the_alias(estate, producer, consumer):
+    """Everything the built estate has to show, in one round trip.
+
+    Three tests below used to ask three separate questions of Fabric, each
+    costing a full Livy submission and each seeing the estate at a different
+    instant. They are one question — "what did this build leave?" — so they get
+    one payload, taken here, before the rebuild test moves the estate on.
+    """
+
+    resolver, session = estate["resolver"], estate["session"]
+    at_producer = resolver.spark_destination(ItemRef(producer.name))
+    at_consumer = resolver.spark_destination(ItemRef(consumer.name))
+
+    return observe_in_session(
+        session,
+        queries={
+            "view_rows": (
+                f"SELECT count(*) AS n FROM {at_consumer.qualify('DWG', 'CustomerName')}"
+            ),
+            "alias_rows": (
+                "SELECT count(*) AS n FROM "
+                f"{at_consumer.qualify('DWG', 'PortableCustomer')}"
+            ),
+            # What the endpoint refresh is for: the SQL side sees what Spark
+            # just created.
+            "consumer_tables": (
+                f"SHOW TABLES IN {at_consumer.qualified_schema('DWG')}"
+            ),
+        },
+        tables={
+            "produced": at_producer.qualify("DWG", "Customer"),
+            # An alias adds a name in the consumer; the object stays put.
+            "alias_in_producer": at_producer.qualify("DWG", "PortableCustomer"),
+            "source_in_consumer": at_consumer.qualify("DWG", "Customer"),
+        },
+        label="observe alias estate",
+    )
 
 
 # --- the alias itself ---------------------------------------------------------
@@ -287,40 +335,21 @@ def test_the_alias_exists_as_a_onelake_shortcut_in_the_consumer(
 def test_the_consumer_reads_the_producers_table_through_its_own_name(alias_estate):
     """The claim an alias makes, checked where it has to hold: in Fabric."""
 
-    session, resolver = alias_estate["session"], alias_estate["resolver"]
-    destination = resolver.spark_destination(ItemRef(alias_estate["consumer"].name))
-    view = destination.qualify("DWG", "CustomerName")
-    aliased = destination.qualify("DWG", "PortableCustomer")
-
-    rows = session.run(
-        f"emit({{'view': spark.sql('SELECT count(*) AS n FROM {view}').collect()[0][0],\n"
-        f"       'alias': spark.sql('SELECT count(*) AS n FROM {aliased}').collect()[0][0]}})\n"
-    ).payload
+    seen = alias_estate["observed"]
 
     # Build creates structure, never data — an empty read is the success case.
-    assert rows == {"view": 0, "alias": 0}
+    assert seen.scalar("view_rows") == 0
+    assert seen.scalar("alias_rows") == 0
 
 
 def test_the_producers_table_is_not_moved_or_duplicated(alias_estate):
     """An alias adds a name in the consumer; the object stays where it is."""
 
-    session, resolver = alias_estate["session"], alias_estate["resolver"]
-    producer = resolver.spark_destination(ItemRef(alias_estate["producer"].name))
-    consumer = resolver.spark_destination(ItemRef(alias_estate["consumer"].name))
+    seen = alias_estate["observed"]
 
-    answers = session.run(
-        "emit({"
-        f"'produced': spark.catalog.tableExists({producer.qualify('DWG', 'Customer')!r}),"
-        f"'alias_in_producer': spark.catalog.tableExists({producer.qualify('DWG', 'PortableCustomer')!r}),"
-        f"'source_in_consumer': spark.catalog.tableExists({consumer.qualify('DWG', 'Customer')!r})"
-        "})\n"
-    ).payload
-
-    assert answers == {
-        "produced": True,
-        "alias_in_producer": False,
-        "source_in_consumer": False,
-    }
+    assert seen.table("produced")
+    assert not seen.table("alias_in_producer")
+    assert not seen.table("source_in_consumer")
 
 
 # --- item order and the endpoint barrier --------------------------------------
@@ -365,14 +394,9 @@ def test_the_consumers_endpoint_reports_the_aliased_table(alias_estate):
     this metadata, and Fabric syncs it behind the mutation rather than with it.
     """
 
-    session, resolver = alias_estate["session"], alias_estate["resolver"]
-    destination = resolver.spark_destination(ItemRef(alias_estate["consumer"].name))
-    names = session.run(
-        "emit(sorted(row.tableName for row in spark.sql("
-        f"'SHOW TABLES IN {destination.qualified_schema('DWG')}').collect()))\n"
-    ).payload
+    seen = alias_estate["observed"]
 
-    assert "PortableCustomer" in names
+    assert "portablecustomer" in seen.values("consumer_tables", "tableName")
 
 
 # --- building the same estate again --------------------------------------------

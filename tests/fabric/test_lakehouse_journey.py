@@ -41,9 +41,18 @@ from build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
 from weaver import FolderTarget
 
-pytestmark = pytest.mark.parametrize(
-    "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True
-)
+#: `full_integration` is this file's *only* selector — it carries neither `spark`
+#: nor `fabric`, so `pytest -m fabric` runs the targeted probes and leaves the
+#: journey alone. That is the right default: the journey is the most expensive
+#: thing in the suite and should rarely be where a component defect is found
+#: first, so it is run by exception (`pytest -m full_integration`) rather than
+#: paid for on every transport run. Both transports run when it is asked for.
+pytestmark = [
+    pytest.mark.full_integration,
+    pytest.mark.parametrize(
+        "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True
+    ),
+]
 
 AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
 
@@ -61,39 +70,69 @@ def _folder(env, schema, name):
     return env.resolver.folder_object(FolderTarget(lakehouse=env.target), schema, name)
 
 
-def _scalar(rows):
-    return next(iter(rows[0].values()))
+def _observe(env, step):
+    """One round trip, and everything any assertion about this moment needs.
 
+    Taken *after* the transition's own outcome has been checked and kept on the
+    step, so a failed install reports what failed rather than a bewildering error
+    from querying an estate that was never built.
 
-def _tables(env):
-    return {
-        row["tableName"].lower()
-        for row in env.query(f"SHOW TABLES IN {env.schema_name('DWG')}")
-    }
+    Deliberately the *same* evidence after every transition, not the subset each
+    one happens to check. A round trip is the cost; the statements inside it are
+    nearly free, so narrowing the payload per phase would save nothing and would
+    mean each transition proved a different thing about the estate.
 
-
-def _views(env):
-    return {
-        row["viewName"].lower()
-        for row in env.query(f"SHOW VIEWS IN {env.schema_name('DWG')}")
-    }
-
-
-def _readable(env) -> None:
-    """Every declared object is present and answers a read.
-
-    Asserted after each transition rather than once at the end, because "the
-    estate still works" is a claim about a moment.
+    It spans both Lakehouses in one observation. That is the claim two-part names
+    made impossible — the build wrote where it said and nowhere else — and it is
+    a claim about one instant, so two calls could not make it.
     """
 
-    assert {"customer", "order"} <= _tables(env)
-    assert {"activecustomer", "activecustomersummary"} <= _views(env)
-    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
-    assert _scalar(env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")) == 0
-    assert (
-        _scalar(env.query("SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}"))
-        == 0
+    weaver = env.weaver_destination
+    step.observation = env.observe(
+        queries={
+            "tables": "SHOW TABLES IN {{schema:DWG}}",
+            "views": "SHOW VIEWS IN {{schema:DWG}}",
+            "customer_columns": "DESCRIBE TABLE {{object:DWG.Customer}}",
+            "customer_rows": "SELECT count(*) AS n FROM {{object:DWG.Customer}}",
+            "summary": (
+                "SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}"
+            ),
+        },
+        schemas={
+            "dwg": "DWG",
+            "raw": "Raw",
+            "legacy": "Legacy",
+            # The control plane is not the destination. An unqualified CREATE
+            # TABLE would land in the attached Lakehouse — this one — and a read
+            # through the same session would find it and pass.
+            "weaver_dwg": ("DWG", weaver),
+            "weaver_raw": ("Raw", weaver),
+        },
+        label=f"observe {step.name}",
     )
+    return step.observation
+
+
+def _readable(env, seen) -> None:
+    """Every declared object is present and answers a read.
+
+    Asserted from the evidence captured *at* each transition rather than by
+    re-reading at the end, because "the estate still works" is a claim about a
+    moment — and a later move could otherwise repair what an earlier one broke.
+    """
+
+    assert {"customer", "order"} <= seen.values("tables", "tableName")
+    assert {"activecustomer", "activecustomersummary"} <= seen.values(
+        "views", "viewName"
+    )
+    assert seen.scalar("customer_rows") == 0
+    assert seen.scalar("summary") == 0
+    assert seen.schema("dwg")
+
+    # Storage, not the catalogue — and over OneLake DFS from here rather than
+    # through the session, so it stays outside the Livy budget this file is
+    # careful about.
+    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
 
 
 # --- the body a developer's own code runs --------------------------------------
@@ -174,12 +213,13 @@ def _assert_installed(env, step) -> None:
     ]
     assert step.outcome.bundle_id == step.bundle.bundle_id
 
-    _readable(env)
+    seen = _observe(env, step)
+    _readable(env, seen)
 
     columns = {
-        row["col_name"].lower()
-        for row in env.query("DESCRIBE TABLE {{object:DWG.Customer}}")
-        if row["col_name"] and not row["col_name"].startswith("#")
+        name
+        for name in seen.values("customer_columns", "col_name")
+        if not name.startswith("#")
     }
     assert {"customerid", "customername", "isactive"} <= columns
     assert AUDIT <= columns
@@ -195,13 +235,11 @@ def _assert_installed(env, step) -> None:
     }
     assert "customer" in stored
 
-    # The control plane is not the destination. This is the assertion two-part
-    # names made impossible: an unqualified CREATE TABLE lands in the attached
-    # Lakehouse, and a read through the same session would find it and pass.
-    weaver = env.weaver_destination
-    assert not env.schema_exists("DWG", destination=weaver)
-    assert not env.schema_exists("Raw", destination=weaver)
-    assert env.schema_exists("DWG")
+    # The control plane is not the destination — read out of the same payload as
+    # the destination's own schemas, so both are true of the same instant.
+    assert not seen.schema("weaver_dwg")
+    assert not seen.schema("weaver_raw")
+    assert seen.schema("dwg")
 
     assert env.store.exists(step.bundle.location.join("install-report.yml"))
 
@@ -254,7 +292,7 @@ def _assert_unchanged(env, step) -> None:
 
     # Doing nothing has to mean nothing, not quietly dropping something. Read
     # here, immediately after this transition, because that is what it claims.
-    _readable(env)
+    _readable(env, _observe(env, step))
 
 
 def _assert_pruned(env, step) -> None:
@@ -262,15 +300,17 @@ def _assert_pruned(env, step) -> None:
 
     assert step.outcome.status == "succeeded", step.outcome.action_error
 
-    tables = _tables(env)
+    seen = _observe(env, step)
+    tables = seen.values("tables", "tableName")
     assert "oldtable" not in tables
-    assert "oldview" not in tables
-    assert not env.schema_exists("Legacy")
+    # SHOW TABLES lists views too, so the orphaned view is checked in both.
+    assert "oldview" not in tables | seen.values("views", "viewName")
+    assert not seen.schema("legacy")
     assert not env.store.exists(_folder(env, "Legacy", "Stuff"))
 
     # Prune is the destructive direction, so what it spares is the assertion
     # worth making.
-    _readable(env)
+    _readable(env, seen)
 
     prunes = [seq for action_id, seq in step.sequence_of.items() if "prune" in action_id]
     assert prunes, "the seeded orphans should have produced prune actions"
@@ -377,7 +417,13 @@ def _assert_failed(journey, step) -> None:
 
 
 def test_a_lakehouse_estate_through_a_whole_build_lifecycle(lakehouse_journey):
-    """Install, rebuild unchanged, prune, then fail — asserting each in turn."""
+    """Install, rebuild unchanged, prune, then fail — asserting each in turn.
+
+    Each transition observes the estate exactly once, immediately, and is
+    asserted against that payload. The observation is what makes the ordering
+    real: the journey mutates a live estate, so evidence read later is evidence
+    about a different estate than the one the assertion names.
+    """
 
     journey = lakehouse_journey
     env = journey.env

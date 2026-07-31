@@ -92,6 +92,10 @@ markers = [
     "spark: local Spark/Delta tests, need a JDK (run with: pytest -m spark)",
     "fabric: opt-in Fabric integration tests, need a workspace and a running capacity (run with: pytest -m fabric)",
     "provisioning: Fabric item lifecycle — creating and deleting Lakehouses. Opt-in separately from `fabric` (run with: pytest -m provisioning), because it exercises Fabric's resource management rather than Weaver's, changes rarely, and its create/delete churn slows every other run",
+    "full_integration: the one comprehensive lifecycle journey, which proves the whole pipeline composes rather than answering any single question. Opted into by name (run with: pytest -m full_integration) and carried by neither `spark` nor `fabric`, so the expensive composition proof is run by exception rather than swept into every transport run. It runs on both transports; narrow with -k local or -k fabric",
 ]
 # Default runs stay fast and need no JVM.
-addopts = ["-m", "not spark and not fabric and not provisioning"]
+addopts = [
+    "-m",
+    "not spark and not fabric and not provisioning and not full_integration",
+]

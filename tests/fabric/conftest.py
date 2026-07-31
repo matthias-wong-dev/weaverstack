@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 import pytest
+from livy_telemetry import LEDGER, OUTSIDE_A_TEST, CountedLivySession
+from observation import Observation, observation_from, observe_body
 
 from weaver import Workspace, ItemRef, Store
 from weaver.spark import SparkCatalogue
@@ -44,13 +46,43 @@ WAREHOUSE_POLL_INTERVAL = 5.0
 
 
 def _timed_session_run(session, label: str, body: str):
-    """Run one meaningful Fabric phase and leave a compact timing breadcrumb."""
+    """Run one meaningful Fabric phase and leave a compact timing breadcrumb.
+
+    The label reaches the Livy ledger as well as the printed line, so the
+    end-of-run breakdown can say which *phase* the round trips went on rather
+    than only how many there were.
+    """
 
     started = time.monotonic()
     try:
-        return session.run(body)
+        return session.run(body, label=label)
     finally:
         print(f"Fabric {label}: {time.monotonic() - started:.2f}s")
+
+
+# --- Livy accounting ---------------------------------------------------------
+#
+# Attribution is by whichever test is running when a statement is submitted.
+# Session-scoped fixture setup therefore lands on the first test that asked for
+# it, which is honest — that test is what paid for it — and the phase labels say
+# which part was fixture work.
+
+
+def pytest_runtest_logstart(nodeid, location):
+    LEDGER.nodeid = nodeid
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    LEDGER.nodeid = OUTSIDE_A_TEST
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    lines = LEDGER.report()
+    if not lines:
+        return
+    terminalreporter.write_sep("=", "Livy transport")
+    for line in lines:
+        terminalreporter.write_line(line)
 
 
 @pytest.fixture(scope="session")
@@ -321,10 +353,17 @@ def livy_session(fabric_workspace, fabric_client):
         session.start()
     except LivyError as exc:
         pytest.skip(f"could not start a Livy session (Environment installed?): {exc}")
-    session.weaver_startup_seconds = time.monotonic() - started
-    print(f"Fabric Livy session startup: {session.weaver_startup_seconds:.2f}s")
+    startup = time.monotonic() - started
+    LEDGER.startup_seconds = startup
+    print(f"Fabric Livy session startup: {startup:.2f}s")
+
+    # Counted from here, not before: `start()` submits the bootstrap, which is
+    # part of standing the session up rather than a round trip a test chose to
+    # make. It is reported as startup so no one tries to optimise it away.
+    counted = CountedLivySession(session)
+    counted.weaver_startup_seconds = startup
     try:
-        yield session
+        yield counted
     finally:
         session.close()
 
@@ -565,7 +604,7 @@ def populated_fabric_lakehouse(
             for statement in lakehouse_sql_statements(script, tables_root)
         ]
         body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
-        result = livy_session.run(f"{body}\nemit(True)\n")
+        result = livy_session.run(f"{body}\nemit(True)\n", label="seed")
         assert result.payload is True
 
         def wipe() -> tuple[str, ...]:
@@ -578,7 +617,7 @@ def populated_fabric_lakehouse(
                 "report = wipe_delta_target(target, workspace)\n"
                 "emit({'removed': list(report.removed)})\n"
             )
-            result = livy_session.run(body)
+            result = livy_session.run(body, label="wipe")
             return tuple(result.payload["removed"])
 
         yield PopulatedLakehouse(
@@ -658,6 +697,10 @@ class Step:
     #: Set when the transition raised. Later steps then report *this* name, so a
     #: journey fails once and says where.
     error: BaseException | None = None
+    #: The one evidence payload taken at this transition, set by the test that
+    #: asserts it. Kept on the step so an assertion names the moment it is about:
+    #: the estate itself has moved on by the time the next transition finishes.
+    observation: "Observation | None" = None
 
     @property
     def actions(self) -> dict:
@@ -841,9 +884,86 @@ class BuildEnv:
         return text if place is None else expand(text, place)
 
     def query(self, sql: str, *, destination=None) -> list:
-        """Run a query, resolving its object tokens against one destination."""
+        """Run a query, resolving its object tokens against one destination.
+
+        One round trip per call. Prefer :meth:`observe` for anything asking more
+        than one question of the same estate at the same moment.
+        """
 
         return self.run_query(self._addressed(sql, destination))
+
+    def observe(
+        self, queries=None, schemas=None, tables=None, *, label="observe"
+    ) -> Observation:
+        """Ask the estate everything at once and bring back one evidence payload.
+
+        A Fabric round trip costs seconds, so the number of them — not the work
+        inside them — sets what this suite costs. Six ``query`` calls describing
+        one moment are six waits for the same answer; this submits their bodies
+        together and returns one payload, which the test then asserts against
+        locally.
+
+        That is not only cheaper, it is more accurate. Separate calls interrogate
+        a *mutable remote estate* at six different instants, so a claim about
+        "the estate after prune" is really six claims about six moments. One
+        payload is one observation of one moment, which is what the assertion
+        says it is.
+
+        ``queries``, ``schemas`` and ``tables`` are mappings of evidence name to,
+        respectively, a statement, a schema name and a ``Schema.Object`` pair. A
+        value may instead be a ``(text, destination)`` pair, so one observation
+        can span the destination Lakehouse *and* the control plane — the pairing
+        that proves a build wrote where it claimed and nowhere else, and which
+        two calls could never make about the same instant.
+
+        Ask ``tables`` rather than ``queries`` where *absent* is a legitimate
+        answer: a SELECT against a missing table raises instead of reporting.
+
+        Failures stay local: :class:`Observation` names the piece of evidence
+        that disappointed, rather than a traceback from inside a Spark session.
+        """
+
+        addressed = {}
+        for name, probe in (queries or {}).items():
+            text, destination = self._probe(probe)
+            addressed[name] = self._addressed(text, destination)
+
+        wanted_schemas = {}
+        for name, probe in (schemas or {}).items():
+            schema, destination = self._probe(probe)
+            wanted_schemas[name] = self.schema_name(schema, destination=destination)
+
+        wanted_tables = {}
+        for name, probe in (tables or {}).items():
+            qualified, destination = self._probe(probe)
+            schema, _, obj = qualified.partition(".")
+            wanted_tables[name] = self.name(schema, obj, destination=destination)
+
+        # A Warehouse environment has no Spark session to batch into: it is
+        # reached over TDS, where a statement is a cheap local round trip and not
+        # a Livy submission. Batching there would buy nothing and hide the shape
+        # of what ran, so it stays a loop — and the test-facing API is the same
+        # either way, which is what lets one journey run against both.
+        if self.run_python is None:
+            return Observation(
+                rows={name: self.run_query(sql) for name, sql in addressed.items()},
+                schemas={
+                    name: self.run_schema_exists(sql)
+                    for name, sql in wanted_schemas.items()
+                },
+            )
+        return observation_from(
+            self.run_python(
+                observe_body(addressed, wanted_schemas, wanted_tables), label=label
+            )
+        )
+
+    def _probe(self, value) -> tuple[str, Any]:
+        """A probe is ``text`` against the default destination, or ``(text, dest)``."""
+
+        if isinstance(value, tuple):
+            return value
+        return (value, None)
 
     def columns(self, table: str, *, destination=None) -> list:
         return self.run_columns(self._addressed(table, destination))
@@ -1063,12 +1183,13 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     def schema_exists(qualified: str) -> bool:
         return bool(spark.catalog.databaseExists(qualified))
 
-    def run_python(body: str):
+    def run_python(body: str, *, label: str = "shared body"):
         """Run a shared body in this process, against the local session.
 
         The Fabric side sends the same text to a Livy session, where ``emit`` is
         part of the bootstrap. Here it is a local closure, so a body written once
-        runs unchanged either side.
+        runs unchanged either side. ``label`` exists for the Fabric side's Livy
+        accounting and is ignored here, where a body costs nothing to run.
         """
 
         emitted = []
@@ -1282,20 +1403,20 @@ def _fabric_build_context(
 
     def query(sql: str) -> list:
         body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
-        return session.run(body).payload
+        return session.run(body, label="query").payload
 
     def columns(table: str) -> list:
         body = (
             "emit([{'name': f.name, 'type': f.dataType.simpleString(), "
             f"'nullable': f.nullable}} for f in spark.table({table!r}).schema])\n"
         )
-        return session.run(body).payload
+        return session.run(body, label="query").payload
 
     def schema_exists(qualified: str) -> bool:
         body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
-        return session.run(body).payload
+        return session.run(body, label="query").payload
 
-    def run_python(body: str):
+    def run_python(body: str, *, label: str = "shared body"):
         """Run a shared body *in Fabric*, with the session's own resolver bound.
 
         The preamble is the whole transport difference: ``resolver_for`` returns
@@ -1309,7 +1430,7 @@ def _fabric_build_context(
             f"resolver = resolver_for({_workspace_literal()})\n"
             f"target = ItemRef({target.name!r})\n"
         )
-        return _timed_session_run(session, "shared body", preamble + body).payload
+        return _timed_session_run(session, label, preamble + body).payload
 
     def seed_orphans() -> None:
         # Seeded in the *destination*, by its four-part name — the session is
@@ -1327,7 +1448,7 @@ def _fabric_build_context(
             "(x int) USING delta",
         ]
         body = "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n"
-        session.run(body)
+        session.run(body, label="seed")
         files_root = resolver.files_root(target)
         store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
         store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
@@ -1360,7 +1481,10 @@ def _empty_the_target(session, store, resolver, target, destination) -> None:
         f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema)} CASCADE"
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
-    session.run("".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n")
+    session.run(
+        "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n",
+        label="empty target",
+    )
 
     for area in (resolver.tables_root(target), resolver.files_root(target)):
         try:
@@ -1578,11 +1702,17 @@ def _install_estate(env) -> InstalledEstate:
     return InstalledEstate(env=env, bundle=bundle)
 
 
+#: No transport marks, deliberately — unlike every other parametrised estate here.
+#: The journey answers to `full_integration` alone, so it is opted into by name
+#: and never swept up by `-m spark` or `-m fabric`. Both transports run when it is
+#: asked for, because the composition proof is worth having on both; `-k local` or
+#: `-k fabric` narrows it. Each param still skips itself when its prerequisite is
+#: missing, so asking for the journey without a JDK or a workspace says so.
 @pytest.fixture(
     scope="module",
     params=[
-        pytest.param("local", marks=pytest.mark.spark, id="local"),
-        pytest.param("fabric", marks=pytest.mark.fabric, id="fabric"),
+        pytest.param("local", id="local"),
+        pytest.param("fabric", id="fabric"),
     ],
 )
 def lakehouse_journey(request, weaver_repo_fixture):
