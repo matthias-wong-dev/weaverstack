@@ -1459,6 +1459,34 @@ def _install_estate(env) -> InstalledEstate:
 
 @pytest.fixture(
     scope="module",
+    params=[pytest.param("local", marks=pytest.mark.spark, id="local")],
+)
+def local_lakehouse_estate(request, weaver_repo_fixture):
+    """One Lakehouse estate on local Spark only.
+
+    For modules whose subject is transport-independent — what the planner
+    decides, what DDL is emitted, how a dependency chain orders — where the
+    Fabric half of :func:`lakehouse_estate` runs the same body against the same
+    assertions and proves nothing further.
+
+    That duplicate is not free. Each module-scoped Fabric estate is one full
+    generate-and-install, 75–123s, and the *estate* is the cost rather than the
+    tests: six assertions over one estate cost exactly what one does. So a module
+    that has no Fabric-specific claim to make is a whole install that can go,
+    while its coverage stays exactly where it was.
+
+    Reach for :func:`lakehouse_estate` when the claim genuinely differs by
+    transport — a resolver path, a SQL endpoint, a real catalogue read.
+    """
+
+    spark = request.getfixturevalue("spark")
+    root = request.getfixturevalue("tmp_path_factory").mktemp("estate")
+    with _local_build_context(root, spark, weaver_repo_fixture) as env:
+        yield _install_estate(env)
+
+
+@pytest.fixture(
+    scope="module",
     params=[
         pytest.param("local", marks=pytest.mark.spark, id="local"),
         pytest.param("fabric", marks=pytest.mark.fabric, id="fabric"),
