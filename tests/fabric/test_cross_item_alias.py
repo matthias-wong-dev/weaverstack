@@ -127,14 +127,30 @@ def _build_in_session(
                 empty(name)
             _await_addressable_lakehouse(session, resolver.spark_destination(ItemRef(name)))
 
-    root = resolver.weaver_items_root
-    if store.exists(root):
-        store.delete(root, recursive=True)
-    for path in sorted(fixture.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts:
-            store.write(root.join(*path.relative_to(fixture).parts), path.read_bytes())
+    def install_repository() -> None:
+        """Put this estate's declaration back under the shared repository root.
+
+        Every estate in the run writes to the *same* ``weaver_items`` root, so an
+        estate created later replaces what an earlier one put there. A rebuild
+        therefore cannot assume its own repository is still installed — it has to
+        re-establish it, or it will plan against whichever fixture happened to
+        land last. That is not hypothetical: the Warehouse alias estate is
+        created between this one's first build and its rebuild, and the rebuild
+        failed with "binding names item(s) absent from the repository".
+
+        Re-uploading identical bytes changes no signature, so an incremental
+        assertion still sees an unchanged repository.
+        """
+
+        root = resolver.weaver_items_root
+        if store.exists(root):
+            store.delete(root, recursive=True)
+        for path in sorted(fixture.rglob("*")):
+            if path.is_file() and "__pycache__" not in path.parts:
+                store.write(root.join(*path.relative_to(fixture).parts), path.read_bytes())
 
     def run(bundle_name: str) -> dict:
+        install_repository()
         payload = session.run(_build_body(fabric_workspace, bindings, bundle_name)).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         failures = {a["id"]: a["error"] for a in payload["actions"] if a["error"]}
@@ -157,9 +173,9 @@ def _build_in_session(
         }
 
     # ``rebuild`` runs the same generate-and-install again over the estate this
-    # one just made — no emptying, no re-upload. That is what makes the
-    # incremental claim testable here at the cost of one extra round trip rather
-    # than a second pair of Lakehouses.
+    # one just made — the targets are not emptied, which is the whole point. It
+    # makes the incremental claim testable here at the cost of one extra round
+    # trip rather than a second pair of Lakehouses.
     return {**run(bundle_name), "rebuild": run}
 
 
