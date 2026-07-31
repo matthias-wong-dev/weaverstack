@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Mapping
 
-from ..catalogue.state import ReconciledCatalogue
+from ..catalogue.state import Catalogue
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..locations import Location
@@ -63,7 +63,8 @@ def generate_item_build_bundle(
     output: Location,
     store: Store,
     target_inventories: Mapping[WeaverItemId, TargetInventory] | None = None,
-    reconciled_catalogue: ReconciledCatalogue,
+    catalogue: Catalogue,
+    stale_claims: tuple = (),
     control_lakehouse: LakehouseBinding,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
@@ -115,11 +116,11 @@ def generate_item_build_bundle(
     # Freshness is read before ``registered`` is narrowed, because the whole
     # point is to compare against an item this build does *not* include.
     stale_aliases = stale_alias_destinations(
-        repository, reconciled_catalogue.registered, bound_items=by_item
+        repository, catalogue.registered, bound_items=by_item
     )
     registered = {
         identity: document
-        for identity, document in reconciled_catalogue.registered.items()
+        for identity, document in catalogue.registered.items()
         if identity.item in by_item
     }
     selection = select_build(
@@ -137,9 +138,10 @@ def generate_item_build_bundle(
     omitted: list[OmittedNode] = []
 
     catalogue_before = render_catalogue_before_build(
-        reconciled_catalogue,
+        catalogue,
         removed | selected_for_drop,
         control_target=control_target,
+        stale_claims=stale_claims,
     )
     if catalogue_before is not None:
         stages.append(catalogue_before)

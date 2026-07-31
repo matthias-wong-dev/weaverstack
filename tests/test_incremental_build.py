@@ -26,8 +26,7 @@ from weaver.build_bundle.models import (
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import project_item_installation
 from weaver.catalogue.state import (
-    CatalogueState,
-    ReconciledCatalogue,
+    Catalogue,
     reconcile_catalogue_state,
 )
 from weaver.catalogue.tables import REGISTRY
@@ -77,7 +76,7 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
                 row["signature"] = "old-signature"
             copied.append(row)
         rows[table] = tuple(copied)
-    return ReconciledCatalogue({item: rows})
+    return Catalogue({item: rows})
 
 
 def _raw_binding(target="Raw_Target"):
@@ -118,7 +117,7 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
         if str(identity.item) == "Lakehouse/Raw"
     }
     empty = determine_impact(
-        repository, ReconciledCatalogue({}).registered, selected=raw
+        repository, Catalogue({}).registered, selected=raw
     )
     assert set(empty.new) == raw
     assert empty.changed == empty.impacted == ()
@@ -171,7 +170,7 @@ def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
         "signature"
     ] = "old-signature"
-    catalogue = ReconciledCatalogue(rows)
+    catalogue = Catalogue(rows)
     impact = determine_impact(
         repository, catalogue.registered, selected=(curated, reporting)
     )
@@ -195,7 +194,7 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
     rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
         "signature"
     ] = "old-signature"
-    catalogue = ReconciledCatalogue(rows)
+    catalogue = Catalogue(rows)
     impact = determine_impact(repository, catalogue.registered, selected=(curated,))
 
     assert impact.changed == (curated,)
@@ -243,7 +242,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     tables[REGISTRY.name] = tuple(
         row for row in tables[REGISTRY.name] if row["object_name"] != "Protected"
     )
-    catalogue = ReconciledCatalogue({item: tables})
+    catalogue = Catalogue({item: tables})
     selection = select_build(repository, catalogue.registered, selected=selected)
     existing = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
     new = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Protected")
@@ -259,7 +258,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         output=Location(str(tmp_path / "bundle")),
         store=store,
         target_inventories=_raw_inventory(repository),
-        reconciled_catalogue=catalogue,
+        catalogue=catalogue,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     customer_actions = [
@@ -366,7 +365,7 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
         target_inventories=_alias_inventories(
             repository, alias_installed=alias_installed
         ),
-        reconciled_catalogue=ReconciledCatalogue(rows),
+        catalogue=Catalogue(rows),
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
 
@@ -419,11 +418,9 @@ def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    state = CatalogueState(
-        status="valid",
+    state = Catalogue(
         rows=_alias_catalogue(repository),
         present_tables=frozenset({REGISTRY.name}),
-        missing_tables=frozenset(),
     )
     reconciled = reconcile_catalogue_state(
         state, inventories=_alias_inventories(repository, alias_installed=False)
@@ -432,7 +429,7 @@ def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
     assert ALIAS_DESTINATION in reconciled.stale_objects
 
     bundle = _alias_bundle(
-        tmp_path, repository, rows=reconciled.rows, alias_installed=False
+        tmp_path, repository, rows=reconciled.catalogue.rows, alias_installed=False
     )
     assert len(_alias_actions(bundle)) == 1
 
@@ -482,7 +479,7 @@ def _consumer_only_selection(repository, rows):
     """Select as a build of the consumer item alone would."""
 
     consumer = WeaverItemId.parse("Warehouse/Reporting")
-    registered = ReconciledCatalogue(rows).registered
+    registered = Catalogue(rows).registered
     return select_build(
         repository,
         {
@@ -562,7 +559,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
     the estate. Both rows read as null, and null is not newer than null."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    registered = ReconciledCatalogue(_alias_catalogue(repository)).registered
+    registered = Catalogue(_alias_catalogue(repository)).registered
 
     assert all(document.build_epoch is None for document in registered.values())
     assert stale_alias_destinations(
@@ -589,7 +586,7 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
     }
 
     assert stale_alias_destinations(
-        repository, ReconciledCatalogue(rows).registered, bound_items=both
+        repository, Catalogue(rows).registered, bound_items=both
     ) == (WeaverDocumentId.parse(ALIAS_DESTINATION),)
 
 
@@ -604,7 +601,7 @@ def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
 
     assert stale_alias_destinations(
         repository,
-        ReconciledCatalogue(rows).registered,
+        Catalogue(rows).registered,
         bound_items={WeaverItemId.parse("Lakehouse/Curated")},
     ) == ()
 
@@ -663,7 +660,7 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
         output=Location(str(tmp_path / "bundle")),
         store=store,
         target_inventories=_raw_inventory(repository),
-        reconciled_catalogue=_catalogue(repository, "Lakehouse/Raw"),
+        catalogue=_catalogue(repository, "Lakehouse/Raw"),
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     physical = {
@@ -696,7 +693,7 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         output=Location(str(tmp_path / "bundle")),
         store=LocalStore(),
         target_inventories=_raw_inventory(repository),
-        reconciled_catalogue=_catalogue(
+        catalogue=_catalogue(
             repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
         ),
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
@@ -755,7 +752,7 @@ select 1 as Id
         output=Location(str(tmp_path / "bundle")),
         store=store,
         target_inventories=_raw_inventory(installed),
-        reconciled_catalogue=catalogue,
+        catalogue=catalogue,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     actions = [action for _sequence, _batch, action in bundle.plan.actions()]
@@ -803,7 +800,7 @@ def test_registered_document_removed_from_repository_is_uncertified_before_prune
         output=Location(str(tmp_path / "bundle")),
         store=store,
         target_inventories=inventories,
-        reconciled_catalogue=catalogue,
+        catalogue=catalogue,
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
     actions = [

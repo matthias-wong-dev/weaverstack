@@ -1161,7 +1161,8 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             store=store,
             control_lakehouse=control,
             target_inventories=inventories,
-            reconciled_catalogue=reconciled,
+            catalogue=reconciled.catalogue,
+            stale_claims=reconciled.stale_claims,
         )
 
     def install(bundle) -> InstallOutcome:
@@ -1352,7 +1353,8 @@ def _fabric_build_context(
             "    bindings=bindings,\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
             "    store=store, control_lakehouse=control,\n"
-            "    target_inventories=inventories, reconciled_catalogue=reconciled)\n"
+            "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
+            "    stale_claims=reconciled.stale_claims)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1594,7 +1596,8 @@ def _warehouse_build_env(
             "    bindings=bindings,\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
             "    store=store, control_lakehouse=control,\n"
-            "    target_inventories=inventories, reconciled_catalogue=reconciled)\n"
+            "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
+            "    stale_claims=reconciled.stale_claims)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )

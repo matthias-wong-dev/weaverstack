@@ -33,9 +33,10 @@ from weaver.build_bundle import (
     write_bundle,
 )
 from weaver.build_bundle.prune import TargetInventory
+from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET
 from weaver.build_bundle.stages import PlannedStage
 from weaver.build_bundle.targets import BoundTarget
-from weaver.catalogue.state import CatalogueState, ReconciledCatalogue, RegisteredDocument
+from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -105,7 +106,7 @@ def registry_row(
     schema = identity.object_id.schema
     return {
         "item_type": identity.item.item_type,
-        "item_name": identity.item.name,
+        "item_name": identity.item.item_name,
         "schema_name": f"Files/{schema}" if identity.is_files else schema,
         "object_name": identity.object_id.object,
         "object_type": object_type,
@@ -115,38 +116,90 @@ def registry_row(
     }
 
 
-def registry_state(*rows, item: str | WeaverItemId = ITEM) -> CatalogueState:
-    """A `CatalogueState` carrying only the Registry rows given.
+class FixtureCatalogue(Catalogue):
+    """The production `Catalogue`, with the ways a test wants to populate one.
 
-    Physically incomplete on purpose — no other catalogue table is present. Use
-    it where *reconciliation* is the subject. It must not be used to test
-    catalogue reading, which is a Spark-boundary concern and has to see a real,
-    complete catalogue; the two are separate claims and this would quietly weaken
-    the second into the first.
+    A subclass rather than a separate type, deliberately. Every build decision
+    runs against the real class; what changes is only *where the state came
+    from*. Beginning from a hand-written Registry row is the same move as
+    installing a frozen bundle instead of building one from a repository — a
+    later starting point on the real thing, not a stand-in for it.
+
+    These constructors are here and not on `Catalogue` because a Registry row
+    means work *succeeded*: it is written last in a build, and the planner has a
+    whole `uncertified` mechanism to withhold rows for work that was not done. A
+    production method that manufactured rows from declarations would be a way to
+    forge that guarantee, and eventually something would call it on a build path.
     """
 
-    if isinstance(item, str):
-        item = item_id(item)
-    return CatalogueState(
-        status="valid",
-        rows={item: {REGISTRY.name: tuple(rows)}},
-        present_tables=frozenset({REGISTRY.name}),
-        missing_tables=frozenset(),
-    )
+    @classmethod
+    def from_registry_rows(cls, *rows, item: str | WeaverItemId = ITEM) -> "Catalogue":
+        """A catalogue holding exactly the Registry rows given.
+
+        Physically incomplete on purpose — no other catalogue table is present.
+        Right for reconciliation and selection, which read the Registry alone;
+        wrong for testing the catalogue *read*, which is a Spark-boundary claim
+        and has to see a complete catalogue.
+        """
+
+        if isinstance(item, str):
+            item = item_id(item)
+        return cls(
+            rows={item: {REGISTRY.name: tuple(rows)}},
+            present_tables=frozenset({REGISTRY.name}),
+        )
+
+    @classmethod
+    def certifying(cls, *registered: RegisteredDocument) -> "Catalogue":
+        """A catalogue certifying exactly these documents, with no row data.
+
+        For tests whose subject is downstream of the Registry — selection,
+        alias staleness, planning — where the rows themselves are never read.
+        """
+
+        return cls(
+            rows={},
+            registered={document.identity: document for document in registered},
+        )
+
+    @classmethod
+    def from_repository(cls, repository, *, item: str | WeaverItemId = ITEM) -> "Catalogue":
+        """The catalogue a successful build of this repository would have left.
+
+        The "already installed, nothing changed" state, which is the premise of
+        every incremental claim and previously took a real build to reach. Each
+        declared document is certified at its currently declared signature, so
+        selection sees an estate that is exactly correct.
+        """
+
+        from weaver.build_bundle.incremental import declared_signatures
+
+        if isinstance(item, str):
+            item = item_id(item)
+        identities = {
+            identity
+            for identity in repository.source_documents
+            if identity.item == item
+        }
+        signatures = declared_signatures(repository, identities)
+        return cls.from_registry_rows(
+            *(
+                registry_row(
+                    identity,
+                    object_type=_object_type_of(repository, identity),
+                    signature=signatures[identity],
+                )
+                for identity in sorted(identities, key=str)
+            ),
+            item=item,
+        )
 
 
-def reconciled_catalogue(*registered: RegisteredDocument, item=None) -> ReconciledCatalogue:
-    """Prepared reconciled state, for when reconciliation is *not* the subject.
+def _object_type_of(repository, identity) -> str:
+    """What the Registry would have recorded this document as."""
 
-    A planner test that had to construct a catalogue projection and let it
-    reconcile would fail for reconciliation defects too, and its failure would
-    not say which. This hands the planner the answer directly.
-    """
-
-    return ReconciledCatalogue(
-        rows={},
-        registered={document.identity: document for document in registered},
-    )
+    kind = repository.source_documents[identity].kind
+    return {"Table": "table", "View": "view", "Folder": "folder"}[str(kind)]
 
 
 # --- physical state ---------------------------------------------------------
@@ -181,6 +234,77 @@ def target_inventory(
         tables=tables,
         views=views,
     )
+
+
+class FixtureInventory(TargetInventory):
+    """The production `TargetInventory`, with the ways a test wants to fill one.
+
+    Safe to populate freely in a way a catalogue is not, and the asymmetry is
+    worth knowing: a wrong inventory *degrades a decision* — prune removes
+    nothing, a schema is not created — whereas a wrong catalogue *forges a
+    guarantee* that an object was installed. Both belong in tests, but only one
+    of them would be dangerous on the production class.
+    """
+
+    @classmethod
+    def from_repository(
+        cls,
+        repository,
+        *,
+        item: str | WeaverItemId = ITEM,
+        target_kind: str = DELTA_TARGET,
+        target_id: str = "target-1",
+        kind: str = "lakehouse",
+        target_name: str = "Sales_LH",
+    ) -> TargetInventory:
+        """The physical state a successful build of this item would have left.
+
+        The "already built, nothing to do" inventory. Reaching it previously
+        meant standing up a Lakehouse and building into it, purely so a prune
+        test could assert that a declared object is spared.
+
+        Built from the documents rather than from `managed_sets`, deliberately.
+        The two hold the same objects, but `managed_sets` folds case for
+        comparison while a real inventory reports the names the target actually
+        has. Since the point of this class is to stand in for a real read, it
+        keeps declared case — otherwise it would be easier to satisfy than the
+        thing it imitates.
+        """
+
+        if isinstance(item, str):
+            item = item_id(item)
+        documents = [
+            document
+            for identity, document in repository.source_documents.items()
+            if identity.item == item
+        ]
+
+        def qualified(*, of_kind: str, files: bool) -> tuple[str, ...]:
+            return tuple(
+                sorted(
+                    document.qualified
+                    for document in documents
+                    if (document.target_kind == FOLDER_TARGET) is files
+                    and (files or str(document.kind) == of_kind)
+                )
+            )
+
+        def schemas_of(names: tuple[str, ...]) -> tuple[str, ...]:
+            return tuple(sorted({name.split(".", 1)[0] for name in names}))
+
+        tables = qualified(of_kind="Table", files=False)
+        views = qualified(of_kind="View", files=False)
+        folders = qualified(of_kind="Folder", files=True)
+        return cls(
+            target_id=target_id,
+            kind=kind,
+            target_name=target_name,
+            schemas=schemas_of(tables + views),
+            folder_schemas=schemas_of(folders),
+            folders=folders,
+            tables=tables,
+            views=views,
+        )
 
 
 def bound_target(

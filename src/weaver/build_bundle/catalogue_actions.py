@@ -10,7 +10,7 @@ from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
 from ..catalogue.projection import project_item_installation
 from ..catalogue.reconcile import reconcile
 from ..catalogue.render import InstallationScope, identifier, literal
-from ..catalogue.state import ReconciledCatalogue
+from ..catalogue.state import Catalogue
 from ..catalogue.tables import DICTIONARY_TABLES, REGISTRY, CatalogueTable
 from ..declaration.model import WeaverDocumentId
 from ..spark.tokens import object_token
@@ -27,12 +27,21 @@ from .stages import CATALOGUE, PlannedStage
 
 
 def collect_claims(
-    catalogue: ReconciledCatalogue,
+    catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
+    *,
+    stale_claims: Iterable[CatalogueClaim] = (),
 ) -> tuple[CatalogueClaim, ...]:
-    """Collect existing claims using installed types and explicit ownership."""
+    """Every catalogue claim this build must delete before it does physical work.
 
-    claims = list(catalogue.stale_claims)
+    Two sources, and they are symmetric: claims reconciliation already disproved
+    against the inventory, and claims held by the objects this build is about to
+    drop or remove. Both are passed in rather than one being read off the
+    catalogue, because a catalogue describes what is claimed — not which of those
+    claims some earlier step decided were wrong.
+    """
+
+    claims = list(stale_claims)
     for identity in sorted(set(identities), key=str):
         document = catalogue.registered.get(identity)
         if document is None:
@@ -130,12 +139,13 @@ def _stage(
 
 
 def render_catalogue_before_build(
-    catalogue: ReconciledCatalogue,
+    catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
     *,
     control_target,
+    stale_claims: Iterable[CatalogueClaim] = (),
 ) -> PlannedStage | None:
-    claims = collect_claims(catalogue, identities)
+    claims = collect_claims(catalogue, identities, stale_claims=stale_claims)
     return _stage(
         index=0,
         slug="catalogue-before-build",

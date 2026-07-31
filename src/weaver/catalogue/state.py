@@ -15,28 +15,43 @@ from .render import InstallationScope
 from .tables import BUILD_EPOCH, CATALOGUE_TABLES, OBJECT_TYPES, REGISTRY
 
 
-@dataclass(frozen=True)
-class CatalogueState:
-    status: str
-    rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
-    present_tables: frozenset[str]
-    missing_tables: frozenset[str]
-
-
 @dataclass(frozen=True, init=False)
-class ReconciledCatalogue:
+class Catalogue:
+    """The catalogue the build reads and reasons about.
+
+    One class, whatever produced it. In production it is read from the Weaver
+    Lakehouse over Spark; a test may build one directly from Registry rows, or
+    from a repository — the state a successful build of that repository would
+    have left. That is not a fake: it is the same class the build consumes, begun
+    further along, exactly as installing a frozen bundle begins further along
+    than building one from a repository.
+
+    Everything the build's own logic needs is here and nothing else. Incremental
+    selection, alias staleness and claim collection all work from ``registered``
+    and ``rows``, so they are pure Python and can be proven without standing up a
+    Lakehouse to seed a signature.
+
+    ``rows`` is the catalogue's own row data, by item and table. ``registered`` is
+    the certified documents derived from the Registry rows — identity, type,
+    signature and publication epoch, and no audit columns, because none of the
+    build's decisions depend on who wrote a row or when it was touched.
+
+    ``present_tables`` records which catalogue tables physically exist. One line
+    of the reconciler needs it and the rule it encodes is not optional: a claim
+    can only be raised against a table that is actually there, or reconciliation
+    would emit deletes against tables that are not.
+    """
+
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
-    stale_claims: tuple[CatalogueClaim, ...]
-    stale_objects: tuple[str, ...]
+    present_tables: frozenset[str]
 
     def __init__(
         self,
         rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]],
         *,
         registered: Mapping[WeaverDocumentId, "RegisteredDocument"] | None = None,
-        stale_claims: tuple[CatalogueClaim, ...] = (),
-        stale_objects: tuple[str, ...] = (),
+        present_tables: frozenset[str] | None = None,
     ) -> None:
         frozen_rows = MappingProxyType(dict(rows))
         object.__setattr__(self, "rows", frozen_rows)
@@ -47,8 +62,42 @@ class ReconciledCatalogue:
             if registered is None
             else MappingProxyType(dict(registered)),
         )
-        object.__setattr__(self, "stale_claims", tuple(stale_claims))
-        object.__setattr__(self, "stale_objects", tuple(stale_objects))
+        # Defaulting to "every table this catalogue carries rows for" keeps a
+        # hand-built catalogue honest without making every caller state it: a
+        # claim is raisable against exactly the tables that are represented.
+        object.__setattr__(
+            self,
+            "present_tables",
+            frozenset(
+                present_tables
+                if present_tables is not None
+                else {
+                    table
+                    for tables in frozen_rows.values()
+                    for table in tables
+                }
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class Reconciliation:
+    """What reconciling a catalogue against prepared inventories produced.
+
+    Two things, and they are genuinely two: the catalogue with disproved claims
+    removed, and the claims that were removed — which the build turns into delete
+    DML. Carrying the second on the catalogue itself made it look like catalogue
+    state, when it is a *finding about* the catalogue, and left claim collection
+    reading one of its two claim sources off an object and computing the other.
+    """
+
+    catalogue: Catalogue
+    #: Claims disproved by the inventory, to be deleted before physical work.
+    stale_claims: tuple[CatalogueClaim, ...]
+    #: The disproved objects, as readable labels. Nothing in the build consumes
+    #: this — it exists so a reconciliation decision can be seen and asserted
+    #: rather than inferred from the DML it eventually produces.
+    stale_objects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -90,8 +139,19 @@ def _registered_documents(
     return MappingProxyType(registered)
 
 
-def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
-    """Read selected scopes and distinguish absent, partial and invalid shape."""
+def read_catalogue_state(catalogue: Any, items) -> Catalogue:
+    """Read the catalogue over Spark — the production way to populate one.
+
+    The one place a catalogue meets a session. Everything downstream of it is
+    pure, so this is the boundary whose *fidelity* is worth a Spark test: does a
+    real catalogue read back into the same class a fixture builds directly.
+
+    The shape check is deliberately strict and must stay so. A physically
+    incomplete catalogue is rejected here rather than tolerated, because tests
+    wanting a Registry-only catalogue can construct one directly — weakening this
+    to accommodate them would trade a real production guarantee for a fixture's
+    convenience.
+    """
 
     present: set[str] = set()
     missing: set[str] = set()
@@ -127,11 +187,6 @@ def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
             "catalogue schema is incompatible; missing required column(s): "
             + ", ".join(incompatible)
         )
-    status = "valid"
-    if not present:
-        status = "absent"
-    elif missing:
-        status = "partial"
     rows = {
         item: MappingProxyType(
             read_installation(
@@ -141,20 +196,23 @@ def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
         )
         for item in items
     }
-    return CatalogueState(
-        status=status,
+    return Catalogue(
         rows=MappingProxyType(rows),
         present_tables=frozenset(present),
-        missing_tables=frozenset(missing),
     )
 
 
 def reconcile_catalogue_state(
-    state: CatalogueState, *, inventories: Mapping[WeaverItemId, Any]
-) -> ReconciledCatalogue:
-    """Discard catalogue roots disproved by prepared target inventories."""
+    state: Catalogue, *, inventories: Mapping[WeaverItemId, Any]
+) -> Reconciliation:
+    """Discard catalogue claims the prepared inventories physically disprove.
 
-    registered = _registered_documents(state.rows)
+    Pure: a catalogue in, an inventory in, a catalogue and its stale claims out.
+    Both inputs can be built directly, so what a registered object does when the
+    thing it claims is *not there* needs no Lakehouse to demonstrate.
+    """
+
+    registered = state.registered
     reconciled = {}
     stale_claims: list[CatalogueClaim] = []
     stale_labels: list[str] = []
@@ -210,9 +268,12 @@ def reconcile_catalogue_state(
         for identity, document in registered.items()
         if identity not in {claim.identity for claim in stale_claims}
     }
-    return ReconciledCatalogue(
-        rows=MappingProxyType(reconciled),
-        registered=retained,
+    return Reconciliation(
+        catalogue=Catalogue(
+            rows=MappingProxyType(reconciled),
+            registered=retained,
+            present_tables=state.present_tables,
+        ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),
     )

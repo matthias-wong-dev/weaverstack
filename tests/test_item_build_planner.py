@@ -26,7 +26,7 @@ from weaver.build_bundle.prune import (
     read_lakehouse_inventory,
     read_warehouse_inventory,
 )
-from weaver.catalogue.state import ReconciledCatalogue
+from weaver.catalogue.state import Catalogue
 
 from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate, _folder, _schema, _write
@@ -114,7 +114,7 @@ def generate_item_build_bundle(repository, **kwargs):
                 target_name=target.name,
             )
     kwargs.setdefault("target_inventories", inventories)
-    kwargs.setdefault("reconciled_catalogue", ReconciledCatalogue({}))
+    kwargs.setdefault("catalogue", Catalogue({}))
     kwargs.setdefault(
         "control_lakehouse", LakehouseBinding(ItemRef("Weaver_Control"))
     )

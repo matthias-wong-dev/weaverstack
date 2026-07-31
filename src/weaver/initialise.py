@@ -177,7 +177,7 @@ def initialise_weaver_lakehouse(
         store=store, resolver=resolver, spark=spark, workspace=workspace
     )
     inventories = read_target_inventories(bindings, environment=environment)
-    reconciled_catalogue = read_reconciled_catalogue(
+    reconciled = read_reconciled_catalogue(
         bindings, inventories=inventories, environment=environment, repository=repository
     )
     bundle = generate_item_build_bundle(
@@ -187,7 +187,8 @@ def initialise_weaver_lakehouse(
         store=store,
         control_lakehouse=control,
         target_inventories=inventories,
-        reconciled_catalogue=reconciled_catalogue,
+        catalogue=reconciled.catalogue,
+        stale_claims=reconciled.stale_claims,
     )
 
     report = install_bundle(

@@ -28,6 +28,46 @@ pytest -m full_integration  # the lifecycle journey, both transports
 pytest -m provisioning      # Fabric item lifecycle
 ```
 
+## The two prepared states
+
+Every build decision runs against two prepared, transport-neutral objects:
+
+```text
+Catalogue         what Weaver certifies as installed  (rows + registered)
+TargetInventory   what is physically there            (schemas/tables/views/folders)
+```
+
+Everything between them and the bundle is pure Python — no session, no store.
+That is what makes the interesting logic cheap to prove: incremental selection,
+alias staleness, reconciliation, prune and item planning all read these two and
+nothing else.
+
+They are populated three ways, and the class is the same one every time:
+
+| | catalogue | inventory |
+|---|---|---|
+| production | `read_catalogue_state` over Spark | `read_lakehouse_inventory` / `read_warehouse_inventory` |
+| fixture | `FixtureCatalogue.from_registry_rows(...)` | `target_inventory(...)` |
+| repository | `FixtureCatalogue.from_repository(...)` | `FixtureInventory.from_repository(...)` |
+
+The repository constructors give the **"already built, nothing changed"** state —
+the premise of every incremental and prune claim, which previously cost a real
+build to reach.
+
+This is not a fake. It is the production class begun further along, exactly as
+installing a frozen bundle begins further along than building one from a
+repository. What each test then proves is the logic itself; what remains for
+Spark and Fabric is the **fidelity of the boundary** — does a real read produce
+the same object a fixture builds.
+
+**The from-repository constructors live on test subclasses, not the production
+classes**, and the asymmetry is deliberate. A wrong inventory *degrades a
+decision* — prune removes nothing, a schema is skipped. A wrong catalogue
+*forges a guarantee*: a Registry row means work succeeded, written last in a
+build, with `uncertified` existing to withhold rows for work that was not done. A
+production method manufacturing rows from declarations would be a way to forge
+that, and something would eventually call it on a build path.
+
 ## Transfer state
 
 The new suite lives in `tests/targeted/`. Old tests remain as reference and are
@@ -37,8 +77,8 @@ sound; it does **not** prove the claim moved. Nothing has been deleted yet.
 
 | | tests | runtime |
 |---|---|---|
-| `tests/targeted/` (new) | 48 | 1.8s |
-| whole default suite (new + old) | 1134 | 11s |
+| `tests/targeted/` (new) | 67 | 2.1s |
+| whole default suite (new + old) | 1153 | 11s |
 | `pytest -m fabric` | 46 | 19m31s |
 | `pytest -m full_integration -k fabric` | 1 | ~8m |
 
@@ -52,6 +92,8 @@ sound; it does **not** prove the claim moved. Nothing has been deleted yet.
 | one action runs with installer result semantics; failures are data; statements reach the engine resolved | `execute_action` | `test_action_execution.py` | `spark_table`, `spark_schema`, `folder`, `alias`, `sql_endpoint_refresh` executors |
 | new / unchanged / changed; descendant propagation; selection bounds the walk; prohibit-rebuild | `determine_impact`, `select_build` | `test_incremental_impact.py` | stale aliases; removed objects; cross-item propagation |
 | one item's stages and their order: prune → drop → schema → build → refresh | `plan_item_build` | `test_item_plan.py` | alias stages; Warehouse item planning; uncertified aliases |
+| desired state; the diff into removals; item scoping; what prune spares | `managed_sets`, `item_prune_stage` | `test_prune.py` | `render_inventory_prune` called directly; empty-parent cleanup; alias destinations retained |
+| a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
 
 ### Covered by old tests, not yet re-homed
 
@@ -70,15 +112,28 @@ failure rather than naming itself.
 
 | seam | state |
 |---|---|
-| `managed_sets` | indirect only — desired-state computation never asserted alone |
-| `render_inventory_prune` | indirect only — the diff that decides removals |
-| `item_prune_stage` | indirect only — item scoping and action packaging |
+| `render_inventory_prune` | reached through `item_prune_stage`, never called directly |
 | `item_schema_stage` | indirect only — bracket escaping, Lakehouse vs Warehouse, alias-derived schemas |
 | `item_drop_stages` | partial — ordering and bad-type covered; per-kind drop rendering is not |
-| `reconcile_catalogue_state` | old tests exist; not yet expressible as one Registry row + one inventory |
-| `read_catalogue_state` | Spark-boundary claim; must see a complete catalogue, not a Registry-only one |
-| inventory readers | `read_lakehouse_inventory`, `read_warehouse_inventory` unasserted against fakes |
+| alias planning | `plan_item_aliases`, `stale_alias_destinations` — old tests only |
 | `build_item_repository` | zero references anywhere |
+
+### Boundary fidelity — the Spark and Fabric job now
+
+With the logic proven above, what those layers owe is narrower: **does a real
+read produce the same object a fixture builds?**
+
+| boundary | claim | state |
+|---|---|---|
+| `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape, not round-trip |
+| `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | **gap** |
+| `read_warehouse_inventory` | same, over TDS | **gap** |
+| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered by `-m spark` and `test_warehouse_build.py` |
+
+The round-trip pairing is the strongest form and does not exist yet: build from a
+repository, read the inventory back, and assert it equals
+`FixtureInventory.from_repository(...)`. That single test would justify every
+pure-Python prune claim that uses the fixture constructor.
 
 ### Fabric — not yet converted
 

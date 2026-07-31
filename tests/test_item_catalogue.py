@@ -303,5 +303,7 @@ def test_a_registry_with_the_epoch_column_is_accepted():
         _Shaped({"Registry": list(REGISTRY.physical_columns)}), ()
     )
 
-    assert state.status == "partial"
-    assert "Registry" in state.present_tables
+    # A catalogue holding only some of its tables is read, not rejected —
+    # `present_tables` is what says which, and it is what reconciliation then
+    # uses to decide whether a claim can be raised at all.
+    assert state.present_tables == frozenset({"Registry"})

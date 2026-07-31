@@ -36,7 +36,7 @@ from .prune import (
     read_warehouse_inventory,
 )
 from ..catalogue.state import (
-    ReconciledCatalogue,
+    Reconciliation,
     read_catalogue_state,
     reconcile_catalogue_state,
 )
@@ -200,7 +200,7 @@ def build_item_repository(
     *,
     bindings: ItemBindings,
     target_inventories: Mapping[WeaverItemId, TargetInventory],
-    reconciled_catalogue: ReconciledCatalogue,
+    reconciliation: Reconciliation,
     environment: InstallationEnvironment,
     source_store: Store,
     control_lakehouse: LakehouseBinding,
@@ -220,7 +220,8 @@ def build_item_repository(
             output=Location((Path(temporary) / "bundle").as_posix()),
             store=source_store,
             target_inventories=target_inventories,
-            reconciled_catalogue=reconciled_catalogue,
+            catalogue=reconciliation.catalogue,
+            stale_claims=reconciliation.stale_claims,
             control_lakehouse=control_lakehouse,
         )
         report = install_bundle(bundle, environment=environment)
@@ -267,7 +268,7 @@ def build_uploaded_item_repository(
             repository,
             bindings=bindings,
             target_inventories=inventories,
-            reconciled_catalogue=reconciled,
+            reconciliation=reconciled,
             environment=environment,
             source_store=materialised.store,
             control_lakehouse=control_lakehouse,
@@ -282,7 +283,7 @@ def read_reconciled_catalogue(
     inventories,
     environment: InstallationEnvironment,
     repository=None,
-) -> ReconciledCatalogue:
+) -> Reconciliation:
     """Read the Weaver Lakehouse catalogue and prove selected claims physically.
 
     The read covers the bound items and, when a ``repository`` is given, the

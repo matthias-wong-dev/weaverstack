@@ -25,7 +25,7 @@ from weaver.errors import BuildError
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.build_bundle.prune import TargetInventory
-from weaver.catalogue.state import ReconciledCatalogue
+from weaver.catalogue.state import Catalogue, Reconciliation
 
 from test_item_repository import _estate
 
@@ -122,7 +122,7 @@ def prepared_state(monkeypatch):
     )
     monkeypatch.setattr(
         "weaver.build_bundle.workflow.read_reconciled_catalogue",
-        lambda *_args, **_kwargs: ReconciledCatalogue({}),
+        lambda *_args, **_kwargs: Reconciliation(Catalogue({}), stale_claims=()),
     )
 
 
@@ -196,7 +196,7 @@ def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_
         output=Location(str(tmp_path / "bundle")),
         store=store,
         target_inventories=_inventories(),
-        reconciled_catalogue=ReconciledCatalogue({}),
+        catalogue=Catalogue({}),
         control_lakehouse=_control(),
     )
     archive = Location(str(tmp_path / "20260727T010203000004Z.weaver.zip"))
@@ -227,7 +227,7 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
         output=Location(str(tmp_path / "bundle")),
         store=store,
         target_inventories=_inventories(),
-        reconciled_catalogue=ReconciledCatalogue({}),
+        catalogue=Catalogue({}),
         control_lakehouse=_control(),
     )
     archive = Location(str(tmp_path / "handover.weaver.zip"))
