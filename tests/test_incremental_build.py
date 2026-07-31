@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from weaver import ItemRef, LocalStore, Location
 from weaver.build_bundle import (
     ItemBinding,
@@ -10,7 +12,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_build
+from weaver.build_bundle.incremental import select_build, stale_alias_destinations
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -291,6 +293,11 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
 
 ALIAS_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
 
+#: Two publication instants, in order. Datetimes because that is what Spark
+#: hands back for a timestamp column.
+EARLIER = datetime(2026, 7, 30, 9, 0, 0)
+LATER = datetime(2026, 7, 31, 9, 0, 0)
+
 
 def _alias_bindings():
     """The producer and the consumer that aliases it, both bound."""
@@ -455,6 +462,165 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind != "create_alias"
     )
+
+
+def _dated(rows, item_text, schema, name, epoch):
+    """Stamp one Registry row with a build epoch, as a publication would."""
+
+    item = WeaverItemId.parse(item_text)
+    tables = dict(rows[item])
+    tables[REGISTRY.name] = tuple(
+        {**row, "build_epoch": epoch}
+        if (row["schema_name"], row["object_name"]) == (schema, name)
+        else row
+        for row in tables[REGISTRY.name]
+    )
+    return {**rows, item: tables}
+
+
+def _consumer_only_selection(repository, rows):
+    """Select as a build of the consumer item alone would."""
+
+    consumer = WeaverItemId.parse("Warehouse/Reporting")
+    registered = ReconciledCatalogue(rows).registered
+    return select_build(
+        repository,
+        {
+            identity: document
+            for identity, document in registered.items()
+            if identity.item == consumer
+        },
+        selected=(
+            {
+                identity
+                for identity in repository.source_documents
+                if identity.item == consumer
+            }
+            | {
+                alias.destination
+                for alias in repository.aliases
+                if alias.destination.item == consumer
+            }
+        ),
+        stale_aliases=stale_alias_destinations(
+            repository, registered, bound_items={consumer}
+        ),
+    )
+
+
+def test_an_alias_is_stale_when_its_unbound_source_was_published_later(tmp_path):
+    """The case the graph cannot answer.
+
+    The producer is not in this build, so there is no walk from it. It was
+    rebuilt at some earlier time by some earlier build, and the only surviving
+    evidence is that its Registry row is dated after the alias's.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    selection = _consumer_only_selection(repository, rows)
+    destination = WeaverDocumentId.parse(ALIAS_DESTINATION)
+
+    assert destination in selection.impact.changed
+    assert destination in selection.selected_for_build
+
+
+def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
+    """It joins the ordinary changed roots, so the ordinary walk does the rest —
+    there is no separate cross-item descendant handling."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    selection = _consumer_only_selection(repository, rows)
+    consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+
+    assert consumer in selection.impact.impacted_descendants
+    assert consumer in selection.selected_for_build
+
+
+def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
+    """The ordinary case, and the one that has to stay cheap."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", LATER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", EARLIER)
+
+    selection = _consumer_only_selection(repository, rows)
+
+    assert selection.selected_for_build == ()
+
+
+def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
+    """Upgrading from a catalogue written before epochs existed must not rebuild
+    the estate. Both rows read as null, and null is not newer than null."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    registered = ReconciledCatalogue(_alias_catalogue(repository)).registered
+
+    assert all(document.build_epoch is None for document in registered.values())
+    assert stale_alias_destinations(
+        repository, registered, bound_items={WeaverItemId.parse("Warehouse/Reporting")}
+    ) == ()
+
+
+def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
+    """A producer rebuilt by an *earlier* build is unchanged to this one.
+
+    Binding it changes nothing: its signature matches the repository, so the
+    descendant walk never starts from it, and only the epochs record that it
+    moved after the alias was made. Were the comparison skipped whenever the
+    producer happened to be bound, that estate would stay stale forever.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+    both = {
+        WeaverItemId.parse("Warehouse/Reporting"),
+        WeaverItemId.parse("Lakehouse/Curated"),
+    }
+
+    assert stale_alias_destinations(
+        repository, ReconciledCatalogue(rows).registered, bound_items=both
+    ) == (WeaverDocumentId.parse(ALIAS_DESTINATION),)
+
+
+def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
+    """Deferral: only the producer is bound, so nothing about the consumer is
+    touched and its alias stays stale until the consumer is next built."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    assert stale_alias_destinations(
+        repository,
+        ReconciledCatalogue(rows).registered,
+        bound_items={WeaverItemId.parse("Lakehouse/Curated")},
+    ) == ()
+
+
+def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
+    """End to end through the planner: the freshness comparison reaches the
+    physical action, and reaches it as an alias action rather than a drop."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _alias_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    bundle = _alias_bundle(tmp_path, repository, rows=rows)
+
+    assert len(_alias_actions(bundle)) == 1
 
 
 def test_the_epoch_leaves_bundle_identity_alone(tmp_path):

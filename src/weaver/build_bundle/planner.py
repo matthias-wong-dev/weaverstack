@@ -43,7 +43,7 @@ from .catalogue_actions import (
     render_catalogue_before_build,
 )
 from .endpoints import item_refresh_stage
-from .incremental import select_build
+from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .physical import (
     item_build_stages,
@@ -112,12 +112,19 @@ def generate_item_build_bundle(
                 f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
 
+    # Freshness is read before ``registered`` is narrowed, because the whole
+    # point is to compare against an item this build does *not* include.
+    stale_aliases = stale_alias_destinations(
+        repository, reconciled_catalogue.registered, bound_items=by_item
+    )
     registered = {
         identity: document
         for identity, document in reconciled_catalogue.registered.items()
         if identity.item in by_item
     }
-    selection = select_build(repository, registered, selected=selected_ids)
+    selection = select_build(
+        repository, registered, selected=selected_ids, stale_aliases=stale_aliases
+    )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
     removed = set(registered) - selected_ids
