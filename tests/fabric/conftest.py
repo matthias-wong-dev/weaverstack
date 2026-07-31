@@ -36,6 +36,7 @@ from support.build_env import (
     _outcome_from_report,
     _upload_tree,
 )
+from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.livy_telemetry import LEDGER, OUTSIDE_A_TEST, CountedLivySession
 from support.observation import Observation, observation_from, observe_body
 
