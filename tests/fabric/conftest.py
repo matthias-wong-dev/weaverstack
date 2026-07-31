@@ -611,7 +611,10 @@ def populated_lakehouse(request):
 # run in that environment. For Fabric, the desktop only stages the repository and
 # reads results.
 
-from build_envs import BUILD_FIXTURE  # the default fixture a build env installs
+# The default a build env installs when a module does not name one. The journey
+# fixture, because it is the one Lakehouse estate that carries every shape a
+# build has to handle — and the only Fabric fixture declaring Lakehouse/Sales.
+from build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
 
 @pytest.fixture(scope="module")
@@ -625,7 +628,7 @@ def weaver_repo_fixture(request):
         @pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)
     """
 
-    return getattr(request, "param", BUILD_FIXTURE)
+    return getattr(request, "param", LAKEHOUSE_JOURNEY_FIXTURE)
 
 
 @dataclass
