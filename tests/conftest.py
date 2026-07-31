@@ -28,6 +28,15 @@ from pathlib import Path
 
 import pytest
 
+import sys as _sys
+from pathlib import Path as _Path
+
+# The narrow fixture constructors are shared by every layer — pure Python,
+# local Spark and Fabric all build their inputs the same way — so they are
+# importable from anywhere in the suite rather than copied per directory.
+_sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
+
+
 from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore, Location
 
 WEAVER_LAKEHOUSE = "Weaver"

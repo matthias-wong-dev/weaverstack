@@ -285,7 +285,13 @@ class FixtureInventory(TargetInventory):
                     document.qualified
                     for document in documents
                     if (document.target_kind == FOLDER_TARGET) is files
-                    and (files or str(document.kind) == of_kind)
+                    and (
+                        files
+                        or (
+                            document.target_kind == target_kind
+                            and str(document.kind) == of_kind
+                        )
+                    )
                 )
             )
 

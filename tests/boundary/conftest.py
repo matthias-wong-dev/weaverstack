@@ -1,0 +1,136 @@
+"""Building a real estate out of the narrow seams, for boundary tests to read.
+
+The layer below this proves what Weaver *decides*; these tests prove that a real
+engine, asked to do it, produces what was decided — and that reading the result
+back gives the same objects a fixture builds.
+
+The estate is assembled by planning one item and executing its actions, not by
+generating and installing a bundle. That is deliberate twice over. It keeps these
+tests about the boundary rather than about bundle assembly, so a failure here
+means Spark disagreed with Weaver; and it means the seams are exercised in
+composition, which is the one thing testing them separately cannot show.
+"""
+
+from __future__ import annotations
+
+import pytest
+from factories import bound_target, item_id, registered_document, target_inventory
+
+from weaver import ItemRef
+from weaver.build_bundle import execute_action, plan_item_build
+from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
+from weaver.locations import Location
+
+
+def resolved_for(lakehouses, item: str) -> ResolvedTarget:
+    """One local Lakehouse, resolved exactly as the installer resolves it."""
+
+    reference = ItemRef(item)
+    return ResolvedTarget(
+        bound=bound_target(id="target-1", item_id=item),
+        lakehouse=reference,
+        location=lakehouses.resolver.lakehouse_spark_location(reference),
+        destination=lakehouses.resolver.spark_destination(reference),
+    )
+
+
+def context_for(lakehouses, spark, item: str) -> InstallationContext:
+    target = resolved_for(lakehouses, item)
+    return InstallationContext(
+        spark=spark,
+        resolver=lakehouses.resolver,
+        store=lakehouses.store,
+        snapshot=Location(str(lakehouses.root)),
+        target=target,
+        targets={target.bound.id: target},
+    )
+
+
+@pytest.fixture(autouse=True)
+def _drop_registered_schemas(request, lakehouses):
+    """Drop every schema this test registered, after it.
+
+    Harness isolation, not product behaviour, and it is load-bearing here. The
+    Spark session is session-scoped while `lakehouses` is per-test, so each test
+    gets a fresh `tmp_path` under the *same logical Lakehouse name*. A schema is
+    not a cache: left registered, the next test's Lakehouse resolves to a
+    database still pointing at the previous test's deleted directory, and the
+    failure surfaces as a missing table in whichever test ran second.
+
+    Found by exactly that — these tests passed alone and failed in sequence.
+    """
+
+    yield
+    if "spark" not in request.fixturenames:
+        return
+    spark = request.getfixturevalue("spark")
+    for item in (lakehouses.weaver, lakehouses.target):
+        prefix = lakehouses.resolver.spark_destination(item).schema_prefix
+        if not prefix:
+            continue
+        for row in spark.sql("SHOW DATABASES").collect():
+            name = row[0]
+            if name.casefold().startswith(prefix.casefold()):
+                spark.sql(f"DROP SCHEMA IF EXISTS `{name}` CASCADE")
+
+
+@pytest.fixture
+def build_item(lakehouses, spark):
+    """Plan one item from nothing and run every action it planned.
+
+    Returns the executed results in order, so a caller can assert that the build
+    genuinely succeeded before reading anything back — otherwise a fidelity test
+    could pass by finding nothing and predicting nothing.
+    """
+
+    def run(
+        repository,
+        *,
+        item: str = "Lakehouse/Sales",
+        target: str = "Sales_LH",
+        inventory=None,
+        rebuild: bool = False,
+    ):
+        identity = item_id(item)
+        bound = bound_target(id="target-1", item_id=target)
+        selected = {
+            key for key in repository.source_documents if key.item == identity
+        }
+        # A rebuild drops before it creates. That is not a detail of this helper
+        # but how Weaver rebuilds at all: a Lakehouse table's generated DDL is
+        # `CREATE TABLE`, so the planner clears the way with a drop stage rather
+        # than relying on a replace-shaped statement.
+        registered = (
+            {key: registered_document(key) for key in selected} if rebuild else {}
+        )
+        planned = plan_item_build(
+            repository,
+            item=identity,
+            target=bound,
+            inventory=inventory
+            if inventory is not None
+            else target_inventory(target_id="target-1"),
+            target_by_item={identity: bound},
+            selected_documents=selected,
+            selected_aliases=set(),
+            selected_for_drop=set(selected) if rebuild else set(),
+            selected_for_build=selected,
+            registered=registered,
+        )
+        context = context_for(lakehouses, spark, target)
+        results = []
+        for stage in planned.stages:
+            for batch in stage.batches:
+                for action in batch.actions:
+                    results.append(
+                        execute_action(
+                            action,
+                            stage.payloads.get(action.payload)
+                            if action.payload
+                            else None,
+                            context=context,
+                        )
+                    )
+        return results
+
+    return run
