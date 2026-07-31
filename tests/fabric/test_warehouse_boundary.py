@@ -467,27 +467,40 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         warehouse_target(warehouse).bound, sql=warehouse.executor
     )
     item = item_id(ITEM)
-    bound = next(
-        binding.to_bound_target()
-        for binding in bindings.entries
-        if binding.item == item
-    )
+    # Each item's inventory must carry *its own* bound target id — the planner
+    # checks that pairing, and the control item's id is nothing like the
+    # Warehouse's. Deriving it from the binding rather than defaulting is the
+    # difference between a prepared inventory and a plausible-looking one.
+    inventories = {}
+    for binding in bindings.entries:
+        bound = binding.to_bound_target()
+        if binding.item == item:
+            inventories[binding.item] = read_warehouse_inventory(
+                bound, sql=warehouse.executor
+            )
+        else:
+            # The control Lakehouse is read for real, over OneLake from here.
+            # An empty inventory would be a lie rather than a simplification —
+            # the catalogue schema is already there, and claiming otherwise makes
+            # the planner emit a create that the session then rejects.
+            from weaver.build_bundle.prune import read_lakehouse_inventory
+
+            inventories[binding.item] = read_lakehouse_inventory(
+                bound, resolver=resolver, store=store
+            )
     bundle = generate_item_build_bundle(
         repository,
         bindings=bindings,
         output=resolver.build_bundle("whrow3"),
         store=store,
-        target_inventories={
-            item: read_warehouse_inventory(bound, sql=warehouse.executor),
-            **{
-                binding.item: FixtureInventory.from_repository(
-                    repository, item=str(binding.item), target_kind=SQL_TARGET
-                )
-                for binding in bindings.entries
-                if binding.item != item
-            },
-        },
-        catalogue=FixtureCatalogue.from_registry_rows(item=ITEM),
+        target_inventories=inventories,
+        # The control item's own catalogue documents are already installed, so
+        # the catalogue must say so — otherwise they look new, the build tries to
+        # create them again, and the session rejects tables that exist. Nothing
+        # is certified for the Warehouse item, which is what makes it build.
+        catalogue=FixtureCatalogue.from_repository(
+            repository, item="Lakehouse/_weaver"
+        ),
         control_lakehouse=LakehouseBinding(
             lakehouse=ItemRef(fabric_workspace.weaver_lakehouse)
         ),
