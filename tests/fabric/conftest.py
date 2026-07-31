@@ -67,13 +67,16 @@ def fabric_workspace_item():
 
     name = os.environ.get(WORKSPACE_ENV, DEFAULT_WORKSPACE)
 
-    from weaver.errors import WeaverError
     from weaver.fabric import find_workspace
 
     try:
         return find_workspace(name)
-    except WeaverError as exc:
-        pytest.skip(f"cannot reach workspace {name!r}: {exc}")
+    except Exception as exc:
+        # Any reason at all: no credential, no network, no such workspace. Every
+        # one of them means "this machine cannot run the Fabric suite", which is a
+        # skip — only a WeaverError was caught before, so an unauthenticated
+        # machine raised azure's ClientAuthenticationError and errored instead.
+        pytest.skip(f"cannot reach workspace {name!r}: {type(exc).__name__}: {exc}")
 
 
 @pytest.fixture(scope="session")

@@ -34,4 +34,8 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
       - run: pip install -e . --no-deps
-      - run: pytest -m "not spark and not fabric"
+      # No -m: the marker expression lives in pyproject's addopts, and repeating
+      # it here let the two drift — CI's copy omitted `not provisioning`, so it
+      # selected tests that need a Fabric workspace and only stayed green because
+      # a fixture happened to skip them.
+      - run: pytest
