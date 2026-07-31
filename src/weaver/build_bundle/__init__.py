@@ -27,9 +27,10 @@ from .models import (
     BuildSequence,
     OmittedNode,
 )
-from .installer import InstallationEnvironment, install_bundle
+from .installer import InstallationEnvironment, execute_action, install_bundle
 from .incremental import BuildSelection, Impact, determine_impact
-from .planner import generate_item_build_bundle
+from .physical import RenderedAction, render_document_build_action
+from .planner import PlannedItem, generate_item_build_bundle, plan_item_build
 from .report import InstallationReport
 from .workflow import (
     ItemBuildResult,
@@ -68,6 +69,14 @@ __all__ = [
     "Impact",
     "BuildSelection",
     "determine_impact",
+    # The three narrow seams: one document rendered, one item planned, one
+    # action executed. Each is the lowest layer that can answer its own
+    # question, so a failure localises there rather than in a whole build.
+    "RenderedAction",
+    "render_document_build_action",
+    "PlannedItem",
+    "plan_item_build",
+    "execute_action",
     "compute_bundle_id",
     "load_bundle",
     "write_bundle",

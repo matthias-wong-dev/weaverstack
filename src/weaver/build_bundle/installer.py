@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
 from ..errors import InstallError
 from ..locations import Location
@@ -243,6 +243,40 @@ def _run_sequence(
     )
 
 
+def execute_action(
+    action: BuildAction,
+    payload: bytes | None = None,
+    *,
+    context: InstallationContext,
+    executors: Mapping[str, ActionExecutor] | None = None,
+) -> ActionResult:
+    """Run one action against one target, with the installer's result semantics.
+
+    The same execution the installer performs, minus everything that is about a
+    *bundle*: no loading, no validation, no sequence barriers, no target
+    resolution, no report. One action, one payload, one context, one result.
+
+    It exists so the platform boundary can be tested where it actually is. A test
+    asking whether Fabric accepts Weaver's generated T-SQL, or whether a created
+    Warehouse table shows up in inventory, needs the statement *executed* — not a
+    repository parsed, a catalogue read, a bundle planned and an installation
+    reported. Those are separately proven, and running them again to reach the
+    one question costs a full build.
+
+    A failing action is data here exactly as it is in an installation: the error
+    is recorded on the result rather than raised, so the caller asserts on a
+    result in both places and the semantics cannot drift apart.
+    """
+
+    return _execute(
+        action,
+        lambda: payload,
+        context=context,
+        target_id=context.target.bound.id,
+        executors=default_executors() if executors is None else executors,
+    )
+
+
 def _run_action(
     action: BuildAction,
     batch: BuildBatch,
@@ -250,55 +284,72 @@ def _run_action(
     bundle: BuildBundle,
     environment: InstallationEnvironment,
 ) -> ActionResult:
-    started = _now()
-    executor = environment.executors.get(action.executor)
-    if executor is None:
-        return _failed(
-            action, batch, started, InstallError(f"no executor named {action.executor!r}")
+    def load_payload() -> bytes | None:
+        if action.payload is None:
+            return None
+        return (bundle.store or environment.store).read(
+            bundle.location.join(*action.payload.split("/"))
         )
 
-    try:
-        payload = None
-        if action.payload is not None:
-            payload = (bundle.store or environment.store).read(
-                bundle.location.join(*action.payload.split("/"))
-            )
-        execution = executor.execute(action, payload, context)
-    except Exception as exc:  # a failing action is data, not a crash
-        return _failed(action, batch, started, exc)
-
-    finished = _now()
-    if isinstance(execution, SkippedExecution):
-        return ActionResult(
-            action_id=action.id,
-            resource_node_id=action.resource_node_id,
-            target_id=batch.target_id,
-            executor=action.executor,
-            status=SKIPPED,
-            started_at=started,
-            finished_at=finished,
-            duration_seconds=(finished - started).total_seconds(),
-            details=execution.details,
-        )
-    return ActionResult(
-        action_id=action.id,
-        resource_node_id=action.resource_node_id,
+    return _execute(
+        action,
+        load_payload,
+        context=context,
         target_id=batch.target_id,
-        executor=action.executor,
-        status=SUCCEEDED,
-        started_at=started,
-        finished_at=finished,
-        duration_seconds=(finished - started).total_seconds(),
-        details=execution or None,
+        executors=environment.executors,
     )
 
 
-def _failed(action: BuildAction, batch: BuildBatch, started: datetime, exc: Exception) -> ActionResult:
+def _execute(
+    action: BuildAction,
+    load_payload,
+    *,
+    context: InstallationContext,
+    target_id: str,
+    executors: Mapping[str, ActionExecutor],
+) -> ActionResult:
+    """The one place an action is run, shared by the installer and by callers.
+
+    ``load_payload`` is deferred rather than passed as bytes because a payload
+    that cannot be read is an action failure like any other, recorded with the
+    same timing and the same result shape as one whose executor raised.
+    """
+
+    started = _now()
+    executor = executors.get(action.executor)
+    if executor is None:
+        return _failed(
+            action, target_id, started, InstallError(f"no executor named {action.executor!r}")
+        )
+
+    try:
+        execution = executor.execute(action, load_payload(), context)
+    except Exception as exc:  # a failing action is data, not a crash
+        return _failed(action, target_id, started, exc)
+
+    finished = _now()
+    skipped = isinstance(execution, SkippedExecution)
+    return ActionResult(
+        action_id=action.id,
+        resource_node_id=action.resource_node_id,
+        target_id=target_id,
+        executor=action.executor,
+        status=SKIPPED if skipped else SUCCEEDED,
+        started_at=started,
+        finished_at=finished,
+        duration_seconds=(finished - started).total_seconds(),
+        details=execution.details if skipped else (execution or None),
+    )
+
+
+def _failed(
+    action: BuildAction, target_id: str, started: datetime, exc: Exception
+) -> ActionResult:
     finished = _now()
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
-        target_id=batch.target_id,
+        target_id=target_id,
         executor=action.executor,
         status=FAILED,
         started_at=started,
