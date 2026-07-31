@@ -21,10 +21,13 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
 
     A Livy session is opened beneath the Weaver Lakehouse, so that is the
     attachment, and it is what inference must produce: the same root the desktop
-    resolver names over REST, and the ``/lakehouse/default`` mount a folder object
-    writes through. If this fails on the roots, the session reports its attachment
+    resolver names over REST. If this fails, the session reports its attachment
     under keys other than the ones :func:`weaver.lakehouse.default_lakehouse`
     reads — which is the one thing about it that no local test can settle.
+
+    Nothing here touches ``/lakehouse/default``. An inferred Lakehouse is reached
+    exactly as a resolved one is, which is what keeps a notebook and a detached
+    load running the same authored code.
     """
 
     from weaver.fabric import FabricResolver
@@ -47,7 +50,6 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
         "emit({\n"
         "  'name': order.lakehouse.name,\n"
         "  'spark_root': order.spark_root,\n"
-        "  'fuse_root': order.fuse_root,\n"
         "  'table_path': order.lakehouse.table_path(*order.identity),\n"
         "  'folder_path': export.path(),\n"
         "  'staging_folder': export.staging_folder(),\n"
@@ -58,6 +60,5 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
     assert payload["spark_root"] == expected_root
     assert payload["inferred"] == expected_root
     assert payload["table_path"] == f"{expected_root}/Tables/Sales/Order"
-    assert payload["fuse_root"] == "/lakehouse/default"
-    assert payload["folder_path"] == "/lakehouse/default/Files/Sales/OrderExport"
+    assert payload["folder_path"] == f"{expected_root}/Files/Sales/OrderExport"
     assert payload["staging_folder"] == payload["folder_path"] + "_Staging"

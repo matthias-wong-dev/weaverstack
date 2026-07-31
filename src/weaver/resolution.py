@@ -8,8 +8,8 @@ concrete :class:`~weaver.locations.Location` values::
     DeltaTarget("Sales") + Budget.Expense
         -> .local/Sales/Tables/Budget/Expense
 
-    FolderTarget("Sales/Files/Extracts") + Budget.BudgetPaper
-        -> .local/Sales/Files/Extracts/Budget/BudgetPaper
+    FolderTarget("Sales/Files") + Budget.BudgetPaper
+        -> .local/Sales/Files/Budget/BudgetPaper
 
     Weaver items
         -> .local/Weaver/Files/weaver_items
@@ -93,25 +93,15 @@ class LocalResolver:
 
         return self.lakehouse(item).value
 
-    def fuse_root(self, item: ItemRef) -> str:
-        """The root ordinary file access reaches, for a Lakehouse.
-
-        Locally the two roots are the same directory: there is no mount to cross,
-        which is exactly what makes the emulator a faithful stand-in for the
-        notebook's attached Lakehouse.
-        """
-
-        return self.lakehouse(item).value
-
     # --- folder targets --------------------------------------------------
 
     def folder_root(self, target: FolderTarget) -> Location:
-        """The configured folder root, including any subpath."""
+        """The Files area a folder target names. There is nothing below it to configure."""
 
-        return self.files_root(target.lakehouse).join(*target.subpath)
+        return self.files_root(target.lakehouse)
 
     def folder_object(self, target: FolderTarget, schema: str, name: str) -> Location:
-        """Where one Folder object materialises, beneath the configured root."""
+        """Where one Folder object materialises — ``Files/<Schema>/<Object>``."""
 
         return self.folder_root(target).join(
             validate_name(schema, what="schema"),

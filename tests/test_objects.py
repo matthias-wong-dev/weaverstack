@@ -65,7 +65,6 @@ class FakeSpark:
 LAKEHOUSE = Lakehouse(
     name="Sales_LH",
     spark_root="abfss://ws@onelake.dfs.fabric.microsoft.com/lh",
-    fuse_root="/lakehouse/default",
     destination=fabric_destination(workspace="Weaver", lakehouse="Sales_LH"),
 )
 
@@ -103,7 +102,6 @@ def test_an_object_binds_a_session_and_a_resolved_lakehouse(spark):
     assert order.spark is spark
     assert order.lakehouse is LAKEHOUSE
     assert order.spark_root == "abfss://ws@onelake.dfs.fabric.microsoft.com/lh"
-    assert order.fuse_root == "/lakehouse/default"
 
 
 def test_the_session_is_mandatory():
@@ -141,7 +139,6 @@ def test_the_notebook_case_infers_the_attached_lakehouse():
 
     assert order.lakehouse.name == "Sales_LH"
     assert order.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
-    assert order.fuse_root == "/lakehouse/default"
 
 
 # --- depending on another object --------------------------------------------
@@ -231,26 +228,31 @@ def test_a_view_is_read_by_name_because_it_has_no_path(spark):
 # --- folders ----------------------------------------------------------------
 
 
-def test_a_folder_path_is_the_fuse_path(spark):
+def test_a_folder_is_addressed_from_the_lakehouse_root(spark):
+    """Hadoop-compatible, so a detached load reaches it as readily as a notebook."""
+
     export = Sales__OrderExport(spark, lakehouse=LAKEHOUSE)
 
-    assert export.path() == "/lakehouse/default/Files/Sales/OrderExport"
+    assert export.path() == (
+        "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/Sales/OrderExport"
+    )
 
 
 def test_staging_is_the_folder_path_with_a_staging_suffix(spark):
     export = Sales__OrderExport(spark, lakehouse=LAKEHOUSE)
 
     assert export.staging_folder() == f"{export.path()}_Staging"
-    assert export.read() == ("/lakehouse/default/Files/Sales/OrderExport_Staging", [])
+    assert export.read() == (f"{export.path()}_Staging", [])
 
 
-def test_a_folder_in_an_unmounted_lakehouse_says_so(spark):
+def test_a_folder_needs_no_mount_at_all(spark):
+    """The Lakehouse nobody attached is reached exactly like the one somebody did."""
+
     export = Sales__OrderExport(
         spark, lakehouse=Lakehouse(name="Other", spark_root="abfss://ws@host/other")
     )
 
-    with pytest.raises(LoadError, match="no FUSE mount"):
-        export.path()
+    assert export.path() == "abfss://ws@host/other/Files/Sales/OrderExport"
 
 
 # --- the surface is only what is documented ---------------------------------
@@ -272,6 +274,7 @@ def test_read_must_be_implemented(spark):
         "folder_path",
         "context",
         "path",
+        "fuse_root",
         "schema",
         "primary_key",
         "is_incremental",

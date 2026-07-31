@@ -112,6 +112,9 @@ def test_a_view_is_read_by_the_name_its_destination_gives_it(spark, lakehouses, 
 
 
 def test_a_folder_stages_beside_its_destination(spark, lakehouses, lakehouse):
+    """Locally the Lakehouse root is a directory, so the Spark-addressed folder
+    path and the resolver's own answer are the same string."""
+
     target = FolderTarget(lakehouse=ItemRef(TARGET))
     export = Sales__OrderExport(spark, lakehouse=lakehouse)
 

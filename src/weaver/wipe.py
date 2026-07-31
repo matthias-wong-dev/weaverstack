@@ -26,7 +26,7 @@ The local emulator materialises an alias as a symbolic link, and
 so the emulator reaches the same guarantee by a different mechanism, and neither
 needs the other's.
 
-**Folders.** The configured root is kept and its contents removed, so the target
+**Folders.** The Files area is kept and its contents removed, so the target
 survives and only what it held goes. Shortcuts under ``Files/`` go first, for the
 same reason.
 
@@ -108,10 +108,8 @@ def _remove_shortcuts(
 ) -> tuple[str, ...]:
     """Take away this Lakehouse's shortcuts beneath ``prefix``, before storage is swept.
 
-    Scoped by path prefix rather than by area, because a folder target may be a
-    root *within* Files — ``Sales_LH/Files/Extracts`` clears only beneath itself,
-    and its shortcuts have to be scoped the same way or a narrow wipe would take
-    away a pointer it never reached.
+    Scoped by path prefix, so a wipe of one area leaves the other's pointers
+    alone — a Files wipe must not take away a shortcut under ``Tables/``.
 
     Reported as ``shortcut:<path>/<name>`` so a dry run distinguishes a pointer
     being taken away from a directory being deleted — they are not the same act,
@@ -147,16 +145,13 @@ def wipe_folder_target(
     store: Store | None = None,
     dry_run: bool = False,
 ) -> WipeReport:
-    """Empty a folder target, keeping the configured root itself."""
+    """Empty a folder target, keeping the Files area itself."""
 
     store = store or store_for(workspace)
     resolver = resolver_for(workspace)
     location = resolver.folder_root(target)
     shortcuts = _remove_shortcuts(
-        resolver,
-        target.lakehouse,
-        prefix="/".join((FILES_AREA, *target.subpath)),
-        dry_run=dry_run,
+        resolver, target.lakehouse, prefix=FILES_AREA, dry_run=dry_run
     )
     return WipeReport(
         target=f"folder:{target}",
@@ -325,7 +320,7 @@ def wipe_selection(
     """Wipe each named target, taking its type from its shape.
 
     ``Sales_LH`` is a **Lakehouse** and clears both its areas.
-    ``Sales_LH/Files/Extracts`` is a folder root and clears only that. A bare
+    ``Sales_LH/Files`` is that Lakehouse's Files area and clears only that. A bare
     name is always a Lakehouse — a Warehouse must be wiped through a
     :class:`~weaver.targets.WarehouseTarget`, never inferred from a name.
     """

@@ -9,7 +9,9 @@ for what the build just made.
 The body below is one string, run in whichever process the environment runs in:
 in this one against local Spark, or inside a Fabric session over Livy. Its only
 transport-dependent line is ``resolver_for``, which the conftest binds before the
-body starts, so what is asserted is genuinely the same code on both.
+body starts, so what is asserted is genuinely the same code on both — including
+the folder paths, which hang off the Lakehouse's own root and therefore need no
+mount on either side.
 
 The classes are declared in the body rather than imported from the installed
 repository because importing one is the load executor's job, and that does not
@@ -56,25 +58,18 @@ order = Sales__Order(spark, lakehouse=lakehouse)
 customer = Sales__Customer(order)
 export = Sales__OrderExport(order)
 
-# A folder's own path is the one thing that needs a mount, and only the session's
-# attached Lakehouse has one. Asked for either way, so both transports report what
-# they can reach rather than the test asking different questions of each.
-mounted = order.fuse_root is not None
-
 emit({
     "ids": [order.object_id, customer.object_id, export.object_id],
     "spark_root": order.spark_root,
-    "fuse_root": order.fuse_root,
     "table_path": lakehouse.table_path(*order.identity),
-    "files_path": lakehouse.location.folder_path(*export.identity),
+    "folder_path": export.path(),
+    "staging_folder": export.staging_folder(),
     "order_columns": sorted(f.name.lower() for f in order.dataframe().schema),
     "order_rows": order.dataframe().count(),
     "empty_rows": order.empty_dataframe().count(),
     "empty_columns": sorted(f.name.lower() for f in order.empty_dataframe().schema),
     "customer_columns": sorted(f.name.lower() for f in customer.dataframe().schema),
     "customer_rows": customer.dataframe().count(),
-    "folder_path": export.path() if mounted else None,
-    "staging_folder": export.staging_folder() if mounted else None,
 })
 '''
 
@@ -114,38 +109,22 @@ def test_an_empty_dataframe_keeps_the_built_shape(reached):
 
 
 def test_a_folder_resolves_to_the_directory_the_build_created(reached, lakehouse_estate):
-    """Spark-addressed, so this half is identical on both transports."""
+    """No mount anywhere in it: the target Lakehouse is not the attached one on
+    Fabric, and a folder still resolves — which is the point of addressing it
+    through the Lakehouse's own root."""
 
     env = lakehouse_estate.env
-    expected = env.resolver.folder_object(
+    target = FolderTarget(lakehouse=env.target)
+    folder = env.resolver.folder_object(target, "Sales", "OrderExport")
+
+    assert reached["folder_path"] == folder.value
+    assert env.store.exists(folder)
+
+
+def test_staging_sits_beside_the_folder_it_belongs_to(reached, lakehouse_estate):
+    env = lakehouse_estate.env
+
+    assert reached["staging_folder"] == f"{reached['folder_path']}_Staging"
+    assert reached["staging_folder"] == env.resolver.folder_staging(
         FolderTarget(lakehouse=env.target), "Sales", "OrderExport"
     ).value
-
-    assert reached["files_path"] == expected
-    assert env.store.exists(env.resolver.folder_object(
-        FolderTarget(lakehouse=env.target), "Sales", "OrderExport"
-    ))
-
-
-def test_the_filesystem_path_follows_the_mount(reached, lakehouse_estate):
-    """The one platform difference, asserted rather than avoided.
-
-    Locally the Lakehouse *is* a directory, so a folder object has an ordinary
-    path. In Fabric only the session's attachment is mounted, and the session
-    attaches to the Weaver Lakehouse while the build targets another — so the
-    target's folders have no filesystem path at all, and say so. The attached
-    case is covered by ``test_an_object_resolves_the_lakehouse_the_session_attached``.
-    """
-
-    env = lakehouse_estate.env
-
-    if env.label == "local":
-        assert reached["fuse_root"] == reached["spark_root"]
-        assert reached["folder_path"] == reached["files_path"]
-        assert reached["staging_folder"] == f"{reached['files_path']}_Staging"
-        assert reached["staging_folder"] == env.resolver.folder_staging(
-            FolderTarget(lakehouse=env.target), "Sales", "OrderExport"
-        ).value
-    else:
-        assert reached["fuse_root"] is None
-        assert reached["folder_path"] is None

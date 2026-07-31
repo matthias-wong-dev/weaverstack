@@ -99,39 +99,41 @@ class ItemRef:
 
 @dataclass(frozen=True)
 class FolderTarget:
-    """A directory inside a Lakehouse Files area.
+    """A Lakehouse Files area — ``Sales/Files``, and nothing further.
 
-    ``Sales/Files`` or ``Sales/Files/Extracts``. The optional subpath is a
-    root *within* level three, not a level of its own — a folder object's
-    ``Schema.Object`` still materialises beneath it.
+    A folder object's physical location is derived from its identity alone:
+    ``Files/<Schema>/<Object>``. A binding-level subpath used to be accepted here,
+    and it made that derivation untrue — the same object landed in different
+    places depending on how its item was bound, so authored code could not compose
+    its own path and neither could anything else without carrying the binding
+    around. One deterministic location per object is worth more than a
+    configurable root.
     """
 
     lakehouse: ItemRef
-    subpath: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "subpath",
-            tuple(validate_name(part, what="folder subpath segment") for part in self.subpath),
-        )
 
     @classmethod
     def parse(cls, text: str) -> "FolderTarget":
         segments = _split(text, what="folder target")
-        if len(segments) < 2:
+        if len(segments) != 2:
             raise IdentityError(
-                f"folder target must be '<Lakehouse>/{FILES_AREA}[/<subpath>]', got {text!r}"
+                f"folder target must be '<Lakehouse>/{FILES_AREA}', got {text!r}"
+                + (
+                    " — a folder object lands at Files/<Schema>/<Object>, so there is "
+                    "nothing to configure beneath the area"
+                    if len(segments) > 2
+                    else ""
+                )
             )
         if segments[1] != FILES_AREA:
             raise IdentityError(
                 f"folder target must name the {FILES_AREA!r} area after the Lakehouse, "
                 f"got {segments[1]!r} in {text!r}"
             )
-        return cls(lakehouse=ItemRef(segments[0]), subpath=tuple(segments[2:]))
+        return cls(lakehouse=ItemRef(segments[0]))
 
     def __str__(self) -> str:
-        return "/".join((self.lakehouse.name, FILES_AREA, *self.subpath))
+        return f"{self.lakehouse.name}/{FILES_AREA}"
 
 
 @dataclass(frozen=True)

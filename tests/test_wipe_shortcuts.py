@@ -137,29 +137,6 @@ def test_only_the_area_being_wiped_loses_its_shortcuts(lakehouses, shortcut_work
     assert shortcut_workspace.removed == ["Files/Sales/Landed"]
 
 
-def test_a_subpath_target_leaves_shortcuts_it_never_reached(lakehouses, monkeypatch):
-    """A folder target may be a root within Files, and scope has to follow it.
-
-    ``Sales_LH/Files/Extracts`` clears only beneath itself, so taking away a
-    pointer under ``Files/Sales`` would be removing something the wipe never
-    touched.
-    """
-
-    shortcuts = (
-        Shortcut(path="Files/Extracts", name="Inbound", target_item_id="producer"),
-        Shortcut(path="Files/Sales", name="Landed", target_item_id="producer"),
-    )
-    resolver = _ShortcutResolver(lakehouses.resolver, shortcuts)
-    monkeypatch.setattr(WIPE_MODULE, "resolver_for", lambda workspace: resolver)
-
-    wipe_folder_target(
-        FolderTarget.parse(f"{lakehouses.target.name}/Files/Extracts"),
-        lakehouses.workspace,
-    )
-
-    assert resolver.removed == ["Files/Extracts/Inbound"]
-
-
 def test_a_dry_run_reports_the_shortcut_without_taking_it_away(
     lakehouses, shortcut_workspace
 ):

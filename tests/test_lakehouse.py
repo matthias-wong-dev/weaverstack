@@ -33,7 +33,7 @@ class FakeSpark:
         return self.settings.get(key, default)
 
 
-# --- the two transports -----------------------------------------------------
+# --- one root, both areas ---------------------------------------------------
 
 
 def test_one_root_carries_both_lakehouse_areas():
@@ -43,26 +43,19 @@ def test_one_root_carries_both_lakehouse_areas():
     assert lakehouse.location.files_root == "abfss://ws@host/lh/Files"
 
 
-def test_the_fuse_root_addresses_the_same_layout():
-    lakehouse = Lakehouse(
-        name="Sales_LH", spark_root="abfss://ws@host/lh", fuse_root="/lakehouse/default"
-    )
+def test_a_folder_hangs_off_the_same_root_as_a_table():
+    """One root, both areas — nothing an object reaches depends on a mount."""
 
-    assert lakehouse.folder_path("Sales", "Export") == "/lakehouse/default/Files/Sales/Export"
-
-
-def test_an_unmounted_lakehouse_has_no_filesystem_path():
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    with pytest.raises(LoadError, match="no FUSE mount"):
-        lakehouse.folder_path("Sales", "Export")
+    assert lakehouse.folder_path("Sales", "Export") == "abfss://ws@host/lh/Files/Sales/Export"
 
 
 def test_a_trailing_separator_does_not_double_up():
-    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/", fuse_root="/mnt/lh/")
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/")
 
     assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
-    assert lakehouse.folder_path("Sales", "Export") == "/mnt/lh/Files/Sales/Export"
+    assert lakehouse.folder_path("Sales", "Export") == "abfss://ws@host/lh/Files/Sales/Export"
 
 
 def test_a_root_must_be_a_real_root():
@@ -119,7 +112,6 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
 
     assert lakehouse.name == "Sales_LH"
     assert lakehouse.spark_root == str(tmp_path / "Sales_LH")
-    assert lakehouse.fuse_root == str(tmp_path / "Sales_LH")
     assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
 
 
@@ -170,7 +162,6 @@ def test_the_attached_lakehouse_comes_from_the_sessions_own_settings():
 
     assert lakehouse.name == "Sales_LH"
     assert lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
-    assert lakehouse.fuse_root == "/lakehouse/default"
 
 
 def test_an_unnamed_attachment_falls_back_to_its_id():

@@ -17,17 +17,18 @@ There is exactly one exception, and it is the notebook case:
 
 Both produce the same value, so authored code cannot tell which path built it.
 
-**Two roots, one location.** ``spark_root`` is what Spark and Hadoop address —
-an ``abfss://`` URL on Fabric, a directory locally. ``fuse_root`` is what
-ordinary filesystem calls address — ``/lakehouse/default`` on Fabric, the same
-directory locally. They name the same storage through different mechanisms, so
-the path arithmetic is shared: both are turned into a
-:class:`~weaver.locations.LakehouseSparkLocation` and joined by it, rather than
-by a second set of string joins that could drift.
+**One root, both areas.** ``spark_root`` is what Spark and Hadoop address — an
+``abfss://`` URL on Fabric, a directory locally — and *everything* an authored
+object reaches hangs off it: tables under ``Tables/``, folders under ``Files/``.
+It is turned into a :class:`~weaver.locations.LakehouseSparkLocation` and joined
+by that, so there is one piece of path arithmetic rather than a second set of
+string joins that could drift.
 
-``fuse_root`` is None when there is no mount — a Fabric Lakehouse that is not the
-session's default has no FUSE path, and asking for a folder path there fails with
-that reason rather than composing one that does not exist.
+Deliberately not a mount. ``/lakehouse/default`` addresses whichever Lakehouse a
+notebook attached, and orchestration runs detached against Lakehouses it resolved
+by name — so a folder that could only be reached through a mount could not be
+loaded at all by the thing that loads it. The Hadoop-compatible root reaches
+every resolved Lakehouse, attached or not, which is why it is the only one here.
 """
 
 from __future__ import annotations
@@ -40,9 +41,6 @@ from .locations import LakehouseSparkLocation
 from .resolution import TABLES_AREA
 from .spark.destination import SparkDestination
 from .targets import FILES_AREA, ItemRef
-
-#: Where Fabric mounts the notebook's attached Lakehouse for ordinary file access.
-FUSE_DEFAULT_ROOT = "/lakehouse/default"
 
 #: The Spark-facing root of a Fabric item. The same template as
 #: :func:`weaver.fabric.onelake.abfss_root`, repeated because the core imports
@@ -79,47 +77,30 @@ class Lakehouse:
 
     name: str
     spark_root: str
-    fuse_root: str | None = None
     destination: SparkDestination | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "spark_root", _root(self.spark_root, what="spark root"))
-        if self.fuse_root is not None:
-            object.__setattr__(self, "fuse_root", _root(self.fuse_root, what="FUSE root"))
+        object.__setattr__(self, "spark_root", _root(self.spark_root, what="root"))
         if not str(self.name).strip():
             raise LoadError("a Lakehouse must be named")
 
-    # --- the two transports ------------------------------------------------
+    # --- one object's physical location ------------------------------------
 
     @property
     def location(self) -> LakehouseSparkLocation:
-        """The Spark-addressed roots — what Delta reads and writes through."""
+        """The two areas this Lakehouse presents, joined by one arithmetic."""
 
         return _areas(self.name, self.spark_root)
 
-    @property
-    def fuse_location(self) -> LakehouseSparkLocation:
-        """The filesystem-addressed roots. Fails when nothing is mounted."""
-
-        if self.fuse_root is None:
-            raise LoadError(
-                f"Lakehouse {self.name!r} has no FUSE mount, so it has no ordinary "
-                "filesystem path — only the notebook's attached Lakehouse is mounted, "
-                "and any other is reached through Spark or a store"
-            )
-        return _areas(self.name, self.fuse_root)
-
-    # --- one object's physical location ------------------------------------
-
     def table_path(self, schema: str, name: str) -> str:
-        """Where one table's Delta files live, for Spark to read."""
+        """Where one table's Delta files live."""
 
         return self.location.table_path(schema, name)
 
     def folder_path(self, schema: str, name: str) -> str:
-        """Where one folder object's files live, for ordinary file access."""
+        """Where one folder object's files live."""
 
-        return self.fuse_location.folder_path(schema, name)
+        return self.location.folder_path(schema, name)
 
     def qualify(self, schema: str, name: str) -> str:
         """One object, as a statement in this session must name it."""
@@ -149,7 +130,6 @@ def lakehouse_for(resolver: Any, item: ItemRef | str) -> Lakehouse:
     return Lakehouse(
         name=reference.name,
         spark_root=resolver.spark_root(reference),
-        fuse_root=resolver.fuse_root(reference),
         destination=resolver.spark_destination(reference),
     )
 
@@ -185,8 +165,11 @@ def default_lakehouse(spark: Any) -> Lakehouse:
         )
     return Lakehouse(
         name=name or item,
+        # The attachment's storage is reached the same way every other Lakehouse
+        # is — by its OneLake root. The ``/lakehouse/default`` mount addresses the
+        # same bytes, but only from a session that attached it, so nothing here
+        # depends on one.
         spark_root=_ABFSS_ROOT.format(workspace=workspace, item=item),
-        fuse_root=FUSE_DEFAULT_ROOT,
         # The one place plain two-part naming is correct: this Lakehouse *is* what
         # the session is attached to, so its catalogue is the session's own.
         destination=SparkDestination(item=name or item),

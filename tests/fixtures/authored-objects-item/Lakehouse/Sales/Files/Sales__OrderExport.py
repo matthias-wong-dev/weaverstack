@@ -11,17 +11,13 @@ Revision notes:
   - 2026-07-30 Created.
 """
 
-import shutil
-from pathlib import Path
-
 from weaver import Folder
 
 
 class Sales__OrderExport(Folder):
     def read(self):
-        staging = Path(self.staging_folder())
-        shutil.copyfile(
-            Path(__file__).parent.parent / "lib" / "data" / "orders.csv",
-            staging / "orders.csv",
-        )
-        return staging, []
+        # The staging directory is addressed through the Lakehouse's own root, so
+        # a fetch writes there with Hadoop-compatible access rather than ordinary
+        # file calls — the destination Lakehouse is not mounted when a load runs
+        # detached against it.
+        return self.staging_folder(), []

@@ -14,9 +14,7 @@ from weaver.errors import IdentityError
 
 ROUND_TRIP = [
     (FolderTarget, "Sales/Files"),
-    (FolderTarget, "Sales/Files/Extracts"),
-    (FolderTarget, "Control/Files/Exports"),
-    (FolderTarget, "Inventory/Files/Forecasts/Daily"),
+    (FolderTarget, "Control/Files"),
     (DeltaTarget, "Sales"),
     (WarehouseTarget, "Reporting"),
     (ItemRef, "Weaver"),
@@ -33,14 +31,19 @@ def test_parsing_is_stable(kind, text):
     assert kind.parse(text) == kind.parse(str(kind.parse(text)))
 
 
-def test_folder_target_splits_lakehouse_and_subpath():
-    target = FolderTarget.parse("Sales/Files/Extracts/Daily")
-    assert target.lakehouse == ItemRef("Sales")
-    assert target.subpath == ("Extracts", "Daily")
+def test_folder_target_names_a_lakehouse_and_its_files_area():
+    assert FolderTarget.parse("Sales/Files").lakehouse == ItemRef("Sales")
 
 
-def test_folder_target_may_be_the_files_root():
-    assert FolderTarget.parse("Sales/Files").subpath == ()
+def test_folder_target_refuses_anything_beneath_the_files_area():
+    """A folder object lands at Files/<Schema>/<Object>, derived from its identity.
+
+    A configurable root would make that derivation false, so the binding cannot
+    offer one — authored code composes this path from identity alone.
+    """
+
+    with pytest.raises(IdentityError, match="nothing to configure"):
+        FolderTarget.parse("Sales/Files/Extracts")
 
 
 def test_folder_target_requires_the_files_area():

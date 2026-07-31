@@ -27,19 +27,18 @@ def test_an_item_holds_files_and_tables(resolver):
     assert resolver.tables_root(item).value == "/srv/.local/Sales/Tables"
 
 
-def test_a_folder_target_may_carry_a_subpath(resolver):
+def test_a_folder_target_resolves_to_the_files_area(resolver):
     assert resolver.folder_root(FolderTarget.parse("Sales/Files")).value == (
         "/srv/.local/Sales/Files"
     )
-    assert resolver.folder_root(FolderTarget.parse("Sales/Files/Extracts")).value == (
-        "/srv/.local/Sales/Files/Extracts"
-    )
 
 
-def test_a_folder_object_materialises_beneath_the_configured_root(resolver):
-    target = FolderTarget.parse("Sales/Files/Extracts")
+def test_a_folder_object_materialises_at_its_identity(resolver):
+    """``Files/<Schema>/<Object>``, derived from the object and nothing else."""
+
+    target = FolderTarget.parse("Sales/Files")
     assert resolver.folder_object(target, "Budget", "BudgetPaper").value == (
-        "/srv/.local/Sales/Files/Extracts/Budget/BudgetPaper"
+        "/srv/.local/Sales/Files/Budget/BudgetPaper"
     )
 
 

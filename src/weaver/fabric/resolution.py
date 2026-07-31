@@ -129,21 +129,10 @@ class FabricResolver:
 
         return abfss_root(self.workspace.id, self.resolve(item, item_type=LAKEHOUSE).id)
 
-    def fuse_root(self, item: ItemRef) -> None:
-        """Always None: a resolved Lakehouse is not a mounted one.
-
-        Fabric mounts one Lakehouse per session — the notebook's attachment, at
-        ``/lakehouse/default`` — and this resolver exists to reach the ones that
-        are *not* attached. Answering None is the honest result; the alternative
-        is a path that looks usable and resolves to the wrong Lakehouse's files.
-        """
-
-        return None
-
     # --- targets ----------------------------------------------------------
 
     def folder_root(self, target: FolderTarget) -> Location:
-        return self.files_root(target.lakehouse).join(*target.subpath)
+        return self.files_root(target.lakehouse)
 
     def folder_object(self, target: FolderTarget, schema: str, name: str) -> Location:
         return self.folder_root(target).join(

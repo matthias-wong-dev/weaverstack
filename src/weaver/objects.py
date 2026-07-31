@@ -130,10 +130,9 @@ class WeaverObject:
         self.lakehouse: Lakehouse = (
             lakehouse if lakehouse is not None else default_lakehouse(spark)
         )
-        #: The destination's root, as Spark addresses it.
+        #: The destination's root — what Spark and Hadoop address. Tables and
+        #: folders both hang off it, so nothing an object reaches needs a mount.
         self.spark_root = self.lakehouse.spark_root
-        #: The same root as ordinary file access addresses it, when it is mounted.
-        self.fuse_root = self.lakehouse.fuse_root
 
     # --- identity ---------------------------------------------------------
 
@@ -164,11 +163,12 @@ class Folder(WeaverObject):
     """
 
     def path(self) -> str:
-        """This folder's materialised location, as an ordinary filesystem path.
+        """This folder's materialised location, beneath the Lakehouse's own root.
 
-        A folder is written and read with ordinary file calls, so this is the FUSE
-        path rather than the Spark one. A Lakehouse that is not mounted has none,
-        and says so rather than composing a path that does not exist.
+        Hadoop-compatible, not a mount. ``/lakehouse/default`` addresses whichever
+        Lakehouse a notebook attached, and a load runs detached against Lakehouses
+        it resolved by name — so a folder reachable only through a mount could not
+        be loaded by the thing that loads it.
         """
 
         return self.lakehouse.folder_path(*self.identity)

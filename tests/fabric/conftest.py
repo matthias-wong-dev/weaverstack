@@ -1,11 +1,15 @@
 """Fixtures for opt-in Fabric integration tests.
 
 These touch a real workspace and a running capacity, so they are deselected by
-default and skip unless `WEAVER_FABRIC_WORKSPACE` names a workspace to use.
+default: `-m fabric` is what asks for them.
 
-They create their own Lakehouses and delete them afterwards. Nothing
-pre-existing in the workspace is touched, and the names are prefixed so a
-leftover from an interrupted run is recognisable.
+The estate is permanent and named by default — `PYTEST_WORKSPACE`, holding
+`PYTEST_WEAVER` and the `PYTEST_LH_*` Lakehouses — so a run needs no environment
+at all. Every name is still overridable (`WEAVER_FABRIC_WORKSPACE`,
+`WEAVER_PYTEST_<ROLE>`) for a tenant that arranges its items differently.
+
+Items are found rather than made, and emptied rather than re-created. The
+lifecycle tests that do create and delete carry their own `provisioning` marker.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ from weaver import Workspace, ItemRef, Store
 from weaver.spark import SparkCatalogue
 
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
+#: The permanent suite workspace. A default rather than a required export: the
+#: estate it holds is permanent too, so naming it per run was ceremony.
+DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 #: The Environment the session attaches to — installed once with `weaver install`
 #: and consumed by the suite, never uploaded by it.
 ENVIRONMENT_ENV = "WEAVER_FABRIC_ENVIRONMENT"
@@ -48,7 +55,7 @@ def _timed_session_run(session, label: str, body: str):
 
 @pytest.fixture(scope="session")
 def fabric_workspace_item():
-    """The workspace named by WEAVER_FABRIC_WORKSPACE."""
+    """The suite's workspace — ``PYTEST_WORKSPACE`` unless one is named."""
 
     pytest.importorskip("azure.identity", reason="install the [fabric] extra")
     pytest.importorskip("requests", reason="install the [fabric] extra")
@@ -58,9 +65,7 @@ def fabric_workspace_item():
 
     prefer_cli_credential()
 
-    name = os.environ.get(WORKSPACE_ENV)
-    if not name:
-        pytest.skip(f"set {WORKSPACE_ENV} to run Fabric tests")
+    name = os.environ.get(WORKSPACE_ENV, DEFAULT_WORKSPACE)
 
     from weaver.errors import WeaverError
     from weaver.fabric import find_workspace
