@@ -99,31 +99,36 @@ Measured across every marker:
 
 | | tests | runtime |
 |---|---|---|
-| `pytest` (pure Python, incl. 68 targeted) | 1154 | 11s |
-| `pytest -m spark` (incl. 13 boundary) | 89 | 5m33s |
-| `pytest -m fabric` | 51 | ~15m |
-| `pytest -m full_integration` (both transports) | 2 | 9m23s |
+| `pytest` (pure Python, incl. 93 targeted) | 1179 | 12s |
+| `pytest -m spark` (incl. 21 boundary) | 98 | 6m33s |
+| `pytest -m fabric` | 46 | **6m39s** |
+| `pytest -m full_integration` | 1 | see below |
 
-Fabric transport, before and after this work:
+Fabric transport, over the course of this work:
 
-| | Livy calls | wall |
+| | Livy calls | Livy elapsed | wall |
+|---|---|---|---|
+| start | 23 | 852s | 16m37s |
+| after the Warehouse module | 20 | — | 17m35s |
+| after the alias and catalogue rewrites | **12** | **202s** | **6m39s** |
+
+Where the reduction came from, and none of it from asserting less:
+
+| module | before | after |
 |---|---|---|
-| before | 23 | 16m37s |
-| after | 20 | 17m35s |
+| `test_warehouse_build.py` | 4 calls / 195s | retired — TDS, 0 calls |
+| `test_cross_item_alias.py` | 10 calls / 486s | 2 calls / 32s |
+| `test_item_catalogue_fabric.py` | 2 calls / 150s | 2 calls / 91s |
 
-**The suite is not yet materially faster, and the number should not be dressed
-up.** Four calls and 195s went with `test_warehouse_build.py`; one call and 111s
-came back to keep the row-3 claim it carried. Net ~85s — less than the variance
-between runs, where the same generate-and-install submissions have ranged
-614–707s.
+The pattern is the same in each. The bundle is generated on the desktop, in pure
+Python, so what runs against Fabric is provably what the build produces; and only
+the part that *has* to be remote is run — an action, an install, a wipe — rather
+than the estate around it. Decisions moved to `tests/targeted`, where they cost
+milliseconds and say which decision was wrong.
 
-What changed is not the total. It is that a component layer now exists, the
-transport is countable, and 97% of the remaining Fabric time sits in three named
-modules rather than being spread invisibly.
-
-The journey alone is 14 calls / 446s of that, and 408s of *those* are the eight
-generate-and-install submissions — genuine build work, not transport. Merging
-submissions would save the round trips (~4s each), not the builds.
+What remains is nearly all genuine work: the catalogue bootstrap (84s) is Weaver
+installing its own catalogue inside a session, and the in-session bundle install
+(54s) is the row-3 claim. Neither is transport waste.
 
 ## Layer by layer
 
