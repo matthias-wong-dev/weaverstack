@@ -67,7 +67,14 @@ def build_warehouse_item(clean_disposable_warehouse):
     warehouse = clean_disposable_warehouse
     target = warehouse_target(warehouse)
 
-    def run(repository, *, inventory=None, rebuild=False):
+    def run(repository, *, inventory=None, rebuild=False, build=True):
+        """``build=False`` is the unchanged estate: nothing to rebuild, only prune.
+
+        That is the real second-build shape — signatures match, so incremental
+        selection chooses no work — and it is the only way to exercise prune
+        against an estate that is already correct.
+        """
+
         identity = item_id(ITEM)
         selected = {
             key for key in repository.source_documents if key.item == identity
@@ -85,7 +92,7 @@ def build_warehouse_item(clean_disposable_warehouse):
             selected_documents=selected,
             selected_aliases=set(),
             selected_for_drop=set(selected) if rebuild else set(),
-            selected_for_build=selected,
+            selected_for_build=selected if build else set(),
             registered=(
                 {key: registered_document(key) for key in selected} if rebuild else {}
             ),
@@ -145,6 +152,12 @@ def estate(tmp_path_factory, build_warehouse_item):
                 "DWG.ActiveCustomer",
                 select="select CustomerId from [DWG].[Customer]",
                 depends_on="DWG.Customer",
+            ),
+            "DWG.CustomerDim.sql": warehouse_table(
+                "DWG.CustomerDim",
+                select="select CustomerId, CustomerName from [DWG].[Customer]",
+                primary_key="CustomerKey",
+                identity="CustomerKey",
             ),
         },
     )
@@ -221,6 +234,60 @@ def test_a_warehouse_view_builds_over_the_table_it_reads(
     )
 
     assert rows[0]["n"] == 0
+
+
+def test_a_dimension_gets_a_weaver_managed_bigint_surrogate(
+    estate, clean_disposable_warehouse
+):
+    """A column the declaration asks for and the query never produces.
+
+    `Identity: CustomerKey` names a surrogate Weaver adds itself, so the query
+    below it selects only the business columns. Whether the engine then creates a
+    `bigint` — and whether it tolerates the create at all — is a Fabric answer.
+    """
+
+    columns = columns_of(clean_disposable_warehouse, "DWG", "CustomerDim")
+
+    assert columns["customerkey"]["type_name"] == "bigint"
+    assert {"customerid", "customername"} <= set(columns)
+
+
+def test_prune_removes_the_unmanaged_and_spares_the_managed(
+    estate, build_warehouse_item, clean_disposable_warehouse
+):
+    """Prune executed, not merely planned — the destructive direction, for real.
+
+    Everywhere else prune is asserted as a *decision*: pure Python renders the
+    actions, and the boundary tests confirm the inventory it decided from is
+    accurate. This runs the frozen T-SQL drops against a real Warehouse, which is
+    the one thing neither can say — and then checks what survived, because what
+    prune spares is the assertion worth making.
+    """
+
+    executor = clean_disposable_warehouse.executor
+    executor.execute_script("create schema Legacy;")
+    executor.execute_script("create table [Legacy].[Thing] ([x] int not null);")
+    executor.execute_script("create table [DWG].[OldTable] ([x] int not null);")
+
+    installed = read_warehouse_inventory(
+        warehouse_target(clean_disposable_warehouse).bound, sql=executor
+    )
+    results = build_warehouse_item(estate, inventory=installed, build=False)
+
+    failures = {r.action_id: r.error_message for r in results if r.status == "failed"}
+    assert not failures, failures
+
+    after = read_warehouse_inventory(
+        warehouse_target(clean_disposable_warehouse).bound, sql=executor
+    )
+    remaining = {name.casefold() for name in after.tables}
+    assert "dwg.oldtable" not in remaining
+    assert "legacy.thing" not in remaining
+    assert "legacy" not in {name.casefold() for name in after.schemas}
+
+    # And the declared estate is untouched.
+    assert {"dwg.customer", "dwg.customerdim"} <= remaining
+    assert "dwg.activecustomer" in {name.casefold() for name in after.views}
 
 
 # --- does a read report what a build left? ------------------------------------

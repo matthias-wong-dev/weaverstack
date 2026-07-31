@@ -143,9 +143,25 @@ replace them; the conversion has not been done.
 
 | module | Livy | what it actually asks | conversion |
 |---|---|---|---|
-| `test_cross_item_alias.py` | 10 calls / 533s | is a shortcut really created, is it left alone on rebuild, does the endpoint refresh publish it | render + execute the alias action; observe once |
-| `test_warehouse_build.py` | 4 calls / 266s | does Fabric accept Weaver's T-SQL and produce these physical types | execute rendered DDL over TDS — **needs no Livy at all** |
-| `test_item_catalogue_fabric.py` | 2 calls / 196s | catalogue build, prune and wipe in-session | genuinely session work; reduce, do not remove |
+| `test_cross_item_alias.py` | 10 calls / 486s | is a shortcut really created, is it left alone on rebuild, does the endpoint refresh publish it | render + execute the alias action; observe once — **not yet done** |
+| ~~`test_warehouse_build.py`~~ | ~~4 calls / 195s~~ | — | **done**: replaced by `test_warehouse_boundary.py`, 10 tests / 7s / **zero Livy** |
+| `test_item_catalogue_fabric.py` | 2 calls / 150s | catalogue build, prune and wipe in-session | genuinely session work; reduce, do not remove |
+
+### Discarded, claim by claim
+
+`test_warehouse_build.py` was the first module retired. Every claim was re-homed
+before it went, which is the rule: an old test passing proves the refactor is
+sound, not that its claim moved.
+
+| its claim | where it lives now |
+|---|---|
+| tables built empty | `test_warehouse_boundary.py` |
+| declared types survive | `test_warehouse_boundary.py` |
+| PK and audit columns not nullable | `test_warehouse_boundary.py` |
+| objects present in the catalogue | `test_warehouse_boundary.py` (inventory fidelity) |
+| a dimension gets a bigint surrogate | `test_warehouse_boundary.py` |
+| prune removes unmanaged, spares managed | `test_warehouse_boundary.py` (executed, not just planned) |
+| **dependency ordering** | `test_item_plan.py` — **pure Python; never needed Fabric** |
 
 Everything already probe-shaped — `test_livy_import.py`,
 `test_authored_object_attachment.py`, `test_warehouse_wipe.py`,

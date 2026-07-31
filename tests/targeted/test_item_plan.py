@@ -264,6 +264,60 @@ def test_a_view_is_built_after_the_table_it_reads(tmp_path):
     )
 
 
+def test_a_warehouse_item_orders_its_objects_by_dependency(tmp_path):
+    """The same ordering claim on the SQL side, and it needs no Warehouse.
+
+    A Warehouse build used to prove this by installing into Fabric and reading
+    sequence numbers off the bundle. The ordering is a property of the item's
+    document graph, so it is decided here — what Fabric can say is only whether
+    the statements are valid, which is a different test.
+    """
+
+    from factories import warehouse_table, warehouse_view
+
+    repository = single_document_repository(
+        tmp_path,
+        item="Warehouse/Reporting",
+        documents={
+            "DWG.Customer.sql": warehouse_table("DWG.Customer"),
+            "DWG.CustomerOrder.sql": warehouse_table(
+                "DWG.CustomerOrder",
+                select="select CustomerId from [DWG].[Customer]",
+            ),
+            "DWG.Summary.sql": warehouse_view(
+                "DWG.Summary",
+                select="select CustomerId from [DWG].[CustomerOrder]",
+                depends_on="DWG.CustomerOrder",
+            ),
+        },
+    )
+    item = item_id("Warehouse/Reporting")
+    selected = {key for key in repository.source_documents if key.item == item}
+    target = bound_target(kind="warehouse", item_id="Reporting_WH")
+
+    planned = plan(
+        repository,
+        item=item,
+        target=target,
+        selected_documents=selected,
+        selected_for_build=selected,
+    )
+
+    ordered = [
+        action.resource_node_id
+        for stage in planned.stages
+        for batch in stage.batches
+        for action in batch.actions
+        if action.kind.startswith("build_")
+    ]
+    assert ordered.index("Warehouse/Reporting/DWG.Customer") < ordered.index(
+        "Warehouse/Reporting/DWG.CustomerOrder"
+    )
+    assert ordered.index("Warehouse/Reporting/DWG.CustomerOrder") < ordered.index(
+        "Warehouse/Reporting/DWG.Summary"
+    )
+
+
 def test_a_folder_is_planned_without_any_schema_creation(tmp_path):
     """A folder lives under Files and has no catalogue schema to create."""
 
