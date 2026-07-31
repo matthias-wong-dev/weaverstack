@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from weaver.locations import Location
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -230,3 +232,76 @@ def test_registry_merge_is_last_and_item_scoped(tmp_path):
     assert "`repository`" not in reconciliation.registry.merge
     assert "`item_type` = 'Lakehouse'" in reconciliation.registry.merge
     assert "`item_name` = 'Raw'" in reconciliation.registry.merge
+
+
+# --- reading a catalogue of an older shape -------------------------------------
+
+
+class _Absent(Exception):
+    def getErrorClass(self):  # noqa: N802 - Spark's own spelling
+        return "TABLE_OR_VIEW_NOT_FOUND"
+
+
+class _FakeCatalogue:
+    """The narrowest thing ``read_catalogue_state`` will accept.
+
+    Duck-typed on purpose: the module names no Spark API, so a shape check needs
+    no session.
+    """
+
+    def __init__(self, columns_by_table):
+        self._columns = columns_by_table
+        self.spark = self
+
+    def expand(self, token: str) -> str:
+        return token.strip("{}").replace("object:", "")
+
+    def table(self, name: str):
+        table = name.split(".", 1)[1]
+        if table not in self._columns:
+            raise _Absent(name)
+        return self
+
+    def __call__(self, *_a, **_k):
+        raise AssertionError("no rows should be read")
+
+    @property
+    def columns(self):
+        return self._current
+
+
+class _Shaped(_FakeCatalogue):
+    def table(self, name: str):
+        table = name.split(".", 1)[1]
+        if table not in self._columns:
+            raise _Absent(name)
+        self._current = self._columns[table]
+        return self
+
+
+def test_a_registry_without_the_epoch_column_is_refused_by_name():
+    """It can be read but not written — the merge sets the epoch on every insert.
+
+    Failing here says which column of which table is wrong. Letting it through
+    would move the failure into the install, where it arrives as an engine
+    complaint about an unknown column and says nothing about the catalogue.
+    """
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    older = [name for name in REGISTRY.physical_columns if name != "build_epoch"]
+
+    with pytest.raises(BuildError, match=r"Registry\.build_epoch"):
+        read_catalogue_state(_Shaped({"Registry": older}), ())
+
+
+def test_a_registry_with_the_epoch_column_is_accepted():
+    from weaver.catalogue.state import read_catalogue_state
+
+    state = read_catalogue_state(
+        _Shaped({"Registry": list(REGISTRY.physical_columns)}), ()
+    )
+
+    assert state.status == "partial"
+    assert "Registry" in state.present_tables

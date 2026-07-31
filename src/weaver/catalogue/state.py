@@ -107,13 +107,18 @@ def read_catalogue_state(catalogue: Any, items) -> CatalogueState:
             raise
         present.add(table.name)
         folded = {column.casefold() for column in columns}
-        # Business columns only. A published column is written by the installer
-        # and never compared, so a catalogue built before one existed is an
-        # *older shape* rather than an incompatible one — the reader already
-        # gives this Weaver the column it expects as a typed null, and the next
-        # build repairs it. Requiring it here would turn a routine upgrade into
-        # a hard failure.
-        required = {name.casefold() for name in table.column_names}
+        # Published columns are required too, and deliberately: the merge writes
+        # one on every insert, so a catalogue without it can be *read* but not
+        # *written*. Exempting it here would let planning succeed and push the
+        # failure into the install, where it surfaces as an engine complaint
+        # about an unknown column rather than as a statement about the
+        # catalogue's shape. The reader's null tolerance answers a different
+        # question — a column that exists but predates some rows — and both hold
+        # at once: require the column, tolerate the value.
+        required = {
+            name.casefold()
+            for name in table.column_names + table.published_column_names
+        }
         absent_columns = sorted(required - folded)
         if absent_columns:
             incompatible.append(f"{table.name}.{absent_columns[0]}")
