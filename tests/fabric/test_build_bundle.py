@@ -15,6 +15,12 @@ because the write and the read went through the same session catalogue and the
 assertion passed either way. ``build_env.query`` resolves the object tokens
 against a named destination, so a read can only succeed where the write actually
 landed.
+
+Everything left here needs a target of its own: one installs from a bundle after
+deleting the source, one seeds orphans for prune to find, and one breaks a
+payload to watch the build stop. Assertions that merely *read* an installed
+estate live in ``test_build_bundle_estate`` and share one install between them,
+because a Fabric install is 75–123s and there is no reason to pay it twice.
 """
 
 from __future__ import annotations
@@ -118,34 +124,6 @@ def test_generate_and_install_lakehouse_bundle(build_env):
     assert _scalar(
         build_env.query("SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}")
     ) == 0
-
-
-@build_environments
-def test_nothing_is_built_in_the_weaver_lakehouse(build_env):
-    """The control plane is not the destination, and a build must not treat it as one.
-
-    This is the assertion the old two-part names made impossible. The session is
-    attached to the Weaver Lakehouse; an unqualified ``CREATE TABLE DWG.Customer``
-    lands there; and the old test then read ``DWG.Customer`` back through the same
-    session and found it. Asking the *Weaver* Lakehouse directly is what closes it.
-    """
-
-    build_env.install_repo()
-    build_env.install(build_env.generate())
-
-    weaver = build_env.weaver_destination
-    assert not build_env.schema_exists("DWG", destination=weaver)
-    assert not build_env.schema_exists("Raw", destination=weaver)
-    # And it did land in the destination, so the absence above is not vacuous.
-    assert build_env.schema_exists("DWG")
-
-
-@build_environments
-def test_install_report_is_written_into_the_bundle(build_env):
-    build_env.install_repo()
-    bundle = build_env.generate()
-    build_env.install(bundle)
-    assert build_env.store.exists(bundle.location.join("install-report.yml"))
 
 
 def _rebuild_with_broken_summary(build_env, bundle):

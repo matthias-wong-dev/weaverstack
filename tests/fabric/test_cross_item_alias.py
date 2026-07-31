@@ -92,7 +92,16 @@ def _await_addressable_lakehouse(session, destination, *, attempts=40, pause=5.0
     )
 
 
-def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bindings, empty=None):
+def _build_in_session(
+    fabric_workspace,
+    fabric_client,
+    session,
+    *,
+    fixture,
+    bindings,
+    empty=None,
+    bundle_name="aliastest",
+):
     """Push one repository, then generate **and** install it inside the session.
 
     Both phases run in Fabric because that is the product: the desktop only
@@ -125,6 +134,38 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
         if path.is_file() and "__pycache__" not in path.parts:
             store.write(root.join(*path.relative_to(fixture).parts), path.read_bytes())
 
+    def run(bundle_name: str) -> dict:
+        payload = session.run(_build_body(fabric_workspace, bindings, bundle_name)).payload
+        plan = BuildPlan.from_mapping(payload["plan"])
+        failures = {a["id"]: a["error"] for a in payload["actions"] if a["error"]}
+        if failures:
+            # Printed as well as asserted: pytest truncates a long repr, and a
+            # Fabric stack trace is the only thing that says what actually went
+            # wrong.
+            for name, error in failures.items():
+                print(f"ALIAS INSTALL FAILURE {name}:\n{error}")
+        assert payload["status"] == "succeeded", sorted(failures)
+        return {
+            "plan": plan,
+            "actions": {a["id"]: a for a in payload["actions"]},
+            "at": {
+                action.id: sequence.number
+                for sequence, _batch, action in plan.actions()
+            },
+            "resolver": resolver,
+            "session": session,
+        }
+
+    # ``rebuild`` runs the same generate-and-install again over the estate this
+    # one just made — no emptying, no re-upload. That is what makes the
+    # incremental claim testable here at the cost of one extra round trip rather
+    # than a second pair of Lakehouses.
+    return {**run(bundle_name), "rebuild": run}
+
+
+def _build_body(fabric_workspace, bindings, bundle_name: str) -> str:
+    """One generate-and-install, as the program the Livy session runs."""
+
     binds = ", ".join(
         (
             f"ItemBinding(WeaverItemId.parse({item!r}), "
@@ -135,7 +176,7 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
         )
         for item, (kind, name) in bindings.items()
     )
-    body = (
+    return (
         "from weaver import ItemRef, FabricWorkspace, WeaverItemId\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.declaration import parse_item_repository\n"
@@ -158,10 +199,11 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
         "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
         "inventories = read_target_inventories(bindings, environment=environment)\n"
         "reconciled = read_reconciled_catalogue("
-        "bindings, inventories=inventories, environment=environment)\n"
+        "bindings, inventories=inventories, environment=environment, "
+        "repository=repository)\n"
         "bundle = generate_item_build_bundle(\n"
         "    repository, bindings=bindings,\n"
-        "    output=resolver.build_bundle('aliastest'),\n"
+        f"    output=resolver.build_bundle({bundle_name!r}),\n"
         "    store=store, control_lakehouse=control,\n"
         "    target_inventories=inventories, reconciled_catalogue=reconciled)\n"
         "report = install_bundle(bundle, environment=environment)\n"
@@ -171,25 +213,6 @@ def _build_in_session(fabric_workspace, fabric_client, session, *, fixture, bind
         "                             if a.error_type else None}\n"
         "                  for a in report.action_results()]})\n"
     )
-    payload = session.run(body).payload
-    plan = BuildPlan.from_mapping(payload["plan"])
-    failures = {a["id"]: a["error"] for a in payload["actions"] if a["error"]}
-    if failures:
-        # Printed as well as asserted: pytest truncates a long repr, and a Fabric
-        # stack trace is the only thing that says what actually went wrong.
-        for name, error in failures.items():
-            print(f"ALIAS INSTALL FAILURE {name}:\n{error}")
-    assert payload["status"] == "succeeded", sorted(failures)
-    return {
-        "plan": plan,
-        "actions": {a["id"]: a for a in payload["actions"]},
-        "at": {
-            action.id: sequence.number
-            for sequence, _batch, action in plan.actions()
-        },
-        "resolver": resolver,
-        "session": session,
-    }
 
 
 @pytest.fixture(scope="module")
@@ -437,6 +460,41 @@ def test_the_warehouse_item_gets_no_endpoint_refresh_of_its_own(
         "refresh-sql-endpoint-Lakehouse--Raw",
         "refresh-sql-endpoint-control",
     } <= refreshes
+
+
+# --- building the same estate again --------------------------------------------
+
+
+def test_a_second_build_leaves_the_shortcut_alone(alias_estate, fabric_client, fabric_alias_lakehouses):
+    """The incremental claim, against a real OneLake shortcut.
+
+    The emulator proves the *decision* — no alias action is planned — and does so
+    cheaply, over several scenarios, in ``test_cross_item_alias_incremental``.
+    What only a workspace can show is that the shortcut Fabric actually made is
+    still the same shortcut afterwards: not deleted and recreated, and still
+    pointing at the same item.
+
+    It costs one extra generate-and-install over the estate already provisioned
+    here, rather than a second pair of Lakehouses.
+    """
+
+    from weaver.fabric.shortcuts import list_shortcuts
+
+    consumer = alias_estate["consumer"]
+    before = list_shortcuts(consumer, client=fabric_client)
+    assert [shortcut.qualified for shortcut in before] == ["Tables/DWG/PortableCustomer"]
+
+    again = alias_estate["rebuild"]("aliasrebuild")
+
+    planned = [
+        action.kind for _sequence, _batch, action in again["plan"].actions()
+    ]
+    assert "create_alias" not in planned, (
+        "an unchanged alias over an unchanged source must not be replaced"
+    )
+
+    after = list_shortcuts(consumer, client=fabric_client)
+    assert after == before, "the shortcut itself must be untouched, not remade"
 
 
 # --- wiping a Lakehouse that holds a shortcut ----------------------------------

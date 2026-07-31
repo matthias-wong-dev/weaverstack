@@ -1,4 +1,4 @@
-"""An alias built twice — the same body on local Spark and on Fabric.
+"""An alias built twice, and left alone the second time.
 
 ``Lakehouse/Raw`` produces ``DWG.Customer``; ``Lakehouse/Curated`` aliases it as
 ``DWG.PortableCustomer`` and builds a view over that name. Both items are bound,
@@ -10,23 +10,27 @@ the first build made is still the same object afterwards. That is the whole
 subject, and it needs a real build rather than a planner test, because what is
 being claimed is that the *physical* alias survives untouched.
 
-The emulator makes a filesystem link where Fabric makes a OneLake shortcut. Both
-are pointers to another item's data, and the incremental decision that leaves one
-alone is identical — which is why this body runs either side rather than being a
-Fabric test with a local approximation. What only Fabric answers is elsewhere, in
-``test_cross_item_alias``: the shortcut is a workspace API call, and it is
-discovered asynchronously.
+**Local only, deliberately.** The emulator makes a filesystem link where Fabric
+makes a OneLake shortcut, and the incremental *decision* — plan an alias action
+or do not — is transport-independent: it is made from signatures and Registry
+epochs before any pointer is touched. So it is proved here, cheaply, over as many
+builds as it takes. Fabric carries the same estate for the things only a
+workspace answers (``test_cross_item_alias``: a shortcut is an API call, it is
+discovered asynchronously, and a Warehouse alias is a view over a SQL endpoint),
+and asserts the no-rebuild once there rather than repeating this.
 """
 
 from __future__ import annotations
 
 import pytest
 from build_envs import CROSS_ITEM_ALIAS_FIXTURE
-from build_envs import lakehouse_environments as build_environments
 
-pytestmark = pytest.mark.parametrize(
-    "weaver_repo_fixture", [CROSS_ITEM_ALIAS_FIXTURE], indirect=True
-)
+pytestmark = [
+    pytest.mark.spark,
+    pytest.mark.parametrize(
+        "weaver_repo_fixture", [CROSS_ITEM_ALIAS_FIXTURE], indirect=True
+    ),
+]
 
 PRODUCER = "Lakehouse/Raw"
 CONSUMER = "Lakehouse/Curated"
@@ -44,41 +48,39 @@ def _consumer_destination(build_env):
     return build_env.destinations[CONSUMER]
 
 
-@build_environments
-def test_the_first_build_makes_the_alias_and_the_second_leaves_it(build_env):
+def test_the_first_build_makes_the_alias_and_the_second_leaves_it(local_build_env):
     """Two builds of an unchanged repository. Only the first touches the alias."""
 
-    build_env.install_repo()
+    local_build_env.install_repo()
 
-    first = build_env.generate("alias-first")
+    first = local_build_env.generate("alias-first")
     assert len(_alias_actions(first)) == 1
-    assert build_env.install(first).status == "succeeded"
+    assert local_build_env.install(first).status == "succeeded"
 
-    consumer = _consumer_destination(build_env)
-    rows = build_env.query(
+    consumer = _consumer_destination(local_build_env)
+    rows = local_build_env.query(
         "SELECT count(*) AS n FROM {{object:DWG.PortableCustomer}}",
         destination=consumer,
     )
     assert next(iter(rows[0].values())) == 0
 
-    second = build_env.generate("alias-second")
+    second = local_build_env.generate("alias-second")
 
     assert _alias_actions(second) == [], (
         "an unchanged alias over an unchanged source must not be replaced"
     )
-    assert build_env.install(second).status == "succeeded"
+    assert local_build_env.install(second).status == "succeeded"
 
     # Still readable through the consumer's own name, so leaving it alone left a
     # working alias rather than merely skipping the work.
-    rows = build_env.query(
+    rows = local_build_env.query(
         "SELECT count(*) AS n FROM {{object:DWG.PortableCustomer}}",
         destination=consumer,
     )
     assert next(iter(rows[0].values())) == 0
 
 
-@build_environments
-def test_the_second_build_rebuilds_nothing_at_all(build_env):
+def test_the_second_build_rebuilds_nothing_at_all(local_build_env):
     """The alias is not a special case: an unchanged estate is a no-op estate.
 
     Were the alias still being replaced, this would show up as physical work in a
@@ -86,10 +88,10 @@ def test_the_second_build_rebuilds_nothing_at_all(build_env):
     made to remove.
     """
 
-    build_env.install_repo()
-    assert build_env.install(build_env.generate("noop-first")).status == "succeeded"
+    local_build_env.install_repo()
+    assert local_build_env.install(local_build_env.generate("noop-first")).status == "succeeded"
 
-    second = build_env.generate("noop-second")
+    second = local_build_env.generate("noop-second")
     physical = {
         action.kind
         for _sequence, _batch, action in second.plan.actions()
@@ -105,24 +107,23 @@ def test_the_second_build_rebuilds_nothing_at_all(build_env):
     assert physical == set()
 
 
-@build_environments
-def test_a_repointed_alias_is_replaced_and_its_consumers_follow(build_env):
+def test_a_repointed_alias_is_replaced_and_its_consumers_follow(local_build_env):
     """The other half: when the declaration does change, the alias is remade and
     the view written against it is rebuilt with it."""
 
-    build_env.install_repo()
-    assert build_env.install(build_env.generate("repoint-first")).status == "succeeded"
+    local_build_env.install_repo()
+    assert local_build_env.install(local_build_env.generate("repoint-first")).status == "succeeded"
 
-    build_env.write_repo_file(
+    local_build_env.write_repo_file(
         "Lakehouse/Curated/alias.yml",
         "aliases:\n  DWG.PortableCustomer: Lakehouse/Raw/DWG.Second\n",
     )
-    build_env.write_repo_file(
+    local_build_env.write_repo_file(
         "Lakehouse/Raw/DWG__Second.py",
         _SECOND_TABLE,
     )
 
-    second = build_env.generate("repoint-second")
+    second = local_build_env.generate("repoint-second")
     kinds = {
         action.resource_node_id or action.kind
         for _sequence, _batch, action in second.plan.actions()
@@ -132,7 +133,7 @@ def test_a_repointed_alias_is_replaced_and_its_consumers_follow(build_env):
     assert "Lakehouse/Curated/DWG.CustomerName" in kinds, (
         "the view over the alias depends on it and must be rebuilt with it"
     )
-    assert build_env.install(second).status == "succeeded"
+    assert local_build_env.install(second).status == "succeeded"
 
 
 _SECOND_TABLE = '''"""
