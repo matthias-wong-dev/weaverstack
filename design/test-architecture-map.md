@@ -4,6 +4,34 @@ What each layer claims, where it is claimed, and what is not claimed yet.
 
 This exists to be reviewed for **gaps**. The interesting column is the last one.
 
+## Layout
+
+Marker, directory, fixture and transport describe the same thing. That is not
+tidiness: a module under `tests/fabric` that answered to `-m spark` loaded the
+Fabric conftest, and with it a workspace, a credential and a session — so the
+two names described different sets and neither was honest.
+
+| command | directory | fixtures | what it needs |
+|---|---|---|---|
+| `pytest` | `tests/`, `tests/targeted`, `tests/support` | none | nothing |
+| `pytest -m spark` | `tests/spark` | `tests/spark/conftest.py` | a JDK |
+| `pytest -m fabric` | `tests/fabric` | `tests/fabric/conftest.py` | a workspace |
+| `pytest -m full_integration` | `tests/fabric` | `tests/fabric/conftest.py` | a workspace |
+| `pytest -m provisioning` | `tests/fabric` | `tests/fabric/conftest.py` | a workspace |
+
+```text
+tests/
+  targeted/    pure Python, by seam — the narrow fixture constructors live here
+  support/     shared harness: build env, observation, Livy ledger, claims
+  spark/       local Spark, incl. boundary/ for interface fidelity
+  fabric/      a real workspace, and nothing that does not need one
+```
+
+`tests/support` holds what belongs to neither transport — the build environment a
+test drives, and the claims that two transports both make. A module that spans
+both is a thin wrapper over a shared claim, not a parametrised module: a
+parametrised one can only be honest about one of its markers.
+
 ## The intended structure
 
 ```text
@@ -18,15 +46,7 @@ one full journey       composition only — never the first sight of a defect
 provisioning           opt-in, changes rarely
 ```
 
-Markers are peers; none implies another.
-
-```bash
-pytest                      # pure Python
-pytest -m spark             # local Spark/Delta
-pytest -m fabric            # targeted Fabric probes
-pytest -m full_integration  # the lifecycle journey, both transports
-pytest -m provisioning      # Fabric item lifecycle
-```
+Markers are peers; none implies another. See the table above for what each runs.
 
 ## The two prepared states
 
