@@ -721,10 +721,18 @@ class Journey:
         ``before`` mutates the repository or the target — it is the *move*, and
         the build that follows is what the assertions are about.
 
-        ``between`` runs after generation and before installation, for the one
-        claim that needs the world to change mid-transition: a bundle installs
-        from itself, so removing the source repository between the two phases
-        must not stop it.
+        ``between(env, bundle)`` runs after generation and before installation,
+        for the two claims that need the world to change mid-transition. It may
+        return a bundle to install *instead* of the generated one:
+
+        - removing the source repository, to prove a bundle installs from itself
+        - substituting a corrupted bundle, to prove a failing action stops its
+          barrier
+
+        A transition whose installation reports failure is recorded in full — the
+        step keeps its bundle and outcome, so the test that expects a failure can
+        inspect it — but the journey is marked failed, so anything after it is
+        skipped rather than asserting against a part-built estate.
         """
 
         if self._failed is not None:
@@ -736,9 +744,11 @@ class Journey:
                 before(self.env)
             bundle = self.env.generate(f"{self.name}-{name}")
             if between is not None:
-                between(self.env)
+                bundle = between(self.env, bundle) or bundle
             outcome = self.env.install(bundle)
             step = Step(name=name, bundle=bundle, outcome=outcome)
+            if outcome.status != "succeeded":
+                self._failed = name
         except BaseException as exc:  # recorded, not raised: the journey continues
             self._failed = name
             step = Step(name=name, error=exc)
@@ -1576,38 +1586,23 @@ def _install_estate(env) -> InstalledEstate:
     ],
 )
 def lakehouse_journey(request, weaver_repo_fixture):
-    """One Lakehouse estate, taken through every move a build has to survive.
+    """One Lakehouse estate for a journey to drive.
 
-    The transitions are run here, once, at module setup; the tests read what they
-    produced. That is the whole economy of it — the first build is the expensive
-    one, and each move after it is an *incremental* build over a target that is
-    already correct, which is a fraction of the cost of a full build into an
-    emptied Lakehouse.
+    **The transitions are deliberately not run here.** A fixture that took every
+    move up front and then handed the result to a set of tests would leave every
+    one of them inspecting the *final* estate, whatever transition each claimed
+    to be about — and a later move could then repair what an earlier one broke,
+    so the earlier assertion would pass on evidence that no longer existed. The
+    physical state has to be read at the point it is claimed about, which means
+    the moves and the assertions have to be interleaved by the test.
 
-    The order is not arbitrary:
-
-    ``install``    the estate from nothing, which is the only full build. The
-                   source repository is deleted between generation and
-                   installation, so this also proves a bundle installs from
-                   itself — a claim that costs nothing when folded in here and a
-                   whole extra install when asserted on its own
-    ``unchanged``  build again having changed nothing — the assertion the old
-                   one-shot estates structurally could not make
-    ``prune``      seed objects the item does not declare, then build again
-    ``broken``     left to the module's last test, because a failed install
-                   leaves the estate part-built and nothing after it could rely
-                   on what it found
+    What is shared is the estate: one target Lakehouse, installed from nothing
+    once, with every move after it an incremental build over a target that is
+    already correct.
     """
 
     with _journey_context(request, weaver_repo_fixture) as env:
-        journey = Journey(env, "lakehouse")
-        env.install_repo()
-        journey.run("install", between=lambda environment: environment.remove_repo())
-        # Put the source back: every later transition has to generate, and
-        # generation reads the repository.
-        journey.run("unchanged", before=lambda environment: environment.install_repo())
-        journey.run("prune", before=lambda environment: environment.seed_orphans())
-        yield journey
+        yield Journey(env, "lakehouse")
 
 
 @contextmanager

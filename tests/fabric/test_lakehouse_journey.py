@@ -1,15 +1,28 @@
 """One Lakehouse estate, built and then moved — on local Spark and on Fabric.
 
-Everything here reads a transition the ``lakehouse_journey`` fixture already
-took. Nothing in this module builds anything, which is the point: the estate is
-installed once and each move after it is an incremental build, so a dozen
-assertions cost what one used to.
+The estate is installed once and each move after it is an incremental build over
+a target that is already correct, so a whole build lifecycle costs roughly what a
+single install used to. It replaces three module estates that each paid a full
+install to ask what a *first* build does — the question the local suite already
+answers, and not the one incremental logic lives in.
 
-It replaces three separate module estates, each of which paid a full install to
-ask what a *first* build does — a question the local suite already answers. What
-this asks instead is what the second build does, and whether it correctly does
-nothing. That question is where incremental logic actually lives and no one-shot
-estate could reach it.
+**One test, not many, and that is the point.** Each phase asserts the physical
+state *immediately* after the transition it is about. Split into separate tests
+sharing a fixture that had already run every move, each would instead be reading
+the final estate — and a later move could repair what an earlier one broke, so
+the earlier assertion would pass on evidence that no longer existed. A build
+lifecycle is a sequence; asserting it out of order asserts something else.
+
+The phases, in the order they must run:
+
+``install``    the estate from nothing, the only full build. The source
+               repository is deleted between generation and installation, so
+               this also proves a bundle installs from itself
+``unchanged``  build again having changed nothing — an estate that is already
+               correct must cost nothing, which no one-shot estate could check
+``prune``      seed objects the item does not declare, then build again
+``broken``     last, because a failing install leaves the estate part-built and
+               nothing after it could rely on what it found
 
 **Every assertion names the Lakehouse it is about.** The session is attached to
 the Weaver Lakehouse and the build writes to a different one, so a query for a
@@ -26,7 +39,7 @@ from dataclasses import replace
 import pytest
 from build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
-from weaver import DeltaTarget, FolderTarget
+from weaver import FolderTarget
 
 pytestmark = pytest.mark.parametrize(
     "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True
@@ -52,137 +65,44 @@ def _scalar(rows):
     return next(iter(rows[0].values()))
 
 
-# --- the first build ----------------------------------------------------------
-
-
-def test_the_bundle_names_only_the_items_it_binds(lakehouse_journey):
-    plan = lakehouse_journey["install"].bundle.plan
-
-    assert plan.format_version == 1
-    assert plan.repository_name == "weaver_items"
-    assert {target.logical_item_name for target in plan.targets} == {"Sales", "_weaver"}
-    assert plan.omitted_nodes == ()
-
-
-def test_every_declared_object_is_built(lakehouse_journey):
-    env = lakehouse_journey.env
-
-    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
-    tables = {
+def _tables(env):
+    return {
         row["tableName"].lower()
         for row in env.query(f"SHOW TABLES IN {env.schema_name('DWG')}")
     }
-    assert {"customer", "order"} <= tables
-    views = {
+
+
+def _views(env):
+    return {
         row["viewName"].lower()
         for row in env.query(f"SHOW VIEWS IN {env.schema_name('DWG')}")
     }
-    assert {"activecustomer", "activecustomersummary"} <= views
 
 
-def test_a_table_is_built_empty_with_its_declared_shape(lakehouse_journey):
-    env = lakehouse_journey.env
-    columns = {
-        row["col_name"].lower()
-        for row in env.query("DESCRIBE TABLE {{object:DWG.Customer}}")
-        if row["col_name"] and not row["col_name"].startswith("#")
-    }
+def _readable(env) -> None:
+    """Every declared object is present and answers a read.
 
-    assert {"customerid", "customername", "isactive"} <= columns
-    assert AUDIT <= columns
-    assert _scalar(env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")) == 0
-
-
-def test_a_view_resolves_through_the_whole_chain(lakehouse_journey):
-    """``ActiveCustomerSummary`` reads ``ActiveCustomer`` reads ``Customer``."""
-
-    env = lakehouse_journey.env
-
-    assert _scalar(
-        env.query("SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}")
-    ) == 0
-
-
-def test_the_table_landed_in_the_destination_not_the_control_plane(lakehouse_journey):
-    """A name alone cannot say which Lakehouse answered, so the storage is asked.
-
-    Case-insensitively and not by exact path: the physical name is the
-    workspace's to choose, and Fabric lowercases a managed table's directory
-    exactly as the local metastore does.
+    Asserted after each transition rather than once at the end, because "the
+    estate still works" is a claim about a moment.
     """
 
-    env = lakehouse_journey.env
-    stored = {
-        entry.name.lower()
-        for entry in env.store.list(env.resolver.tables_root(env.target).join("DWG"))
-        if entry.is_directory
-    }
-
-    assert "customer" in stored
-
-
-def test_nothing_is_built_in_the_weaver_lakehouse(lakehouse_journey):
-    """The control plane is not the destination, and a build must not treat it as
-    one. This is the assertion two-part names made impossible: an unqualified
-    ``CREATE TABLE DWG.Customer`` lands in the attached Lakehouse, and a read
-    through the same session would find it there and pass."""
-
-    env = lakehouse_journey.env
-    weaver = env.weaver_destination
-
-    assert not env.schema_exists("DWG", destination=weaver)
-    assert not env.schema_exists("Raw", destination=weaver)
-    assert env.schema_exists("DWG")
-
-
-def test_the_install_report_is_written_into_the_bundle(lakehouse_journey):
-    bundle = lakehouse_journey["install"].bundle
-
-    assert lakehouse_journey.env.store.exists(bundle.location.join("install-report.yml"))
-
-
-def test_a_bundle_installs_without_its_source_repository(lakehouse_journey):
-    """The source was deleted between generating this bundle and installing it,
-    and the install still succeeded. A bundle carries everything it needs; it is
-    not a pointer back at a repository that has to still be there."""
-
-    step = lakehouse_journey["install"]
-
-    assert step.outcome.status == "succeeded"
-
-
-def test_every_planned_action_ran_in_the_order_planned(lakehouse_journey):
-    step = lakehouse_journey["install"]
-    planned = [action.id for _s, _b, action in step.bundle.plan.actions()]
-
-    assert list(step.outcome.action_order) == planned
-    assert step.outcome.bundle_id == step.bundle.bundle_id
-
-
-def test_dependencies_are_built_before_the_objects_that_read_them(lakehouse_journey):
-    at = lakehouse_journey["install"].sequence_of
-    of = {
-        action_id: at[action_id]
-        for action_id in at
-        if "DWG." in action_id or "Raw." in action_id
-    }
-
-    def when(name):
-        return next(seq for action_id, seq in of.items() if action_id.endswith(name))
-
-    assert when("DWG.Customer") < when("DWG.ActiveCustomer") < when(
-        "DWG.ActiveCustomerSummary"
+    assert {"customer", "order"} <= _tables(env)
+    assert {"activecustomer", "activecustomersummary"} <= _views(env)
+    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
+    assert _scalar(env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")) == 0
+    assert (
+        _scalar(env.query("SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}"))
+        == 0
     )
-    assert when("DWG.Customer") < when("DWG.Order")
 
 
-# --- reaching the built objects the way a developer does -----------------------
+# --- the body a developer's own code runs --------------------------------------
 #
-# One round trip into the environment, shared by the assertions below. The body
-# is a single string run wherever the environment runs — in this process against
-# local Spark, or inside a Fabric session over Livy — so what is asserted is
-# genuinely the same code either side. Its only transport-dependent line is
-# ``resolver``, which the environment binds before the body starts.
+# One round trip into the environment. The body is a single string run wherever
+# the environment runs — in this process against local Spark, or inside a Fabric
+# session over Livy — so what is asserted is genuinely the same code either side.
+# Its only transport-dependent line is ``resolver``, which the environment binds
+# before the body starts.
 #
 # The classes are declared in the body rather than imported from the installed
 # repository because importing one is the load executor's job, and that does not
@@ -236,144 +156,167 @@ emit({
 '''
 
 
-@pytest.fixture(scope="module")
-def reached(lakehouse_journey):
-    return lakehouse_journey.env.run_python(AUTHORED)
+def _assert_installed(env, step) -> None:
+    """The first build: everything declared exists, and nothing landed elsewhere."""
+
+    plan = step.bundle.plan
+    assert plan.format_version == 1
+    assert plan.repository_name == "weaver_items"
+    assert {target.logical_item_name for target in plan.targets} == {"Sales", "_weaver"}
+    assert plan.omitted_nodes == ()
+
+    # The source repository was deleted between generating this bundle and
+    # installing it. A bundle carries everything it needs; it is not a pointer
+    # back at a repository that has to still be there.
+    assert step.outcome.status == "succeeded", step.outcome.action_error
+    assert list(step.outcome.action_order) == [
+        action.id for _s, _b, action in plan.actions()
+    ]
+    assert step.outcome.bundle_id == step.bundle.bundle_id
+
+    _readable(env)
+
+    columns = {
+        row["col_name"].lower()
+        for row in env.query("DESCRIBE TABLE {{object:DWG.Customer}}")
+        if row["col_name"] and not row["col_name"].startswith("#")
+    }
+    assert {"customerid", "customername", "isactive"} <= columns
+    assert AUDIT <= columns
+
+    # A name alone cannot say which Lakehouse answered, so the storage is asked.
+    # Case-insensitively and not by exact path: the physical name is the
+    # workspace's to choose, and Fabric lowercases a managed table's directory
+    # exactly as the local metastore does.
+    stored = {
+        entry.name.lower()
+        for entry in env.store.list(env.resolver.tables_root(env.target).join("DWG"))
+        if entry.is_directory
+    }
+    assert "customer" in stored
+
+    # The control plane is not the destination. This is the assertion two-part
+    # names made impossible: an unqualified CREATE TABLE lands in the attached
+    # Lakehouse, and a read through the same session would find it and pass.
+    weaver = env.weaver_destination
+    assert not env.schema_exists("DWG", destination=weaver)
+    assert not env.schema_exists("Raw", destination=weaver)
+    assert env.schema_exists("DWG")
+
+    assert env.store.exists(step.bundle.location.join("install-report.yml"))
+
+    at = step.sequence_of
+
+    def when(name):
+        return next(seq for action_id, seq in at.items() if action_id.endswith(name))
+
+    assert when("DWG.Customer") < when("DWG.ActiveCustomer") < when(
+        "DWG.ActiveCustomerSummary"
+    )
+    assert when("DWG.Customer") < when("DWG.Order")
 
 
-def test_object_identity_comes_from_the_class_name(reached):
+def _assert_authored_objects_reach_the_build(env) -> None:
+    """A developer's own classes, resolving to what the build just made."""
+
+    reached = env.run_python(AUTHORED)
+
     assert reached["ids"] == ["DWG.Order", "DWG.Customer", "Raw.CustomerCsv"]
-
-
-def test_a_table_reads_the_delta_files_the_build_created(reached):
     assert reached["table_path"] == reached["resolved_table_path"]
     assert reached["order_rows"] == 0
     assert set(reached["order_columns"]) == {"orderid", "customerid", "amount"} | AUDIT
-
-
-def test_a_dependency_reads_its_own_table_through_the_same_session(reached):
     assert reached["customer_rows"] == 0
     assert set(reached["customer_columns"]) == {
         "customerid",
         "customername",
         "isactive",
     } | AUDIT
-
-
-def test_an_empty_dataframe_keeps_the_built_shape(reached):
     assert reached["empty_columns"] == reached["order_columns"]
 
-
-def test_a_folder_resolves_to_the_directory_the_build_created(reached, lakehouse_journey):
-    """No mount anywhere in it: the target Lakehouse is not the attached one on
-    Fabric, and a folder still resolves — which is the point of addressing it
-    through the Lakehouse's own root."""
-
+    # No mount anywhere in it: the target Lakehouse is not the attached one on
+    # Fabric, and a folder still resolves — the point of addressing it through
+    # the Lakehouse's own root.
     assert reached["folder_path"] == reached["resolved_folder_path"]
-
-    env = lakehouse_journey.env
-    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
-
-
-def test_staging_sits_beside_the_folder_it_belongs_to(reached):
     assert reached["staging_folder"] == f"{reached['folder_path']}_Staging"
     assert reached["staging_folder"] == reached["resolved_staging_path"]
 
 
-# --- building again, having changed nothing ------------------------------------
+def _assert_unchanged(env, step) -> None:
+    """Building an already-correct estate must cost nothing and break nothing."""
+
+    assert step.outcome.status == "succeeded", step.outcome.action_error
+
+    physical = step.kinds() - BOOKKEEPING
+    assert physical == set(), (
+        f"a build with nothing to do performed {sorted(physical)} — something was "
+        "rebuilt that did not need to be"
+    )
+
+    # Doing nothing has to mean nothing, not quietly dropping something. Read
+    # here, immediately after this transition, because that is what it claims.
+    _readable(env)
 
 
-def test_a_second_build_does_no_physical_work(lakehouse_journey):
-    """The assertion the one-shot estates could not make.
+def _assert_pruned(env, step) -> None:
+    """What the item no longer declares goes; what it declares stays."""
 
-    An estate that is already correct should cost nothing to build. Anything
-    here other than catalogue bookkeeping means something was rebuilt that did
-    not need to be — which is exactly the class of bug incremental selection
-    exists to prevent, and which a suite that only ever built once could never
-    see.
-    """
+    assert step.outcome.status == "succeeded", step.outcome.action_error
 
-    kinds = lakehouse_journey["unchanged"].kinds() - BOOKKEEPING
-
-    assert kinds == set()
-
-
-def test_a_second_build_leaves_the_objects_readable(lakehouse_journey):
-    """Doing nothing has to mean *nothing*, not quietly dropping something."""
-
-    env = lakehouse_journey.env
-
-    assert _scalar(env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")) == 0
-    assert _scalar(
-        env.query("SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}")
-    ) == 0
-    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
-
-
-# --- pruning what the item no longer declares ----------------------------------
-
-
-def test_unmanaged_objects_are_pruned(lakehouse_journey):
-    """Seeded before this build: two tables, a view and two folders the item
-    does not declare. Prune is what removes them, and it runs before the build
-    so a rebuilt object never meets its own stale predecessor."""
-
-    env = lakehouse_journey.env
-    tables = {
-        row["tableName"].lower()
-        for row in env.query(f"SHOW TABLES IN {env.schema_name('DWG')}")
-    }
-
+    tables = _tables(env)
     assert "oldtable" not in tables
     assert "oldview" not in tables
     assert not env.schema_exists("Legacy")
     assert not env.store.exists(_folder(env, "Legacy", "Stuff"))
 
+    # Prune is the destructive direction, so what it spares is the assertion
+    # worth making.
+    _readable(env)
 
-def test_pruning_spares_everything_the_item_declares(lakehouse_journey):
-    """The half that matters: prune is the destructive direction, so what it
-    leaves alone is the assertion worth making."""
-
-    env = lakehouse_journey.env
-    tables = {
-        row["tableName"].lower()
-        for row in env.query(f"SHOW TABLES IN {env.schema_name('DWG')}")
-    }
-
-    assert {"customer", "order"} <= tables
-    assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
-
-
-def test_prune_runs_before_anything_is_built(lakehouse_journey):
-    step = lakehouse_journey["prune"]
     prunes = [seq for action_id, seq in step.sequence_of.items() if "prune" in action_id]
+    assert prunes, "the seeded orphans should have produced prune actions"
     builds = [
         seq
         for action_id, seq in step.sequence_of.items()
         if step.actions[action_id].startswith("build_")
     ]
-
-    assert prunes, "the seeded orphans should have produced prune actions"
     if builds:
-        assert max(prunes) < min(builds)
+        assert max(prunes) < min(builds), "prune must run before anything is built"
 
 
-# --- a failing build, last because it leaves the estate part-built --------------
+#: The summary view, rewritten. Changing it is what gives the failing transition
+#: something to build: by this point the estate is correct, so an unchanged
+#: repository would plan no work at all and there would be no payload to corrupt.
+#: That is incremental build working — and the reason a failure case in a journey
+#: has to create its own reason to run.
+CHANGED_SUMMARY = """/*
+View ID: DWG.ActiveCustomerSummary
+
+Description: How many customers are active.
+
+Lineage: $DWG.ActiveCustomer
+
+Dependencies:
+  - DWG.ActiveCustomer
+*/
+select
+    count(1) as CustomerCount
+from DWG.ActiveCustomer
+"""
 
 
-def test_a_failing_view_stops_the_build_and_leaves_no_final_view(lakehouse_journey):
-    """A payload that cannot run must stop its barrier, not be skipped past.
+def _change_the_summary(env) -> None:
+    env.install_repo()
+    env.write_repo_file(
+        "Lakehouse/Sales/DWG.ActiveCustomerSummary.sql", CHANGED_SUMMARY
+    )
 
-    Deliberately the module's last test: the install fails partway by design, so
-    the estate afterwards is not in a state anything else could assert against.
-    """
+
+def _corrupt(env, bundle):
+    """The same bundle with one view's payload made invalid, hashes matching."""
 
     from weaver.build_bundle import compute_bundle_id, write_bundle
 
-    env = lakehouse_journey.env
-    bundle = lakehouse_journey["install"].bundle
     store = env.store
-
     payloads = {
         action.payload: store.read(bundle.location.join(*action.payload.split("/")))
         for _s, _b, action in bundle.plan.actions()
@@ -392,19 +335,22 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(lakehouse_journ
         return action
 
     plan = bundle.plan
-    sequences = tuple(
-        replace(
-            sequence,
-            batches=tuple(
-                replace(batch, actions=tuple(fix(action) for action in batch.actions))
-                for batch in sequence.batches
-            ),
-        )
-        for sequence in plan.sequences
+    plan = replace(
+        plan,
+        bundle_id="",
+        sequences=tuple(
+            replace(
+                sequence,
+                batches=tuple(
+                    replace(batch, actions=tuple(fix(a) for a in batch.actions))
+                    for batch in sequence.batches
+                ),
+            )
+            for sequence in plan.sequences
+        ),
     )
-    plan = replace(plan, sequences=sequences, bundle_id="")
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
-    corrupted = write_bundle(
+    return write_bundle(
         env.resolver.build_bundle("broken"),
         plan=plan,
         payloads=payloads,
@@ -412,7 +358,40 @@ def test_a_failing_view_stops_the_build_and_leaves_no_final_view(lakehouse_journ
         store=store,
     )
 
-    outcome = env.install(corrupted)
 
-    assert outcome.status == "failed"
-    assert any(status == "failed" for status in outcome.action_status.values())
+def _assert_failed(journey, step) -> None:
+    """A payload that cannot run stops its barrier rather than being skipped past."""
+
+    assert step.outcome is not None, "the failing install should have been recorded"
+    assert "build_view" in step.kinds(), (
+        "the changed summary should have planned a rebuild for the corruption to hit"
+    )
+    assert step.outcome.status == "failed"
+    assert any(status == "failed" for status in step.outcome.action_status.values())
+
+    # And the journey knows it failed, so anything after it is skipped rather
+    # than asserting against a part-built estate.
+    after = journey.run("after-failure")
+    assert after.error is not None
+    assert "broken" in str(after.error)
+
+
+def test_a_lakehouse_estate_through_a_whole_build_lifecycle(lakehouse_journey):
+    """Install, rebuild unchanged, prune, then fail — asserting each in turn."""
+
+    journey = lakehouse_journey
+    env = journey.env
+
+    env.install_repo()
+    _assert_installed(env, journey.run("install", between=lambda e, _b: e.remove_repo()))
+    _assert_authored_objects_reach_the_build(env)
+
+    # The source goes back before every later transition: generation reads it.
+    _assert_unchanged(env, journey.run("unchanged", before=lambda e: e.install_repo()))
+
+    _assert_pruned(env, journey.run("prune", before=lambda e: e.seed_orphans()))
+
+    _assert_failed(
+        journey,
+        journey.run("broken", before=_change_the_summary, between=_corrupt),
+    )
