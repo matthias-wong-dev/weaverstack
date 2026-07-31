@@ -171,6 +171,48 @@ seconds of Livy between them**.
 One claim in `test_warehouse_build.py` needs no Fabric whatever:
 `test_every_object_is_built_in_dependency_order` reads `bundle.plan.actions()`.
 
+## A proposal, assessed: `from_repository` in production, and catalogue diffing
+
+Two halves, and they do not get the same answer.
+
+### Promoting `from_repository` — sound, and worth doing
+
+`project_item_installation` already *is* "the catalogue this repository should
+produce": it projects every catalogue table — Registry, the dictionaries,
+Installation — from the declarations. It simply returns a `CatalogueProjection`
+rather than a `Catalogue`.
+
+Those are the same idea with two types. Unifying them would make
+`Catalogue.from_repository(...)` production code with a real job — *desired*
+state — and that also dissolves the objection that kept it on a test subclass. A
+constructor computing what *should* be installed forges nothing; the danger was
+only ever in manufacturing rows that claim work *succeeded*.
+
+The test-side constructor would then be a thin wrapper, or disappear.
+
+### Diffing two catalogues to produce DML — no, and the reason is load-bearing
+
+Catalogue DML is deliberately **not** derived from reading the catalogue. Per
+`weaver/catalogue/reconcile.py`: the delete keeps exactly the keys the projection
+claims and the merge is idempotent, so the pair is correct against any prior
+state — *including one the planner could not see*.
+
+Making the builder diff current against desired would reintroduce precisely the
+failure mode that design prevents: **a failed or partial read would widen the
+deletion scope.** A catalogue read that silently returned fewer rows would
+produce a delete for rows that should have been kept, in the authoritative
+record, with nothing to catch it.
+
+Note also that `reconcile.compare(...)` already exists — new, changed, unchanged
+and removed — precisely so a reviewer can see what a bundle will change *without
+any statement depending on it*. The comparison is already there; keeping it out
+of the DML path is the point, not an omission.
+
+So: promote the constructor, keep the rendering projection-driven. The symmetry
+with prune is tempting and false — prune diffs against physical state it must
+observe, while the catalogue is the authority and needs no permission from its
+own prior contents.
+
 ## Conventions
 
 - Take the narrowest fixture that can answer the question. Reaching for a richer
