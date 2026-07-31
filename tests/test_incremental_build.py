@@ -23,13 +23,17 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import project_item_installation
-from weaver.catalogue.state import ReconciledCatalogue
+from weaver.catalogue.state import (
+    CatalogueState,
+    ReconciledCatalogue,
+    reconcile_catalogue_state,
+)
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 
 from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate, _folder, _write
+from test_item_repository import _estate, _folder, _table, _write
 
 
 def _repository(root):
@@ -37,14 +41,27 @@ def _repository(root):
 
 
 def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
+    """One item's catalogue as a completed build would have left it.
+
+    Both kinds of registered object are included — documents and the item's alias
+    destinations — because that is what a real installation holds, and selection
+    reads the two the same way.
+    """
+
     item = WeaverItemId.parse(item_text)
     retained = [identity for identity in repository.source_documents if identity.item == item]
+    retained.extend(
+        alias.destination
+        for alias in repository.aliases
+        if alias.destination.item == item
+    )
     projection = project_item_installation(
         repository,
         item=item,
         retained=retained,
         target_name=f"{item.item_name}_Target",
         weaver_version="test",
+        target_kind="warehouse" if item.item_type == "Warehouse" else "lakehouse",
     )
     old = set(old)
     rows = {}
@@ -270,6 +287,174 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         bundle.location.join(*registry_action.payload.split("/"))
     ).decode()
     assert repository.source_documents[existing].effective_signature in registry_payload
+
+
+ALIAS_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
+
+
+def _alias_bindings():
+    """The producer and the consumer that aliases it, both bound."""
+
+    from weaver.build_bundle import WarehouseBinding
+
+    return ItemBindings(
+        (
+            ItemBinding(
+                WeaverItemId.parse("Lakehouse/Curated"),
+                LakehouseBinding(ItemRef("Curated_Target")),
+            ),
+            ItemBinding(
+                WeaverItemId.parse("Warehouse/Reporting"),
+                WarehouseBinding(ItemRef("Reporting_Target")),
+            ),
+        )
+    )
+
+
+def _alias_inventories(repository, *, alias_installed=True):
+    """Both targets as they stand, with the alias view present or absent.
+
+    The alias destination is an ordinary view in the Warehouse's inventory —
+    which is exactly the point of registering it as one — so leaving it out is
+    how "somebody deleted the alias" is expressed.
+    """
+
+    inventories = {}
+    for binding in _alias_bindings().entries:
+        target = binding.to_bound_target()
+        item = binding.item
+        objects = [
+            repository.source_documents[identity].qualified
+            for identity in repository.source_documents
+            if identity.item == item and not identity.is_files
+        ]
+        views = list(objects) if target.kind == "warehouse" else []
+        tables = [] if target.kind == "warehouse" else list(objects)
+        if alias_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
+            views.append("Sales.PortableCustomer")
+        inventories[item] = TargetInventory(
+            target_id=target.id,
+            kind=target.kind,
+            target_name=target.name,
+            schemas=("Sales",),
+            tables=tuple(tables),
+            views=tuple(views),
+        )
+    return inventories
+
+
+def _alias_catalogue(repository):
+    rows = {}
+    for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
+        rows.update(_catalogue(repository, item_text).rows)
+    return rows
+
+
+def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bundle"):
+    return generate_item_build_bundle(
+        repository,
+        bindings=_alias_bindings(),
+        output=Location(str(tmp_path / name)),
+        store=LocalStore(),
+        target_inventories=_alias_inventories(
+            repository, alias_installed=alias_installed
+        ),
+        reconciled_catalogue=ReconciledCatalogue(rows),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+    )
+
+
+def _alias_actions(bundle):
+    return [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "create_alias"
+    ]
+
+
+def test_an_unchanged_alias_is_not_replaced(tmp_path):
+    """The behaviour this whole change exists for.
+
+    An alias used to be remade on every build. Now its declaration is unchanged,
+    its destination is present and its source was not rebuilt — so there is
+    nothing to do, and a shortcut that takes seconds to become readable is not
+    torn down and remade for nothing.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    bundle = _alias_bundle(tmp_path, repository, rows=_alias_catalogue(repository))
+
+    assert _alias_actions(bundle) == []
+
+
+def test_a_repointed_alias_is_replaced(tmp_path):
+    """The declaration *is* the alias, so changing what it points at changes it."""
+
+    root = _dependency_estate(tmp_path)
+    _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
+    installed = _alias_catalogue(_repository(root))
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+    )
+    repository = _repository(root)
+    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+
+    assert len(_alias_actions(bundle)) == 1
+
+
+def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
+    """Registered but not there: reconciliation drops the row, so it reads as new.
+
+    Nothing alias-specific does this — the alias is registered as a view, and the
+    Warehouse inventory simply does not hold one.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    state = CatalogueState(
+        status="valid",
+        rows=_alias_catalogue(repository),
+        present_tables=frozenset({REGISTRY.name}),
+        missing_tables=frozenset(),
+    )
+    reconciled = reconcile_catalogue_state(
+        state, inventories=_alias_inventories(repository, alias_installed=False)
+    )
+
+    assert ALIAS_DESTINATION in reconciled.stale_objects
+
+    bundle = _alias_bundle(
+        tmp_path, repository, rows=reconciled.rows, alias_installed=False
+    )
+    assert len(_alias_actions(bundle)) == 1
+
+
+def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
+    """Replacing an alias is the alias executor's job, not a drop and a build.
+
+    It holds no data, so it is remade in place; routing it through the generic
+    drop would emit a ``drop view`` for a shortcut and ask the build pipeline for
+    a source document that does not exist.
+    """
+
+    root = _dependency_estate(tmp_path)
+    _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
+    installed = _alias_catalogue(_repository(root))
+    _write(
+        root,
+        "Warehouse/Reporting/alias.yml",
+        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+    )
+    repository = _repository(root)
+    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+
+    assert len(_alias_actions(bundle)) == 1
+    assert all(
+        action.resource_node_id != ALIAS_DESTINATION
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind != "create_alias"
+    )
 
 
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):

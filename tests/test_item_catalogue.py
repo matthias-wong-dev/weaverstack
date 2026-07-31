@@ -22,17 +22,31 @@ from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate
 
 
-def _project(repository, item_text: str, target: str):
+def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"):
     item = WeaverItemId.parse(item_text)
     retained = [
         identity for identity in repository.source_documents if identity.item == item
     ]
+    retained.extend(
+        alias.destination
+        for alias in repository.aliases
+        if alias.destination.item == item
+    )
     return project_item_installation(
         repository,
         item=item,
         retained=retained,
         target_name=target,
         weaver_version="1.2.3",
+        target_kind=target_kind,
+    )
+
+
+def _registry_row(projection, schema: str, name: str):
+    return next(
+        row
+        for row in projection.for_table(REGISTRY)
+        if row["schema_name"] == schema and row["object_name"] == name
     )
 
 
@@ -126,6 +140,74 @@ def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path
     assert row["source_item_name"] == "Curated"
     assert row["source_schema_name"] == "Sales"
     assert row["source_object_name"] == "Customer"
+
+
+def test_an_alias_destination_is_registered_as_the_object_it_actually_is(tmp_path):
+    """No ``shortcut`` type. To every reader of the catalogue an alias in a
+    Warehouse is a view, and that is what it is recorded as — its alias-ness
+    lives in ``_.Alias`` and nowhere else."""
+
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
+    projection = _project(
+        repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="warehouse"
+    )
+    row = _registry_row(projection, "Sales", "PortableCustomer")
+
+    assert row["object_type"] == "view"
+    assert row["object_role"] == "data"
+
+
+def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
+    """The same alias against a Lakehouse is a table — a OneLake shortcut is how
+    it is made, not what it is."""
+
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
+    projection = _project(
+        repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="lakehouse"
+    )
+
+    assert _registry_row(projection, "Sales", "PortableCustomer")["object_type"] == "table"
+
+
+def test_an_alias_signature_is_its_declaration_and_not_its_sources_content(tmp_path):
+    """A rebuilt source does not redefine the alias, so it must not change its
+    signature — that would replace every downstream shortcut on every reload."""
+
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
+    projection = _project(
+        repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="warehouse"
+    )
+    alias = next(
+        alias
+        for alias in repository.aliases
+        if str(alias.destination) == "Warehouse/Reporting/Sales.PortableCustomer"
+    )
+    source = repository.source_documents[alias.source]
+
+    registry = _registry_row(projection, "Sales", "PortableCustomer")
+    assert registry["signature"] == alias.signature
+    assert registry["signature"] != source.effective_signature
+    assert projection.for_table(ALIAS)[0]["signature"] == alias.signature
+
+
+def test_an_alias_describes_nothing_beyond_its_registration(tmp_path):
+    """It holds no columns, no keys and no dependencies of its own. Only the two
+    rows that say it exists and what it stands for."""
+
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
+    projection = _project(
+        repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="warehouse"
+    )
+    destination = ("Sales", "PortableCustomer")
+
+    for table in CATALOGUE_TABLES:
+        if table in (REGISTRY, ALIAS, SCHEMA_DICTIONARY, INSTALLATION):
+            continue
+        assert not [
+            row
+            for row in projection.for_table(table)
+            if (row.get("schema_name"), row.get("object_name")) == destination
+        ], f"{table.name} should hold no row for an alias destination"
 
 
 def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp_path):
