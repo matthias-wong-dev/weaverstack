@@ -712,11 +712,16 @@ class Journey:
         self.steps: dict[str, Step] = {}
         self._failed: str | None = None
 
-    def run(self, name: str, *, before=None) -> Step:
+    def run(self, name: str, *, before=None, between=None) -> Step:
         """Take one transition: optionally change something, then build.
 
         ``before`` mutates the repository or the target — it is the *move*, and
         the build that follows is what the assertions are about.
+
+        ``between`` runs after generation and before installation, for the one
+        claim that needs the world to change mid-transition: a bundle installs
+        from itself, so removing the source repository between the two phases
+        must not stop it.
         """
 
         if self._failed is not None:
@@ -727,6 +732,8 @@ class Journey:
             if before is not None:
                 before(self.env)
             bundle = self.env.generate(f"{self.name}-{name}")
+            if between is not None:
+                between(self.env)
             outcome = self.env.install(bundle)
             step = Step(name=name, bundle=bundle, outcome=outcome)
         except BaseException as exc:  # recorded, not raised: the journey continues
@@ -1556,6 +1563,69 @@ def _install_estate(env) -> InstalledEstate:
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
     return InstalledEstate(env=env, bundle=bundle)
+
+
+@pytest.fixture(
+    scope="module",
+    params=[
+        pytest.param("local", marks=pytest.mark.spark, id="local"),
+        pytest.param("fabric", marks=pytest.mark.fabric, id="fabric"),
+    ],
+)
+def lakehouse_journey(request, weaver_repo_fixture):
+    """One Lakehouse estate, taken through every move a build has to survive.
+
+    The transitions are run here, once, at module setup; the tests read what they
+    produced. That is the whole economy of it — the first build is the expensive
+    one, and each move after it is an *incremental* build over a target that is
+    already correct, which is a fraction of the cost of a full build into an
+    emptied Lakehouse.
+
+    The order is not arbitrary:
+
+    ``install``    the estate from nothing, which is the only full build. The
+                   source repository is deleted between generation and
+                   installation, so this also proves a bundle installs from
+                   itself — a claim that costs nothing when folded in here and a
+                   whole extra install when asserted on its own
+    ``unchanged``  build again having changed nothing — the assertion the old
+                   one-shot estates structurally could not make
+    ``prune``      seed objects the item does not declare, then build again
+    ``broken``     left to the module's last test, because a failed install
+                   leaves the estate part-built and nothing after it could rely
+                   on what it found
+    """
+
+    with _journey_context(request, weaver_repo_fixture) as env:
+        journey = Journey(env, "lakehouse")
+        env.install_repo()
+        journey.run("install", between=lambda environment: environment.remove_repo())
+        # Put the source back: every later transition has to generate, and
+        # generation reads the repository.
+        journey.run("unchanged", before=lambda environment: environment.install_repo())
+        journey.run("prune", before=lambda environment: environment.seed_orphans())
+        yield journey
+
+
+@contextmanager
+def _journey_context(request, weaver_repo_fixture):
+    """The build environment a journey drives, on whichever transport it asked for."""
+
+    if request.param == "local":
+        spark = request.getfixturevalue("spark")
+        root = request.getfixturevalue("tmp_path_factory").mktemp("journey")
+        with _local_build_context(root, spark, weaver_repo_fixture) as env:
+            yield env
+    else:
+        with _fabric_build_context(
+            request.getfixturevalue("fabric_workspace_item"),
+            request.getfixturevalue("fabric_client"),
+            request.getfixturevalue("fabric_workspace"),
+            request.getfixturevalue("fabric_target_lakehouse"),
+            request.getfixturevalue("livy_session"),
+            weaver_repo_fixture,
+        ) as env:
+            yield env
 
 
 @pytest.fixture(
