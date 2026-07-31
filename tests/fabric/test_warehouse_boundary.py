@@ -428,7 +428,8 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     desktop read the tests above rely on.
     """
 
-    from weaver.build_bundle import generate_item_build_bundle, write_bundle  # noqa: F401
+    from weaver import wipe_sql_target
+    from weaver.build_bundle import generate_item_build_bundle
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
     from factories import FixtureCatalogue, item_bindings
@@ -436,6 +437,13 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     resolver = FabricResolver(fabric_workspace)
     store = OneLakeDfsClient()
     warehouse = clean_disposable_warehouse
+
+    # This test installs from nothing, so it starts from nothing. The Warehouse
+    # is emptied per *module*, and the estate fixture above has already built
+    # into it — without this the install would be asked to create a table that
+    # exists, and the test would fail for a reason that is not its subject.
+    # Found by exactly that: it passed alone and failed in the suite.
+    wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
 
     # The declaration goes into the Weaver Lakehouse, as a user's would.
     root = resolver.weaver_items_root
