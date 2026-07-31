@@ -105,15 +105,22 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     assert payload["version"]
 
 
-def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
+def test_a_wipe_clears_both_onelake_areas(
     livy_session, fabric_workspace, fabric_target_lakehouse
 ):
+    """What only OneLake can answer about a wipe: it clears Tables *and* Files.
+
+    This used to run a whole generate-and-install to arrange a table and a
+    folder, then prune, then wipe — a build paid for entirely to create state.
+    The build is proven at the boundary, the prune decision is pure Python, and
+    what is left is the wipe itself against real OneLake storage, which has two
+    areas and a directory layout nothing local has to get right.
+
+    So the state is seeded directly, in the same submission that wipes it.
+    """
+
     body = (
-        "from weaver import (FabricWorkspace, ItemRef, WeaverItemId, "
-        "wipe_lakehouse)\n"
-        "from weaver.build_bundle import (InstallationEnvironment, ItemBinding, "
-        "ItemBindings, LakehouseBinding, build_uploaded_item_repository, "
-        "effective_item_bindings)\n"
+        "from weaver import FabricWorkspace, ItemRef, wipe_lakehouse\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.spark import SparkCatalogue\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
@@ -122,58 +129,31 @@ def test_item_build_prunes_and_full_lakehouse_wipe_clears_both_areas(
         f"target = ItemRef({fabric_target_lakehouse.name!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"
-        "root = resolver.weaver_items_root\n"
-        "files = {\n"
-        f"    'Lakehouse/Domain/schemas/Sales.yml': {_SCHEMA.encode()!r},\n"
-        f"    'Lakehouse/Domain/Sales.Customer.sql': {_TABLE.encode()!r},\n"
-        f"    'Lakehouse/Domain/Files/Sales__Customer.py': {_FOLDER.encode()!r},\n"
-        "}\n"
-        "for relative, data in files.items():\n"
-        "    store.write(root.join(*relative.split('/')), data)\n"
         "catalogue = SparkCatalogue(spark, resolver.spark_destination(target))\n"
         "catalogue.create_schema('Sales')\n"
-        "catalogue.sql(\"CREATE TABLE {{object:Sales.Ghost}} (`Id` string) USING delta\")\n"
-        "old_folder = resolver.files_root(target) / 'Sales' / 'OldFolder'\n"
-        "store.make_directory(old_folder)\n"
-        "binding = LakehouseBinding(target)\n"
-        "control = LakehouseBinding(ItemRef(workspace.weaver_lakehouse))\n"
-        "selected = ItemBindings((ItemBinding(\n"
-        "    WeaverItemId.parse('Lakehouse/Domain'), binding),))\n"
-        "result = build_uploaded_item_repository(\n"
-        "    root, bindings=effective_item_bindings(\n"
-        "        selected, weaver_lakehouse=workspace.weaver_lakehouse),\n"
-        "    environment=InstallationEnvironment(\n"
-        "        store=store, resolver=resolver, spark=spark, workspace=workspace),\n"
-        "    control_lakehouse=control)\n"
-        "report = result.report\n"
-        "tables_after_build = sorted(name.lower() for name in catalogue.tables('Sales'))\n"
-        "customer_folder = resolver.files_root(target) / 'Sales' / 'Customer'\n"
-        "folders_after_build = {\n"
-        "    'customer': store.exists(customer_folder),\n"
-        "    'old': store.exists(old_folder),\n"
+        "catalogue.sql(\"CREATE TABLE IF NOT EXISTS {{object:Sales.Customer}} "
+        "(`Id` string) USING delta\")\n"
+        "store.make_directory(resolver.files_root(target) / 'Sales' / 'Customer')\n"
+        "seeded = {\n"
+        "    'Files': [e.name for e in store.list(resolver.files_root(target))],\n"
+        "    'Tables': [e.name for e in store.list(resolver.tables_root(target))],\n"
         "}\n"
         "wipe_reports = wipe_lakehouse(target, workspace, store=store)\n"
-        "remaining = {\n"
-        "    'Files': [entry.name for entry in store.list(resolver.files_root(target))],\n"
-        "    'Tables': [entry.name for entry in store.list(resolver.tables_root(target))],\n"
-        "}\n"
         "emit({\n"
-        "    'status': report.status,\n"
-        "    'errors': [\n"
-        "        {'id': action.action_id, 'type': action.error_type, "
-        "         'message': action.error_message}\n"
-        "        for action in report.action_results() if action.status == 'failed'],\n"
-        "    'tables_after_build': tables_after_build,\n"
-        "    'folders_after_build': folders_after_build,\n"
-        "    'wipe_targets': sorted(item.target.split(':', 1)[0] "
-        "                           for item in wipe_reports),\n"
-        "    'remaining': remaining,\n"
+        "    'seeded': seeded,\n"
+        "    'wipe_targets': sorted(item.target.split(':', 1)[0] for item in wipe_reports),\n"
+        "    'remaining': {\n"
+        "        'Files': [e.name for e in store.list(resolver.files_root(target))],\n"
+        "        'Tables': [e.name for e in store.list(resolver.tables_root(target))],\n"
+        "    },\n"
         "})\n"
     )
 
-    payload = livy_session.run(body, label="generate and install").payload
-    assert payload["status"] == "succeeded", payload["errors"]
-    assert payload["tables_after_build"] == ["customer"]
-    assert payload["folders_after_build"] == {"customer": True, "old": False}
+    payload = livy_session.run(body, label="seed and wipe").payload
+
+    # The seed has to have landed, or an empty wipe would pass for a working one.
+    assert payload["seeded"]["Files"], payload["seeded"]
+    assert payload["seeded"]["Tables"], payload["seeded"]
+
     assert payload["wipe_targets"] == ["delta", "folder"]
     assert payload["remaining"] == {"Files": [], "Tables": []}

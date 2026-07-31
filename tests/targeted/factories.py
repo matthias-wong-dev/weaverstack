@@ -479,6 +479,7 @@ def alias_repository(
     producer: str = "Lakehouse/Raw",
     consumer: str = "Lakehouse/Curated",
     schema: str = "DWG",
+    consumer_view: bool = True,
 ):
     """Two items, the second aliasing a table in the first.
 
@@ -501,11 +502,28 @@ def alias_repository(
         f"{consumer}/alias.yml",
         alias_declaration(**{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}),
     )
-    _write(
-        root,
-        f"{consumer}/{schema}.CustomerName.sql",
-        spark_view(f"{schema}.CustomerName", depends_on=f"{schema}.PortableCustomer"),
-    )
+    if consumer_view:
+        # A Warehouse consumer reads its alias through T-SQL over the producer's
+        # SQL endpoint, so the view it builds is spelled differently — and for a
+        # probe that only wants the alias itself, no view is wanted at all.
+        if consumer.startswith("Warehouse/"):
+            _write(
+                root,
+                f"{consumer}/{schema}.CustomerName.sql",
+                warehouse_view(
+                    f"{schema}.CustomerName",
+                    select=f"select CustomerId from [{schema}].[PortableCustomer]",
+                    depends_on=f"{schema}.PortableCustomer",
+                ),
+            )
+        else:
+            _write(
+                root,
+                f"{consumer}/{schema}.CustomerName.sql",
+                spark_view(
+                    f"{schema}.CustomerName", depends_on=f"{schema}.PortableCustomer"
+                ),
+            )
     return parse_item_repository(Location(str(root)))
 
 
