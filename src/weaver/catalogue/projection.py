@@ -25,10 +25,10 @@ appearing to depend directly on another's physical object.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
+from ..build_bundle.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 from ..declaration.metadata import FOLDER, TABLE, VIEW, ObjectId, Reference
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
 from ..declaration.references import declared_column_notes, resolve_text
@@ -80,11 +80,29 @@ def project_item_installation(
     retained: Iterable[WeaverDocumentId],
     target_name: str,
     weaver_version: str,
+    target_kind: str = LAKEHOUSE_TARGET,
 ) -> CatalogueProjection:
     scope = InstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
     if any(identity.item != item for identity in retained):
         raise ValueError(f"item projection {item} received a document owned elsewhere")
+
+    # ``retained`` carries both kinds of registered object. Splitting them here
+    # rather than at the call site keeps the caller from having to know which is
+    # which — the repository already does.
+    alias_by_destination = {
+        alias.destination: alias
+        for alias in repository.aliases
+        if alias.destination.item == item
+    }
+    retained_aliases = tuple(
+        alias_by_destination[identity]
+        for identity in retained
+        if identity in alias_by_destination
+    )
+    retained = tuple(
+        identity for identity in retained if identity not in alias_by_destination
+    )
     documents = [repository.source_documents[identity] for identity in retained]
     all_documents = tuple(repository.source_documents.values())
     rows: dict[str, list[dict]] = {table.name: [] for table in CATALOGUE_TABLES}
@@ -182,6 +200,16 @@ def project_item_installation(
             }
         )
 
+    for alias in retained_aliases:
+        rows[REGISTRY.name].append(
+            {
+                **_identity(scope, alias.destination),
+                "object_type": _alias_object_type(alias.destination, target_kind),
+                "object_role": ROLE_DATA,
+                "signature": alias.signature,
+            }
+        )
+
     for alias in repository.aliases:
         if alias.destination.item != item:
             continue
@@ -194,7 +222,7 @@ def project_item_installation(
                 "source_item_name": alias.source.item.item_name,
                 "source_schema_name": _catalogue_schema(alias.source),
                 "source_object_name": alias.source.object_id.object,
-                "signature": _alias_signature(alias),
+                "signature": alias.signature,
             }
         )
 
@@ -202,6 +230,10 @@ def project_item_installation(
         {
             (_catalogue_schema(identity), identity.object_id.schema)
             for identity in retained
+        }
+        | {
+            (_catalogue_schema(alias.destination), alias.destination.object_id.schema)
+            for alias in retained_aliases
         }
     )
     item_model = next(model for model in repository.items if model.identity == item)
@@ -232,9 +264,26 @@ def project_item_installation(
     )
 
 
-def _alias_signature(alias) -> str:
-    declaration = f"{alias.destination}\0{alias.source}".encode("utf-8")
-    return hashlib.sha256(declaration).hexdigest()
+def _alias_object_type(destination: WeaverDocumentId, target_kind: str) -> str:
+    """What an alias destination physically *is*, in the catalogue's vocabulary.
+
+    Not a type of its own. An alias is registered as the thing it actually is —
+    a folder under ``Files``, a view in a Warehouse, a table in a Lakehouse —
+    because to every reader of the catalogue that is what it is, and because the
+    operations that matter (does it exist, how is it addressed, how is it
+    dropped) are the ordinary ones for that type. That a Lakehouse table alias
+    happens to be implemented as a OneLake shortcut is execution detail, the way
+    a managed table's storage layout is.
+
+    Its *alias-ness* is not lost: :data:`~weaver.catalogue.tables.ALIAS` records
+    it, and that is the only place that does.
+    """
+
+    if destination.is_files:
+        return OBJECT_TYPE_FOR_KIND[FOLDER]
+    if target_kind == WAREHOUSE_TARGET:
+        return OBJECT_TYPE_FOR_KIND[VIEW]
+    return OBJECT_TYPE_FOR_KIND[TABLE]
 
 
 def _scope(scope: InstallationScope) -> dict[str, str]:

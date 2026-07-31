@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from ..declaration.model import WeaverDocumentId, WeaverItemId
 from .models import (
@@ -78,8 +78,19 @@ def plan_item_aliases(
     item: WeaverItemId,
     target: BoundTarget,
     target_by_item: Mapping[WeaverItemId, BoundTarget],
+    selected: Iterable[WeaverDocumentId],
 ) -> ItemAliasPlan:
-    """Plan every alias this item consumes, against the current bindings."""
+    """Plan the aliases this build selected, against the current bindings.
+
+    ``selected`` is what incremental selection chose to rebuild. An alias absent
+    from it is current — its declaration is unchanged, its destination is there,
+    and its source has not been rebuilt since — so it is left alone rather than
+    replaced, exactly as an unchanged document is.
+
+    Its *schema* is still reported. A retained alias lives in a namespace the
+    item must have, and a build that created only the schemas its rebuilt aliases
+    needed would leave the others homeless.
+    """
 
     aliases = sorted(
         (alias for alias in repository.aliases if alias.destination.item == item),
@@ -88,6 +99,7 @@ def plan_item_aliases(
     if not aliases:
         return ItemAliasPlan()
 
+    chosen = set(selected)
     omitted: list[OmittedNode] = []
     supported: list[tuple] = []
     schemas: list[str] = []
@@ -104,8 +116,9 @@ def plan_item_aliases(
                 )
             )
             continue
-        supported.append((alias, source_target))
         schemas.append(alias.destination.object_id.schema)
+        if alias.destination in chosen:
+            supported.append((alias, source_target))
 
     stage = None
     if supported:

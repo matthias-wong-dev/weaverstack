@@ -135,7 +135,14 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     }
 
 
-def test_cross_item_descendants_are_deferred(tmp_path):
+def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
+    """Impact crosses the alias, because the alias is in the graph.
+
+    The consumer is in another item and reaches its producer only through
+    ``Sales.PortableCustomer``. Nothing here special-cases that: the walk is the
+    ordinary descendant walk, and the alias is an ordinary hop on it.
+    """
+
     repository = _repository(_dependency_estate(tmp_path))
     curated = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Customer")
     reporting = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
@@ -149,6 +156,29 @@ def test_cross_item_descendants_are_deferred(tmp_path):
     impact = determine_impact(
         repository, catalogue.registered, selected=(curated, reporting)
     )
+    assert impact.changed == (curated,)
+    assert reporting in impact.impacted_descendants
+
+
+def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
+    """Deferral is now by construction rather than by rule.
+
+    The same changed producer, with the consumer simply not selected: nothing
+    reaches it, because impact only ever names nodes the build was asked about.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    curated = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Customer")
+    reporting = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+    rows = {}
+    for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
+        rows.update(_catalogue(repository, item_text).rows)
+    rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
+        "signature"
+    ] = "old-signature"
+    catalogue = ReconciledCatalogue(rows)
+    impact = determine_impact(repository, catalogue.registered, selected=(curated,))
+
     assert impact.changed == (curated,)
     assert reporting not in impact.impacted
 

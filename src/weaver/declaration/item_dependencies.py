@@ -27,6 +27,9 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     folded_native = {str(identity).casefold(): identity for identity in native}
     folded_alias = {str(identity).casefold(): identity for identity in aliases}
     edges: list[ItemDependency] = []
+    #: Graph edges, kept separately from ``edges`` because the two answer
+    #: different questions — see :func:`_document_graph`.
+    graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
         if source.document.declares_dependencies:
@@ -77,6 +80,11 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
                     is_within_item=producer.item == consumer.item,
                 )
             )
+            # ``destination`` is what the consumer named in its own namespace: the
+            # producer itself when that resolved natively, and the item's alias
+            # destination when it resolved through one. The edge above records the
+            # producer either way; the graph records the hop actually taken.
+            graph_edges.add((str(destination), str(consumer)))
 
     unique = {
         (edge.consumer, edge.reference, edge.producer, edge.resolution_kind): edge
@@ -92,14 +100,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             ),
         )
     )
-    graph = Graph(
-        (str(identity) for identity in native),
-        (
-            (str(edge.producer), str(edge.consumer))
-            for edge in resolved
-            if edge.producer is not None
-        ),
-    )
+    graph = _document_graph(native, aliases, graph_edges)
     item_graph = _item_graph(repository, resolved)
     by_name = {str(item.identity): item.identity for item in repository.items}
     return replace(
@@ -111,6 +112,43 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             tuple(by_name[node] for node in layer) for layer in item_graph.layers()
         ),
     )
+
+
+def _document_graph(
+    native: Mapping[WeaverDocumentId, SourceDocument],
+    aliases: Mapping[WeaverDocumentId, WeaverDocumentId],
+    graph_edges: set[tuple[str, str]],
+) -> Graph:
+    """The graph incremental selection is planned against.
+
+    **This is deliberately not a projection of** :attr:`dependency_edges`. An
+    edge records what the author wrote and where it resolved to, and
+    :data:`~weaver.catalogue.tables.DEPENDENCY` publishes exactly that — an
+    alias edge names the *source document* as its producer, because that is the
+    truth about where the data comes from. The graph answers a different
+    question: what must be built, in what order. There the alias destination is
+    a thing in its own right — a shortcut or a view that some build has to
+    create — so the path is three hops rather than two:
+
+    .. code-block:: text
+
+        source document → alias destination → consumer document
+
+    Representing it that way is what lets impact propagate across items without
+    the planner needing a special case: an alias is an ordinary node, rebuilt
+    when its source is, and its consumers are ordinary descendants of it.
+
+    Every alias contributes its ``source → destination`` edge whether or not a
+    document consumes it. An alias with no consumer still has to be materialised
+    after the thing it points at exists.
+    """
+
+    edges = set(graph_edges)
+    for destination, source in aliases.items():
+        edges.add((str(source), str(destination)))
+    nodes = [str(identity) for identity in native]
+    nodes.extend(str(destination) for destination in aliases)
+    return Graph(nodes, sorted(edges))
 
 
 def _item_graph(repository: WeaverRepository, resolved: tuple[ItemDependency, ...]) -> Graph:
@@ -137,8 +175,8 @@ def _item_graph(repository: WeaverRepository, resolved: tuple[ItemDependency, ..
             continue
         edges.add((str(edge.producer.item), str(edge.consumer.item)))
     for alias in repository.aliases:
-        if alias.source.item == alias.destination.item:
-            continue
+        # Repository parsing rejects a same-item alias, so every alias is an
+        # edge between two distinct items.
         edges.add((str(alias.source.item), str(alias.destination.item)))
 
     try:

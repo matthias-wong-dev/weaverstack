@@ -81,9 +81,20 @@ def generate_item_build_bundle(
             + ", ".join(sorted(map(str, unknown)))
         )
 
-    selected_ids = {
+    # Two kinds of node are selectable, and most of what follows needs exactly
+    # one of them. Documents are what prune, schemas and the physical build
+    # pipelines are about; alias destinations are registered objects too — so
+    # they take part in selection and certification — but they are materialised
+    # by the alias executor rather than by any document stage.
+    selected_documents = {
         identity for identity in repository.source_documents if identity.item in by_item
     }
+    selected_aliases = {
+        alias.destination
+        for alias in repository.aliases
+        if alias.destination.item in by_item
+    }
+    selected_ids = selected_documents | selected_aliases
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -135,7 +146,8 @@ def generate_item_build_bundle(
                 target=target_by_item[item],
                 inventory=inventories[item],
                 target_by_item=target_by_item,
-                selected_ids=selected_ids,
+                selected_documents=selected_documents,
+                selected_aliases=selected_aliases,
                 selected_for_drop=selected_for_drop,
                 selected_for_build=selected_for_build,
                 registered=registered,
@@ -225,7 +237,8 @@ def _plan_item(
     target,
     inventory: TargetInventory,
     target_by_item,
-    selected_ids,
+    selected_documents,
+    selected_aliases,
     selected_for_drop,
     selected_for_build,
     registered,
@@ -233,26 +246,34 @@ def _plan_item(
     """One item's contiguous group of stages, in the order they must run."""
 
     aliases = plan_item_aliases(
-        repository, item=item, target=target, target_by_item=target_by_item
+        repository,
+        item=item,
+        target=target,
+        target_by_item=target_by_item,
+        selected=selected_for_build & selected_aliases,
     )
     stages: list[PlannedStage] = []
 
+    # Prune is given every *declared* alias destination, never only the selected
+    # ones: an alias this build decided not to touch is still desired state, and
+    # a prune that could not see it would delete the very thing incremental
+    # selection just chose to keep.
     prune = item_prune_stage(
-        repository, selected_ids, item=item, target=target, inventory=inventory
+        repository, selected_documents, item=item, target=target, inventory=inventory
     )
     if prune is not None:
         stages.append(prune)
     stages.extend(
         item_drop_stages(
             repository,
-            selected_for_drop,
+            selected_for_drop - selected_aliases,
             item=item,
             target=target,
             registered=registered,
         )
     )
     schemas = item_schema_stage(
-        selected_ids,
+        selected_documents,
         item=item,
         target=target,
         inventory=inventory,
@@ -264,7 +285,10 @@ def _plan_item(
         stages.append(aliases.stage)
     stages.extend(
         item_build_stages(
-            repository, selected_for_build, item=item, target=target
+            repository,
+            selected_for_build - selected_aliases,
+            item=item,
+            target=target,
         )
     )
 

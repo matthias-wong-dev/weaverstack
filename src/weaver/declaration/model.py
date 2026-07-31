@@ -7,6 +7,7 @@ physical bindings applied later.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Mapping
 
@@ -177,6 +178,25 @@ class RepositoryAlias:
 
     destination: WeaverDocumentId
     source: WeaverDocumentId
+
+    @property
+    def signature(self) -> str:
+        """What this alias *is*, hashed — and nothing about what it points to.
+
+        An alias declares one thing: this destination stands for that source. So
+        its signature is the pair, and only the pair. The source document's own
+        content is deliberately absent: a rebuilt source does not redefine the
+        alias, and treating it as a change would replace every downstream
+        shortcut whenever a table was reloaded.
+
+        A source that was rebuilt is still a reason to remake the alias — but
+        that is freshness, answered by comparing build epochs in the Registry,
+        not by this signature. Keeping the two apart is what lets an unchanged
+        alias over an unchanged source be left alone.
+        """
+
+        declaration = f"{self.destination}\0{self.source}".encode("utf-8")
+        return hashlib.sha256(declaration).hexdigest()
 
     def __str__(self) -> str:
         return f"{self.destination}: {self.source}"

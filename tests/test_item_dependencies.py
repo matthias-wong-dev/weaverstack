@@ -120,6 +120,72 @@ def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
     assert not edge.is_within_item
 
 
+def test_the_alias_destination_is_its_own_node_between_source_and_consumer(tmp_path):
+    """The graph is three hops where the published edge is two.
+
+    ``dependency_edges`` says where the data comes from, so an alias edge names
+    the source document. The graph says what must be built and in what order, and
+    there the alias destination is a thing in its own right — so impact reaches a
+    consumer *through* it rather than jumping the boundary.
+    """
+
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
+    graph = repository.dependency_graph
+    source = "Lakehouse/Curated/Sales.Customer"
+    alias = "Warehouse/Reporting/Sales.PortableCustomer"
+    consumer = "Warehouse/Reporting/Sales.Customer"
+
+    assert alias in graph.nodes
+    pairs = {(edge.upstream, edge.downstream) for edge in graph.edges}
+    assert (source, alias) in pairs
+    assert (alias, consumer) in pairs
+    # The two-hop shortcut must *not* also be there, or the alias would be
+    # bypassable and a build could order the consumer before it.
+    assert (source, consumer) not in pairs
+
+    assert consumer in graph.descendants(source)
+    assert graph.descendants(alias) == (consumer,)
+
+
+def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
+    """It has to be materialised after the thing it points at exists, whether or
+    not anything reads it yet."""
+
+    root = _dependency_estate(tmp_path)
+    _write(
+        root,
+        "Warehouse/Audit/alias.yml",
+        "aliases:\n  Sales.Unread: Lakehouse/Curated/Sales.Customer\n",
+    )
+    graph = parse_item_repository(Location(str(root))).dependency_graph
+
+    alias = "Warehouse/Audit/Sales.Unread"
+    assert alias in graph.nodes
+    assert ("Lakehouse/Curated/Sales.Customer", alias) in {
+        (edge.upstream, edge.downstream) for edge in graph.edges
+    }
+
+
+def test_published_dependency_edges_ignore_the_alias_node(tmp_path):
+    """The graph gained a hop; the catalogue's dependency rows did not.
+
+    Guards the decoupling directly: no edge may name an alias destination as a
+    producer, and none may become within-item by acquiring one.
+    """
+
+    repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
+    destinations = {alias.destination for alias in repository.aliases}
+
+    assert destinations
+    assert all(edge.producer not in destinations for edge in repository.dependency_edges)
+
+    alias_edge = _edge(
+        repository, "Warehouse/Reporting/Sales.Customer", "Sales.PortableCustomer"
+    )
+    assert str(alias_edge.producer) == "Lakehouse/Curated/Sales.Customer"
+    assert not alias_edge.is_within_item
+
+
 def test_three_part_sql_reference_is_preserved_as_physical(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     edge = _edge(
