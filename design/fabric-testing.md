@@ -93,14 +93,31 @@ export WEAVER_FABRIC_WORKSPACE=PYTEST_WORKSPACE   # default: PYTEST_WORKSPACE
 export WEAVER_FABRIC_ENVIRONMENT=weaver           # default: weaver
 ```
 
-Item **lifecycle** tests — creating and deleting Lakehouses — carry their own
-`provisioning` marker and are not selected by `-m fabric`:
+Every marker says *what a test needs*, and the one that matters most for day-to-day
+work is whether a **wheel publish** is one of those things:
 
 ```bash
-pytest -m fabric          # what Weaver does with items that exist
-pytest -m provisioning    # Fabric creating and deleting them
+pytest -m fabric            # real Fabric, driven from this checkout — no publish
+pytest -m published_weaver  # the installed package is the subject
+pytest -m full_integration  # the Fabric lifecycle journey
+pytest -m provisioning      # Fabric creating and deleting items
 ```
 
+`fabric` versus `published_weaver` is about **what executes**, not about whether
+Livy is involved. Creating a OneLake shortcut is a REST call, refreshing an
+endpoint is another, wiping a Lakehouse is directory removal, and a Warehouse is
+reached over TDS — all of which work perfectly well from this checkout against a
+real workspace. Even a Spark body is `fabric` if it does not import Weaver, which
+is why `LivySession.for_workspace` takes `require_weaver`.
+
+What earns `published_weaver` is being *about* the installed package: that it
+acquires its own capabilities from the session's identity, that the Environment
+carries it, that it bootstraps its own catalogue. Those are proven once, per
+capability, in `tests/fabric/test_published_weaver.py` — so no feature has to
+re-prove them, and the ordinary loop never waits on a publish.
+
+Item **lifecycle** tests — creating and deleting Lakehouses — are separated for a
+different reason.
 They are separated because they exercise Fabric's resource management rather
 than Weaver's and change rarely, while their create/delete churn slows every run
 of the code actually under development. `create_lakehouse` is still real product
@@ -116,11 +133,16 @@ subscription — and it keeps the suite off whatever capacity real work uses. On
 small shared capacity (an F2 permits one Spark session at a time) a long test run
 and a scheduled job contend for the same slot.
 
-## Install Weaver once, whenever the code changes
+## Install Weaver when you want to test the installed Weaver
 
-The Fabric suite imports Weaver from a Fabric Environment — it does **not** copy
-source into the workspace. Install (or update) that Environment whenever Weaver
-Python changes:
+Only two tiers need it — `published_weaver` and `full_integration` — and they are
+the ones whose subject *is* the installed package. `pytest -m fabric` needs no
+publish at all, which is the point: a five-minute publish should not sit between
+you and finding out a REST request body is wrong.
+
+Weaver is imported from a Fabric Environment — nothing is copied into the
+workspace. Install (or update) that Environment when Weaver Python changes and
+you want the wheel-backed tiers to reflect it:
 
 ```bash
 weaver install --workspace <workspace> --environment weaver
@@ -138,19 +160,29 @@ Capacity is billed while it runs, so turn it on, work, turn it off.
 weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
 weaver capacity status  --resource-group <rg> --capacity-name <capacity>
 
-.venv/bin/python -m pytest -m fabric
+.venv/bin/python -m pytest -m fabric            # no publish needed
+
+# and, when the installed package is what you want to exercise:
+weaver install --workspace <workspace> --environment weaver
+.venv/bin/python -m pytest -m published_weaver
+.venv/bin/python -m pytest -m full_integration
 
 weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
 ```
+
+Leave a gap between the wheel-backed tiers: a capacity often allows one Spark
+session, and a run starting seconds after another released its slot will find the
+session queued rather than idle.
 
 Resuming takes about half a minute and `resume` returns before the capacity is
 `Active`, so `status` is the confirmation.
 
 The suite runs against `PYTEST_WORKSPACE` unless `WEAVER_FABRIC_WORKSPACE` names
 another, and skips with the reason if that workspace cannot be reached rather
-than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`; the Livy tests
-skip (rather than fail) if that Environment has no Weaver installed yet, pointing
-at `weaver install`.
+than failing. `WEAVER_FABRIC_ENVIRONMENT` defaults to `weaver`. The session no longer asserts
+that the Environment carries a usable Weaver: a body that wants Weaver imports it
+and fails on its own terms, which is both more precise and what lets a test use
+Spark without needing a publish.
 
 Immediately before it requests its shared Livy session, the harness reads the
 sessions collection for every Lakehouse in the workspace. It prints active or
@@ -281,7 +313,7 @@ Two rules keep the cost down and the setup in one place:
 - **Environment setup lives only in `conftest`.** Tests never build a workspace,
   create a Lakehouse, start a session or clean a catalog. Which Weaver document repository an
   environment installs is the `weaver_repo_fixture` parameter (paths in
-  `tests/fabric/build_envs.py`), so one body can be pointed at another estate:
+  `tests/support/build_envs.py`), so one body can be pointed at another estate:
   `@pytest.mark.parametrize("weaver_repo_fixture", [SQL_TABLE_FIXTURE], indirect=True)`.
 - **An estate is provisioned and installed once per module.** The module-scoped
   `lakehouse_estate` and `warehouse_estate` fixtures install one estate and hand
@@ -296,28 +328,46 @@ Two rules keep the cost down and the setup in one place:
 body against both Spark transports, so `-m spark` and `-m fabric` each select
 their half.
 
-### `weaver install` is a precondition of the Fabric suite
+### `weaver install` is a precondition of two tiers, not of the suite
 
-Every Fabric build test — Lakehouse and Warehouse alike — runs inside the Livy
-session, which imports Weaver from the Environment. **The suite therefore tests
-the wheel that was last published, not your working tree**, so any Weaver Python
-change needs `weaver install` before it is exercised on Fabric. That is the point:
-what is under test is Weaver-on-Fabric doing the job.
+This used to be true of everything Fabric, and it was the single worst thing about
+working on this codebase: a five-minute publish stood between a developer and
+finding out a REST body was malformed.
 
-The one thing that legitimately skips a publish is a change whose effect is fully
-determined *before* Fabric runs — nothing in the current build suite qualifies,
-because generation itself happens in Fabric.
+**A tier that runs the installed package tests the wheel that was last published,
+not your working tree.** That applies to `published_weaver` and
+`full_integration`, and for them it is the whole point — what is under test is
+Weaver-on-Fabric doing the job.
 
-## The three test suites
+It does not apply to `-m fabric`, which drives real Fabric from this checkout.
+The bundle is generated here, in pure Python, so the actions that run are provably
+the ones the build produces; then only the part that must be remote is run — an
+action through `execute_action`, a wipe, a REST call. A change to Weaver Python
+is exercised there immediately, with no publish.
+
+The distinction to hold on to is **what executes**, not whether Livy is involved.
+A Spark body that does not import Weaver needs a session, not a published
+package.
+
+## The test tiers
 
 | | command | needs |
 |---|---|---|
-| core | `pytest` | nothing — under a second |
+| core | `pytest` | nothing — under twenty seconds |
 | local Spark | `pytest -m spark` | a JDK and the `[spark]` extra |
 | Fabric | `pytest -m fabric` | `az login`, a workspace, a running capacity |
+| installed Weaver | `pytest -m published_weaver` | the above **and** `weaver install` |
+| the journey | `pytest -m full_integration` | the above |
 
-The default run excludes both optional suites, so a contributor with neither a
-JVM nor a tenant still gets a green build.
+The default run excludes every optional tier, so a contributor with neither a JVM
+nor a tenant still gets a green build. The first three are the development loop
+and none of them publishes anything.
+
+Marker, directory and fixture agree: `-m spark` collects only `tests/spark`, and
+the Fabric tiers only `tests/fabric`. That is enforced by where a test lives
+rather than by convention — a module under `tests/fabric` answering to `-m spark`
+would load the Fabric conftest, and with it a workspace, a credential and a
+session.
 
 ## Known Fabric behaviour
 

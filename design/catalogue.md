@@ -132,19 +132,56 @@ scope and cannot be treated as orphans.
 
 Catalogue work concludes every build and is appended at bundle **generation**, not
 decided at install time. Its statements are two per table — a scoped delete of
-everything the projection does not claim, then an idempotent merge of everything it
-does.
+everything the desired catalogue does not claim, then an idempotent merge of
+everything it does.
 
-Those statements deliberately **do not depend on reading the catalogue first**. The
-pair is correct against any prior state, including one the planner could not see. A
-build that derived its deletes from an inventory would have its deletion scope
-widened by a failed read, which is what [How Weaver Build Works](how-does-build-work.md), section 6 exists to prevent.
+The desired catalogue is derived in three steps, each one idea:
 
-Generation therefore does not read the catalogue at all. It briefly did, to put a
-row count in each sequence description — but a description is part of the hashed
-plan, so two runs of the same repository produced *different bundle identities*
-purely because the catalogue's state had changed. Counting rows is a report about
-state, not part of a frozen contract.
+```python
+logical     = Catalogue.from_repository(repository)   # everything the source declares
+certified   = retaining(logical, repository, ids)     # what this build actually proved
+publishable = for_targets(certified, repository, ids, kinds)
+```
+
+`from_repository` takes no selection and no binding: it is what the *source* says,
+so a developer keeps it correct by adding a declaration rather than by remembering
+a fixture. `retaining` is what keeps a Registry row meaning *this succeeded* —
+publishing the whole declaration would claim objects a build omitted or failed to
+materialise. `for_targets` certifies alias destinations, which cannot be done
+earlier: an alias is a view in a Warehouse and a table in a Lakehouse, so the
+Registry row needs the binding. It scopes as well as binds, so there is no path
+that certifies an alias against a guessed kind.
+
+Publication is then a diff:
+
+```python
+changes = current.diff(publishable)
+dml     = changes.render_dml(installation=...)
+```
+
+**The two sides are used for different things, and that asymmetry is the design.**
+`current` informs the *report* — new, changed, unchanged, removed — so a reviewer
+can see what a bundle will do before it runs. `desired` alone drives the
+*statements*.
+
+That matters because a row-level delete would look equivalent and is not. A
+partial or wrongly-scoped read returns *fewer* rows in `current`, so it would emit
+*fewer* deletes — and obsolete claims would survive indefinitely, silently, in the
+authoritative record. Scoped against what the desired catalogue claims, the pair
+is correct against any prior state, including one the reader never saw. Three
+catalogues that disagree completely about what is persisted render byte-identical
+statements, which `tests/targeted/test_catalogue_diff.py` asserts rather than
+describes.
+
+Nothing about a binding reaches the projection. Target name, Weaver version, the
+Installation row and the publication epoch are supplied at render time, because
+they are things a *build* knows and a repository does not.
+
+Generation does not let the catalogue's *state* reach the plan. It briefly did, to
+put a row count in each sequence description — but a description is part of the
+hashed plan, so two runs of the same repository produced *different bundle
+identities* purely because the catalogue had changed. Counting rows is a report
+about state, not part of a frozen contract.
 `weaver.catalogue.reconcile.summarise` and the tolerant reader remain the API for
 asking what a build would change.
 

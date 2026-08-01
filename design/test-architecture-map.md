@@ -152,38 +152,35 @@ sound; it does **not** prove the claim moved. Nothing has been deleted yet.
 
 Measured across every marker:
 
-| | tests | runtime |
-|---|---|---|
-| `pytest` (pure Python, incl. 93 targeted) | 1179 | 12s |
-| `pytest -m spark` (incl. 21 boundary) | 98 | 6m33s |
-| `pytest -m fabric` | 46 | **6m39s** |
-| `pytest -m full_integration` | 1 | see below |
+| command | tests | runtime | needs |
+|---|---|---|---|
+| `pytest` (incl. 163 targeted) | 1249 | 15s | nothing |
+| `pytest -m spark` (incl. 21 boundary) | 98 | ~7m | a JDK |
+| `pytest -m fabric` | 39 | ~4m | a workspace |
+| `pytest -m published_weaver` | 13 | ~4.5m | a workspace **and the wheel** |
+| `pytest -m full_integration` | 1 | ~8m | a workspace and the wheel |
 
 Fabric transport, over the course of this work:
 
-| | Livy calls | Livy elapsed | wall |
-|---|---|---|---|
-| start | 23 | 852s | 16m37s |
-| after the Warehouse module | 20 | — | 17m35s |
-| after the alias and catalogue rewrites | **12** | **202s** | **6m39s** |
+| | Livy calls | wall |
+|---|---|---|
+| start | 23 | 16m37s |
+| after the alias and catalogue rewrites | 12 | 6m39s |
+| after the wheel split | **6** | **~4m, and no publish** |
 
-Where the reduction came from, and none of it from asserting less:
+Where it went, and none of it from asserting less:
 
 | module | before | after |
 |---|---|---|
-| `test_warehouse_build.py` | 4 calls / 195s | retired — TDS, 0 calls |
-| `test_cross_item_alias.py` | 10 calls / 486s | 2 calls / 32s |
-| `test_item_catalogue_fabric.py` | 2 calls / 150s | 2 calls / 91s |
+| `test_warehouse_build.py` | 4 calls / 195s | retired — a Warehouse is TDS |
+| `test_cross_item_alias.py` | 10 calls / 486s | 3 calls, driven from the checkout |
+| `test_warehouse_wipe.py` | wheel-gated | 6s, no session |
+| `test_item_catalogue_fabric.py` | 2 calls / 150s | 1 call; the wipe half moved out |
 
-The pattern is the same in each. The bundle is generated on the desktop, in pure
-Python, so what runs against Fabric is provably what the build produces; and only
-the part that *has* to be remote is run — an action, an install, a wipe — rather
-than the estate around it. Decisions moved to `tests/targeted`, where they cost
-milliseconds and say which decision was wrong.
-
-What remains is nearly all genuine work: the catalogue bootstrap (84s) is Weaver
-installing its own catalogue inside a session, and the in-session bundle install
-(54s) is the row-3 claim. Neither is transport waste.
+The pattern is the same each time. The bundle is generated on the desktop, in
+pure Python, so what runs against Fabric is provably what the build produces; and
+only the part that *must* be remote is run — an action, an install, a wipe —
+rather than the estate around it.
 
 ## Layer by layer
 
@@ -195,7 +192,10 @@ installing its own catalogue inside a session, and the in-session bundle install
 | one action runs with installer result semantics; failures are data; statements reach the engine resolved | `execute_action` | `test_action_execution.py` | `spark_table`, `spark_schema`, `folder`, `alias`, `sql_endpoint_refresh` executors |
 | new / unchanged / changed; descendant propagation; selection bounds the walk; prohibit-rebuild | `determine_impact`, `select_build` | `test_incremental_impact.py` | stale aliases; removed objects; cross-item propagation |
 | one item's stages and their order: prune → drop → schema → build → refresh | `plan_item_build` | `test_item_plan.py` | alias stages; Warehouse item planning; uncertified aliases |
-| desired state; the diff into removals; item scoping; what prune spares | `managed_sets`, `item_prune_stage` | `test_prune.py` | `render_inventory_prune` called directly; empty-parent cleanup; alias destinations retained |
+| desired state; item scoping; what prune spares | `managed_sets`, `item_prune_stage` | `test_prune.py` | empty-parent cleanup; alias destinations retained |
+| the diff into removals; schema-drop folding; T-SQL escaping; determinism | `render_inventory_prune` | `test_inventory_prune.py` | — |
+| which schemas an item needs; alias namespaces; per-side payloads | `item_schema_stage` | `test_schema_stage.py` | — |
+| generate-and-install from prepared state; failure semantics; archives | `build_item_repository` | `test_build_workflow.py` | — |
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
 
 ### Covered by old tests, not yet re-homed
@@ -215,11 +215,22 @@ failure rather than naming itself.
 
 | seam | state |
 |---|---|
-| `render_inventory_prune` | reached through `item_prune_stage`, never called directly |
-| `item_schema_stage` | indirect only — bracket escaping, Lakehouse vs Warehouse, alias-derived schemas |
-| `item_drop_stages` | partial — ordering and bad-type covered; per-kind drop rendering is not |
-| alias planning | `plan_item_aliases`, `stale_alias_destinations` — old tests only |
-| `build_item_repository` | zero references anywhere |
+| `read_catalogue_state` | Spark-boundary claim; must see a complete catalogue, not a Registry-only one |
+| inventory readers | `read_lakehouse_inventory` / `read_warehouse_inventory` unasserted against fakes |
+| dictionary-table claim rules | still only in `tests/test_catalogue_state.py`, which is why that file cannot retire |
+
+Closed since this file was written: `render_inventory_prune`
+(`test_inventory_prune.py`), `item_schema_stage` (`test_schema_stage.py`) and
+`build_item_repository` (`test_build_workflow.py`) — the last of which no test had
+named at all. Each was reached only through something larger, so a defect in it
+and a defect in its caller failed the same test the same way.
+
+Two of them turned up behaviour worth having written down. The Lakehouse folds
+objects into a doomed schema's drop while the Warehouse must drop each by name
+first, because T-SQL will not drop a schema that still holds objects — the two
+look interchangeable from a distance. And every whole-plan assertion has to be
+scoped to an item, because a repository always carries Weaver's own builtin
+catalogue item and it is correctly built alongside.
 
 ### Boundary fidelity — the Spark and Fabric job now
 
