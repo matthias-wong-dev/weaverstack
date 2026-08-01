@@ -19,15 +19,21 @@ alias action learned to wait for a real read to succeed.
 item that mutated Delta is closed by a refresh. The emulator has no endpoint and
 skips it, so the refresh is unexercised until here.
 
-So the bundle is generated *here*, on the desktop, in pure Python — free — and
-then **only the alias action is run**, in the session, out of that bundle. Not
-the estate around it: schemas, tables, views, catalogue publication and the
-endpoint refreshes are minutes of work that answer none of the questions above,
-and every one of them is already proven elsewhere.
+So the bundle is generated *here*, in pure Python, and **only the alias action is
+run** out of it — not the estate around it. Schemas, tables, views, catalogue
+publication and the refreshes are minutes of work that answer none of the
+questions above, and every one is proven elsewhere.
 
-What crosses into Fabric is the action itself, with its frozen payload, executed
-through the same `execute_action` an installation uses and on the session's own
-identity. One submission: seed the source, run the action, observe.
+And the action runs *from here too*, against the real workspace: creating a
+OneLake shortcut is a REST call and refreshing an endpoint is another, so both
+reach Fabric perfectly well from this checkout. Only two things need a session,
+and neither imports Weaver — making the source table, and reading it back
+through its alias.
+
+That leaves exactly one claim needing the published wheel, and it has its own
+file: the executor's *wait* for asynchronous discovery is guarded by
+``context.spark is not None``, so running the action from here skips it. See
+`test_alias_discovery.py`.
 """
 
 from __future__ import annotations
@@ -39,7 +45,7 @@ from factories import FixtureCatalogue, alias_repository, item_id
 
 from weaver import ItemRef
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = pytest.mark.fabric
 
 #: Logical names owned by this module alone. The catalogue is keyed by logical
 #: item, never by physical target, so two estates sharing a name share Registry
@@ -119,12 +125,52 @@ def action_of(plan, kind: str):
     raise AssertionError(f"the plan carried no {kind} action")
 
 
+def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, sql=None):
+    """Execute one real action against real Fabric, from this process.
+
+    The same `execute_action` an installation calls, with its frozen payload,
+    given the capabilities a desktop caller injects rather than the ones a
+    session acquires. That the session can acquire its own is a separate claim,
+    made once in `test_published_weaver.py`.
+    """
+
+    from weaver.build_bundle import InstallationEnvironment, execute_action
+    from weaver.build_bundle.executors.base import InstallationContext
+
+    environment = InstallationEnvironment(
+        store=store, resolver=resolver, spark=None, workspace=workspace, sql=sql
+    )
+    resolved = {
+        target.id: environment.resolve_target(target) for target in bundle.plan.targets
+    }
+    payload = None
+    if action.payload is not None:
+        payload = store.read(bundle.location.join(*action.payload.split("/")))
+    return execute_action(
+        action,
+        payload,
+        context=InstallationContext(
+            spark=None,
+            resolver=resolver,
+            store=store,
+            snapshot=bundle.location.join("repository"),
+            target=resolved[batch_target],
+            targets=resolved,
+            # A Warehouse alias is a T-SQL view, so it needs a SQL capability.
+            # Injected here because a desktop caller has no session identity to
+            # acquire one from — which is exactly the difference the parity
+            # probes exist to cover.
+            sql=sql,
+        ),
+    )
+
+
 @pytest.fixture(scope="module")
 def alias_estate(
     fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session,
     tmp_path_factory,
 ):
-    """The alias action, run in Fabric — and nothing else run with it."""
+    """The alias action, run from here against real Fabric."""
 
     from factories import item_bindings
     from weaver.declaration import parse_item_repository
@@ -160,63 +206,61 @@ def alias_estate(
         for role, item in (("producer", producer), ("consumer", consumer))
     }
     source = at["producer"].qualify("DWG", "Customer")
-    aliased = at["consumer"].qualify("DWG", "PortableCustomer")
 
-    payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
-        "from weaver.resolution import resolver_for, store_for\n"
-        "from weaver.build_bundle import (InstallationEnvironment, execute_action, "
-        "load_bundle)\n"
-        "from weaver.build_bundle.executors.base import InstallationContext\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
-        f"environment={fabric_workspace.environment!r})\n"
-        "store = store_for(workspace)\n"
-        "resolver = resolver_for(workspace)\n"
-        # Seed the source and clear the destination. Setup, not subject: a
-        # shortcut needs something to point at, and a stale one would make the
-        # creation a no-op.
+    # Setup, and the only part that needs a session: a Delta table is the one
+    # thing a desktop cannot make. The body imports nothing.
+    livy_session.run(
         f"spark.sql('DROP SCHEMA IF EXISTS {at['consumer'].qualified_schema('DWG')} CASCADE')\n"
         f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at['producer'].qualified_schema('DWG')}')\n"
         f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at['consumer'].qualified_schema('DWG')}')\n"
         f"spark.sql('CREATE TABLE IF NOT EXISTS {source} (CustomerId string) USING delta')\n"
-        "environment = InstallationEnvironment("
-        "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
-        "bundle = load_bundle(resolver.build_bundle('aliasaction'), store=store)\n"
-        "resolved = {t.id: environment.resolve_target(t) for t in bundle.plan.targets}\n"
-        "def _run(action, target_id):\n"
-        "    context = InstallationContext(spark=spark, resolver=resolver, store=store,\n"
-        "        snapshot=bundle.location.join('repository'), target=resolved[target_id],\n"
-        "        targets=resolved)\n"
-        "    payload = None\n"
-        "    if action.payload is not None:\n"
-        "        payload = store.read(bundle.location.join(*action.payload.split('/')))\n"
-        "    return execute_action(action, payload, context=context)\n"
-        "alias = next(a for _s, _b, a in bundle.plan.actions() "
-        f"if a.id == {alias_action.id!r})\n"
-        "refresh = next(a for _s, _b, a in bundle.plan.actions() "
-        f"if a.id == {refresh_action.id!r})\n"
-        f"alias_result = _run(alias, {batch.target_id!r})\n"
-        f"refresh_result = _run(refresh, {batch.target_id!r})\n"
+        "emit(True)\n",
+        label="seed the source",
+    )
+
+    alias_result = run_from_here(
+        alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
+        store=store, batch_target=batch.target_id,
+    )
+    assert alias_result.status == "succeeded", alias_result.error_message
+    refresh_result = run_from_here(
+        refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
+        store=store, batch_target=batch.target_id,
+    )
+
+    aliased = at["consumer"].qualify("DWG", "PortableCustomer")
+    # Fabric discovers a shortcut asynchronously, and running the action from
+    # here skipped the executor's own wait — so the read retries. That the
+    # *executor* waits is asserted in `test_alias_discovery.py`, where it can be.
+    seen = livy_session.run(
+        "import time\n"
+        "_deadline = time.monotonic() + 180\n"
         "_seen = {}\n"
-        "if alias_result.status == 'succeeded':\n"
-        f"    _seen['alias_rows'] = spark.sql('SELECT count(*) AS n FROM {aliased}').collect()[0][0]\n"
-        f"    _seen['consumer_tables'] = sorted(r.tableName for r in spark.sql('SHOW TABLES IN {at['consumer'].qualified_schema('DWG')}').collect())\n"
-        f"    _seen['alias_in_producer'] = spark.catalog.tableExists({at['producer'].qualify('DWG', 'PortableCustomer')!r})\n"
-        f"    _seen['source_in_consumer'] = spark.catalog.tableExists({at['consumer'].qualify('DWG', 'Customer')!r})\n"
-        f"    _seen['produced'] = spark.catalog.tableExists({source!r})\n"
-        "emit({'alias': {'status': alias_result.status, 'error': alias_result.error_message,\n"
-        "                'details': alias_result.details},\n"
-        "      'refresh': {'status': refresh_result.status, 'error': refresh_result.error_message,\n"
-        "                  'details': refresh_result.details},\n"
-        "      'seen': _seen})\n",
-        label="run the alias action",
+        "while True:\n"
+        "    try:\n"
+        f"        _seen['alias_rows'] = spark.sql('SELECT count(*) AS n FROM {aliased}').collect()[0][0]\n"
+        "        break\n"
+        "    except Exception as exc:\n"
+        "        if time.monotonic() >= _deadline:\n"
+        "            raise\n"
+        "        time.sleep(5)\n"
+        f"_seen['consumer_tables'] = sorted(r.tableName for r in spark.sql('SHOW TABLES IN {at['consumer'].qualified_schema('DWG')}').collect())\n"
+        f"_seen['alias_in_producer'] = spark.catalog.tableExists({at['producer'].qualify('DWG', 'PortableCustomer')!r})\n"
+        f"_seen['source_in_consumer'] = spark.catalog.tableExists({at['consumer'].qualify('DWG', 'Customer')!r})\n"
+        f"_seen['produced'] = spark.catalog.tableExists({source!r})\n"
+        "emit(_seen)\n",
+        label="read back through the alias",
     ).payload
 
-    assert payload["alias"]["status"] == "succeeded", payload["alias"]["error"]
-
     return {
-        "payload": payload,
+        "payload": {
+            "seen": seen,
+            "refresh": {
+                "status": refresh_result.status,
+                "error": refresh_result.error_message,
+                "details": refresh_result.details,
+            },
+        },
         "plan": bundle.plan,
         "repository": repository,
         "bindings": bindings,
@@ -386,57 +430,34 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
 
     # The alias lands in a schema the build's schema stage would have made. That
     # stage is not the subject and is proven elsewhere, so it is arranged here
-    # over TDS rather than run — setup, and cheaper than a stage.
+    # over TDS rather than run.
     warehouse.executor.execute_script(
         "if schema_id(N'DWG') is null exec(N'create schema DWG');"
     )
-
-    payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
-        "from weaver.resolution import resolver_for, store_for\n"
-        "from weaver.build_bundle import (InstallationEnvironment, execute_action, "
-        "load_bundle)\n"
-        "from weaver.build_bundle.executors.base import InstallationContext\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
-        f"environment={fabric_workspace.environment!r})\n"
-        "store = store_for(workspace)\n"
-        "resolver = resolver_for(workspace)\n"
-        # The alias needs something to point at, and the endpoint needs to have
-        # seen it. Setup, not subject.
+    # And the source has to exist, which is the one thing needing a session.
+    livy_session.run(
         f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at.qualified_schema('DWG')}')\n"
         f"spark.sql('CREATE TABLE IF NOT EXISTS {source} (CustomerId string) USING delta')\n"
-        "environment = InstallationEnvironment("
-        "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
-        "bundle = load_bundle(resolver.build_bundle('whalias'), store=store)\n"
-        "resolved = {t.id: environment.resolve_target(t) for t in bundle.plan.targets}\n"
-        "refresh = next((a for _s, _b, a in bundle.plan.actions()\n"
-        "                if a.kind == 'refresh_sql_endpoint'\n"
-        f"                and 'AliasHouseProducer' in a.id), None)\n"
-        "alias = next(a for _s, _b, a in bundle.plan.actions() "
-        f"if a.id == {alias_action.id!r})\n"
-        "def _run(action, target_id):\n"
-        "    context = InstallationContext(spark=spark, resolver=resolver, store=store,\n"
-        "        snapshot=bundle.location.join('repository'), target=resolved[target_id],\n"
-        "        sql=environment.sql_for(resolved[target_id].bound), targets=resolved)\n"
-        "    payload = None\n"
-        "    if action.payload is not None:\n"
-        "        payload = store.read(bundle.location.join(*action.payload.split('/')))\n"
-        "    return execute_action(action, payload, context=context)\n"
-        # The producer's endpoint must be refreshed before the Warehouse can see
-        # the table through it — the ordering the item layers exist to enforce.
-        "if refresh is not None:\n"
-        "    for _s, b, a in bundle.plan.actions():\n"
-        "        if a.id == refresh.id:\n"
-        "            _run(refresh, b.target_id)\n"
-        "            break\n"
-        f"result = _run(alias, {batch.target_id!r})\n"
-        "emit({'status': result.status, 'error': result.error_message,\n"
-        "      'details': result.details})\n",
-        label="run the warehouse alias action",
-    ).payload
+        "emit(True)\n",
+        label="seed the source",
+    )
 
-    assert payload["status"] == "succeeded", payload["error"]
+    # The producer's endpoint must catch up before the Warehouse can see the
+    # table through it — a REST call, made from here.
+    for _sequence, refresh_batch, action in bundle.plan.actions():
+        if action.kind == "refresh_sql_endpoint" and "AliasHouseProducer" in action.id:
+            run_from_here(
+                action, bundle, workspace=fabric_workspace, resolver=resolver,
+                store=store, batch_target=refresh_batch.target_id,
+            )
+            break
+
+    result = run_from_here(
+        alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
+        store=store, batch_target=batch.target_id, sql=warehouse.executor,
+    )
+
+    assert result.status == "succeeded", result.error_message
 
     # And the view really answers, over TDS from here.
     rows = warehouse.executor.query(

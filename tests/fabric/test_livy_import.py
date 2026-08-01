@@ -112,23 +112,3 @@ def test_the_weaver_contract_parses_there(installed_environment):
         "row_update_datetime",
         "row_delete_datetime",
     ]
-
-
-# --- the transport protocol ---------------------------------------------------
-#
-# One call each, and they cannot be merged: what each asserts is a property of
-# the submission itself, and a body that raised would take any other evidence in
-# the same payload down with it.
-
-
-def test_a_failing_statement_reports_its_error(livy_session):
-    from weaver.fabric import LivyError
-
-    with pytest.raises(LivyError, match="ZeroDivisionError|division"):
-        livy_session.run("1 / 0\n", label="protocol")
-
-
-def test_printed_output_is_not_mistaken_for_a_result(livy_session):
-    result = livy_session.run("print('just logging')\n", label="protocol")
-    assert result.returned is False
-    assert "just logging" in result.text

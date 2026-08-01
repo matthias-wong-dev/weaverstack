@@ -248,8 +248,20 @@ class LivySession:
         return self._token_source()
 
     @classmethod
-    def for_workspace(cls, workspace, *, resolver=None, **kwargs) -> "LivySession":
+    def for_workspace(
+        cls, workspace, *, resolver=None, require_weaver: bool = True, **kwargs
+    ) -> "LivySession":
         """A session against a workspace's Weaver Lakehouse, ready to ``import weaver``.
+
+        ``require_weaver=False`` starts the session without asserting the
+        Environment carries a usable Weaver. The Environment is still attached —
+        a body that wants Weaver can still import it — but the *session* no
+        longer depends on the wheel being current.
+
+        That distinction is worth having. Submitting Spark to a workspace and
+        running the installed package are two different things, and conflating
+        them put a wheel publish in front of every test that merely needed a
+        session to read a table back.
 
         The session is created against the Weaver Lakehouse (its default), and
         the workspace's ``environment`` is attached so a plain ``import
@@ -283,7 +295,11 @@ class LivySession:
             resolver.workspace.id,
             home.id,
             environment_id=environment_id,
-            bootstrap=environment_bootstrap() + emit_source(),
+            bootstrap=(
+                environment_bootstrap() + emit_source()
+                if require_weaver
+                else emit_source()
+            ),
             **kwargs,
         )
 

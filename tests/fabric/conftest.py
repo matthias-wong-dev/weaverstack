@@ -347,7 +347,12 @@ def livy_session(fabric_workspace, fabric_client):
             )
 
     try:
-        session = LivySession.for_workspace(fabric_workspace)
+        # The session does not assert the wheel: a body that needs Weaver
+        # imports it and fails on its own terms, which is both more precise
+        # and what lets a test use Spark without needing a publish.
+        session = LivySession.for_workspace(
+            fabric_workspace, require_weaver=False
+        )
     except CommandError as exc:
         pytest.skip(f"{exc}; run `weaver install` into the Environment first")
     started = time.monotonic()
@@ -584,21 +589,27 @@ def populated_fabric_lakehouse(
             for statement in lakehouse_sql_statements(script, tables_root)
         ]
         body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
+        # Raw Spark, no Weaver import: a session is needed to make a Delta table,
+        # the installed package is not.
         result = livy_session.run(f"{body}\nemit(True)\n", label="seed")
         assert result.payload is True
 
         def wipe() -> tuple[str, ...]:
-            body = (
-                "from weaver import FabricWorkspace, DeltaTarget, wipe_delta_target\n"
-                f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-                f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
-                f"environment={fabric_workspace.environment!r})\n"
-                f"target = DeltaTarget.parse({target.name!r})\n"
-                "report = wipe_delta_target(target, workspace)\n"
-                "emit({'removed': list(report.removed)})\n"
+            """Weaver's own wipe, run from here.
+
+            `wipe_delta_target` never needed a session: a Delta table is a
+            directory, there is no catalogue to enumerate, and shortcuts go over
+            REST. It ran in one only because that is where the installed package
+            lived — which put a wheel publish in front of a claim about directory
+            removal.
+            """
+
+            from weaver import DeltaTarget, wipe_delta_target
+
+            report = wipe_delta_target(
+                DeltaTarget(lakehouse=target), fabric_workspace, store=store
             )
-            result = livy_session.run(body, label="wipe")
-            return tuple(result.payload["removed"])
+            return tuple(report.removed)
 
         yield PopulatedLakehouse(
             workspace=fabric_workspace,
