@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from ...errors import InstallError
-from ...locations import LakehouseSparkLocation, Location
+from ...locations import LakehouseSparkLocation
 from ...spark import SparkCatalogue, SparkDestination
 from ...store import Store
 from ...targets import ItemRef

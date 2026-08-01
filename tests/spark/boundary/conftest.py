@@ -16,7 +16,6 @@ from weaver import ItemRef
 from weaver.build_bundle import execute_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.etl import item_load_artefacts
-from weaver.locations import Location
 
 
 

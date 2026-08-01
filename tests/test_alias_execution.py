@@ -12,7 +12,6 @@ from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarg
 from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, BuildAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
-from weaver.locations import Location
 from weaver.resolution import LocalResolver
 from weaver.store import LocalStore
 from weaver.targets import ItemRef

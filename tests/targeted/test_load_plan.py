@@ -17,7 +17,6 @@ from factories import (
     WAREHOUSE_ITEM,
     bound_target,
     document_id,
-    folder_document,
     item_id,
     lakehouse_table,
     registered_document,
