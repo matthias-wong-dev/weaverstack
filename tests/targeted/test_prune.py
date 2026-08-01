@@ -246,3 +246,95 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
     # separation comes from binding items to different targets, not from prune.
     assert any("Customer" in node for node in prune_targets(stage))
     assert not any("Neighbour" in node for node in prune_targets(stage))
+
+
+# --- the Warehouse side -------------------------------------------------------
+
+
+@pytest.fixture
+def warehouse_estate(tmp_path):
+    """A Warehouse item, which is the side nothing here used to cover.
+
+    Every other estate in this module is a Lakehouse, and that asymmetry hid a
+    real defect: a Lakehouse's generated `_` is a *folder document*, so it enters
+    the keep-set through the ordinary document path and needs no help, while a
+    Warehouse's `_` is a schema no document declares. The two look interchangeable
+    from a distance and are not.
+    """
+
+    from factories import WAREHOUSE_ITEM, schema_document, warehouse_table
+    from weaver import Location
+    from weaver.declaration import parse_item_repository
+
+    root = tmp_path / "repo"
+    for relative, text in {
+        f"{WAREHOUSE_ITEM}/schemas/Sales.yml": schema_document("Sales"),
+        f"{WAREHOUSE_ITEM}/Sales.Customer.sql": warehouse_table("Sales.Customer"),
+    }.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return parse_item_repository(Location(str(root)))
+
+
+def test_a_freshly_built_warehouse_is_pruned_of_nothing(warehouse_estate):
+    """The claim the Fabric tier was making alone, one layer down and free.
+
+    A build that creates `_` for its load procedures and then prunes it is not a
+    subtle failure — it destroys the schema it just made, every build. It was
+    invisible here because the keep-set's load half arrived as a defaulted
+    argument that only production passed, which is why `item_prune_stage` now
+    derives it instead of accepting it.
+    """
+
+    from factories import WAREHOUSE_ITEM
+
+    item = item_id(WAREHOUSE_ITEM)
+    target = bound_target(
+        id="target-1",
+        kind="warehouse",
+        item_id="Reporting_WH",
+        logical_item_name="Reporting",
+        logical_item_type="Warehouse",
+    )
+
+    stage = item_prune_stage(
+        warehouse_estate,
+        set(warehouse_estate.source_documents),
+        item=item,
+        target=target,
+        inventory=FixtureInventory.from_repository(
+            warehouse_estate,
+            item=WAREHOUSE_ITEM,
+            target_kind=SQL_TARGET,
+            kind="warehouse",
+            target_name="Reporting_WH",
+        ),
+    )
+
+    assert stage is None
+
+
+def test_the_procedure_schema_is_in_the_keep_set(warehouse_estate):
+    """Stated directly, so a failure names the keep-set rather than the stage."""
+
+    from factories import WAREHOUSE_ITEM
+    from weaver.etl import item_load_artefacts
+
+    documents = {
+        str(identity): document
+        for identity, document in warehouse_estate.source_documents.items()
+        if identity.item == item_id(WAREHOUSE_ITEM)
+    }
+    managed = managed_sets(
+        documents,
+        SQL_TARGET,
+        load_identities=[
+            artefact.identity
+            for artefact in item_load_artefacts(
+                warehouse_estate, item=item_id(WAREHOUSE_ITEM)
+            )
+        ],
+    )
+
+    assert "_" in managed.schemas

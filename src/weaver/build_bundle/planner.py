@@ -319,15 +319,10 @@ def plan_item_build(
     # Prune is given every *declared* alias destination, never only the selected
     # ones: an alias this build decided not to touch is still desired state, and
     # a prune that could not see it would delete the very thing incremental
-    # selection just chose to keep. Load identities arrive on the same terms and
-    # for the same reason.
+    # selection just chose to keep. Load artefacts are treated the same way, and
+    # the stage derives them itself.
     prune = item_prune_stage(
-        repository,
-        selected_documents,
-        item=item,
-        target=target,
-        inventory=inventory,
-        load_identities=[artefact.identity for artefact in artefacts],
+        repository, selected_documents, item=item, target=target, inventory=inventory
     )
     if prune is not None:
         stages.append(prune)

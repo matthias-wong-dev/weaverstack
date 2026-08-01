@@ -94,7 +94,6 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         "if alias.payload is not None:\n"
         "    payload = store.read(bundle.location.join(*alias.payload.split('/')))\n"
         "context = InstallationContext(spark=spark, resolver=resolver, store=store,\n"
-        "    snapshot=bundle.location.join('repository'),\n"
         f"    target=resolved[{batch.target_id!r}], targets=resolved)\n"
         "result = execute_action(alias, payload, context=context)\n"
         "emit({'status': result.status, 'error': result.error_message,\n"

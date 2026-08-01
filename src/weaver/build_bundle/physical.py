@@ -16,7 +16,7 @@ from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..spark.tokens import object_token
-from ..etl import FILE_TYPE, PROCEDURE_TYPE
+from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_load_artefacts
 from .models import (
     BUILD_FOLDER,
     BUILD_PROCEDURE,
@@ -74,9 +74,16 @@ def item_prune_stage(
     item: WeaverItemId,
     target,
     inventory,
-    load_identities=(),
 ) -> PlannedStage | None:
-    """Freeze one item's authoritative repository/inventory diff."""
+    """Freeze one item's authoritative repository/inventory diff.
+
+    The keep-set is derived here rather than handed in, and the load artefacts
+    are why. They contribute the ``_`` schema a Warehouse's generated procedures
+    live in, which no document declares — so a caller that did not think to pass
+    them would produce a prune that drops the schema the same build just created.
+    A destructive default is not something to leave reachable, and the repository
+    is already here, so nothing has to be remembered.
+    """
 
     documents = {
         str(identity): repository.source_documents[identity]
@@ -93,7 +100,7 @@ def item_prune_stage(
             if alias.destination.item == item
         ],
         load_identities=[
-            identity for identity in load_identities if identity.item == item
+            artefact.identity for artefact in item_load_artefacts(repository, item=item)
         ],
     )
 
