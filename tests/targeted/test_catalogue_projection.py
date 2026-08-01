@@ -25,7 +25,7 @@ from factories import (
     spark_view,
 )
 
-from weaver.catalogue import catalogue_from_repository
+from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import INSTALLATION, REGISTRY
 
 CUSTOMER = "DWG.Customer"
@@ -46,12 +46,17 @@ def repository(tmp_path):
     )
 
 
-def derived(repository, *names, **kwargs):
-    return catalogue_from_repository(
-        repository,
-        retained={item_id(): {document_id(name) for name in names}},
-        **kwargs,
-    )
+def derived(repository, *names):
+    """The logical catalogue, narrowed to the objects a test is talking about.
+
+    `from_repository` takes no selection — it is everything the source declares —
+    so narrowing is a separate step, which is the whole point of the contract.
+    """
+
+    catalogue = Catalogue.from_repository(repository)
+    if not names:
+        return catalogue
+    return catalogue.retaining({document_id(name) for name in names})
 
 
 # --- it is a function of source -----------------------------------------------
@@ -60,25 +65,32 @@ def derived(repository, *names, **kwargs):
 def test_everything_declared_is_certified(repository):
     """The premise of the whole idea: adding a declaration adds a row.
 
-    No fixture to update, no list to keep in step — the constructor reads the
-    repository, so a new artefact appears in the desired catalogue by existing.
+    No fixture to update, no list to keep in step, and no selection to pass —
+    the constructor reads the repository, so a new artefact appears in the
+    desired catalogue by existing.
     """
 
-    catalogue = derived(repository, CUSTOMER, VIEW, FOLDER)
+    catalogue = Catalogue.from_repository(repository)
 
-    assert {identity for identity in catalogue.registered} == {
-        document_id(CUSTOMER),
-        document_id(VIEW),
-        document_id(FOLDER),
-    }
+    # Scoped to this item: a repository always carries Weaver's own builtin
+    # catalogue item too, and projecting *everything declared* means projecting
+    # that as well — which is right, and worth seeing rather than filtering away
+    # inside the constructor.
+    assert {
+        identity for identity in catalogue.registered if identity.item == item_id()
+    } == {document_id(CUSTOMER), document_id(VIEW), document_id(FOLDER)}
+    assert any(
+        identity.item.item_name == "_weaver" for identity in catalogue.registered
+    ), "the builtin catalogue item is declared source too"
 
 
 def test_each_object_is_registered_as_what_it_is(repository):
-    catalogue = derived(repository, CUSTOMER, VIEW, FOLDER)
+    catalogue = Catalogue.from_repository(repository)
 
     kinds = {
         identity.object_id.object: document.object_type
         for identity, document in catalogue.registered.items()
+        if identity.item == item_id()
     }
     assert kinds == {"Customer": "table", "ActiveCustomer": "view", "CustomerCsv": "folder"}
 
@@ -103,16 +115,22 @@ def test_signatures_are_the_declarations_own(repository):
     } == declared
 
 
-def test_an_object_the_build_is_not_retaining_is_absent(repository):
-    """Desired state is what this build claims, not everything in the repository.
+def test_narrowing_is_a_later_step_not_an_input(repository):
+    """Selection transforms the desired catalogue; it does not construct it.
 
-    A build that projected objects it was not installing would be claiming them,
-    and the comparison would then propose removing whatever it had missed.
+    The full logical catalogue claims everything declared. What a *build* may
+    certify is a narrowing of it — and it has to be, because a Registry row means
+    the work succeeded, so publishing the whole declaration would claim objects a
+    build omitted or failed to materialise.
     """
 
-    catalogue = derived(repository, CUSTOMER)
+    everything = Catalogue.from_repository(repository)
+    assert {document_id(CUSTOMER), document_id(VIEW)} <= set(everything.registered)
 
-    assert document_id(VIEW) not in catalogue.registered
+    narrowed = everything.retaining({document_id(CUSTOMER)})
+
+    assert document_id(CUSTOMER) in narrowed.registered
+    assert document_id(VIEW) not in narrowed.registered
 
 
 def test_it_is_stable_across_calls(repository):
@@ -145,38 +163,71 @@ def test_no_publication_epoch_is_stamped(repository):
         assert not row.get("build_epoch")
 
 
-def test_the_target_kind_reaches_the_alias_type_and_nothing_else(tmp_path):
-    """The one binding fact that changes a logical value, and why it is allowed.
+def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
+    """The logical catalogue declares the alias and certifies nothing about it.
 
-    An alias destination is registered as the thing it physically *is* — a view
-    in a Warehouse, a table in a Lakehouse — because every reader of the
-    catalogue needs the real type. So the binding reaches this far, and the test
-    pins that it reaches no further than the alias.
+    An alias is a view in a Warehouse and a table in a Lakehouse. The Alias row —
+    this name points at that object — is a declaration and belongs to the source.
+    The Registry row says a physical object exists *and what it is*, which cannot
+    be answered without knowing what it was bound to. So it is not answered.
+    """
+
+    from factories import alias_repository
+    from weaver.catalogue.tables import ALIAS
+
+    repository = alias_repository(tmp_path / "repo")
+    consumer = item_id("Lakehouse/Curated")
+    alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
+
+    logical = Catalogue.from_repository(repository)
+
+    assert logical.rows[consumer][ALIAS.name], "the declaration is source"
+    assert alias not in logical.registered, "the certification is not"
+
+
+def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
+    from factories import alias_repository
+
+    repository = alias_repository(tmp_path / "repo")
+    producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
+    alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
+    kinds = {producer: "lakehouse", consumer: "lakehouse"}
+
+    as_lakehouse = Catalogue.from_repository(repository).for_targets(kinds)
+    as_warehouse = Catalogue.from_repository(repository).for_targets(
+        {**kinds, consumer: "warehouse"}
+    )
+
+    assert as_lakehouse.registered[alias].object_type == "table"
+    assert as_warehouse.registered[alias].object_type == "view"
+    # Same declaration either way: only the physical form moved.
+    assert (
+        as_lakehouse.registered[alias].signature
+        == as_warehouse.registered[alias].signature
+    )
+
+
+def test_an_item_that_is_not_bound_is_not_published(tmp_path):
+    """Binding and scoping are one decision, which is what removes the hazard.
+
+    An alias certified against a *guessed* kind would record a Warehouse alias as
+    a table — wrong, quiet, and in the authoritative record. There is no path to
+    that here: naming the item is how it gets published, and naming it means
+    stating its kind. An item left out is simply out of scope.
     """
 
     from factories import alias_repository
 
     repository = alias_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
-    alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
 
-    as_lakehouse = catalogue_from_repository(
-        repository,
-        retained={consumer: {alias}},
-        target_kinds={consumer: "lakehouse"},
-    )
-    as_warehouse = catalogue_from_repository(
-        repository,
-        retained={consumer: {alias}},
-        target_kinds={consumer: "warehouse"},
+    published = Catalogue.from_repository(repository).for_targets(
+        {producer: "lakehouse"}
     )
 
-    assert as_lakehouse.registered[alias].object_type == "table"
-    assert as_warehouse.registered[alias].object_type == "view"
-    # Same declaration either way: only the physical type moved.
-    assert (
-        as_lakehouse.registered[alias].signature
-        == as_warehouse.registered[alias].signature
+    assert set(published.rows) == {producer}
+    assert not any(
+        identity.item == consumer for identity in published.registered
     )
 
 
@@ -196,15 +247,14 @@ def test_several_items_project_into_one_catalogue(tmp_path):
     repository = alias_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
-    catalogue = catalogue_from_repository(
-        repository,
-        retained={
-            producer: {document_id("Lakehouse/Raw/DWG.Customer")},
-            consumer: {document_id("Lakehouse/Curated/DWG.CustomerName")},
-        },
+    catalogue = Catalogue.from_repository(repository).retaining(
+        {
+            document_id("Lakehouse/Raw/DWG.Customer"),
+            document_id("Lakehouse/Curated/DWG.CustomerName"),
+        }
     )
 
-    assert set(catalogue.rows) == {producer, consumer}
+    assert {producer, consumer} <= set(catalogue.rows)
     assert {identity.item for identity in catalogue.registered} == {producer, consumer}
 
 
@@ -221,9 +271,8 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
     repository = alias_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
 
-    catalogue = catalogue_from_repository(
-        repository,
-        retained={consumer: {document_id("Lakehouse/Curated/DWG.CustomerName")}},
+    catalogue = Catalogue.from_repository(repository).retaining(
+        {document_id("Lakehouse/Curated/DWG.CustomerName")}
     )
 
     for row in catalogue.rows[consumer][REGISTRY.name]:

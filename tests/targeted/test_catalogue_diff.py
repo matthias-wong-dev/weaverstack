@@ -27,7 +27,6 @@ from factories import (
     single_document_repository,
 )
 
-from weaver.catalogue import catalogue_from_repository
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import REGISTRY
 
@@ -47,8 +46,10 @@ def repository(tmp_path):
 
 
 def desired_from(repository, *names):
-    return catalogue_from_repository(
-        repository, retained={item_id(): {document_id(name) for name in names}}
+    """Logical, then narrowed — the order publication uses."""
+
+    return Catalogue.from_repository(repository).retaining(
+        {document_id(name) for name in names}
     )
 
 
@@ -61,11 +62,14 @@ def registry_changes(changes):
 
 
 def statements(changes) -> list[str]:
-    return [
-        line
-        for result in changes.render_dml().values()
-        for line in result.statements
-    ]
+    """The statements for the item under test.
+
+    Scoped, because a repository declares Weaver's own catalogue item as well and
+    a desired catalogue derived from source carries it — correctly, and it is not
+    what these tests are about.
+    """
+
+    return list(changes.render_dml()[item_id()].statements)
 
 
 # --- the report reads both sides ----------------------------------------------

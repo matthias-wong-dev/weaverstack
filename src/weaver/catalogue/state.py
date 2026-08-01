@@ -45,6 +45,17 @@ class Catalogue:
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
     present_tables: frozenset[str]
+    #: The repository this was derived from, when it was. A persisted catalogue
+    #: has none — it is a record of what is there, with nothing to re-derive from
+    #: — and the transformations that narrow or bind a *desired* catalogue say so
+    #: rather than silently doing nothing.
+    source: Any
+    #: Which nodes this catalogue still claims, after any narrowing. Carried
+    #: rather than re-derived because an alias's *declaration* is published even
+    #: when the alias itself was not installed — the Alias row says the name
+    #: points there, the Registry row says something is there — so the rows alone
+    #: cannot say what may be certified.
+    retained: frozenset
 
     def __init__(
         self,
@@ -52,9 +63,15 @@ class Catalogue:
         *,
         registered: Mapping[WeaverDocumentId, "RegisteredDocument"] | None = None,
         present_tables: frozenset[str] | None = None,
+        source: Any = None,
+        retained: frozenset | None = None,
     ) -> None:
         frozen_rows = MappingProxyType(dict(rows))
         object.__setattr__(self, "rows", frozen_rows)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(
+            self, "retained", frozenset(retained) if retained is not None else frozenset()
+        )
         object.__setattr__(
             self,
             "registered",
@@ -78,6 +95,144 @@ class Catalogue:
                 }
             ),
         )
+
+    # --- constructors ---------------------------------------------------------
+    #
+    # Symmetrical on purpose. One reads what is persisted, the other derives what
+    # the source says should be; both produce this class, which is what lets the
+    # two be compared at all.
+
+    @classmethod
+    def from_weaver_lakehouse(cls, catalogue: Any, items) -> "Catalogue":
+        """The persisted catalogue, read over Spark from the Weaver Lakehouse."""
+
+        return read_catalogue_state(catalogue, items)
+
+    @classmethod
+    def from_repository(cls, repository) -> "Catalogue":
+        """Everything the source declares — the whole logical catalogue.
+
+        *All* of it, deliberately. Not the subset some build is ready to certify:
+        making selection an input would mean the caller had to know what was
+        certifiable before the desired state could be described, and the desired
+        state would then be a statement about a build rather than about the
+        repository. Selection and materialisation *transform* this later — see
+        :meth:`retaining` and :meth:`for_targets`.
+
+        It carries no binding: no target name, no Weaver version, no Installation
+        row, no publication epoch, and no Registry certification for an alias
+        destination, because an alias is a view in a Warehouse and a table in a
+        Lakehouse and this does not know which.
+        """
+
+        from .projection import project_item_catalogue
+
+        rows = {}
+        everything: set = set()
+        for model in repository.items:
+            item = model.identity
+            declared = {
+                identity
+                for identity in repository.source_documents
+                if identity.item == item
+            }
+            projection = project_item_catalogue(
+                repository, item=item, retained=declared
+            )
+            rows[item] = MappingProxyType(dict(projection.rows))
+            everything |= declared
+        everything |= {alias.destination for alias in repository.aliases}
+        return cls(
+            rows=MappingProxyType(rows), source=repository, retained=everything
+        )
+
+    # --- transformations ------------------------------------------------------
+
+    def retaining(self, identities) -> "Catalogue":
+        """Narrow to what a build actually certified.
+
+        The step that keeps a Registry row meaning *this succeeded*. Publishing
+        the whole logical catalogue would claim every declared object as
+        installed, including the ones a build omitted or failed to materialise —
+        which is precisely what the planner's uncertified set exists to prevent.
+        """
+
+        if self.source is None:
+            raise BuildError(
+                "only a repository-derived catalogue can be narrowed by selection; "
+                "a persisted one already describes what is there"
+            )
+        from .projection import project_item_catalogue
+
+        wanted = set(identities)
+        rows = {}
+        for item in self.rows:
+            kept = {identity for identity in wanted if identity.item == item}
+            if not kept:
+                # An item this build retains nothing of is not part of its
+                # desired state at all — it is out of scope, not empty. Keeping
+                # it would publish a scope that deletes everything the item has,
+                # and would demand a binding for an item that has none.
+                continue
+            projection = project_item_catalogue(
+                self.source, item=item, retained=kept
+            )
+            rows[item] = MappingProxyType(dict(projection.rows))
+        return Catalogue(
+            rows=MappingProxyType(rows), source=self.source, retained=wanted
+        )
+
+    def for_targets(self, target_kinds: Mapping[WeaverItemId, str]) -> "Catalogue":
+        """Bind to targets: certify alias destinations, and scope to what is bound.
+
+        ``target_kinds`` names the items being published *and* what each is bound
+        to, and those are one decision rather than two. An item not named is not
+        published — so an alias can never be certified against a guessed kind,
+        because there is no path that reaches the certification without stating
+        the binding. A default would have written a Warehouse alias into the
+        Registry as a table, quietly, in the authoritative record.
+
+        An item named here but retaining nothing is still published, and must be:
+        its scope's rows are all obsolete and the publication is what says so.
+        """
+
+        if self.source is None:
+            raise BuildError(
+                "only a repository-derived catalogue needs binding to targets"
+            )
+        from .projection import project_alias_registry
+
+        rows = {}
+        for item, kind in target_kinds.items():
+            tables = dict(self.rows.get(item, {}))
+            certifiable = self._retained_aliases(item)
+            if certifiable:
+                tables[REGISTRY.name] = tuple(
+                    tables.get(REGISTRY.name, ())
+                ) + project_alias_registry(
+                    self.source, item=item, retained=certifiable, target_kind=kind
+                )
+            rows[item] = MappingProxyType(tables)
+        return Catalogue(
+            rows=MappingProxyType(rows), source=self.source, retained=self.retained
+        )
+
+    def _retained_aliases(self, item) -> set:
+        """This item's alias destinations that the build actually retained.
+
+        Read from `retained` rather than from the Alias rows, and the difference
+        is the whole point. An alias whose source item is unbound has no physical
+        form under these bindings: its *declaration* is still published — the name
+        does point there — but nothing was installed, so a Registry row would
+        claim work that never happened. That is what the planner's uncertified set
+        exists to prevent, and this is where the prevention has to land.
+        """
+
+        return {
+            alias.destination
+            for alias in self.source.aliases
+            if alias.destination.item == item and alias.destination in self.retained
+        }
 
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
@@ -168,48 +323,6 @@ class CatalogueChanges:
             )
             rendered[item] = reconcile(projection)
         return rendered
-
-
-def catalogue_from_repository(
-    repository,
-    *,
-    retained: Mapping[WeaverItemId, Any],
-    target_kinds: Mapping[WeaverItemId, str] | None = None,
-) -> Catalogue:
-    """The catalogue a repository *describes* — the desired state, from source.
-
-    The logical twin of :func:`read_catalogue_state`. One reads what is
-    persisted; this derives what the declarations say should be. Both produce the
-    same class, so the two are directly comparable, which is what a diff needs.
-
-    It exists in production rather than in a fixture for a reason worth stating:
-    a projection the build itself uses cannot drift. A test fixture listing the
-    rows a repository ought to produce has to be updated by hand every time an
-    artefact is added, and will be wrong the first time someone forgets.
-
-    Nothing about a *binding* is here. No target name, no Weaver version, no
-    Installation row, no publication epoch: those are facts a build knows and a
-    repository does not, and they are supplied when the publication is rendered.
-    The single exception is ``target_kinds``, because an alias destination is
-    registered as the thing it physically is — a view in a Warehouse, a table in
-    a Lakehouse — and the catalogue's readers need the real type.
-    """
-
-    from .projection import project_item_installation
-
-    target_kinds = dict(target_kinds or {})
-    rows: dict[WeaverItemId, Mapping[str, tuple]] = {}
-    for item, identities in retained.items():
-        projection = project_item_installation(
-            repository,
-            item=item,
-            retained=identities,
-            **(
-                {"target_kind": target_kinds[item]} if item in target_kinds else {}
-            ),
-        )
-        rows[item] = MappingProxyType(dict(projection.rows))
-    return Catalogue(rows=MappingProxyType(rows))
 
 
 @dataclass(frozen=True)

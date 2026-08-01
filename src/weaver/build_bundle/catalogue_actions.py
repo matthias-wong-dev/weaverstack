@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Iterable, Mapping
 
 from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
-from ..catalogue.state import Catalogue, catalogue_from_repository
+from ..catalogue.state import Catalogue
 from ..catalogue.reconcile import reconcile
 from ..catalogue.render import InstallationScope, identifier, literal
 from ..catalogue.state import Catalogue
@@ -188,13 +188,13 @@ def render_catalogue_after_build(
     # persisted. Only the desired side drives the statements — see
     # `CatalogueChanges` — but routing production through the same call the
     # reporting uses is what stops the two drifting apart.
-    desired = catalogue_from_repository(
-        repository,
-        retained={
-            item: {identity for identity in selected_ids if identity.item == item}
-            for item in sorted(target_by_item, key=str)
-        },
-        target_kinds={item: target.kind for item, target in target_by_item.items()},
+    # Logical, then narrowed, then bound — in that order and visibly so. The
+    # narrowing is what keeps a Registry row meaning "this succeeded"; the
+    # binding is what lets an alias be certified as the thing it physically is.
+    desired = (
+        Catalogue.from_repository(repository)
+        .retaining(selected_ids)
+        .for_targets({item: target.kind for item, target in target_by_item.items()})
     )
     binding_rows = {
         item: (

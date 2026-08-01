@@ -73,32 +73,30 @@ class CatalogueProjection:
         return sum(len(rows) for rows in self.rows.values())
 
 
-def project_item_installation(
+def project_item_catalogue(
     repository: WeaverRepository,
     *,
     item: WeaverItemId,
     retained: Iterable[WeaverDocumentId],
-    target_kind: str = LAKEHOUSE_TARGET,
-    installation: Mapping[str, object] | None = None,
 ) -> CatalogueProjection:
     """One item's catalogue rows, from the declaration and nothing else.
 
-    Everything here is a function of *source*: what the item declares, what it
-    aliases, what its documents describe. That is what makes the projection
-    something a developer keeps correct by adding a declaration, rather than a
-    fixture someone has to remember to update alongside one.
+    Every value here is a function of *source*: what the item declares, what it
+    aliases, what its documents describe. Nothing about a build, a binding or a
+    target reaches it. That is what makes the projection something a developer
+    keeps correct by adding a declaration, rather than a fixture someone has to
+    remember to update alongside one.
 
-    Two facts are not functions of source, and they are handled differently.
+    Not an *installation* projection, despite what this was once called. It says
+    what the repository declares; whether any of it has been installed, where,
+    and by which Weaver are separate facts composed at publication.
 
-    ``target_kind`` stays, because it changes a *logical* value: an alias
-    destination is registered as the thing it physically is, and that is a view
-    in a Warehouse and a table in a Lakehouse. The catalogue's readers need the
-    real type, so the binding has to reach this far and no further.
-
-    ``installation`` is the row recording which target the item was bound to and
-    which Weaver wrote it. That is pure binding, so it is supplied by whoever is
-    publishing rather than baked in — a repository-derived catalogue has no
-    business claiming an installation.
+    **No Registry row is written for an alias destination.** The Alias row —
+    this name points at that object — is a declaration and belongs here. The
+    Registry row is a certification that a physical object exists at that name
+    *and what it is*, and an alias is a view in a Warehouse and a table in a
+    Lakehouse. That cannot be answered without a binding, so it is not answered
+    here; see :func:`project_alias_registry`.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -219,16 +217,6 @@ def project_item_installation(
             }
         )
 
-    for alias in retained_aliases:
-        rows[REGISTRY.name].append(
-            {
-                **_identity(scope, alias.destination),
-                "object_type": _alias_object_type(alias.destination, target_kind),
-                "object_role": ROLE_DATA,
-                "signature": alias.signature,
-            }
-        )
-
     for alias in repository.aliases:
         if alias.destination.item != item:
             continue
@@ -269,17 +257,48 @@ def project_item_installation(
             }
         )
 
-    if installation is not None:
-        rows[INSTALLATION.name].append(
-            {
-                **_scope(scope),
-                **installation,
-                "signature": item_model.signature,
-            }
-        )
     return CatalogueProjection(
         scope=scope,
         rows={name: tuple(values) for name, values in rows.items()},
+    )
+
+
+def project_alias_registry(
+    repository: WeaverRepository,
+    *,
+    item: WeaverItemId,
+    retained: Iterable[WeaverDocumentId],
+    target_kind: str,
+) -> tuple[Row, ...]:
+    """Registry rows certifying this item's alias destinations, given a binding.
+
+    Separate from :func:`project_item_catalogue` because it is the one part of an
+    item's catalogue that cannot be derived from source: an alias is registered
+    as the thing it physically *is*, and that depends on what it was bound to.
+
+    Requiring the kind rather than defaulting it is deliberate. A default would
+    write a *wrong* Registry row quietly — a Warehouse alias recorded as a table —
+    and a wrong certification is the one failure the catalogue must never produce
+    on its own.
+    """
+
+    scope = InstallationScope(item.item_type, item.item_name)
+    wanted = set(retained)
+    return tuple(
+        {
+            **_identity(scope, alias.destination),
+            "object_type": _alias_object_type(alias.destination, target_kind),
+            "object_role": ROLE_DATA,
+            "signature": alias.signature,
+        }
+        for alias in sorted(
+            (
+                alias
+                for alias in repository.aliases
+                if alias.destination.item == item and alias.destination in wanted
+            ),
+            key=lambda alias: str(alias.destination),
+        )
     )
 
 

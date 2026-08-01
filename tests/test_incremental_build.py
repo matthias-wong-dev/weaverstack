@@ -24,7 +24,10 @@ from weaver.build_bundle.models import (
     BuildPlan,
 )
 from weaver.build_bundle.prune import TargetInventory
-from weaver.catalogue.projection import project_item_installation
+from weaver.catalogue.projection import (
+    project_alias_registry,
+    project_item_catalogue,
+)
 from weaver.catalogue.state import (
     Catalogue,
     reconcile_catalogue_state,
@@ -56,19 +59,21 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
         for alias in repository.aliases
         if alias.destination.item == item
     )
-    projection = project_item_installation(
+    projection = project_item_catalogue(repository, item=item, retained=retained)
+    # Alias certification is a binding-time step now, so it is composed here to
+    # give these tests the same complete catalogue they asserted against before.
+    projected = dict(projection.rows)
+    projected[REGISTRY.name] = tuple(
+        projected.get(REGISTRY.name, ())
+    ) + project_alias_registry(
         repository,
         item=item,
         retained=retained,
         target_kind="warehouse" if item.item_type == "Warehouse" else "lakehouse",
-        installation={
-            "target_name": f"{item.item_name}_Target",
-            "weaver_version": "test",
-        },
     )
     old = set(old)
     rows = {}
-    for table, values in projection.rows.items():
+    for table, values in projected.items():
         copied = []
         for value in values:
             row = dict(value)
