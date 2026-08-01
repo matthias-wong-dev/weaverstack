@@ -323,21 +323,30 @@ pytest -m full_integration  # the lifecycle journey, on both transports
 pytest -m provisioning      # Fabric item lifecycle
 ```
 
-`spark`, `fabric` and `provisioning` say *what a test needs*. `full_integration`
-says *what a test is*, and deliberately carries neither transport marker, so
-`-m fabric` runs the probes and leaves the journey alone.
+Every marker says *what a test needs*:
 
-That separation is the point rather than a convenience. The journey is the most
-expensive thing in the suite, and it should **rarely be where a defect is found
-for the first time** — syntax, selection, planning, action rendering, execution
-and reconciliation are all meant to be proven below it. Making it run by
-exception keeps the routine Fabric run about components, and makes the one
-expensive composition proof a thing you ask for.
+| marker | needs |
+|---|---|
+| `spark` | a JDK |
+| `fabric` | a workspace — **and nothing published** |
+| `published_weaver` | a workspace *and* the wheel in the Environment |
+| `full_integration` | a workspace and the wheel |
+| `provisioning` | a workspace |
 
-It runs on both transports when asked for, because composition is worth proving
-on each; narrow with `-k local` or `-k fabric`. Each transport skips itself when
-its prerequisite is missing, so asking for the journey without a JDK or a
-workspace says so rather than failing.
+`fabric` and `published_weaver` is the distinction that keeps the loop fast, and
+it is about *what executes*, not about whether Livy is involved. A Spark body
+that does not import Weaver needs a session, not a published package — which is
+why `LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
+refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
+run from the checkout against the real workspace. What needs the wheel is what is
+*about* the wheel: that the installed package acquires its own capabilities.
+
+`full_integration` is the Fabric lifecycle journey alone — one test, no JDK. Its
+local twin lives in `tests/spark` under `spark`, because that is what it needs.
+The journey is the most expensive thing in the suite and should **rarely be where
+a defect is found for the first time**: syntax, selection, planning, action
+rendering, execution and reconciliation are all meant to be proven below it.
+Making it run by exception keeps the routine Fabric run about components.
 
 Isolation therefore comes from **emptying** an item rather than from having a new
 one. That is not a weaker guarantee, but it is a different one, so the cleaning
