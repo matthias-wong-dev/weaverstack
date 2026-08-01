@@ -312,3 +312,57 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
     for row in catalogue.rows[consumer][REGISTRY.name]:
         assert row["item_type"] == "Lakehouse"
         assert row["item_name"] == "Curated"
+
+
+# --- completeness -------------------------------------------------------------
+
+
+def test_catalogue_from_repository_has_all_artefacts(tmp_path):
+    """Every kind of object Weaver installs is registered by the projection.
+
+    The tripwire for a new artefact, and the first thing that should fail when
+    one is added. Adding a member to `OBJECT_TYPES` without teaching the
+    projection to emit it — or without adding a source that owns one — breaks
+    this immediately, and names the type that is missing.
+
+    Asserted as equality rather than containment on purpose. Containment would
+    let a type be declared and never projected, which is the exact shape of the
+    omission this exists to catch.
+    """
+
+    from factories import full_estate
+    from weaver.catalogue.tables import OBJECT_TYPES
+
+    repository = full_estate(tmp_path / "repo")
+    catalogue = Catalogue.from_repository(repository)
+
+    assert {
+        document.object_type for document in catalogue.registered.values()
+    } == set(OBJECT_TYPES)
+
+
+def test_every_declared_object_and_artefact_is_registered(tmp_path):
+    """Nothing the source declares is left out of what it claims to install.
+
+    The other half of the same idea: the first test says every *kind* appears,
+    this says every *instance* does. A projection that emitted one file and
+    forgot the rest would satisfy the first and fail here.
+    """
+
+    from factories import ITEM, WAREHOUSE_ITEM, full_estate, item_id
+    from weaver.etl import item_load_artefacts
+
+    repository = full_estate(tmp_path / "repo")
+    catalogue = Catalogue.from_repository(repository)
+
+    for item in (ITEM, WAREHOUSE_ITEM):
+        identity = item_id(item)
+        expected = {
+            key for key in repository.source_documents if key.item == identity
+        } | {
+            artefact.identity
+            for artefact in item_load_artefacts(repository, item=identity)
+        }
+        assert expected <= set(catalogue.registered), sorted(
+            str(value) for value in expected - set(catalogue.registered)
+        )

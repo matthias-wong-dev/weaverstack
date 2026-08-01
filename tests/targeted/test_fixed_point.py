@@ -33,14 +33,9 @@ from factories import (
     ITEM,
     WAREHOUSE_ITEM,
     FixtureInventory,
-    folder_document,
+    full_estate,
     item_bindings,
     item_id,
-    lakehouse_table,
-    schema_document,
-    spark_view,
-    warehouse_table,
-    warehouse_view,
 )
 
 from weaver import ItemRef, LocalStore, Location
@@ -87,31 +82,9 @@ def _write(root, relative: str, text: str) -> None:
 
 @pytest.fixture
 def estate(tmp_path):
-    """Both item types, and every source that owns a load artefact."""
+    """Both item types, and every artefact a source can own."""
 
-    root = tmp_path / "repo"
-    _write(root, f"{ITEM}/schemas/DWG.yml", schema_document("DWG"))
-    _write(root, f"{ITEM}/schemas/Raw.yml", schema_document("Raw"))
-    _write(root, f"{ITEM}/DWG__Customer.py", lakehouse_table("DWG.Customer"))
-    _write(
-        root,
-        f"{ITEM}/DWG.ActiveCustomer.sql",
-        spark_view("DWG.ActiveCustomer", depends_on="DWG.Customer"),
-    )
-    _write(root, f"{ITEM}/Files/Raw__CustomerCsv.py", folder_document("Raw.CustomerCsv"))
-    _write(root, f"{ITEM}/lib/dates.py", "def parse(value):\n    return value\n")
-    _write(root, f"{WAREHOUSE_ITEM}/schemas/Sales.yml", schema_document("Sales"))
-    _write(
-        root, f"{WAREHOUSE_ITEM}/Sales.Customer.sql", warehouse_table("Sales.Customer")
-    )
-    _write(
-        root,
-        f"{WAREHOUSE_ITEM}/Sales.Live.sql",
-        warehouse_view(
-            "Sales.Live", select="select 1 as CustomerId", depends_on="Sales.Customer"
-        ),
-    )
-    return parse_item_repository(Location(str(root)))
+    return full_estate(tmp_path / "repo")
 
 
 def build(repository, tmp_path):
@@ -238,3 +211,176 @@ def test_the_bundle_is_identical_the_second_time(estate, tmp_path):
     second, _ = build(estate, tmp_path / "two")
 
     assert first.bundle_id == second.bundle_id
+
+
+# --- convergence from anywhere ------------------------------------------------
+#
+# The fixed point above is one point. These say a build *reaches* it, from a
+# fresh target, from a damaged one, and from a correct one after a source is
+# deleted. Each applies the build's own declared effect to the state it was
+# planned against, and compares the result with what the source declares — so
+# what is being asserted is that the plan closes the gap it was given.
+
+
+def converged(repository, tmp_path, *, inventories, catalogue):
+    """Where each target ends up, and where the source says it should be.
+
+    Reconciliation first, because convergence is a property of the *workflow*
+    rather than of the planner alone. A catalogue claiming an object the target
+    no longer holds is exactly the damage a build is supposed to repair, and the
+    step that turns "claimed but absent" into "rebuild this" is the reconciler.
+    Planning against an unreconciled catalogue would leave the object missing and
+    the claim intact — correct for the inputs given, and not what a build does.
+    """
+
+    from factories import estate_inventories
+    from weaver.catalogue.state import reconcile_catalogue_state
+
+    reconciled = reconcile_catalogue_state(catalogue, inventories=inventories)
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=item_bindings(
+            (ITEM, LAKEHOUSE_TARGET_NAME), (WAREHOUSE_ITEM, WAREHOUSE_TARGET_NAME)
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=LocalStore(),
+        target_inventories=inventories,
+        catalogue=reconciled.catalogue,
+        stale_claims=reconciled.stale_claims,
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+    )
+    declared = estate_inventories(repository)
+    reached = {
+        item: inventory.update_using(bundle.plan)
+        for item, inventory in inventories.items()
+    }
+    return reached, declared
+
+
+def holdings(inventory) -> dict[str, tuple[str, ...]]:
+    """What a target holds, folded — the shape two inventories compare on."""
+
+    return {
+        field: tuple(sorted((v.casefold() for v in getattr(inventory, field))))
+        for field in (
+            "schemas",
+            "tables",
+            "views",
+            "folders",
+            "folder_schemas",
+            "files",
+            "procedures",
+        )
+    }
+
+
+def assert_reaches_the_declared_estate(reached, declared):
+    for item, inventory in reached.items():
+        assert holdings(inventory) == holdings(declared[item]), item
+
+
+def test_a_build_from_nothing_reaches_the_declared_estate(estate, tmp_path):
+    """Empty target, empty catalogue — everything is new and nothing is stale."""
+
+    from factories import estate_inventories
+
+    reached, declared = converged(
+        estate,
+        tmp_path,
+        inventories=estate_inventories(estate, empty=True),
+        catalogue=Catalogue({}),
+    )
+
+    assert_reaches_the_declared_estate(reached, declared)
+
+
+def test_a_build_repairs_a_damaged_estate(estate, tmp_path):
+    """Objects deleted behind Weaver's back, and strays that nothing declares.
+
+    Two kinds of damage the design promises to close, and they close by
+    different routes: the missing object is a claim the inventory disproves, so
+    reconciliation withdraws it and the object is rebuilt; the stray is simply
+    undeclared, so prune removes it. Both end at the same declared estate.
+    """
+
+    from dataclasses import replace
+
+    from factories import estate_inventories, item_id
+
+    damaged = estate_inventories(estate)
+    lakehouse = item_id(ITEM)
+    intact = damaged[lakehouse]
+    damaged[lakehouse] = replace(
+        intact,
+        # gone from the target, still claimed by the catalogue
+        tables=tuple(t for t in intact.tables if not t.endswith(".Customer")),
+        # never declared by anything
+        views=intact.views + ("DWG.LeftBehind",),
+        schemas=intact.schemas + ("Abandoned",),
+    )
+    catalogue = Catalogue.from_repository(estate)
+
+    reached, declared = converged(
+        estate, tmp_path, inventories=damaged, catalogue=catalogue
+    )
+
+    assert_reaches_the_declared_estate(reached, declared)
+
+
+def test_deleting_one_document_loses_only_that_object(estate, tmp_path):
+    """The one that matters most, because over-broad pruning destroys estates.
+
+    A correct estate, one source removed, and the build must take exactly that
+    object and its deployed copy — the copy because a Python document owns two
+    targets, and losing the module would be as wrong as keeping the table.
+    """
+
+    from factories import estate_inventories, item_id
+
+    before = estate_inventories(estate)
+    catalogue = Catalogue.from_repository(estate)
+
+    # The estate as it is once the author deletes one document.
+    (tmp_path / "repo" / ITEM / "DWG.Summary.sql").unlink()
+    after = parse_item_repository(Location(str(tmp_path / "repo")))
+
+    reached, declared = converged(
+        after, tmp_path, inventories=before, catalogue=catalogue
+    )
+
+    assert_reaches_the_declared_estate(reached, declared)
+    lost = set(holdings(before[item_id(ITEM)])["tables"]) - set(
+        holdings(reached[item_id(ITEM)])["tables"]
+    )
+    assert lost == {"dwg.summary"}
+    lost_files = set(holdings(before[item_id(ITEM)])["files"]) - set(
+        holdings(reached[item_id(ITEM)])["files"]
+    )
+    assert lost_files == {"_/load/dwg.summary.sql"}
+
+
+def test_converging_twice_changes_nothing_the_second_time(estate, tmp_path):
+    """Reaching the fixed point is one claim; staying there is another.
+
+    A build that converged but left the estate subtly different from what the
+    source declares would pass the tests above and plan work forever after.
+    """
+
+    from factories import estate_inventories
+
+    reached, _declared = converged(
+        estate,
+        tmp_path,
+        inventories=estate_inventories(estate, empty=True),
+        catalogue=Catalogue({}),
+    )
+    settled, declared = converged(
+        estate,
+        tmp_path / "second",
+        inventories=reached,
+        catalogue=Catalogue.from_repository(estate),
+    )
+
+    assert_reaches_the_declared_estate(settled, declared)
+    for item, inventory in settled.items():
+        assert holdings(inventory) == holdings(reached[item]), item

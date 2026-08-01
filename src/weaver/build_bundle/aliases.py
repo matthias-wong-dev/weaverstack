@@ -40,6 +40,12 @@ from .models import (
     BuildBatch,
     OmittedNode,
 )
+from .changes import (
+    FOLDER as FOLDER_KIND,
+    TABLE as TABLE_KIND,
+    VIEW as VIEW_KIND,
+    added,
+)
 from .payloads import sha256_hex
 from .stages import ALIAS, PlannedStage
 from .targets import BoundTarget, WAREHOUSE_TARGET
@@ -133,11 +139,25 @@ def plan_item_aliases(
         action = _alias_action(
             supported, item=item, target=target, payloads=payloads
         )
+        # One action stands for every alias the item consumes, so it produces
+        # several changes. Each names what the alias physically *is* at this
+        # binding — a folder under Files, a view in a Warehouse, a table in a
+        # Lakehouse — which is the same question the Registry row answers.
         stage = PlannedStage(
             phase=ALIAS,
             slug="item-aliases",
             description="materialise item-owned aliases",
             payloads=payloads,
+            changes={
+                target.id: tuple(
+                    added(
+                        _alias_change_kind(alias.destination, target),
+                        alias.destination.object_id.qualified,
+                        action.id,
+                    )
+                    for alias, _source_target in supported
+                )
+            },
             batches=(
                 BuildBatch(
                     id=f"item-aliases-{item_slug}",
@@ -173,6 +193,20 @@ def _unsupported(alias, *, target: BoundTarget, source_target: BoundTarget | Non
             f"form for the Warehouse source {alias.source}"
         )
     return None
+
+
+def _alias_change_kind(destination, target) -> str:
+    """What an alias will look like to an inventory, which depends on binding.
+
+    The same rule :func:`weaver.build_bundle.prune.managed_sets` applies for the
+    keep-set, and for the same reason: an alias is a folder, a view or a table
+    according to what it was bound to, and nothing about the declaration says
+    which.
+    """
+
+    if destination.is_files:
+        return FOLDER_KIND
+    return VIEW_KIND if target.kind == WAREHOUSE_TARGET else TABLE_KIND
 
 
 def _alias_action(
