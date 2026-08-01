@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.fabric
+pytestmark = pytest.mark.published_weaver
 
 
 # --- what the installed Environment provides ----------------------------------

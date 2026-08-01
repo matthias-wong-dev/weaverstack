@@ -39,7 +39,7 @@ from factories import FixtureCatalogue, alias_repository, item_id
 
 from weaver import ItemRef
 
-pytestmark = pytest.mark.fabric
+pytestmark = pytest.mark.published_weaver
 
 #: Logical names owned by this module alone. The catalogue is keyed by logical
 #: item, never by physical target, so two estates sharing a name share Registry

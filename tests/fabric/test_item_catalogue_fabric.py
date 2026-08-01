@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.fabric
+pytestmark = pytest.mark.published_weaver
 
 _SCHEMA = """Schema ID: Sales
 Description: Sales objects for the item prune proof.

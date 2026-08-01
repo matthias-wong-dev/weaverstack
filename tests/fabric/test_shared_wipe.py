@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from support.wipe_claims import assert_a_wipe_removes_every_table
 
-pytestmark = pytest.mark.fabric
+pytestmark = pytest.mark.published_weaver
 
 
 def test_a_wipe_removes_every_table(populated_fabric_lakehouse):
