@@ -48,14 +48,38 @@ provisioning           opt-in, changes rarely
 
 Markers are peers; none implies another. See the table above for what each runs.
 
-## The two prepared states
+## The three states, and what compares them
 
-Every build decision runs against two prepared, transport-neutral objects:
+Every build decision runs against prepared, transport-neutral objects:
 
 ```text
-Catalogue         what Weaver certifies as installed  (rows + registered)
-TargetInventory   what is physically there            (schemas/tables/views/folders)
+Catalogue.from_repository(...)   what the source says should be   — desired
+read_catalogue_state(...)        what is persisted                — current
+TargetInventory                  what is physically there         — reality
 ```
+
+Reconciliation removes catalogue claims that reality disproves. The diff decides
+how the persisted catalogue should move toward the one the repository describes:
+
+```python
+changes = current.diff(desired)      # reports new/changed/unchanged/removed
+dml = changes.render_dml(binding)    # statements from `desired` alone
+```
+
+**The asymmetry is the design.** `current` informs the report; `desired` alone
+drives the statements. A row-level delete would look equivalent and would not be
+— a partial or wrongly-scoped read returns *fewer* rows in `current`, so fewer
+deletes, and obsolete claims would survive indefinitely with nothing to notice.
+Scoped against what `desired` claims, the pair is correct against any prior
+state, including one the reader never saw. `test_catalogue_diff.py` asserts it:
+three catalogues that disagree completely render byte-identical statements.
+
+`Catalogue.from_repository` is production, not a fixture, and that is the point —
+a projection the build itself uses cannot drift, whereas a fixture listing the
+rows a repository ought to produce must be updated by hand every time an artefact
+is added, and is wrong the first time someone forgets. It carries no binding: no
+target name, no Weaver version, no Installation row, no epoch. The one exception
+is `target_kind`, because an alias is registered as what it physically is.
 
 Everything between them and the bundle is pure Python — no session, no store.
 That is what makes the interesting logic cheap to prove: incremental selection,
