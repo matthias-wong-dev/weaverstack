@@ -13,7 +13,7 @@ from weaver.catalogue import (
     TABLE_DICTIONARY,
 )
 from weaver.catalogue.claims import CatalogueClaim, CatalogueClaimRule
-from weaver.catalogue.state import CatalogueState, reconcile_catalogue_state
+from weaver.catalogue.state import Catalogue, reconcile_catalogue_state
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import BuildError
 
@@ -38,8 +38,7 @@ def _folder_row(name: str):
 
 def _state(*rows):
     registry = tuple(dict(row) for row in rows)
-    return CatalogueState(
-        status="valid",
+    return Catalogue(
         rows={
             ITEM: {
                 REGISTRY.name: registry,
@@ -52,7 +51,6 @@ def _state(*rows):
             }
         },
         present_tables=frozenset(table.name for table in CATALOGUE_TABLES),
-        missing_tables=frozenset(),
     )
 
 
@@ -73,11 +71,11 @@ def test_valid_rows_remain_and_stale_object_metadata_is_removed():
         inventories={ITEM: _inventory("Current")},
     )
 
-    assert [row["object_name"] for row in result.rows[ITEM][REGISTRY.name]] == [
+    assert [row["object_name"] for row in result.catalogue.rows[ITEM][REGISTRY.name]] == [
         "Current"
     ]
     assert [
-        row["object_name"] for row in result.rows[ITEM][TABLE_DICTIONARY.name]
+        row["object_name"] for row in result.catalogue.rows[ITEM][TABLE_DICTIONARY.name]
     ] == ["Current"]
     assert result.stale_objects == ("Lakehouse/Sales/Sales.Missing",)
     assert {claim.rule.table.name for claim in result.stale_claims} >= {
@@ -93,11 +91,11 @@ def test_same_named_folder_and_table_keep_the_four_part_catalogue_identity():
     )
 
     assert [
-        row["object_type"] for row in result.rows[ITEM][REGISTRY.name]
+        row["object_type"] for row in result.catalogue.rows[ITEM][REGISTRY.name]
     ] == ["folder"]
-    assert result.rows[ITEM][TABLE_DICTIONARY.name] == ()
+    assert result.catalogue.rows[ITEM][TABLE_DICTIONARY.name] == ()
     assert [
-        row["object_type"] for row in result.rows[ITEM][FOLDER_DICTIONARY.name]
+        row["object_type"] for row in result.catalogue.rows[ITEM][FOLDER_DICTIONARY.name]
     ] == ["folder"]
     assert result.stale_objects == ("Lakehouse/Sales/Sales.Customer",)
     assert result.stale_claims
@@ -111,12 +109,12 @@ def test_missing_folder_does_not_remove_same_named_table():
     )
 
     assert [
-        row["object_type"] for row in result.rows[ITEM][REGISTRY.name]
+        row["object_type"] for row in result.catalogue.rows[ITEM][REGISTRY.name]
     ] == ["table"]
     assert [
-        row["object_type"] for row in result.rows[ITEM][TABLE_DICTIONARY.name]
+        row["object_type"] for row in result.catalogue.rows[ITEM][TABLE_DICTIONARY.name]
     ] == ["table"]
-    assert result.rows[ITEM][FOLDER_DICTIONARY.name] == ()
+    assert result.catalogue.rows[ITEM][FOLDER_DICTIONARY.name] == ()
     assert result.stale_objects == ("Lakehouse/Sales/Files/Sales.Customer",)
     assert result.stale_claims
     assert all(claim.identity.is_files for claim in result.stale_claims)
@@ -135,7 +133,7 @@ def test_folder_claims_do_not_infer_ownership_of_table_dictionary_rows():
     state.rows[ITEM][TABLE_DICTIONARY.name] = (_row("Archive"),)
     result = reconcile_catalogue_state(state, inventories={ITEM: _inventory()})
 
-    assert result.rows[ITEM][TABLE_DICTIONARY.name] == (_row("Archive"),)
+    assert result.catalogue.rows[ITEM][TABLE_DICTIONARY.name] == (_row("Archive"),)
     assert TABLE_DICTIONARY.name not in {
         claim.rule.table.name for claim in result.stale_claims
     }

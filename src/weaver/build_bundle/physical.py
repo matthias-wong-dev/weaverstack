@@ -9,7 +9,8 @@ across items or chooses a sequence number.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from typing import Mapping
 
 from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
@@ -261,6 +262,63 @@ def item_schema_stage(
     )
 
 
+@dataclass(frozen=True)
+class RenderedAction:
+    """One authored document turned into one action and its frozen payload.
+
+    The smallest unit the build has: a declaration in, an executable out. Kept as
+    a value rather than written straight into a stage's payload dict so that the
+    mapping from *declaration* to *bundle action* — which executor runs it, what
+    the payload is called, what its hash is — can be examined on its own, without
+    planning an item or generating a bundle to see it.
+
+    ``payloads`` is empty for a folder, which is created rather than executed.
+    """
+
+    action: BuildAction
+    payloads: Mapping[str, bytes]
+
+
+def render_document_build_action(identity, source) -> RenderedAction:
+    """The build action and payload one declared document renders to.
+
+    This is where ``source.create_ddl()`` becomes something a bundle can carry:
+    the DDL says *what statement*, and this says what action runs it, under what
+    id, with which executor, and against which frozen bytes. The two are separate
+    claims and are worth failing separately.
+    """
+
+    action_slug = _slug(identity)
+    if source.kind == FOLDER:
+        # A folder has no statement to run: it is a directory the installer
+        # creates, so there is nothing to freeze and nothing to hash.
+        return RenderedAction(
+            action=BuildAction(
+                id=f"folder-{action_slug}",
+                kind=BUILD_FOLDER,
+                resource_node_id=str(identity),
+                executor="folder",
+                payload=None,
+                payload_sha256=None,
+            ),
+            payloads={},
+        )
+    ddl = source.create_ddl()
+    filename = f"{action_slug}{ddl.extension}"
+    content = ddl.content.encode("utf-8")
+    return RenderedAction(
+        action=BuildAction(
+            id=f"object-{action_slug}",
+            kind=_OBJECT_KIND[source.kind],
+            resource_node_id=str(identity),
+            executor=ddl.executor,
+            payload=filename,
+            payload_sha256=sha256_hex(content),
+        ),
+        payloads={filename: content},
+    )
+
+
 def item_build_stages(
     repository,
     selected_for_build,
@@ -278,14 +336,15 @@ def item_build_stages(
     stages = []
     for index, layer in enumerate(graph.layers()):
         payloads: dict[str, bytes] = {}
-        actions = tuple(
-            _build_action(
-                identities[node],
-                repository.source_documents[identities[node]],
-                payloads,
+        actions = []
+        for node in sorted(layer):
+            identity = identities[node]
+            rendered = render_document_build_action(
+                identity, repository.source_documents[identity]
             )
-            for node in sorted(layer)
-        )
+            payloads.update(rendered.payloads)
+            actions.append(rendered.action)
+        actions = tuple(actions)
         stages.append(
             PlannedStage(
                 phase=BUILD,
@@ -303,26 +362,3 @@ def item_build_stages(
     return tuple(stages)
 
 
-def _build_action(identity, source, payloads):
-    action_slug = _slug(identity)
-    if source.kind == FOLDER:
-        return BuildAction(
-            id=f"folder-{action_slug}",
-            kind=BUILD_FOLDER,
-            resource_node_id=str(identity),
-            executor="folder",
-            payload=None,
-            payload_sha256=None,
-        )
-    ddl = source.create_ddl()
-    filename = f"{action_slug}{ddl.extension}"
-    content = ddl.content.encode("utf-8")
-    payloads[filename] = content
-    return BuildAction(
-        id=f"object-{action_slug}",
-        kind=_OBJECT_KIND[source.kind],
-        resource_node_id=str(identity),
-        executor=ddl.executor,
-        payload=filename,
-        payload_sha256=sha256_hex(content),
-    )

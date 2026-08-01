@@ -49,16 +49,18 @@ from .tables import (
     table,
 )
 from .state import (
-    CatalogueState,
     RegisteredDocument,
-    ReconciledCatalogue,
+    Catalogue,
+    Reconciliation,
+    for_targets,
+    retaining,
     read_catalogue_state,
     reconcile_catalogue_state,
 )
 
 __all__ = [
     "ALIAS", "AUDIT_COLUMN_NAMES", "CATALOGUE_SCHEMA", "CATALOGUE_TABLES",
-    "COLUMN_DICTIONARY", "CatalogueColumn", "CatalogueTable", "CatalogueState", "DEPENDENCY",
+    "COLUMN_DICTIONARY", "CatalogueColumn", "CatalogueTable", "DEPENDENCY",
     "DICTIONARY_TABLES", "FOLDER_DICTIONARY", "FOREIGN_KEY_DICTIONARY",
     "INDEX_DICTIONARY", "INSTALLATION", "ITEM_SCOPE_COLUMNS",
     "InstallationScope", "KEY_PRIMARY", "KEY_UNIQUE",
@@ -66,6 +68,6 @@ __all__ = [
     "SCHEMA_DICTIONARY", "SIGNATURE", "TABLE_DICTIONARY", "column_set",
     "identifier", "literal", "qualified_name", "render_delete_obsolete",
     "render_delete_scope", "render_merge", "sorted_rows", "table", "typed_literal",
-    "RegisteredDocument", "ReconciledCatalogue",
+    "RegisteredDocument", "Catalogue", "Reconciliation", "retaining", "for_targets",
     "read_catalogue_state", "reconcile_catalogue_state",
 ]

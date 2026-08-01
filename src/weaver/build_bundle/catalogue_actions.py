@@ -7,10 +7,10 @@ from collections import defaultdict
 from typing import Iterable, Mapping
 
 from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
-from ..catalogue.projection import project_item_installation
+from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.reconcile import reconcile
 from ..catalogue.render import InstallationScope, identifier, literal
-from ..catalogue.state import ReconciledCatalogue
+from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.tables import DICTIONARY_TABLES, REGISTRY, CatalogueTable
 from ..declaration.model import WeaverDocumentId
 from ..spark.tokens import object_token
@@ -27,12 +27,21 @@ from .stages import CATALOGUE, PlannedStage
 
 
 def collect_claims(
-    catalogue: ReconciledCatalogue,
+    catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
+    *,
+    stale_claims: Iterable[CatalogueClaim] = (),
 ) -> tuple[CatalogueClaim, ...]:
-    """Collect existing claims using installed types and explicit ownership."""
+    """Every catalogue claim this build must delete before it does physical work.
 
-    claims = list(catalogue.stale_claims)
+    Two sources, and they are symmetric: claims reconciliation already disproved
+    against the inventory, and claims held by the objects this build is about to
+    drop or remove. Both are passed in rather than one being read off the
+    catalogue, because a catalogue describes what is claimed — not which of those
+    claims some earlier step decided were wrong.
+    """
+
+    claims = list(stale_claims)
     for identity in sorted(set(identities), key=str):
         document = catalogue.registered.get(identity)
         if document is None:
@@ -130,12 +139,13 @@ def _stage(
 
 
 def render_catalogue_before_build(
-    catalogue: ReconciledCatalogue,
+    catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
     *,
     control_target,
+    stale_claims: Iterable[CatalogueClaim] = (),
 ) -> PlannedStage | None:
-    claims = collect_claims(catalogue, identities)
+    claims = collect_claims(catalogue, identities, stale_claims=stale_claims)
     return _stage(
         index=0,
         slug="catalogue-before-build",
@@ -146,12 +156,21 @@ def render_catalogue_before_build(
     )
 
 
+def _item_signature(repository, item) -> str:
+    """The item's own signature, which is what an Installation row records."""
+
+    return next(
+        model.signature for model in repository.items if model.identity == item
+    )
+
+
 def render_catalogue_after_build(
     repository,
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
     *,
     control_target,
+    current: Catalogue | None = None,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
@@ -164,18 +183,45 @@ def render_catalogue_after_build(
     from .. import __version__
 
     selected_ids = set(selected_ids)
+
+    # The publication is a diff: what the repository describes, against what is
+    # persisted. Only the desired side drives the statements — see
+    # `CatalogueChanges` — but routing production through the same call the
+    # reporting uses is what stops the two drifting apart.
+    # Logical, then narrowed, then bound — in that order and visibly so. The
+    # narrowing is what keeps a Registry row meaning "this succeeded"; the
+    # binding is what lets an alias be certified as the thing it physically is.
+    logical = Catalogue.from_repository(repository)
+    certified = retaining(logical, repository, selected_ids)
+    desired = for_targets(
+        certified,
+        repository,
+        selected_ids,
+        {item: target.kind for item, target in target_by_item.items()},
+    )
+    binding_rows = {
+        item: (
+            {
+                "item_type": item.item_type,
+                "item_name": item.item_name,
+                "target_name": target_by_item[item].name,
+                "weaver_version": __version__,
+                "signature": _item_signature(repository, item),
+            },
+        )
+        for item in target_by_item
+    }
+    by_item = (current or Catalogue(rows={})).diff(desired).render_dml(
+        installation=binding_rows
+    )
+
     catalogue_statements: list[str] = []
     registry_statements: list[str] = []
     for item in sorted(target_by_item, key=str):
-        projection = project_item_installation(
-            repository,
-            item=item,
-            retained=(identity for identity in selected_ids if identity.item == item),
-            target_name=target_by_item[item].name,
-            weaver_version=__version__,
-            target_kind=target_by_item[item].kind,
-        )
-        result = reconcile(projection)
+        result = by_item[item]
+        # Registry last, in its own barrier — taken from the structure rather
+        # than recovered from the SQL, so the ordering invariant is carried by
+        # the type instead of by a string match.
         for table_plan in (*result.dictionaries, result.installation):
             catalogue_statements.extend(table_plan.statements)
         registry_statements.extend(result.registry.statements)

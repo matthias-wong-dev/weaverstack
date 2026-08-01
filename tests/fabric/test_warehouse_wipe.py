@@ -1,4 +1,16 @@
-"""The complete desktop-populate → in-Fabric wipe → desktop-verify path."""
+"""Wiping a real Warehouse: populate, wipe, verify — all over TDS.
+
+A Warehouse is reached over TDS, and `wipe_sql_target` takes its SQL executor as
+an argument. So none of this needs a Livy session: the production implementation
+runs here, against the real Warehouse, on the connection this process already
+holds.
+
+It used to submit the wipe into a session purely because *that* is where the
+installed package lived — which put a five-minute `weaver install` on the path to
+finding out whether the generated DROP statements were right. That the installed
+package can acquire a Warehouse connection from the session's own identity is a
+separate claim, made once in `test_published_weaver.py`.
+"""
 
 from __future__ import annotations
 
@@ -28,13 +40,12 @@ EXPECTED_OBJECTS = {
 }
 
 
-def test_installed_weaver_wipes_a_desktop_populated_warehouse(
+def test_weaver_wipes_a_populated_warehouse(
     clean_disposable_warehouse,
     fabric_client,
     fabric_workspace_item,
-    livy_session,
 ):
-    """Exercise installed Weaver, not a duplicate test-side SQL implementation."""
+    """Exercise Weaver's own wipe, not a duplicate test-side SQL implementation."""
 
     from weaver.fabric import WAREHOUSE, find_item
 
@@ -51,22 +62,18 @@ def test_installed_weaver_wipes_a_desktop_populated_warehouse(
         f"{len(before)} fixture objects present before wipe"
     )
 
-    body = (
-        "from weaver import FabricWorkspace, WarehouseTarget, wipe_sql_target\n"
-        f"workspace = FabricWorkspace(workspace={warehouse.workspace.workspace!r}, "
-        f"weaver_lakehouse={warehouse.workspace.weaver_lakehouse!r}, "
-        f"environment={warehouse.workspace.environment!r})\n"
-        f"target = WarehouseTarget.parse({warehouse.target.warehouse.name!r})\n"
-        "result = wipe_sql_target(target, workspace)\n"
-        "emit({'completed': result is None})\n"
-    )
+    from weaver import wipe_sql_target
+
     started = time.monotonic()
-    result = livy_session.run(body)
-    warehouse.timings["Fabric wipe execution"] = time.monotonic() - started
-    assert result.payload == {"completed": True}
+    # The production implementation, given the SQL executor explicitly — which is
+    # the only thing a session would have supplied differently.
+    wipe_sql_target(
+        warehouse.target, warehouse.workspace, sql=warehouse.executor
+    )
+    warehouse.timings["wipe execution"] = time.monotonic() - started
     print(
-        f"Warehouse {warehouse.item.name} Fabric wipe execution: "
-        f"{warehouse.timings['Fabric wipe execution']:.2f}s"
+        f"Warehouse {warehouse.item.name} wipe execution: "
+        f"{warehouse.timings['wipe execution']:.2f}s"
     )
 
     after = user_objects(warehouse.executor)

@@ -439,6 +439,30 @@ so nothing has to leave arithmetic headroom for a repository's dependency depth
 and no phase can collide with a region another phase claimed. A number *describes*
 the order the plan already has; it does not create it.
 
+### 11a. Three seams
+
+Generation and execution are reachable at three narrower points than "build a
+bundle", each the lowest layer that can answer its own question:
+
+```python
+render_document_build_action(identity, source)   # one declaration -> one action
+plan_item_build(repository, item=..., ...)       # one item's physical plan
+execute_action(action, payload, context=...)     # one action -> one ActionResult
+```
+
+They are not a parallel path. The planner calls `plan_item_build`,
+`item_build_stages` calls the renderer, and the installer and `execute_action`
+share one execution routine — so what a caller reaches directly is exactly what a
+whole build does.
+
+`execute_action` is the one that changes what has to be paid for. Almost
+everything an executor does is checkable without an engine: that the exact
+statement arrives, that a logical name is resolved against the batch's
+destination first, that a missing capability fails saying which, and that a
+failure becomes a *result* rather than an exception. What remains for a real
+workspace is narrow, and reaching it no longer costs a repository parse, a
+catalogue read and an installation.
+
 ## 12. Bundle execution order
 
 A build is an ordered series of **item** builds. The item graph is the outer

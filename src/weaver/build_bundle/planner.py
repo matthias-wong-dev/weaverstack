@@ -28,10 +28,10 @@ graph is the outer boundary, not a replacement for it.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Mapping
 
-from ..catalogue.state import ReconciledCatalogue
+from ..catalogue.state import Catalogue
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..locations import Location
@@ -63,7 +63,8 @@ def generate_item_build_bundle(
     output: Location,
     store: Store,
     target_inventories: Mapping[WeaverItemId, TargetInventory] | None = None,
-    reconciled_catalogue: ReconciledCatalogue,
+    catalogue: Catalogue,
+    stale_claims: tuple = (),
     control_lakehouse: LakehouseBinding,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
@@ -115,11 +116,11 @@ def generate_item_build_bundle(
     # Freshness is read before ``registered`` is narrowed, because the whole
     # point is to compare against an item this build does *not* include.
     stale_aliases = stale_alias_destinations(
-        repository, reconciled_catalogue.registered, bound_items=by_item
+        repository, catalogue.registered, bound_items=by_item
     )
     registered = {
         identity: document
-        for identity, document in reconciled_catalogue.registered.items()
+        for identity, document in catalogue.registered.items()
         if identity.item in by_item
     }
     selection = select_build(
@@ -137,9 +138,10 @@ def generate_item_build_bundle(
     omitted: list[OmittedNode] = []
 
     catalogue_before = render_catalogue_before_build(
-        reconciled_catalogue,
+        catalogue,
         removed | selected_for_drop,
         control_target=control_target,
+        stale_claims=stale_claims,
     )
     if catalogue_before is not None:
         stages.append(catalogue_before)
@@ -152,7 +154,7 @@ def generate_item_build_bundle(
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
         for item in layer:
-            item_stages, item_omitted, item_uncertified = _plan_item(
+            planned = plan_item_build(
                 repository,
                 item=item,
                 target=target_by_item[item],
@@ -164,9 +166,9 @@ def generate_item_build_bundle(
                 selected_for_build=selected_for_build,
                 registered=registered,
             )
-            layer_stages.extend(item_stages)
-            omitted.extend(item_omitted)
-            uncertified |= item_uncertified
+            layer_stages.extend(planned.stages)
+            omitted.extend(planned.omitted)
+            uncertified |= planned.uncertified
         stages.extend(merge_layer_stages(layer_stages))
 
     stages.extend(
@@ -175,6 +177,9 @@ def generate_item_build_bundle(
             selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
+            # Passed for the *report* the diff can produce. The statements come
+            # from the desired side alone, so a bad read cannot change them.
+            current=catalogue,
         )
     )
 
@@ -243,7 +248,24 @@ def _item_layers(
     )
 
 
-def _plan_item(
+@dataclass(frozen=True)
+class PlannedItem:
+    """One item's physical plan: what to do, what was left out, what is uncertified."""
+
+    #: The item's contiguous stages, in the order they must run.
+    stages: tuple[PlannedStage, ...]
+    #: Nodes this item could not plan, each carrying why.
+    omitted: tuple[OmittedNode, ...]
+    #: Alias destinations this item could not materialise *and* was asked to
+    #: build. Withheld from certification: an alias whose source item is unbound
+    #: has no physical form under these bindings, and a Registry row for it would
+    #: claim an installation that never happened. One already installed from an
+    #: earlier build is left certified — it is still there — so only the
+    #: intersection with the build selection is withheld.
+    uncertified: frozenset
+
+
+def plan_item_build(
     repository: WeaverRepository,
     *,
     item: WeaverItemId,
@@ -255,15 +277,19 @@ def _plan_item(
     selected_for_drop,
     selected_for_build,
     registered,
-) -> tuple[tuple[PlannedStage, ...], tuple[OmittedNode, ...], set]:
-    """One item's contiguous group of stages, in the order they must run.
+) -> PlannedItem:
+    """One item's physical plan, from prepared inputs.
 
-    The third return is the alias destinations this item could not materialise
-    *and* was asked to build. They are withheld from certification: an alias
-    whose source item is unbound has no physical form under these bindings, and
-    a Registry row for it would claim an installation that never happened. One
-    already installed from an earlier build is left certified — it is still
-    there — so only the intersection with the build selection is withheld.
+    The seam between deciding *what* to build and arranging a whole bundle. It
+    takes a selection that has already been made and an inventory that has
+    already been read, and answers only: for this one item against this one
+    target, which stages run and in what order.
+
+    Everything above it stays out — item layers, catalogue publication, the
+    control-plane target, bundle identity, writing. So a claim about one item's
+    prune-then-drop-then-schema-then-build ordering can be made without
+    generating a bundle to see it, which is what kept such claims in the
+    integration suite.
     """
 
     aliases = plan_item_aliases(
@@ -316,10 +342,10 @@ def _plan_item(
     refresh = item_refresh_stage(stages, item=item, target=target)
     if refresh is not None:
         stages.append(refresh)
-    return (
-        tuple(stages),
-        aliases.omitted,
-        set(aliases.omitted_destinations) & set(selected_for_build),
+    return PlannedItem(
+        stages=tuple(stages),
+        omitted=aliases.omitted,
+        uncertified=frozenset(aliases.omitted_destinations) & frozenset(selected_for_build),
     )
 
 

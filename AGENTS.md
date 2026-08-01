@@ -250,6 +250,104 @@ Item *lifecycle* cover — creating and deleting Lakehouses — is marked
 resource management rather than Weaver's, changes rarely, and its create/delete
 churn would otherwise slow every run of the code actually under development.
 
+### One state transition, one evidence payload
+
+Because the suite's cost is Livy round trips, **a Livy call is an architectural
+decision, not an implementation detail.** One submission costs seconds; the
+statements inside it cost almost nothing. So the rule is:
+
+> A remote state transition produces one evidence payload. Assertions stay local.
+
+Gather every question about one moment into one body, submit it once, and assert
+against what comes back:
+
+```python
+seen = env.observe(
+    queries={"tables": "SHOW TABLES IN {{schema:DWG}}"},
+    schemas={"dwg": "DWG", "weaver_dwg": ("DWG", env.weaver_destination)},
+)
+assert {"customer", "order"} <= seen.values("tables", "tableName")
+assert not seen.schema("weaver_dwg")
+```
+
+rather than a call per question:
+
+```python
+assert env.query("SHOW TABLES IN ...")          # one round trip
+assert env.schema_exists("DWG")                  # another
+assert not env.schema_exists("DWG", weaver)      # another
+```
+
+This is cheaper, but the reason it is *better* is accuracy. Separate calls
+interrogate a **mutable remote estate** at several instants, so "the estate after
+prune" becomes several claims about several moments — and a later transition can
+make an earlier assertion pass on state that no longer exists. One payload is one
+observation of one moment, which is what the assertion says it is. Keep it on the
+step it belongs to (`step.observation`) rather than re-reading later.
+
+Split calls only where the *boundary between them* is the subject: before versus
+after a build or refresh, a failure stopping later work, a repository mutated
+between generation and installation, prune or wipe changing the estate. The
+protocol tests in `test_livy_import.py` show both halves of that judgement.
+
+The helpers live in `tests/fabric/observation.py`, and both transports run the
+same body — local Spark in-process, Fabric over Livy — so what the local suite
+proves is the code Fabric runs. Neither hides the call: every submission is
+counted by `tests/fabric/livy_telemetry.py` and pytest prints a breakdown at the
+end of the run.
+
+```text
+================================ Livy transport ================================
+Livy calls: 31
+Livy elapsed: 124.8s (plus 62.0s session startup)
+
+By phase:
+  generate and install: 12 calls / 84.1s
+  observe install: 1 calls / 4.2s
+...
+```
+
+No test asserts a call count. A number that has to be edited whenever a probe
+legitimately changes teaches the suite to raise the budget rather than ask why;
+the summary already puts a regression in front of whoever caused it.
+
+### Markers
+
+Each marker is opted into by name, and none implies another.
+
+```bash
+pytest                      # pure Python, under a second
+pytest -m spark             # local Spark/Delta, needs a JDK
+pytest -m fabric            # targeted Fabric probes
+pytest -m full_integration  # the lifecycle journey, on both transports
+pytest -m provisioning      # Fabric item lifecycle
+```
+
+Every marker says *what a test needs*:
+
+| marker | needs |
+|---|---|
+| `spark` | a JDK |
+| `fabric` | a workspace — **and nothing published** |
+| `published_weaver` | a workspace *and* the wheel in the Environment |
+| `full_integration` | a workspace and the wheel |
+| `provisioning` | a workspace |
+
+`fabric` and `published_weaver` is the distinction that keeps the loop fast, and
+it is about *what executes*, not about whether Livy is involved. A Spark body
+that does not import Weaver needs a session, not a published package — which is
+why `LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
+refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
+run from the checkout against the real workspace. What needs the wheel is what is
+*about* the wheel: that the installed package acquires its own capabilities.
+
+`full_integration` is the Fabric lifecycle journey alone — one test, no JDK. Its
+local twin lives in `tests/spark` under `spark`, because that is what it needs.
+The journey is the most expensive thing in the suite and should **rarely be where
+a defect is found for the first time**: syntax, selection, planning, action
+rendering, execution and reconciliation are all meant to be proven below it.
+Making it run by exception keeps the routine Fabric run about components.
+
 Isolation therefore comes from **emptying** an item rather than from having a new
 one. That is not a weaker guarantee, but it is a different one, so the cleaning
 path is load-bearing and asserted rather than assumed: residue is possible in

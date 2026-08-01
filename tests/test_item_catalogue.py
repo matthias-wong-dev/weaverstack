@@ -7,7 +7,11 @@ import pytest
 from weaver.locations import Location
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.catalogue.projection import project_item_installation
+from weaver.catalogue.projection import (
+    CatalogueProjection,
+    project_alias_registry,
+    project_item_catalogue,
+)
 from weaver.catalogue.reconcile import reconcile
 from weaver.catalogue.tables import (
     ALIAS,
@@ -34,14 +38,25 @@ def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"
         for alias in repository.aliases
         if alias.destination.item == item
     )
-    return project_item_installation(
-        repository,
-        item=item,
-        retained=retained,
-        target_name=target,
-        weaver_version="1.2.3",
-        target_kind=target_kind,
+    # The projection is now source-only. Alias certification and the Installation
+    # row are composed on top, exactly as publication composes them — so this
+    # helper still yields the whole picture these tests assert against.
+    projection = project_item_catalogue(repository, item=item, retained=retained)
+    rows = dict(projection.rows)
+    rows[REGISTRY.name] = tuple(rows.get(REGISTRY.name, ())) + project_alias_registry(
+        repository, item=item, retained=retained, target_kind=target_kind
     )
+    item_model = next(m for m in repository.items if m.identity == item)
+    rows[INSTALLATION.name] = (
+        {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "target_name": target,
+            "weaver_version": "1.2.3",
+            "signature": item_model.signature,
+        },
+    )
+    return CatalogueProjection(scope=projection.scope, rows=rows)
 
 
 def _registry_row(projection, schema: str, name: str):
@@ -303,5 +318,7 @@ def test_a_registry_with_the_epoch_column_is_accepted():
         _Shaped({"Registry": list(REGISTRY.physical_columns)}), ()
     )
 
-    assert state.status == "partial"
-    assert "Registry" in state.present_tables
+    # A catalogue holding only some of its tables is read, not rejected —
+    # `present_tables` is what says which, and it is what reconciliation then
+    # uses to decide whether a claim can be raised at all.
+    assert state.present_tables == frozenset({"Registry"})

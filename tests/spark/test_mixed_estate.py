@@ -18,7 +18,7 @@ read, a SQL endpoint, an in-session build — live in the modules that make them
 from __future__ import annotations
 
 import pytest
-from build_envs import MIXED_ESTATE_FIXTURE
+from support.build_envs import MIXED_ESTATE_FIXTURE
 
 from weaver import FolderTarget
 

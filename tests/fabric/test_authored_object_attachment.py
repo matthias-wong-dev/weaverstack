@@ -13,7 +13,7 @@ import pytest
 
 from weaver import ItemRef
 
-pytestmark = pytest.mark.fabric
+pytestmark = pytest.mark.published_weaver
 
 
 def test_an_object_resolves_the_lakehouse_the_session_attached(
