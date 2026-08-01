@@ -199,6 +199,7 @@ rather than the estate around it.
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
 | which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
 | the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
+| a correct estate plans nothing: three agreeing states, both item types, every physical kind | `generate_item_build_bundle` | `test_fixed_point.py` | — |
 
 ### Covered by old tests, not yet re-homed
 
@@ -348,6 +349,23 @@ Warehouse estate.
 The general lesson: **an asymmetry between the two physical sides is where a
 Lakehouse-only fixture stops being representative.** Prune, schemas and inventory
 all behave differently across that line.
+
+**Would the fixed-point test have caught it?** No — and the reason is worth
+keeping. `test_fixed_point.py` composes the three states and asserts a build finds
+nothing to do, which is the strongest whole-plan property available. It passes
+with that defect reintroduced, because *the planner passed the argument
+correctly*. The bug lived in the seam's **default**, on a path only a direct
+caller took.
+
+A defaulted argument is two contracts. A composed test can only ever prove the
+one the composition uses. That is why the more important half of the fix was
+removing the parameter rather than adding coverage: with the value derived
+inside, there is one path, and breaking the derivation now fails
+`test_fixed_point.py` *and* `test_prune.py` together — verified by doing it.
+
+The rule this suggests: **a seam with a destructive default cannot be covered
+from above.** Either the default goes, or the seam is tested directly on every
+shape it accepts.
 
 **A `snapshot=` keyword in a Livy body.** Not a coverage gap of the same kind —
 that code is a *string* sent to a Fabric session and executes only against the
