@@ -47,10 +47,12 @@ def _repository(root):
 def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
     """One item's catalogue as a completed build would have left it.
 
-    Both kinds of registered object are included — documents and the item's alias
-    destinations — because that is what a real installation holds, and selection
-    reads the two the same way.
+    Every kind of registered object is included — documents, the item's alias
+    destinations and its load artefacts — because that is what a real
+    installation holds, and selection reads them all the same way.
     """
+
+    from weaver.etl import item_load_artefacts
 
     item = WeaverItemId.parse(item_text)
     retained = [identity for identity in repository.source_documents if identity.item == item]
@@ -58,6 +60,9 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
         alias.destination
         for alias in repository.aliases
         if alias.destination.item == item
+    )
+    retained.extend(
+        artefact.identity for artefact in item_load_artefacts(repository, item=item)
     )
     projection = project_item_catalogue(repository, item=item, retained=retained)
     # Alias certification is a binding-time step now, so it is composed here to

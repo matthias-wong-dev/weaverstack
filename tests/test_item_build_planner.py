@@ -438,6 +438,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "alias": noop,
             "tsql_batch": noop,
             "sql_endpoint_refresh": noop,
+                "load_file": noop,
         },
     )
     report = install_bundle(reloaded, environment=environment)

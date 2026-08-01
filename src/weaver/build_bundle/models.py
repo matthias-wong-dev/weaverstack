@@ -38,12 +38,26 @@ BUILD_VIEW = "build_view"
 #: not be created while the endpoint still describes the previous shape.
 REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
+#: Load kinds — what an item's final layer installs. ``write_file`` puts one
+#: deployed module or generated statement into the runtime tree;
+#: ``build_procedure`` creates or replaces one generated load procedure.
+WRITE_FILE = "write_file"
+BUILD_PROCEDURE = "build_procedure"
+
 #: Managed rebuild drops.  They are deliberately distinct from prune: these
 #: objects remain desired and are removed only so a selected definition can be
 #: recreated.
 DROP_FOLDER = "drop_folder"
 DROP_TABLE = "drop_table"
 DROP_VIEW = "drop_view"
+
+#: Removals of load artefacts whose source has stopped claiming them. Distinct
+#: from prune because they come from the *catalogue* rather than from a diff
+#: against the target: the previous Registry row says what was installed and
+#: where, so a deleted or renamed source produces the removal without anything
+#: having to enumerate the runtime tree.
+DELETE_FILE = "delete_file"
+DROP_PROCEDURE = "drop_procedure"
 
 #: Prune kinds. Each names one frozen drop the build computed against the target:
 #: a Spark SQL DROP for a table/view/schema, a directory removal for a folder.

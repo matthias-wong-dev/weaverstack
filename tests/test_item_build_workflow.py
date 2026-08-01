@@ -83,6 +83,7 @@ def _executors():
             "alias",
             "tsql_batch",
             "sql_endpoint_refresh",
+            "load_file",
         )
     }
 

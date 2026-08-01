@@ -410,12 +410,19 @@ def generated_item_files(
     inside it can be claimed, since it is what owns the directory they land in.
     """
 
-    if _is_builtin(item) or item.item_type == WAREHOUSE:
+    if _is_builtin(item):
         return {}
+    schema = {f"{item}/{SCHEMA_DOCUMENT}": render_schema_document().encode("utf-8")}
+    if item.item_type == WAREHOUSE:
+        # A Warehouse needs the schema its generated load procedures live in and
+        # nothing else — there is no Files area, so no runtime tree and no folder
+        # to own one.
+        documents = tuple(documents)
+        return schema if any(source.kind == TABLE for source in documents) else {}
     if not has_deployable_source(item, documents=documents, support_paths=support_paths):
         return {}
     return {
-        f"{item}/{SCHEMA_DOCUMENT}": render_schema_document().encode("utf-8"),
+        **schema,
         f"{item}/{FOLDER_DOCUMENT}": render_folder_document().encode("utf-8"),
     }
 

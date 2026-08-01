@@ -36,7 +36,7 @@ import yaml
 from ..errors import BuildError
 from ..locations import Location
 from ..store import Store
-from .models import OMISSION_REASONS, BuildPlan
+from .models import DELETE_FILE, OMISSION_REASONS, BuildPlan
 
 #: The only bundle format this code writes and accepts.
 SUPPORTED_FORMAT_VERSION = 1
@@ -54,6 +54,7 @@ TSQL_BATCH_EXECUTOR = "tsql_batch"
 FOLDER_EXECUTOR = "folder"
 ALIAS_EXECUTOR = "alias"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
+LOAD_FILE_EXECUTOR = "load_file"
 #: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
 #: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
 #: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
@@ -61,9 +62,7 @@ SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
 #: ordered array of them, each as its own batch; ``folder`` makes or removes a
-#: directory; ``alias`` points one Lakehouse name at another item's object;
-#: ``sql_endpoint_refresh`` syncs a Lakehouse's SQL analytics endpoint with the Delta
-#: mutations just made in it. All are build, not load.
+#: directory; ``alias`` points one Lakehouse name at another item's object
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
@@ -75,6 +74,7 @@ VALID_EXECUTORS = frozenset(
         FOLDER_EXECUTOR,
         ALIAS_EXECUTOR,
         SQL_ENDPOINT_REFRESH_EXECUTOR,
+        LOAD_FILE_EXECUTOR,
     }
 )
 #: Executors that run a payload, and the extension that payload must carry.
@@ -88,10 +88,20 @@ _EXECUTOR_EXTENSION = {
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
     ALIAS_EXECUTOR: ".alias.json",
+    # A deployed file's payload is its exact bytes, whatever they are — a Python
+    # module, a generated statement — so the extension names the *role* rather
+    # than the content, which is the one thing every load file has in common.
+    LOAD_FILE_EXECUTOR: ".payload",
 }
 _PAYLOADLESS_EXECUTORS = frozenset(
     {FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR}
 )
+#: Kinds that carry no payload even though their executor usually does. Only
+#: ``delete_file``: removing a deployed file needs the identity and nothing else,
+#: while writing one needs the exact bytes. Expressing it per *kind* keeps the
+#: strict requirement where it matters — a ``write_file`` with no payload is
+#: still rejected here rather than at install time.
+_PAYLOADLESS_KINDS = frozenset({DELETE_FILE})
 
 
 @dataclass(frozen=True)
@@ -305,15 +315,18 @@ def _validate_action_shape(action, omitted_ids) -> None:
             raise BuildError(
                 f"action {action.id!r} has no payload but carries a payload hash"
             )
-        if action.executor not in _PAYLOADLESS_EXECUTORS:
+        if (
+            action.executor not in _PAYLOADLESS_EXECUTORS
+            and action.kind not in _PAYLOADLESS_KINDS
+        ):
             raise BuildError(
                 f"action {action.id!r} uses executor {action.executor!r}, which needs a payload"
             )
         return
 
-    if action.executor in _PAYLOADLESS_EXECUTORS:
+    if action.executor in _PAYLOADLESS_EXECUTORS or action.kind in _PAYLOADLESS_KINDS:
         raise BuildError(
-            f"action {action.id!r} uses executor {action.executor!r}, which takes no payload"
+            f"action {action.id!r} is a {action.kind!r}, which takes no payload"
         )
     _check_payload_path(action.payload)
     extension = _EXECUTOR_EXTENSION[action.executor]

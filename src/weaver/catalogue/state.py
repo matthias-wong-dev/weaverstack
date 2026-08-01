@@ -119,6 +119,7 @@ class Catalogue:
         Lakehouse and this does not know which.
         """
 
+        from ..etl import item_load_artefacts
         from .projection import project_item_catalogue
 
         rows = {}
@@ -129,6 +130,13 @@ class Catalogue:
                 for identity in repository.source_documents
                 if identity.item == item
             }
+            # A load artefact is declared by the source exactly as a document is
+            # — derived from it, but a target in its own right — so it belongs in
+            # what the repository says should exist.
+            declared.update(
+                artefact.identity
+                for artefact in item_load_artefacts(repository, item=item)
+            )
             projection = project_item_catalogue(
                 repository, item=item, retained=declared
             )
