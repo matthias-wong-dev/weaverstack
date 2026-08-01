@@ -27,6 +27,7 @@ def installed_environment(livy_session):
     """Everything the session's Weaver can be asked about itself, in one payload."""
 
     result = livy_session.run(
+        "import weaver\n"
         "from importlib.metadata import version\n"
         "import yaml, sqlparse, mssql_python\n"
         "from weaver import FolderTarget, DeltaTarget, Location\n"

@@ -68,6 +68,7 @@ def test_the_installed_package_imports_and_reports_a_version(livy_session):
     """The precondition for every other claim in this file."""
 
     payload = livy_session.run(
+        "import weaver\n"
         "from importlib.metadata import version\n"
         "emit({'attr': weaver.__version__, 'dist': version('weaverstack')})\n",
         label="parity: import",

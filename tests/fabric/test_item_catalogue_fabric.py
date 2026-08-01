@@ -45,6 +45,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     installation_filter = "item_type = 'Lakehouse' AND item_name = '_weaver'"
     registry_filter = installation_filter
     body = (
+        "import weaver\n"
         "from weaver import FabricWorkspace, ItemRef, WeaverItemId\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBinding, "
         "ItemBindings, LakehouseBinding, build_uploaded_item_repository, "
