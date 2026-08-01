@@ -6,8 +6,6 @@ A bundle is a directory:
 
     <bundle>/
         plan.yml                     the canonical manifest
-        repository/                  the certified repository snapshot
-            ...
         payload/                     one generated definition per action
             010-create-schemas/
                 create-DWG.spark.sql
@@ -42,7 +40,6 @@ from .models import DELETE_FILE, OMISSION_REASONS, BuildPlan
 SUPPORTED_FORMAT_VERSION = 1
 
 PLAN_FILENAME = "plan.yml"
-REPOSITORY_DIR = "repository"
 PAYLOAD_DIR = "payload"
 
 SPARK_SQL_EXECUTOR = "spark_sql"
@@ -109,8 +106,8 @@ class BuildBundle:
     """A validated bundle and the store holding its files.
 
     The bundle store is deliberately independent of the target store. Inside
-    Fabric, payloads and the certified snapshot live on the session driver's
-    temporary filesystem while target Files mutations still use ``FabricStore``.
+    Fabric, payloads live on the session driver's temporary filesystem while
+    target Files mutations still use ``FabricStore``.
     ``None`` remains accepted for compatibility with callers that reconstruct a
     lightweight handle and let the installer use its environment store.
     """
@@ -174,13 +171,11 @@ def write_bundle(
     *,
     plan: BuildPlan,
     payloads: Mapping[str, bytes],
-    snapshot: Mapping[str, bytes],
     store: Store,
 ) -> BuildBundle:
     """Write a bundle, manifest last, then reload and validate it.
 
-    ``payloads`` is keyed by each action's bundle-relative payload path;
-    ``snapshot`` by repository-relative path (written beneath ``repository/``).
+    ``payloads`` is keyed by each action's bundle-relative payload path.
     """
 
     for _, _, action in plan.actions():
@@ -198,10 +193,6 @@ def write_bundle(
                 f"action {action.id!r} payload hash does not match its content "
                 f"({action.payload_sha256} vs {digest})"
             )
-
-    for relative, data in snapshot.items():
-        _check_relative(relative, what="snapshot path")
-        store.write(location.join(REPOSITORY_DIR, *relative.split("/")), data)
 
     for relative, data in payloads.items():
         store.write(location.join(*relative.split("/")), data)

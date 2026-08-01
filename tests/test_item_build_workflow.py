@@ -187,7 +187,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     assert remote.writes == [archive.value]
 
 
-def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_path):
+def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
     root = Location(str(_estate(tmp_path)))
     store = LocalStore()
     repository = parse_item_repository(root, store=store)
@@ -215,7 +215,7 @@ def test_bundle_archive_round_trip_preserves_identity_payloads_and_snapshot(tmp_
         }
         assert "plan.yml" in names
         assert any(name.startswith("payload/") for name in names)
-        assert any(name.startswith("repository/") for name in names)
+        assert not any(name.startswith("repository/") for name in names)
 
 
 def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path):

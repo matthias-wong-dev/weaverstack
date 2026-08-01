@@ -161,12 +161,14 @@ def test_write_then_load_returns_an_equal_plan(tmp_path):
         location,
         plan=_identified_plan(),
         payloads=_payloads(),
-        snapshot={"Raw__CustomerCsv.py": b"# snapshot\n"},
         store=store,
     )
     reloaded = load_bundle(location, store=store)
     assert reloaded.plan == bundle.plan
-    assert store.exists(location.join("repository", "Raw__CustomerCsv.py"))
+    # Outputs only. A bundle carries what it installs, never a second copy of
+    # the source it was planned from — the installer has no route back to a
+    # repository and needs none.
+    assert not store.exists(location.join("repository"))
     assert store.exists(location.join("plan.yml"))
 
 
@@ -181,7 +183,7 @@ def test_manifest_is_written_last(tmp_path, monkeypatch):
         return real_write(loc, data)
 
     monkeypatch.setattr(store, "write", recording_write)
-    write_bundle(location, plan=_identified_plan(), payloads=_payloads(), snapshot={}, store=store)
+    write_bundle(location, plan=_identified_plan(), payloads=_payloads(), store=store)
     assert written[-1].endswith("plan.yml")
 
 
@@ -191,7 +193,7 @@ def test_manifest_is_written_last(tmp_path, monkeypatch):
 def _write_valid(tmp_path):
     store = LocalStore()
     location = Location(str(tmp_path / "bundle"))
-    write_bundle(location, plan=_identified_plan(), payloads=_payloads(), snapshot={}, store=store)
+    write_bundle(location, plan=_identified_plan(), payloads=_payloads(), store=store)
     return store, location
 
 

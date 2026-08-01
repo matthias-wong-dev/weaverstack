@@ -153,7 +153,6 @@ def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, s
             spark=None,
             resolver=resolver,
             store=store,
-            snapshot=bundle.location.join("repository"),
             target=resolved[batch_target],
             targets=resolved,
             # A Warehouse alias is a T-SQL view, so it needs a SQL capability.

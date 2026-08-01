@@ -210,8 +210,8 @@ destroy the no-op above. It is written on insert only; see
 that is what makes it true rather than merely cheap.
 
 The Installation signature is deliberately item-scoped. The repository signature
-still certifies the complete coordinated source and bundle snapshot, while object
-rows retain their individual source signatures. This separation lets a future
+still certifies the complete coordinated source a bundle was planned from, while
+object rows retain their individual source signatures. This separation lets a future
 incremental planner see that changing `Lakehouse/Raw` does not by itself make an
 installed `Warehouse/Reporting` stale. An alias lives in the consuming item's own
 `alias.yml`, so it contributes to that item's signature and not the producer's.

@@ -50,7 +50,6 @@ def context_for(
         spark=spark,
         resolver=lakehouses.resolver,
         store=lakehouses.store,
-        snapshot=Location(str(lakehouses.root)),
         target=target,
         targets={target.bound.id: target},
         epoch=epoch,

@@ -115,9 +115,11 @@ From Python inside the target environment,
 `build_uploaded_item_repository()` is the full application workflow. It copies
 `Files/weaver_items` once to a session-local temporary directory, parses it,
 reads target and catalogue state, reconciles, and then calls the narrower
-`build_item_repository()` planner/executor seam. The generated bundle contains a
-certified repository snapshot, so installation never reopens or reinterprets
-the source repository.
+`build_item_repository()` planner/executor seam. The generated bundle contains
+only frozen outputs — every statement, every deployed file, every hash — and no
+copy of the source, so installation cannot reopen or reinterpret the repository
+even in principle. `repository_signature` still records which authored state the
+bundle was planned from.
 
 ## Migrating a flat repository
 

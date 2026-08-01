@@ -653,7 +653,7 @@ def single_action_bundle(
     )
     plan = _with_identity(plan)
     return write_bundle(
-        location, plan=plan, payloads=payloads, snapshot={}, store=store
+        location, plan=plan, payloads=payloads, store=store
     )
 
 
@@ -790,7 +790,6 @@ def installation_context(
         spark=spark,
         resolver=resolver,
         store=store,
-        snapshot=snapshot or Location("/snapshot"),
         target=target if target is not None else resolved_target(),
         sql=sql,
         targets=targets or {},

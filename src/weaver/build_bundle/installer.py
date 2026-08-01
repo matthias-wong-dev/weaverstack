@@ -8,8 +8,10 @@ report. It never reads the source repository, resolves a dependency or selects a
 target — every such decision is already in the bundle.
 
 Build is not load: the installer runs generated create DDL, creates folder
-directories, and reconciles the target — it never executes an object's code, so
-there is no snapshot on the import path. Concurrency starts conservatively:
+directories, deploys an item's runtime code, and reconciles the target — it never
+executes an object's code, and it has no route back to the source repository at
+all, because a bundle carries its outputs rather than a second copy of its
+inputs. Concurrency starts conservatively:
 sequences are serial and actions run serially within a batch, because one shared
 local Spark session gives no useful parallel DDL. The manifest still models
 independent actions, so a Fabric installer can add session concurrency later
@@ -216,10 +218,8 @@ def _run_sequence(
             spark=environment.spark,
             resolver=environment.resolver,
             store=environment.store,
-            snapshot=bundle.location.join("repository"),
             target=target,
             sql=environment.sql_for(target.bound),
-            snapshot_store=bundle.store or environment.store,
             targets=resolved,
             epoch=epoch,
         )

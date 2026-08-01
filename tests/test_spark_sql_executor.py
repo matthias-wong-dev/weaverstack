@@ -56,7 +56,7 @@ def _run(spark, destination):
         destination=destination,
     )
     context = InstallationContext(
-        spark=spark, resolver=None, store=None, snapshot=None, target=target
+        spark=spark, resolver=None, store=None, target=target
     )
     return SparkSqlExecutor().execute(
         action,
@@ -122,7 +122,7 @@ def test_catalogue_batch_executes_each_statement_in_payload_order():
         destination=destination,
     )
     context = InstallationContext(
-        spark=spark, resolver=None, store=None, snapshot=None, target=target
+        spark=spark, resolver=None, store=None, target=target
     )
 
     details = SparkSqlBatchExecutor().execute(
@@ -145,7 +145,6 @@ def _batch_context(spark, *, epoch=None):
         spark=spark,
         resolver=None,
         store=None,
-        snapshot=None,
         target=ResolvedTarget(
             bound=BoundTarget(id="control", kind="lakehouse", item_id="Control"),
             lakehouse=ItemRef("Control"),

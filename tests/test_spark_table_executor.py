@@ -164,7 +164,7 @@ def _run(spark, payload: bytes, *, destination=DESTINATION):
         destination=destination,
     )
     context = InstallationContext(
-        spark=spark, resolver=None, store=None, snapshot=None, target=target
+        spark=spark, resolver=None, store=None, target=target
     )
     return SparkTableExecutor().execute(action, payload, context)
 

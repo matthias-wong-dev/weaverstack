@@ -222,7 +222,6 @@ def generate_item_build_bundle(
         output,
         plan=plan,
         payloads=payloads,
-        snapshot=_snapshot(repository, store),
         store=store,
     )
 
@@ -384,21 +383,6 @@ def plan_item_build(
         omitted=aliases.omitted,
         uncertified=frozenset(aliases.omitted_destinations) & frozenset(selected_for_build),
     )
-
-
-def _snapshot(repository: WeaverRepository, store: Store) -> dict[str, bytes]:
-    if repository.root is None:
-        raise BuildError("a discovered repository root is required to certify a snapshot")
-    paths = {source.relative_path for source in repository.source_documents.values()}
-    paths.update(schema.relative_path for schema in repository.schema_documents.values())
-    paths.update(repository.support_files)
-    snapshot = {
-        relative: store.read(repository.root.join(*relative.split("/")))
-        for relative in sorted(paths)
-        if relative not in repository.generated_files
-    }
-    snapshot.update(repository.generated_files)
-    return dict(sorted(snapshot.items()))
 
 
 def _control_target(binding: LakehouseBinding, targets):

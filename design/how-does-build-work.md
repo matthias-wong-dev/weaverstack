@@ -416,7 +416,7 @@ A bundle is the complete contract between planning and execution. It contains:
 - the full build selection;
 - ordered sequences, batches, and actions;
 - exact DDL, DML, filesystem operations, and payload hashes;
-- the repository snapshot and deterministic bundle identity;
+- the deterministic bundle identity and the signature of the source it was planned from;
 - omitted nodes and reporting metadata.
 
 Unchanged and prohibited existing documents emit no physical actions. New and
