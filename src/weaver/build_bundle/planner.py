@@ -177,6 +177,9 @@ def generate_item_build_bundle(
             selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
+            # Passed for the *report* the diff can produce. The statements come
+            # from the desired side alone, so a bad read cannot change them.
+            current=catalogue,
         )
     )
 

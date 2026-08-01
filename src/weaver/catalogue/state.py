@@ -12,7 +12,7 @@ from ..spark.tokens import object_token
 from .claims import CatalogueClaim, claim_rules_for_object_type
 from .reader import _is_absent, read_installation
 from .render import InstallationScope
-from .tables import BUILD_EPOCH, CATALOGUE_TABLES, OBJECT_TYPES, REGISTRY
+from .tables import BUILD_EPOCH, CATALOGUE_TABLES, INSTALLATION, OBJECT_TYPES, REGISTRY
 
 
 @dataclass(frozen=True, init=False)
@@ -78,6 +78,96 @@ class Catalogue:
                 }
             ),
         )
+
+    def diff(self, desired: "Catalogue") -> "CatalogueChanges":
+        """How this catalogue would move toward the one ``desired`` describes.
+
+        Read it as: *persisted* `.diff(` *derived from source* `)`. The result
+        reports from both sides and renders statements from ``desired`` alone —
+        see :class:`CatalogueChanges` for why that asymmetry is deliberate.
+        """
+
+        return CatalogueChanges(current=self, desired=desired)
+
+
+@dataclass(frozen=True)
+class CatalogueChanges:
+    """How a persisted catalogue would move toward the one a repository describes.
+
+    Carries both sides, and uses them for different things — which is the whole
+    of the design and the part worth not getting wrong.
+
+    ``current`` informs *reporting*: how many rows are new, changed, unchanged
+    and removed, so a reviewer can see what a bundle will do before it runs.
+
+    ``desired`` alone drives the *statements*. The delete keeps exactly the keys
+    the desired catalogue claims and the merge is idempotent, so the pair is
+    correct against any prior state — including one the reader never saw. Deriving
+    the delete from the row-level difference instead would look equivalent and
+    would not be: a partial or scoped-wrong read returns fewer rows in
+    ``current``, so the diff would emit fewer deletes and obsolete claims would
+    survive indefinitely, with nothing to notice. As it stands a bad read costs a
+    misleading *report* and cannot corrupt the catalogue.
+    """
+
+    current: "Catalogue"
+    desired: "Catalogue"
+
+    def per_table(self):
+        """``{item: (TableChanges, ...)}`` — reporting only, never statements."""
+
+        from .reconcile import compare
+        from .tables import DICTIONARY_TABLES, INSTALLATION, REGISTRY
+
+        tables = (*DICTIONARY_TABLES, INSTALLATION, REGISTRY)
+        report = {}
+        for item, wanted in self.desired.rows.items():
+            found = self.current.rows.get(item, {})
+            report[item] = tuple(
+                compare(table, wanted.get(table.name, ()), found.get(table.name, ()))
+                for table in tables
+            )
+        return report
+
+    @property
+    def is_noop(self) -> bool:
+        return all(
+            change.is_noop
+            for changes in self.per_table().values()
+            for change in changes
+        )
+
+    def render_dml(self, *, installation=None):
+        """``{item: CatalogueReconciliation}`` making the catalogue match ``desired``.
+
+        A structured result rather than flat statements, and deliberately: the
+        caller needs the dictionaries, the Installation row and the Registry
+        separated, because Registry is written last in its own barrier so a row
+        certifying an object cannot outrun the work it attests to. Handing back
+        one list would leave the caller to recover that ordering by inspecting
+        the SQL, which is a guess dressed as a grouping.
+
+        ``installation`` supplies the binding facts per item — which target, which
+        Weaver — because a repository-derived catalogue does not know them and
+        must not invent them.
+        """
+
+        from .projection import CatalogueProjection
+        from .reconcile import reconcile
+
+        installation = dict(installation or {})
+        rendered = {}
+        for item, wanted in self.desired.rows.items():
+            rows = dict(wanted)
+            binding = installation.get(item)
+            if binding is not None:
+                rows[INSTALLATION.name] = tuple(binding)
+            projection = CatalogueProjection(
+                scope=InstallationScope(item.item_type, item.item_name),
+                rows=rows,
+            )
+            rendered[item] = reconcile(projection)
+        return rendered
 
 
 def catalogue_from_repository(
