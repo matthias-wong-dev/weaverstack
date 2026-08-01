@@ -242,6 +242,12 @@ def determine_impact(
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
         for root in changed:
+            # A load artefact is not a node in the authored graph, and that is
+            # the design rather than an omission: nothing depends on a deployed
+            # module, and it depends on nothing — its signature is its own
+            # content. So a changed one is the end of a walk, not the start.
+            if root.is_load_artefact:
+                continue
             for node in graph.descendants(str(root)):
                 descendant = by_text.get(node)
                 if descendant is not None and descendant in existing:
