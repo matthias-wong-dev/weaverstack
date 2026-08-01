@@ -80,6 +80,7 @@ def estate(tmp_path):
             "sql_endpoint_refresh",
             "tsql",
             "tsql_batch",
+            "load_file",
         )
     }
     return {

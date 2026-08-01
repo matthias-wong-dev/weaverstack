@@ -36,7 +36,7 @@ ACTION = BuildAction(
 
 def _context(sql):
     return InstallationContext(
-        spark=None, resolver=None, store=None, snapshot=None, target=None, sql=sql
+        spark=None, resolver=None, store=None, target=None, sql=sql
     )
 
 

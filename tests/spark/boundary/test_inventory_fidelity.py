@@ -87,6 +87,12 @@ def test_a_built_estate_reads_back_as_the_fixture_predicts(
     assert folded(actual.folders) == folded(predicted.folders)
     assert folded(actual.schemas) == folded(predicted.schemas)
     assert folded(actual.folder_schemas) == folded(predicted.folder_schemas)
+    # The deployed runtime tree, read back file by file. This is what makes a
+    # load artefact's claim disprovable: an inventory that could not see these
+    # would report every one of them missing, and reconciliation would rebuild
+    # the whole tree on every build without anything noticing.
+    assert folded(actual.files) == folded(predicted.files)
+    assert actual.files, "the estate deployed no load files at all"
 
 
 def test_prune_against_a_freshly_built_estate_finds_nothing(

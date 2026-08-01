@@ -387,7 +387,6 @@ def _corrupt(env, bundle):
         env.resolver.build_bundle("broken"),
         plan=plan,
         payloads=payloads,
-        snapshot={},
         store=store,
     )
 

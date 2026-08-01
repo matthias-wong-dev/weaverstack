@@ -33,13 +33,19 @@ from weaver.build_bundle import (
     write_bundle,
 )
 from weaver.build_bundle.prune import TargetInventory
-from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET
+from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from weaver.build_bundle.stages import PlannedStage
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.etl import (
+    FILE_TYPE,
+    PROCEDURE_TYPE,
+    item_load_artefacts,
+    load_schemas,
+)
 
 #: Neutral names, per the environment-neutrality rule: no product, workspace or
 #: tenant may be inferable from a fixture.
@@ -107,6 +113,8 @@ def registry_row(
     return {
         "item_type": identity.item.item_type,
         "item_name": identity.item.item_name,
+        # Only a Folder carries the prefix. A load artefact's schema is already
+        # the real one — a path beneath Files, or a Warehouse schema.
         "schema_name": f"Files/{schema}" if identity.is_files else schema,
         "object_name": identity.object_id.object,
         "object_type": object_type,
@@ -186,8 +194,13 @@ class FixtureCatalogue(Catalogue):
 
         The "already installed, nothing changed" state, which is the premise of
         every incremental claim and previously took a real build to reach. Each
-        declared document is certified at its currently declared signature, so
+        declared object is certified at its currently declared signature, so
         selection sees an estate that is exactly correct.
+
+        Load artefacts are certified alongside the documents, and have to be: a
+        catalogue that certified only the documents would describe an estate
+        whose runtime tree was never installed, and every incremental claim built
+        on it would be reasoning about a half-built one.
         """
 
         from weaver.build_bundle.incremental import declared_signatures
@@ -199,12 +212,19 @@ class FixtureCatalogue(Catalogue):
             for identity in repository.source_documents
             if identity.item == item
         }
+        types = {
+            identity: _object_type_of(repository, identity) for identity in identities
+        }
+        for artefact in item_load_artefacts(repository, item=item):
+            identities.add(artefact.identity)
+            types[artefact.identity] = artefact.object_type
         signatures = declared_signatures(repository, identities)
         return cls.from_registry_rows(
             *(
                 registry_row(
                     identity,
-                    object_type=_object_type_of(repository, identity),
+                    object_type=types[identity],
+                    object_role="load" if identity.is_load_artefact else "data",
                     signature=signatures[identity],
                 )
                 for identity in sorted(identities, key=str)
@@ -233,6 +253,8 @@ def target_inventory(
     folders: tuple[str, ...] = (),
     tables: tuple[str, ...] = (),
     views: tuple[str, ...] = (),
+    files: tuple[str, ...] = (),
+    procedures: tuple[str, ...] = (),
 ) -> TargetInventory:
     """Exactly the physical state asked for, and nothing else.
 
@@ -251,6 +273,8 @@ def target_inventory(
         folders=folders,
         tables=tables,
         views=views,
+        files=files,
+        procedures=procedures,
     )
 
 
@@ -319,15 +343,31 @@ class FixtureInventory(TargetInventory):
         tables = qualified(of_kind="Table", files=False)
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
+        artefacts = item_load_artefacts(repository, item=item)
         return cls(
             target_id=target_id,
             kind=kind,
             target_name=target_name,
-            schemas=schemas_of(tables + views),
+            schemas=schemas_of(tables + views)
+            + tuple(load_schemas(artefacts) if target_kind == SQL_TARGET else ()),
             folder_schemas=schemas_of(folders),
             folders=folders,
             tables=tables,
             views=views,
+            files=tuple(
+                sorted(
+                    artefact.target_path
+                    for artefact in artefacts
+                    if artefact.object_type == FILE_TYPE
+                )
+            ),
+            procedures=tuple(
+                sorted(
+                    artefact.identity.object_id.qualified
+                    for artefact in artefacts
+                    if artefact.object_type == PROCEDURE_TYPE
+                )
+            ),
         )
 
 
@@ -613,7 +653,7 @@ def single_action_bundle(
     )
     plan = _with_identity(plan)
     return write_bundle(
-        location, plan=plan, payloads=payloads, snapshot={}, store=store
+        location, plan=plan, payloads=payloads, store=store
     )
 
 
@@ -750,7 +790,6 @@ def installation_context(
         spark=spark,
         resolver=resolver,
         store=store,
-        snapshot=snapshot or Location("/snapshot"),
         target=target if target is not None else resolved_target(),
         sql=sql,
         targets=targets or {},

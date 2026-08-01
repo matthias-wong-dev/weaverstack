@@ -101,7 +101,6 @@ def build_warehouse_item(clean_disposable_warehouse):
             spark=None,
             resolver=None,
             store=None,
-            snapshot=Location("/snapshot"),
             target=target,
             sql=warehouse.executor,
             targets={target.bound.id: target},

@@ -47,10 +47,13 @@ CATALOGUE_SCHEMA = "_"
 #: What an installed object is, in the catalogue's vocabulary. Deliberately
 #: coarse: enough for a later operation to know how to address the thing, without
 #: inventing an identity scheme that competes with Weaver document's kind and language.
-OBJECT_TYPES = ("folder", "table", "view")
+#: ``file`` and ``stored_procedure`` are what a load layer installs — a deployed
+#: module or generated statement, and a generated load procedure — and they are
+#: ordinary managed objects rather than infrastructure exempt from the lifecycle.
+OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure")
 
-#: What an object is *for*. Everything Weaver builds today holds or shapes data;
-#: ``load`` arrives with stored procedures, which do work rather than hold rows.
+#: What an object is *for*. A ``data`` object holds or shapes rows; a ``load``
+#: object does the work that fills one, and is installed by an item's load layer.
 ROLE_DATA = "data"
 ROLE_LOAD = "load"
 OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD)
@@ -327,14 +330,17 @@ REGISTRY = CatalogueTable(
         CatalogueColumn(
             "object_type",
             not_null=True,
-            description="What was installed: folder, table or view.",
+            description=(
+                "What was installed: folder, table, view, file or "
+                "stored_procedure."
+            ),
         ),
         CatalogueColumn(
             "object_role",
             not_null=True,
             description=(
                 "What the object is for: data holds or shapes rows; load does "
-                "work, which arrives with stored procedures."
+                "the work that fills one."
             ),
         ),
         _signature("the object's source file"),

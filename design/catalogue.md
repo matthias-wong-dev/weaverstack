@@ -34,7 +34,21 @@ Warehouse | Reporting | Sales       | Customer
 ```
 
 Those are three rows and all are real. The first two share one Lakehouse item but
-remain distinct because `Files/` is part of the Folder's schema. A build cannot
+remain distinct because `Files/` is part of the Folder's schema.
+
+A load artefact is keyed the same way, with the two halves spelled as the target
+itself spells them — a containing path and a complete filename, or a schema and a
+procedure named for what it loads:
+
+```text
+Lakehouse | Sales     | _/Load/lib  | dates.py
+Warehouse | Reporting | _           | Load Sales.Customer
+```
+
+Nothing is encoded to fit table-style naming, so the identity a build reasons
+about and the name the target holds are the same string. Load artefacts claim the
+Registry and nothing else: they declare no columns, keys, relationships or
+dependencies, so no dictionary row describes them. A build cannot
 touch another item because every key begins with its exact item identity.
 
 An object left out because its owning item was not bound is **out of scope**, not
@@ -53,7 +67,7 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | Table | One row per | Notes |
 |---|---|---|
 | `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
-| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table or view; `object_role` is `data` today and `load` when stored procedures arrive. `build_epoch` dates the build that published the row. |
+| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows and `load` for something that does the work of filling one. `build_epoch` dates the build that published the row. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
 | `_.FolderDictionary` | managed folder | Keeps the folder's two-part identity, and its file key — the scope of what Weaver manages inside it. |
@@ -210,8 +224,8 @@ destroy the no-op above. It is written on insert only; see
 that is what makes it true rather than merely cheap.
 
 The Installation signature is deliberately item-scoped. The repository signature
-still certifies the complete coordinated source and bundle snapshot, while object
-rows retain their individual source signatures. This separation lets a future
+still certifies the complete coordinated source a bundle was planned from, while
+object rows retain their individual source signatures. This separation lets a future
 incremental planner see that changing `Lakehouse/Raw` does not by itself make an
 installed `Warehouse/Reporting` stale. An alias lives in the consuming item's own
 `alias.yml`, so it contributes to that item's signature and not the producer's.
@@ -228,11 +242,17 @@ Three scopes, and they are deliberately different operations:
 Only the first is part of a build. A build that did not bind an item has no opinion
 about it, so nothing in the build path can reach its installation rows.
 
-Schema `_` is reserved from ordinary prune. An application build normally cannot
-see it — prune is scoped to the bound destination's own storage, and the catalogue
-lives in the Weaver Lakehouse — but a repository built *into* the Weaver Lakehouse
-would, and a prune that dropped `_` would take the record of every installation
-with it.
+Schema `_` in the Weaver Lakehouse's `Tables` area is reserved from ordinary
+prune. An application build normally cannot see it — prune is scoped to the bound
+destination's own storage, and the catalogue lives in the Weaver Lakehouse — but a
+repository built *into* the Weaver Lakehouse would, and a prune that dropped `_`
+would take the record of every installation with it.
+
+The load layer's `_` is a different thing wearing the same name: a folder
+`Files/_/Load` in a bound Lakehouse, and a schema `_` in a bound Warehouse. Both
+are *generated and managed* rather than reserved, so ordinary prune is exactly
+what removes them once an item stops declaring load code. They never meet the
+catalogue's `_`, which is a `Tables` schema in a different item.
 
 ## Reading it tolerantly
 

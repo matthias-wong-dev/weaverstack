@@ -11,13 +11,19 @@ Microsoft Fabric.
 
 A Weaver repository declares the desired structure of a data estate. Build
 turns that declaration into schemas, folders, Delta tables, Warehouse tables,
-and views.
+views, and the load artefacts that will one day fill them.
 
 Build does not populate those objects with source data. It never calls an
 object's `read()` implementation, samples operational input, executes merge
 policy, or advances a bookmark. Those are load responsibilities.
 
 > Build creates and reconciles structure. Load moves and transforms data.
+
+Installing an item's load *code* is on the build side of that line, and the
+distinction is worth being exact about. A deployed Python module and a generated
+stored procedure are objects that must exist before any load can run — they are
+created, signed, reconciled and pruned exactly as a table is, and running them is
+somebody else's job entirely. Section 11b describes them.
 
 An empty table created from declared columns, or from the static shape of a
 declared query, is a successful build. This boundary lets structure advance
@@ -416,7 +422,7 @@ A bundle is the complete contract between planning and execution. It contains:
 - the full build selection;
 - ordered sequences, batches, and actions;
 - exact DDL, DML, filesystem operations, and payload hashes;
-- the repository snapshot and deterministic bundle identity;
+- the deterministic bundle identity and the signature of the source it was planned from;
 - omitted nodes and reporting metadata.
 
 Unchanged and prohibited existing documents emit no physical actions. New and
@@ -463,6 +469,71 @@ failure becomes a *result* rather than an exception. What remains for a real
 workspace is narrow, and reaching it no longer costs a repository parse, a
 catalogue read and an installation.
 
+### 11b. Load artefacts
+
+A load artefact is a target object, not a side effect of building one. It is
+claimed during repository interpretation, registered in the catalogue, signed,
+selected incrementally, installed by a physical action and pruned when the source
+stops claiming it — the same machinery a table travels through.
+
+Three of them, from three kinds of source:
+
+```text
+Warehouse/Reporting/Sales__Customer.sql   ->  _.[Load Sales.Customer]
+Lakehouse/Sales/lib/dates.py              ->  Files/_/Load/lib/dates.py
+Lakehouse/Sales/Sales__Customer.sql       ->  Files/_/Load/Sales__Customer.sql
+```
+
+A view produces nothing on either engine: its definition *is* its query, so there
+is no work to schedule. A Python file produces *two* targets — the table or folder
+it declares, and the module a load will import — and they are separate objects
+because their target identities and roles differ.
+
+The identity model does not change. Every object is a schema and an object inside
+an item; what differs is the shape of those two parts, and that shape decides how
+they are validated and spelled:
+
+```text
+DWG        + Customer             a table
+_/Load/lib + dates.py             a deployed module
+_          + Load Sales.Customer  a generated procedure
+```
+
+Nothing is encoded to fit table-style validation, so nothing has to be decoded to
+be used: the Registry stores what the target actually calls the object.
+
+**Signatures say what would make an artefact wrong.** A deployed module is signed
+by its own bytes. A generated body is signed by the document it renders *plus* the
+version of the generator that rendered it — `SPARK_ETL_TEMPLATE_VERSION` and
+`TSQL_ETL_TEMPLATE_VERSION`, separate because the two generators evolve
+separately. Raising one invalidates exactly the artefacts it renders. Neither
+reaches `repository.signature`, which describes authored content.
+
+Selection is per artefact and nothing else. Changing one module rebuilds that
+module; adding one creates a claim; deleting one prunes the target file; renaming
+one does both, with nothing needing to know the two are related. A load artefact
+is deliberately **not** a node in the authored dependency graph — nothing depends
+on a deployed module and it depends on nothing — so a changed upstream document
+never redeploys an unchanged one.
+
+**`_` is generated infrastructure, not a reserved word.** A Lakehouse item with
+load code declares a folder `Files/_/Load`; a Warehouse item with load procedures
+uses schema `_`. Both are projected as ordinary managed objects while the item has
+artefacts, which means the ordinary keep-set, inventory and prune give them their
+whole lifecycle — including removal, when the last artefact goes and the folder or
+schema stops being projected. An ordinary item may not author into `_`, which is
+the one name Weaver takes back.
+
+Removal of the artefacts themselves is **claim-driven**: the previous Registry row
+says what was installed and where. That is not a weakening of "prune is explicit"
+— the removals are frozen into the bundle at generation time like every other
+destructive action — it is the recognition that a deleted source leaves nothing
+behind for a diff to notice.
+
+> This branch establishes the lifecycle. The generated T-SQL and Spark SQL bodies
+> are deterministic proxies, and the template versions exist so replacing them
+> later invalidates precisely what changed.
+
 ## 12. Bundle execution order
 
 A build is an ordered series of **item** builds. The item graph is the outer
@@ -473,13 +544,13 @@ catalogue claim removal, when required
 
 item layer 0
     producer item A
-        prune, managed drops, schemas, aliases, documents, SQL endpoint refresh
+        prune, managed drops, schemas, aliases, documents, endpoint refresh, load
     independent producer item B
-        prune, managed drops, schemas, aliases, documents, SQL endpoint refresh
+        prune, managed drops, schemas, aliases, documents, endpoint refresh, load
 
 item layer 1
     consumer item C
-        prune, managed drops, schemas, aliases, documents, SQL endpoint refresh
+        prune, managed drops, schemas, aliases, documents, endpoint refresh, load
 
 final batched catalogue publication
 Weaver Lakehouse SQL endpoint refresh
@@ -494,7 +565,10 @@ Within an item, prune and managed drops lead because they are the destructive
 reconciliation of what is already there. Schemas precede aliases so a
 Warehouse-backed alias has a schema to be created in, and aliases precede the
 item's own documents so those are built against a namespace that already holds
-what the item imports.
+what the item imports. The load layer closes the item: its artefacts depend on
+the item's structure being finished, which is expressed by the layer being last
+rather than by any edge, and nothing inside it is ordered against anything else
+because nothing there runs.
 
 Empty phases are omitted. Managed drops use reverse dependency layers; physical
 builds use forward layers. A sequence is a barrier: later sequences do not begin

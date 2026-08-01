@@ -3,6 +3,12 @@
 ## Core build and execution
 
 1. **Implement basic ETL for a single Weaver item**
+   - The lifecycle is in place: load artefacts are claimed, registered, signed,
+     built, pruned and deployed to `Files/_/Load`, with a generated procedure per
+     Warehouse table. What remains is the generated bodies themselves, and
+     running them.
+   - `SPARK_ETL_TEMPLATE_VERSION` and `TSQL_ETL_TEMPLATE_VERSION` exist so
+     replacing a proxy body rebuilds exactly what it renders.
 2. **Implement ETL across Weaver items using catalogue dependencies**
 3. **Add ETL unit tests and document the execution assumptions**
 4. **Implement bookmarks for incremental loading**

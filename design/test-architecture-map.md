@@ -191,12 +191,15 @@ rather than the estate around it.
 | a declaration becomes one action + payload; id, executor, filename, hash, determinism | `render_document_build_action` | `test_document_action.py` | alias destinations; a document whose DDL raises |
 | one action runs with installer result semantics; failures are data; statements reach the engine resolved | `execute_action` | `test_action_execution.py` | `spark_table`, `spark_schema`, `folder`, `alias`, `sql_endpoint_refresh` executors |
 | new / unchanged / changed; descendant propagation; selection bounds the walk; prohibit-rebuild | `determine_impact`, `select_build` | `test_incremental_impact.py` | stale aliases; removed objects; cross-item propagation |
-| one item's stages and their order: prune → drop → schema → build → refresh | `plan_item_build` | `test_item_plan.py` | alias stages; Warehouse item planning; uncertified aliases |
-| desired state; item scoping; what prune spares | `managed_sets`, `item_prune_stage` | `test_prune.py` | empty-parent cleanup; alias destinations retained |
+| one item's stages and their order: prune → drop → schema → build → refresh → load | `plan_item_build` | `test_item_plan.py` | alias stages; uncertified aliases |
+| desired state; item scoping; what prune spares, on both physical sides | `managed_sets`, `item_prune_stage` | `test_prune.py` | alias destinations retained |
 | the diff into removals; schema-drop folding; T-SQL escaping; determinism | `render_inventory_prune` | `test_inventory_prune.py` | — |
 | which schemas an item needs; alias namespaces; per-side payloads | `item_schema_stage` | `test_schema_stage.py` | — |
 | generate-and-install from prepared state; failure semantics; archives | `build_item_repository` | `test_build_workflow.py` | — |
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
+| which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
+| the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
+| a correct estate plans nothing: three agreeing states, both item types, every physical kind | `generate_item_build_bundle` | `test_fixed_point.py` | — |
 
 ### Covered by old tests, not yet re-homed
 
@@ -239,8 +242,8 @@ read produce the same object a fixture builds?**
 
 | boundary | claim | state |
 |---|---|---|
-| `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape, not round-trip |
-| `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | **gap** |
+| `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape; `test_catalogue_fidelity.py` round-trips load artefacts, whose identities no two-part grammar can express |
+| `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | covered — `test_inventory_fidelity.py`, including the deployed runtime tree file by file |
 | `read_warehouse_inventory` | same, over TDS | **gap** |
 | genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered by `-m spark` and `test_warehouse_build.py` |
 
@@ -326,6 +329,50 @@ So: promote the constructor, keep the rendering projection-driven. The symmetry
 with prune is tempting and false — prune diffs against physical state it must
 observe, while the catalogue is the authority and needs no permission from its
 own prior contents.
+
+## What only Fabric has caught, and why
+
+Worth recording, because each one names a shape of gap rather than a bug.
+
+**A Warehouse prune dropping the `_` schema it had just created.** Every pure
+caller of `item_prune_stage` used a *Lakehouse* estate, and the two sides are not
+symmetric: a Lakehouse's generated `_` is a folder *document*, so it reaches the
+keep-set through the ordinary document path, while a Warehouse's `_` is a schema
+no document declares. The defect could only exist on the side nothing covered.
+
+It was reachable at all because the keep-set's load half arrived as a *defaulted*
+argument — production passed it, a direct caller did not, and a seam with a
+destructive default has two behaviours of which the suite exercised one. The
+stage now derives it, so there is nothing to forget, and `test_prune.py` has a
+Warehouse estate.
+
+The general lesson: **an asymmetry between the two physical sides is where a
+Lakehouse-only fixture stops being representative.** Prune, schemas and inventory
+all behave differently across that line.
+
+**Would the fixed-point test have caught it?** No — and the reason is worth
+keeping. `test_fixed_point.py` composes the three states and asserts a build finds
+nothing to do, which is the strongest whole-plan property available. It passes
+with that defect reintroduced, because *the planner passed the argument
+correctly*. The bug lived in the seam's **default**, on a path only a direct
+caller took.
+
+A defaulted argument is two contracts. A composed test can only ever prove the
+one the composition uses. That is why the more important half of the fix was
+removing the parameter rather than adding coverage: with the value derived
+inside, there is one path, and breaking the derivation now fails
+`test_fixed_point.py` *and* `test_prune.py` together — verified by doing it.
+
+The rule this suggests: **a seam with a destructive default cannot be covered
+from above.** Either the default goes, or the seam is tested directly on every
+shape it accepts.
+
+**A `snapshot=` keyword in a Livy body.** Not a coverage gap of the same kind —
+that code is a *string* sent to a Fabric session and executes only against the
+installed wheel, so no pure test could run it and no import check could see it. It
+is the one category where `-m published_weaver` is the first possible sight of the
+defect, and it argues for grepping test *bodies* after any signature change rather
+than trusting a mechanical rewrite.
 
 ## Conventions
 

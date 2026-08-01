@@ -273,3 +273,79 @@ def test_an_epoch_token_is_resolved_before_it_reaches_the_engine(
     # The token is in the frozen payload — that is what keeps a bundle's bytes
     # stable — and the installer is what removes it.
     assert any("{{epoch}}" in line for line in rendered)
+
+
+def test_load_artefacts_publish_and_read_back_as_first_class_objects(
+    catalogue, lakehouses, spark, tmp_path
+):
+    """A load artefact is a Registry row like any other, all the way through.
+
+    `Catalogue.from_repository` claims them, publication writes them, and the
+    reader hands them back with the identity intact — including the two spellings
+    that no two-part `Schema.Object` grammar can express: a containing path with
+    a filename, and a procedure named for what it loads.
+
+    Pure tests prove the projection and the selection; this proves the row
+    survives a real Delta write and a real read, which is the one thing they
+    cannot say.
+    """
+
+    from factories import (
+        bound_target,
+        item_id,
+        lakehouse_table,
+        single_document_repository,
+    )
+    from conftest import context_for
+    from weaver.etl import LOAD_ROOT, item_load_artefacts
+
+    repository = single_document_repository(
+        tmp_path / "repo",
+        documents={
+            "DWG__Customer.py": lakehouse_table("DWG.Customer"),
+            "lib/dates.py": "def parse(value):\n    return value\n",
+        },
+    )
+    item = item_id()
+    target = bound_target(id="control", item_id=lakehouses.weaver.name)
+    artefacts = item_load_artefacts(repository, item=item)
+    assert artefacts, "the item declared no load artefacts to publish"
+
+    stages = render_catalogue_after_build(
+        repository,
+        {artefact.identity for artefact in artefacts}
+        | {identity for identity in repository.source_documents if identity.item == item},
+        {item: target},
+        control_target=target,
+    )
+    context = context_for(
+        lakehouses,
+        spark,
+        lakehouses.weaver.name,
+        target_id="control",
+        epoch="2026-08-01 09:00:00",
+    )
+    for stage in stages:
+        for batch in stage.batches:
+            for action in batch.actions:
+                result = execute_action(
+                    action,
+                    stage.payloads.get(action.payload) if action.payload else None,
+                    context=context,
+                )
+                assert result.status in {"succeeded", "skipped"}, result.error_message
+
+    seen = read(catalogue, item)
+
+    for artefact in artefacts:
+        assert artefact.identity in seen.registered, artefact.identity
+        stored = seen.registered[artefact.identity]
+        assert stored.object_type == artefact.object_type
+        assert stored.signature == artefact.signature
+    # And the halves came back as the target's own names, not something encoded.
+    module = next(
+        identity
+        for identity in seen.registered
+        if identity.object_id.object == "dates.py"
+    )
+    assert module.object_id.schema == f"{LOAD_ROOT}/lib"

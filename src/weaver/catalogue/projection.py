@@ -32,6 +32,8 @@ from ..build_bundle.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 from ..declaration.metadata import FOLDER, TABLE, VIEW, ObjectId, Reference
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
 from ..declaration.references import declared_column_notes, resolve_text
+from ..etl import PROCEDURE_TYPE, item_load_artefacts, load_artefacts_by_identity
+from .claims import catalogue_schema
 from .render import InstallationScope, Row, column_set
 from .tables import (
     ALIAS,
@@ -46,6 +48,7 @@ from .tables import (
     KEY_UNIQUE,
     REGISTRY,
     ROLE_DATA,
+    ROLE_LOAD,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
     CatalogueTable,
@@ -104,7 +107,7 @@ def project_item_catalogue(
     if any(identity.item != item for identity in retained):
         raise ValueError(f"item projection {item} received a document owned elsewhere")
 
-    # ``retained`` carries both kinds of registered object. Splitting them here
+    # ``retained`` carries every kind of registered object. Splitting them here
     # rather than at the call site keeps the caller from having to know which is
     # which — the repository already does.
     alias_by_destination = {
@@ -117,8 +120,14 @@ def project_item_catalogue(
         for identity in retained
         if identity in alias_by_destination
     )
+    loads = load_artefacts_by_identity(item_load_artefacts(repository, item=item))
+    retained_loads = tuple(
+        loads[identity] for identity in retained if identity in loads
+    )
     retained = tuple(
-        identity for identity in retained if identity not in alias_by_destination
+        identity
+        for identity in retained
+        if identity not in alias_by_destination and identity not in loads
     )
     documents = [repository.source_documents[identity] for identity in retained]
     all_documents = tuple(repository.source_documents.values())
@@ -203,6 +212,20 @@ def project_item_catalogue(
             _foreign_keys(source, identity, common, signature)
         )
 
+    # A load artefact claims the Registry and nothing else. It has no columns to
+    # describe, no keys to record and no dependencies to keep — it is a deployed
+    # module or a generated statement, and what the catalogue knows about it is
+    # that Weaver installed it and at what signature.
+    for artefact in retained_loads:
+        rows[REGISTRY.name].append(
+            {
+                **_identity(scope, artefact.identity),
+                "object_type": artefact.object_type,
+                "object_role": ROLE_LOAD,
+                "signature": artefact.signature,
+            }
+        )
+
     retained_set = set(retained)
     for edge in repository.dependency_edges:
         if edge.consumer not in retained_set:
@@ -241,6 +264,16 @@ def project_item_catalogue(
         | {
             (_catalogue_schema(alias.destination), alias.destination.object_id.schema)
             for alias in retained_aliases
+        }
+        # A generated load procedure puts a schema into use that no document
+        # declares an object in, so it would otherwise be a schema the
+        # installation uses and does not describe. A deployed file contributes
+        # nothing here: its schema half is a path, and the namespace it sits in
+        # is described by the folder document that owns the tree.
+        | {
+            (artefact.identity.object_id.schema, artefact.identity.object_id.schema)
+            for artefact in retained_loads
+            if artefact.object_type == PROCEDURE_TYPE
         }
     )
     item_model = next(model for model in repository.items if model.identity == item)
@@ -329,8 +362,7 @@ def _scope(scope: InstallationScope) -> dict[str, str]:
 
 
 def _catalogue_schema(identity: WeaverDocumentId) -> str:
-    prefix = "Files/" if identity.is_files else ""
-    return f"{prefix}{identity.object_id.schema}"
+    return catalogue_schema(identity)
 
 
 def _identity(scope: InstallationScope, identity: WeaverDocumentId) -> dict:

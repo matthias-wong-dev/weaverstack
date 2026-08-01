@@ -115,9 +115,11 @@ From Python inside the target environment,
 `build_uploaded_item_repository()` is the full application workflow. It copies
 `Files/weaver_items` once to a session-local temporary directory, parses it,
 reads target and catalogue state, reconciles, and then calls the narrower
-`build_item_repository()` planner/executor seam. The generated bundle contains a
-certified repository snapshot, so installation never reopens or reinterprets
-the source repository.
+`build_item_repository()` planner/executor seam. The generated bundle contains
+only frozen outputs — every statement, every deployed file, every hash — and no
+copy of the source, so installation cannot reopen or reinterpret the repository
+even in principle. `repository_signature` still records which authored state the
+bundle was planned from.
 
 ## Migrating a flat repository
 
@@ -140,3 +142,22 @@ would make physical deployment history part of logical identity.
 - [CLI usage](cli-usage.md) — workspaces, build, wipe and capacity
 - [Master CLI plan](weaver_master_cli_plan.md) — the authoritative current model
 - [Agent guide](../AGENTS.md) — implementation invariants
+
+## Generated declarations
+
+A parsed repository carries more than what was authored. Weaver composes two
+kinds of generated document into it and reads them through the same static
+readers as authored content, so there is no second parsing path:
+
+- `Lakehouse/_weaver` — the catalogue's own tables, always;
+- an item's `schemas/_.yml`, and for a Lakehouse `Files/___Load.py` — the schema
+  its generated load procedures live in, and the folder its load code is deployed
+  into, present only while the item has load code.
+
+`___Load.py` is `_.Load`: a schema of `_` plus the `__` separator. A run of
+leading underscores is read as the schema it is, which is why the file can be
+named at all.
+
+Because those are generated, `_` is the one schema an ordinary item may not
+author into. Every other underscore schema is free — `_weaver` declares its own
+catalogue in `_`, because it is the item that owns it.

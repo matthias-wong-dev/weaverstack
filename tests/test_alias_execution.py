@@ -12,7 +12,6 @@ from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarg
 from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, BuildAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
-from weaver.locations import Location
 from weaver.resolution import LocalResolver
 from weaver.store import LocalStore
 from weaver.targets import ItemRef
@@ -66,7 +65,6 @@ def _local_context(tmp_path, *, resolver=None, store=None):
         resolver=resolver
         or LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")),
         store=store or LocalStore(),
-        snapshot=Location(str(tmp_path / "snapshot")),
         target=destination,
         targets={DESTINATION_TARGET_ID: destination, SOURCE_TARGET_ID: source},
     )
@@ -234,7 +232,6 @@ def _addressable_context(tmp_path, spark, resolver):
         spark=spark,
         resolver=resolver,
         store=LocalStore(),
-        snapshot=Location(str(tmp_path / "snapshot")),
         target=destination,
         targets={DESTINATION_TARGET_ID: destination, SOURCE_TARGET_ID: source},
     )
@@ -348,7 +345,6 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
         spark=None,
         resolver=None,
         store=LocalStore(),
-        snapshot=Location("/tmp/snapshot"),
         target=_target(DESTINATION_TARGET_ID, "Reporting_WH"),
         sql=sql,
     )

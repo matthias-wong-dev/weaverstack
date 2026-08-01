@@ -191,3 +191,71 @@ def _item():
     from factories import item_id
 
     return item_id()
+
+
+# --- what a load artefact's claim is tested against ---------------------------
+
+
+def test_a_deployed_file_the_inventory_holds_is_retained():
+    """The claim that keeps a runtime tree from being rebuilt every build.
+
+    `has_object` branches by type, and this is why it must: a `file` falling
+    through to the table collection would be found missing every time, its claim
+    deleted, and the whole tree redeployed on every build with nothing saying so.
+    """
+
+    identity = document_id("Lakehouse/Sales/file:_/Load/lib/dates.py")
+    result = reconcile(
+        FixtureCatalogue.from_registry_rows(
+            registry_row(identity, object_type="file", object_role="load")
+        ),
+        target_inventory(files=("_/Load/lib/dates.py",)),
+    )
+
+    assert result.stale_claims == ()
+    assert identity in result.catalogue.registered
+
+
+def test_a_deployed_file_the_inventory_does_not_hold_is_disproved():
+    """Deleted from the target behind Weaver's back, and noticed."""
+
+    identity = document_id("Lakehouse/Sales/file:_/Load/lib/dates.py")
+    result = reconcile(
+        FixtureCatalogue.from_registry_rows(
+            registry_row(identity, object_type="file", object_role="load")
+        ),
+        target_inventory(files=("_/Load/lib/other.py",)),
+    )
+
+    assert result.stale_objects == (str(identity),)
+    assert identity not in result.catalogue.registered
+
+
+def test_a_generated_procedure_is_reconciled_against_the_procedures_read():
+    identity = document_id(
+        "Warehouse/Reporting/procedure:_/Load Sales.Customer"
+    )
+    rows = FixtureCatalogue.from_registry_rows(
+        registry_row(identity, object_type="stored_procedure", object_role="load"),
+        item="Warehouse/Reporting",
+    )
+    from factories import item_id
+    from weaver.catalogue.state import reconcile_catalogue_state
+
+    held = reconcile_catalogue_state(
+        rows,
+        inventories={
+            item_id("Warehouse/Reporting"): target_inventory(
+                kind="warehouse", procedures=("_.Load Sales.Customer",)
+            )
+        },
+    )
+    gone = reconcile_catalogue_state(
+        rows,
+        inventories={
+            item_id("Warehouse/Reporting"): target_inventory(kind="warehouse")
+        },
+    )
+
+    assert held.stale_claims == ()
+    assert gone.stale_objects == (str(identity),)

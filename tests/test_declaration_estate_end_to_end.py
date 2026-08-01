@@ -36,12 +36,20 @@ def repository():
 
 @pytest.fixture(scope="module")
 def authored(repository):
-    """Every authored document, keyed by its full logical identity."""
+    """Every authored document, keyed by its full logical identity.
+
+    Generated declarations are excluded, and the word is meant literally: a
+    parsed repository also carries what Weaver composes into it — the builtin
+    catalogue item, and the runtime folder an item with load code is deployed
+    into. Those are real documents and are built like any other; they are simply
+    not what a test about *authoring* is describing.
+    """
 
     return {
         str(identity): document
         for identity, document in repository.source_documents.items()
         if str(identity.item) != BUILTIN
+        and document.relative_path not in repository.generated_files
     }
 
 
@@ -256,9 +264,9 @@ def test_the_declaration_orders_upstream_before_downstream(repository):
     )
 
 
-def test_the_layers_show_what_can_run_together(repository):
+def test_the_layers_show_what_can_run_together(repository, authored):
     layers = tuple(
-        tuple(node for node in layer if not node.startswith(BUILTIN))
+        tuple(node for node in layer if node in authored)
         for layer in repository.dependency_graph.layers()
     )
     assert tuple(layer for layer in layers if layer) == (

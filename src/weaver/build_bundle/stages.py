@@ -37,15 +37,20 @@ from .payloads import payload_path
 #: namespace that already holds what the item imports. The refresh closes the
 #: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
 #: item's view or shortcut would be built over metadata that does not describe it.
+#: Load closes the item, after the refresh. Its artefacts depend on the item's
+#: structural work being finished and on nothing within their own layer — a
+#: deployed module and a generated procedure have no ordering between them,
+#: because nothing here runs them.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"
 ALIAS = "alias"
 BUILD = "build"
 REFRESH = "refresh"
+LOAD = "load"
 CATALOGUE = "catalogue"
 
-_PHASE_ORDER = (PRUNE, DROP, SCHEMA, ALIAS, BUILD, REFRESH, CATALOGUE)
+_PHASE_ORDER = (PRUNE, DROP, SCHEMA, ALIAS, BUILD, REFRESH, LOAD, CATALOGUE)
 _PHASE_RANK = {phase: rank for rank, phase in enumerate(_PHASE_ORDER)}
 
 

@@ -95,7 +95,7 @@ def _bundle(tmp_path):
 
     store = LocalStore()
     location = Location(str(tmp_path / "bundle"))
-    write_bundle(location, plan=plan, payloads=payloads, snapshot={}, store=store)
+    write_bundle(location, plan=plan, payloads=payloads, store=store)
     return location, store
 
 
@@ -208,7 +208,7 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
     store = LocalStore()
     location = Location(str(tmp_path / "refresh-bundle"))
     bundle = write_bundle(
-        location, plan=plan, payloads={}, snapshot={}, store=store
+        location, plan=plan, payloads={}, store=store
     )
     workspace = LocalWorkspace(
         workspace=tmp_path / "local", weaver_lakehouse="Weaver"

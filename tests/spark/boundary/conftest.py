@@ -15,7 +15,7 @@ from factories import bound_target, item_id, registered_document, target_invento
 from weaver import ItemRef
 from weaver.build_bundle import execute_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.locations import Location
+from weaver.etl import item_load_artefacts
 
 
 
@@ -49,7 +49,6 @@ def context_for(
         spark=spark,
         resolver=lakehouses.resolver,
         store=lakehouses.store,
-        snapshot=Location(str(lakehouses.root)),
         target=target,
         targets={target.bound.id: target},
         epoch=epoch,
@@ -110,9 +109,28 @@ def build_item(lakehouses, spark):
         # but how Weaver rebuilds at all: a Lakehouse table's generated DDL is
         # `CREATE TABLE`, so the planner clears the way with a drop stage rather
         # than relying on a replace-shaped statement.
+        #
+        # Each fabricated row records what its document actually is. A drop is
+        # rendered from the *installed* type, so calling everything a table would
+        # have this helper ask for `DROP TABLE` on a folder — which it did, until
+        # an item with load code began declaring one.
         registered = (
-            {key: registered_document(key) for key in selected} if rebuild else {}
+            {
+                key: registered_document(
+                    key, object_type=_registered_type(repository, key)
+                )
+                for key in selected
+            }
+            if rebuild
+            else {}
         )
+        # The item's load layer is built too, and has to be: a fidelity test
+        # reads back what a build leaves, so a harness that skipped the runtime
+        # tree would predict files that were never written.
+        loads = {
+            artefact.identity
+            for artefact in item_load_artefacts(repository, item=identity)
+        }
         planned = plan_item_build(
             repository,
             item=identity,
@@ -125,6 +143,7 @@ def build_item(lakehouses, spark):
             selected_aliases=set(),
             selected_for_drop=set(selected) if rebuild else set(),
             selected_for_build=selected,
+            selected_loads=loads,
             registered=registered,
         )
         context = context_for(lakehouses, spark, target)
@@ -144,3 +163,10 @@ def build_item(lakehouses, spark):
         return results
 
     return run
+
+
+def _registered_type(repository, identity) -> str:
+    """What the Registry would have recorded this document as."""
+
+    kind = str(repository.source_documents[identity].kind)
+    return {"Table": "table", "View": "view", "Folder": "folder"}[kind]

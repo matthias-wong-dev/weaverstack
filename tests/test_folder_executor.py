@@ -31,7 +31,6 @@ def _context(tmp_path):
         spark=None,
         resolver=resolver,
         store=store,
-        snapshot=Location(str(tmp_path / "snapshot")),
         target=ResolvedTarget(bound=bound, lakehouse=lakehouse),
     )
 

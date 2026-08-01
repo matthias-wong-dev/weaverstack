@@ -164,21 +164,32 @@ def declared_signatures(
 ) -> dict[WeaverDocumentId, str]:
     """What each selected node's Registry signature should be, from the source.
 
-    Two kinds of node are selectable and they are signed differently. A document
-    is signed by its source file. An alias destination is signed by the pair it
-    declares — this destination, that source — because that is the whole of what
-    an alias *is* (see :attr:`~weaver.declaration.model.RepositoryAlias.signature`).
+    Three kinds of node are selectable and they are signed differently. A
+    document is signed by its source file. An alias destination is signed by the
+    pair it declares — this destination, that source — because that is the whole
+    of what an alias *is* (see
+    :attr:`~weaver.declaration.model.RepositoryAlias.signature`). A load artefact
+    is signed by what it is rendered from: a deployed module by its own bytes, a
+    generated body by the document it renders plus the version of the generator
+    that rendered it (see :mod:`weaver.etl`).
     """
 
+    from ..etl import load_artefacts, load_artefacts_by_identity
+
     aliases = {alias.destination: alias for alias in repository.aliases}
+    loads = load_artefacts_by_identity(load_artefacts(repository))
     signatures: dict[WeaverDocumentId, str] = {}
     for identity in selected:
         alias = aliases.get(identity)
-        signatures[identity] = (
-            alias.signature
-            if alias is not None
-            else repository.source_documents[identity].effective_signature
-        )
+        artefact = loads.get(identity)
+        if alias is not None:
+            signatures[identity] = alias.signature
+        elif artefact is not None:
+            signatures[identity] = artefact.signature
+        else:
+            signatures[identity] = repository.source_documents[
+                identity
+            ].effective_signature
     return signatures
 
 
@@ -231,6 +242,12 @@ def determine_impact(
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
         for root in changed:
+            # A load artefact is not a node in the authored graph, and that is
+            # the design rather than an omission: nothing depends on a deployed
+            # module, and it depends on nothing — its signature is its own
+            # content. So a changed one is the end of a walk, not the start.
+            if root.is_load_artefact:
+                continue
             for node in graph.descendants(str(root)):
                 descendant = by_text.get(node)
                 if descendant is not None and descendant in existing:

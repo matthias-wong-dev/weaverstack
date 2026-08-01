@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from ..catalogue.tables import CATALOGUE_SCHEMA
+from ..etl import LOAD_ROOT
 from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA
 from ..spark import SparkCatalogue, object_token, schema_token
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
-from ..declaration.model import WeaverDocumentId
+from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
 from ..store import Store
 from ..targets import ItemRef
@@ -37,13 +38,18 @@ from .targets import BoundTarget
 #: materialised output.
 _RESERVED_FILES_AREAS = frozenset({WEAVER_ITEMS_AREA, BUILD_BUNDLES_AREA})
 
-#: Schemas a prune never touches. A schema-enabled Fabric Lakehouse has a default
-#: ``dbo`` schema that cannot be dropped and that Weaver does not manage; ``_``
-#: holds Weaver's own catalogue, which no item owns. A build normally cannot see
-#: `_` at all — it lives in the Weaver Lakehouse and prune is scoped to the bound
-#: destination's own storage — but an item built *into* the Weaver Lakehouse
+#: *Delta* schemas a prune never touches. A schema-enabled Fabric Lakehouse has a
+#: default ``dbo`` schema that cannot be dropped and that Weaver does not manage;
+#: ``_`` holds Weaver's own catalogue, which no item owns. A build normally cannot
+#: see `_` at all — it lives in the Weaver Lakehouse and prune is scoped to the
+#: bound destination's own storage — but an item built *into* the Weaver Lakehouse
 #: would, and a prune that dropped the catalogue would take the record of every
 #: installation with it.
+#:
+#: The load layer's ``_`` is a different object wearing the same name: a *folder*
+#: under Files, and a *Warehouse* schema. Neither is listed here, and neither
+#: should be — both are generated, projected and pruned like any other managed
+#: object, which is exactly how they go when an item stops declaring load code.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 
 #: Warehouse schemas that belong to the engine rather than to any item.
@@ -63,7 +69,15 @@ class _Managed:
 
 @dataclass(frozen=True)
 class TargetInventory:
-    """Transport-neutral physical state prepared before bundle generation."""
+    """Transport-neutral physical state prepared before bundle generation.
+
+    ``files`` and ``procedures`` are what a load layer installs, and they are
+    read like everything else here. A type the inventory cannot see would be
+    disproved by every reconciliation — the claim tested against nothing and
+    found missing — so an artefact would be rebuilt on every build, silently.
+    Observing them is what lets the ordinary machinery answer presence, physical
+    deletion and drift for load artefacts too.
+    """
 
     target_id: str
     kind: str
@@ -73,8 +87,27 @@ class TargetInventory:
     folders: tuple[str, ...] = ()
     tables: tuple[str, ...] = ()
     views: tuple[str, ...] = ()
+    #: Deployed load files, as ``<path beneath Files>/<filename>``.
+    files: tuple[str, ...] = ()
+    #: Generated load procedures, as ``<schema>.<name>``.
+    procedures: tuple[str, ...] = ()
 
     def has_object(self, schema: str, name: str, object_type: str) -> bool:
+        """Whether the target holds this object, asked of the right collection.
+
+        Branching on the type is not a convenience: falling through to ``tables``
+        for a type this did not know about would answer *no* for something that
+        is plainly there, and reconciliation reads a *no* as proof the claim is
+        stale.
+        """
+
+        if object_type == "file":
+            # A file is addressed by path, and its schema already *is* the path
+            # beneath Files — so the two halves join with a separator rather than
+            # the dot a two-part object name uses.
+            return _holds(self.files, f"{schema}/{name}")
+        if object_type == "stored_procedure":
+            return _holds(self.procedures, f"{schema}.{name}")
         physical_schema = schema
         values = self.views if object_type == "view" else self.tables
         if object_type == "folder":
@@ -82,8 +115,11 @@ class TargetInventory:
             if schema.casefold().startswith(prefix.casefold()):
                 physical_schema = schema[len(prefix) :]
             values = self.folders
-        qualified = f"{physical_schema}.{name}".casefold()
-        return qualified in {value.casefold() for value in values}
+        return _holds(values, f"{physical_schema}.{name}")
+
+
+def _holds(values: Iterable[str], qualified: str) -> bool:
+    return qualified.casefold() in {value.casefold() for value in values}
 
 
 def read_lakehouse_inventory(
@@ -146,6 +182,7 @@ def read_lakehouse_inventory(
             for schema in schemas
             for view in catalogue.views(schema)
         )
+    files = () if control_item else _load_files(store, files_root)
     return TargetInventory(
         target_id=target.id,
         kind=target.kind,
@@ -157,11 +194,38 @@ def read_lakehouse_inventory(
         folders=tuple(sorted(folders, key=str.casefold)),
         tables=tuple(sorted(tables, key=str.casefold)),
         views=tuple(sorted(views, key=str.casefold)),
+        files=files,
+    )
+
+
+def _load_files(store: Store, files_root) -> tuple[str, ...]:
+    """Every deployed load file, as the path beneath ``Files`` that names it.
+
+    Scoped to the runtime tree rather than the whole Files area, and deliberately:
+    a Folder object's *contents* are data an item loaded, not objects Weaver
+    installed, so walking all of Files would inventory rows as though they were
+    artefacts. The load tree is the one place a build puts individual files it
+    claims one by one.
+    """
+
+    root = files_root / LOAD_ROOT.split("/")[0]
+    if not store.exists(root) or not store.is_directory(root):
+        return ()
+    prefix = files_root.value.rstrip("/") + "/"
+    return tuple(
+        sorted(
+            (
+                entry.location.value[len(prefix) :]
+                for entry in store.list(root, recursive=True)
+                if not entry.is_directory
+            ),
+            key=str.casefold,
+        )
     )
 
 
 def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
-    """Read every Weaver-manageable schema, table and view in one Warehouse."""
+    """Read every Weaver-manageable schema, table, view and procedure."""
 
     rows = sql.query(
         """
@@ -170,7 +234,7 @@ def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
                objects.type as object_type
         from sys.objects as objects
         where objects.is_ms_shipped = 0
-          and objects.type in (N'U', N'V')
+          and objects.type in (N'U', N'V', N'P')
         order by schema_name(objects.schema_id), objects.name
         """
     )
@@ -216,6 +280,12 @@ def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
         views=tuple(
             sorted(
                 (f"{schema}.{name}" for schema, name, kind in objects if kind == "V"),
+                key=str.casefold,
+            )
+        ),
+        procedures=tuple(
+            sorted(
+                (f"{schema}.{name}" for schema, name, kind in objects if kind == "P"),
                 key=str.casefold,
             )
         ),
@@ -349,6 +419,7 @@ def managed_sets(
     object_target_kind: str = DELTA_TARGET,
     *,
     alias_destinations: Iterable[WeaverDocumentId] = (),
+    load_identities: Iterable[WeaverDocumentId] = (),
 ) -> _Managed:
     """The keep-set for one physical side: Delta objects, or Warehouse ones.
 
@@ -358,6 +429,14 @@ def managed_sets(
     shortcut or view it was about to create would be both destructive and
     pointless. Which set an alias joins follows its physical form: a folder under
     Files, a view in a Warehouse, a table directory in a Lakehouse.
+
+    ``load_identities`` contribute the one namespace a document cannot: the ``_``
+    schema a Warehouse's generated load procedures live in. Nothing *declares* a
+    document there, so without this the schema would be an orphan and every build
+    would drop the schema it had just created. It is derived from the artefacts
+    rather than added unconditionally, which is what lets the schema go when the
+    last procedure does. On the Lakehouse side the runtime tree needs nothing
+    here — it is a declared folder, and is spared as one.
     """
 
     tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
@@ -371,8 +450,14 @@ def managed_sets(
             views.add(qualified)
         else:
             tables.add(qualified)
+    schemas = {name.split(".", 1)[0].lower() for name in tables | views}
+    schemas.update(
+        identity.object_id.schema.lower()
+        for identity in load_identities
+        if identity.shape == PROCEDURE_SHAPE
+    )
     return _Managed(
-        schemas=frozenset(name.split(".", 1)[0].lower() for name in tables | views),
+        schemas=frozenset(schemas),
         folder_schemas=frozenset(name.split(".", 1)[0].lower() for name in folders),
         folders=frozenset(name.lower() for name in folders),
         tables=frozenset(name.lower() for name in tables),

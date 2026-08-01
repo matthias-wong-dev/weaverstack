@@ -45,8 +45,11 @@ from .catalogue_actions import (
 from .endpoints import item_refresh_stage
 from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
+from ..etl import item_load_artefacts, load_artefacts, load_schemas
 from .physical import (
     item_build_stages,
+    item_load_removals,
+    item_load_stages,
     item_drop_stages,
     item_prune_stage,
     item_schema_stage,
@@ -82,11 +85,14 @@ def generate_item_build_bundle(
             + ", ".join(sorted(map(str, unknown)))
         )
 
-    # Two kinds of node are selectable, and most of what follows needs exactly
+    # Three kinds of node are selectable, and most of what follows needs exactly
     # one of them. Documents are what prune, schemas and the physical build
     # pipelines are about; alias destinations are registered objects too — so
     # they take part in selection and certification — but they are materialised
-    # by the alias executor rather than by any document stage.
+    # by the alias executor rather than by any document stage. Load artefacts are
+    # the third, and are kept out of everything that assumes a selected identity
+    # maps to a parsed declaration: they are signed from their own content and
+    # installed by the item's final layer.
     selected_documents = {
         identity for identity in repository.source_documents if identity.item in by_item
     }
@@ -95,7 +101,12 @@ def generate_item_build_bundle(
         for alias in repository.aliases
         if alias.destination.item in by_item
     }
-    selected_ids = selected_documents | selected_aliases
+    selected_loads = {
+        artefact.identity
+        for artefact in load_artefacts(repository)
+        if artefact.identity.item in by_item
+    }
+    selected_ids = selected_documents | selected_aliases | selected_loads
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -162,8 +173,10 @@ def generate_item_build_bundle(
                 target_by_item=target_by_item,
                 selected_documents=selected_documents,
                 selected_aliases=selected_aliases,
-                selected_for_drop=selected_for_drop,
-                selected_for_build=selected_for_build,
+                selected_for_drop=selected_for_drop - selected_loads,
+                selected_for_build=selected_for_build - selected_loads,
+                selected_loads=selected_for_build & selected_loads,
+                removed=removed,
                 registered=registered,
             )
             layer_stages.extend(planned.stages)
@@ -209,7 +222,6 @@ def generate_item_build_bundle(
         output,
         plan=plan,
         payloads=payloads,
-        snapshot=_snapshot(repository, store),
         store=store,
     )
 
@@ -277,6 +289,8 @@ def plan_item_build(
     selected_for_drop,
     selected_for_build,
     registered,
+    selected_loads=(),
+    removed=(),
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -299,12 +313,14 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_aliases,
     )
+    artefacts = item_load_artefacts(repository, item=item)
     stages: list[PlannedStage] = []
 
     # Prune is given every *declared* alias destination, never only the selected
     # ones: an alias this build decided not to touch is still desired state, and
     # a prune that could not see it would delete the very thing incremental
-    # selection just chose to keep.
+    # selection just chose to keep. Load artefacts are treated the same way, and
+    # the stage derives them itself.
     prune = item_prune_stage(
         repository, selected_documents, item=item, target=target, inventory=inventory
     )
@@ -324,7 +340,11 @@ def plan_item_build(
         item=item,
         target=target,
         inventory=inventory,
-        extra_schemas=aliases.schemas,
+        # `_` is where a Warehouse's generated load procedures live, and no
+        # document declares an object in it — so like an alias's namespace it
+        # would never be created if only documents were consulted. It is derived
+        # from the artefacts, so an item with no procedures asks for no schema.
+        extra_schemas=tuple(aliases.schemas) + load_schemas(artefacts),
     )
     if schemas is not None:
         stages.append(schemas)
@@ -342,26 +362,22 @@ def plan_item_build(
     refresh = item_refresh_stage(stages, item=item, target=target)
     if refresh is not None:
         stages.append(refresh)
+
+    # The load layer closes the item, after its structure is built and its
+    # endpoint has caught up. Removals ride in it too: they come from the
+    # previous Registry rows rather than from any diff against the target, so
+    # they need no earlier barrier to be safe.
+    stages.extend(
+        item_load_stages(artefacts, selected_loads, item=item, target=target)
+    )
+    stages.extend(
+        item_load_removals(removed, item=item, target=target, registered=registered)
+    )
     return PlannedItem(
         stages=tuple(stages),
         omitted=aliases.omitted,
         uncertified=frozenset(aliases.omitted_destinations) & frozenset(selected_for_build),
     )
-
-
-def _snapshot(repository: WeaverRepository, store: Store) -> dict[str, bytes]:
-    if repository.root is None:
-        raise BuildError("a discovered repository root is required to certify a snapshot")
-    paths = {source.relative_path for source in repository.source_documents.values()}
-    paths.update(schema.relative_path for schema in repository.schema_documents.values())
-    paths.update(repository.support_files)
-    snapshot = {
-        relative: store.read(repository.root.join(*relative.split("/")))
-        for relative in sorted(paths)
-        if relative not in repository.generated_files
-    }
-    snapshot.update(repository.generated_files)
-    return dict(sorted(snapshot.items()))
 
 
 def _control_target(binding: LakehouseBinding, targets):

@@ -1,11 +1,16 @@
-"""Executor dispatch for build actions — all build, none load.
+"""Executor dispatch for build actions.
 
 ``spark_sql`` runs one create or frozen ``DROP``; ``spark_sql_batch`` runs an
 ordered catalogue payload as one reported action. ``spark_schema`` makes one
 schema, ``spark_table`` completes a table whose shape only the session knows,
 and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse SQL path.
 ``alias`` points one Lakehouse name at another item's object, and ``sql_endpoint``
-closes an item by syncing its SQL analytics endpoint.
+syncs a Lakehouse's SQL analytics endpoint.
+
+``load_file`` closes an item: it writes one file of the deployed runtime tree, or
+removes one the source has stopped claiming. Generated load procedures need no
+executor of their own — a create-or-alter is T-SQL, and ``tsql`` runs the payload
+it is given without inspecting what the payload builds.
 
 There is no prune executor — a build freezes its drops as payloads, so the
 installer never enumerates the target.
@@ -19,6 +24,7 @@ from __future__ import annotations
 from .alias import AliasExecutor
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .folder import FolderExecutor
+from .load_file import LoadFileExecutor
 from .spark_schema import SparkSchemaExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
@@ -36,6 +42,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkSchemaExecutor.name: SparkSchemaExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
+        LoadFileExecutor.name: LoadFileExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
         TSqlBatchExecutor.name: TSqlBatchExecutor(),
         AliasExecutor.name: AliasExecutor(),
@@ -55,6 +62,7 @@ __all__ = [
     "SparkTableExecutor",
     "SqlEndpointRefreshExecutor",
     "FolderExecutor",
+    "LoadFileExecutor",
     "TSqlExecutor",
     "TSqlBatchExecutor",
     "default_executors",

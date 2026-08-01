@@ -27,6 +27,15 @@ from .tables import (
 
 
 def catalogue_schema(identity: WeaverDocumentId) -> str:
+    """The ``schema_name`` this identity is stored under.
+
+    A Folder carries its ``Files/`` prefix because that prefix is part of what
+    distinguishes it from a table of the same name. A load artefact does not get
+    one: its schema is already the real thing — the containing path for a file,
+    the Warehouse schema for a procedure — and prefixing it would store something
+    that is not the target's own name.
+    """
+
     prefix = "Files/" if identity.is_files else ""
     return f"{prefix}{identity.object_id.schema}"
 
@@ -83,6 +92,12 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
         CatalogueClaimRule(TABLE_DICTIONARY),
         *_COMMON_OBJECT_RULES[1:],
     ),
+    # A load artefact claims the Registry and nothing else. It declares no
+    # columns, no keys, no relationships and no dependencies — it is a deployed
+    # module or a generated statement, and the only thing the catalogue records
+    # about it is that Weaver installed it and at what signature.
+    "file": (CatalogueClaimRule(REGISTRY),),
+    "stored_procedure": (CatalogueClaimRule(REGISTRY),),
 }
 
 OBJECT_TYPE_FOR_DOCUMENT_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}

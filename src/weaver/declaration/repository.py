@@ -304,6 +304,55 @@ def parse_item_repository(
         source_documents[identity] = replace(source, logical_id=identity)
         documents_by_item[builtin_item].append(identity)
 
+    # An item with load code owns the runtime tree that code is deployed into,
+    # and owning it means declaring it. The folder and its schema are generated
+    # here rather than reserved somewhere later, so they are ordinary managed
+    # objects from the moment the repository is interpreted.
+    from ..etl import ETL_SCHEMA, generated_item_files
+
+    for item in sorted(item_ids):
+        if item == builtin_item:
+            continue
+        authored = [
+            str(schema)
+            for schema in schemas_by_item[item]
+            if schema.schema == ETL_SCHEMA
+        ] + [
+            source_documents[identity].relative_path
+            for identity in documents_by_item[item]
+            if identity.object_id.schema == ETL_SCHEMA
+        ]
+        if authored:
+            raise DiscoveryError(
+                f"{sorted(authored)[0]}: schema {ETL_SCHEMA!r} is generated Weaver "
+                "infrastructure — it holds the runtime tree a load is deployed "
+                "into and the schema generated load procedures live in, so an "
+                "item may not author into it"
+            )
+
+    for item in sorted(item_ids):
+        item_files = generated_item_files(
+            item,
+            documents=[
+                source_documents[identity] for identity in documents_by_item[item]
+            ],
+            support_paths=support_files,
+        )
+        if not item_files:
+            continue
+        generated_files = {**generated_files, **item_files}
+        for relative, data in sorted(item_files.items()):
+            if "/schemas/" in relative:
+                schema = read_schema_document(relative, data)
+                identity = WeaverSchemaId(item, schema.schema_id)
+                schema_documents[identity] = schema
+                schemas_by_item[item].append(identity)
+                continue
+            source = read_source_document(relative, data, item.item_type)
+            identity = WeaverDocumentId(item, source.object_id, is_files=True)
+            source_documents[identity] = replace(source, logical_id=identity)
+            documents_by_item[item].append(identity)
+
     items: list[WeaverItem] = []
     for item_id in sorted(item_ids):
         schemas = tuple(sorted(schemas_by_item[item_id], key=str))
@@ -349,6 +398,15 @@ def parse_item_repository(
         for model in items
     ]
 
+    # Held rather than re-read: a ``lib/`` module is deployed by the load layer,
+    # so its bytes have to reach both the signature it is selected by and the
+    # payload the bundle carries, and neither may reopen the repository.
+    support_file_contents = {
+        relative: store.read(root.join(*relative.split("/")))
+        for relative in sorted(support_files)
+        if relative.endswith(".py")
+    }
+
     repository = WeaverRepository(
         name=root.name,
         root=root,
@@ -356,6 +414,7 @@ def parse_item_repository(
         source_documents=source_documents,
         schema_documents=schema_documents,
         support_files=tuple(sorted(support_files)),
+        support_file_contents=support_file_contents,
         signature=_item_repository_signature(
             files, store, root, generated=generated_files
         ),

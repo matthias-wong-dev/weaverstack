@@ -5,9 +5,9 @@ optional structured details, or raises. It never reads the repository, resolves
 a dependency or selects a target: those decisions are all in the bundle already.
 The installer owns timing, status and reporting; an executor owns the work.
 
-The context carries runtime services — a Spark session, the resolver and store,
-and the bundle's certified snapshot location — plus the one target the current
-batch is bound to. It carries no planning input.
+The context carries runtime services — a Spark session, the resolver and store —
+plus the one target the current batch is bound to. It carries no planning input,
+and no way back to the repository: everything an action needs is its payload.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from ...errors import InstallError
-from ...locations import LakehouseSparkLocation, Location
+from ...locations import LakehouseSparkLocation
 from ...spark import SparkCatalogue, SparkDestination
 from ...store import Store
 from ...targets import ItemRef
@@ -76,10 +76,8 @@ class InstallationContext:
     spark: Any
     resolver: Any
     store: Store
-    snapshot: Location
     target: ResolvedTarget
     sql: Any = None
-    snapshot_store: Store | None = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: This installation's publication instant, resolved into ``{{epoch}}``. One
     #: value for the whole run, so every Registry row a build writes carries the

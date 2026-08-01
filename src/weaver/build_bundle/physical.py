@@ -16,8 +16,13 @@ from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..spark.tokens import object_token
+from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_load_artefacts
 from .models import (
     BUILD_FOLDER,
+    BUILD_PROCEDURE,
+    DELETE_FILE,
+    DROP_PROCEDURE,
+    WRITE_FILE,
     BUILD_TABLE,
     BUILD_VIEW,
     CREATE_SCHEMA,
@@ -29,7 +34,7 @@ from .models import (
 )
 from .payloads import sha256_hex
 from .prune import managed_sets, render_inventory_prune
-from .stages import BUILD, DROP, PRUNE, SCHEMA, PlannedStage
+from .stages import BUILD, DROP, LOAD, PRUNE, SCHEMA, PlannedStage
 from .targets import WAREHOUSE_TARGET
 
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
@@ -52,7 +57,14 @@ DELTA_MUTATING_KINDS = frozenset(
 
 
 def _slug(value) -> str:
-    return str(value).replace("/", "--").replace(" ", "-")
+    """An identity as something safe to name a payload file and an action after.
+
+    Separators, spaces and the shape marker's colon all go: a payload path must
+    stay relative and inside the bundle, and a colon reads as a drive letter on
+    one of the platforms a bundle is unpacked on.
+    """
+
+    return str(value).replace("/", "--").replace(" ", "-").replace(":", "-")
 
 
 def item_prune_stage(
@@ -63,7 +75,15 @@ def item_prune_stage(
     target,
     inventory,
 ) -> PlannedStage | None:
-    """Freeze one item's authoritative repository/inventory diff."""
+    """Freeze one item's authoritative repository/inventory diff.
+
+    The keep-set is derived here rather than handed in, and the load artefacts
+    are why. They contribute the ``_`` schema a Warehouse's generated procedures
+    live in, which no document declares — so a caller that did not think to pass
+    them would produce a prune that drops the schema the same build just created.
+    A destructive default is not something to leave reachable, and the repository
+    is already here, so nothing has to be remembered.
+    """
 
     documents = {
         str(identity): repository.source_documents[identity]
@@ -78,6 +98,9 @@ def item_prune_stage(
             alias.destination
             for alias in repository.aliases
             if alias.destination.item == item
+        ],
+        load_identities=[
+            artefact.identity for artefact in item_load_artefacts(repository, item=item)
         ],
     )
 
@@ -316,6 +339,168 @@ def render_document_build_action(identity, source) -> RenderedAction:
             payload_sha256=sha256_hex(content),
         ),
         payloads={filename: content},
+    )
+
+
+def render_load_build_action(artefact) -> RenderedAction:
+    """The action and frozen payload one load artefact installs as.
+
+    The load half of :func:`render_document_build_action`, and the same claim:
+    what runs it, under what id, against which bytes. A file is written into the
+    runtime tree by the ``load_file`` executor; a procedure is a create-or-alter
+    run by ``tsql``, which needs no knowledge that it happens to be a procedure.
+    """
+
+    action_slug = _slug(artefact.identity)
+    if artefact.is_file:
+        filename = f"{action_slug}.payload"
+        executor, kind = "load_file", WRITE_FILE
+    else:
+        filename = f"{action_slug}.sql"
+        executor, kind = "tsql", BUILD_PROCEDURE
+    return RenderedAction(
+        action=BuildAction(
+            id=f"load-{action_slug}",
+            kind=kind,
+            resource_node_id=str(artefact.identity),
+            executor=executor,
+            payload=filename,
+            payload_sha256=sha256_hex(artefact.payload),
+        ),
+        payloads={filename: artefact.payload},
+    )
+
+
+def item_load_stages(
+    artefacts,
+    selected_for_build,
+    *,
+    item: WeaverItemId,
+    target,
+) -> tuple[PlannedStage, ...]:
+    """One item's load layer: the last thing it does, and one barrier wide.
+
+    A single stage rather than dependency layers, because there are no
+    dependencies to express — nothing here runs anything, so a deployed module
+    and a generated procedure have no ordering between them. What they *do*
+    depend on is the item's structural work, and that is expressed by the layer
+    being last rather than by an edge.
+
+    Empty when the item has no selected load work, which is a phase with nothing
+    to do rather than an empty barrier: an unpopulated stage takes no sequence
+    number.
+    """
+
+    selected = [
+        artefact
+        for artefact in artefacts
+        if artefact.identity.item == item and artefact.identity in selected_for_build
+    ]
+    if not selected:
+        return ()
+    payloads: dict[str, bytes] = {}
+    actions = []
+    for artefact in sorted(selected, key=lambda value: str(value.identity)):
+        rendered = render_load_build_action(artefact)
+        payloads.update(rendered.payloads)
+        actions.append(rendered.action)
+    return (
+        PlannedStage(
+            phase=LOAD,
+            slug="load",
+            description="install load artefacts",
+            payloads=payloads,
+            batches=(
+                BuildBatch(
+                    id=f"{_slug(item)}", target_id=target.id, actions=tuple(actions)
+                ),
+            ),
+        ),
+    )
+
+
+def item_load_removals(
+    removed,
+    *,
+    item: WeaverItemId,
+    target,
+    registered,
+) -> tuple[PlannedStage, ...]:
+    """Frozen removals for load artefacts the source has stopped claiming.
+
+    Driven by the previous Registry rows rather than by a diff against the
+    target, and that is what makes a rename ordinary: the old identity is no
+    longer claimed, so its row names exactly what to remove and where, while the
+    new identity is simply new. Nothing has to notice that the two are related.
+
+    The removals ride in the item's load layer alongside its writes. They cannot
+    collide — an identity is either still claimed or not — and keeping them
+    together means everything the load layer does to a target is in one barrier.
+    """
+
+    # Scoped by what the Registry says each removed object *is*, not by what its
+    # identity looks like. A removed table is removed by the inventory prune,
+    # which can see it; only the two the prune cannot see are handled here.
+    selected = sorted(
+        (
+            identity
+            for identity in removed
+            if identity.item == item
+            and registered[identity].object_type in (FILE_TYPE, PROCEDURE_TYPE)
+        ),
+        key=str,
+    )
+    payloads: dict[str, bytes] = {}
+    actions = []
+    for identity in selected:
+        object_type = registered[identity].object_type
+        action_slug = _slug(identity)
+        if object_type == FILE_TYPE:
+            actions.append(
+                BuildAction(
+                    id=f"load-remove-{action_slug}",
+                    kind=DELETE_FILE,
+                    resource_node_id=str(identity),
+                    executor="load_file",
+                    payload=None,
+                    payload_sha256=None,
+                )
+            )
+            continue
+        statement = (
+            "drop procedure if exists "
+            f"{_tsql_ident(identity.object_id.schema)}."
+            f"{_tsql_ident(identity.object_id.object)};\n"
+        )
+        content = statement.encode("utf-8")
+        filename = f"drop-{action_slug}.sql"
+        payloads[filename] = content
+        actions.append(
+            BuildAction(
+                id=f"load-remove-{action_slug}",
+                kind=DROP_PROCEDURE,
+                resource_node_id=str(identity),
+                executor="tsql",
+                payload=filename,
+                payload_sha256=sha256_hex(content),
+            )
+        )
+    if not actions:
+        return ()
+    return (
+        PlannedStage(
+            phase=LOAD,
+            slug="load",
+            description="install load artefacts",
+            payloads=payloads,
+            batches=(
+                BuildBatch(
+                    id=f"remove-{_slug(item)}",
+                    target_id=target.id,
+                    actions=tuple(actions),
+                ),
+            ),
+        ),
     )
 
 

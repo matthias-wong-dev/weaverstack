@@ -33,7 +33,6 @@ def _context(resolver):
         spark=None,
         resolver=resolver,
         store=LocalStore(),
-        snapshot=Location("/tmp/snapshot"),
         target=ResolvedTarget(bound=bound, lakehouse=ItemRef("Sales")),
     )
 

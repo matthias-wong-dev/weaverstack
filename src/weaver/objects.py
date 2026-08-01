@@ -232,9 +232,24 @@ class View(WeaverObject):
 
 
 def _identity(class_name: str) -> tuple[str, str]:
-    """``Sales__Order`` → ``("Sales", "Order")``."""
+    """``Sales__Order`` → ``("Sales", "Order")``; ``___Load`` → ``("_", "Load")``.
 
-    parts = [part.strip() for part in class_name.split(CLASS_ID_SEPARATOR)]
+    A run of leading underscores is read as a schema plus the separator, because
+    ``_`` is a real schema and spelling ``_.Load`` as a class name produces three
+    of them. The rule is the parser's — see
+    :func:`weaver.declaration.source.python_id_parts` — repeated rather than
+    imported, for the same reason the separator itself is.
+    """
+
+    leading = len(class_name) - len(class_name.lstrip("_"))
+    if leading >= len(CLASS_ID_SEPARATOR) + 1:
+        split = [
+            class_name[: leading - len(CLASS_ID_SEPARATOR)],
+            class_name[leading:],
+        ]
+    else:
+        split = class_name.split(CLASS_ID_SEPARATOR)
+    parts = [part.strip() for part in split]
     if len(parts) != 2 or not all(parts):
         raise LoadError(
             f"{class_name!r} does not name an object: a Weaver class separates "

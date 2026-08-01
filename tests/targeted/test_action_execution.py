@@ -30,6 +30,7 @@ from factories import (
     warehouse_context,
 )
 
+from weaver import Location
 from weaver.build_bundle import execute_action
 from weaver.build_bundle.executors import default_executors
 
@@ -281,3 +282,102 @@ def test_a_tsql_batch_payload_that_is_not_an_array_is_rejected():
 
     assert result.status == "failed"
     assert "array of statements" in result.error_message
+
+
+# --- the load layer's file executor -------------------------------------------
+
+
+def _load_context(tmp_path):
+    """A real store and resolver, because placement is the claim being made."""
+
+    from weaver import LocalResolver, LocalStore, LocalWorkspace
+
+    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    return installation_context(
+        store=LocalStore(),
+        resolver=LocalResolver(workspace),
+        target=resolved_target(),
+    )
+
+
+def _load_action(*, kind: str, relative: str, payload: str | None):
+    from factories import ITEM
+    from weaver.etl import LOAD_ROOT
+
+    return build_action(
+        id=f"load-{relative}",
+        kind=kind,
+        resource_node_id=f"{ITEM}/file:{LOAD_ROOT}/{relative}",
+        executor="load_file",
+        payload=payload,
+        payload_sha256="unused" if payload else None,
+    )
+
+
+def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
+    """Placement comes from the identity and the bound target, and from nothing
+    the executor decides — that was settled when the artefact was claimed."""
+
+    from weaver.etl import LOAD_ROOT
+
+    context = _load_context(tmp_path)
+    action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+
+    result = execute_action(action, b"def parse(value):\n", context=context)
+
+    assert result.status == "succeeded"
+    written = result.details["written"]
+    assert written.endswith(f"Files/{LOAD_ROOT}/lib/dates.py")
+    assert context.store.read(Location(written)) == b"def parse(value):\n"
+
+
+def test_a_write_creates_the_directories_beneath_it(tmp_path):
+    """A module several packages deep needs no folder action to precede it."""
+
+    context = _load_context(tmp_path)
+    action = _load_action(
+        kind="write_file", relative="lib/nested/deep/dates.py", payload="p.payload"
+    )
+
+    assert execute_action(action, b"x = 1\n", context=context).status == "succeeded"
+
+
+def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
+    """An empty file is a plausible-looking wrong answer, so it is refused."""
+
+    context = _load_context(tmp_path)
+    action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+
+    result = execute_action(action, None, context=context)
+
+    assert result.status == "failed"
+    assert "no payload" in result.error_message
+
+
+def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
+    """Tolerant of absence, and only here.
+
+    A delete reconciles toward "this must not exist", and something else having
+    removed it first is that state reached — unlike a create, where a collision
+    means two things believe they own one name.
+    """
+
+    context = _load_context(tmp_path)
+    action = _load_action(kind="delete_file", relative="lib/dates.py", payload=None)
+
+    result = execute_action(action, None, context=context)
+
+    assert result.status == "succeeded"
+    assert "absent" in result.details
+
+
+def test_a_deployed_file_is_removed_where_it_was_written(tmp_path):
+    context = _load_context(tmp_path)
+    write = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    execute_action(write, b"x = 1\n", context=context)
+
+    delete = _load_action(kind="delete_file", relative="lib/dates.py", payload=None)
+    result = execute_action(delete, None, context=context)
+
+    assert result.status == "succeeded"
+    assert not context.store.exists(Location(result.details["deleted"]))

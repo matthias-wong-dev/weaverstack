@@ -110,6 +110,30 @@ def _stem(filename: str) -> str:
     return name
 
 
+def python_id_parts(stem: str) -> list[str]:
+    """Split ``Schema__Object`` where the schema may itself be underscores.
+
+    ``Sales__Order`` is unambiguous, but ``_`` is a real schema — it is where
+    generated infrastructure lives — and ``_`` + ``__`` + ``Load`` spells
+    ``___Load``, which an ordinary split reads as an empty schema. A run of
+    leading underscores is therefore read as what it is: the last two are the
+    separator and the rest are the schema, so ``___Load`` is ``_.Load``.
+
+    Only a schema made *entirely* of underscores needs this. ``_ETL__Load`` has
+    one leading underscore, splits once, and never reaches the branch.
+    """
+
+    leading = len(stem) - len(stem.lstrip("_"))
+    if leading >= len(PYTHON_ID_SEPARATOR) + 1:
+        return [stem[: leading - len(PYTHON_ID_SEPARATOR)], stem[leading:]]
+    return stem.split(PYTHON_ID_SEPARATOR)
+
+
+#: Private alias, so the helper reads as an implementation detail at its one
+#: internal call site while staying importable for the authoring surface.
+_python_id_parts = python_id_parts
+
+
 def object_id_for_filename(filename: str, language: str) -> ObjectId:
     """The ID a filename claims, before the document is consulted."""
 
@@ -121,7 +145,7 @@ def object_id_for_filename(filename: str, language: str) -> ObjectId:
                 f"{PYTHON_ID_SEPARATOR!r}, not '.', because a module name cannot "
                 "contain a dot — expected Schema__Object.py"
             )
-        parts = stem.split(PYTHON_ID_SEPARATOR)
+        parts = _python_id_parts(stem)
     else:
         if PYTHON_ID_SEPARATOR in stem:
             raise DiscoveryError(
