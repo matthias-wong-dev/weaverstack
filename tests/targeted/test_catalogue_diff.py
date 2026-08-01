@@ -27,7 +27,7 @@ from factories import (
     single_document_repository,
 )
 
-from weaver.catalogue.state import Catalogue
+from weaver.catalogue.state import Catalogue, retaining
 from weaver.catalogue.tables import REGISTRY
 
 CUSTOMER = "DWG.Customer"
@@ -48,8 +48,10 @@ def repository(tmp_path):
 def desired_from(repository, *names):
     """Logical, then narrowed — the order publication uses."""
 
-    return Catalogue.from_repository(repository).retaining(
-        {document_id(name) for name in names}
+    return retaining(
+        Catalogue.from_repository(repository),
+        repository,
+        {document_id(name) for name in names},
     )
 
 

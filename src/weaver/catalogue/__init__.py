@@ -52,6 +52,8 @@ from .state import (
     RegisteredDocument,
     Catalogue,
     Reconciliation,
+    for_targets,
+    retaining,
     read_catalogue_state,
     reconcile_catalogue_state,
 )
@@ -66,6 +68,6 @@ __all__ = [
     "SCHEMA_DICTIONARY", "SIGNATURE", "TABLE_DICTIONARY", "column_set",
     "identifier", "literal", "qualified_name", "render_delete_obsolete",
     "render_delete_scope", "render_merge", "sorted_rows", "table", "typed_literal",
-    "RegisteredDocument", "Catalogue", "Reconciliation",
+    "RegisteredDocument", "Catalogue", "Reconciliation", "retaining", "for_targets",
     "read_catalogue_state", "reconcile_catalogue_state",
 ]

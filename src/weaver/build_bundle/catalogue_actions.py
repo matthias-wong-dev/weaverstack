@@ -7,10 +7,10 @@ from collections import defaultdict
 from typing import Iterable, Mapping
 
 from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
-from ..catalogue.state import Catalogue
+from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.reconcile import reconcile
 from ..catalogue.render import InstallationScope, identifier, literal
-from ..catalogue.state import Catalogue
+from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.tables import DICTIONARY_TABLES, REGISTRY, CatalogueTable
 from ..declaration.model import WeaverDocumentId
 from ..spark.tokens import object_token
@@ -191,10 +191,13 @@ def render_catalogue_after_build(
     # Logical, then narrowed, then bound — in that order and visibly so. The
     # narrowing is what keeps a Registry row meaning "this succeeded"; the
     # binding is what lets an alias be certified as the thing it physically is.
-    desired = (
-        Catalogue.from_repository(repository)
-        .retaining(selected_ids)
-        .for_targets({item: target.kind for item, target in target_by_item.items()})
+    logical = Catalogue.from_repository(repository)
+    certified = retaining(logical, repository, selected_ids)
+    desired = for_targets(
+        certified,
+        repository,
+        selected_ids,
+        {item: target.kind for item, target in target_by_item.items()},
     )
     binding_rows = {
         item: (

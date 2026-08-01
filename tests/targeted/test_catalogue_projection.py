@@ -25,7 +25,7 @@ from factories import (
     spark_view,
 )
 
-from weaver.catalogue.state import Catalogue
+from weaver.catalogue.state import Catalogue, for_targets, retaining
 from weaver.catalogue.tables import INSTALLATION, REGISTRY
 
 CUSTOMER = "DWG.Customer"
@@ -56,7 +56,7 @@ def derived(repository, *names):
     catalogue = Catalogue.from_repository(repository)
     if not names:
         return catalogue
-    return catalogue.retaining({document_id(name) for name in names})
+    return retaining(catalogue, repository, {document_id(name) for name in names})
 
 
 # --- it is a function of source -----------------------------------------------
@@ -127,7 +127,7 @@ def test_narrowing_is_a_later_step_not_an_input(repository):
     everything = Catalogue.from_repository(repository)
     assert {document_id(CUSTOMER), document_id(VIEW)} <= set(everything.registered)
 
-    narrowed = everything.retaining({document_id(CUSTOMER)})
+    narrowed = retaining(everything, repository, {document_id(CUSTOMER)})
 
     assert document_id(CUSTOMER) in narrowed.registered
     assert document_id(VIEW) not in narrowed.registered
@@ -193,9 +193,13 @@ def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
     alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
     kinds = {producer: "lakehouse", consumer: "lakehouse"}
 
-    as_lakehouse = Catalogue.from_repository(repository).for_targets(kinds)
-    as_warehouse = Catalogue.from_repository(repository).for_targets(
-        {**kinds, consumer: "warehouse"}
+    logical = Catalogue.from_repository(repository)
+    declared = set(logical.registered) | {
+        alias.destination for alias in repository.aliases
+    }
+    as_lakehouse = for_targets(logical, repository, declared, kinds)
+    as_warehouse = for_targets(
+        logical, repository, declared, {**kinds, consumer: "warehouse"}
     )
 
     assert as_lakehouse.registered[alias].object_type == "table"
@@ -221,8 +225,12 @@ def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     repository = alias_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
-    published = Catalogue.from_repository(repository).for_targets(
-        {producer: "lakehouse"}
+    logical = Catalogue.from_repository(repository)
+    published = for_targets(
+        logical,
+        repository,
+        {alias.destination for alias in repository.aliases},
+        {producer: "lakehouse"},
     )
 
     assert set(published.rows) == {producer}
@@ -247,11 +255,13 @@ def test_several_items_project_into_one_catalogue(tmp_path):
     repository = alias_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
-    catalogue = Catalogue.from_repository(repository).retaining(
+    catalogue = retaining(
+        Catalogue.from_repository(repository),
+        repository,
         {
             document_id("Lakehouse/Raw/DWG.Customer"),
             document_id("Lakehouse/Curated/DWG.CustomerName"),
-        }
+        },
     )
 
     assert {producer, consumer} <= set(catalogue.rows)
@@ -271,8 +281,10 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
     repository = alias_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
 
-    catalogue = Catalogue.from_repository(repository).retaining(
-        {document_id("Lakehouse/Curated/DWG.CustomerName")}
+    catalogue = retaining(
+        Catalogue.from_repository(repository),
+        repository,
+        {document_id("Lakehouse/Curated/DWG.CustomerName")},
     )
 
     for row in catalogue.rows[consumer][REGISTRY.name]:
