@@ -200,6 +200,9 @@ rather than the estate around it.
 | which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
 | the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
 | a correct estate plans nothing: three agreeing states, both item types, every physical kind | `generate_item_build_bundle` | `test_fixed_point.py` | — |
+| a build converges: from nothing, from damage, and losing only a deleted source | `TargetInventory.update_using` | `test_fixed_point.py` | — |
+| every action that touches a target is declared, and every declaration runs | `target_changes` | `test_build_intent.py` | — |
+| every artefact kind reaches the catalogue, and every instance of one | `Catalogue.from_repository` | `test_catalogue_projection.py` | — |
 
 ### Covered by old tests, not yet re-homed
 
@@ -373,6 +376,24 @@ installed wheel, so no pure test could run it and no import check could see it. 
 is the one category where `-m published_weaver` is the first possible sight of the
 defect, and it argues for grepping test *bodies* after any signature change rather
 than trusting a mechanical rewrite.
+
+## Adding an artefact: what fails, and in what order
+
+The suite is arranged so a new artefact type is caught by a sequence of tests
+rather than one, each naming a different thing left undone.
+
+| what is missing | what fails |
+|---|---|
+| the catalogue does not register it | `test_catalogue_from_repository_has_all_artefacts` |
+| a build emits no action for it | `test_a_build_from_nothing_reaches_the_declared_estate` |
+| an action is emitted but declares no effect | `test_every_action_that_touches_a_target_is_declared` |
+| the effect is declared but no action performs it | `test_every_declared_change_names_an_action_that_runs` |
+| the inventory cannot see it | `test_inventory_fidelity.py`, and every claim about it becomes vacuous |
+
+The order matters as much as the coverage: the first failure names the artefact,
+not a symptom several layers downstream. Verified by doing it — adding a member
+to `OBJECT_TYPES` fails only the first; suppressing the load layer's declarations
+fails the third and, in consequence, convergence.
 
 ## Conventions
 
