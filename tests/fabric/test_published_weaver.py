@@ -32,8 +32,36 @@ If any of these regress, the wheel is broken however green the desktop suite is.
 from __future__ import annotations
 
 import pytest
+from factories import item_id, single_document_repository, warehouse_table
+
+from weaver import ItemRef
+from weaver.build_bundle.executors.base import ResolvedTarget
+from weaver.build_bundle.prune import read_warehouse_inventory
 
 pytestmark = pytest.mark.published_weaver
+
+#: The Warehouse item the installation probe builds. Its own logical name, so it
+#: cannot collide with an estate another module is publishing under the same one.
+ITEM = "Warehouse/ParityReporting"
+
+
+def warehouse_target(warehouse) -> ResolvedTarget:
+    """A Warehouse resolves to no Spark address at all — it is reached over TDS."""
+
+    from factories import bound_target
+
+    return ResolvedTarget(
+        bound=bound_target(
+            id="target-1",
+            kind="warehouse",
+            item_id=warehouse.item.name,
+            logical_item_name="ParityReporting",
+            logical_item_type="Warehouse",
+        ),
+        lakehouse=ItemRef(warehouse.item.name),
+        location=None,
+        destination=None,
+    )
 
 
 def test_the_installed_package_imports_and_reports_a_version(livy_session):
