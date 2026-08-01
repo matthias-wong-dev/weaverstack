@@ -60,9 +60,11 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
         repository,
         item=item,
         retained=retained,
-        target_name=f"{item.item_name}_Target",
-        weaver_version="test",
         target_kind="warehouse" if item.item_type == "Warehouse" else "lakehouse",
+        installation={
+            "target_name": f"{item.item_name}_Target",
+            "weaver_version": "test",
+        },
     )
     old = set(old)
     rows = {}

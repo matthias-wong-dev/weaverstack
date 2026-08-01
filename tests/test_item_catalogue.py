@@ -38,9 +38,8 @@ def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"
         repository,
         item=item,
         retained=retained,
-        target_name=target,
-        weaver_version="1.2.3",
         target_kind=target_kind,
+        installation={"target_name": target, "weaver_version": "1.2.3"},
     )
 
 

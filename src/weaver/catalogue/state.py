@@ -80,6 +80,48 @@ class Catalogue:
         )
 
 
+def catalogue_from_repository(
+    repository,
+    *,
+    retained: Mapping[WeaverItemId, Any],
+    target_kinds: Mapping[WeaverItemId, str] | None = None,
+) -> Catalogue:
+    """The catalogue a repository *describes* — the desired state, from source.
+
+    The logical twin of :func:`read_catalogue_state`. One reads what is
+    persisted; this derives what the declarations say should be. Both produce the
+    same class, so the two are directly comparable, which is what a diff needs.
+
+    It exists in production rather than in a fixture for a reason worth stating:
+    a projection the build itself uses cannot drift. A test fixture listing the
+    rows a repository ought to produce has to be updated by hand every time an
+    artefact is added, and will be wrong the first time someone forgets.
+
+    Nothing about a *binding* is here. No target name, no Weaver version, no
+    Installation row, no publication epoch: those are facts a build knows and a
+    repository does not, and they are supplied when the publication is rendered.
+    The single exception is ``target_kinds``, because an alias destination is
+    registered as the thing it physically is — a view in a Warehouse, a table in
+    a Lakehouse — and the catalogue's readers need the real type.
+    """
+
+    from .projection import project_item_installation
+
+    target_kinds = dict(target_kinds or {})
+    rows: dict[WeaverItemId, Mapping[str, tuple]] = {}
+    for item, identities in retained.items():
+        projection = project_item_installation(
+            repository,
+            item=item,
+            retained=identities,
+            **(
+                {"target_kind": target_kinds[item]} if item in target_kinds else {}
+            ),
+        )
+        rows[item] = MappingProxyType(dict(projection.rows))
+    return Catalogue(rows=MappingProxyType(rows))
+
+
 @dataclass(frozen=True)
 class Reconciliation:
     """What reconciling a catalogue against prepared inventories produced.

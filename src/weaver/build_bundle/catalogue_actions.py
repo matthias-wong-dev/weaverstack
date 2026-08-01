@@ -177,13 +177,19 @@ def render_catalogue_after_build(
     catalogue_statements: list[str] = []
     registry_statements: list[str] = []
     for item in sorted(target_by_item, key=str):
+        # The binding facts are supplied here, at publication, rather than
+        # carried by the projection: which target this item was bound to and
+        # which Weaver wrote the row are things a *build* knows, not things a
+        # repository declares.
         projection = project_item_installation(
             repository,
             item=item,
             retained=(identity for identity in selected_ids if identity.item == item),
-            target_name=target_by_item[item].name,
-            weaver_version=__version__,
             target_kind=target_by_item[item].kind,
+            installation={
+                "target_name": target_by_item[item].name,
+                "weaver_version": __version__,
+            },
         )
         result = reconcile(projection)
         for table_plan in (*result.dictionaries, result.installation):

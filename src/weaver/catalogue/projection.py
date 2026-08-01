@@ -78,10 +78,29 @@ def project_item_installation(
     *,
     item: WeaverItemId,
     retained: Iterable[WeaverDocumentId],
-    target_name: str,
-    weaver_version: str,
     target_kind: str = LAKEHOUSE_TARGET,
+    installation: Mapping[str, object] | None = None,
 ) -> CatalogueProjection:
+    """One item's catalogue rows, from the declaration and nothing else.
+
+    Everything here is a function of *source*: what the item declares, what it
+    aliases, what its documents describe. That is what makes the projection
+    something a developer keeps correct by adding a declaration, rather than a
+    fixture someone has to remember to update alongside one.
+
+    Two facts are not functions of source, and they are handled differently.
+
+    ``target_kind`` stays, because it changes a *logical* value: an alias
+    destination is registered as the thing it physically is, and that is a view
+    in a Warehouse and a table in a Lakehouse. The catalogue's readers need the
+    real type, so the binding has to reach this far and no further.
+
+    ``installation`` is the row recording which target the item was bound to and
+    which Weaver wrote it. That is pure binding, so it is supplied by whoever is
+    publishing rather than baked in — a repository-derived catalogue has no
+    business claiming an installation.
+    """
+
     scope = InstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
     if any(identity.item != item for identity in retained):
@@ -250,14 +269,14 @@ def project_item_installation(
             }
         )
 
-    rows[INSTALLATION.name].append(
-        {
-            **_scope(scope),
-            "target_name": target_name,
-            "weaver_version": weaver_version,
-            "signature": item_model.signature,
-        }
-    )
+    if installation is not None:
+        rows[INSTALLATION.name].append(
+            {
+                **_scope(scope),
+                **installation,
+                "signature": item_model.signature,
+            }
+        )
     return CatalogueProjection(
         scope=scope,
         rows={name: tuple(values) for name, values in rows.items()},
