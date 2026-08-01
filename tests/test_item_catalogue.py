@@ -91,7 +91,10 @@ def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     schemas = {
         row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)
     }
-    assert schemas == {"Sales", "Files/Sales"}
+    # `Files/_` is the generated runtime folder's schema. It is catalogued by the
+    # same rule as any other folder schema, which is the point: nothing about the
+    # load layer gets a namespace convention of its own.
+    assert schemas == {"Sales", "Files/Sales", "Files/_"}
 
 
 def test_no_catalogue_table_keeps_a_hidden_namespace_dimension():

@@ -76,9 +76,19 @@ def test_everything_declared_is_certified(repository):
     # catalogue item too, and projecting *everything declared* means projecting
     # that as well — which is right, and worth seeing rather than filtering away
     # inside the constructor.
+    #
+    # `_.Load` is here for the same reason. An item with load code declares the
+    # runtime folder that code is deployed into, and it is generated during
+    # interpretation, so *the source declares it* just as surely as the author's
+    # own documents do.
     assert {
         identity for identity in catalogue.registered if identity.item == item_id()
-    } == {document_id(CUSTOMER), document_id(VIEW), document_id(FOLDER)}
+    } == {
+        document_id(CUSTOMER),
+        document_id(VIEW),
+        document_id(FOLDER),
+        document_id(f"{item_id()}/Files/_.Load"),
+    }
     assert any(
         identity.item.item_name == "_weaver" for identity in catalogue.registered
     ), "the builtin catalogue item is declared source too"
@@ -92,7 +102,12 @@ def test_each_object_is_registered_as_what_it_is(repository):
         for identity, document in catalogue.registered.items()
         if identity.item == item_id()
     }
-    assert kinds == {"Customer": "table", "ActiveCustomer": "view", "CustomerCsv": "folder"}
+    assert kinds == {
+        "Customer": "table",
+        "ActiveCustomer": "view",
+        "CustomerCsv": "folder",
+        "Load": "folder",
+    }
 
 
 def test_signatures_are_the_declarations_own(repository):

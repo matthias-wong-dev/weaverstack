@@ -1,4 +1,4 @@
-"""Schema ``_`` is an ordinary schema, and an object may depend on nothing.
+"""An underscore schema is ordinary, and an object may depend on nothing.
 
 Weaver's own catalogue lives in schema ``_`` of the Weaver Lakehouse, declared as
 ordinary Weaver document and built through the ordinary build path. Two rules had to give way
@@ -9,6 +9,14 @@ for that, and both were over-broad rather than load-bearing:
   object;
 - a Spark SQL object must be explicit about its dependencies, which an empty list
   satisfies as well as a populated one. A query built from literals has none.
+
+``_`` itself is the one name an ordinary item may not use, and that is a
+statement about *ownership* rather than a return of the naming rule: it holds the
+runtime tree a load is deployed into and the schema generated load procedures
+live in, both of which Weaver generates and prunes. The package-owned
+``Lakehouse/_weaver`` still declares its catalogue there, because it is the item
+that owns it. Any other underscore schema is authored freely, which is what these
+tests check.
 
 A misnamed object file is still an error rather than quietly demoted to
 support.
@@ -25,7 +33,7 @@ from weaver.declaration.model import WeaverDocumentId
 
 REGISTRY = """\
 /*
-Table ID: _.Registry
+Table ID: _Control.Registry
 
 Description: Objects Weaver currently certifies as installed.
 
@@ -96,7 +104,7 @@ class _Documents:
         ]
 
 
-def _repo(tmp_path, files: dict[str, str], schemas=("_",)):
+def _repo(tmp_path, files: dict[str, str], schemas=("_Control",)):
     root = tmp_path / "repo"
     for schema in schemas:
         path = root / ITEM / "schemas" / f"{schema}.yml"
@@ -109,18 +117,32 @@ def _repo(tmp_path, files: dict[str, str], schemas=("_",)):
     return _Documents(parse_item_repository(Location(value=str(root)), store=LocalStore()))
 
 
-def test_an_object_in_schema_underscore_is_read_as_an_object(tmp_path):
-    repo = _repo(tmp_path, {"_.Registry.sql": REGISTRY})
-    document = repo["_.Registry"]
-    assert document.object_id.schema == "_"
+def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):
+    repo = _repo(tmp_path, {"_Control.Registry.sql": REGISTRY})
+    document = repo["_Control.Registry"]
+    assert document.object_id.schema == "_Control"
     assert document.object_id.object == "Registry"
-    assert document.node_id == f"{ITEM}/_.Registry"
+    assert document.node_id == f"{ITEM}/_Control.Registry"
     assert repo.support_files == ()
 
 
-def test_the_underscore_schema_must_still_be_declared(tmp_path):
+def test_an_underscore_schema_must_still_be_declared(tmp_path):
     with pytest.raises(DiscoveryError, match="is not declared by item"):
-        _repo(tmp_path, {"_.Registry.sql": REGISTRY}, schemas=("Sales",))
+        _repo(tmp_path, {"_Control.Registry.sql": REGISTRY}, schemas=("Sales",))
+
+
+def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
+    """The one name an ordinary item may not author into.
+
+    It holds generated infrastructure — the deployed runtime tree and the load
+    procedures — so an authored object there would collide with something Weaver
+    generates, claims and prunes. Refused at interpretation, where the author can
+    still see which file caused it.
+    """
+
+    registry = REGISTRY.replace("_Control.Registry", "_.Registry")
+    with pytest.raises(DiscoveryError, match="generated Weaver infrastructure"):
+        _repo(tmp_path, {"_.Registry.sql": registry}, schemas=("_",))
 
 
 

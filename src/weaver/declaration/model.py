@@ -24,6 +24,30 @@ WAREHOUSE = "Warehouse"
 ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE})
 FILES = "Files"
 
+#: What an identity's two parts *mean*, which is what decides how they are
+#: validated and spelled. Weaver has one identity — a schema and an object
+#: within an item — and three kinds of target wear it differently:
+#:
+#: ``OBJECT``     ``Sales`` + ``Customer``: a table, view or folder.
+#: ``FILE``       ``_/Load/lib`` + ``dates.py``: the containing path is the
+#:                schema and the complete leaf filename is the object.
+#: ``PROCEDURE``  ``_`` + ``Load Sales.Customer``: an ordinary schema, and an
+#:                object name that carries the dot and space of the object it
+#:                loads.
+#:
+#: Validation branches on this rather than assuming table-style naming
+#: everywhere, and the Registry stores the real logical target name rather than
+#: something encoded to fit one validator.
+OBJECT_SHAPE = "object"
+FILE_SHAPE = "file"
+PROCEDURE_SHAPE = "procedure"
+SHAPES = (OBJECT_SHAPE, FILE_SHAPE, PROCEDURE_SHAPE)
+
+#: How a non-object shape marks itself in the one-line spelling. A file's schema
+#: is a path and its object carries an extension, so ``Schema.Object`` cannot
+#: tell the two halves apart without being told which shape it is reading.
+_SHAPE_MARKERS = {FILE_SHAPE: "file:", PROCEDURE_SHAPE: "procedure:"}
+
 
 def _logical_name(value: object, *, what: str) -> str:
     if not isinstance(value, str):
@@ -32,6 +56,61 @@ def _logical_name(value: object, *, what: str) -> str:
         raise IdentityError(f"{what} must be a non-empty name without surrounding whitespace")
     if any(character in value for character in ("/", "\\", ".", ":")):
         raise IdentityError(f"{what} must be one logical name, got {value!r}")
+    return value
+
+
+def _relative_path(value: object, *, what: str) -> str:
+    """One relative, canonical path — a file identity's schema half.
+
+    A file's schema is where it sits, so it may contain ``/``. Everything that
+    would make it ambiguous or let it escape its root may not: an absolute path,
+    a backslash, an empty component, or a ``.``/``..`` component. The result is
+    a path that joins onto a root exactly once and means the same thing however
+    it is read back.
+    """
+
+    if not isinstance(value, str):
+        raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
+    if not value or value != value.strip():
+        raise IdentityError(f"{what} must be a non-empty path without surrounding whitespace")
+    if "\\" in value:
+        raise IdentityError(f"{what} must use '/' between components, got {value!r}")
+    components = value.split("/")
+    if any(not component for component in components):
+        raise IdentityError(f"{what} must be relative and canonical, got {value!r}")
+    if any(component in (".", "..") for component in components):
+        raise IdentityError(f"{what} must not contain '.' or '..', got {value!r}")
+    return value
+
+
+def _file_name(value: object, *, what: str) -> str:
+    """One complete leaf filename, extension included — a file identity's object."""
+
+    if not isinstance(value, str):
+        raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
+    if not value or value != value.strip():
+        raise IdentityError(f"{what} must be a non-empty name without surrounding whitespace")
+    if "/" in value or "\\" in value:
+        raise IdentityError(f"{what} must be one filename, got {value!r}")
+    if value in (".", ".."):
+        raise IdentityError(f"{what} must name a file, got {value!r}")
+    return value
+
+
+def _procedure_name(value: object, *, what: str) -> str:
+    """One procedure name, which carries the identity of what it loads.
+
+    ``Load Sales.Customer`` is the real name of the real object, so the dot and
+    the space are part of it rather than something to encode away. It is still
+    one name in one schema, so a path separator is refused.
+    """
+
+    if not isinstance(value, str):
+        raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
+    if not value or value != value.strip():
+        raise IdentityError(f"{what} must be a non-empty name without surrounding whitespace")
+    if any(character in value for character in ("/", "\\")):
+        raise IdentityError(f"{what} must be one object name, got {value!r}")
     return value
 
 
@@ -111,38 +190,87 @@ class WeaverSchemaId:
 
 @dataclass(frozen=True, order=True)
 class WeaverDocumentId:
-    """An item-qualified table-style or Lakehouse Files document identity."""
+    """An item-qualified target identity: one schema and one object, in one item.
+
+    One identity model for everything Weaver builds. A table, a deployed Python
+    module and a generated stored procedure are all *a schema and an object
+    inside an item* — what differs is only the shape of those two parts, which
+    :data:`SHAPES` names and which decides both how they are validated and how
+    they are spelled on one line. The Registry stores the two real parts, so
+    nothing is encoded to fit a validator and nothing has to be decoded to be
+    used.
+    """
 
     item: WeaverItemId
     object_id: ObjectId
     is_files: bool = False
+    shape: str = OBJECT_SHAPE
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "object_id",
-            ObjectId(
-                schema=_logical_name(self.object_id.schema, what="schema name"),
-                object=_logical_name(self.object_id.object, what="object name"),
-            ),
-        )
+        if self.shape not in SHAPES:
+            expected = ", ".join(SHAPES)
+            raise IdentityError(
+                f"identity shape must be one of {expected}, got {self.shape!r}"
+            )
+        if self.shape == FILE_SHAPE:
+            schema = _relative_path(self.object_id.schema, what="file path")
+            name = _file_name(self.object_id.object, what="file name")
+        elif self.shape == PROCEDURE_SHAPE:
+            schema = _logical_name(self.object_id.schema, what="schema name")
+            name = _procedure_name(self.object_id.object, what="object name")
+        else:
+            schema = _logical_name(self.object_id.schema, what="schema name")
+            name = _logical_name(self.object_id.object, what="object name")
+        object.__setattr__(self, "object_id", ObjectId(schema=schema, object=name))
+        if self.is_files and self.shape != OBJECT_SHAPE:
+            raise IdentityError(
+                "the Files/ prefix belongs to a Folder document; a "
+                f"{self.shape} identity carries its own location"
+            )
         if self.is_files and self.item.item_type != LAKEHOUSE:
             raise IdentityError("Files documents may only belong to a Lakehouse item")
+        if self.shape == FILE_SHAPE and self.item.item_type != LAKEHOUSE:
+            raise IdentityError("a file identity may only belong to a Lakehouse item")
+        if self.shape == PROCEDURE_SHAPE and self.item.item_type != WAREHOUSE:
+            raise IdentityError(
+                "a stored procedure identity may only belong to a Warehouse item"
+            )
 
     @classmethod
     def parse(cls, text: str) -> "WeaverDocumentId":
         parts = _split(text, what="document identity")
+        if len(parts) >= 4:
+            marker = _SHAPE_MARKERS[FILE_SHAPE]
+            if parts[2].startswith(marker):
+                # ``file:<path>/<name>`` — the last component is the filename and
+                # everything before it, marker stripped, is the containing path.
+                head = (parts[2][len(marker) :],) + parts[3:-1]
+                return cls(
+                    WeaverItemId(parts[0], parts[1]),
+                    ObjectId(schema="/".join(head), object=parts[-1]),
+                    shape=FILE_SHAPE,
+                )
+        if len(parts) == 4:
+            marker = _SHAPE_MARKERS[PROCEDURE_SHAPE]
+            if parts[2].startswith(marker):
+                return cls(
+                    WeaverItemId(parts[0], parts[1]),
+                    ObjectId(schema=parts[2][len(marker) :], object=parts[3]),
+                    shape=PROCEDURE_SHAPE,
+                )
+            if parts[2] == FILES:
+                return cls(
+                    WeaverItemId(parts[0], parts[1]),
+                    _object_id(parts[3]),
+                    is_files=True,
+                )
         if len(parts) == 3:
             return cls(WeaverItemId(parts[0], parts[1]), _object_id(parts[2]))
-        if len(parts) == 4 and parts[2] == FILES:
-            return cls(
-                WeaverItemId(parts[0], parts[1]),
-                _object_id(parts[3]),
-                is_files=True,
-            )
         raise IdentityError(
-            "document identity must be ItemType/ItemName/Schema.Object or "
-            f"Lakehouse/ItemName/Files/Schema.Object, got {text!r}"
+            "document identity must be ItemType/ItemName/Schema.Object, "
+            "Lakehouse/ItemName/Files/Schema.Object, "
+            "Lakehouse/ItemName/file:Path/Name.ext or "
+            f"Warehouse/ItemName/procedure:Schema/Object, got {text!r}"
         )
 
     @classmethod
@@ -165,8 +293,25 @@ class WeaverDocumentId:
 
     @property
     def relative(self) -> str:
+        if self.shape == FILE_SHAPE:
+            marker = _SHAPE_MARKERS[FILE_SHAPE]
+            return f"{marker}{self.object_id.schema}/{self.object_id.object}"
+        if self.shape == PROCEDURE_SHAPE:
+            marker = _SHAPE_MARKERS[PROCEDURE_SHAPE]
+            return f"{marker}{self.object_id.schema}/{self.object_id.object}"
         prefix = f"{FILES}/" if self.is_files else ""
         return f"{prefix}{self.object_id.qualified}"
+
+    @property
+    def is_load_artefact(self) -> bool:
+        """Whether this identity names something a load layer produces.
+
+        The two load shapes against the one structural shape. Asked wherever a
+        selection has to be partitioned, so that the question is answered from
+        the identity rather than by each caller keeping its own set.
+        """
+
+        return self.shape in (FILE_SHAPE, PROCEDURE_SHAPE)
 
     def __str__(self) -> str:
         return f"{self.item}/{self.relative}"
@@ -273,6 +418,13 @@ class WeaverRepository:
     )
     schema_documents: Mapping[WeaverSchemaId, "SchemaSes"] = field(default_factory=dict)
     support_files: tuple[str, ...] = ()
+    #: The bytes of the support files a build has to *carry*, by the same
+    #: repository-relative path. A ``lib/`` module is authored source that no
+    #: Weaver document declares, and the load layer deploys it — so its content
+    #: has to reach signature derivation and the bundle without either of them
+    #: reopening the repository. Files nothing deploys, such as ``alias.yml``,
+    #: are listed in :attr:`support_files` and not held here.
+    support_file_contents: Mapping[str, bytes] = field(default_factory=dict)
     signature: str = ""
     aliases: tuple[RepositoryAlias, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()

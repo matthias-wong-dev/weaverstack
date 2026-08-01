@@ -6,13 +6,23 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from ..declaration.model import WeaverDocumentId, WeaverItemId
+from ..declaration.metadata import ObjectId
+from ..declaration.model import (
+    FILE_SHAPE,
+    PROCEDURE_SHAPE,
+    WeaverDocumentId,
+    WeaverItemId,
+)
 from ..errors import BuildError
 from ..spark.tokens import object_token
-from .claims import CatalogueClaim, claim_rules_for_object_type
+from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from .reader import _is_absent, read_installation
 from .render import InstallationScope
 from .tables import BUILD_EPOCH, CATALOGUE_TABLES, INSTALLATION, OBJECT_TYPES, REGISTRY
+
+#: What a Folder's stored schema carries, so a table and a folder of the same
+#: name stay apart. Only the object shape uses it — see :func:`catalogue_schema`.
+_FILES_PREFIX = "Files/"
 
 
 @dataclass(frozen=True, init=False)
@@ -331,14 +341,18 @@ def _registered_documents(
     registered: dict[WeaverDocumentId, RegisteredDocument] = {}
     for item, tables in rows.items():
         for row in tables.get(REGISTRY.name, ()):
-            identity = _row_identity(item, row)
+            # The type is read first because it is what says how the other two
+            # columns are shaped: ``_/Load/lib`` and ``dates.py`` are a schema
+            # and an object only once the row has said it describes a file.
             object_type = str(row.get("object_type") or "")
             if object_type not in OBJECT_TYPES:
                 expected = ", ".join(OBJECT_TYPES)
                 raise BuildError(
-                    f"Registry row for {identity} has unsupported object_type "
+                    f"Registry row for {item}/{row.get('schema_name')}."
+                    f"{row.get('object_name')} has unsupported object_type "
                     f"{object_type!r}; expected one of {expected}"
                 )
+            identity = _row_identity(item, row, object_type)
             signature = str(row.get("signature") or "")
             if not signature:
                 raise BuildError(f"Registry row for {identity} has no signature")
@@ -436,13 +450,10 @@ def reconcile_catalogue_state(
             for identity, document in registered.items():
                 if identity.item != item:
                     continue
-                schema = (
-                    f"Files/{identity.object_id.schema}"
-                    if identity.is_files
-                    else identity.object_id.schema
-                )
                 if not inventory.has_object(
-                    schema, identity.object_id.object, document.object_type
+                    catalogue_schema(identity),
+                    identity.object_id.object,
+                    document.object_type,
                 ):
                     stale[identity] = document
         filtered = {}
@@ -492,11 +503,29 @@ def reconcile_catalogue_state(
     )
 
 
-def _row_identity(item: WeaverItemId, row: Mapping[str, object]) -> WeaverDocumentId:
+def _row_identity(
+    item: WeaverItemId, row: Mapping[str, object], object_type: str
+) -> WeaverDocumentId:
+    """One Registry row's identity, built from its own columns.
+
+    The row already *is* the identity: item, schema, object and what kind of
+    object it is are four stored fields. Composing them into a line and handing
+    it to a parser was a round trip through a grammar built for table-style
+    ``Schema.Object`` names, and it could not express the two the load layer
+    installs — a path and a filename, or a procedure named for what it loads.
+    Constructing directly means the stored name is the real name, in both
+    directions.
+    """
+
     schema = str(row.get("schema_name") or "")
-    is_files = schema.startswith("Files/")
-    logical_schema = schema[len("Files/") :] if is_files else schema
-    prefix = "Files/" if is_files else ""
-    return WeaverDocumentId.parse(
-        f"{item}/{prefix}{logical_schema}.{row.get('object_name')}"
+    name = str(row.get("object_name") or "")
+    if object_type == "file":
+        return WeaverDocumentId(item, ObjectId(schema, name), shape=FILE_SHAPE)
+    if object_type == "stored_procedure":
+        return WeaverDocumentId(item, ObjectId(schema, name), shape=PROCEDURE_SHAPE)
+    is_files = schema.startswith(_FILES_PREFIX)
+    return WeaverDocumentId(
+        item,
+        ObjectId(schema[len(_FILES_PREFIX) :] if is_files else schema, name),
+        is_files=is_files,
     )

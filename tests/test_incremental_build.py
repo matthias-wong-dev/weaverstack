@@ -160,6 +160,21 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     }
 
 
+def _stale(rows, item_text: str, object_name: str) -> None:
+    """Age one certified object's signature, found by name rather than position.
+
+    An item's Registry rows are whatever it declares, and that set grows — the
+    generated runtime folder joined it when load artefacts arrived. Reaching for
+    a row by index made a test about signature comparison depend on how the rows
+    happened to sort.
+    """
+
+    registry = rows[WeaverItemId.parse(item_text)][REGISTRY.name]
+    matched = [row for row in registry if row["object_name"] == object_name]
+    assert len(matched) == 1, f"{object_name} is not one row in {item_text}"
+    matched[0]["signature"] = "old-signature"
+
+
 def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     """Impact crosses the alias, because the alias is in the graph.
 
@@ -174,9 +189,7 @@ def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
         rows.update(_catalogue(repository, item_text).rows)
-    rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
-        "signature"
-    ] = "old-signature"
+    _stale(rows, "Lakehouse/Curated", "Customer")
     catalogue = Catalogue(rows)
     impact = determine_impact(
         repository, catalogue.registered, selected=(curated, reporting)
@@ -198,9 +211,7 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
         rows.update(_catalogue(repository, item_text).rows)
-    rows[WeaverItemId.parse("Lakehouse/Curated")][REGISTRY.name][0][
-        "signature"
-    ] = "old-signature"
+    _stale(rows, "Lakehouse/Curated", "Customer")
     catalogue = Catalogue(rows)
     impact = determine_impact(repository, catalogue.registered, selected=(curated,))
 

@@ -94,7 +94,11 @@ def test_the_keep_set_is_what_the_item_declares(estate):
     # metastore does the same, and neither promises the declared spelling.
     assert managed.tables == frozenset({"dwg.customer"})
     assert managed.views == frozenset({"dwg.activecustomer"})
-    assert managed.folders == frozenset({"raw.customercsv"})
+    # `_.load` is the generated folder that owns the item's deployed runtime
+    # tree. It is declared like any other folder, so it is spared like one — and
+    # an item with no load code never declares it, which is how the tree is
+    # eventually removed.
+    assert managed.folders == frozenset({"raw.customercsv", "_.load"})
 
 
 def test_the_keep_set_is_per_physical_side(estate):
@@ -110,7 +114,7 @@ def test_the_keep_set_is_per_physical_side(estate):
     assert managed.tables == frozenset()
     assert managed.views == frozenset()
     # A folder lives under Files whichever object side is being asked about.
-    assert managed.folders == frozenset({"raw.customercsv"})
+    assert managed.folders == frozenset({"raw.customercsv", "_.load"})
 
 
 def test_the_keep_set_and_an_inventory_are_the_same_shape(estate):
