@@ -11,13 +11,44 @@ tidiness: a module under `tests/fabric` that answered to `-m spark` loaded the
 Fabric conftest, and with it a workspace, a credential and a session — so the
 two names described different sets and neither was honest.
 
-| command | directory | fixtures | what it needs |
-|---|---|---|---|
-| `pytest` | `tests/`, `tests/targeted`, `tests/support` | none | nothing |
-| `pytest -m spark` | `tests/spark` | `tests/spark/conftest.py` | a JDK |
-| `pytest -m fabric` | `tests/fabric` | `tests/fabric/conftest.py` | a workspace |
-| `pytest -m full_integration` | `tests/fabric` | `tests/fabric/conftest.py` | a workspace |
-| `pytest -m provisioning` | `tests/fabric` | `tests/fabric/conftest.py` | a workspace |
+| command | needs | runtime |
+|---|---|---|
+| `pytest` | nothing | 14s |
+| `pytest -m spark` | a JDK | ~7m |
+| `pytest -m fabric` | a workspace | ~1m |
+| `pytest -m published_weaver` | a workspace **and a published wheel** | ~2m |
+| `pytest -m full_integration` | a workspace and a published wheel | ~8m |
+| `pytest -m provisioning` | a workspace | — |
+
+The first three are the development loop. **None of them publishes anything**,
+which is the point: a five-minute `weaver install` used to sit between a
+developer and finding out a REST body was malformed.
+
+## What the wheel actually has to prove
+
+Weaver's executors are one implementation; what differs between a desktop run and
+a notebook is how capabilities are *acquired*. Prove that once per capability and
+no feature has to re-prove it — which is what lets `-m fabric` drive real Fabric
+from the checkout.
+
+Writing those probes corrected the model. "Same implementation, different
+acquisition" holds for only half of it:
+
+| capability | desktop | in a session |
+|---|---|---|
+| SQL | injected `desktop_sql_executor` | `sql_for` on the session identity — *same class* |
+| Spark | injected session | the session's own — *same class* |
+| store | `OneLakeDfsClient` | `FabricStore` over `notebookutils.fs` — **different class** |
+| resolution | `FabricResolver` + `DefaultAzureCredential` | `FabricSessionResolver` over `notebookutils` — **different class** |
+
+A session has no CLI, no IMDS and no environment variables, so the desktop
+credential chain simply fails there; REST is reached on a
+`notebookutils.credentials` token. The bottom two get probes of their own because
+for them a desktop test proves a *different class*, not the same one wired
+differently.
+
+The argument also rests on executors never branching on where they run.
+`tests/targeted/test_executor_parity.py` asserts that rather than trusting it.
 
 ```text
 tests/
