@@ -197,6 +197,8 @@ rather than the estate around it.
 | which schemas an item needs; alias namespaces; per-side payloads | `item_schema_stage` | `test_schema_stage.py` | — |
 | generate-and-install from prepared state; failure semantics; archives | `build_item_repository` | `test_build_workflow.py` | — |
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
+| which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
+| the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
 
 ### Covered by old tests, not yet re-homed
 
@@ -239,8 +241,8 @@ read produce the same object a fixture builds?**
 
 | boundary | claim | state |
 |---|---|---|
-| `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape, not round-trip |
-| `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | **gap** |
+| `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape; `test_catalogue_fidelity.py` round-trips load artefacts, whose identities no two-part grammar can express |
+| `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | covered — `test_inventory_fidelity.py`, including the deployed runtime tree file by file |
 | `read_warehouse_inventory` | same, over TDS | **gap** |
 | genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered by `-m spark` and `test_warehouse_build.py` |
 

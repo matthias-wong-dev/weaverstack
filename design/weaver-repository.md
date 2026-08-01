@@ -142,3 +142,22 @@ would make physical deployment history part of logical identity.
 - [CLI usage](cli-usage.md) — workspaces, build, wipe and capacity
 - [Master CLI plan](weaver_master_cli_plan.md) — the authoritative current model
 - [Agent guide](../AGENTS.md) — implementation invariants
+
+## Generated declarations
+
+A parsed repository carries more than what was authored. Weaver composes two
+kinds of generated document into it and reads them through the same static
+readers as authored content, so there is no second parsing path:
+
+- `Lakehouse/_weaver` — the catalogue's own tables, always;
+- an item's `schemas/_.yml`, and for a Lakehouse `Files/___Load.py` — the schema
+  its generated load procedures live in, and the folder its load code is deployed
+  into, present only while the item has load code.
+
+`___Load.py` is `_.Load`: a schema of `_` plus the `__` separator. A run of
+leading underscores is read as the schema it is, which is why the file can be
+named at all.
+
+Because those are generated, `_` is the one schema an ordinary item may not
+author into. Every other underscore schema is free — `_weaver` declares its own
+catalogue in `_`, because it is the item that owns it.

@@ -612,12 +612,19 @@ The build system should prove that:
 ### The bundle is independent
 
 Generate a bundle, remove or make unavailable the Weaver document source repository, and
-successfully install from the bundle alone.
+successfully install from the bundle alone. The bundle carries frozen outputs
+only — no copy of the source — so this is a property of the artefact rather than
+a discipline the installer observes.
 
 ### Build does not load
 
 Use Weaver document objects whose `read()` methods would fail if invoked. Building and
 installing their structure must still succeed.
+
+Installing an item's load *code* does not cross this line and is worth being
+exact about. A deployed module and a generated procedure are objects that must
+exist before a load can run; a build creates, signs and prunes them, and never
+runs them. The test is unchanged — nothing a build does executes authored code.
 
 ### Declared schema is used
 
@@ -779,7 +786,7 @@ bundle is not complete enough.
 
 The philosophy can be condensed into ten rules:
 
-1. **Build creates structure; load moves data.**
+1. **Build creates structure and the code that will load it; load moves data.**
 2. **Interpret the repository once.**
 3. **Make every decision before installation.**
 4. **Freeze create and destructive actions alike.**
