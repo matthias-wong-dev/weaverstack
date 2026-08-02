@@ -38,7 +38,7 @@ def keep(*, tables=(), views=(), folders=(), schemas=(), folder_schemas=()):
 
 def prune(inventory, managed, *, target=None):
     payloads: dict[str, bytes] = {}
-    actions = render_inventory_prune(
+    actions, _changes = render_inventory_prune(
         target or bound_target(), inventory, managed, payloads
     )
     return actions, payloads

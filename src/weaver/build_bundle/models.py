@@ -19,10 +19,11 @@ Every type serialises to and from plain mappings, which is what the canonical
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .targets import BoundTarget
+from .changes import TargetChange
 from .incremental import BuildSelection
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
@@ -226,6 +227,15 @@ class BuildPlan:
     sequences: tuple[BuildSequence, ...]
     selection: BuildSelection
     omitted_nodes: tuple[OmittedNode, ...] = ()
+    #: What this plan will *mean* for each bound target, keyed by target id —
+    #: the objects it adds and removes. Part of the manifest, and therefore of
+    #: the bundle identity, so the summary a reviewer reads is the summary the
+    #: installation was certified with. A sibling file outside the hash could be
+    #: edited after certification, which is the thing frozen payloads exist to
+    #: prevent.
+    target_changes: Mapping[str, tuple[TargetChange, ...]] = field(
+        default_factory=dict
+    )
 
     def to_mapping(self) -> dict[str, Any]:
         mapping = {
@@ -236,6 +246,10 @@ class BuildPlan:
             "targets": [target.to_mapping() for target in self.targets],
             "sequences": [sequence.to_mapping() for sequence in self.sequences],
             "omitted_nodes": [node.to_mapping() for node in self.omitted_nodes],
+            "target_changes": {
+                target_id: [change.to_mapping() for change in changes]
+                for target_id, changes in sorted(self.target_changes.items())
+            },
         }
         mapping["selection"] = self.selection.to_mapping()
         return mapping
@@ -253,6 +267,10 @@ class BuildPlan:
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
             ),
+            target_changes={
+                target_id: tuple(TargetChange.from_mapping(c) for c in changes)
+                for target_id, changes in mapping.get("target_changes", {}).items()
+            },
         )
 
     # --- convenience views ------------------------------------------------

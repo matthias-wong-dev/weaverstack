@@ -567,6 +567,87 @@ def alias_repository(
     return parse_item_repository(Location(str(root)))
 
 
+SPARK_TABLE = """\
+/*
+Table ID: {object_id}
+
+Description: A Spark SQL table.
+
+Lineage: Declared for a test.
+
+Dependencies: []
+
+Schema:
+  CustomerId: string
+*/
+select cast(null as string) as CustomerId
+ where 1 = 0
+"""
+
+
+def full_estate(root: Path):
+    """One repository holding every artefact Weaver can install.
+
+    A table, a view, a folder, a deployed module, a generated Spark SQL load
+    file, and a generated stored procedure — across both item types, because the
+    two physical sides are not symmetric and a Lakehouse-only estate stops being
+    representative exactly where that asymmetry starts.
+
+    Shared because three separate claims need *completeness* rather than a narrow
+    subject: that the catalogue registers every artefact kind, that a build's
+    declared effect covers every action it emits, and that a build converges. A
+    narrower fixture cannot answer any of them.
+    """
+
+    for relative, text in {
+        f"{ITEM}/schemas/DWG.yml": schema_document("DWG"),
+        f"{ITEM}/schemas/Raw.yml": schema_document("Raw"),
+        f"{ITEM}/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+        f"{ITEM}/DWG.Summary.sql": SPARK_TABLE.format(object_id="DWG.Summary"),
+        f"{ITEM}/DWG.ActiveCustomer.sql": spark_view(
+            "DWG.ActiveCustomer", depends_on="DWG.Customer"
+        ),
+        f"{ITEM}/Files/Raw__CustomerCsv.py": folder_document("Raw.CustomerCsv"),
+        f"{ITEM}/lib/dates.py": "def parse(value):\n    return value\n",
+        f"{WAREHOUSE_ITEM}/schemas/Sales.yml": schema_document("Sales"),
+        f"{WAREHOUSE_ITEM}/Sales.Customer.sql": warehouse_table("Sales.Customer"),
+        f"{WAREHOUSE_ITEM}/Sales.Live.sql": warehouse_view(
+            "Sales.Live", select="select 1 as CustomerId", depends_on="Sales.Customer"
+        ),
+    }.items():
+        _write(root, relative, text)
+    return parse_item_repository(Location(str(root)))
+
+
+def estate_bindings():
+    """Both items of :func:`full_estate`, bound to neutral physical targets."""
+
+    return item_bindings((ITEM, "Sales_LH"), (WAREHOUSE_ITEM, "Reporting_WH"))
+
+
+def estate_inventories(repository, *, empty: bool = False):
+    """Each bound target's inventory, either as built or as nothing at all."""
+
+    bound = {b.item: b.to_bound_target() for b in estate_bindings().entries}
+    made = {}
+    for item, target_kind, kind in (
+        (ITEM, DELTA_TARGET, "lakehouse"),
+        (WAREHOUSE_ITEM, SQL_TARGET, "warehouse"),
+    ):
+        identity = item_id(item)
+        arguments = dict(
+            target_id=bound[identity].id, kind=kind, target_name=bound[identity].name
+        )
+        made[identity] = (
+            target_inventory(**arguments)
+            if empty
+            else FixtureInventory.from_repository(
+                repository, item=item, target_kind=target_kind, **arguments
+            )
+        )
+    return made
+
+
 def single_document_repository(
     root: Path,
     *,

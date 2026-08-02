@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, replace
 from typing import Iterable, Mapping, Sequence
 
 from ..errors import BuildError
+from .changes import TargetChange, merge as merge_changes
 from .models import BuildBatch, BuildSequence
 from .payloads import payload_path
 
@@ -65,6 +66,11 @@ class PlannedStage:
     ``slug`` names the stage's payload directory. ``payloads`` is keyed by bare
     filename within it, because the directory's name is not known until the
     stage has a number.
+
+    ``changes`` is what this stage's actions will *mean* for each target, keyed
+    by target id. Rendered beside the actions rather than inferred from them —
+    see :mod:`weaver.build_bundle.changes` — so the statement of effect and the
+    thing that has the effect are written in one place.
     """
 
     phase: str
@@ -73,6 +79,7 @@ class PlannedStage:
     slug: str = ""
     index: int = 0
     payloads: Mapping[str, bytes] = field(default_factory=dict)
+    changes: Mapping[str, tuple[TargetChange, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.phase not in _PHASE_RANK:
@@ -128,6 +135,7 @@ def merge_layer_stages(stages: Iterable[PlannedStage]) -> tuple[PlannedStage, ..
                 first,
                 batches=tuple(batch for stage in group for batch in stage.batches),
                 payloads=payloads,
+                changes=merge_changes(*(stage.changes for stage in group)),
             )
         )
     return tuple(merged)
@@ -135,7 +143,11 @@ def merge_layer_stages(stages: Iterable[PlannedStage]) -> tuple[PlannedStage, ..
 
 def enumerate_stages(
     stages: Sequence[PlannedStage],
-) -> tuple[tuple[BuildSequence, ...], dict[str, bytes]]:
+) -> tuple[
+    tuple[BuildSequence, ...],
+    dict[str, bytes],
+    dict[str, tuple[TargetChange, ...]],
+]:
     """Number the assembled plan and resolve every payload path.
 
     Batch ids gain the same number prefix, so a batch is still identifiable in a
@@ -145,6 +157,7 @@ def enumerate_stages(
 
     sequences: list[BuildSequence] = []
     payloads: dict[str, bytes] = {}
+    changes: list[Mapping[str, tuple[TargetChange, ...]]] = []
     # An empty stage is not a barrier — it is a phase this build had no work for
     # — so it takes no number and leaves no gap.
     populated = [stage for stage in stages if stage.batches]
@@ -154,6 +167,7 @@ def enumerate_stages(
             path = payload_path(number, stage.payload_slug, filename)
             resolved[filename] = path
             payloads[path] = content
+        changes.append(stage.changes)
         sequences.append(
             BuildSequence(
                 number=number,
@@ -163,7 +177,7 @@ def enumerate_stages(
                 ),
             )
         )
-    return tuple(sequences), payloads
+    return tuple(sequences), payloads, merge_changes(*changes)
 
 
 def _numbered(batch: BuildBatch, number: int, payloads: Mapping[str, str]) -> BuildBatch:

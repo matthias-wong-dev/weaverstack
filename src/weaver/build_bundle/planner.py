@@ -196,7 +196,7 @@ def generate_item_build_bundle(
         )
     )
 
-    sequences, payloads = enumerate_stages(stages)
+    sequences, payloads, target_changes = enumerate_stages(stages)
 
     omitted.extend(
         OmittedNode(
@@ -216,6 +216,7 @@ def generate_item_build_bundle(
         sequences=sequences,
         selection=selection,
         omitted_nodes=tuple(sorted(omitted, key=lambda node: (node.node_id, node.reason))),
+        target_changes=target_changes,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(

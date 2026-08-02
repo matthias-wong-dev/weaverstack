@@ -45,7 +45,7 @@ def _stage(phase, *, index=0, slug="things", batch="one", payloads=None, actions
 
 
 def test_stages_are_numbered_consecutively_from_one():
-    sequences, _payloads = enumerate_stages(
+    sequences, _payloads, _changes = enumerate_stages(
         [_stage(PRUNE), _stage(ALIAS), _stage(BUILD)]
     )
 
@@ -55,7 +55,7 @@ def test_stages_are_numbered_consecutively_from_one():
 def test_an_empty_stage_takes_no_number_and_leaves_no_gap():
     empty = PlannedStage(phase=ALIAS, description="nothing to alias", batches=())
 
-    sequences, _payloads = enumerate_stages([_stage(PRUNE), empty, _stage(BUILD)])
+    sequences, _payloads, _changes = enumerate_stages([_stage(PRUNE), empty, _stage(BUILD)])
 
     assert [sequence.number for sequence in sequences] == [1, 2]
     assert [sequence.description for sequence in sequences] == [
@@ -65,7 +65,7 @@ def test_an_empty_stage_takes_no_number_and_leaves_no_gap():
 
 
 def test_payload_paths_and_batch_ids_gain_the_number_they_were_given():
-    sequences, payloads = enumerate_stages(
+    sequences, payloads, _changes = enumerate_stages(
         [
             _stage(PRUNE),
             _stage(

@@ -17,6 +17,16 @@ from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..spark.tokens import object_token
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_load_artefacts
+from .changes import (
+    FILE as FILE_KIND,
+    FOLDER as FOLDER_KIND,
+    SCHEMA as SCHEMA_KIND,
+    STORED_PROCEDURE as PROCEDURE_KIND,
+    TABLE as TABLE_KIND,
+    VIEW as VIEW_KIND,
+    added as change_added,
+    removed as change_removed,
+)
 from .models import (
     BUILD_FOLDER,
     BUILD_PROCEDURE,
@@ -40,6 +50,16 @@ from .targets import WAREHOUSE_TARGET
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
 _DROP_KIND = {FOLDER: DROP_FOLDER, TABLE: DROP_TABLE, VIEW: DROP_VIEW}
 _DECLARATION_KIND = {"folder": FOLDER, "table": TABLE, "view": VIEW}
+
+#: A Weaver document kind, and a Registry object type, as the change vocabulary
+#: spells them. Two mappings rather than one because the two inputs are
+#: different: a build knows what it declares, a drop knows what is installed.
+_CHANGE_KIND_FOR_KIND = {FOLDER: FOLDER_KIND, TABLE: TABLE_KIND, VIEW: VIEW_KIND}
+_CHANGE_KIND_FOR_TYPE = {
+    "folder": FOLDER_KIND,
+    "table": TABLE_KIND,
+    "view": VIEW_KIND,
+}
 
 #: Kinds that change Delta storage, and therefore leave a Lakehouse's SQL
 #: analytics endpoint describing something that is no longer there.
@@ -105,7 +125,7 @@ def item_prune_stage(
     )
 
     payloads: dict[str, bytes] = {}
-    actions = render_inventory_prune(target, inventory, managed, payloads)
+    actions, changes = render_inventory_prune(target, inventory, managed, payloads)
     if not actions:
         return None
 
@@ -117,6 +137,12 @@ def item_prune_stage(
         slug="item-prune",
         description="prune unmanaged objects by logical item",
         payloads={f"{item_slug}-{name}": data for name, data in payloads.items()},
+        changes={
+            target.id: tuple(
+                replace(change, action_id=f"{item_slug}-{change.action_id}")
+                for change in changes
+            )
+        },
         batches=(
             BuildBatch(
                 id=f"item-prune-{item_slug}",
@@ -155,10 +181,20 @@ def item_drop_stages(
     stages = []
     for index, layer in enumerate(reversed(graph.layers())):
         payloads: dict[str, bytes] = {}
-        actions = tuple(
-            _drop_action(identities[node], registered[identities[node]].object_type, target, payloads)
-            for node in sorted(layer)
-        )
+        changes: list = []
+        actions = []
+        for node in sorted(layer):
+            identity = identities[node]
+            installed = registered[identity].object_type
+            actions.append(_drop_action(identity, installed, target, payloads))
+            changes.append(
+                change_removed(
+                    _CHANGE_KIND_FOR_TYPE[installed],
+                    identity.object_id.qualified,
+                    f"managed-drop-{_slug(identity)}",
+                )
+            )
+        actions = tuple(actions)
         stages.append(
             PlannedStage(
                 phase=DROP,
@@ -166,6 +202,7 @@ def item_drop_stages(
                 slug="managed-drop",
                 description="drop selected rebuild dependency layer",
                 payloads=payloads,
+                changes={target.id: tuple(changes)},
                 batches=(
                     BuildBatch(
                         id=f"managed-drop-{_slug(item)}",
@@ -255,6 +292,7 @@ def item_schema_stage(
     item_slug = _slug(item)
     payloads: dict[str, bytes] = {}
     actions = []
+    changes = []
     for schema in schemas:
         if target.kind == WAREHOUSE_TARGET:
             content = f"create schema [{schema.replace(']', ']]')}];\n".encode("utf-8")
@@ -264,9 +302,10 @@ def item_schema_stage(
             executor, extension = "spark_schema", ".schema.json"
         filename = f"create-{item_slug}-{schema}{extension}"
         payloads[filename] = content
+        action_id = f"schema-{item_slug}-{schema}"
         actions.append(
             BuildAction(
-                id=f"schema-{item_slug}-{schema}",
+                id=action_id,
                 kind=CREATE_SCHEMA,
                 resource_node_id=None,
                 executor=executor,
@@ -274,11 +313,13 @@ def item_schema_stage(
                 payload_sha256=sha256_hex(content),
             )
         )
+        changes.append(change_added(SCHEMA_KIND, schema, action_id))
     return PlannedStage(
         phase=SCHEMA,
         slug="create-schemas",
         description="create item-owned schemas",
         payloads=payloads,
+        changes={target.id: tuple(changes)},
         batches=(
             BuildBatch(id=f"{item_slug}", target_id=target.id, actions=tuple(actions)),
         ),
@@ -400,16 +441,27 @@ def item_load_stages(
         return ()
     payloads: dict[str, bytes] = {}
     actions = []
+    changes = []
     for artefact in sorted(selected, key=lambda value: str(value.identity)):
         rendered = render_load_build_action(artefact)
         payloads.update(rendered.payloads)
         actions.append(rendered.action)
+        changes.append(
+            change_added(
+                FILE_KIND if artefact.is_file else PROCEDURE_KIND,
+                artefact.target_path
+                if artefact.is_file
+                else artefact.identity.object_id.qualified,
+                rendered.action.id,
+            )
+        )
     return (
         PlannedStage(
             phase=LOAD,
             slug="load",
             description="install load artefacts",
             payloads=payloads,
+            changes={target.id: tuple(changes)},
             batches=(
                 BuildBatch(
                     id=f"{_slug(item)}", target_id=target.id, actions=tuple(actions)
@@ -452,6 +504,7 @@ def item_load_removals(
     )
     payloads: dict[str, bytes] = {}
     actions = []
+    changes = []
     for identity in selected:
         object_type = registered[identity].object_type
         action_slug = _slug(identity)
@@ -464,6 +517,13 @@ def item_load_removals(
                     executor="load_file",
                     payload=None,
                     payload_sha256=None,
+                )
+            )
+            changes.append(
+                change_removed(
+                    FILE_KIND,
+                    f"{identity.object_id.schema}/{identity.object_id.object}",
+                    f"load-remove-{action_slug}",
                 )
             )
             continue
@@ -485,6 +545,13 @@ def item_load_removals(
                 payload_sha256=sha256_hex(content),
             )
         )
+        changes.append(
+            change_removed(
+                PROCEDURE_KIND,
+                identity.object_id.qualified,
+                f"load-remove-{action_slug}",
+            )
+        )
     if not actions:
         return ()
     return (
@@ -493,6 +560,7 @@ def item_load_removals(
             slug="load",
             description="install load artefacts",
             payloads=payloads,
+            changes={target.id: tuple(changes)},
             batches=(
                 BuildBatch(
                     id=f"remove-{_slug(item)}",
@@ -522,13 +590,20 @@ def item_build_stages(
     for index, layer in enumerate(graph.layers()):
         payloads: dict[str, bytes] = {}
         actions = []
+        changes = []
         for node in sorted(layer):
             identity = identities[node]
-            rendered = render_document_build_action(
-                identity, repository.source_documents[identity]
-            )
+            source = repository.source_documents[identity]
+            rendered = render_document_build_action(identity, source)
             payloads.update(rendered.payloads)
             actions.append(rendered.action)
+            changes.append(
+                change_added(
+                    _CHANGE_KIND_FOR_KIND[source.kind],
+                    identity.object_id.qualified,
+                    rendered.action.id,
+                )
+            )
         actions = tuple(actions)
         stages.append(
             PlannedStage(
@@ -537,6 +612,7 @@ def item_build_stages(
                 slug="build-objects",
                 description="build dependency layer",
                 payloads=payloads,
+                changes={target.id: tuple(changes)},
                 batches=(
                     BuildBatch(
                         id=f"{_slug(item)}", target_id=target.id, actions=actions

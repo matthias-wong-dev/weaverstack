@@ -422,6 +422,7 @@ A bundle is the complete contract between planning and execution. It contains:
 - the full build selection;
 - ordered sequences, batches, and actions;
 - exact DDL, DML, filesystem operations, and payload hashes;
+- **what each target will hold afterwards** — the objects added and removed;
 - the deterministic bundle identity and the signature of the source it was planned from;
 - omitted nodes and reporting metadata.
 
@@ -445,7 +446,47 @@ so nothing has to leave arithmetic headroom for a repository's dependency depth
 and no phase can collide with a region another phase claimed. A number *describes*
 the order the plan already has; it does not create it.
 
-### 11a. Three seams
+### 11a. What a build declares it will mean
+
+The actions say what runs. `target_changes` says what it amounts to: per bound
+target, the objects the build adds and removes, named as an inventory reports
+them.
+
+```text
+remove  table   DWG.Legacy                <- prune-table-DWG.Legacy
+add     table   DWG.Customer              <- object-DWG.Customer
+add     file    _/Load/lib/dates.py       <- load-file-lib-dates.py
+```
+
+**Declared, not inferred.** The effect of an action *could* be derived —
+`prune_schema` removes a schema, `write_file` adds a path — but that derivation
+is a model of what executors do, living where no executor can correct it. It
+drifts silently. Stating the effect where the action is rendered puts the two
+statements in one function, which is where a disagreement is cheapest to notice.
+
+**Checked, not trusted.** A summary the planner writes about its own plan proves
+nothing on its own. Every change names the action that produces it, so a physical
+action nothing declares and a declaration nothing performs both fail a test —
+per item type, since the two physical sides emit different actions. Adding an
+artefact type means emitting an action *and* a change; forget either and the
+correspondence breaks.
+
+It also gives a pruned object somewhere to be written down. A prune action
+carries no `resource_node_id` — what it removes has no node in the repository,
+which is why it is being pruned — so without this, what a prune destroys appears
+only inside a frozen SQL payload.
+
+The summary lives in the manifest and therefore in the bundle identity: the
+summary a reviewer reads is the one the installation was certified with. A
+sibling file outside the hash could be edited afterwards, which is exactly what
+frozen payloads exist to prevent.
+
+Applying it to a prepared inventory gives the state a build is aiming at, which
+is what lets **"a build converges on what the source declares"** be asserted
+without installing anything — from an empty target, from a damaged one, and from
+a correct one after a source is deleted.
+
+### 11b. Three seams
 
 Generation and execution are reachable at three narrower points than "build a
 bundle", each the lowest layer that can answer its own question:
@@ -469,7 +510,7 @@ failure becomes a *result* rather than an exception. What remains for a real
 workspace is narrow, and reaching it no longer costs a repository parse, a
 catalogue read and an installation.
 
-### 11b. Load artefacts
+### 11c. Load artefacts
 
 A load artefact is a target object, not a side effect of building one. It is
 claimed during repository interpretation, registered in the catalogue, signed,

@@ -194,12 +194,15 @@ rather than the estate around it.
 | one item's stages and their order: prune → drop → schema → build → refresh → load | `plan_item_build` | `test_item_plan.py` | alias stages; uncertified aliases |
 | desired state; item scoping; what prune spares, on both physical sides | `managed_sets`, `item_prune_stage` | `test_prune.py` | alias destinations retained |
 | the diff into removals; schema-drop folding; T-SQL escaping; determinism | `render_inventory_prune` | `test_inventory_prune.py` | — |
+| every action kind is executed somewhere, or deferred with a reason | the action kinds themselves | `test_action_checklist.py` | — |
 | which schemas an item needs; alias namespaces; per-side payloads | `item_schema_stage` | `test_schema_stage.py` | — |
 | generate-and-install from prepared state; failure semantics; archives | `build_item_repository` | `test_build_workflow.py` | — |
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
 | which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
 | the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
-| a correct estate plans nothing: three agreeing states, both item types, every physical kind | `generate_item_build_bundle` | `test_fixed_point.py` | — |
+| a build converges on what the source declares — from a correct estate, from nothing, from damage, and after a deletion | `generate_item_build_bundle`, `TargetInventory.update_using` | `test_convergence.py` (`-k converges`) | — |
+| every action that touches a target is declared, and every declaration runs | `target_changes` | `test_build_intent.py` | — |
+| every artefact kind reaches the catalogue, and every instance of one | `Catalogue.from_repository` | `test_catalogue_projection.py` | — |
 
 ### Covered by old tests, not yet re-homed
 
@@ -245,7 +248,8 @@ read produce the same object a fixture builds?**
 | `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape; `test_catalogue_fidelity.py` round-trips load artefacts, whose identities no two-part grammar can express |
 | `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | covered — `test_inventory_fidelity.py`, including the deployed runtime tree file by file |
 | `read_warehouse_inventory` | same, over TDS | **gap** |
-| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered by `-m spark` and `test_warehouse_build.py` |
+| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered — `spark/boundary/test_actions_delta.py`, `fabric/test_actions_warehouse.py` |
+| a whole bundle | the physical sequence executes against real Fabric, in manifest order, leaving the declared estate | covered — `fabric/test_bundle_can_install.py`, one Livy session |
 
 The round-trip pairing is the strongest form and does not exist yet: build from a
 repository, read the inventory back, and assert it equals
@@ -269,6 +273,12 @@ replace them; the conversion has not been done.
 `test_warehouse_build.py` was the first module retired. Every claim was re-homed
 before it went, which is the rule: an old test passing proves the refactor is
 sound, not that its claim moved.
+
+`test_local_persisted_view.py` was the second, and for a different reason: it
+was a **spike**, proving Spark *could* carry a view over a view before Weaver
+built one. The claim now belongs to a real document and a real action
+(`test_build_view_action_creates_a_view_over_another_view`), which is what the
+spike was written to anticipate.
 
 | its claim | where it lives now |
 |---|---|
@@ -351,7 +361,7 @@ Lakehouse-only fixture stops being representative.** Prune, schemas and inventor
 all behave differently across that line.
 
 **Would the fixed-point test have caught it?** No — and the reason is worth
-keeping. `test_fixed_point.py` composes the three states and asserts a build finds
+keeping. `test_convergence.py` composes the three states and asserts a build finds
 nothing to do, which is the strongest whole-plan property available. It passes
 with that defect reintroduced, because *the planner passed the argument
 correctly*. The bug lived in the seam's **default**, on a path only a direct
@@ -361,7 +371,7 @@ A defaulted argument is two contracts. A composed test can only ever prove the
 one the composition uses. That is why the more important half of the fix was
 removing the parameter rather than adding coverage: with the value derived
 inside, there is one path, and breaking the derivation now fails
-`test_fixed_point.py` *and* `test_prune.py` together — verified by doing it.
+`test_convergence.py` *and* `test_prune.py` together — verified by doing it.
 
 The rule this suggests: **a seam with a destructive default cannot be covered
 from above.** Either the default goes, or the seam is tested directly on every
@@ -373,6 +383,42 @@ installed wheel, so no pure test could run it and no import check could see it. 
 is the one category where `-m published_weaver` is the first possible sight of the
 defect, and it argues for grepping test *bodies* after any signature change rather
 than trusting a mechanical rewrite.
+
+## The action checklist
+
+```text
+pytest --collect-only -q tests/targeted/test_action_checklist.py
+```
+
+lists every action Weaver can perform against a target and the test that executes
+it, one `[<kind>-<test>]` per line. The test names carry both halves —
+`test_<kind>_action_<what it proves>` — so the list reads as a checklist without
+giving up the claim.
+
+`test_action_checklist.py` holds the estate to it: every kind the product defines
+is either covered, naming its test, or deferred with a reason. A new kind cannot
+arrive unnoticed, and a renamed test cannot leave the list pointing at nothing.
+
+See [how-to-add-an-artefact.md](how-to-add-an-artefact.md) for the six steps and
+the order their tests fail in.
+
+## Adding an artefact: what fails, and in what order
+
+The suite is arranged so a new artefact type is caught by a sequence of tests
+rather than one, each naming a different thing left undone.
+
+| what is missing | what fails |
+|---|---|
+| the catalogue does not register it | `test_catalogue_from_repository_has_all_artefacts` |
+| a build emits no action for it | `test_converges_from_nothing_to_the_declared_estate` |
+| an action is emitted but declares no effect | `test_every_action_that_touches_a_target_is_declared` |
+| the effect is declared but no action performs it | `test_every_declared_change_names_an_action_that_runs` |
+| the inventory cannot see it | `test_inventory_fidelity.py`, and every claim about it becomes vacuous |
+
+The order matters as much as the coverage: the first failure names the artefact,
+not a symptom several layers downstream. Verified by doing it — adding a member
+to `OBJECT_TYPES` fails only the first; suppressing the load layer's declarations
+fails the third and, in consequence, convergence.
 
 ## Conventions
 

@@ -31,6 +31,15 @@ from .models import (
     PRUNE_VIEW,
     BuildAction,
 )
+from .changes import (
+    FOLDER as FOLDER_KIND,
+    FOLDER_SCHEMA as FOLDER_SCHEMA_KIND,
+    SCHEMA as SCHEMA_KIND,
+    TABLE as TABLE_KIND,
+    VIEW as VIEW_KIND,
+    TargetChange,
+    removed,
+)
 from .payloads import sha256_hex
 from .targets import BoundTarget
 
@@ -91,6 +100,26 @@ class TargetInventory:
     files: tuple[str, ...] = ()
     #: Generated load procedures, as ``<schema>.<name>``.
     procedures: tuple[str, ...] = ()
+
+    def update_using(self, plan) -> "TargetInventory":
+        """This target as the plan intends to leave it.
+
+        The build's declared effect on this target, applied. What it gives is a
+        *prediction*, and the value of a prediction is that it can be wrong: an
+        estate built from a repository and read back should equal the same
+        repository's declared inventory, and if applying a build's own summary to
+        the state it was planned against does not reach that, the build does not
+        converge.
+
+        Reads the summary rather than inferring one from the actions, because an
+        inference would be a model of what executors do living where no executor
+        could correct it. The summary is held to the actions separately, by
+        bijection over action ids.
+        """
+
+        from .changes import apply_to
+
+        return apply_to(self, plan.target_changes.get(self.target_id, ()))
 
     def has_object(self, schema: str, name: str, object_type: str) -> bool:
         """Whether the target holds this object, asked of the right collection.
@@ -297,15 +326,22 @@ def render_inventory_prune(
     inventory: TargetInventory,
     managed: _Managed,
     payloads: dict[str, bytes],
-) -> tuple[BuildAction, ...]:
+) -> tuple[tuple[BuildAction, ...], tuple[TargetChange, ...]]:
     """Purely render prune actions from one already-read inventory.
 
     ``payloads`` is filled with the frozen drops, keyed by bare filename: the
     caller owns which sequence these actions land in and therefore which payload
     directory they live under.
+
+    Returns the changes alongside, and this is the one place they are not merely
+    convenient. A prune action carries no ``resource_node_id`` — the object it
+    removes has no node in the repository, which is why it is being pruned — so
+    what a prune destroys is otherwise recorded nowhere a reader or a test can
+    reach without parsing SQL.
     """
 
     actions: list[BuildAction] = []
+    changes: list[TargetChange] = []
     if target.kind == "warehouse":
         for qualified in inventory.views:
             if qualified.casefold() not in managed.views:
@@ -322,6 +358,7 @@ def render_inventory_prune(
                         extension=".sql",
                     )
                 )
+                changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
             if qualified.casefold() not in managed.tables:
                 schema, name = qualified.split(".", 1)
@@ -337,6 +374,7 @@ def render_inventory_prune(
                         extension=".sql",
                     )
                 )
+                changes.append(removed(TABLE_KIND, qualified, actions[-1].id))
         for schema in inventory.schemas:
             if schema.casefold() not in managed.schemas:
                 actions.append(
@@ -351,6 +389,7 @@ def render_inventory_prune(
                         extension=".sql",
                     )
                 )
+                changes.append(removed(SCHEMA_KIND, schema, actions[-1].id))
     else:
         orphan_schemas = {
             schema.casefold()
@@ -373,6 +412,7 @@ def render_inventory_prune(
                         payloads,
                     )
                 )
+                changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
             schema, name = qualified.split(".", 1)
             if (
@@ -389,9 +429,11 @@ def render_inventory_prune(
                         payloads,
                     )
                 )
+                changes.append(removed(TABLE_KIND, qualified, actions[-1].id))
         for schema in inventory.folder_schemas:
             if schema.casefold() not in managed.folder_schemas:
                 actions.append(_prune_folder_action(target, f"folder:{schema}"))
+                changes.append(removed(FOLDER_SCHEMA_KIND, schema, actions[-1].id))
         for qualified in inventory.folders:
             schema, _name = qualified.split(".", 1)
             if (
@@ -399,6 +441,7 @@ def render_inventory_prune(
                 and qualified.casefold() not in managed.folders
             ):
                 actions.append(_prune_folder_action(target, f"folder:{qualified}"))
+                changes.append(removed(FOLDER_KIND, qualified, actions[-1].id))
         for schema in inventory.schemas:
             if schema.casefold() in orphan_schemas:
                 actions.append(
@@ -411,7 +454,8 @@ def render_inventory_prune(
                         payloads,
                     )
                 )
-    return tuple(actions)
+                changes.append(removed(SCHEMA_KIND, schema, actions[-1].id))
+    return tuple(actions), tuple(changes)
 
 
 def managed_sets(
