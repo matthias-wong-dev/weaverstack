@@ -194,6 +194,7 @@ rather than the estate around it.
 | one item's stages and their order: prune → drop → schema → build → refresh → load | `plan_item_build` | `test_item_plan.py` | alias stages; uncertified aliases |
 | desired state; item scoping; what prune spares, on both physical sides | `managed_sets`, `item_prune_stage` | `test_prune.py` | alias destinations retained |
 | the diff into removals; schema-drop folding; T-SQL escaping; determinism | `render_inventory_prune` | `test_inventory_prune.py` | — |
+| every action kind is executed somewhere, or deferred with a reason | the action kinds themselves | `test_action_checklist.py` | — |
 | which schemas an item needs; alias namespaces; per-side payloads | `item_schema_stage` | `test_schema_stage.py` | — |
 | generate-and-install from prepared state; failure semantics; archives | `build_item_repository` | `test_build_workflow.py` | — |
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
@@ -245,7 +246,8 @@ read produce the same object a fixture builds?**
 | `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape; `test_catalogue_fidelity.py` round-trips load artefacts, whose identities no two-part grammar can express |
 | `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | covered — `test_inventory_fidelity.py`, including the deployed runtime tree file by file |
 | `read_warehouse_inventory` | same, over TDS | **gap** |
-| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered by `-m spark` and `test_warehouse_build.py` |
+| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered — `spark/boundary/test_actions_delta.py`, `fabric/test_actions_warehouse.py` |
+| a whole bundle | the physical sequence executes against real Fabric, in manifest order, leaving the declared estate | covered — `fabric/test_bundle_can_install.py`, one Livy session |
 
 The round-trip pairing is the strongest form and does not exist yet: build from a
 repository, read the inventory back, and assert it equals
@@ -269,6 +271,12 @@ replace them; the conversion has not been done.
 `test_warehouse_build.py` was the first module retired. Every claim was re-homed
 before it went, which is the rule: an old test passing proves the refactor is
 sound, not that its claim moved.
+
+`test_local_persisted_view.py` was the second, and for a different reason: it
+was a **spike**, proving Spark *could* carry a view over a view before Weaver
+built one. The claim now belongs to a real document and a real action
+(`test_build_view_action_creates_a_view_over_another_view`), which is what the
+spike was written to anticipate.
 
 | its claim | where it lives now |
 |---|---|
@@ -373,6 +381,20 @@ installed wheel, so no pure test could run it and no import check could see it. 
 is the one category where `-m published_weaver` is the first possible sight of the
 defect, and it argues for grepping test *bodies* after any signature change rather
 than trusting a mechanical rewrite.
+
+## The action checklist
+
+`pytest --collect-only -q -k _action_` lists every action Weaver can perform
+against a target, and the test that executes it. The names carry both halves —
+`test_<kind>_action_<what it proves>` — so the list reads as a checklist without
+giving up the claim.
+
+`test_action_checklist.py` holds the estate to it: every kind the product defines
+is either covered, naming its test, or deferred with a reason. A new kind cannot
+arrive unnoticed, and a renamed test cannot leave the list pointing at nothing.
+
+See [how-to-add-an-artefact.md](how-to-add-an-artefact.md) for the six steps and
+the order their tests fail in.
 
 ## Conventions
 
