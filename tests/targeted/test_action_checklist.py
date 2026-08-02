@@ -1,6 +1,12 @@
 """Every action kind has a test that executes it, or is deliberately deferred.
 
-The list below *is* the checklist. Each action kind names the test that runs it
+The list below *is* the checklist, and it is legible from the terminal:
+
+```text
+pytest --collect-only -q tests/targeted/test_action_checklist.py
+```
+
+Each parametrised case reads ``[<kind>-<the test that executes it>]``. Each action kind names the test that runs it
 against a real engine and inspects what it made — and adding a kind without
 adding that test fails here, naming what is missing rather than leaving it to be
 noticed.
@@ -43,8 +49,8 @@ DEFERRED = {
 #: does what "the object is what it should be" means.
 COVERED = {
     "create_schema": (
-        "test_create_schema_action_creates_the_schema",  # delta
-        "test_create_schema_action_creates_the_schema",  # warehouse
+        "test_create_schema_action_creates_the_schema",
+        "test_create_schema_action_creates_the_schema_in_the_warehouse",
     ),
     "build_table": (
         "test_build_table_action_creates_the_declared_columns",

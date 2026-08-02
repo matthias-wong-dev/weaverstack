@@ -384,8 +384,12 @@ than trusting a mechanical rewrite.
 
 ## The action checklist
 
-`pytest --collect-only -q -k _action_` lists every action Weaver can perform
-against a target, and the test that executes it. The names carry both halves —
+```text
+pytest --collect-only -q tests/targeted/test_action_checklist.py
+```
+
+lists every action Weaver can perform against a target and the test that executes
+it, one `[<kind>-<test>]` per line. The test names carry both halves —
 `test_<kind>_action_<what it proves>` — so the list reads as a checklist without
 giving up the claim.
 
