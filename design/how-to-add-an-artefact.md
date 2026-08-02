@@ -80,11 +80,15 @@ tests/spark/boundary/test_actions_delta.py       real Spark
 tests/fabric/test_actions_warehouse.py           real Fabric, over TDS, no Livy
 ```
 
-Named `test_<kind>_action_<what it proves>`, so
-`pytest --collect-only -q -k _action_` is the list of what is actually checked.
-Then add the kind to
+Named `test_<kind>_action_<what it proves>`, so a test names both the kind and
+its claim. Then add the kind to
 [`test_action_checklist.py`](../tests/targeted/test_action_checklist.py) — either
-covered, naming the test, or deferred, with a reason.
+covered, naming the test, or deferred, with a reason. That file prints the whole
+list:
+
+```text
+pytest --collect-only -q tests/targeted/test_action_checklist.py
+```
 
 The subject is always the **Weaver document**, never the engine. Not "can Spark
 create a view" but "the view this document declares is the view that appears".

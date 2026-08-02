@@ -196,7 +196,7 @@ def columns_of(warehouse, schema: str, name: str) -> dict:
 # --- does Fabric accept what Weaver generates? --------------------------------
 
 
-def test_create_schema_action_creates_the_schema(estate, clean_disposable_warehouse):
+def test_create_schema_action_creates_the_schema_in_the_warehouse(estate, clean_disposable_warehouse):
     """A namespace with nothing in it, so nothing else proves it exists.
 
     Every other test reaches `DWG` by creating an object inside it. If the schema
