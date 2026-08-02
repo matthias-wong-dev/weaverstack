@@ -132,7 +132,7 @@ def physical_bundle(repository, *, target_name: str, resolver, store):
         selected_loads=loads,
         registered={},
     )
-    sequences, payloads = enumerate_stages(list(planned.stages))
+    sequences, payloads, target_changes = enumerate_stages(list(planned.stages))
     plan = BuildPlan(
         format_version=1,
         bundle_id="",
@@ -141,6 +141,7 @@ def physical_bundle(repository, *, target_name: str, resolver, store):
         targets=(target,),
         sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        target_changes=target_changes,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     location = resolver.build_bundle(BUNDLE)
@@ -236,6 +237,18 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     )
     for field in ("tables", "views", "schemas", "folders", "files"):
         assert _folded(payload[field]) == _folded(getattr(declared, field)), field
+
+    # 4. And the build's own account of what it would do was true of Fabric.
+    #    `target_changes` is checked against the actions in pure Python and
+    #    applied to inventories there too — but only here is it compared with a
+    #    target that really had the actions run against it. A summary that
+    #    predicted the right shape and the wrong estate would pass everything
+    #    else and fail this.
+    predicted = FixtureInventory(
+        target_id="target-1", kind="lakehouse", target_name=lakehouse.name
+    ).update_using(bundle.plan)
+    for field in ("tables", "views", "schemas", "folders", "files"):
+        assert _folded(payload[field]) == _folded(getattr(predicted, field)), field
 
 
 def _folded(names) -> set:
