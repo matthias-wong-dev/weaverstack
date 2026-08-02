@@ -99,7 +99,12 @@ def build_item(lakehouses, spark):
         target: str = "Sales_LH",
         inventory=None,
         rebuild: bool = False,
+        build: bool = True,
     ):
+        # `build=False` plans the reconciliation half only. Prune is driven by
+        # the inventory against what the item declares, not by selection, so a
+        # second pass over an already-built estate can exercise it without every
+        # strict create colliding with the object it made the first time.
         identity = item_id(item)
         bound = bound_target(id="target-1", item_id=target)
         selected = {
@@ -142,8 +147,8 @@ def build_item(lakehouses, spark):
             selected_documents=selected,
             selected_aliases=set(),
             selected_for_drop=set(selected) if rebuild else set(),
-            selected_for_build=selected,
-            selected_loads=loads,
+            selected_for_build=selected if build else set(),
+            selected_loads=loads if build else set(),
             registered=registered,
         )
         context = context_for(lakehouses, spark, target)

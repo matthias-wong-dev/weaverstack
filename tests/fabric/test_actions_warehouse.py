@@ -13,6 +13,19 @@ goes over the SQL connection this process already holds, and the Livy ledger
 stays at zero.
 
 That is the whole argument for `execute_action` in one file.
+
+**The names are the checklist.** One `test_<kind>_action_<what it proves>` per
+action kind a Warehouse can receive, so `pytest --collect-only -q -k _action_`
+lists what is actually checked. `test_action_checklist.py` holds this file to
+that list.
+
+The inventory-fidelity tests keep their own names and stay here rather than
+moving to a module of their own. A Warehouse is emptied per module and this
+estate is module-scoped, so a second file would mean a second Warehouse build —
+paying a real Fabric cost for a filing decision.
+
+Each test starts from a **Weaver document**. The subject is never "can Fabric
+create a view" but "the view this document declares is the view that appears".
 """
 
 from __future__ import annotations
@@ -183,7 +196,22 @@ def columns_of(warehouse, schema: str, name: str) -> dict:
 # --- does Fabric accept what Weaver generates? --------------------------------
 
 
-def test_a_declared_warehouse_table_builds(estate, clean_disposable_warehouse):
+def test_create_schema_action_creates_the_schema(estate, clean_disposable_warehouse):
+    """A namespace with nothing in it, so nothing else proves it exists.
+
+    Every other test reaches `DWG` by creating an object inside it. If the schema
+    action were wrong the object would fail too, and the failure would name the
+    object rather than the namespace.
+    """
+
+    rows = clean_disposable_warehouse.executor.query(
+        "select name from sys.schemas where name = N'DWG'"
+    )
+
+    assert [str(row["name"]) for row in rows] == ["DWG"]
+
+
+def test_build_table_action_is_accepted_by_fabric(estate, clean_disposable_warehouse):
     """The narrowest Fabric-only claim there is: this T-SQL is valid there.
 
     Weaver's table script materialises and inspects its own query shape
@@ -199,7 +227,7 @@ def test_a_declared_warehouse_table_builds(estate, clean_disposable_warehouse):
     assert rows[0]["n"] == 0
 
 
-def test_the_declared_types_are_what_the_warehouse_creates(
+def test_build_table_action_uses_the_declared_types(
     estate, clean_disposable_warehouse
 ):
     """Types are inferred from the query, server-side — only Fabric can confirm."""
@@ -210,7 +238,7 @@ def test_the_declared_types_are_what_the_warehouse_creates(
     assert columns["score"]["type_name"] == "decimal"
 
 
-def test_the_primary_key_and_audit_columns_are_not_nullable(
+def test_build_table_action_makes_the_primary_key_not_nullable(
     estate, clean_disposable_warehouse
 ):
     columns = columns_of(clean_disposable_warehouse, "DWG", "Customer")
@@ -219,7 +247,7 @@ def test_the_primary_key_and_audit_columns_are_not_nullable(
         assert columns[audit]["is_nullable"] is False, audit
 
 
-def test_a_warehouse_view_builds_over_the_table_it_reads(
+def test_build_view_action_creates_a_view_over_the_table_it_reads(
     estate, clean_disposable_warehouse
 ):
     """A view is one CREATE VIEW and must be the first statement in its batch.
@@ -235,7 +263,7 @@ def test_a_warehouse_view_builds_over_the_table_it_reads(
     assert rows[0]["n"] == 0
 
 
-def test_a_dimension_gets_a_weaver_managed_bigint_surrogate(
+def test_build_table_action_adds_the_declared_identity_column(
     estate, clean_disposable_warehouse
 ):
     """A column the declaration asks for and the query never produces.
@@ -251,7 +279,7 @@ def test_a_dimension_gets_a_weaver_managed_bigint_surrogate(
     assert {"customerid", "customername"} <= set(columns)
 
 
-def test_prune_removes_the_unmanaged_and_spares_the_managed(
+def test_prune_table_action_removes_an_object_nothing_declares(
     estate, build_warehouse_item, clean_disposable_warehouse
 ):
     """Prune executed, not merely planned — the destructive direction, for real.
