@@ -199,8 +199,7 @@ rather than the estate around it.
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
 | which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
 | the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
-| a correct estate plans nothing: three agreeing states, both item types, every physical kind | `generate_item_build_bundle` | `test_fixed_point.py` | — |
-| a build converges: from nothing, from damage, and losing only a deleted source | `TargetInventory.update_using` | `test_fixed_point.py` | — |
+| a build converges on what the source declares — from a correct estate, from nothing, from damage, and after a deletion | `generate_item_build_bundle`, `TargetInventory.update_using` | `test_convergence.py` (`-k converges`) | — |
 | every action that touches a target is declared, and every declaration runs | `target_changes` | `test_build_intent.py` | — |
 | every artefact kind reaches the catalogue, and every instance of one | `Catalogue.from_repository` | `test_catalogue_projection.py` | — |
 
@@ -354,7 +353,7 @@ Lakehouse-only fixture stops being representative.** Prune, schemas and inventor
 all behave differently across that line.
 
 **Would the fixed-point test have caught it?** No — and the reason is worth
-keeping. `test_fixed_point.py` composes the three states and asserts a build finds
+keeping. `test_convergence.py` composes the three states and asserts a build finds
 nothing to do, which is the strongest whole-plan property available. It passes
 with that defect reintroduced, because *the planner passed the argument
 correctly*. The bug lived in the seam's **default**, on a path only a direct
@@ -364,7 +363,7 @@ A defaulted argument is two contracts. A composed test can only ever prove the
 one the composition uses. That is why the more important half of the fix was
 removing the parameter rather than adding coverage: with the value derived
 inside, there is one path, and breaking the derivation now fails
-`test_fixed_point.py` *and* `test_prune.py` together — verified by doing it.
+`test_convergence.py` *and* `test_prune.py` together — verified by doing it.
 
 The rule this suggests: **a seam with a destructive default cannot be covered
 from above.** Either the default goes, or the seam is tested directly on every
@@ -385,7 +384,7 @@ rather than one, each naming a different thing left undone.
 | what is missing | what fails |
 |---|---|
 | the catalogue does not register it | `test_catalogue_from_repository_has_all_artefacts` |
-| a build emits no action for it | `test_a_build_from_nothing_reaches_the_declared_estate` |
+| a build emits no action for it | `test_converges_from_nothing_to_the_declared_estate` |
 | an action is emitted but declares no effect | `test_every_action_that_touches_a_target_is_declared` |
 | the effect is declared but no action performs it | `test_every_declared_change_names_an_action_that_runs` |
 | the inventory cannot see it | `test_inventory_fidelity.py`, and every claim about it becomes vacuous |

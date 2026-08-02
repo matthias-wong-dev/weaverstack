@@ -1,4 +1,31 @@
-"""A correct estate plans nothing. The whole build, as one property.
+"""A build converges on what the source declares, from wherever it starts.
+
+```text
+pytest --collect-only -q -k converges
+```
+
+The family, and the four starting states it covers:
+
+```text
+a correct estate    plans nothing, and selects nothing
+nothing at all      reaches the declared estate
+a damaged estate    repairs it — a deleted object, a stray, a leftover schema
+after a deletion    loses that object and nothing else
+```
+
+Plus a second pass over the first, because reaching the fixed point and staying
+there are different claims.
+
+Two tests here are *not* convergence claims and keep descriptive names, because
+they guard the family against passing vacuously: a bundle with no actions at all
+would satisfy every assertion above, so one asserts the catalogue tail is still
+published, and one asserts the plan is deterministic.
+
+The general statement is that a build is a convergence operator onto
+`from_repository`. The special case — an estate that is already correct — is
+where it started, and reads first below.
+
+## A correct estate plans nothing. The whole build, as one property.
 
 Every other test here asks whether one decision is right. This asks whether they
 compose: give the planner a catalogue derived from the source, an inventory
@@ -145,7 +172,7 @@ def physical(bundle, estate_targets) -> list[str]:
     ]
 
 
-def test_an_estate_that_already_matches_its_source_plans_no_physical_work(
+def test_converges_from_a_correct_estate_by_planning_nothing(
     estate, tmp_path
 ):
     """The property, stated once.
@@ -157,7 +184,7 @@ def test_an_estate_that_already_matches_its_source_plans_no_physical_work(
     assert physical(*build(estate, tmp_path)) == []
 
 
-def test_nothing_is_selected_to_build_or_drop(estate, tmp_path):
+def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
     """The decision behind the actions, asserted separately.
 
     An empty selection and an empty action list fail for different reasons —
@@ -279,7 +306,7 @@ def assert_reaches_the_declared_estate(reached, declared):
         assert holdings(inventory) == holdings(declared[item]), item
 
 
-def test_a_build_from_nothing_reaches_the_declared_estate(estate, tmp_path):
+def test_converges_from_nothing_to_the_declared_estate(estate, tmp_path):
     """Empty target, empty catalogue — everything is new and nothing is stale."""
 
     from factories import estate_inventories
@@ -294,7 +321,7 @@ def test_a_build_from_nothing_reaches_the_declared_estate(estate, tmp_path):
     assert_reaches_the_declared_estate(reached, declared)
 
 
-def test_a_build_repairs_a_damaged_estate(estate, tmp_path):
+def test_converges_from_a_damaged_estate_by_repairing_it(estate, tmp_path):
     """Objects deleted behind Weaver's back, and strays that nothing declares.
 
     Two kinds of damage the design promises to close, and they close by
@@ -327,7 +354,7 @@ def test_a_build_repairs_a_damaged_estate(estate, tmp_path):
     assert_reaches_the_declared_estate(reached, declared)
 
 
-def test_deleting_one_document_loses_only_that_object(estate, tmp_path):
+def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path):
     """The one that matters most, because over-broad pruning destroys estates.
 
     A correct estate, one source removed, and the build must take exactly that
@@ -359,7 +386,7 @@ def test_deleting_one_document_loses_only_that_object(estate, tmp_path):
     assert lost_files == {"_/load/dwg.summary.sql"}
 
 
-def test_converging_twice_changes_nothing_the_second_time(estate, tmp_path):
+def test_converges_and_stays_converged_on_a_second_pass(estate, tmp_path):
     """Reaching the fixed point is one claim; staying there is another.
 
     A build that converged but left the estate subtly different from what the
