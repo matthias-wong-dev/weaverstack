@@ -617,6 +617,69 @@ def test_an_unkeyed_load_is_exempt(spark, lakehouse, unkeyed):
     assert result.succeeded is True
 
 
+def test_the_threshold_counts_the_selected_delete_driver(
+    spark, lakehouse, customer, deployed
+):
+    """One driver, counted once.
+
+    An incremental load's deletes are what it named; adding an absence count on
+    top would guard against work the load was never going to do.
+    """
+
+    import importlib
+
+    (deployed / "Sales__Customer.py").write_text(
+        GUARDED_MODULE.replace(
+            "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
+        ),
+        encoding="utf-8",
+    )
+    cls = importlib.reload(importlib.import_module("Sales__Customer")).Sales__Customer
+
+    _load(cls, spark, lakehouse, TWENTY)
+
+    # Fifteen rows are absent from this run — but the source is incremental, so
+    # absence deletes nothing and only the one named key counts toward the guard.
+    result = _load(cls, spark, lakehouse, TWENTY[:5], deletes=[("c0",)])
+
+    assert result.succeeded is True
+    assert result.rows_deleted == 1
+
+
+def test_reported_deletions_are_reconciled_from_cardinality(
+    spark, lakehouse, customer
+):
+    """before + inserted - after, so what is reported is what actually left."""
+
+    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two"), ("c3", "Three")])
+
+    result = _load(customer, spark, lakehouse, [("c1", "One"), ("c4", "Four")])
+
+    assert (result.rows_inserted, result.rows_deleted) == (1, 2)
+    assert _contents(spark, lakehouse) == [("c1", "One"), ("c4", "Four")]
+
+
+def test_an_empty_target_is_never_guarded(spark, lakehouse, guarded):
+    """A first load has no proportion to be a percentage of."""
+
+    result = _load(guarded, spark, lakehouse, TWENTY)
+
+    assert result.succeeded is True
+    assert result.rows_inserted == 20
+
+
+def test_a_tolerated_rejection_loads_the_valid_rows_and_reports_failure(
+    spark, lakehouse, customer
+):
+    """The other half of what fault_tolerant governs: suppress, not permit."""
+
+    result = _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=True)
+
+    assert result.succeeded is False
+    assert result.rows_rejected == 3
+    assert result.rows_inserted == 2
+
+
 # --- the contract comes from the module --------------------------------------
 
 
