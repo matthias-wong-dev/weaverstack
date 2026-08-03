@@ -38,7 +38,7 @@ from weaver import ItemRef
 from weaver.build_bundle.executors.base import ResolvedTarget
 from weaver.build_bundle.prune import read_warehouse_inventory
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 #: The Warehouse item the installation probe builds. Its own logical name, so it
 #: cannot collide with an estate another module is publishing under the same one.

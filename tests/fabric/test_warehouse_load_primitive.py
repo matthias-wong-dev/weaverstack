@@ -29,7 +29,7 @@ from weaver.runtime.load_contract import (
     REJECTION_REASON,
 )
 
-pytestmark = pytest.mark.fabric
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 SCHEMA = "DWG"
 

@@ -52,7 +52,7 @@ from weaver.build_bundle.incremental import BuildSelection, Impact
 from weaver.build_bundle.stages import enumerate_stages
 from weaver.declaration.metadata import DELTA_TARGET
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 ITEM = "Lakehouse/Sales"
 BUNDLE = "installorder"

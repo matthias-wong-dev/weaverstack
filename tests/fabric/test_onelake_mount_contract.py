@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.fabric
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 MOUNT_CONTRACT = r'''
 import notebookutils, os

@@ -22,7 +22,7 @@ from factories import FixtureCatalogue, alias_repository, item_bindings
 
 from weaver import ItemRef
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 PRODUCER = "Lakehouse/DiscoveryProducer"
 CONSUMER = "Lakehouse/DiscoveryConsumer"

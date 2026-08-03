@@ -14,7 +14,7 @@ from weaver.errors import CommandError
 from weaver.fabric import OneLakeDfsClient, onelake_url, parse_onelake
 from weaver.store import StoreError
 
-pytestmark = pytest.mark.fabric
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 
 @pytest.fixture

@@ -42,7 +42,7 @@ def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
         find_workspace("weavertest_no_such_workspace")
 
 
-@pytest.mark.provisioning
+@pytest.mark.provision
 def test_created_lakehouses_appear_in_the_workspace(fabric_lakehouses, fabric_client):
     names = {
         item.name
@@ -54,7 +54,7 @@ def test_created_lakehouses_appear_in_the_workspace(fabric_lakehouses, fabric_cl
     assert fabric_lakehouses["target"].name in names
 
 
-@pytest.mark.provisioning
+@pytest.mark.provision
 def test_a_lakehouse_is_findable_by_name(fabric_lakehouses, fabric_client):
     found = find_item(
         fabric_lakehouses["workspace"],
@@ -65,7 +65,7 @@ def test_a_lakehouse_is_findable_by_name(fabric_lakehouses, fabric_client):
     assert found.id == fabric_lakehouses["target"].id
 
 
-@pytest.mark.provisioning
+@pytest.mark.provision
 def test_creating_an_existing_lakehouse_returns_it(fabric_lakehouses, fabric_client):
     """Idempotent, so a rerun after an interruption does not fail."""
     from weaver.fabric import create_lakehouse
@@ -78,7 +78,7 @@ def test_creating_an_existing_lakehouse_returns_it(fabric_lakehouses, fabric_cli
     assert again.id == fabric_lakehouses["target"].id
 
 
-@pytest.mark.provisioning
+@pytest.mark.provision
 def test_an_unknown_item_says_which_workspace(fabric_lakehouses, fabric_client):
     with pytest.raises(CommandError, match="no Lakehouse named"):
         find_item(

@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 
 #: Everything asked of the installed estate, in one round trip. It imports from

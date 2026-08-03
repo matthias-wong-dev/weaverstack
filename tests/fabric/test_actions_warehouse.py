@@ -50,7 +50,7 @@ from weaver.declaration.metadata import SQL_TARGET
 from weaver.locations import Location
 from weaver.targets import ItemRef
 
-pytestmark = pytest.mark.fabric
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 ITEM = "Warehouse/Reporting"
 AUDIT = {"row insert datetime", "row update datetime", "row delete datetime"}
