@@ -116,8 +116,8 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (3, "53a4b2a4cb9c72a6b5c400b98575a2bd5ce38c9145571ea40da38bdbcffa2925"),
-    "spark": (4, "0e9c38a85a4422d55663ad411b8ddeb86dd92f2bc2cf97d310bca120b8692f1d"),
+    "tsql": (4, "d8069faa10c23c0d32008376b2f35bb63e85ef8e747a6cdb633d4ecda0b1bdc3"),
+    "spark": (5, "d8381c8169419d1ddea0d6ada80517cb8c833da91db17d0065571f35444d3cb3"),
 }
 
 
@@ -239,6 +239,63 @@ def test_an_incremental_load_deletes_nothing():
 
     assert "delete c\n" not in payload
     assert "not a retirement" in payload
+
+
+# --- stability thresholds ------------------------------------------------------
+
+
+GUARDED_WAREHOUSE = WAREHOUSE_TABLE.replace(
+    "Primary key: Customer id",
+    "Primary key: Customer id\n\nDelete percentage threshold: 2"
+    "\n\nUpdate percentage threshold: 7\n\nStability row threshold: 500",
+)
+
+
+def test_the_procedure_takes_a_threshold_waiver_defaulting_to_enforcement():
+    payload = _warehouse().create_load().payload.decode()
+
+    assert "@ignore_stability_threshold bit = 0" in payload
+
+
+def test_the_declared_thresholds_reach_the_procedure():
+    payload = _warehouse(GUARDED_WAREHOUSE).create_load().payload.decode()
+
+    assert "@weaver_target_rows >= 500" in payload
+    assert "/ @weaver_target_rows > 2" in payload
+    assert "/ @weaver_target_rows > 7" in payload
+
+
+def test_the_thresholds_are_checked_before_the_first_write():
+    """A breach must leave the target as it was, so refusing has to be a
+    decision not to start rather than an unwind."""
+
+    payload = _warehouse(GUARDED_WAREHOUSE).create_load().payload.decode()
+    gate = payload.index("@ignore_stability_threshold = 0 and")
+    insert = payload.index("insert into [Sales].[Customer] (")
+
+    assert gate < insert
+
+
+def test_the_defaults_are_the_documented_ones():
+    payload = _warehouse().create_load().payload.decode()
+
+    assert "@weaver_target_rows >= 1000000" in payload
+    assert "/ @weaver_target_rows > 5" in payload
+    assert "/ @weaver_target_rows > 20" in payload
+
+
+def test_the_program_records_the_threshold_decision_once():
+    """Three things need the answer — the writes, the delete set and the result.
+
+    Recomputing it in each would let them disagree, and a load that reported one
+    thing and did another is what the guard exists to prevent.
+    """
+
+    program = _program()
+
+    assert program.count("AS within_thresholds") == 1
+    # Everything else reads the recorded column rather than deriving it again.
+    assert program.count("SELECT within_thresholds FROM") >= 2
 
 
 # --- the Spark SQL program ----------------------------------------------------

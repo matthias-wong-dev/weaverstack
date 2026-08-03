@@ -46,6 +46,39 @@ where
         select __TARGET_EXCEPT_COLUMNS__
     );
 
+-- Everything this load is about to do, counted before it does any of it. A
+-- breach with @fault_tolerant = 0 leaves the target exactly as it was, so
+-- refusing is a decision not to start rather than an unwind.
+select @weaver_target_rows = count(*) from $target_table;
+select @weaver_prospective_updates = count(*) from $upsert_table where [_Is new row] = 0;
+$prospective_deletes
+
+if @ignore_stability_threshold = 0 and @weaver_target_rows >= $stability_rows
+begin
+    if @weaver_prospective_deletes * 100.0 / @weaver_target_rows > $delete_threshold
+        set @weaver_error = 'delete of ' + cast(@weaver_prospective_deletes as varchar(20))
+            + ' rows is over the $delete_threshold% threshold of '
+            + cast(@weaver_target_rows as varchar(20));
+    else if @weaver_prospective_updates * 100.0 / @weaver_target_rows > $update_threshold
+        set @weaver_error = 'update of ' + cast(@weaver_prospective_updates as varchar(20))
+            + ' rows is over the $update_threshold% threshold of '
+            + cast(@weaver_target_rows as varchar(20));
+
+    if @weaver_error is not null and @fault_tolerant = 0
+    begin
+        select
+            cast(0 as bit) as succeeded
+          , @weaver_rows_read as rows_read
+          , cast(0 as bigint) as rows_inserted
+          , cast(0 as bigint) as rows_updated
+          , cast(0 as bigint) as rows_deleted
+          , @weaver_rows_rejected as rows_rejected
+          , @weaver_error + ', and fault_tolerant = 0, so the target was not modified'
+            as error_message;
+        return;
+    end;
+end;
+
 insert into $target_table (
     __SOURCE_COLUMNS__
   , [Row insert datetime]
@@ -73,6 +106,6 @@ set @weaver_rows_updated = @@rowcount;
 
 $missing_reconciliation
 
-if @weaver_rows_rejected > 0
+if @weaver_rows_rejected > 0 and @weaver_error is null
     set @weaver_error = cast(@weaver_rows_rejected as varchar(20))
         + ' $tolerated_message';

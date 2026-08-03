@@ -1,5 +1,6 @@
 create or alter procedure $load_procedure
     @fault_tolerant bit = 0
+  , @ignore_stability_threshold bit = 0
 as
 begin
     set nocount on;
@@ -12,6 +13,9 @@ begin
     declare @weaver_rows_deleted bigint = 0;
     declare @weaver_rows_rejected bigint = 0;
     declare @weaver_error varchar(4000) = null;
+    declare @weaver_target_rows bigint = 0;
+    declare @weaver_prospective_deletes bigint = 0;
+    declare @weaver_prospective_updates bigint = 0;
 
 $preprocessing_banner
 $start_artifact_cleanup

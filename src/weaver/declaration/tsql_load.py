@@ -172,6 +172,10 @@ def _primary_key_body(names: dict, contract: LoadContract) -> str:
         target_upsert_join=_join("c", "u", contract.primary_key),
         target_missing_predicate=f"t.{_quote(contract.primary_key[0])} is null",
         missing_reconciliation=_missing_reconciliation(names, contract),
+        prospective_deletes=_prospective_deletes(names, contract),
+        delete_threshold=contract.delete_threshold,
+        update_threshold=contract.update_threshold,
+        stability_rows=contract.stability_rows,
         rejection_reason=REJECTION_REASON,
         blank_reason=REASON_BLANK_PK,
         duplicate_reason=REASON_DUPLICATE_PK,
@@ -186,6 +190,27 @@ def _full_replace_body(names: dict) -> str:
         target_table=names["target"],
         staging_table=names["staging"],
     ).rstrip()
+
+
+def _prospective_deletes(names: dict, contract: LoadContract) -> str:
+    """Count what the load is about to delete, before it deletes any of it.
+
+    A number obtained by deleting would be a report rather than a check, and the
+    whole point of the guard is to decide *not* to.
+    """
+
+    if not contract.deletes_absent_rows:
+        return (
+            "-- Incremental: nothing is deleted, so there is nothing to count."
+        )
+    join = _join("s", "c", contract.primary_key)
+    return (
+        f"select @weaver_prospective_deletes = count(*)\n"
+        f"from {names['target']} as c\n"
+        f"where not exists (\n"
+        f"    select 1 from {names['staging']} as s where {join}\n"
+        f");"
+    )
 
 
 def _missing_reconciliation(names: dict, contract: LoadContract) -> str:

@@ -215,6 +215,56 @@ def test_the_rejected_rows_are_kept_with_their_reason(spark, estate, program):
     }
 
 
+# --- stability thresholds ----------------------------------------------------
+
+
+GUARDED = SOURCE.replace(
+    "Primary key: Customer id",
+    "Primary key: Customer id\n\nDelete percentage threshold: 5"
+    "\n\nStability row threshold: 10",
+)
+
+
+@pytest.fixture
+def guarded(spark, estate):
+    """The same program, declaring a threshold a small fixture can trip."""
+
+    document = read_source_document(
+        "Sales.Customer.sql", GUARDED.encode("utf-8"), LAKEHOUSE
+    )
+    payload = document.create_load().payload.decode("utf-8")
+    return SparkCatalogue(spark, estate).expand(payload)
+
+
+TWENTY = [(f"c{n:02d}", f"Name {n}") for n in range(20)]
+
+
+def test_too_many_deletes_leaves_the_target_untouched(spark, estate, guarded):
+    """Spark has no `if`, so the guard is a predicate: with a breach and no
+    tolerance the permitted set is empty and every write below it does nothing."""
+
+    _source_rows(spark, estate, TWENTY)
+    run_load_program(spark, guarded)
+
+    _source_rows(spark, estate, TWENTY[:5])
+    result = run_load_program(spark, guarded)
+
+    assert result.succeeded is False
+    assert "threshold" in result.error_message
+    assert len(_contents(spark, estate)) == 20
+
+
+def test_the_threshold_can_be_waived_for_one_run(spark, estate, guarded):
+    _source_rows(spark, estate, TWENTY)
+    run_load_program(spark, guarded)
+
+    _source_rows(spark, estate, TWENTY[:5])
+    result = run_load_program(spark, guarded, ignore_stability_threshold=True)
+
+    assert result.succeeded is True
+    assert len(_contents(spark, estate)) == 5
+
+
 def test_an_unchanged_row_keeps_its_original_update_time(spark, estate, program):
     _source_rows(spark, estate, CLEAN)
     run_load_program(spark, program)

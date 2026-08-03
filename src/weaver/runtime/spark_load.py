@@ -20,13 +20,21 @@ from __future__ import annotations
 from ..declaration.spark_load import (
     FAULT_TOLERANT_DEFAULT,
     FAULT_TOLERANT_MARKER,
+    IGNORE_THRESHOLD_DEFAULT,
+    IGNORE_THRESHOLD_MARKER,
     statements_of,
 )
 from ..errors import LoadError
 from .load_result import RESULT_COLUMNS, LoadResult
 
 
-def run_load_program(spark, program: str, *, fault_tolerant: bool = False) -> LoadResult:
+def run_load_program(
+    spark,
+    program: str,
+    *,
+    fault_tolerant: bool = False,
+    ignore_stability_threshold: bool = False,
+) -> LoadResult:
     """Execute an installed load program and report what it did.
 
     ``program`` is the installed file's text, whose object names are already
@@ -34,7 +42,9 @@ def run_load_program(spark, program: str, *, fault_tolerant: bool = False) -> Lo
     program nobody could run without a resolver would not be a primitive.
     """
 
-    statements = statements_of(_answer(program, fault_tolerant))
+    statements = statements_of(
+        _answer(program, fault_tolerant, ignore_stability_threshold)
+    )
     if not statements:
         raise LoadError("the load program contains no statements")
 
@@ -58,18 +68,26 @@ def run_load_program(spark, program: str, *, fault_tolerant: bool = False) -> Lo
     return LoadResult.from_row({name: row[name] for name in RESULT_COLUMNS})
 
 
-def _answer(program: str, fault_tolerant: bool) -> str:
+def _answer(
+    program: str, fault_tolerant: bool, ignore_stability_threshold: bool
+) -> str:
     """Substitute the one question the file leaves open.
 
-    A run's tolerance of rejects is not a property of the object or of where it
-    lives, so it is the only hole the installer leaves for whoever runs the
-    program. The file already reads 0, so refusing needs no substitution at all
-    — which is what makes an installed program runnable exactly as it stands.
+    A run's tolerance of rejects, and its willingness to waive the declared
+    stability thresholds, are properties of the run rather than of the object or
+    of where it lives — so they are the only holes the installer leaves for
+    whoever runs the program. Both already read 0, so the cautious answers need
+    no substitution at all, which is what makes an installed program runnable
+    exactly as it stands.
     """
 
-    if not fault_tolerant:
-        return program
-    return program.replace(FAULT_TOLERANT_DEFAULT, f"{FAULT_TOLERANT_MARKER}1")
+    if fault_tolerant:
+        program = program.replace(FAULT_TOLERANT_DEFAULT, f"{FAULT_TOLERANT_MARKER}1")
+    if ignore_stability_threshold:
+        program = program.replace(
+            IGNORE_THRESHOLD_DEFAULT, f"{IGNORE_THRESHOLD_MARKER}1"
+        )
+    return program
 
 
 __all__ = ["run_load_program"]

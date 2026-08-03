@@ -72,6 +72,12 @@ GENERATED_LOAD_MARKER = "-- Weaver generated load"
 FAULT_TOLERANT_MARKER = "/*weaver:fault_tolerant*/"
 FAULT_TOLERANT_DEFAULT = f"{FAULT_TOLERANT_MARKER}0"
 
+#: The second answer a run gives, in the same comment-wrapped form and for the
+#: same reason: an installed program is valid SQL with nothing substituted, and
+#: what it does then is enforce the declared thresholds.
+IGNORE_THRESHOLD_MARKER = "/*weaver:ignore_stability_threshold*/"
+IGNORE_THRESHOLD_DEFAULT = f"{IGNORE_THRESHOLD_MARKER}0"
+
 #: The rank a duplicate key gets, and the suffixes of the intermediate relations.
 RANK_COLUMN = "__weaver_pk_row_number"
 STAGING_SUFFIX = "_Staging"
@@ -224,6 +230,13 @@ def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
         # After the upsert set, which it counts, and before any write — so the
         # counts and the changes they describe are one decision.
         _result_table(names, contract, rejected),
+        # The stability gate, narrowing the upsert set the writes read. With a
+        # breach and no tolerance this is empty, so the merge below touches
+        # nothing and the target is left exactly as it was — the `if` a
+        # procedure would use, written as a `where`.
+        f"CREATE OR REPLACE TEMP VIEW {names['permitted']} AS\n"
+        f"SELECT u.*\nFROM {names['upsert']} AS u\n"
+        f"WHERE {_permitted(names)}",
         _merge(names, contract, business, audit),
     ]
     if contract.deletes_absent_rows:
@@ -285,20 +298,49 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
         f"    , CASE WHEN {tolerated} THEN (\n"
         f"          SELECT count(*) FROM {names['target']} AS t\n"
         f"          WHERE NOT EXISTS (SELECT 1 FROM {valid} AS v WHERE {join})\n"
-        f"      ) ELSE 0 END AS rows_deleted\n"
+        f"      ) ELSE 0 END AS proposed_deleted\n"
         if contract.deletes_absent_rows
-        else "    , CAST(0 AS BIGINT) AS rows_deleted\n"
+        else "    , CAST(0 AS BIGINT) AS proposed_deleted\n"
     )
     return (
         f"CREATE TABLE {names['result']} USING delta {COLUMN_MAPPING} AS\n"
-        f"SELECT\n"
+        f"SELECT *\n"
+        f"    , {_threshold_predicate(names, contract)} AS within_thresholds\n"
+        f"FROM (\n"
+        f"  SELECT\n"
         f"      (SELECT count(*) FROM {names['staging']}) AS rows_read\n"
+        f"    , (SELECT count(*) FROM {names['target']}) AS target_rows\n"
         f"    , (SELECT count(*) FROM {names['upsert']} "
-        f"WHERE `{IS_NEW_COLUMN}` = 1) AS rows_inserted\n"
+        f"WHERE `{IS_NEW_COLUMN}` = 1) AS proposed_inserted\n"
         f"    , (SELECT count(*) FROM {names['upsert']} "
-        f"WHERE `{IS_NEW_COLUMN}` = 0) AS rows_updated\n"
+        f"WHERE `{IS_NEW_COLUMN}` = 0) AS proposed_updated\n"
         f"{deleted}"
-        f"    , (SELECT count(*) FROM {names['reject']}) AS rows_rejected"
+        f"    , (SELECT count(*) FROM {names['reject']}) AS rows_rejected\n"
+        f") AS proposed"
+    )
+
+
+def _threshold_predicate(names: dict, contract: LoadContract) -> str:
+    """Whether the proposed change is within what the object allows.
+
+    Decided *once*, here, and recorded as a column — because three things need
+    the answer: the writes that must not happen, the delete set that must stay
+    empty, and the result that has to say so. Recomputing it in each would let
+    them disagree, and a load that reported one thing and did another is the
+    failure this whole guard exists to prevent.
+    """
+
+    return (
+        f"(\n"
+        f"        {IGNORE_THRESHOLD_DEFAULT} = 1\n"
+        f"     OR target_rows < {contract.stability_rows}\n"
+        f"     OR (\n"
+        f"            proposed_deleted * 100.0 / target_rows "
+        f"<= {contract.delete_threshold}\n"
+        f"        AND proposed_updated * 100.0 / target_rows "
+        f"<= {contract.update_threshold}\n"
+        f"        )\n"
+        f"    )"
     )
 
 
@@ -357,7 +399,7 @@ def _merge(names: dict, contract: LoadContract, business, audit) -> str:
     values = ", ".join(f"s.`{name}`" for name in business)
     return (
         f"MERGE INTO {names['target']} AS t\n"
-        f"USING {names['upsert']} AS s\n"
+        f"USING {names['permitted']} AS s\n"
         f"   ON {join}\n"
         f"WHEN MATCHED AND s.`{IS_NEW_COLUMN}` = 0 THEN UPDATE SET {update_set}\n"
         f"WHEN NOT MATCHED AND s.`{IS_NEW_COLUMN}` = 1 "
@@ -378,6 +420,16 @@ def _tolerated(names: dict) -> str:
         f"({FAULT_TOLERANT_DEFAULT} = 1 "
         f"OR (SELECT count(*) FROM {names['reject']}) = 0)"
     )
+
+
+def _permitted(names: dict) -> str:
+    """The decision the result table already recorded.
+
+    Read rather than recomputed, so the writes, the delete set and the reported
+    result cannot disagree about whether this load was allowed to happen.
+    """
+
+    return f"(SELECT within_thresholds FROM {names['result']})"
 
 
 def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
@@ -409,7 +461,8 @@ def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
         f"WHERE NOT EXISTS (\n"
         f"    SELECT 1 FROM {names['valid']} AS v WHERE {join}\n"
         f")\n"
-        f"  AND {_tolerated(names)}",
+        f"  AND {_tolerated(names)}\n"
+        f"  AND {_permitted(names)}",
         f"MERGE INTO {names['target']} AS t\n"
         f"USING {names['delete']} AS d\n"
         f"   ON {key_join('d', 't', contract.primary_key)}\n"
@@ -424,15 +477,29 @@ def _final_select(names: dict) -> str:
     independent fact: a load succeeded exactly when it rejected nothing.
     """
 
-    columns = ", ".join(RESULT_COLUMNS[1:6])
     return (
         f"SELECT\n"
-        f"      rows_rejected = 0 AS succeeded\n"
-        f"    , {columns.replace(', ', chr(10) + '    , ')}\n"
-        f"    , CASE WHEN rows_rejected = 0 THEN CAST(NULL AS STRING)\n"
-        f"           WHEN rows_inserted = 0 AND rows_updated = 0 AND rows_deleted = 0\n"
-        f"           THEN '{INTOLERANT_MESSAGE}'\n"
-        f"           ELSE '{TOLERATED_MESSAGE}' END AS error_message\n"
+        f"      (rows_rejected = 0 AND within_thresholds) AS succeeded\n"
+        f"    , rows_read\n"
+        f"    , CASE WHEN within_thresholds THEN proposed_inserted ELSE 0 END\n"
+        f"        AS rows_inserted\n"
+        f"    , CASE WHEN within_thresholds THEN proposed_updated ELSE 0 END\n"
+        f"        AS rows_updated\n"
+        f"    , CASE WHEN within_thresholds THEN proposed_deleted ELSE 0 END\n"
+        f"        AS rows_deleted\n"
+        f"    , rows_rejected\n"
+        f"    , CASE\n"
+        f"        WHEN NOT within_thresholds THEN\n"
+        f"          concat('the proposed change is over this object''s stability "
+        f"thresholds: ',\n"
+        f"                 proposed_deleted, ' deletes and ', proposed_updated,\n"
+        f"                 ' updates against ', target_rows, ' rows')\n"
+        f"        WHEN rows_rejected = 0 THEN CAST(NULL AS STRING)\n"
+        f"        WHEN proposed_inserted = 0 AND proposed_updated = 0 "
+        f"AND proposed_deleted = 0\n"
+        f"          THEN '{INTOLERANT_MESSAGE}'\n"
+        f"        ELSE '{TOLERATED_MESSAGE}'\n"
+        f"      END AS error_message\n"
         f"FROM {names['result']}"
     )
 
@@ -453,6 +520,7 @@ def _names(document: SesDocument) -> dict:
         # A temp view is session-scoped and unqualified: it is the one relation
         # here that is not a managed object, because it holds no rows of its own.
         "valid": f"weaver_valid_{schema}__{obj}".replace(" ", "_"),
+        "permitted": f"weaver_permitted_{schema}__{obj}".replace(" ", "_"),
     }
 
 
