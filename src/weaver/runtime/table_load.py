@@ -88,22 +88,28 @@ def load_table(
     if contract.replaces_wholesale:
         return _full_replace(spark, target, upserts, columns)
 
-    validated, reason, rank = _validate(spark, upserts, contract, columns)
-    counts = _reason_counts(spark, validated, reason)
-    rows_read = sum(counts.values())
-    rows_rejected = rows_read - counts.get(None, 0)
+    validated, reason = _validate(spark, upserts, contract, columns)
+    try:
+        counts = _reason_counts(spark, validated, reason)
+        rows_read = sum(counts.values())
+        rows_rejected = rows_read - counts.get(None, 0)
 
-    if rows_rejected:
-        _write_rejects(spark, target, validated, reason, columns)
-    if rows_rejected and not fault_tolerant:
-        # Nothing has been written, so refusing is a decision not to start
-        # rather than an unwind — and the reject table survives as the evidence.
-        return LoadResult.failure(
-            INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=rows_rejected
-        )
+        if rows_rejected:
+            _write_rejects(spark, target, validated, reason, columns)
+        if rows_rejected and not fault_tolerant:
+            # Nothing has been written, so refusing is a decision not to start
+            # rather than an unwind — and the reject table is the evidence.
+            return LoadResult.failure(
+                INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=rows_rejected
+            )
 
-    accepted = _accepted_view(spark, validated, reason, columns, target)
-    written = _merge(spark, target, accepted, contract, columns, deletes)
+        accepted = _accepted_view(spark, validated, reason, columns, target)
+        written = _merge(spark, target, accepted, contract, columns, deletes)
+    finally:
+        # The reference unpersists its validation state, and a session that
+        # loads many objects is exactly where not doing so is felt: each load
+        # would leave its staged rows cached for the life of the session.
+        spark.sql(f"UNCACHE TABLE IF EXISTS {validated}")
 
     result = LoadResult(
         succeeded=True,
@@ -121,7 +127,7 @@ def load_table(
 # --- validation ---------------------------------------------------------------
 
 
-def _validate(spark, upserts, contract: LoadContract, columns) -> tuple[str, str, str]:
+def _validate(spark, upserts, contract: LoadContract, columns) -> tuple[str, str]:
     """Stage the proposed rows with a reject reason attached to each.
 
     The reason is a column rather than a filter so that accepting, rejecting and
@@ -136,7 +142,7 @@ def _validate(spark, upserts, contract: LoadContract, columns) -> tuple[str, str
     partition = ", ".join(f"s.`{c}`" for c in contract.primary_key)
     named = ", ".join(f"s.`{c}`" for c in columns)
 
-    view = f"weaver_validated_{_slug(spark, staged)}"
+    view = f"weaver_validated_{_clean(staged)}"
     spark.sql(
         f"CREATE OR REPLACE TEMP VIEW {view} AS\n"
         f"SELECT {named}, `{rank}`,\n"
@@ -151,7 +157,7 @@ def _validate(spark, upserts, contract: LoadContract, columns) -> tuple[str, str
     )
     # Materialised, because every count and both branches below read it again.
     spark.sql(f"CACHE TABLE {view}")
-    return view, reason, rank
+    return view, reason
 
 
 def _reason_counts(spark, view: str, reason: str) -> dict:
@@ -164,7 +170,7 @@ def _reason_counts(spark, view: str, reason: str) -> dict:
 
 
 def _accepted_view(spark, validated: str, reason: str, columns, target: str) -> str:
-    view = f"weaver_accepted_{_slug(spark, target)}"
+    view = f"weaver_accepted_{_clean(target)}"
     named = ", ".join(f"`{c}`" for c in columns)
     spark.sql(
         f"CREATE OR REPLACE TEMP VIEW {view} AS "
@@ -295,7 +301,7 @@ def _merge(spark, target: str, accepted: str, contract, columns, deletes) -> dic
 def _merge_source(spark, accepted: str, contract, columns, deletes, operation: str) -> str:
     """The merge's source: proposed rows, plus any keys explicitly retired."""
 
-    view = f"weaver_source_{_slug(spark, accepted)}"
+    view = f"weaver_source_{_clean(accepted)}"
     named = ", ".join(f"`{c}`" for c in columns)
     upserts = f"SELECT {named}, 'upsert' AS `{operation}` FROM {accepted}"
     if deletes is None:
@@ -393,10 +399,6 @@ def _register(spark, frame, *, target: str) -> str:
     name = f"weaver_{_clean(target)}"
     frame.createOrReplaceTempView(name)
     return name
-
-
-def _slug(spark, name: str) -> str:
-    return _clean(name)
 
 
 def _clean(name: str) -> str:
