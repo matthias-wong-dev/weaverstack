@@ -85,9 +85,11 @@ class LoadArtefact:
 
     Everything a build needs about a load artefact and nothing about how it was
     reached. The identity is the catalogue key; the signature is what incremental
-    selection compares; the payload is the frozen bytes the installer writes, so
-    an artefact carries its own content rather than sending the installer back to
-    a repository it must never reopen.
+    selection compares; the payload is the frozen bytes the installer is *given*
+    — deployed source for a Python object, and for a generated load an installer
+    script or an instruction the executor completes against the built target. An
+    artefact carries its own content either way, so the installer is never sent
+    back to a repository it must never reopen.
 
     ``origin`` is the declaration this artefact was derived from, where there was
     one. A deployed helper module under ``lib/`` has none: it is authored source

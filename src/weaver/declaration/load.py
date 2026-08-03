@@ -20,19 +20,44 @@ generate itself. It asks for a payload and carries what it gets, which is why
 replacing what this module returns moves exactly the artefacts whose bytes
 changed and nothing else.
 
+**Neither generated load is finished here**, and that is the shape both share
+rather than a limitation of either. What a load writes are the *physical*
+target's columns, and they are not knowable while the target is still a
+declaration: a Warehouse table and a Spark SQL table may each leave their shape
+to be inferred at build. So generation produces something destination-free and
+incomplete, and installation finishes it against the table that now exists:
+
+.. code-block:: text
+
+    create_load()               a destination-free instruction
+      → the target DDL is built
+      → the installer reads the physical target's columns
+      → the installer renders the executable definition
+      → destination tokens are resolved
+      → the runnable artefact is installed
+
+The two differ only in where that rendering happens. A Warehouse load is an
+*installer script*: it carries the assembly with it and runs it server-side,
+reading ``sys.columns`` and creating the procedure in one execution. A Spark SQL
+load is an *instruction*, because Spark has no way to assemble a program from
+inside one — so the ``load_file`` executor reads the built table's schema,
+renders the program and writes it down.
+
 Which sources own a load, and in what form:
 
 .. code-block:: text
 
     Warehouse table (T-SQL)     an installer script for [_].[Load S.N]
-    Lakehouse table (Spark SQL) a runnable Spark SQL program
+    Lakehouse table (Spark SQL) an instruction the installer renders
     Lakehouse table (Python)    the authored module itself
     Folder (Python)             the authored module itself
 
 The two Python forms are not generated at all, and that is the honest answer
 rather than a gap: the author's module *is* the executable artefact, so it is
-deployed verbatim and signed by its own bytes. A view owns no load — its
-definition is its query, so there is nothing to run.
+deployed verbatim and signed by its own bytes. It also needs no second phase —
+a Python load reads its target's columns when it runs, which is the same
+question answered at the same place. A view owns no load; its definition is its
+query, so there is nothing to run.
 """
 
 from __future__ import annotations
@@ -71,7 +96,14 @@ SPARK_LOAD_EXTENSION = ".spark.sql"
 
 @dataclass(frozen=True)
 class GeneratedLoad:
-    """One source's generated, installable load definition.
+    """One source's generated load payload — installable, not yet executable.
+
+    ``payload`` is what the bundle carries and what the installer is handed. It
+    is deliberately *not* a finished program: a Warehouse load is a script that
+    assembles the procedure server-side, and a Spark SQL load is an instruction
+    the executor renders once it can see the built table. Calling it a completed
+    executable definition would misdescribe both, and invite a reader to write
+    the file down unchanged.
 
     ``template_version`` is the generator's version, carried out so the artefact
     layer can salt a signature with it without knowing which generator ran. That
@@ -86,7 +118,7 @@ class GeneratedLoad:
 
 
 def generate_load(document: "SourceDocument") -> GeneratedLoad:
-    """The installable load definition for one validated source.
+    """The installable load payload for one validated source.
 
     Only a table has one. A Folder's load is its authored module and a View has
     no load at all, so neither reaches here — :func:`has_generated_load` is the

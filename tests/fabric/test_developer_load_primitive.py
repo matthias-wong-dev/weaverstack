@@ -1,4 +1,13 @@
-"""The Lakehouse load primitives, against real OneLake.
+"""A developer running a deployed load primitive in Fabric, by hand.
+
+This is a *primitive* test, and its claim is developer-facing: someone in a
+Fabric session can import a deployed object and run its load, with no planner,
+no catalogue orchestration and no estate-level entry point in the way.
+
+That is also why it is ``published_weaver``. The subject is the API the *wheel
+installed in the session* offers — that `.load()` exists there and behaves —
+rather than the load semantics underneath it, which are proved locally in
+``tests/spark`` for a fraction of the cost.
 
 These are the claims local Spark cannot make, and the branch learned that the
 expensive way. In the emulator ``Files`` is an ordinary directory, so a folder
@@ -84,12 +93,13 @@ emit(results)
 '''
 
 
-def test_the_lakehouse_load_primitives_reach_onelake(fabric_lakehouse_estate):
-    """The deployed tree imports, and a Folder writes files that actually land.
+def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_estate):
+    """Import the object the installer deployed, call ``.load()``, and be done.
 
-    The folder is the subject: its authored code writes with ``open()``, which
-    cannot address an ``abfss://`` URL at all. Before the files root existed
-    this reported success and wrote into a local directory called ``abfss:/…``.
+    The folder is the subject because it is the primitive that most needs a real
+    Lakehouse: its authored code writes with ``open()``, which cannot address an
+    ``abfss://`` URL at all. Before the files root existed this reported success
+    and wrote into a local directory called ``abfss:/…``.
     """
 
     env = fabric_lakehouse_estate.env

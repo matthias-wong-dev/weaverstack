@@ -1,8 +1,31 @@
 """Writing and removing one file of a Lakehouse item's deployed runtime tree.
 
-The load layer's file half. A ``write_file`` action carries the exact bytes to
-put down — a deployed Python module, or a generated Spark SQL statement — and a
-``delete_file`` action removes one whose source has stopped claiming it.
+The load layer's file half — and for one kind of file, its second phase.
+
+A ``write_file`` action usually carries the exact bytes to put down: a deployed
+Python module is authored source and travels verbatim. A **generated Spark SQL
+load does not**. Its payload is an instruction, and finishing it is this
+executor's job:
+
+.. code-block:: text
+
+    read the built target's schema, through Spark
+    take its physical business columns
+    render the executable program from the instruction
+    resolve the destination tokens
+    write the file
+
+That two-phase shape is the same one the Warehouse load uses, which ships a
+script that reads ``sys.columns`` and assembles the procedure server-side. The
+reason is the same too: what a load writes are the *physical* target's columns,
+and a Spark SQL table may leave its schema to be inferred at build — so the
+program cannot be finished while the table is still a declaration. Writing a
+file up front would be writing down a guess.
+
+A consequence worth stating: installing a generated load therefore **needs a
+Spark session**, where deploying a module needs only the store.
+
+A ``delete_file`` action removes a file whose source has stopped claiming it.
 
 Both derive their location the same way every other executor does: from the
 action's resource id and the target the batch names. The identity says where the
@@ -83,9 +106,14 @@ class LoadFileExecutor:
     def _addressed(
         self, path: str, payload: bytes, context: InstallationContext
     ) -> bytes:
-        """Resolve a generated Spark SQL program's object tokens as it lands.
+        """Finish a generated load, and address it, on the way down.
 
-        The bundle stays destination-free — that is what lets one repository
+        Two steps, not one. An instruction is first *rendered* into a program
+        against the built target's columns (:meth:`_render`); whatever program
+        results then has its object tokens resolved. A payload that is already a
+        program — one written by an older bundle — skips straight to the second.
+
+        The bundle stays destination-free, which is what lets one repository
         generate the same bytes everywhere and two bundles be diffed for what
         actually differs. The *installed file* cannot be: it has to be runnable
         by anyone who opens it, and by then the destination is known, so this is
