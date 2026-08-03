@@ -63,8 +63,16 @@ RANK_COLUMN = "__weaver_pk_row_number"
 STAGING_SUFFIX = "_Staging"
 REJECT_SUFFIX = "_Reject"
 RESULT_SUFFIX = "_LoadResult"
+DELETE_SUFFIX = "_Delete"
 
 REJECTION_REASON = "Rejection reason"
+
+#: Every table this program creates carries Delta column mapping, for the same
+#: reason :func:`weaver.declaration.ddl._create_table_sql` does: a declared
+#: column name may contain spaces, and Delta refuses those in a physical schema
+#: unless mapping is on. Staging carries the author's own columns forward, so a
+#: table created without it fails on exactly the declarations Weaver permits.
+COLUMN_MAPPING = "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
 
 INTOLERANT_MESSAGE = (
     "rows were rejected and fault_tolerant = 0, so the target was not modified"
@@ -84,9 +92,12 @@ def generate_spark_load_program(document: SesDocument, body: str) -> str:
     else:
         statements = _full_replace_program(names, query, contract)
 
+    # The header must not quote the delimiter. It is a comment, but the splitter
+    # looks for the marker anywhere, so a header that spelled it out would be
+    # cut in half and its first line offered to Spark as a statement.
     header = (
         f"-- Weaver generated load for {document.qualified}.\n"
-        f"-- Statements run in order, separated by '{STATEMENT_DELIMITER}'.\n"
+        f"-- Statements run in order, separated by the marker below.\n"
         f"-- Substitute {FAULT_TOLERANT_TOKEN} with 1 to load valid rows despite "
         "rejects, or 0 to refuse.\n"
     )
@@ -105,12 +116,20 @@ def statements_of(program: str) -> tuple[str, ...]:
 
     parts = []
     for chunk in program.split(STATEMENT_DELIMITER):
-        statement = "\n".join(
-            line for line in chunk.splitlines() if not line.startswith("-- Weaver")
-        ).strip()
-        if statement:
+        statement = chunk.strip()
+        # A chunk of nothing but comments is the file's header, or the tail of a
+        # marker line — never something to hand to Spark, which would reject it
+        # as a syntax error at end of input.
+        if statement and not _is_all_comment(statement):
             parts.append(statement)
     return tuple(parts)
+
+
+def _is_all_comment(statement: str) -> bool:
+    return all(
+        not line.strip() or line.lstrip().startswith("--")
+        for line in statement.splitlines()
+    )
 
 
 # --- the two programs --------------------------------------------------------
@@ -126,16 +145,17 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
         f"DROP TABLE IF EXISTS {names['reject']}",
         f"DROP TABLE IF EXISTS {names['staging']}",
         f"DROP TABLE IF EXISTS {names['result']}",
+        f"DROP TABLE IF EXISTS {names['delete']}",
         # Staging is a real table, not a view: the source query must run once,
         # and a view would re-run it for every count and again for the merge.
-        f"CREATE TABLE {names['staging']} USING delta AS\n"
+        f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n    s.*\n"
         f"  , row_number() OVER (\n"
         f"        PARTITION BY {_columns('s', contract.primary_key)}\n"
         f"        ORDER BY (SELECT NULL)\n"
         f"    ) AS `{RANK_COLUMN}`\n"
         f"FROM (\n{_indent(query, 4)}\n) AS s",
-        f"CREATE TABLE {names['reject']} USING delta AS\n"
+        f"CREATE TABLE {names['reject']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n    s.*\n"
         f"  , CASE WHEN {blank} THEN 'null primary key'\n"
         f"         ELSE 'duplicate primary key' END AS `{REJECTION_REASON}`\n"
@@ -157,7 +177,7 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
         _merge(names, contract, business, audit),
     ]
     if contract.deletes_absent_rows:
-        statements.append(_delete_absent(names, contract))
+        statements.extend(_delete_absent(names, contract))
     statements.append(_final_select(names))
     return statements
 
@@ -175,8 +195,8 @@ def _full_replace_program(names: dict, query: str, contract: LoadContract) -> li
     return [
         f"DROP TABLE IF EXISTS {names['staging']}",
         f"DROP TABLE IF EXISTS {names['result']}",
-        f"CREATE TABLE {names['staging']} USING delta AS\n{query}",
-        f"CREATE TABLE {names['result']} USING delta AS\n"
+        f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS\n{query}",
+        f"CREATE TABLE {names['result']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n"
         f"    (SELECT count(*) FROM {names['staging']}) AS rows_read\n"
         f"  , (SELECT count(*) FROM {names['staging']}) AS rows_inserted\n"
@@ -217,7 +237,7 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
         else "    , CAST(0 AS BIGINT) AS rows_deleted\n"
     )
     return (
-        f"CREATE TABLE {names['result']} USING delta AS\n"
+        f"CREATE TABLE {names['result']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n"
         f"      (SELECT count(*) FROM {names['staging']}) AS rows_read\n"
         f"    , CASE WHEN {tolerated} THEN (\n"
@@ -271,14 +291,34 @@ def _merge(names: dict, contract: LoadContract, business, audit) -> str:
     )
 
 
-def _delete_absent(names: dict, contract: LoadContract) -> str:
+def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
+    """Remove target rows the source stopped producing, in two statements.
+
+    Delta refuses a subquery in ``DELETE``, and ``WHEN NOT MATCHED BY SOURCE``
+    would be worse than unavailable — it would be dangerous. The valid view is
+    empty whenever a run is refusing to write, and "not matched by source"
+    against an empty source matches *every* target row, so the one case that
+    must leave the target untouched would empty it instead.
+
+    Materialising the keys first removes both problems. The subquery lives in a
+    ``CREATE TABLE AS``, where it is allowed, and an intolerant run produces an
+    empty key set, so the merge below it deletes nothing.
+    """
+
     join = _join("v", "t", contract.primary_key)
-    return (
-        f"DELETE FROM {names['target']} AS t\n"
+    keys = ", ".join(f"t.`{c}`" for c in contract.primary_key)
+    return [
+        f"CREATE TABLE {names['delete']} USING delta {COLUMN_MAPPING} AS\n"
+        f"SELECT {keys}\n"
+        f"FROM {names['target']} AS t\n"
         f"WHERE NOT EXISTS (\n"
         f"    SELECT 1 FROM {names['valid']} AS v WHERE {join}\n"
-        f")"
-    )
+        f")",
+        f"MERGE INTO {names['target']} AS t\n"
+        f"USING {names['delete']} AS d\n"
+        f"   ON {_join('d', 't', contract.primary_key)}\n"
+        f"WHEN MATCHED THEN DELETE",
+    ]
 
 
 def _final_select(names: dict) -> str:
@@ -312,6 +352,7 @@ def _names(document: SesDocument) -> dict:
         "staging": object_token(schema, obj + STAGING_SUFFIX),
         "reject": object_token(schema, obj + REJECT_SUFFIX),
         "result": object_token(schema, obj + RESULT_SUFFIX),
+        "delete": object_token(schema, obj + DELETE_SUFFIX),
         # A temp view is session-scoped and unqualified: it is the one relation
         # here that is not a managed object, because it holds no rows of its own.
         "valid": f"weaver_valid_{schema}__{obj}".replace(" ", "_"),
