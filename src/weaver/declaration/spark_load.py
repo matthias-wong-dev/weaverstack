@@ -571,10 +571,29 @@ def _names(document: SesDocument) -> dict:
 
 
 def _business_columns(contract: LoadContract) -> tuple[str, ...]:
-    """The columns a load writes: the declaration's, never the audit ones.
+    """The columns a load writes.
 
-    A Delta table has no identity column to exclude — that is a Warehouse
-    declaration — so what remains is exactly what the author declared.
+    **This is wrong and is a known defect.** Comparison columns are the subset
+    whose change means a matched row was updated; they are not the table's
+    shape, and a declaration may narrow them to one column out of many. A table
+    declaring ``Customer id, Customer name, Amount`` with
+    ``Comparison columns: Amount`` therefore has ``Customer name`` dropped from
+    staging, rejects, the upsert set, inserts and updates. The branch's own
+    ``Sales.OrderSummary`` example is affected.
+
+    The fix needs the *declared* shape, which ``LoadContract`` does not carry,
+    and it has to work for a Spark SQL table that leaves its schema to be
+    inferred at build — where the generator cannot know the columns at all.
+    Projecting around the helper columns instead of naming them was tried and
+    does not work on OSS Spark: ``SELECT * EXCEPT`` is a Databricks extension,
+    and Delta's ``MERGE ... UPDATE SET *`` requires the source to carry every
+    target column including ``row_insert_datetime``, which an update must not
+    overwrite.
+
+    So the shape of the fix is: carry the declared columns on the contract and
+    use them here, and settle separately what an inferred table does — most
+    likely reading its columns at install, as the Warehouse installer already
+    reads ``sys.columns``.
     """
 
     return tuple(contract.primary_key) + tuple(
