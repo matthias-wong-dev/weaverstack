@@ -438,8 +438,9 @@ def warehouse_table(
     physical types casts them in the select, which is also how the real fixtures
     read.
 
-    ``identity`` names a Weaver-managed surrogate key: a column the query does
-    *not* produce and Weaver adds, which is why it needs an engine to confirm.
+    ``identity`` names an engine-generated surrogate key: a column the query does
+    *not* produce, which build declares ``identity`` and the Warehouse
+    assigns — which is why it needs an engine to confirm.
     """
 
     identity_line = f"Identity: {identity}\n\n" if identity else ""

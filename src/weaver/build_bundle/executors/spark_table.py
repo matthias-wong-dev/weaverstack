@@ -17,10 +17,11 @@ pass, the Spark counterpart of the old T-SQL self-contained script
 4. append Weaver's audit columns;
 5. create the table with strict ``CREATE TABLE``.
 
-Identity is validated (it must name a produced column) but not materialised on
-Delta: an identity/generated column is not portably available on the local Delta
-build, and the feature is provisional. T-SQL materialises it; here it is a no-op
-beyond validation.
+A Delta table has no identity column, so nothing here handles one. Native
+identity is what makes the column worth having, and no Delta version Weaver
+runs on generates it, so the ``Identity`` header is a Warehouse-only
+declaration the parser refuses elsewhere (:data:`weaver.declaration.metadata.IDENTITY_LANGUAGES`)
+rather than something accepted here and quietly not materialised.
 """
 
 from __future__ import annotations
@@ -90,22 +91,17 @@ class SparkTableExecutor:
             references = tuple(
                 (label, column) for label, column in instruction["references"]
             )
-            identity = instruction.get("identity_column")
-            identity_name = identity[0] if identity else None
-
             business_columns = validate_build_columns(
                 qualified,
                 query_columns,
                 declared_columns=declared_names,
                 references=references,
-                identity=identity_name,
             )
 
             business = self._physical_columns(
                 qualified, business_columns, declared, query_types, references
             )
-            leading = [tuple(identity)] if identity else []
-            physical = leading + business + [
+            physical = business + [
                 tuple(entry) for entry in instruction["audit_columns"]
             ]
 

@@ -86,6 +86,9 @@ def estate(tmp_path):
     _write(root, f"{ITEM}/DWG.Active.sql", spark_view(VIEW, depends_on=CUSTOMER))
     _write(root, f"{ITEM}/Files/Raw__Export.py", folder_document("Raw.Export"))
     _write(root, f"{ITEM}/lib/dates.py", "def parse_date(value):\n    return value\n")
+    # Not Python, and deployed all the same: lib/ is reproduced verbatim, so a
+    # module that reads a data file beside it finds one.
+    _write(root, f"{ITEM}/lib/data/holidays.csv", "date,name\n2026-01-01,New Year\n")
     _write(root, f"{WAREHOUSE_ITEM}/schemas/Sales.yml", schema_document("Sales"))
     _write(root, f"{WAREHOUSE_ITEM}/Sales.Customer.sql", warehouse_table("Sales.Customer"))
     _write(
@@ -109,13 +112,15 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     Worth asserting whole rather than piecemeal: the interesting property is not
     that a Python file is deployed but that *this* is the complete set — that a
     view contributes nothing, that a helper module nobody declares still gets a
-    claim, and that the generated folder document does not deploy itself.
+    claim, that a data file beside that module travels with it, and that the
+    generated folder document does not deploy itself.
     """
 
     assert identities(load_artefacts(estate)) == [
         f"{ITEM}/file:{LOAD_ROOT}/DWG.Summary.sql",
         f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py",
         f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py",
+        f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv",
         f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
         f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer",
     ]
@@ -253,7 +258,7 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
     that no generator produced.
     """
 
-    import weaver.etl
+    import weaver.declaration.load
 
     spark_file = f"{ITEM}/file:{LOAD_ROOT}/DWG.Summary.sql"
     procedure = f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer"
@@ -262,7 +267,7 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
         name: signature_of(estate, name) for name in (spark_file, procedure, module)
     }
 
-    monkeypatch.setattr(weaver.etl, "SPARK_ETL_TEMPLATE_VERSION", 2)
+    monkeypatch.setattr(weaver.declaration.load, "SPARK_LOAD_VERSION", 99)
     after = {
         name: signature_of(estate, name) for name in (spark_file, procedure, module)
     }
@@ -277,13 +282,40 @@ def test_the_template_versions_do_not_reach_the_repository_signature(
 ):
     """It describes authored content, and a renderer's version is not authored."""
 
-    import weaver.etl
+    import weaver.declaration.load
 
-    monkeypatch.setattr(weaver.etl, "TSQL_ETL_TEMPLATE_VERSION", 99)
+    monkeypatch.setattr(weaver.declaration.load, "TSQL_LOAD_VERSION", 99)
 
     assert (
         parse_item_repository(estate.root).signature == estate.signature
     )
+
+
+def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
+    """`lib/` is reproduced verbatim, whatever is in it.
+
+    A `.py` filter here was reading across from the *top level*, where a Weaver
+    document is python, sql or yml. But a helper module that reads a data file
+    beside it needs that file to have travelled with it — and it did not, so on
+    Fabric the module found nothing.
+    """
+
+    deployed = {
+        str(artefact.identity) for artefact in item_load_artefacts(estate, item=item_id())
+    }
+
+    assert f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py" in deployed
+    assert f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv" in deployed
+
+
+def test_an_alias_declaration_is_not_runtime_source(estate):
+    """It declares where a name points; nothing imports it at load time."""
+
+    deployed = {
+        str(artefact.identity) for artefact in item_load_artefacts(estate, item=item_id())
+    }
+
+    assert not any(name.endswith("alias.yml") for name in deployed)
 
 
 # --- incremental selection ----------------------------------------------------

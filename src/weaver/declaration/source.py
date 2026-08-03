@@ -331,6 +331,19 @@ class SourceDocument:
 
         return generate_ddl(self)
 
+    def create_load(self) -> "GeneratedLoad":
+        """The generated, installable load definition for this source.
+
+        The sibling of :meth:`create_ddl`, and owned here for the same reason:
+        the source alone knows its language, kind, ID and validated body. The
+        load artefact layer asks for this and carries what it gets rather than
+        rendering anything itself.
+        """
+
+        from .load import generate_load
+
+        return generate_load(self)
+
 
 def read_source_document(
     relative_path: str, data: bytes, item_type: str

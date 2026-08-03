@@ -151,6 +151,32 @@ class WeaverObject:
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
 
+    # --- the load contract, read from this module's own docstring ----------
+
+    def _document(self):
+        """This object's parsed declaration, from the module it was defined in.
+
+        The module *is* the contract. A deployed object in a session has no
+        repository to reopen and no catalogue to query, so if its docstring were
+        not sufficient then ``load()`` would be the tail end of an orchestration
+        rather than something runnable on its own.
+
+        It is read on every call rather than cached, which is what makes an edit
+        visible on the next reload — the notebook loop this is meant to support.
+        """
+
+        import sys
+
+        from .runtime.load_contract import document_for_module
+
+        module = sys.modules.get(type(self).__module__)
+        if module is None:  # pragma: no cover - a class with no importable module
+            raise LoadError(
+                f"{type(self).__name__} was defined outside an importable module, "
+                "so its Weaver metadata cannot be read"
+            )
+        return document_for_module(module)
+
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.object_id} in {self.lakehouse.name}>"
 
@@ -163,15 +189,27 @@ class Folder(WeaverObject):
     """
 
     def path(self) -> str:
-        """This folder's materialised location, beneath the Lakehouse's own root.
+        """This folder's materialised location, as Spark addresses it.
 
-        Hadoop-compatible, not a mount. ``/lakehouse/default`` addresses whichever
-        Lakehouse a notebook attached, and a load runs detached against Lakehouses
-        it resolved by name — so a folder reachable only through a mount could not
-        be loaded by the thing that loads it.
+        What one object hands another: a table reading these files does it with
+        ``spark.read``, which wants the ``abfss://`` form. Addressed by the root
+        the Lakehouse was resolved to, never by ``/lakehouse/default`` — that
+        names only whatever a notebook attached, and a load runs detached against
+        Lakehouses it resolved by name.
         """
 
         return self.lakehouse.folder_path(*self.identity)
+
+    def local_path(self) -> str:
+        """This folder's location for code that opens files rather than reading
+        them through Spark.
+
+        The same bytes as :meth:`path`, spelled as a filesystem path. In OneLake
+        that is a mount Weaver makes of the resolved root; locally the two are
+        the same directory.
+        """
+
+        return self.lakehouse.folder_local_path(*self.identity)
 
     def staging_folder(self) -> str:
         """The object-local staging directory to write into.
@@ -182,7 +220,43 @@ class Folder(WeaverObject):
         so a failed load leaves exactly one directory to look at.
         """
 
-        return f"{self.path()}_Staging"
+        return f"{self.local_path()}_Staging"
+
+    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this folder's ``read()`` and publish what it staged.
+
+        Independently runnable, which is the point::
+
+            Sales__Export(spark).load(fault_tolerant=False)
+
+        No repository, no catalogue, no bundle and no orchestrator — the module
+        carries its own contract and this object carries its own destination.
+        """
+
+        from .runtime.folder_load import load_folder, new_staging_folder
+        from .runtime.load_contract import FolderLoadContract
+
+        contract = FolderLoadContract.from_document(self._document())
+        # Weaver issues staging, before read() rather than after the load. A run
+        # must begin from nothing it did not itself produce, or the previous
+        # run's files are published again and a replacement concludes that
+        # nothing was retired. Clearing afterwards instead would destroy the one
+        # directory worth looking at when a load fails.
+        issued = new_staging_folder(self.local_path(), self.staging_folder())
+        staged, deletes = _load_pair(self, self.read())
+        if str(staged) != issued:
+            raise LoadError(
+                f"{type(self).__name__}.read() returned {staged!r}, which is not "
+                f"the staging folder Weaver issued ({issued!r}) — return "
+                "self.staging_folder()"
+            )
+        return load_folder(
+            contract=contract,
+            destination=self.local_path(),
+            staging=issued,
+            deletes=deletes,
+            fault_tolerant=fault_tolerant,
+        )
 
 
 class Table(WeaverObject):
@@ -214,6 +288,43 @@ class Table(WeaverObject):
 
         return self.dataframe().limit(0)
 
+    def load(
+        self,
+        fault_tolerant: bool = False,
+        ignore_stability_threshold: bool = False,
+    ) -> "LoadResult":
+        """Run this table's ``read()`` and write what it staged.
+
+        Independently runnable, which is the point::
+
+            Sales__Customer(spark).load(fault_tolerant=True)
+
+        No repository, no catalogue, no bundle and no orchestrator — the module
+        carries its own contract and this object carries its own destination.
+
+        ``ignore_stability_threshold`` waives the declared delete and update
+        limits for one run. It exists for the case where a very large change is
+        the correct answer — a genuine bulk retirement — and is a deliberate act
+        each time rather than a setting that stays on.
+        """
+
+        from .runtime.load_contract import LoadContract
+        from .runtime.table_load import load_table
+
+        contract = LoadContract.from_document(self._document())
+        # The first value is *staging* — unvalidated, unreconciled, nothing yet
+        # classified as new or changed. Naming it so is the point.
+        staged, deletes = _load_pair(self, self.read())
+        return load_table(
+            self.spark,
+            contract=contract,
+            lakehouse=self.lakehouse,
+            staging_frame=staged,
+            deletes=deletes,
+            fault_tolerant=fault_tolerant,
+            ignore_stability_threshold=ignore_stability_threshold,
+        )
+
 
 class View(WeaverObject):
     """A view over other objects, declared in SQL.
@@ -229,6 +340,24 @@ class View(WeaverObject):
         """
 
         return self.spark.table(self.lakehouse.qualify(*self.identity))
+
+
+def _load_pair(obj, returned):
+    """Unpack what ``read()`` returned, refusing anything else by name.
+
+    Both kinds of object return a pair, and the error has to name the object
+    rather than surface as a tuple-unpacking failure three frames deeper — an
+    author who returned a single frame should be told that, not shown a
+    ValueError about lengths.
+    """
+
+    if not isinstance(returned, tuple) or len(returned) != 2:
+        raise LoadError(
+            f"{type(obj).__name__}.read() must return a pair — "
+            f"(staging, deletes) for a Table, (staging_folder, files_to_delete) "
+            f"for a Folder — and returned {type(returned).__name__}"
+        )
+    return returned
 
 
 def _identity(class_name: str) -> tuple[str, str]:

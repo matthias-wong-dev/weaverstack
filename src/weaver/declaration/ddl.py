@@ -59,8 +59,9 @@ if TYPE_CHECKING:
     from .source import SourceDocument
 
 #: The bundle format version this generator targets. A change to the generated
-#: shape is a change to this number.
-BUILD_FORMAT_VERSION = 1
+#: shape is a change to this number. Version 2 dropped the ``spark_table``
+#: payload's identity column: a Delta table no longer has one to carry.
+BUILD_FORMAT_VERSION = 2
 
 #: The executor a concrete Spark statement runs through. It names a runtime
 #: dispatch key, not an engine — a Fabric Spark session and a local one both use
@@ -207,11 +208,6 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
         ),
         "source_query": _addressed((document.sql_body or "").strip()),
         "references": [list(pair) for pair in metadata_column_references(ses)],
-        # The Weaver-managed surrogate column, when declared: a not-null bigint
-        # the executor adds and a later load populates. None when absent.
-        "identity_column": (
-            _column_entry(ses.identity_column) if ses.identity_column else None
-        ),
         "audit_columns": [_column_entry(column) for column in ses.audit_columns],
         "column_mapping": True,
     }

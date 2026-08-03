@@ -398,13 +398,18 @@ def parse_item_repository(
         for model in items
     ]
 
-    # Held rather than re-read: a ``lib/`` module is deployed by the load layer,
-    # so its bytes have to reach both the signature it is selected by and the
+    # Held rather than re-read: a ``lib/`` file is deployed by the load layer, so
+    # its bytes have to reach both the signature it is selected by and the
     # payload the bundle carries, and neither may reopen the repository.
+    #
+    # Every support file, not only the Python ones. A `.py` filter here was
+    # reading across from the *top level*, where a Weaver document is python,
+    # sql or yml — but `lib/` is an ordinary directory the runtime tree
+    # reproduces verbatim, and a module that reads a data file beside it needs
+    # that file to have travelled with it.
     support_file_contents = {
         relative: store.read(root.join(*relative.split("/")))
         for relative in sorted(support_files)
-        if relative.endswith(".py")
     }
 
     repository = WeaverRepository(

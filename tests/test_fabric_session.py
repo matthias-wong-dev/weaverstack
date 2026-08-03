@@ -61,8 +61,10 @@ class _NamedLakehouses:
 def test_a_lakehouse_resolves_to_what_authored_code_addresses():
     """What ``lakehouse_for`` composes inside a session — attached or not.
 
-    Both areas hang off the one OneLake root, so an object reaches a Lakehouse
-    this session never attached exactly as it reaches the one it did.
+    The OneLake root is the durable identity, and a table is addressed by it
+    directly. A folder is reached through a mount of that same root, resolved on
+    use, so an object reaches a Lakehouse this session never attached exactly as
+    it reaches the one it did.
     """
 
     from weaver import lakehouse_for
@@ -79,9 +81,8 @@ def test_a_lakehouse_resolves_to_what_authored_code_addresses():
         "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/"
         "id-of-Sales/Tables/Sales/Order"
     )
-    assert lakehouse.folder_path("Sales", "Export") == (
-        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/"
-        "id-of-Sales/Files/Sales/Export"
+    assert lakehouse.location.files_root == (
+        "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/id-of-Sales/Files"
     )
     assert lakehouse.qualify("Sales", "Order") == "`Analytics`.`Sales`.`Sales`.`Order`"
 
