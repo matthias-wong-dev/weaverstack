@@ -241,6 +241,7 @@ def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
     ]
     if contract.deletes_absent_rows:
         statements.extend(_delete_absent(names, contract))
+    statements.append(_guard(names))
     statements.append(_final_select(names))
     return statements
 
@@ -305,8 +306,11 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
     return (
         f"CREATE TABLE {names['result']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT *\n"
-        f"    , {_threshold_predicate(names, contract)} AS within_thresholds\n"
+        f"    , {_outcome_columns()}\n"
         f"FROM (\n"
+        f"  SELECT *\n"
+        f"    , {_threshold_predicate(names, contract)} AS within_thresholds\n"
+        f"  FROM (\n"
         f"  SELECT\n"
         f"      (SELECT count(*) FROM {names['staging']}) AS rows_read\n"
         f"    , (SELECT count(*) FROM {names['target']}) AS target_rows\n"
@@ -316,7 +320,54 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
         f"WHERE `{IS_NEW_COLUMN}` = 0) AS proposed_updated\n"
         f"{deleted}"
         f"    , (SELECT count(*) FROM {names['reject']}) AS rows_rejected\n"
-        f") AS proposed"
+        f"  ) AS proposed\n"
+        f") AS decided"
+    )
+
+
+def _outcome_columns() -> str:
+    """``succeeded`` and ``error_message``, derived where every reader sees them.
+
+    Both are known before a single row moves, so they are settled with the
+    counts rather than at the end — which is what lets the guard that raises and
+    the row that reports read one decision.
+    """
+
+    return (
+        f"      (rows_rejected = 0 AND within_thresholds) AS succeeded\n"
+        f"    , CASE\n"
+        f"        WHEN NOT within_thresholds THEN\n"
+        f"          concat('the proposed change is over this object''s stability "
+        f"thresholds: ',\n"
+        f"                 proposed_deleted, ' deletes and ', proposed_updated,\n"
+        f"                 ' updates against ', target_rows, ' rows; "
+        f"the target was not modified')\n"
+        f"        WHEN rows_rejected = 0 THEN CAST(NULL AS STRING)\n"
+        f"        WHEN {FAULT_TOLERANT_DEFAULT} = 0 THEN '{INTOLERANT_MESSAGE}'\n"
+        f"        ELSE '{TOLERATED_MESSAGE}'\n"
+        f"      END AS error_message"
+    )
+
+
+def _guard(names: dict) -> str:
+    """Raise when the run failed and was not asked to tolerate it.
+
+    Native, because ``exec [_].[Load S.N]`` and ``.load()`` must fail the same
+    way — a primitive that returned a quiet row where its sibling raised would
+    make every caller special-case which one it was talking to.
+
+    Safe at the end: both failing cases empty the relations the writes read, so
+    nothing has been written by the time this runs.
+    """
+
+    return (
+        f"{POSTPROCESSING_BANNER}\n"
+        f"SELECT CASE\n"
+        f"         WHEN succeeded THEN 'ok'\n"
+        f"         WHEN {FAULT_TOLERANT_DEFAULT} = 1 THEN 'reported'\n"
+        f"         ELSE raise_error(error_message)\n"
+        f"       END AS guard\n"
+        f"FROM {names['result']}"
     )
 
 
@@ -328,19 +379,23 @@ def _threshold_predicate(names: dict, contract: LoadContract) -> str:
     empty, and the result that has to say so. Recomputing it in each would let
     them disagree, and a load that reported one thing and did another is the
     failure this whole guard exists to prevent.
+
+    An explicit ``CASE`` rather than an ``OR`` chain, because SQL does not
+    promise to short-circuit and the arithmetic divides by ``target_rows``. An
+    empty target has no proportion to be a percentage of, and a first load into
+    one is the case the guard must never stand in the way of.
     """
 
     return (
-        f"(\n"
-        f"        {IGNORE_THRESHOLD_DEFAULT} = 1\n"
-        f"     OR target_rows < {contract.stability_rows}\n"
-        f"     OR (\n"
-        f"            proposed_deleted * 100.0 / target_rows "
+        f"CASE\n"
+        f"        WHEN {IGNORE_THRESHOLD_DEFAULT} = 1 THEN true\n"
+        f"        WHEN target_rows = 0 THEN true\n"
+        f"        WHEN target_rows < {contract.stability_rows} THEN true\n"
+        f"        ELSE proposed_deleted * 100.0 / target_rows "
         f"<= {contract.delete_threshold}\n"
-        f"        AND proposed_updated * 100.0 / target_rows "
+        f"         AND proposed_updated * 100.0 / target_rows "
         f"<= {contract.update_threshold}\n"
-        f"        )\n"
-        f"    )"
+        f"      END"
     )
 
 
@@ -473,33 +528,24 @@ def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
 def _final_select(names: dict) -> str:
     """The result row, in the shape every transport reports.
 
-    ``succeeded`` is derived here rather than stored, because it is not an
-    independent fact: a load succeeded exactly when it rejected nothing.
+    ``rows_deleted`` is reconciled from the target's own cardinality rather than
+    taken from the delete driver: the driver says what the load *intended*, and
+    this says what happened. The two differ whenever a key named for deletion
+    was not there to begin with.
     """
 
+    inserted = "CASE WHEN within_thresholds THEN proposed_inserted ELSE 0 END"
     return (
         f"SELECT\n"
-        f"      (rows_rejected = 0 AND within_thresholds) AS succeeded\n"
+        f"      succeeded\n"
         f"    , rows_read\n"
-        f"    , CASE WHEN within_thresholds THEN proposed_inserted ELSE 0 END\n"
-        f"        AS rows_inserted\n"
+        f"    , {inserted} AS rows_inserted\n"
         f"    , CASE WHEN within_thresholds THEN proposed_updated ELSE 0 END\n"
         f"        AS rows_updated\n"
-        f"    , CASE WHEN within_thresholds THEN proposed_deleted ELSE 0 END\n"
+        f"    , target_rows + {inserted} - (SELECT count(*) FROM {names['target']})\n"
         f"        AS rows_deleted\n"
         f"    , rows_rejected\n"
-        f"    , CASE\n"
-        f"        WHEN NOT within_thresholds THEN\n"
-        f"          concat('the proposed change is over this object''s stability "
-        f"thresholds: ',\n"
-        f"                 proposed_deleted, ' deletes and ', proposed_updated,\n"
-        f"                 ' updates against ', target_rows, ' rows')\n"
-        f"        WHEN rows_rejected = 0 THEN CAST(NULL AS STRING)\n"
-        f"        WHEN proposed_inserted = 0 AND proposed_updated = 0 "
-        f"AND proposed_deleted = 0\n"
-        f"          THEN '{INTOLERANT_MESSAGE}'\n"
-        f"        ELSE '{TOLERATED_MESSAGE}'\n"
-        f"      END AS error_message\n"
+        f"    , error_message\n"
         f"FROM {names['result']}"
     )
 

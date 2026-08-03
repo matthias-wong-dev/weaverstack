@@ -176,6 +176,21 @@ def customer(spark, lakehouses, lakehouse, deployed):
 
 
 @pytest.fixture
+def incremental(spark, lakehouse, customer, deployed):
+    """The same table declared incremental, where explicit deletes are the driver."""
+
+    import importlib
+
+    (deployed / "Sales__Customer.py").write_text(
+        CUSTOMER_MODULE.replace(
+            "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
+        ),
+        encoding="utf-8",
+    )
+    return importlib.reload(importlib.import_module("Sales__Customer")).Sales__Customer
+
+
+@pytest.fixture
 def unkeyed(spark, lakehouse, customer, deployed):
     """An unkeyed table beside the keyed one, sharing its schema fixture."""
 
@@ -261,42 +276,65 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing(
     assert _contents(spark, lakehouse) == [("c1", "One")]
 
 
-def test_an_explicit_delete_retires_a_row_the_source_no_longer_produces(
-    spark, lakehouse, customer
+def test_an_incremental_load_deletes_only_what_it_was_told_to(
+    spark, lakehouse, incremental
 ):
-    """An explicit delete is a statement, not an inference.
+    """Absence proves nothing to an incremental source, so it must *state*.
 
-    The object names the row as gone, so it goes — which is how an incremental
-    source reports a deletion it actually observed rather than inferring one
-    from a row's absence.
+    `c2` is missing from this run's rows and survives; `c3` is named for
+    deletion and goes.
     """
 
-    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+    _load(incremental, spark, lakehouse,
+          [("c1", "One"), ("c2", "Two"), ("c3", "Three")])
 
-    result = _load(customer, spark, lakehouse, [("c1", "One")], deletes=[("c2",)])
+    result = _load(incremental, spark, lakehouse, [("c1", "One")], deletes=[("c3",)])
 
     assert result.rows_deleted == 1
-    assert _contents(spark, lakehouse) == [("c1", "One")]
+    assert _contents(spark, lakehouse) == [("c1", "One"), ("c2", "Two")]
 
 
-def test_a_staged_key_may_still_be_explicitly_deleted(spark, lakehouse, customer):
-    """Explicit deletes are not part of staging reconciliation.
+def test_a_staged_key_may_still_be_explicitly_deleted(spark, lakehouse, incremental):
+    """The delete runs after the upsert, so the later statement wins.
 
-    They run afterwards, by key, so a key that was both staged and deleted ends
-    up deleted. No conflict rule is needed — the later statement wins, and
-    over-deleting is the recoverable direction. This is a deliberate departure
-    from `delta_table_load.py`, which filtered deletes against the accepted keys
-    so an upsert survived.
+    No conflict rule is needed, and over-deleting is the recoverable direction.
     """
 
-    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+    _load(incremental, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
 
     result = _load(
-        customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")], deletes=[("c2",)]
+        incremental, spark, lakehouse, [("c1", "One"), ("c2", "Two")], deletes=[("c2",)]
     )
 
     assert result.rows_deleted == 1
     assert _contents(spark, lakehouse) == [("c1", "One")]
+
+
+def test_a_non_incremental_load_refuses_explicit_deletes(spark, lakehouse, customer):
+    """The source is the whole truth, so absence already retires a row.
+
+    An explicit list would be a second, quieter answer to a question the
+    reconciliation has already answered — so it is refused rather than ignored,
+    as a non-incremental folder's explicit deletes already are.
+    """
+
+    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+
+    with pytest.raises(LoadError, match="cannot name explicit deletes"):
+        _load(customer, spark, lakehouse, [("c1", "One")], deletes=[("c2",)])
+
+
+def test_a_delete_for_a_row_that_was_not_there_is_not_a_deletion(
+    spark, lakehouse, incremental
+):
+    """Reported from the target's own cardinality, so what is counted is what
+    actually left rather than what was asked for."""
+
+    _load(incremental, spark, lakehouse, [("c1", "One")])
+
+    result = _load(incremental, spark, lakehouse, [("c1", "One")], deletes=[("gone",)])
+
+    assert result.rows_deleted == 0
 
 
 # --- rejection and fault tolerance -------------------------------------------
@@ -305,14 +343,20 @@ def test_a_staged_key_may_still_be_explicitly_deleted(spark, lakehouse, customer
 REJECTABLE = [("c1", "One"), (None, "NoKey"), ("   ", "Blank"), ("c4", "A"), ("c4", "B")]
 
 
-def test_an_intolerant_load_with_rejects_leaves_the_target_untouched(
+def test_an_intolerant_load_with_rejects_raises_and_leaves_the_target_untouched(
     spark, lakehouse, customer
 ):
-    result = _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=False)
+    """`fault_tolerant` decides how a failure surfaces: raised, or returned.
 
-    assert result.succeeded is False
-    assert result.rows_rejected == 3
-    assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (0, 0, 0)
+    The error carries the result, so a caller that catches it can still report
+    how many rows were read and how many refused.
+    """
+
+    with pytest.raises(LoadError) as raised:
+        _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=False)
+
+    assert raised.value.result.rows_rejected == 3
+    assert raised.value.result.succeeded is False
     assert _contents(spark, lakehouse) == []
 
 
@@ -511,10 +555,10 @@ def test_too_many_deletes_refuses_and_leaves_the_target_untouched(
 
     _load(guarded, spark, lakehouse, TWENTY)
 
-    result = _load(guarded, spark, lakehouse, TWENTY[:5])
+    with pytest.raises(LoadError, match="over the 5% threshold") as raised:
+        _load(guarded, spark, lakehouse, TWENTY[:5])
 
-    assert result.succeeded is False
-    assert "over the 5% threshold" in result.error_message
+    assert raised.value.result.succeeded is False
     assert len(_contents(spark, lakehouse)) == 20
 
 
@@ -522,26 +566,31 @@ def test_too_many_updates_refuses(spark, lakehouse, guarded):
     _load(guarded, spark, lakehouse, TWENTY)
 
     changed = [(key, f"changed {key}") for key, _ in TWENTY]
-    result = _load(guarded, spark, lakehouse, changed)
+    with pytest.raises(LoadError, match="over the 20% threshold"):
+        _load(guarded, spark, lakehouse, changed)
 
-    assert result.succeeded is False
-    assert "over the 20% threshold" in result.error_message
     # Untouched: the names are the originals, not the changed ones.
     assert sorted(_contents(spark, lakehouse)) == sorted(TWENTY)
 
 
-def test_a_breach_is_governed_by_fault_tolerant_like_a_rejection(
+def test_tolerating_a_breach_changes_only_how_it_is_reported(
     spark, lakehouse, guarded
 ):
-    """Tolerating it changes what is written, never what is reported."""
+    """A breach never writes.
+
+    Tolerating exactly the change the threshold was declared to prevent would
+    defeat the guard, so `fault_tolerant` decides only whether the refusal is
+    raised or returned. Permitting it is what `ignore_stability_threshold` is
+    for.
+    """
 
     _load(guarded, spark, lakehouse, TWENTY)
 
     result = _load(guarded, spark, lakehouse, TWENTY[:5], fault_tolerant=True)
 
     assert result.succeeded is False
-    assert result.rows_deleted == 15
-    assert len(_contents(spark, lakehouse)) == 5
+    assert result.rows_deleted == 0
+    assert len(_contents(spark, lakehouse)) == 20
 
 
 def test_the_threshold_can_be_waived_for_one_run(spark, lakehouse, guarded):
@@ -721,12 +770,13 @@ def test_a_staged_file_the_key_does_not_claim_is_rejected(spark, lakehouse, expo
     assert _folder_contents(lakehouse) == {"a.csv": "1"}
 
 
-def test_an_intolerant_folder_load_with_rejects_publishes_nothing(
+def test_an_intolerant_folder_load_with_rejects_raises_and_publishes_nothing(
     spark, lakehouse, export
 ):
-    result = _load_folder(export, spark, lakehouse, {"a.csv": "1", "notes.md": "x"})
+    with pytest.raises(LoadError) as raised:
+        _load_folder(export, spark, lakehouse, {"a.csv": "1", "notes.md": "x"})
 
-    assert result.succeeded is False
+    assert raised.value.result.rows_rejected == 1
     assert _folder_contents(lakehouse) == {}
 
 

@@ -116,8 +116,8 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (4, "d8069faa10c23c0d32008376b2f35bb63e85ef8e747a6cdb633d4ecda0b1bdc3"),
-    "spark": (5, "d8381c8169419d1ddea0d6ada80517cb8c833da91db17d0065571f35444d3cb3"),
+    "tsql": (5, "4235710f72b79d3923425256aee74bfcf8ecdd60c4d28910ac20c6eacf9c5fdf"),
+    "spark": (6, "823a5303282a633362159c132c5794c2d12178ca7278511a2077b4c9b5356f2e"),
 }
 
 
@@ -159,6 +159,36 @@ def test_generation_is_deterministic():
 
 
 # --- the Warehouse procedure --------------------------------------------------
+
+
+def test_an_intolerant_run_raises_rather_than_returning_a_quiet_row():
+    """`exec [_].[Load S.N]` must fail the way `.load()` does.
+
+    A primitive that returned a row saying `succeeded = 0` where its sibling
+    raised would make every caller special-case which one it was talking to.
+    """
+
+    payload = _warehouse().create_load().payload.decode()
+
+    assert "throw 51020" in payload  # rows rejected, intolerant
+    assert "throw 51021" in payload  # over a stability threshold, intolerant
+
+
+def test_a_breach_never_writes_whatever_fault_tolerant_says():
+    """Tolerating exactly the change the threshold prevents would defeat it."""
+
+    payload = _warehouse().create_load().payload.decode()
+    breach = payload.index("if @weaver_error is not null")
+    insert = payload.index("insert into [Sales].[Customer] (")
+
+    assert breach < insert
+    assert "the target was not modified" in payload
+
+
+def test_an_empty_target_is_never_guarded():
+    payload = _warehouse().create_load().payload.decode()
+
+    assert "@weaver_target_rows > 0" in payload
 
 
 def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
@@ -226,7 +256,9 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
     payload = _warehouse().create_load().payload.decode()
 
     assert "delete c" in payload
-    assert "set @weaver_rows_deleted = @@rowcount;" in payload
+    # Reported from cardinality, not from @@rowcount: the driver says what the
+    # load intended, the target's own count says what happened.
+    assert "@weaver_target_before + @weaver_rows_inserted - count(*)" in payload
 
 
 def test_an_incremental_load_deletes_nothing():

@@ -91,8 +91,11 @@ def load_folder(
     rows_read = len(staged) + len(rejected)
 
     if rejected and not fault_tolerant:
-        return LoadResult.failure(
-            INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=len(rejected)
+        raise LoadError(
+            f"{contract.qualified}: {INTOLERANT_MESSAGE}",
+            result=LoadResult.failure(
+                INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=len(rejected)
+            ),
         )
 
     inserted, updated = _publish(staged, staging_path, destination_path)

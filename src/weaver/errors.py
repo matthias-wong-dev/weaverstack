@@ -29,7 +29,20 @@ class MetadataError(WeaverError):
 
 
 class LoadError(WeaverError):
-    """Raised when an object cannot be executed or its context is unavailable."""
+    """Raised when an object cannot be executed or its context is unavailable.
+
+    ``result`` carries the load's counts when one was under way, because a
+    failure is still an outcome worth reporting: how many rows were read and how
+    many refused is exactly what a caller wants, and losing it to an exception
+    would force a second query against the reject table to find out.
+
+    It is optional, so the many places that raise this before a load has begun
+    stay unchanged.
+    """
+
+    def __init__(self, message: str, *, result: object | None = None) -> None:
+        super().__init__(message)
+        self.result = result
 
 
 class DiscoveryError(WeaverError):

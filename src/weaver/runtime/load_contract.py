@@ -113,7 +113,13 @@ class LoadContract:
         symptom of anything.
         """
 
-        if self.replaces_wholesale or target_rows < self.stability_rows:
+        # An empty target has no proportion to be a percentage of, and a first
+        # load into one is the case the guard must never stand in the way of.
+        if (
+            self.replaces_wholesale
+            or target_rows == 0
+            or target_rows < self.stability_rows
+        ):
             return None
         for count, limit, what in (
             (deleting, self.delete_threshold, "delete"),

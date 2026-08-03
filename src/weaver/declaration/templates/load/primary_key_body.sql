@@ -19,18 +19,12 @@ where $staging_blank_predicate
 -- Intolerant of rejects: the target is left exactly as it was. Nothing has been
 -- written yet, so refusing here is a decision not to start rather than an
 -- unwind — and the reject table survives as the evidence.
+--
+-- Raised rather than returned, so `exec [_].[Load S.N]` fails the same way
+-- `.load()` does. A primitive that returned a quiet row where its sibling
+-- raised would make every caller special-case which one it was talking to.
 if @weaver_rows_rejected > 0 and @fault_tolerant = 0
-begin
-    select
-        cast(0 as bit) as succeeded
-      , @weaver_rows_read as rows_read
-      , cast(0 as bigint) as rows_inserted
-      , cast(0 as bigint) as rows_updated
-      , cast(0 as bigint) as rows_deleted
-      , @weaver_rows_rejected as rows_rejected
-      , cast('$intolerant_message' as varchar(4000)) as error_message;
-    return;
-end;
+    throw 51020, '$intolerant_message', 1;
 
 create table $upsert_table as
 select
@@ -50,10 +44,12 @@ where
 -- breach with @fault_tolerant = 0 leaves the target exactly as it was, so
 -- refusing is a decision not to start rather than an unwind.
 select @weaver_target_rows = count(*) from $target_table;
+set @weaver_target_before = @weaver_target_rows;
 select @weaver_prospective_updates = count(*) from $upsert_table where [_Is new row] = 0;
 $prospective_deletes
 
-if @ignore_stability_threshold = 0 and @weaver_target_rows >= $stability_rows
+if @ignore_stability_threshold = 0 and @weaver_target_rows > 0
+    and @weaver_target_rows >= $stability_rows
 begin
     if @weaver_prospective_deletes * 100.0 / @weaver_target_rows > $delete_threshold
         set @weaver_error = 'delete of ' + cast(@weaver_prospective_deletes as varchar(20))
@@ -64,8 +60,15 @@ begin
             + ' rows is over the $update_threshold% threshold of '
             + cast(@weaver_target_rows as varchar(20));
 
-    if @weaver_error is not null and @fault_tolerant = 0
+    -- A breach never writes. Tolerating exactly the change the threshold was
+    -- declared to prevent would defeat the guard, so @fault_tolerant decides
+    -- only whether the refusal is raised or returned. Permitting it is what
+    -- @ignore_stability_threshold is for.
+    if @weaver_error is not null
     begin
+        set @weaver_error = @weaver_error + '; the target was not modified';
+        if @fault_tolerant = 0
+            throw 51021, @weaver_error, 1;
         select
             cast(0 as bit) as succeeded
           , @weaver_rows_read as rows_read
@@ -73,8 +76,7 @@ begin
           , cast(0 as bigint) as rows_updated
           , cast(0 as bigint) as rows_deleted
           , @weaver_rows_rejected as rows_rejected
-          , @weaver_error + ', and fault_tolerant = 0, so the target was not modified'
-            as error_message;
+          , @weaver_error as error_message;
         return;
     end;
 end;

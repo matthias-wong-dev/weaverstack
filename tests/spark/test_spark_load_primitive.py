@@ -18,6 +18,7 @@ import pytest
 from weaver import ItemRef, lakehouse_for
 from weaver.declaration import read_source_document
 from weaver.declaration.model import LAKEHOUSE
+from weaver.errors import LoadError
 from weaver.runtime.load_contract import (
     REASON_BLANK_PK,
     REASON_DUPLICATE_PK,
@@ -174,11 +175,12 @@ def test_an_intolerant_run_with_rejects_leaves_the_target_untouched(
     run_load_program(spark, program)
 
     _source_rows(spark, estate, REJECTABLE)
-    result = run_load_program(spark, program, fault_tolerant=False)
 
-    assert result.succeeded is False
-    assert result.rows_rejected == 3
-    assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (0, 0, 0)
+    # The program raises natively, so running the installed file by hand fails
+    # exactly as `.load()` does rather than returning a quiet row.
+    with pytest.raises(LoadError):
+        run_load_program(spark, program, fault_tolerant=False)
+
     assert _contents(spark, estate) == CLEAN
 
 
@@ -247,11 +249,37 @@ def test_too_many_deletes_leaves_the_target_untouched(spark, estate, guarded):
     run_load_program(spark, guarded)
 
     _source_rows(spark, estate, TWENTY[:5])
-    result = run_load_program(spark, guarded)
+
+    with pytest.raises(LoadError, match="threshold"):
+        run_load_program(spark, guarded)
+
+    assert len(_contents(spark, estate)) == 20
+
+
+def test_tolerating_a_breach_changes_only_how_it_is_reported(spark, estate, guarded):
+    """A breach never writes, whatever fault_tolerant says."""
+
+    _source_rows(spark, estate, TWENTY)
+    run_load_program(spark, guarded)
+
+    _source_rows(spark, estate, TWENTY[:5])
+    result = run_load_program(spark, guarded, fault_tolerant=True)
 
     assert result.succeeded is False
-    assert "threshold" in result.error_message
+    assert result.rows_deleted == 0
     assert len(_contents(spark, estate)) == 20
+
+
+def test_an_empty_target_does_not_divide_by_zero(spark, estate, guarded):
+    """A first load has no proportion to be a percentage of, and is the case the
+    guard must never stand in the way of."""
+
+    _source_rows(spark, estate, TWENTY)
+
+    result = run_load_program(spark, guarded)
+
+    assert result.succeeded is True
+    assert result.rows_inserted == 20
 
 
 def test_the_threshold_can_be_waived_for_one_run(spark, estate, guarded):

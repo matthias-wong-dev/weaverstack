@@ -50,7 +50,16 @@ def run_load_program(
 
     frame = None
     for statement in statements:
-        frame = spark.sql(statement)
+        try:
+            frame = spark.sql(statement)
+            if _is_terminal(statement):
+                frame.collect()
+        except Exception as exc:
+            # The program raises natively when a run failed and was not asked to
+            # tolerate it, so `exec`-ing the file and calling `.load()` fail the
+            # same way. Wrapped here so a caller meets one error type whichever
+            # primitive it drove.
+            raise LoadError(str(exc)) from exc
 
     rows = frame.collect()
     if not rows:
@@ -66,6 +75,17 @@ def run_load_program(
             f"{', '.join(missing)} — it must project the load result"
         )
     return LoadResult.from_row({name: row[name] for name in RESULT_COLUMNS})
+
+
+def _is_terminal(statement: str) -> bool:
+    """Whether this statement must be evaluated rather than merely planned.
+
+    Spark is lazy, so a `SELECT` that raises does nothing until something reads
+    it — and the guard's entire job is to raise. DDL and DML run eagerly; the
+    guard is the one projection whose evaluation matters.
+    """
+
+    return "raise_error(" in statement
 
 
 def _answer(

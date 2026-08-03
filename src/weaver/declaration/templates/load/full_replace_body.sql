@@ -1,9 +1,9 @@
 -- No primary key, so no row can be matched to a target row: there is no such
 -- thing as an update here, and nothing to reject. The target's contents become
 -- the source's.
-delete from $target_table;
+select @weaver_target_before = count(*) from $target_table;
 
-set @weaver_rows_deleted = @@rowcount;
+delete from $target_table;
 
 insert into $target_table (
     __SOURCE_COLUMNS__

@@ -114,6 +114,7 @@ def generate_tsql_load_script(
         start_artifact_cleanup=_indent(_cleanup(names, contract), 4),
         staging_sql=_indent(staging_sql, 4),
         staging_table=names["staging"],
+        target_table=names["target"],
         load_body=_indent(load_body, 4),
         end_artifact_cleanup=_indent(_end_cleanup(names, contract), 4),
     ).rstrip()
@@ -232,9 +233,7 @@ def _missing_reconciliation(names: dict, contract: LoadContract) -> str:
         f"from {names['target']} as c\n"
         f"where not exists (\n"
         f"    select 1 from {names['staging']} as s where {join}\n"
-        f");\n"
-        f"\n"
-        f"set @weaver_rows_deleted = @@rowcount;"
+        f");"
     )
 
 

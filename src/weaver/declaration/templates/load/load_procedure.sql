@@ -16,6 +16,7 @@ begin
     declare @weaver_target_rows bigint = 0;
     declare @weaver_prospective_deletes bigint = 0;
     declare @weaver_prospective_updates bigint = 0;
+    declare @weaver_target_before bigint = 0;
 
 $preprocessing_banner
 $start_artifact_cleanup
@@ -28,6 +29,13 @@ $postprocessing_banner
 $load_body
 
 $end_artifact_cleanup
+
+    -- What the target actually lost, from its own cardinality. The delete
+    -- driver says what the load intended; this says what happened, and the two
+    -- differ whenever a key named for deletion was not there to begin with.
+    select @weaver_rows_deleted =
+        @weaver_target_before + @weaver_rows_inserted - count(*)
+    from $target_table;
 
     select
         cast(case when @weaver_error is null then 1 else 0 end as bit) as succeeded
