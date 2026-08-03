@@ -287,7 +287,25 @@ def test_a_tsql_batch_payload_that_is_not_an_array_is_rejected():
 # --- the load layer's file executor -------------------------------------------
 
 
-def _load_context(tmp_path):
+class _TableSpark:
+    """A session that can say what a built table's columns are, and no more.
+
+    That is the whole capability a generated load needs at install: the columns
+    are the one thing generation cannot know, so the installer reads them.
+    """
+
+    def __init__(self, columns):
+        self._columns = columns
+
+    def table(self, name):
+        fields = [type("F", (), {"name": c})() for c in self._columns]
+        return type("Frame", (), {"schema": type("S", (), {"fields": fields})()})()
+
+
+AUDIT = ("row_insert_datetime", "row_update_datetime", "row_delete_datetime")
+
+
+def _load_context(tmp_path, columns=("Customer id", "Customer name")):
     """A real store and resolver, because placement is the claim being made."""
 
     from weaver import LocalResolver, LocalStore, LocalWorkspace
@@ -297,6 +315,7 @@ def _load_context(tmp_path):
         store=LocalStore(),
         resolver=LocalResolver(workspace),
         target=resolved_target(),
+        spark=_TableSpark(tuple(columns) + AUDIT),
     )
 
 
@@ -347,7 +366,16 @@ def test_a_generated_load_program_is_addressed_as_it_lands(tmp_path):
     )
     payload = document.create_load().payload
 
-    context = _load_context(tmp_path)
+    context = _load_context(
+        tmp_path,
+        columns=(
+            "Customer id",
+            "Total amount",
+            "row_insert_datetime",
+            "row_update_datetime",
+            "row_delete_datetime",
+        ),
+    )
     action = _load_action(
         kind="write_file", relative="Sales.OrderSummary.sql", payload="p.payload"
     )
@@ -355,7 +383,11 @@ def test_a_generated_load_program_is_addressed_as_it_lands(tmp_path):
     result = execute_action(action, payload, context=context)
     written = context.store.read(Location(result.details["written"])).decode()
 
+    # The bundle carries an instruction; the installer renders the program from
+    # the columns the built table reports.
     assert b"{{object:" in payload, "the bundle payload is destination-free"
+    assert written.lstrip().startswith("-- Weaver generated load")
+    assert "Total amount" in written
     assert "{{" not in written, "the installed file names its destination"
     assert "Sales_LH" in written or "sales_lh" in written
 

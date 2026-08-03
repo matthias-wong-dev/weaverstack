@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 #: previous generation's artefacts, which is the failure this exists to prevent
 #: and which cost a Fabric round trip to notice.
 TSQL_LOAD_VERSION = 5
-SPARK_LOAD_VERSION = 6
+SPARK_LOAD_VERSION = 7
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
 #: Warehouse load is a stored procedure; a Lakehouse load is a file in the
@@ -131,9 +131,13 @@ def _tsql_load(document: "SourceDocument") -> GeneratedLoad:
 
 
 def _spark_load(document: "SourceDocument") -> GeneratedLoad:
-    from .spark_load import generate_spark_load_program
+    from .spark_load import generate_spark_load_instruction
 
-    content = generate_spark_load_program(
+    # An instruction, not the program: the columns a load writes are the built
+    # table's, and a Spark SQL table may infer its schema at build. The
+    # installer reads them and renders the file into place — the same two-phase
+    # shape the Warehouse load uses with sys.columns.
+    content = generate_spark_load_instruction(
         document.document, document.sql_body or ""
     )
     return GeneratedLoad(

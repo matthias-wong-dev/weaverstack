@@ -95,6 +95,20 @@ def estate(spark, lakehouse):
         spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
+def _render(spark, estate, document):
+    import json
+
+    from weaver.declaration.spark_load import render_installed_program
+    from weaver.runtime.load_contract import delta_audit_columns
+
+    audit = set(delta_audit_columns())
+    target = estate.qualify("Sales", "Customer")
+    columns = tuple(
+        f.name for f in spark.table(target).schema.fields if f.name not in audit
+    )
+    return render_installed_program(json.loads(document.create_load().payload), columns)
+
+
 @pytest.fixture
 def program(spark, estate):
     """The generated program, addressed for this destination as install does."""
@@ -102,8 +116,11 @@ def program(spark, estate):
     document = read_source_document(
         "Sales.Customer.sql", SOURCE.encode("utf-8"), LAKEHOUSE
     )
-    payload = document.create_load().payload.decode("utf-8")
-    return SparkCatalogue(spark, estate).expand(payload)
+    # Rendered the way the installer renders it: from the columns the built
+    # table reports, not from the declaration. A Spark SQL table may infer its
+    # schema at build, so generation cannot know them.
+    program = _render(spark, estate, document)
+    return SparkCatalogue(spark, estate).expand(program)
 
 
 def _source_rows(spark, estate, rows):
@@ -234,8 +251,11 @@ def guarded(spark, estate):
     document = read_source_document(
         "Sales.Customer.sql", GUARDED.encode("utf-8"), LAKEHOUSE
     )
-    payload = document.create_load().payload.decode("utf-8")
-    return SparkCatalogue(spark, estate).expand(payload)
+    # Rendered the way the installer renders it: from the columns the built
+    # table reports, not from the declaration. A Spark SQL table may infer its
+    # schema at build, so generation cannot know them.
+    program = _render(spark, estate, document)
+    return SparkCatalogue(spark, estate).expand(program)
 
 
 TWENTY = [(f"c{n:02d}", f"Name {n}") for n in range(20)]
@@ -291,6 +311,37 @@ def test_the_threshold_can_be_waived_for_one_run(spark, estate, guarded):
 
     assert result.succeeded is True
     assert len(_contents(spark, estate)) == 5
+
+
+def _artefacts(spark, estate):
+    rows = spark.sql(
+        f"SHOW TABLES IN {estate.qualified_schema('Sales')}"
+    ).collect()
+    return {r["tableName"].lower() for r in rows if "customer_" in r["tableName"].lower()}
+
+
+def test_a_clean_run_clears_its_intermediate_artefacts(spark, estate, program):
+    """The same evidence rule as the Python and Warehouse primitives.
+
+    A run that refused rows keeps what explains the refusal; a clean one keeps
+    nothing, so a stale table never reads as evidence about the run that just
+    succeeded.
+    """
+
+    _source_rows(spark, estate, CLEAN)
+
+    result = run_load_program(spark, program)
+
+    assert result.succeeded is True
+    assert _artefacts(spark, estate) == set()
+
+
+def test_a_rejected_run_keeps_its_evidence(spark, estate, program):
+    _source_rows(spark, estate, REJECTABLE)
+
+    run_load_program(spark, program, fault_tolerant=True)
+
+    assert "customer_reject" in _artefacts(spark, estate)
 
 
 def test_an_unchanged_row_keeps_its_original_update_time(spark, estate, program):

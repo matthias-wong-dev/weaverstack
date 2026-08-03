@@ -117,7 +117,7 @@ def test_a_view_has_no_generated_load():
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
     "tsql": (5, "4235710f72b79d3923425256aee74bfcf8ecdd60c4d28910ac20c6eacf9c5fdf"),
-    "spark": (6, "823a5303282a633362159c132c5794c2d12178ca7278511a2077b4c9b5356f2e"),
+    "spark": (7, "f95e8ec19ab88c027e43741b3ce2c14f70feed33f6d4d4ddacac4cbca22605bf"),
 }
 
 
@@ -333,8 +333,22 @@ def test_the_program_records_the_threshold_decision_once():
 # --- the Spark SQL program ----------------------------------------------------
 
 
-def _program(source: str = SPARK_TABLE) -> str:
-    return _spark(source).create_load().payload.decode()
+#: The columns the built table would report. Generation cannot know them — a
+#: Spark SQL table may infer its schema at build — so the installer reads them
+#: and renders the program, and these tests do the same.
+BUILT_COLUMNS = ("Customer id", "Customer name")
+
+
+def _instruction(source: str = SPARK_TABLE) -> dict:
+    import json
+
+    return json.loads(_spark(source).create_load().payload)
+
+
+def _program(source: str = SPARK_TABLE, columns=BUILT_COLUMNS) -> str:
+    from weaver.declaration.spark_load import render_installed_program
+
+    return render_installed_program(_instruction(source), columns)
 
 
 def test_the_program_is_a_statement_list_ending_in_the_result():
@@ -343,6 +357,47 @@ def test_the_program_is_a_statement_list_ending_in_the_result():
     assert len(statements) > 1
     for column in RESULT_COLUMNS:
         assert column in statements[-1]
+
+
+def test_every_declared_column_is_carried_not_only_the_compared_ones():
+    """Comparison columns say what *change* means, not what the table is.
+
+    A declaration may narrow them to one column out of many. Deriving the
+    writable set from them dropped every other non-key column from staging,
+    rejects, the upsert set, inserts and updates — silently.
+    """
+
+    source = SPARK_TABLE.replace(
+        "Primary key: Customer id",
+        "Primary key: Customer id\n\nComparison columns: Amount",
+    ).replace(
+        "  Customer name: string", "  Customer name: string\n  Amount: decimal(18,2)"
+    )
+    program = _program(source, columns=("Customer id", "Customer name", "Amount"))
+
+    # Carried into the target...
+    assert "`Customer name`" in program
+    # ...but not consulted when deciding whether a matched row changed.
+    changed = [line for line in program.splitlines() if "<=>" in line]
+    assert changed, "the program must compare something"
+    assert all("Customer name" not in line for line in changed)
+
+
+def test_the_columns_come_from_the_built_table_not_the_declaration():
+    """The bundle carries an instruction; the installer finishes the program.
+
+    A Spark SQL table may leave its schema to be inferred at build, so the
+    columns are only knowable once the table exists — the same reason the
+    Warehouse installer reads sys.columns rather than guessing.
+    """
+
+    instruction = _instruction()
+
+    assert instruction["weaver"] == "weaver:generated-load"
+    assert "columns" not in instruction
+    # Whatever the table turns out to have is what the program writes.
+    rendered = _program(columns=("Customer id", "Surprise"))
+    assert "`Surprise`" in rendered
 
 
 def test_the_program_is_destination_free():

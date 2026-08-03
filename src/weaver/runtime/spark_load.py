@@ -74,7 +74,46 @@ def run_load_program(
             "the load program's final statement is missing "
             f"{', '.join(missing)} — it must project the load result"
         )
-    return LoadResult.from_row({name: row[name] for name in RESULT_COLUMNS})
+    result = LoadResult.from_row({name: row[name] for name in RESULT_COLUMNS})
+    if result.succeeded:
+        _clear(spark, program)
+    return result
+
+
+#: The artefacts a clean run leaves behind, and does not need to. The rule is
+#: the same on all three table primitives: a run that refused rows keeps its
+#: evidence, a clean one keeps nothing. Done here rather than in the program
+#: because the final statement reads the result table — cleanup has to follow
+#: the row being taken, and only the runner knows when that has happened.
+_ARTEFACT_SUFFIXES = ("_Staging", "_Upsert", "_Reject", "_Delete", "_LoadResult")
+
+
+def _clear(spark, program: str) -> None:
+    for name in _artefact_names(program):
+        spark.sql(f"DROP TABLE IF EXISTS {name}")
+
+
+def _artefact_names(program: str) -> list[str]:
+    """The artefacts this program named, read back off its own drop statements.
+
+    The program opens by dropping whatever a previous run left, so it already
+    says which relations it owns — and reading them from there means the runner
+    never has to compose a name the generator might spell differently.
+    """
+
+    names = []
+    for statement in statements_of(program):
+        head, _, tail = statement.partition("DROP TABLE IF EXISTS ")
+        if not tail:
+            continue
+        candidate = tail.strip().splitlines()[0].strip()
+        if candidate.endswith(_ARTEFACT_SUFFIXES) or candidate.rstrip("`").endswith(
+            _ARTEFACT_SUFFIXES
+        ):
+            names.append(candidate)
+    # The result table is dropped last: everything else is read while deciding,
+    # and it is read to produce the row that was just taken.
+    return names
 
 
 def _is_terminal(statement: str) -> bool:

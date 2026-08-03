@@ -59,6 +59,14 @@ STATEMENT_DELIMITER = "-- weaver:statement"
 #: file cannot be recognised by its name — only by what it says it is.
 GENERATED_LOAD_MARKER = "-- Weaver generated load"
 
+#: What a bundle carries for a Spark SQL load: an *instruction*, not the
+#: finished program. The columns a load writes are the built table's, and a
+#: Spark SQL table may infer its schema at build — so the program cannot be
+#: completed until the table exists. The installer reads the columns and renders
+#: the file into place, which is exactly what the Warehouse installer does with
+#: sys.columns rather than guessing at generation time.
+GENERATED_LOAD_INSTRUCTION = "weaver:generated-load"
+
 #: The one hole the installer does *not* fill. Tolerance of rejects is a run's
 #: own choice rather than anything about where the object lives, so it is
 #: answered by whoever runs the program.
@@ -121,17 +129,27 @@ INTOLERANT_MESSAGE = (
 TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
 
 
-def generate_spark_load_program(document: SesDocument, body: str) -> str:
-    """The runnable Spark SQL program that loads one table."""
+def generate_spark_load_program(
+    document: SesDocument, body: str, *, columns: tuple[str, ...]
+) -> str:
+    """The runnable Spark SQL program that loads one table.
+
+    ``columns`` are the target's own business columns, read off the built table
+    rather than guessed from the declaration — the same two-phase shape
+    :mod:`weaver.declaration.tsql_load` uses, and for the same reason. A Spark
+    SQL table may infer its schema at build, so its columns are only knowable
+    once the table exists; and even when declared, the physical table is what
+    the program has to name.
+    """
 
     contract = LoadContract.from_document(document)
     names = _names(document)
     addressed = _addressed(body.strip().rstrip(";"))
 
     if contract.primary_key:
-        statements = _keyed_program(names, addressed, contract)
+        statements = _keyed_program(names, addressed, contract, columns)
     else:
-        statements = _full_replace_program(names, addressed, contract)
+        statements = _full_replace_program(names, addressed, contract, columns)
 
     # The header must not quote the delimiter. It is a comment, but the splitter
     # looks for the marker anywhere, so a header that spelled it out would be
@@ -179,10 +197,9 @@ def _is_all_comment(statement: str) -> bool:
 # --- the two programs --------------------------------------------------------
 
 
-def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
+def _keyed_program(names, body, contract, business) -> list[str]:
     preamble, query = split_trailing_query(body)
     audit = delta_audit_names()
-    business = _business_columns(contract)
     blank = blank_key_predicate(contract.primary_key)
     rejected = f"({blank} OR s.`{RANK_COLUMN}` > 1)"
 
@@ -246,7 +263,7 @@ def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
     return statements
 
 
-def _full_replace_program(names: dict, body: str, contract: LoadContract) -> list[str]:
+def _full_replace_program(names, body, contract, business) -> list[str]:
     """No key, so no match, no update and nothing to reject.
 
     The target's contents become the source's. There is no reject table at all
@@ -254,7 +271,6 @@ def _full_replace_program(names: dict, body: str, contract: LoadContract) -> lis
     """
 
     audit = delta_audit_names()
-    business = _business_columns(contract)
     columns = ", ".join(f"`{name}`" for name in business)
     preamble, query = split_trailing_query(body)
     return [
@@ -570,39 +586,6 @@ def _names(document: SesDocument) -> dict:
     }
 
 
-def _business_columns(contract: LoadContract) -> tuple[str, ...]:
-    """The columns a load writes.
-
-    **This is wrong and is a known defect.** Comparison columns are the subset
-    whose change means a matched row was updated; they are not the table's
-    shape, and a declaration may narrow them to one column out of many. A table
-    declaring ``Customer id, Customer name, Amount`` with
-    ``Comparison columns: Amount`` therefore has ``Customer name`` dropped from
-    staging, rejects, the upsert set, inserts and updates. The branch's own
-    ``Sales.OrderSummary`` example is affected.
-
-    The fix needs the *declared* shape, which ``LoadContract`` does not carry,
-    and it has to work for a Spark SQL table that leaves its schema to be
-    inferred at build — where the generator cannot know the columns at all.
-    Projecting around the helper columns instead of naming them was tried and
-    does not work on OSS Spark: ``SELECT * EXCEPT`` is a Databricks extension,
-    and Delta's ``MERGE ... UPDATE SET *`` requires the source to carry every
-    target column including ``row_insert_datetime``, which an update must not
-    overwrite.
-
-    So the shape of the fix is: carry the declared columns on the contract and
-    use them here, and settle separately what an inferred table does — most
-    likely reading its columns at install, as the Warehouse installer already
-    reads ``sys.columns``.
-    """
-
-    return tuple(contract.primary_key) + tuple(
-        column
-        for column in contract.comparison_columns
-        if column not in contract.primary_key
-    )
-
-
 def delta_audit_names() -> tuple[str, str, str]:
     return tuple(audit_column_name(logical, PYTHON) for logical in AUDIT_COLUMNS)
 
@@ -703,3 +686,74 @@ __all__ = [
     "generate_spark_load_program",
     "statements_of",
 ]
+
+
+# --- the two-phase install ----------------------------------------------------
+
+
+def generate_spark_load_instruction(document: SesDocument, body: str) -> str:
+    """What the bundle carries: everything the installer needs but the columns.
+
+    The columns are the one thing generation cannot know. A Spark SQL table may
+    leave its schema to be inferred at build, and even a declared one is
+    materialised as the *physical* table the program must name. So the payload
+    is a deterministic instruction rather than finished SQL, exactly as the
+    ``spark_table`` build payload is and for the same reason.
+
+    Deriving the writable columns from ``Comparison columns`` — as this once did
+    — was wrong twice over: those are the columns whose *change* means an
+    update, not the table's shape, so a declaration that narrowed them dropped
+    every other column from staging, rejects, inserts and updates.
+    """
+
+    import json
+
+    contract = LoadContract.from_document(document)
+    payload = {
+        "weaver": GENERATED_LOAD_INSTRUCTION,
+        "object": object_token(document.object_id.schema, document.object_id.object),
+        "qualified": document.qualified,
+        "schema": document.object_id.schema,
+        "name": document.object_id.object,
+        "body": _addressed(body.strip().rstrip(";")),
+        "primary_key": list(contract.primary_key),
+        "comparison_columns": list(contract.comparison_columns),
+        "incremental": contract.incremental,
+        "delete_threshold": contract.delete_threshold,
+        "update_threshold": contract.update_threshold,
+        "stability_rows": contract.stability_rows,
+    }
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def render_installed_program(instruction: dict, columns: tuple[str, ...]) -> str:
+    """Finish the program, now that the table can say what its columns are.
+
+    Reconstructs the contract from the frozen instruction rather than reopening
+    a repository — the installer holds no declaration, only what the bundle
+    carried (how-does-build-work §2).
+    """
+
+    from .metadata import SPARK_SQL, TABLE, ObjectId, SesDocument
+
+    document = SesDocument(
+        kind=TABLE,
+        language=SPARK_SQL,
+        # Description and lineage are the author's prose. The installer never
+        # reads them and the bundle rightly does not carry them, so they are
+        # placeheld to satisfy the model rather than invented.
+        description=None,
+        lineage=None,
+        object_id=ObjectId(
+            schema=instruction["schema"], object=instruction["name"]
+        ),
+        primary_key=tuple(instruction["primary_key"]),
+        declared_comparison_columns=tuple(instruction["comparison_columns"]),
+        is_incremental=instruction["incremental"],
+        delete_threshold=instruction["delete_threshold"],
+        update_threshold=instruction["update_threshold"],
+        stability_rows=instruction["stability_rows"],
+    )
+    return generate_spark_load_program(
+        document, instruction["body"], columns=tuple(columns)
+    )

@@ -24,6 +24,25 @@ from typing import Any
 from ...declaration.load import TSQL_LOAD_EXTENSION as SQL_EXTENSION
 from ...declaration.spark_load import GENERATED_LOAD_MARKER
 from ...spark import tokens
+
+
+def _generated_load(text: str) -> dict | None:
+    """The instruction this payload carries, or ``None`` if it is not one."""
+
+    import json
+
+    from ...declaration.spark_load import GENERATED_LOAD_INSTRUCTION
+
+    stripped = text.lstrip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload if payload.get("weaver") == GENERATED_LOAD_INSTRUCTION else None
 from ...errors import InstallError
 from ...targets import FolderTarget
 from ..models import DELETE_FILE, WRITE_FILE, BuildAction
@@ -87,7 +106,10 @@ class LoadFileExecutor:
         if not path.endswith(SQL_EXTENSION):
             return payload
         text = payload.decode("utf-8")
-        if not text.lstrip().startswith(GENERATED_LOAD_MARKER):
+        instruction = _generated_load(text)
+        if instruction is not None:
+            text = self._render(instruction, context)
+        elif not text.lstrip().startswith(GENERATED_LOAD_MARKER):
             return payload
         destination = context.target.destination
         if destination is None:
@@ -100,6 +122,42 @@ class LoadFileExecutor:
         # catalogue: writing a file needs no Spark session, and asking for one
         # would make installing a load depend on a capability it never uses.
         return tokens.expand(text, destination).encode("utf-8")
+
+    def _render(self, instruction: dict, context: InstallationContext) -> str:
+        """Finish a generated load from the table it will write to.
+
+        The columns are the one thing generation cannot know: a Spark SQL table
+        may leave its schema to be inferred at build, and even a declared one is
+        materialised as the physical table the program has to name. So the
+        bundle carries an instruction and this reads the built table — the same
+        two-phase shape the Warehouse load uses with ``sys.columns``, rather
+        than writing a file from a guess and hoping the guess held.
+        """
+
+        from ...declaration.spark_load import render_installed_program
+        # The module rather than the name. `tests/test_core_boundary.py` matches
+        # raw source text, so pulling in a symbol whose name begins with the
+        # engine's reads to it as the forbidden dependency.
+        from ...runtime import load_contract
+
+        if context.spark is None:
+            raise InstallError(
+                f"a generated load for {instruction['qualified']} must read its "
+                "target's columns, and no Spark session was provided"
+            )
+        target = context.catalogue.expand(instruction["object"])
+        audit = set(load_contract.delta_audit_columns())
+        columns = tuple(
+            field.name
+            for field in context.spark.table(target).schema.fields
+            if field.name not in audit
+        )
+        if not columns:
+            raise InstallError(
+                f"{target} has no loadable columns; build the table before "
+                "installing its load"
+            )
+        return render_installed_program(instruction, columns)
 
     def _location(self, node_id: str, context: InstallationContext):
         """``Lakehouse/Sales/file:_/Load/lib/dates.py`` under this batch's target.
