@@ -18,6 +18,11 @@ import pytest
 from weaver import ItemRef, lakehouse_for
 from weaver.declaration import read_source_document
 from weaver.declaration.model import LAKEHOUSE
+from weaver.runtime.load_contract import (
+    REASON_BLANK_PK,
+    REASON_DUPLICATE_PK,
+    REJECTION_REASON,
+)
 from weaver.runtime.spark_load import run_load_program
 from weaver.build_bundle.executors.spark_case import exact_identifier_case
 from weaver.spark import SparkCatalogue
@@ -195,12 +200,18 @@ def test_the_rejected_rows_are_kept_with_their_reason(spark, estate, program):
     run_load_program(spark, program, fault_tolerant=True)
 
     rejects = spark.sql(
-        f"SELECT `Rejection reason` FROM {estate.qualify('Sales', 'Customer_Reject')}"
+        f"SELECT * FROM {estate.qualify('Sales', 'Customer_Reject')}"
     ).collect()
 
-    assert {row["Rejection reason"] for row in rejects} == {
-        "null primary key",
-        "duplicate primary key",
+    assert {row[REJECTION_REASON] for row in rejects} == {
+        REASON_BLANK_PK,
+        REASON_DUPLICATE_PK,
+    }
+    # The author's columns and the reason — not Weaver's internal rank column.
+    assert set(rejects[0].asDict()) == {
+        "Customer id",
+        "Customer name",
+        REJECTION_REASON,
     }
 
 

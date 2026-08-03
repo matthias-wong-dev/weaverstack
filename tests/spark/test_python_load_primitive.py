@@ -20,6 +20,12 @@ import textwrap
 import pytest
 
 from weaver import DeltaTarget, ItemRef, lakehouse_for
+from weaver.errors import LoadError
+from weaver.runtime.load_contract import (
+    REASON_BLANK_PK,
+    REASON_DUPLICATE_PK,
+    REJECTION_REASON,
+)
 
 pytestmark = pytest.mark.spark
 
@@ -201,13 +207,33 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing(
     assert _contents(spark, lakehouse) == [("c1", "One")]
 
 
-def test_an_explicit_delete_retires_a_row_the_source_still_produces(
+def test_an_explicit_delete_retires_a_row_the_source_no_longer_produces(
     spark, lakehouse, customer
 ):
     """An explicit delete is a statement, not an inference.
 
     The object names the row as gone, so it goes — which is how an incremental
-    source reports a deletion it actually observed.
+    source reports a deletion it actually observed rather than inferring one
+    from a row's absence.
+    """
+
+    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+
+    result = _load(customer, spark, lakehouse, [("c1", "One")], deletes=[("c2",)])
+
+    assert result.rows_deleted == 1
+    assert _contents(spark, lakehouse) == [("c1", "One")]
+
+
+def test_an_upsert_wins_when_a_key_is_both_proposed_and_deleted(
+    spark, lakehouse, customer
+):
+    """A source that contradicts itself is read the recoverable way.
+
+    Keeping the row is recoverable — the next load can delete it. Deleting a row
+    the source also proposed is not: the value it proposed is gone. This is the
+    reference implementation's rule, and the reason its merge filters explicit
+    deletes against the accepted keys before building its source.
     """
 
     _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
@@ -216,8 +242,8 @@ def test_an_explicit_delete_retires_a_row_the_source_still_produces(
         customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")], deletes=[("c2",)]
     )
 
-    assert result.rows_deleted == 1
-    assert _contents(spark, lakehouse) == [("c1", "One")]
+    assert result.rows_deleted == 0
+    assert _contents(spark, lakehouse) == [("c1", "One"), ("c2", "Two")]
 
 
 # --- rejection and fault tolerance -------------------------------------------
@@ -260,13 +286,13 @@ def test_the_rejected_rows_are_kept_with_their_reason(spark, lakehouse, customer
     _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=True)
 
     rejects = spark.sql(
-        f"SELECT `Customer id`, `Rejection reason` "
+        f"SELECT `Customer id`, `{REJECTION_REASON}` "
         f"FROM {lakehouse.qualify('Sales', 'Customer_Reject')}"
     ).collect()
 
-    assert {row["Rejection reason"] for row in rejects} == {
-        "null primary key",
-        "duplicate primary key",
+    assert {row[REJECTION_REASON] for row in rejects} == {
+        REASON_BLANK_PK,
+        REASON_DUPLICATE_PK,
     }
 
 
@@ -389,3 +415,116 @@ def test_a_file_the_key_does_not_claim_survives_replacement(spark, lakehouse, ex
     _load_folder(export, spark, lakehouse, {"a.csv": "1"})
 
     assert unmanaged.exists()
+
+
+def test_a_nested_file_is_not_claimed_by_a_single_segment_key(spark, lakehouse, export):
+    """`*.csv` claims `a.csv` and not `archive/old.csv`.
+
+    The file key is matched segment by segment, so `*` stops at a directory
+    boundary. Matching it against the whole path instead would quietly claim
+    every nested file — and then delete it on the next replacement.
+    """
+
+    from pathlib import Path
+
+    _load_folder(export, spark, lakehouse, {"a.csv": "1"})
+    nested = Path(lakehouse.folder_path("Sales", "Export")) / "archive" / "old.csv"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("kept", encoding="utf-8")
+
+    _load_folder(export, spark, lakehouse, {"a.csv": "1"})
+
+    assert nested.exists()
+
+
+def test_a_staged_file_the_key_does_not_claim_is_rejected(spark, lakehouse, export):
+    """Publishing a folder while silently dropping part of it is not a success."""
+
+    result = _load_folder(
+        export, spark, lakehouse, {"a.csv": "1", "notes.md": "x"}, fault_tolerant=True
+    )
+
+    assert result.succeeded is False
+    assert result.rows_rejected == 1
+    assert _folder_contents(lakehouse) == {"a.csv": "1"}
+
+
+def test_an_intolerant_folder_load_with_rejects_publishes_nothing(
+    spark, lakehouse, export
+):
+    result = _load_folder(export, spark, lakehouse, {"a.csv": "1", "notes.md": "x"})
+
+    assert result.succeeded is False
+    assert _folder_contents(lakehouse) == {}
+
+
+def test_staging_is_reissued_so_a_run_never_republishes_the_last_one(
+    spark, lakehouse, export
+):
+    """Staging belongs to the object, and a run starts from nothing it did not
+    itself produce — otherwise a replacement never retires anything."""
+
+    _load_folder(export, spark, lakehouse, {"a.csv": "1", "b.csv": "2"})
+
+    result = _load_folder(export, spark, lakehouse, {"a.csv": "1"})
+
+    assert result.rows_read == 1
+    assert _folder_contents(lakehouse) == {"a.csv": "1"}
+
+
+def test_a_non_incremental_folder_may_not_name_explicit_deletes(
+    spark, lakehouse, export, deployed
+):
+    """It is replaced whole, so absence from staging is what retires a file."""
+
+    import importlib
+
+    path = deployed / "Sales__Export.py"
+    path.write_text(
+        EXPORT_MODULE.replace("return str(staging), []", "return str(staging), ['a.csv']"),
+        encoding="utf-8",
+    )
+    module = importlib.reload(importlib.import_module("Sales__Export"))
+
+    with pytest.raises(LoadError, match="cannot name explicit deletes"):
+        _load_folder(module.Sales__Export, spark, lakehouse, {"b.csv": "1"})
+
+
+def test_a_delete_that_escapes_the_folder_is_refused(spark, lakehouse, export, deployed):
+    """A load may only touch its own destination."""
+
+    import importlib
+
+    path = deployed / "Sales__Export.py"
+    path.write_text(
+        EXPORT_MODULE.replace("Incremental: false", "Incremental: true").replace(
+            "return str(staging), []", "return str(staging), ['../../escape.csv']"
+        ),
+        encoding="utf-8",
+    )
+    module = importlib.reload(importlib.import_module("Sales__Export"))
+
+    with pytest.raises(LoadError, match="traverse out of the folder"):
+        _load_folder(module.Sales__Export, spark, lakehouse, {"a.csv": "1"})
+
+
+def test_a_folder_that_returns_someone_elses_directory_is_refused(
+    spark, lakehouse, deployed, tmp_path
+):
+    """Weaver publishes the tree it issued and validated, not one it was handed."""
+
+    import importlib
+
+    path = deployed / "Sales__Export.py"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    path.write_text(
+        EXPORT_MODULE.replace(
+            "return str(staging), []", f"return {str(elsewhere)!r}, []"
+        ),
+        encoding="utf-8",
+    )
+    module = importlib.reload(importlib.import_module("Sales__Export"))
+
+    with pytest.raises(LoadError, match="not the staging folder Weaver issued"):
+        _load_folder(module.Sales__Export, spark, lakehouse, {})

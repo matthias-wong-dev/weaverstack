@@ -28,6 +28,7 @@ from weaver.declaration.spark_load import (
     FAULT_TOLERANT_MARKER,
     statements_of,
 )
+from weaver.runtime.load_contract import REASON_BLANK_PK, REASON_DUPLICATE_PK
 from weaver.runtime.load_result import RESULT_COLUMNS
 
 WAREHOUSE_TABLE = """/*
@@ -155,11 +156,20 @@ def test_the_intermediate_tables_are_real_and_named_for_their_object():
         assert f"[Sales].[Customer{suffix}]" in payload
 
 
-def test_a_keyed_load_rejects_null_and_duplicate_keys():
+def test_a_keyed_load_rejects_blank_and_duplicate_keys():
+    """One vocabulary across all four primitives.
+
+    A reject table is read by people, so a Warehouse reject saying one thing and
+    a Delta reject saying another would make the same refusal look like two
+    different problems.
+    """
+
     payload = _warehouse().create_load().payload.decode()
 
-    assert "null primary key" in payload
-    assert "duplicate primary key" in payload
+    assert REASON_BLANK_PK in payload
+    assert REASON_DUPLICATE_PK in payload
+    assert REASON_BLANK_PK in _program()
+    assert REASON_DUPLICATE_PK in _program()
 
 
 def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
@@ -169,7 +179,7 @@ def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
 
     assert "delete from [Sales].[Customer];" in payload
     assert "_Reject" not in payload
-    assert "duplicate primary key" not in payload
+    assert REASON_DUPLICATE_PK not in payload
 
 
 def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():

@@ -53,7 +53,12 @@ from .metadata import (
     SesDocument,
 )
 from .sql_shaping import render_sql_template
-from ..runtime.load_contract import LoadContract
+from ..runtime.load_contract import (
+    REASON_BLANK_PK,
+    REASON_DUPLICATE_PK,
+    REJECTION_REASON,
+    LoadContract,
+)
 
 #: The column a staged row's duplicate rank lands in. Named to be unmistakably
 #: Weaver's: it sits beside the author's own columns in a real table, so a name
@@ -149,6 +154,9 @@ def _primary_key_body(names: dict, contract: LoadContract) -> str:
         target_upsert_join=_join("c", "u", contract.primary_key),
         target_missing_predicate=f"t.{_quote(contract.primary_key[0])} is null",
         missing_reconciliation=_missing_reconciliation(names, contract),
+        rejection_reason=REJECTION_REASON,
+        blank_reason=REASON_BLANK_PK,
+        duplicate_reason=REASON_DUPLICATE_PK,
         intolerant_message=_escape_literal(INTOLERANT_MESSAGE),
         tolerated_message=_escape_literal(TOLERATED_MESSAGE),
     ).rstrip()

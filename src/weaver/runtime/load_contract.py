@@ -170,6 +170,17 @@ def document_for_module(module) -> SesDocument:
     return parse_document(inspect.cleandoc(doc), language=PYTHON)
 
 
+#: Why a row was refused. One spelling for all four primitives, so a reject
+#: table written by a Warehouse procedure and one written by a Python load can
+#: be read by the same query. Taken from the reference implementation rather
+#: than reinvented — these strings are already in use against real data.
+REASON_BLANK_PK = "blank_primary_key"
+REASON_DUPLICATE_PK = "duplicate_primary_key"
+
+#: The column a reject table carries the reason in.
+REJECTION_REASON = "_reject_reason"
+
+
 def delta_audit_columns() -> tuple[str, str, str]:
     """The insert, update and delete audit column names, spelled for Delta."""
 

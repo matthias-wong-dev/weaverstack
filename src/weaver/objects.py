@@ -221,24 +221,27 @@ class Folder(WeaverObject):
         carries its own contract and this object carries its own destination.
         """
 
-        import shutil
-
-        from .runtime.folder_load import load_folder
+        from .runtime.folder_load import load_folder, new_staging_folder
         from .runtime.load_contract import FolderLoadContract
 
         contract = FolderLoadContract.from_document(self._document())
-        # Staging is emptied before read() rather than after the load, and the
-        # order is the whole point. It belongs to this object, so a run must
-        # start from nothing it did not itself produce — otherwise the previous
-        # run's files are still there, get published again, and a replacement
-        # concludes that nothing was retired. Clearing afterwards instead would
-        # also destroy the one directory worth looking at when a load fails.
-        shutil.rmtree(self.staging_folder(), ignore_errors=True)
+        # Weaver issues staging, before read() rather than after the load. A run
+        # must begin from nothing it did not itself produce, or the previous
+        # run's files are published again and a replacement concludes that
+        # nothing was retired. Clearing afterwards instead would destroy the one
+        # directory worth looking at when a load fails.
+        issued = new_staging_folder(self.path(), self.staging_folder())
         staged, deletes = _load_pair(self, self.read())
+        if str(staged) != issued:
+            raise LoadError(
+                f"{type(self).__name__}.read() returned {staged!r}, which is not "
+                f"the staging folder Weaver issued ({issued!r}) — return "
+                "self.staging_folder()"
+            )
         return load_folder(
             contract=contract,
             destination=self.path(),
-            staging=str(staged),
+            staging=issued,
             deletes=deletes,
             fault_tolerant=fault_tolerant,
         )

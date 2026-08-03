@@ -73,7 +73,15 @@ REJECT_SUFFIX = "_Reject"
 RESULT_SUFFIX = "_LoadResult"
 DELETE_SUFFIX = "_Delete"
 
-REJECTION_REASON = "Rejection reason"
+#: Re-exported from the runtime so the generators and the Python loads write one
+#: vocabulary. A reject table is read by people, and a Warehouse reject that said
+#: "null primary key" beside a Delta one that said "blank_primary_key" would make
+#: the same refusal look like two different problems.
+from ..runtime.load_contract import (  # noqa: E402
+    REASON_BLANK_PK,
+    REASON_DUPLICATE_PK,
+    REJECTION_REASON,
+)
 
 #: Every table this program creates carries Delta column mapping, for the same
 #: reason :func:`weaver.declaration.ddl._create_table_sql` does: a declared
@@ -173,9 +181,9 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
         f"    ) AS `{RANK_COLUMN}`\n"
         f"FROM (\n{_indent(query, 4)}\n) AS s",
         f"CREATE TABLE {names['reject']} USING delta {COLUMN_MAPPING} AS\n"
-        f"SELECT\n    s.*\n"
-        f"  , CASE WHEN {blank} THEN 'null primary key'\n"
-        f"         ELSE 'duplicate primary key' END AS `{REJECTION_REASON}`\n"
+        f"SELECT\n    {_columns('s', business)}\n"
+        f"  , CASE WHEN {blank} THEN '{REASON_BLANK_PK}'\n"
+        f"         ELSE '{REASON_DUPLICATE_PK}' END AS `{REJECTION_REASON}`\n"
         f"FROM {names['staging']} AS s\n"
         f"WHERE {rejected}",
         # Measured before anything is written, so the counts and the decision

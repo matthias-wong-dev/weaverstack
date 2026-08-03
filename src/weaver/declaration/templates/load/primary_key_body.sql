@@ -2,9 +2,9 @@ create table $reject_table as
 select
     __STAGING_SELECT_COLUMNS__
   , case
-        when $staging_blank_predicate then cast('null primary key' as varchar(100))
-        else cast('duplicate primary key' as varchar(100))
-    end as [Rejection reason]
+        when $staging_blank_predicate then cast('$blank_reason' as varchar(100))
+        else cast('$duplicate_reason' as varchar(100))
+    end as [$rejection_reason]
 from $staging_table as s
 where $staging_blank_predicate
    or s.[$rank_column] > 1;
