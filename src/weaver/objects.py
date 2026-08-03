@@ -288,8 +288,12 @@ class Table(WeaverObject):
 
         return self.dataframe().limit(0)
 
-    def load(self, fault_tolerant: bool = False) -> "LoadResult":
-        """Run this table's ``read()`` and write what it proposed.
+    def load(
+        self,
+        fault_tolerant: bool = False,
+        ignore_stability_threshold: bool = False,
+    ) -> "LoadResult":
+        """Run this table's ``read()`` and write what it staged.
 
         Independently runnable, which is the point::
 
@@ -297,6 +301,11 @@ class Table(WeaverObject):
 
         No repository, no catalogue, no bundle and no orchestrator — the module
         carries its own contract and this object carries its own destination.
+
+        ``ignore_stability_threshold`` waives the declared delete and update
+        limits for one run. It exists for the case where a very large change is
+        the correct answer — a genuine bulk retirement — and is a deliberate act
+        each time rather than a setting that stays on.
         """
 
         from .runtime.load_contract import LoadContract
@@ -313,6 +322,7 @@ class Table(WeaverObject):
             staging_frame=staged,
             deletes=deletes,
             fault_tolerant=fault_tolerant,
+            ignore_stability_threshold=ignore_stability_threshold,
         )
 
 

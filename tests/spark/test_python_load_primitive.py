@@ -463,6 +463,111 @@ def test_a_full_replacement_materialises_staging_before_emptying_the_target(
     ]
 
 
+# --- stability thresholds ----------------------------------------------------
+
+
+GUARDED_MODULE = CUSTOMER_MODULE.replace(
+    "Primary key: Customer id",
+    "Primary key: Customer id\n\nDelete percentage threshold: 5"
+    "\n\nUpdate percentage threshold: 20\n\nStability row threshold: 10",
+)
+
+
+@pytest.fixture
+def guarded(spark, lakehouse, customer, deployed):
+    """The same table, declaring thresholds a small fixture can actually trip.
+
+    The row threshold is 10 rather than the default million, because the guard's
+    subject is the percentages and a test cannot afford a million rows to reach
+    them.
+    """
+
+    import importlib
+
+    (deployed / "Sales__Customer.py").write_text(GUARDED_MODULE, encoding="utf-8")
+    return importlib.reload(importlib.import_module("Sales__Customer")).Sales__Customer
+
+
+TWENTY = [(f"c{n}", f"Name {n}") for n in range(20)]
+
+
+def test_a_load_below_the_row_threshold_is_never_guarded(spark, lakehouse, customer):
+    """On a small table one row is a large percentage, and tripping on that
+    would teach everyone to disable the guard."""
+
+    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+
+    result = _load(customer, spark, lakehouse, [("c1", "One")])
+
+    assert result.succeeded is True
+    assert result.rows_deleted == 1
+
+
+def test_too_many_deletes_refuses_and_leaves_the_target_untouched(
+    spark, lakehouse, guarded
+):
+    """A source that broke overnight produces a load Weaver would otherwise
+    carry out faithfully."""
+
+    _load(guarded, spark, lakehouse, TWENTY)
+
+    result = _load(guarded, spark, lakehouse, TWENTY[:5])
+
+    assert result.succeeded is False
+    assert "over the 5% threshold" in result.error_message
+    assert len(_contents(spark, lakehouse)) == 20
+
+
+def test_too_many_updates_refuses(spark, lakehouse, guarded):
+    _load(guarded, spark, lakehouse, TWENTY)
+
+    changed = [(key, f"changed {key}") for key, _ in TWENTY]
+    result = _load(guarded, spark, lakehouse, changed)
+
+    assert result.succeeded is False
+    assert "over the 20% threshold" in result.error_message
+    # Untouched: the names are the originals, not the changed ones.
+    assert sorted(_contents(spark, lakehouse)) == sorted(TWENTY)
+
+
+def test_a_breach_is_governed_by_fault_tolerant_like_a_rejection(
+    spark, lakehouse, guarded
+):
+    """Tolerating it changes what is written, never what is reported."""
+
+    _load(guarded, spark, lakehouse, TWENTY)
+
+    result = _load(guarded, spark, lakehouse, TWENTY[:5], fault_tolerant=True)
+
+    assert result.succeeded is False
+    assert result.rows_deleted == 15
+    assert len(_contents(spark, lakehouse)) == 5
+
+
+def test_the_threshold_can_be_waived_for_one_run(spark, lakehouse, guarded):
+    """For the case where a very large change is the correct answer."""
+
+    _load(guarded, spark, lakehouse, TWENTY)
+
+    guarded.rows = TWENTY[:5]
+    guarded.deletes = []
+    result = guarded(spark, lakehouse=lakehouse).load(ignore_stability_threshold=True)
+
+    assert result.succeeded is True
+    assert result.rows_deleted == 15
+
+
+def test_an_unkeyed_load_is_exempt(spark, lakehouse, unkeyed):
+    """It replaces every row by definition, so a delete threshold would trip on
+    every run — which is the declaration working, not a symptom."""
+
+    _load(unkeyed, spark, lakehouse, [(f"c{n}", f"Name {n}") for n in range(20)])
+
+    result = _load(unkeyed, spark, lakehouse, [("c1", "One")])
+
+    assert result.succeeded is True
+
+
 # --- the contract comes from the module --------------------------------------
 
 

@@ -76,6 +76,12 @@ INTOLERANT_MESSAGE = (
 )
 TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
 
+#: What a run reports when the change is larger than the object allows. Governed
+#: by ``fault_tolerant`` exactly as row rejection is: refused outright at 0, gone
+#: ahead with but still reported as a failure at 1.
+BREACH_REFUSED = "{reason}, and fault_tolerant = 0, so the target was not modified"
+BREACH_TOLERATED = "{reason}"
+
 
 def load_table(
     spark,
@@ -85,6 +91,7 @@ def load_table(
     staging_frame,
     deletes=None,
     fault_tolerant: bool = False,
+    ignore_stability_threshold: bool = False,
 ) -> LoadResult:
     """Load one Delta table from the rows its object staged.
 
@@ -121,6 +128,25 @@ def load_table(
             INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=rows_rejected
         )
 
+    _derive_upserts(spark, names, contract, columns)
+
+    # Everything the load is about to do, counted before it does any of it —
+    # which is the whole reason the change set is a table. A breach at
+    # fault_tolerant = 0 leaves the target exactly as it was.
+    breach = None
+    if not ignore_stability_threshold:
+        breach = contract.breaches(
+            target_rows=_count(spark, names["target"]),
+            deleting=_prospective_deletes(spark, names, contract, deletes),
+            updating=_count(spark, names["upsert"], where=f"`{IS_NEW_COLUMN}` = 0"),
+        )
+    if breach and not fault_tolerant:
+        return LoadResult.failure(
+            BREACH_REFUSED.format(reason=breach),
+            rows_read=rows_read,
+            rows_rejected=rows_rejected,
+        )
+
     inserted, updated = _apply_upserts(spark, names, contract, columns)
     deleted = _apply_deletes(spark, names, contract, columns, deletes)
 
@@ -132,6 +158,8 @@ def load_table(
         rows_deleted=deleted,
         rows_rejected=rows_rejected,
     )
+    if breach:
+        return result.rejected(BREACH_TOLERATED.format(reason=breach))
     if rows_rejected:
         # The artefacts stay: a run that refused rows is one someone will want
         # to look at, and the reject table alone does not explain itself.
@@ -196,12 +224,12 @@ def _reject_invalid_keys(spark, names, contract: LoadContract, columns) -> int:
     return count
 
 
-def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, int]:
-    """Derive the change set, then insert the new rows and update the changed.
+def _derive_upserts(spark, names, contract: LoadContract, columns) -> None:
+    """Record what this load has decided to change, before it changes anything.
 
-    Two statements over one materialised set, as the Warehouse does. The set is
-    a table rather than a subquery so that what Weaver decided to change is
-    inspectable afterwards, and so both counts read the same rows the writes did.
+    A table rather than a subquery, so what Weaver decided is inspectable
+    afterwards — and so the stability check can read the size of the change
+    before a single row has moved.
     """
 
     join = key_join("s", "t", contract.primary_key)
@@ -216,6 +244,14 @@ def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, 
         f"LEFT JOIN {names['target']} AS t ON {join}\n"
         f"WHERE {missing} OR ({changed})"
     )
+
+
+def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, int]:
+    """Insert the new rows, then update the changed ones.
+
+    Two statements over the one materialised set, as the Warehouse does, so both
+    counts describe exactly the rows the writes touched.
+    """
 
     audit = delta_audit_names()
     insert_columns = ", ".join(f"`{c}`" for c in columns)
@@ -247,6 +283,34 @@ def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, 
             f"WHEN MATCHED THEN UPDATE SET {', '.join(sets)}"
         )
     return inserted, updated
+
+
+def _prospective_deletes(spark, names, contract, deletes) -> int:
+    """How many target rows this load is about to remove, before it removes any.
+
+    Counted rather than measured after the fact, because the point of the guard
+    is to decide *not* to delete — a number obtained by deleting would be a
+    report rather than a check.
+    """
+
+    total = 0
+    if deletes is not None:
+        keys = _register(spark, deletes, names["target"], "delete_probe")
+        named = ", ".join(f"`{c}`" for c in contract.primary_key)
+        join = key_join("d", "t", contract.primary_key)
+        total += _count(
+            spark,
+            f"{names['target']} AS t JOIN (SELECT DISTINCT {named} FROM {keys}) AS d "
+            f"ON {join}",
+        )
+    if contract.deletes_absent_rows:
+        join = key_join("s", "t", contract.primary_key)
+        total += _count(
+            spark,
+            f"{names['target']} AS t WHERE NOT EXISTS "
+            f"(SELECT 1 FROM {names['staging']} AS s WHERE {join})",
+        )
+    return total
 
 
 def _apply_deletes(spark, names, contract, columns, deletes) -> int:

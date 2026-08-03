@@ -37,6 +37,9 @@ import inspect
 from dataclasses import dataclass
 
 from ..declaration.metadata import (
+    DEFAULT_DELETE_THRESHOLD,
+    DEFAULT_STABILITY_ROWS,
+    DEFAULT_UPDATE_THRESHOLD,
     AUDIT_DELETE,
     AUDIT_INSERT,
     AUDIT_UPDATE,
@@ -67,6 +70,9 @@ class LoadContract:
     comparison_columns: tuple[str, ...] = ()
     identity_column: str | None = None
     incremental: bool = False
+    delete_threshold: int = DEFAULT_DELETE_THRESHOLD
+    update_threshold: int = DEFAULT_UPDATE_THRESHOLD
+    stability_rows: int = DEFAULT_STABILITY_ROWS
 
     @property
     def qualified(self) -> str:
@@ -89,6 +95,38 @@ class LoadContract:
 
         return bool(self.primary_key) and not self.incremental
 
+    def breaches(self, *, target_rows: int, deleting: int, updating: int) -> str | None:
+        """Why this load looks wrong, or ``None`` if it does not.
+
+        The guard against a load that is *technically* correct and obviously
+        wrong: a source that broke overnight and returned a tenth of its rows
+        produces a change Weaver would otherwise carry out faithfully.
+
+        Both percentages are of the target as it stands *before* the load, which
+        is the number an operator means by "5% of the table". Neither applies
+        below the row threshold, because on a small table one row is a large
+        percentage and tripping on that would teach everyone to disable the
+        guard.
+
+        An unkeyed load is exempt: with no key there is nothing to match, so
+        replacing every row is what the declaration asked for rather than a
+        symptom of anything.
+        """
+
+        if self.replaces_wholesale or target_rows < self.stability_rows:
+            return None
+        for count, limit, what in (
+            (deleting, self.delete_threshold, "delete"),
+            (updating, self.update_threshold, "update"),
+        ):
+            percentage = count * 100 / target_rows
+            if percentage > limit:
+                return (
+                    f"{what} of {count} rows is {percentage:.1f}% of {target_rows}, "
+                    f"over the {limit}% threshold"
+                )
+        return None
+
     @classmethod
     def from_document(cls, document: SesDocument) -> "LoadContract":
         """The contract a parsed Weaver document describes.
@@ -109,6 +147,9 @@ class LoadContract:
             comparison_columns=document.comparison_columns,
             identity_column=document.identity,
             incremental=document.is_incremental,
+            delete_threshold=document.delete_threshold,
+            update_threshold=document.update_threshold,
+            stability_rows=document.stability_rows,
         )
 
 

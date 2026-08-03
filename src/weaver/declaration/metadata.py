@@ -113,6 +113,26 @@ WAREHOUSE_ALIAS = "Warehouse alias"
 LAKEHOUSE_ALIAS = "Lakehouse alias"
 _ALIAS_KEYS = {WAREHOUSE_ALIAS, LAKEHOUSE_ALIAS}
 
+#: Stability thresholds — the guard against a load that is *technically* correct
+#: and obviously wrong. A source that broke overnight and returned a tenth of its
+#: rows produces a load Weaver would otherwise carry out faithfully.
+#:
+#: The percentages are of the target's row count *before* the load, and the row
+#: threshold is the size below which neither applies: on a small table a single
+#: row is a large percentage, and tripping on that would teach everyone to turn
+#: the guard off.
+DELETE_THRESHOLD = "Delete percentage threshold"
+UPDATE_THRESHOLD = "Update percentage threshold"
+STABILITY_ROWS = "Stability row threshold"
+
+#: Deliberately not zero. A load that has never been run against a populated
+#: table has nothing to compare with, and a first load inserts everything — so
+#: the defaults protect an established table without standing in the way of one
+#: being established.
+DEFAULT_DELETE_THRESHOLD = 5
+DEFAULT_UPDATE_THRESHOLD = 20
+DEFAULT_STABILITY_ROWS = 1_000_000
+
 # Keys accepted per kind. Anything else is a typo and is refused by name.
 _COMMON_KEYS = {
     "Description",
@@ -137,6 +157,9 @@ _KIND_KEYS = {
         "Identity",
         "Comparison columns",
         "Incremental",
+        DELETE_THRESHOLD,
+        UPDATE_THRESHOLD,
+        STABILITY_ROWS,
     },
     # A view's keys are logical: it stores no rows, so they describe the shape of
     # the result rather than constraining storage. They are declared so the model
@@ -423,6 +446,9 @@ class WeaverDocument:
     declared_not_null: tuple[str, ...] = ()
     identity: str | None = None
     declared_comparison_columns: tuple[str, ...] = ()
+    delete_threshold: int = DEFAULT_DELETE_THRESHOLD
+    update_threshold: int = DEFAULT_UPDATE_THRESHOLD
+    stability_rows: int = DEFAULT_STABILITY_ROWS
     file_keys: tuple[str, ...] = ()
     is_incremental: bool = False
     prohibit_rebuild: bool = False
@@ -638,6 +664,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     unique_keys = _parse_unique_keys(loaded.get("Unique keys"), primary_key)
     foreign_keys = _parse_foreign_keys(loaded.get("Foreign keys"), object_id)
     declared_not_null = _parse_column_list(loaded.get("Not null"), "Not null")
+    delete_threshold = _parse_percentage(loaded, DELETE_THRESHOLD, DEFAULT_DELETE_THRESHOLD)
+    update_threshold = _parse_percentage(loaded, UPDATE_THRESHOLD, DEFAULT_UPDATE_THRESHOLD)
+    stability_rows = _parse_row_count(loaded, STABILITY_ROWS, DEFAULT_STABILITY_ROWS)
     identity = _parse_identity(loaded.get("Identity"))
     if identity is not None and language not in IDENTITY_LANGUAGES:
         raise MetadataError(_IDENTITY_UNSUPPORTED)
@@ -692,6 +721,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         declared_not_null=declared_not_null,
         identity=identity,
         declared_comparison_columns=comparison,
+        delete_threshold=delete_threshold,
+        update_threshold=update_threshold,
+        stability_rows=stability_rows,
         file_keys=file_keys,
         is_incremental=is_incremental,
         prohibit_rebuild=prohibit_rebuild,
@@ -978,6 +1010,32 @@ def _parse_bool(value: Any, key: str) -> bool:
     if isinstance(value, bool):
         return value
     raise MetadataError(f"{key} must be a boolean (true/false)")
+
+
+def _parse_percentage(raw: dict[str, Any], key: str, default: int) -> int:
+    """A whole percentage between 0 and 100.
+
+    100 is permitted and means "never trip", which is a clearer way to disable
+    one threshold than a separate flag would be.
+    """
+
+    if key not in raw or raw[key] is None:
+        return default
+    value = raw[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise MetadataError(f"{key} must be a whole percentage, got {value!r}")
+    if not 0 <= value <= 100:
+        raise MetadataError(f"{key} must be between 0 and 100, got {value}")
+    return value
+
+
+def _parse_row_count(raw: dict[str, Any], key: str, default: int) -> int:
+    if key not in raw or raw[key] is None:
+        return default
+    value = raw[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise MetadataError(f"{key} must be a whole number of rows, got {value!r}")
+    return value
 
 
 def _parse_flag_with_default(raw: dict[str, Any], key: str, *, default: bool) -> bool:
