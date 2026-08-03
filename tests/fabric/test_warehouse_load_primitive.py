@@ -23,6 +23,11 @@ import pytest
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
 from weaver.runtime import LoadResult
+from weaver.runtime.load_contract import (
+    REASON_BLANK_PK,
+    REASON_DUPLICATE_PK,
+    REJECTION_REASON,
+)
 
 pytestmark = pytest.mark.fabric
 
@@ -212,16 +217,20 @@ def test_a_non_incremental_run_deletes_rows_the_source_stopped_producing(estate)
 # --- rejection and fault tolerance -------------------------------------------
 
 
-def test_an_intolerant_run_with_rejects_leaves_the_target_untouched(estate):
+def test_an_intolerant_run_with_rejects_raises_and_leaves_the_target_untouched(estate):
+    """`exec [_].[Load S.N]` fails the way `.load()` does.
+
+    The procedure throws rather than returning a row saying `succeeded = 0`, so
+    a caller does not have to special-case which primitive it is driving.
+    """
+
     _source_rows(estate, CLEAN)
     _load(estate, fault_tolerant=False)
 
     _source_rows(estate, REJECTABLE)
-    result = _load(estate, fault_tolerant=False)
+    with pytest.raises(Exception, match="rows were rejected"):
+        _load(estate, fault_tolerant=False)
 
-    assert result.succeeded is False
-    assert result.rows_rejected == 3
-    assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (0, 0, 0)
     assert _contents(estate) == CLEAN
 
 
@@ -241,16 +250,22 @@ def test_a_tolerant_run_loads_the_valid_rows_and_still_reports_failure(estate):
 def test_the_rejected_rows_survive_with_their_reason(estate):
     """A count says something went wrong and nothing about what."""
 
+    # Tolerated, not refused — and that distinction is a finding rather than a
+    # convenience. Fabric's DDL is transactional, so the `throw` an intolerant
+    # run raises rolls the batch back and takes the reject table with it. On the
+    # Warehouse the evidence therefore survives only the tolerant path, which
+    # sits awkwardly beside the plan's "preserve the rejection evidence" and is
+    # reported rather than worked around here.
     _source_rows(estate, REJECTABLE)
-    _load(estate, fault_tolerant=False)
+    _load(estate, fault_tolerant=True)
 
     rows = estate.query(
-        f"select distinct [Rejection reason] from [{SCHEMA}].[LoadCustomer_Reject];"
+        f"select distinct [{REJECTION_REASON}] from [{SCHEMA}].[LoadCustomer_Reject];"
     )
 
-    assert {str(row["Rejection reason"]) for row in rows} == {
-        "null primary key",
-        "duplicate primary key",
+    assert {str(row[REJECTION_REASON]) for row in rows} == {
+        REASON_BLANK_PK,
+        REASON_DUPLICATE_PK,
     }
 
 

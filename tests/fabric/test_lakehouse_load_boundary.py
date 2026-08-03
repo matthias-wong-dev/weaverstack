@@ -19,13 +19,20 @@ semantics* — rejection, thresholds, incremental policy — is proved locally i
 One submission, one evidence payload, per the suite's rule: every question about
 the installed estate goes in one body and the assertions run locally against
 what it brings back.
+
+``published_weaver`` alone, never also ``fabric``. The markers are opted into by
+name and neither implies the other, so carrying both would let ``-m fabric``
+select this — and ``-m fabric`` promises a workspace and *nothing published*.
+What needs the wheel is what this is about: the installed package acquiring its
+own capabilities. The platform question underneath it — what a mount is — is a
+``fabric`` test of its own, and runs in a minute without a publish.
 """
 
 from __future__ import annotations
 
 import pytest
 
-pytestmark = [pytest.mark.fabric, pytest.mark.published_weaver]
+pytestmark = pytest.mark.published_weaver
 
 
 #: Everything asked of the installed estate, in one round trip. It imports from
