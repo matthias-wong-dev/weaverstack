@@ -72,15 +72,9 @@ from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 results["imported"] = Raw__CustomerCsv.__name__
 
-# The data file this fixture's folder reads. Placed by the test rather than by
-# the installer: the deployed tree currently carries only `.py` support files,
-# so a module that reads a data file beside it finds nothing. That gap is real
-# and reported separately — it is not what this test is about, and standing on
-# it would stop the folder claim being proved at all.
-data = os.path.join(root, "lib", "data")
-os.makedirs(data, exist_ok=True)
-with open(os.path.join(data, "customers.csv"), "w") as handle:
-    handle.write("CustomerId,CustomerName\n1,Ada\n2,Grace\n")
+# What the folder reads is deployed, not placed here: `lib/` travels whole, so
+# a helper module's data file arrives beside the module that reads it.
+results["lib"] = sorted(os.listdir(os.path.join(root, "lib", "data")))
 
 # The folder load, writing ordinary files to OneLake through the mount.
 export = Raw__CustomerCsv(spark, lakehouse=destination)
@@ -110,11 +104,10 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
     # at the root, and the `Files/` segment preserved rather than flattened.
     assert "Files" in seen["deployed"]
     assert "DWG__Customer.py" in seen["deployed"]
-    # `lib/` is absent, and that is a finding rather than an expectation: this
-    # fixture's lib/ holds only a CSV, and the deployed tree carries `.py`
-    # support files alone. A module that reads a data file beside it therefore
-    # finds nothing — see the note in BODY, which supplies the file itself.
-    assert "lib" not in seen["deployed"]
+    # `lib/` travels whole. This fixture's holds only a CSV, so a `.py` filter
+    # left it out entirely and the folder's read() found nothing to copy.
+    assert "lib" in seen["deployed"]
+    assert seen["lib"] == ["customers.csv"]
     # The authored path is reproduced verbatim, so the import reads the same.
     assert seen["imported"] == "Raw__CustomerCsv"
     # Two spellings of one location, because two things read them.
