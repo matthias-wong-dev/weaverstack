@@ -136,9 +136,9 @@ def _is_all_comment(statement: str) -> bool:
 
 
 def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]:
-    audit = _audit_names()
+    audit = delta_audit_names()
     business = _business_columns(contract)
-    blank = _blank_predicate(contract.primary_key)
+    blank = blank_key_predicate(contract.primary_key)
     rejected = f"({blank} OR s.`{RANK_COLUMN}` > 1)"
 
     statements = [
@@ -189,7 +189,7 @@ def _full_replace_program(names: dict, query: str, contract: LoadContract) -> li
     here — rejection is a statement about keys, and there are none.
     """
 
-    audit = _audit_names()
+    audit = delta_audit_names()
     business = _business_columns(contract)
     columns = ", ".join(f"`{name}`" for name in business)
     return [
@@ -225,8 +225,8 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
     """
 
     valid = f"(SELECT * FROM {names['staging']} AS s WHERE NOT {rejected})"
-    join = _join("v", "t", contract.primary_key)
-    changed = _changed_predicate("v", "t", contract)
+    join = key_join("v", "t", contract.primary_key)
+    changed = changed_predicate("v", "t", contract)
     tolerated = f"({FAULT_TOLERANT_TOKEN} = 1 OR (SELECT count(*) FROM {names['reject']}) = 0)"
     deleted = (
         f"    , CASE WHEN {tolerated} THEN (\n"
@@ -263,8 +263,8 @@ def _merge(names: dict, contract: LoadContract, business, audit) -> str:
     come to mean "when was this table last loaded".
     """
 
-    join = _join("s", "t", contract.primary_key)
-    changed = _changed_predicate("s", "t", contract)
+    join = key_join("s", "t", contract.primary_key)
+    changed = changed_predicate("s", "t", contract)
     updates = ", ".join(
         f"t.`{name}` = s.`{name}`"
         for name in business
@@ -275,7 +275,7 @@ def _merge(names: dict, contract: LoadContract, business, audit) -> str:
         for part in (
             updates,
             f"t.`{audit[1]}` = current_timestamp()",
-            f"t.`{audit[2]}` = {_live_literal()}",
+            f"t.`{audit[2]}` = {live_delete_literal()}",
         )
         if part
     )
@@ -305,7 +305,7 @@ def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
     empty key set, so the merge below it deletes nothing.
     """
 
-    join = _join("v", "t", contract.primary_key)
+    join = key_join("v", "t", contract.primary_key)
     keys = ", ".join(f"t.`{c}`" for c in contract.primary_key)
     return [
         f"CREATE TABLE {names['delete']} USING delta {COLUMN_MAPPING} AS\n"
@@ -316,7 +316,7 @@ def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
         f")",
         f"MERGE INTO {names['target']} AS t\n"
         f"USING {names['delete']} AS d\n"
-        f"   ON {_join('d', 't', contract.primary_key)}\n"
+        f"   ON {key_join('d', 't', contract.primary_key)}\n"
         f"WHEN MATCHED THEN DELETE",
     ]
 
@@ -373,7 +373,7 @@ def _business_columns(contract: LoadContract) -> tuple[str, ...]:
     )
 
 
-def _audit_names() -> tuple[str, str, str]:
+def delta_audit_names() -> tuple[str, str, str]:
     return tuple(audit_column_name(logical, PYTHON) for logical in AUDIT_COLUMNS)
 
 
@@ -382,18 +382,18 @@ def _audit_list(audit) -> str:
 
 
 def _audit_values(audit) -> str:
-    return f"current_timestamp(), current_timestamp(), {_live_literal()}"
+    return f"current_timestamp(), current_timestamp(), {live_delete_literal()}"
 
 
-def _live_literal() -> str:
+def live_delete_literal() -> str:
     return f"CAST('{AUDIT_LIVE_DELETE_DATETIME}' AS TIMESTAMP)"
 
 
-def _join(left: str, right: str, columns) -> str:
+def key_join(left: str, right: str, columns) -> str:
     return " AND ".join(f"{left}.`{c}` = {right}.`{c}`" for c in columns)
 
 
-def _changed_predicate(left: str, right: str, contract: LoadContract) -> str:
+def changed_predicate(left: str, right: str, contract: LoadContract) -> str:
     """Whether a matched row differs, null-safely.
 
     ``<=>`` rather than ``<>`` because a column going to or from null is a
@@ -415,9 +415,20 @@ def _changed_predicate(left: str, right: str, contract: LoadContract) -> str:
     )
 
 
-def _blank_predicate(columns) -> str:
+def blank_key_predicate(columns, alias: str = "s") -> str:
+    """A key column that is null, empty or only spaces is not a key.
+
+    Blank is rejected alongside null deliberately: a key of whitespace matches
+    nothing a human would call a match, and letting it through would create a
+    row nobody can find again.
+
+    ``alias`` is empty when the predicate is applied to a frame rather than
+    inside a join, where there is no relation to qualify.
+    """
+
+    prefix = f"{alias}." if alias else ""
     predicates = [
-        f"nullif(trim(CAST(s.`{c}` AS STRING)), '') IS NULL" for c in columns
+        f"nullif(trim(CAST({prefix}`{c}` AS STRING)), '') IS NULL" for c in columns
     ]
     if len(predicates) == 1:
         return predicates[0]
@@ -446,7 +457,14 @@ def _indent(text: str, spaces: int) -> str:
 
 
 __all__ = [
+    "COLUMN_MAPPING",
     "FAULT_TOLERANT_TOKEN",
+    "REJECTION_REASON",
+    "blank_key_predicate",
+    "changed_predicate",
+    "delta_audit_names",
+    "key_join",
+    "live_delete_literal",
     "INTOLERANT_MESSAGE",
     "STATEMENT_DELIMITER",
     "TOLERATED_MESSAGE",

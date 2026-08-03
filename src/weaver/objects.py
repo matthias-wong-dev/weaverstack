@@ -151,6 +151,32 @@ class WeaverObject:
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
 
+    # --- the load contract, read from this module's own docstring ----------
+
+    def _document(self):
+        """This object's parsed declaration, from the module it was defined in.
+
+        The module *is* the contract. A deployed object in a session has no
+        repository to reopen and no catalogue to query, so if its docstring were
+        not sufficient then ``load()`` would be the tail end of an orchestration
+        rather than something runnable on its own.
+
+        It is read on every call rather than cached, which is what makes an edit
+        visible on the next reload — the notebook loop this is meant to support.
+        """
+
+        import sys
+
+        from .runtime.load_contract import document_for_module
+
+        module = sys.modules.get(type(self).__module__)
+        if module is None:  # pragma: no cover - a class with no importable module
+            raise LoadError(
+                f"{type(self).__name__} was defined outside an importable module, "
+                "so its Weaver metadata cannot be read"
+            )
+        return document_for_module(module)
+
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.object_id} in {self.lakehouse.name}>"
 
@@ -184,6 +210,39 @@ class Folder(WeaverObject):
 
         return f"{self.path()}_Staging"
 
+    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this folder's ``read()`` and publish what it staged.
+
+        Independently runnable, which is the point::
+
+            Sales__Export(spark).load(fault_tolerant=False)
+
+        No repository, no catalogue, no bundle and no orchestrator — the module
+        carries its own contract and this object carries its own destination.
+        """
+
+        import shutil
+
+        from .runtime.folder_load import load_folder
+        from .runtime.load_contract import FolderLoadContract
+
+        contract = FolderLoadContract.from_document(self._document())
+        # Staging is emptied before read() rather than after the load, and the
+        # order is the whole point. It belongs to this object, so a run must
+        # start from nothing it did not itself produce — otherwise the previous
+        # run's files are still there, get published again, and a replacement
+        # concludes that nothing was retired. Clearing afterwards instead would
+        # also destroy the one directory worth looking at when a load fails.
+        shutil.rmtree(self.staging_folder(), ignore_errors=True)
+        staged, deletes = _load_pair(self, self.read())
+        return load_folder(
+            contract=contract,
+            destination=self.path(),
+            staging=str(staged),
+            deletes=deletes,
+            fault_tolerant=fault_tolerant,
+        )
+
 
 class Table(WeaverObject):
     """Rows materialised into a Delta table or a Warehouse table.
@@ -214,6 +273,31 @@ class Table(WeaverObject):
 
         return self.dataframe().limit(0)
 
+    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this table's ``read()`` and write what it proposed.
+
+        Independently runnable, which is the point::
+
+            Sales__Customer(spark).load(fault_tolerant=True)
+
+        No repository, no catalogue, no bundle and no orchestrator — the module
+        carries its own contract and this object carries its own destination.
+        """
+
+        from .runtime.load_contract import LoadContract
+        from .runtime.table_load import load_table
+
+        contract = LoadContract.from_document(self._document())
+        upserts, deletes = _load_pair(self, self.read())
+        return load_table(
+            self.spark,
+            contract=contract,
+            target=self.lakehouse.qualify(*self.identity),
+            upserts=upserts,
+            deletes=deletes,
+            fault_tolerant=fault_tolerant,
+        )
+
 
 class View(WeaverObject):
     """A view over other objects, declared in SQL.
@@ -229,6 +313,24 @@ class View(WeaverObject):
         """
 
         return self.spark.table(self.lakehouse.qualify(*self.identity))
+
+
+def _load_pair(obj, returned):
+    """Unpack what ``read()`` returned, refusing anything else by name.
+
+    Both kinds of object return a pair, and the error has to name the object
+    rather than surface as a tuple-unpacking failure three frames deeper — an
+    author who returned a single frame should be told that, not shown a
+    ValueError about lengths.
+    """
+
+    if not isinstance(returned, tuple) or len(returned) != 2:
+        raise LoadError(
+            f"{type(obj).__name__}.read() must return a pair — "
+            f"(upserts, deletes) for a Table, (staging_folder, files_to_delete) "
+            f"for a Folder — and returned {type(returned).__name__}"
+        )
+    return returned
 
 
 def _identity(class_name: str) -> tuple[str, str]:
