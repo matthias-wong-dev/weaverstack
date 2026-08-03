@@ -303,12 +303,14 @@ class Table(WeaverObject):
         from .runtime.table_load import load_table
 
         contract = LoadContract.from_document(self._document())
-        upserts, deletes = _load_pair(self, self.read())
+        # The first value is *staging* — unvalidated, unreconciled, nothing yet
+        # classified as new or changed. Naming it so is the point.
+        staged, deletes = _load_pair(self, self.read())
         return load_table(
             self.spark,
             contract=contract,
-            target=self.lakehouse.qualify(*self.identity),
-            upserts=upserts,
+            lakehouse=self.lakehouse,
+            staging_frame=staged,
             deletes=deletes,
             fault_tolerant=fault_tolerant,
         )
@@ -342,7 +344,7 @@ def _load_pair(obj, returned):
     if not isinstance(returned, tuple) or len(returned) != 2:
         raise LoadError(
             f"{type(obj).__name__}.read() must return a pair — "
-            f"(upserts, deletes) for a Table, (staging_folder, files_to_delete) "
+            f"(staging, deletes) for a Table, (staging_folder, files_to_delete) "
             f"for a Folder — and returned {type(returned).__name__}"
         )
     return returned

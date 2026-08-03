@@ -1,42 +1,44 @@
 """Loading a Python-defined Delta table — the mechanics behind ``Table.load()``.
 
 The authored class proposes rows; this owns everything that happens to them.
-``read()`` returns ``(upserts, deletes)`` and never touches the target, which is
+``read()`` returns ``(staging, deletes)`` and never touches the target, which is
 the invariant the whole runtime rests on: an object that wrote to its own table
 would make Weaver's accounting a guess.
 
-Ported from ``weaver_runtime.dbrep.runtime.delta_table_load``, whose shape is
-worth stating because it is not the obvious one:
+**The first value is staging, not an upsert set.** It has not been validated,
+nothing has been rejected from it, and no row in it has yet been classified as
+new or changed. It goes through the same phases the Warehouse procedure runs::
 
-**One validation pass, not several.** The reject reason becomes a *column* —
-blank key, duplicate key, or null for accepted — and a single ``GROUP BY`` over
-it yields the input, accepted and rejected counts together. Counting each
-condition separately would walk the staged rows three times and, worse, walk
-them at three different moments.
+    staging
+      → validate keys
+      → reject invalid rows
+      → valid staging
+      → compare against target
+      → derive the upsert set
+      → insert new rows
+      → update changed rows
+      → apply explicit deletes, separately, by key
+      → delete absent rows, for non-incremental loads only
 
-**One merge, not three statements.** Upserts and explicit deletes travel in the
-same source relation, distinguished by an operation column, so inserts, updates
-and both kinds of delete are one atomic Delta operation. An upsert wins when the
-same key is also explicitly deleted.
+**The intermediate tables are real**, as they are in the Warehouse and in the
+generated Spark SQL program: ``<Schema>.<Object>_Staging``, ``_Upsert`` and
+``_Reject``. That is what makes a load inspectable — what the source produced,
+what was refused, and what Weaver decided to change are all still there
+afterwards, and a run that failed can be understood without re-running the
+authored code that produced it. Temporary views cannot do that: they vanish with
+the session that made them, which is exactly when someone wants to look.
 
-**The counts come from the merge itself.** Delta reports
-``numTargetRowsInserted``/``Updated``/``Deleted`` in its operation metrics, read
-back through ``DESCRIBE HISTORY``. Counting by querying before the write would
-be a second pass over state a concurrent writer could already have moved.
+**Explicit deletes are not part of staging reconciliation.** They are applied
+afterwards, by key, so a key that was both staged and deleted ends up deleted —
+no conflict rule is needed, because the later statement simply wins. That is a
+deliberate departure from ``delta_table_load.py``, which filtered deletes
+against the accepted keys so an upsert would survive; running deletes last makes
+the same decision without a rule to remember.
 
-Two departures from the reference, both forced and both narrow:
-
-*It is written in SQL, not the DataFrame API.* The reference imports ``pyspark``
-and ``delta.tables``; ``tests/test_core_boundary.py`` forbids both anywhere in
-``weaver``, so the core stays importable without a JVM. Every operation here is
-the same operation issued as text — including the metrics, which
-``DESCRIBE HISTORY`` exposes without ``DeltaTable``.
-
-*``fault_tolerant`` is Weaver's addition.* The reference always proceeds and
-reports rejects afterwards. Here an intolerant run returns before the merge, so
-the target is untouched — which is also why this module may safely use
-``WHEN NOT MATCHED BY SOURCE`` where the generated Spark program cannot: it
-never reaches the merge with an empty source.
+Two departures from the reference remain, both forced. It is written in SQL
+rather than the DataFrame API, because ``tests/test_core_boundary.py`` forbids
+importing ``pyspark`` or ``delta`` anywhere in ``weaver``. And ``fault_tolerant``
+is Weaver's own addition: an intolerant run returns before any target mutation.
 """
 
 from __future__ import annotations
@@ -58,125 +60,311 @@ from .load_contract import (
 )
 from .load_result import LoadResult
 
+#: The suffixes of the three artefacts, matching the Warehouse and the generated
+#: Spark program so one vocabulary describes a load whichever engine ran it.
+STAGING_SUFFIX = "_Staging"
+UPSERT_SUFFIX = "_Upsert"
+REJECT_SUFFIX = "_Reject"
+
+#: What ranks duplicate keys, and what marks a row of the upsert set as new.
+#: Both are Weaver's, and both sit in a table beside the author's own columns.
+RANK_COLUMN = "__weaver_pk_row_number"
+IS_NEW_COLUMN = "_Is new row"
+
 INTOLERANT_MESSAGE = (
     "rows were rejected and fault_tolerant = 0, so the target was not modified"
 )
 TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
-
-REJECT_SUFFIX = "_Reject"
 
 
 def load_table(
     spark,
     *,
     contract: LoadContract,
-    target: str,
-    upserts,
+    lakehouse,
+    staging_frame,
     deletes=None,
     fault_tolerant: bool = False,
 ) -> LoadResult:
-    """Load one Delta table from the rows its object proposed.
+    """Load one Delta table from the rows its object staged.
 
-    ``target`` is the qualified physical name the session must use — resolved by
-    the caller, never inferred here, because a load that guessed its destination
-    from the attached Lakehouse would write to the control plane.
+    The destination is resolved by the caller, never inferred here: a load that
+    guessed it from the attached Lakehouse would write to the control plane.
     """
 
-    columns = _business_columns(spark, target)
-    _require_columns(upserts, contract, columns)
+    schema, name = contract.object_id.schema, contract.object_id.object
+    names = {
+        "target": lakehouse.qualify(schema, name),
+        "staging": lakehouse.qualify(schema, name + STAGING_SUFFIX),
+        "upsert": lakehouse.qualify(schema, name + UPSERT_SUFFIX),
+        "reject": lakehouse.qualify(schema, name + REJECT_SUFFIX),
+    }
+    columns = _business_columns(spark, names["target"])
+    _require_columns(staging_frame, contract, columns)
+
+    # Every run starts from nothing a previous run left. Otherwise a clean load
+    # leaves the last run's reject table standing, and it reads as evidence about
+    # the run that just succeeded.
+    _clear(spark, names)
+
+    _materialise_staging(spark, names, staging_frame, contract, columns)
+    rows_read = _count(spark, names["staging"])
 
     if contract.replaces_wholesale:
-        return _full_replace(spark, target, upserts, columns)
+        return _full_replace(spark, names, columns, rows_read)
 
-    validated, reason = _validate(spark, upserts, contract, columns)
-    try:
-        counts = _reason_counts(spark, validated, reason)
-        rows_read = sum(counts.values())
-        rows_rejected = rows_read - counts.get(None, 0)
+    rows_rejected = _reject_invalid_keys(spark, names, contract, columns)
+    if rows_rejected and not fault_tolerant:
+        # Nothing has been written, so refusing is a decision not to start
+        # rather than an unwind — and the reject table is the evidence.
+        return LoadResult.failure(
+            INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=rows_rejected
+        )
 
-        if rows_rejected:
-            _write_rejects(spark, target, validated, reason, columns)
-        if rows_rejected and not fault_tolerant:
-            # Nothing has been written, so refusing is a decision not to start
-            # rather than an unwind — and the reject table is the evidence.
-            return LoadResult.failure(
-                INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=rows_rejected
-            )
-
-        accepted = _accepted_view(spark, validated, reason, columns, target)
-        written = _merge(spark, target, accepted, contract, columns, deletes)
-    finally:
-        # The reference unpersists its validation state, and a session that
-        # loads many objects is exactly where not doing so is felt: each load
-        # would leave its staged rows cached for the life of the session.
-        spark.sql(f"UNCACHE TABLE IF EXISTS {validated}")
+    inserted, updated = _apply_upserts(spark, names, contract, columns)
+    deleted = _apply_deletes(spark, names, contract, columns, deletes)
 
     result = LoadResult(
         succeeded=True,
         rows_read=rows_read,
-        rows_inserted=written["inserted"],
-        rows_updated=written["updated"],
-        rows_deleted=written["deleted"],
+        rows_inserted=inserted,
+        rows_updated=updated,
+        rows_deleted=deleted,
         rows_rejected=rows_rejected,
     )
     if rows_rejected:
+        # The artefacts stay: a run that refused rows is one someone will want
+        # to look at, and the reject table alone does not explain itself.
         return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
+    _clear(spark, names)
     return result
 
 
-# --- validation ---------------------------------------------------------------
+# --- phases ------------------------------------------------------------------
 
 
-def _validate(spark, upserts, contract: LoadContract, columns) -> tuple[str, str]:
-    """Stage the proposed rows with a reject reason attached to each.
+def _materialise_staging(spark, names, frame, contract: LoadContract, columns) -> None:
+    """Put what ``read()`` produced into a real table, ranked for duplicates.
 
-    The reason is a column rather than a filter so that accepting, rejecting and
-    counting are all reads of one materialised relation — the reference's shape,
-    and the reason the rows are only walked once.
+    Materialised before anything else happens, and that ordering is the point:
+    the authored query runs exactly once, and a source that fails does so before
+    the target has been touched.
     """
 
-    staged = _register(spark, upserts, target="staged")
-    reason = _temporary_column(columns, REJECTION_REASON)
-    rank = _temporary_column((*columns, reason), "_weaver_primary_key_rank")
-    blank = blank_key_predicate(contract.primary_key, alias="s")
-    partition = ", ".join(f"s.`{c}`" for c in contract.primary_key)
+    view = _register(spark, frame, names["target"], "staged")
     named = ", ".join(f"s.`{c}`" for c in columns)
-
-    view = f"weaver_validated_{_clean(staged)}"
+    if not contract.primary_key:
+        selected = named
+    else:
+        partition = ", ".join(f"s.`{c}`" for c in contract.primary_key)
+        selected = (
+            f"{named}, row_number() OVER ("
+            f" PARTITION BY {partition} ORDER BY (SELECT NULL)) AS `{RANK_COLUMN}`"
+        )
     spark.sql(
-        f"CREATE OR REPLACE TEMP VIEW {view} AS\n"
-        f"SELECT {named}, `{rank}`,\n"
+        f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
+        f"SELECT {selected} FROM {view} AS s"
+    )
+
+
+def _reject_invalid_keys(spark, names, contract: LoadContract, columns) -> int:
+    """Move rows Weaver will not load into the reject table, with the reason.
+
+    A count alone says something went wrong and nothing about what, so the rows
+    are kept. They are then removed from staging, which from here on is the
+    *valid* staging every later phase reads.
+    """
+
+    blank = blank_key_predicate(contract.primary_key, alias="s")
+    rejected = f"({blank} OR s.`{RANK_COLUMN}` > 1)"
+    named = ", ".join(f"s.`{c}`" for c in columns)
+    spark.sql(
+        f"CREATE TABLE {names['reject']} USING delta {COLUMN_MAPPING} AS\n"
+        f"SELECT {named},\n"
         f"  CASE WHEN {blank} THEN '{REASON_BLANK_PK}'\n"
-        f"       WHEN `{rank}` > 1 THEN '{REASON_DUPLICATE_PK}'\n"
-        f"       ELSE CAST(NULL AS STRING) END AS `{reason}`\n"
-        f"FROM (\n"
-        f"  SELECT s.*, row_number() OVER ("
-        f" PARTITION BY {partition} ORDER BY (SELECT NULL)) AS `{rank}`\n"
-        f"  FROM {staged} AS s\n"
-        f") AS s"
+        f"       ELSE '{REASON_DUPLICATE_PK}' END AS `{REJECTION_REASON}`\n"
+        f"FROM {names['staging']} AS s WHERE {rejected}"
     )
-    # Materialised, because every count and both branches below read it again.
-    spark.sql(f"CACHE TABLE {view}")
-    return view, reason
+    count = _count(spark, names["reject"])
+    if count:
+        unqualified = rejected.replace("s.`", "`")
+        spark.sql(f"DELETE FROM {names['staging']} WHERE {unqualified}")
+    else:
+        # Nothing was refused, so there is no evidence to keep and an empty table
+        # standing next to the object would only invite the wrong conclusion.
+        spark.sql(f"DROP TABLE IF EXISTS {names['reject']}")
+    return count
 
 
-def _reason_counts(spark, view: str, reason: str) -> dict:
-    """Input, accepted and rejected counts in one pass over the staged rows."""
+def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, int]:
+    """Derive the change set, then insert the new rows and update the changed.
 
-    rows = spark.sql(
-        f"SELECT `{reason}` AS reason, count(*) AS n FROM {view} GROUP BY `{reason}`"
-    ).collect()
-    return {row["reason"]: int(row["n"]) for row in rows}
+    Two statements over one materialised set, as the Warehouse does. The set is
+    a table rather than a subquery so that what Weaver decided to change is
+    inspectable afterwards, and so both counts read the same rows the writes did.
+    """
 
-
-def _accepted_view(spark, validated: str, reason: str, columns, target: str) -> str:
-    view = f"weaver_accepted_{_clean(target)}"
-    named = ", ".join(f"`{c}`" for c in columns)
+    join = key_join("s", "t", contract.primary_key)
+    changed = changed_predicate("s", "t", contract)
+    missing = f"t.`{contract.primary_key[0]}` IS NULL"
+    named = ", ".join(f"s.`{c}`" for c in columns)
     spark.sql(
-        f"CREATE OR REPLACE TEMP VIEW {view} AS "
-        f"SELECT {named} FROM {validated} WHERE `{reason}` IS NULL"
+        f"CREATE TABLE {names['upsert']} USING delta {COLUMN_MAPPING} AS\n"
+        f"SELECT {named},\n"
+        f"  CASE WHEN {missing} THEN 1 ELSE 0 END AS `{IS_NEW_COLUMN}`\n"
+        f"FROM {names['staging']} AS s\n"
+        f"LEFT JOIN {names['target']} AS t ON {join}\n"
+        f"WHERE {missing} OR ({changed})"
     )
-    return view
+
+    audit = delta_audit_names()
+    insert_columns = ", ".join(f"`{c}`" for c in columns)
+    audit_columns = ", ".join(f"`{a}`" for a in audit)
+    inserted = _count(spark, names["upsert"], where=f"`{IS_NEW_COLUMN}` = 1")
+    if inserted:
+        spark.sql(
+            f"INSERT INTO {names['target']} ({insert_columns}, {audit_columns})\n"
+            f"SELECT {insert_columns}, current_timestamp(), current_timestamp(), "
+            f"{live_delete_literal()}\n"
+            f"FROM {names['upsert']} WHERE `{IS_NEW_COLUMN}` = 1"
+        )
+
+    updated = _count(spark, names["upsert"], where=f"`{IS_NEW_COLUMN}` = 0")
+    if updated:
+        sets = [
+            f"t.`{c}` = u.`{c}`" for c in columns if c not in contract.primary_key
+        ] + [
+            f"t.`{audit[1]}` = current_timestamp()",
+            f"t.`{audit[2]}` = {live_delete_literal()}",
+        ]
+        # A merge rather than an UPDATE ... FROM, which Delta does not have. The
+        # rows were already chosen when the upsert set was built, so this only
+        # applies the change it recorded.
+        spark.sql(
+            f"MERGE INTO {names['target']} AS t\n"
+            f"USING (SELECT * FROM {names['upsert']} WHERE `{IS_NEW_COLUMN}` = 0) AS u\n"
+            f"   ON {key_join('u', 't', contract.primary_key)}\n"
+            f"WHEN MATCHED THEN UPDATE SET {', '.join(sets)}"
+        )
+    return inserted, updated
+
+
+def _apply_deletes(spark, names, contract, columns, deletes) -> int:
+    """Rows the object named, then — unless incremental — rows it stopped naming.
+
+    Two different claims. An explicit delete is the object *stating* that a row
+    is gone; absence from the source only means retirement when the source is
+    the whole truth, which is what a non-incremental declaration says it is.
+
+    Explicit deletes run after the upserts, so a key that was both staged and
+    deleted ends up deleted. No conflict rule is needed: the later statement
+    wins, and over-deleting is the recoverable direction.
+    """
+
+    removed = 0
+    if deletes is not None:
+        keys = _register(spark, deletes, names["target"], "deletes")
+        named = ", ".join(f"`{c}`" for c in contract.primary_key)
+        wanted = _count(spark, f"(SELECT DISTINCT {named} FROM {keys})")
+        if wanted:
+            removed += _delete_matching(
+                spark, names["target"], f"(SELECT DISTINCT {named} FROM {keys})", contract
+            )
+
+    if contract.deletes_absent_rows:
+        # Safe here, unlike in the generated program: an intolerant run has
+        # already returned, so valid staging is never empty for want of
+        # tolerance and this cannot match the whole target by accident.
+        before = _count(spark, names["target"])
+        spark.sql(
+            f"MERGE INTO {names['target']} AS t\n"
+            f"USING {names['staging']} AS s\n"
+            f"   ON {key_join('s', 't', contract.primary_key)}\n"
+            f"WHEN NOT MATCHED BY SOURCE THEN DELETE"
+        )
+        removed += before - _count(spark, names["target"])
+    return removed
+
+
+def _delete_matching(spark, target: str, source: str, contract) -> int:
+    """Remove the rows these keys name, counting what was actually there."""
+
+    join = key_join("d", "t", contract.primary_key)
+    before = _count(spark, target)
+    spark.sql(
+        f"MERGE INTO {target} AS t USING {source} AS d ON {join} "
+        f"WHEN MATCHED THEN DELETE"
+    )
+    return before - _count(spark, target)
+
+
+def _full_replace(spark, names, columns, rows_read: int) -> LoadResult:
+    """No key, so no row can be matched: the target's contents become these.
+
+    Staging is materialised first and the target emptied only afterwards, which
+    is the whole reason staging is a table. Clearing the target and *then*
+    evaluating the authored source would leave nothing behind if the source
+    failed.
+    """
+
+    audit = delta_audit_names()
+    named = ", ".join(f"`{c}`" for c in columns)
+    audit_columns = ", ".join(f"`{a}`" for a in audit)
+    rows_deleted = _count(spark, names["target"])
+    spark.sql(f"DELETE FROM {names['target']}")
+    spark.sql(
+        f"INSERT INTO {names['target']} ({named}, {audit_columns})\n"
+        f"SELECT {named}, current_timestamp(), current_timestamp(), "
+        f"{live_delete_literal()} FROM {names['staging']}"
+    )
+    _clear(spark, names)
+    return LoadResult(
+        succeeded=True,
+        rows_read=rows_read,
+        rows_inserted=rows_read,
+        rows_deleted=rows_deleted,
+    )
+
+
+# --- helpers -----------------------------------------------------------------
+
+
+def _clear(spark, names) -> None:
+    """Drop the three artefacts, newest dependency first."""
+
+    for key in ("upsert", "reject", "staging"):
+        spark.sql(f"DROP TABLE IF EXISTS {names[key]}")
+
+
+def _count(spark, relation: str, *, where: str | None = None) -> int:
+    """How many rows. Unfiltered, Delta answers this from its transaction log.
+
+    Which is why the target's own count is affordable: it is the ``sys.partitions``
+    equivalent rather than a scan. A filtered count does read, so the filtered
+    ones here are over the upsert set, never over the target.
+    """
+
+    clause = f" WHERE {where}" if where else ""
+    return int(
+        spark.sql(f"SELECT count(*) AS n FROM {relation}{clause}").collect()[0]["n"]
+    )
+
+
+def _business_columns(spark, target: str) -> tuple[str, ...]:
+    """The target's own columns, less the audit ones the load supplies itself.
+
+    Read from the table rather than from the declaration, for the reason the
+    Warehouse installer reads sys.columns: the physical table is what is being
+    written to, and a declaration that had drifted from it would produce a
+    statement naming a column that is not there.
+    """
+
+    audit = set(delta_audit_names())
+    return tuple(
+        field.name
+        for field in spark.table(target).schema.fields
+        if field.name not in audit
+    )
 
 
 def _require_columns(frame, contract: LoadContract, columns) -> None:
@@ -192,7 +380,7 @@ def _require_columns(frame, contract: LoadContract, columns) -> None:
     if missing:
         raise LoadError(
             f"{contract.qualified}: read() did not produce "
-            f"{', '.join(repr(name) for name in missing)} — the upserts frame "
+            f"{', '.join(repr(name) for name in missing)} — the staged frame "
             "must carry every column the table declares, by exact name"
         )
     key_missing = [name for name in contract.primary_key if name not in produced]
@@ -204,215 +392,21 @@ def _require_columns(frame, contract: LoadContract, columns) -> None:
         )
 
 
-def _business_columns(spark, target: str) -> tuple[str, ...]:
-    """The target's own columns, less the audit ones the load supplies itself.
+def _register(spark, frame, target: str, role: str) -> str:
+    """A temporary view over one frame, so SQL can name it.
 
-    Read from the table rather than from the declaration, for the reason the
-    Warehouse installer reads sys.columns: the physical table is what is being
-    written to, and a declaration that had drifted from it would produce a merge
-    naming a column that is not there.
+    The one legitimate use of a temp view here: it names an in-flight
+    ``DataFrame`` for a single statement. It is never where a phase's result
+    lives — those are tables, because they have to outlive the session.
     """
 
-    audit = set(delta_audit_names())
-    return tuple(
-        field.name
-        for field in spark.table(target).schema.fields
-        if field.name not in audit
-    )
-
-
-# --- the writes ----------------------------------------------------------------
-
-
-def _full_replace(spark, target: str, staged, columns) -> LoadResult:
-    """No key, so no match and no update: the target's contents become these."""
-
-    rows_deleted = int(
-        spark.sql(f"SELECT count(*) AS n FROM {target}").collect()[0]["n"]
-    )
-    view = _register(spark, staged, target="replace")
-    rows_read = int(spark.sql(f"SELECT count(*) AS n FROM {view}").collect()[0]["n"])
-    audit = delta_audit_names()
-    named = ", ".join(f"`{c}`" for c in columns)
-    spark.sql(f"DELETE FROM {target}")
-    spark.sql(
-        f"INSERT INTO {target} ({named}, {', '.join(f'`{a}`' for a in audit)})\n"
-        f"SELECT {named}, current_timestamp(), current_timestamp(), "
-        f"{live_delete_literal()} FROM {view}"
-    )
-    return LoadResult(
-        succeeded=True,
-        rows_read=rows_read,
-        rows_inserted=rows_read,
-        rows_deleted=rows_deleted,
-    )
-
-
-def _merge(spark, target: str, accepted: str, contract, columns, deletes) -> dict:
-    """One Delta operation carrying every change this load makes.
-
-    Upserts and explicit deletes share a source relation, told apart by an
-    operation column. An upsert wins when the same key is also explicitly
-    deleted — a row both proposed and retired is a source that contradicts
-    itself, and keeping it is the recoverable reading.
-    """
-
-    operation = _temporary_column(columns, "_weaver_operation")
-    source = _merge_source(spark, accepted, contract, columns, deletes, operation)
-
-    join = key_join("s", "t", contract.primary_key)
-    changed = changed_predicate("s", "t", contract)
-    audit = delta_audit_names()
-    sets = [
-        f"t.`{c}` = s.`{c}`" for c in columns if c not in contract.primary_key
-    ] + [
-        f"t.`{audit[1]}` = current_timestamp()",
-        f"t.`{audit[2]}` = {live_delete_literal()}",
-    ]
-    named = ", ".join(f"`{c}`" for c in columns)
-    values = ", ".join(f"s.`{c}`" for c in columns)
-
-    clauses = []
-    if deletes is not None:
-        clauses.append(f"WHEN MATCHED AND s.`{operation}` = 'delete' THEN DELETE")
-    clauses.append(
-        f"WHEN MATCHED AND s.`{operation}` = 'upsert' AND ({changed}) "
-        f"THEN UPDATE SET {', '.join(sets)}"
-    )
-    clauses.append(
-        f"WHEN NOT MATCHED AND s.`{operation}` = 'upsert' THEN INSERT "
-        f"({named}, {', '.join(f'`{a}`' for a in audit)}) "
-        f"VALUES ({values}, current_timestamp(), current_timestamp(), "
-        f"{live_delete_literal()})"
-    )
-    if contract.deletes_absent_rows:
-        # Safe here, unlike in the generated program: an intolerant run has
-        # already returned, so the source is never empty for want of tolerance.
-        clauses.append("WHEN NOT MATCHED BY SOURCE THEN DELETE")
-
-    before = _version(spark, target)
-    spark.sql(
-        f"MERGE INTO {target} AS t USING {source} AS s ON {join}\n"
-        + "\n".join(clauses)
-    )
-    return _written(spark, target, after=before)
-
-
-def _merge_source(spark, accepted: str, contract, columns, deletes, operation: str) -> str:
-    """The merge's source: proposed rows, plus any keys explicitly retired."""
-
-    view = f"weaver_source_{_clean(accepted)}"
-    named = ", ".join(f"`{c}`" for c in columns)
-    upserts = f"SELECT {named}, 'upsert' AS `{operation}` FROM {accepted}"
-    if deletes is None:
-        spark.sql(f"CREATE OR REPLACE TEMP VIEW {view} AS {upserts}")
-        return view
-
-    keys = _register(spark, deletes, target="deletes")
-    # Non-key columns are null on a delete row: the merge reads only the key.
-    filled = ", ".join(
-        f"d.`{c}`" if c in contract.primary_key else f"CAST(NULL AS STRING) AS `{c}`"
-        for c in columns
-    )
-    anti = key_join("a", "d", contract.primary_key)
-    spark.sql(
-        f"CREATE OR REPLACE TEMP VIEW {view} AS\n{upserts}\n"
-        f"UNION ALL\n"
-        f"SELECT {filled}, 'delete' AS `{operation}`\n"
-        f"FROM (SELECT DISTINCT {', '.join(f'`{c}`' for c in contract.primary_key)} "
-        f"FROM {keys}) AS d\n"
-        f"WHERE NOT EXISTS (SELECT 1 FROM {accepted} AS a WHERE {anti})"
-    )
-    return view
-
-
-def _write_rejects(spark, target: str, validated: str, reason: str, columns) -> None:
-    """Keep the refused rows, with the reason, beside the table they were for.
-
-    A count alone tells a caller that something went wrong and nothing about
-    what, which is the state this exists to prevent.
-    """
-
-    reject_table = _reject_table(target)
-    named = ", ".join(f"`{c}`" for c in columns)
-    spark.sql(f"DROP TABLE IF EXISTS {reject_table}")
-    spark.sql(
-        f"CREATE TABLE {reject_table} USING delta {COLUMN_MAPPING} AS "
-        f"SELECT {named}, `{reason}` FROM {validated} WHERE `{reason}` IS NOT NULL"
-    )
-
-
-# --- Delta's own accounting ----------------------------------------------------
-
-
-def _version(spark, target: str) -> int:
-    return int(
-        spark.sql(f"DESCRIBE HISTORY {target} LIMIT 1").collect()[0]["version"]
-    )
-
-
-def _written(spark, target: str, *, after: int) -> dict:
-    """What the merge reported doing, from Delta's operation metrics.
-
-    Guarded on the version: a merge that changed nothing writes no commit, so
-    the newest history entry would otherwise be the previous operation's and its
-    counts would be attributed to this load.
-    """
-
-    row = spark.sql(f"DESCRIBE HISTORY {target} LIMIT 1").collect()[0]
-    if int(row["version"]) <= after:
-        return {"inserted": 0, "updated": 0, "deleted": 0}
-    metrics = dict(row["operationMetrics"] or {})
-
-    def metric(*names) -> int:
-        for name in names:
-            if name in metrics:
-                return int(metrics[name])
-        return 0
-
-    return {
-        "inserted": metric("numTargetRowsInserted", "numInsertedRows"),
-        "updated": metric("numTargetRowsUpdated", "numUpdatedRows"),
-        "deleted": metric("numTargetRowsDeleted", "numDeletedRows"),
-    }
-
-
-# --- names ---------------------------------------------------------------------
-
-
-def _temporary_column(columns, preferred: str) -> str:
-    """A column name of Weaver's that cannot collide with the author's.
-
-    The reference's rule: keep appending an underscore until the name is free.
-    A fixed name would eventually meet an author who chose the same one, and the
-    failure would be a wrong load rather than an error.
-    """
-
-    name = preferred
-    existing = set(columns)
-    while name in existing:
-        name += "_"
-    return name
-
-
-def _register(spark, frame, *, target: str) -> str:
-    name = f"weaver_{_clean(target)}"
+    name = "weaver_" + role + "_" + _clean(target)
     frame.createOrReplaceTempView(name)
     return name
 
 
 def _clean(name: str) -> str:
-    return (
-        name.replace(".", "_").replace("`", "").replace(" ", "_").replace("-", "_")
-    )
-
-
-def _reject_table(target: str) -> str:
-    """``sales.`Customer``` -> ``sales.`Customer_Reject```."""
-
-    head, _, tail = target.rpartition(".")
-    name = tail.strip("`")
-    return f"{head}.`{name}{REJECT_SUFFIX}`" if head else f"`{name}{REJECT_SUFFIX}`"
+    return name.replace(".", "_").replace("`", "").replace(" ", "_").replace("-", "_")
 
 
 __all__ = ["INTOLERANT_MESSAGE", "TOLERATED_MESSAGE", "load_table"]

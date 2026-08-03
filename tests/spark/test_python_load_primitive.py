@@ -62,6 +62,36 @@ class Sales__Customer(Table):
         return frame, deletes
 '''
 
+UNKEYED_MODULE = '''\
+"""
+Table ID: Sales.Snapshot
+
+Description: A table with no key, replaced whole on every load.
+
+Lineage: The sales system.
+
+Schema:
+  Customer id: string
+  Customer name: string
+"""
+from weaver import Table
+
+
+class Sales__Snapshot(Table):
+    rows = []
+    fail = False
+
+    def read(self):
+        frame = self.spark.createDataFrame(
+            self.rows, "`Customer id` string, `Customer name` string"
+        )
+        if self.fail:
+            # Fails while staging is materialised, which is before the target is
+            # touched — the ordering the physical staging table exists to give.
+            frame = frame.selectExpr("`Customer id`", "no_such_column AS `Customer name`")
+        return frame, None
+'''
+
 EXPORT_MODULE = '''\
 """
 Folder ID: Sales.Export
@@ -98,12 +128,13 @@ def deployed(tmp_path, monkeypatch):
     root = tmp_path / "deployed"
     root.mkdir()
     (root / "Sales__Customer.py").write_text(CUSTOMER_MODULE, encoding="utf-8")
+    (root / "Sales__Snapshot.py").write_text(UNKEYED_MODULE, encoding="utf-8")
     (root / "Sales__Export.py").write_text(EXPORT_MODULE, encoding="utf-8")
     monkeypatch.syspath_prepend(str(root))
-    for name in ("Sales__Customer", "Sales__Export"):
+    for name in ("Sales__Customer", "Sales__Export", "Sales__Snapshot"):
         sys.modules.pop(name, None)
     yield root
-    for name in ("Sales__Customer", "Sales__Export"):
+    for name in ("Sales__Customer", "Sales__Export", "Sales__Snapshot"):
         sys.modules.pop(name, None)
 
 
@@ -144,8 +175,31 @@ def customer(spark, lakehouses, lakehouse, deployed):
     spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
-def _load(cls, spark, lakehouse, rows, *, deletes=(), fault_tolerant=False):
-    cls.rows = list(rows)
+@pytest.fixture
+def unkeyed(spark, lakehouse, customer, deployed):
+    """An unkeyed table beside the keyed one, sharing its schema fixture."""
+
+    import importlib
+
+    spark.sql(
+        f"CREATE TABLE {lakehouse.qualify('Sales', 'Snapshot')} (\n"
+        "  `Customer id` string,\n"
+        "  `Customer name` string,\n"
+        "  `row_insert_datetime` timestamp NOT NULL,\n"
+        "  `row_update_datetime` timestamp NOT NULL,\n"
+        "  `row_delete_datetime` timestamp NOT NULL\n"
+        ") USING delta TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
+    )
+    module = importlib.import_module("Sales__Snapshot")
+    module.Sales__Snapshot.fail = False
+    return module.Sales__Snapshot
+
+
+def _load(cls, spark, lakehouse, rows, *, deletes=(), fault_tolerant=False, keep=False):
+    """Run one load. ``keep`` stages an extra rejectable row so the artefacts
+    survive, for the tests whose subject is what a load left behind."""
+
+    cls.rows = list(rows) + ([(None, "keeps the artefacts")] if keep else [])
     cls.deletes = list(deletes)
     return cls(spark, lakehouse=lakehouse).load(fault_tolerant=fault_tolerant)
 
@@ -225,15 +279,14 @@ def test_an_explicit_delete_retires_a_row_the_source_no_longer_produces(
     assert _contents(spark, lakehouse) == [("c1", "One")]
 
 
-def test_an_upsert_wins_when_a_key_is_both_proposed_and_deleted(
-    spark, lakehouse, customer
-):
-    """A source that contradicts itself is read the recoverable way.
+def test_a_staged_key_may_still_be_explicitly_deleted(spark, lakehouse, customer):
+    """Explicit deletes are not part of staging reconciliation.
 
-    Keeping the row is recoverable — the next load can delete it. Deleting a row
-    the source also proposed is not: the value it proposed is gone. This is the
-    reference implementation's rule, and the reason its merge filters explicit
-    deletes against the accepted keys before building its source.
+    They run afterwards, by key, so a key that was both staged and deleted ends
+    up deleted. No conflict rule is needed — the later statement wins, and
+    over-deleting is the recoverable direction. This is a deliberate departure
+    from `delta_table_load.py`, which filtered deletes against the accepted keys
+    so an upsert survived.
     """
 
     _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
@@ -242,8 +295,8 @@ def test_an_upsert_wins_when_a_key_is_both_proposed_and_deleted(
         customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")], deletes=[("c2",)]
     )
 
-    assert result.rows_deleted == 0
-    assert _contents(spark, lakehouse) == [("c1", "One"), ("c2", "Two")]
+    assert result.rows_deleted == 1
+    assert _contents(spark, lakehouse) == [("c1", "One")]
 
 
 # --- rejection and fault tolerance -------------------------------------------
@@ -294,6 +347,120 @@ def test_the_rejected_rows_are_kept_with_their_reason(spark, lakehouse, customer
         REASON_BLANK_PK,
         REASON_DUPLICATE_PK,
     }
+
+
+# --- the reconciliation lifecycle, not just its outcome ----------------------
+
+
+def _tables(spark, lakehouse):
+    """Which of the load's artefacts exist right now."""
+
+    rows = spark.sql(
+        f"SHOW TABLES IN {lakehouse.destination.qualified_schema('Sales')}"
+    ).collect()
+    return {row["tableName"] for row in rows}
+
+
+def test_the_intermediate_artefacts_are_real_delta_tables(spark, lakehouse, customer):
+    """Physical, as they are in the Warehouse and the generated Spark program.
+
+    A run that refused rows is one someone will want to look at, and a temporary
+    view vanishes with the session — which is exactly when they look.
+    """
+
+    _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=True)
+
+    present = _tables(spark, lakehouse)
+
+    assert {"customer_staging", "customer_upsert", "customer_reject"} <= {
+        name.lower() for name in present
+    }
+
+
+def test_staging_holds_what_read_produced_before_anything_was_rejected(
+    spark, lakehouse, customer
+):
+    """`read()[0]` is staging, not an upsert set.
+
+    It has not been validated and nothing has been classified — which is why the
+    rejected rows were in it and the reject table is derived *from* it.
+    """
+
+    _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=True)
+
+    reject_count = spark.sql(
+        f"SELECT count(*) AS n FROM {lakehouse.qualify('Sales', 'Customer_Reject')}"
+    ).collect()[0]["n"]
+
+    assert reject_count == 3
+
+
+def test_the_upsert_set_records_what_weaver_decided_to_change(
+    spark, lakehouse, customer
+):
+    """Inspectable afterwards: which rows were new, and which merely changed."""
+
+    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+    _load(customer, spark, lakehouse, [("c1", "One"), ("c2", "Changed"), ("c3", "New")],
+          fault_tolerant=True, keep=True)
+
+    rows = spark.sql(
+        f"SELECT `Customer id`, `_Is new row` "
+        f"FROM {lakehouse.qualify('Sales', 'Customer_Upsert')} ORDER BY 1"
+    ).collect()
+
+    # c1 is unchanged, so it is not in the change set at all.
+    assert [(r["Customer id"], r["_Is new row"]) for r in rows] == [
+        ("c2", 0),
+        ("c3", 1),
+    ]
+
+
+def test_a_clean_run_clears_the_artefacts_it_no_longer_needs(
+    spark, lakehouse, customer
+):
+    _load(customer, spark, lakehouse, [("c1", "One")])
+
+    present = {name.lower() for name in _tables(spark, lakehouse)}
+
+    assert "customer" in present
+    assert not {"customer_staging", "customer_upsert", "customer_reject"} & present
+
+
+def test_a_clean_run_clears_the_previous_run_s_rejects(spark, lakehouse, customer):
+    """Otherwise a stale reject table reads as evidence about the run that just
+    succeeded."""
+
+    _load(customer, spark, lakehouse, REJECTABLE, fault_tolerant=True)
+    assert "customer_reject" in {name.lower() for name in _tables(spark, lakehouse)}
+
+    _load(customer, spark, lakehouse, [("c1", "One")])
+
+    assert "customer_reject" not in {name.lower() for name in _tables(spark, lakehouse)}
+
+
+def test_a_full_replacement_materialises_staging_before_emptying_the_target(
+    spark, lakehouse, deployed, unkeyed
+):
+    """Clearing the target and *then* evaluating the source would leave nothing
+    behind when the source fails."""
+
+    _load(unkeyed, spark, lakehouse, [("c1", "One"), ("c2", "Two")])
+
+    unkeyed.fail = True
+    with pytest.raises(Exception):
+        _load(unkeyed, spark, lakehouse, [("c3", "Three")])
+
+    # The target still holds the previous load: the failure happened while
+    # staging was being materialised, before the delete.
+    rows = spark.sql(
+        f"SELECT `Customer id`, `Customer name` "
+        f"FROM {lakehouse.qualify('Sales', 'Snapshot')} ORDER BY 1"
+    ).collect()
+    assert [(r["Customer id"], r["Customer name"]) for r in rows] == [
+        ("c1", "One"),
+        ("c2", "Two"),
+    ]
 
 
 # --- the contract comes from the module --------------------------------------
