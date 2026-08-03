@@ -253,7 +253,7 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
     that no generator produced.
     """
 
-    import weaver.etl
+    import weaver.declaration.load
 
     spark_file = f"{ITEM}/file:{LOAD_ROOT}/DWG.Summary.sql"
     procedure = f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer"
@@ -262,7 +262,7 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
         name: signature_of(estate, name) for name in (spark_file, procedure, module)
     }
 
-    monkeypatch.setattr(weaver.etl, "SPARK_ETL_TEMPLATE_VERSION", 2)
+    monkeypatch.setattr(weaver.declaration.load, "SPARK_LOAD_VERSION", 99)
     after = {
         name: signature_of(estate, name) for name in (spark_file, procedure, module)
     }
@@ -277,9 +277,9 @@ def test_the_template_versions_do_not_reach_the_repository_signature(
 ):
     """It describes authored content, and a renderer's version is not authored."""
 
-    import weaver.etl
+    import weaver.declaration.load
 
-    monkeypatch.setattr(weaver.etl, "TSQL_ETL_TEMPLATE_VERSION", 99)
+    monkeypatch.setattr(weaver.declaration.load, "TSQL_LOAD_VERSION", 99)
 
     assert (
         parse_item_repository(estate.root).signature == estate.signature

@@ -23,11 +23,14 @@ complete set of claims, which is what lets a deleted or renamed source produce a
 ordinary prune through catalogue reconciliation rather than needing a scan to
 notice its artefact has been orphaned.
 
-**The generated bodies are proxies.** T-SQL and Spark SQL loads carry
-deterministic placeholder statements, because this establishes the lifecycle and
-not the ETL. Their signatures already include a template version, so replacing a
-proxy with real generation later invalidates exactly the artefacts it changes and
-nothing else.
+**Nothing here generates a payload.** A T-SQL or Spark SQL load's bytes come
+from :meth:`weaver.declaration.source.SourceDocument.create_load`, and deployed
+Python is its own authored source. This module asks for a payload and carries
+what it gets, so the question of *what a load does* stays with the generator
+that knows the language, and the question of *which loads exist and how they are
+signed* stays here. Each generated payload arrives with its generator's version,
+which salts the signature — so a change to load generation invalidates exactly
+the artefacts it changed, and leaves deployed Python untouched.
 """
 
 from __future__ import annotations
@@ -46,19 +49,6 @@ from .declaration.model import (
     WeaverRepository,
 )
 from .declaration.source import content_hash
-
-#: The version of the generated Spark SQL load body, and of the generated T-SQL
-#: one. They are separate because the two generators evolve independently: a
-#: change to the Spark DML has no bearing on what a Warehouse procedure should
-#: contain, and bumping one should not invalidate the other's artefacts.
-#:
-#: Each is a *signature salt*, never part of an identity. Raising one rebuilds
-#: every artefact it renders and leaves everything else — including deployed
-#: Python, which is signed by its own bytes — untouched. It does not reach
-#: ``repository.signature`` either: that describes authored content, and the
-#: renderer's version is not something an author wrote.
-SPARK_ETL_TEMPLATE_VERSION = 1
-TSQL_ETL_TEMPLATE_VERSION = 1
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
 #: gets a schema named ``_`` holding the load procedures; the Lakehouse gets a
@@ -161,21 +151,15 @@ def _warehouse_artefacts(
     for identity, source in sorted(repository.source_documents.items(), key=_by_text):
         if identity.item != item or source.kind != TABLE:
             continue
-        procedure = WeaverDocumentId(
-            item,
-            ObjectId(
-                schema=ETL_SCHEMA,
-                object=f"{LOAD_PROCEDURE_PREFIX}{identity.object_id.qualified}",
-            ),
-            shape=PROCEDURE_SHAPE,
-        )
-        body = render_load_procedure(procedure, identity)
+        generated = source.create_load()
         artefacts.append(
             LoadArtefact(
-                identity=procedure,
-                object_type=PROCEDURE_TYPE,
-                signature=_salted(source.effective_signature, TSQL_ETL_TEMPLATE_VERSION),
-                payload=body.encode("utf-8"),
+                identity=load_procedure_id(item, identity.object_id),
+                object_type=generated.object_type,
+                signature=_salted(
+                    source.effective_signature, generated.template_version
+                ),
+                payload=generated.payload,
                 origin=identity,
             )
         )
@@ -206,14 +190,14 @@ def _lakehouse_artefacts(
                 )
             )
         elif source.language == SPARK_SQL and source.kind == TABLE:
-            body = render_load_statement(identity)
+            generated = source.create_load()
             artefacts.append(
                 _file_artefact(
                     item,
                     relative,
-                    payload=body.encode("utf-8"),
+                    payload=generated.payload,
                     signature=_salted(
-                        source.effective_signature, SPARK_ETL_TEMPLATE_VERSION
+                        source.effective_signature, generated.template_version
                     ),
                     origin=identity,
                 )
@@ -264,36 +248,33 @@ def _file_artefact(
     )
 
 
-def render_load_procedure(
-    procedure: WeaverDocumentId, source: WeaverDocumentId
-) -> str:
-    """The T-SQL body of a generated load procedure — a proxy, for now.
+def load_procedure_id(item: WeaverItemId, source: ObjectId) -> WeaverDocumentId:
+    """The identity of the procedure that loads one Warehouse table.
 
-    Deterministic, and shaped like what replaces it: one create-or-alter naming
-    the real procedure, so the identity, the statement and the catalogue row all
-    agree before any of the loading logic exists.
+    ``Load Sales.Customer`` is a real name in a real schema, not an encoding, so
+    the catalogue stores it exactly as the Warehouse holds it.
     """
 
-    name = f"{_tsql_ident(procedure.object_id.schema)}.{_tsql_ident(procedure.object_id.object)}"
-    return (
-        f"create or alter procedure {name}\n"
-        "as\n"
-        "begin\n"
-        "    set nocount on;\n"
-        f"    /* Loads {source.object_id.qualified}. Generated by Weaver. */\n"
-        "    return;\n"
-        "end;\n"
+    return WeaverDocumentId(
+        item,
+        ObjectId(
+            schema=ETL_SCHEMA,
+            object=f"{LOAD_PROCEDURE_PREFIX}{source.qualified}",
+        ),
+        shape=PROCEDURE_SHAPE,
     )
 
 
-def render_load_statement(source: WeaverDocumentId) -> str:
-    """The Spark SQL body of a generated load file — a proxy, for now."""
+def load_procedure_name(source: ObjectId) -> str:
+    """How the generated procedure spells its own name in T-SQL.
 
-    return (
-        f"-- Loads {source.object_id.qualified}. Generated by Weaver.\n"
-        f"select 1 as weaver_load_placeholder\n"
-        f" where 1 = 0\n"
-    )
+    Derived from the same parts as :func:`load_procedure_id`, so the identity
+    the catalogue registers and the name the script creates cannot drift.
+    """
+
+    schema = _tsql_ident(ETL_SCHEMA)
+    procedure = _tsql_ident(f"{LOAD_PROCEDURE_PREFIX}{source.qualified}")
+    return f"{schema}.{procedure}"
 
 
 def _salted(signature: str, version: int) -> str:
@@ -476,12 +457,10 @@ __all__ = [
     "LOAD_ROOT",
     "LoadArtefact",
     "PROCEDURE_TYPE",
-    "SPARK_ETL_TEMPLATE_VERSION",
-    "TSQL_ETL_TEMPLATE_VERSION",
     "item_load_artefacts",
     "load_artefacts",
     "load_artefacts_by_identity",
     "load_schemas",
-    "render_load_procedure",
-    "render_load_statement",
+    "load_procedure_id",
+    "load_procedure_name",
 ]
