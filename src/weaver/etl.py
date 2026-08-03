@@ -203,10 +203,14 @@ def _lakehouse_artefacts(
                 )
             )
     for relative, content in sorted(repository.support_file_contents.items()):
-        if not relative.endswith(PYTHON_SUFFIX):
-            continue
         parts = relative.split("/")
-        if len(parts) < 3 or WeaverItemId(parts[0], parts[1]) != item:
+        # Everything beneath ``lib/``, whatever it is. The tree is reproduced
+        # verbatim, so a helper module's data file travels with the module that
+        # reads it — an ``alias.yml`` beside it is a declaration rather than
+        # runtime source and stays behind.
+        if len(parts) < 4 or parts[2] != "lib":
+            continue
+        if WeaverItemId(parts[0], parts[1]) != item:
             continue
         artefacts.append(
             _file_artefact(
@@ -418,11 +422,8 @@ def has_deployable_source(
             return True
         if source.language == SPARK_SQL and source.kind == TABLE:
             return True
-    prefix = f"{item}/"
-    return any(
-        relative.startswith(prefix) and relative.endswith(PYTHON_SUFFIX)
-        for relative in support_paths
-    )
+    prefix = f"{item}/lib/"
+    return any(relative.startswith(prefix) for relative in support_paths)
 
 
 def load_schemas(artefacts: Iterable[LoadArtefact]) -> tuple[str, ...]:
