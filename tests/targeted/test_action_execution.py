@@ -331,6 +331,74 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     assert context.store.read(Location(written)) == b"def parse(value):\n"
 
 
+def test_a_generated_load_program_is_addressed_as_it_lands(tmp_path):
+    """The bundle stays destination-free; the installed file must be runnable.
+
+    Keyed on what the payload *is*, not what it is called — a generated load
+    keeps its authored `.sql` name, so a suffix rule matched nothing and every
+    installed program shipped with its tokens intact.
+    """
+
+    from weaver.declaration import read_source_document
+    from weaver.declaration.model import LAKEHOUSE
+
+    document = read_source_document(
+        "Sales.OrderSummary.sql", _SPARK_LOAD_SOURCE.encode("utf-8"), LAKEHOUSE
+    )
+    payload = document.create_load().payload
+
+    context = _load_context(tmp_path)
+    action = _load_action(
+        kind="write_file", relative="Sales.OrderSummary.sql", payload="p.payload"
+    )
+
+    result = execute_action(action, payload, context=context)
+    written = context.store.read(Location(result.details["written"])).decode()
+
+    assert b"{{object:" in payload, "the bundle payload is destination-free"
+    assert "{{" not in written, "the installed file names its destination"
+    assert "Sales_LH" in written or "sales_lh" in written
+
+
+def test_a_deployed_python_module_is_left_exactly_as_authored(tmp_path):
+    """A module is source code, not a statement.
+
+    It addresses its target through the resolved Lakehouse it is constructed
+    with, so nothing in it is Weaver's to rewrite.
+    """
+
+    context = _load_context(tmp_path)
+    action = _load_action(
+        kind="write_file", relative="Sales__Customer.py", payload="p.payload"
+    )
+    source = b'"""Table ID: Sales.Customer"""\nBRACES = "{{not a token}}"\n'
+
+    result = execute_action(action, source, context=context)
+
+    assert context.store.read(Location(result.details["written"])) == source
+
+
+_SPARK_LOAD_SOURCE = """/*
+Table ID: Sales.OrderSummary
+
+Description: Order totals.
+
+Lineage: $Sales.Order
+
+Dependencies:
+  - Sales.Order
+
+Primary key: Customer id
+
+Schema:
+  Customer id: string
+  Total amount: decimal(18,2)
+*/
+select `Customer id`, cast(sum(`Amount`) as decimal(18,2)) as `Total amount`
+  from Sales.Order group by `Customer id`
+"""
+
+
 def test_a_write_creates_the_directories_beneath_it(tmp_path):
     """A module several packages deep needs no folder action to precede it."""
 

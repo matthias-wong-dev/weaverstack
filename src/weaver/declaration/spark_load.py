@@ -38,6 +38,7 @@ from ..runtime.load_contract import LoadContract
 from ..runtime.load_result import RESULT_COLUMNS
 from ..spark.tokens import object_token
 from .dependencies import rewrite_sql_references
+from .sql_shaping import split_statements, split_trailing_query
 from .metadata import (
     AUDIT_COLUMNS,
     AUDIT_LIVE_DELETE_DATETIME,
@@ -52,6 +53,11 @@ from .metadata import (
 #: possible moment. This marker is a SQL comment, so the file also stays valid
 #: to paste into a notebook whole.
 STATEMENT_DELIMITER = "-- weaver:statement"
+
+#: The first line of every generated program. It is what the installer keys its
+#: token expansion on: a generated load keeps its *authored* filename, so the
+#: file cannot be recognised by its name — only by what it says it is.
+GENERATED_LOAD_MARKER = "-- Weaver generated load"
 
 #: The one hole the installer does *not* fill. Tolerance of rejects is a run's
 #: own choice rather than anything about where the object lives, so it is
@@ -90,6 +96,13 @@ from ..runtime.load_contract import (  # noqa: E402
 #: table created without it fails on exactly the declarations Weaver permits.
 COLUMN_MAPPING = "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
 
+#: Banners marking where the author's own code sits in the generated program.
+#: A generated artefact is read by people — usually when something has gone
+#: wrong — and the first question is always "which of this did I write?".
+PREPROCESSING_BANNER = "-- Pre-processing"
+TRANSFORMATION_BANNER = "-- Data transformation (authored)"
+POSTPROCESSING_BANNER = "-- Post-processing"
+
 INTOLERANT_MESSAGE = (
     "rows were rejected and fault_tolerant = 0, so the target was not modified"
 )
@@ -101,18 +114,18 @@ def generate_spark_load_program(document: SesDocument, body: str) -> str:
 
     contract = LoadContract.from_document(document)
     names = _names(document)
-    query = _addressed(body.strip().rstrip(";"))
+    addressed = _addressed(body.strip().rstrip(";"))
 
     if contract.primary_key:
-        statements = _keyed_program(names, query, contract)
+        statements = _keyed_program(names, addressed, contract)
     else:
-        statements = _full_replace_program(names, query, contract)
+        statements = _full_replace_program(names, addressed, contract)
 
     # The header must not quote the delimiter. It is a comment, but the splitter
     # looks for the marker anywhere, so a header that spelled it out would be
     # cut in half and its first line offered to Spark as a statement.
     header = (
-        f"-- Weaver generated load for {document.qualified}.\n"
+        f"{GENERATED_LOAD_MARKER} for {document.qualified}.\n"
         f"-- Statements run in order, separated by the marker below.\n"
         f"-- Substitute {FAULT_TOLERANT_MARKER}0 with {FAULT_TOLERANT_MARKER}1 to load "
         "valid rows despite rejects. Unsubstituted, it refuses.\n"
@@ -154,14 +167,15 @@ def _is_all_comment(statement: str) -> bool:
 # --- the two programs --------------------------------------------------------
 
 
-def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]:
+def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
+    preamble, query = split_trailing_query(body)
     audit = delta_audit_names()
     business = _business_columns(contract)
     blank = blank_key_predicate(contract.primary_key)
     rejected = f"({blank} OR s.`{RANK_COLUMN}` > 1)"
 
     statements = [
-        f"DROP TABLE IF EXISTS {names['reject']}",
+        f"{PREPROCESSING_BANNER}\nDROP TABLE IF EXISTS {names['reject']}",
         f"DROP TABLE IF EXISTS {names['staging']}",
         f"DROP TABLE IF EXISTS {names['result']}",
         # Only when this program creates one. Dropping a table it never makes
@@ -171,8 +185,13 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
             if contract.deletes_absent_rows
             else []
         ),
+        # The authored preamble, as written. A body may set a temporary view up
+        # before selecting from it, and only the trailing query fills staging —
+        # wrapping the whole body in a subquery would put a CREATE inside a FROM.
+        *(f"{TRANSFORMATION_BANNER}\n{statement}" for statement in split_statements(preamble)),
         # Staging is a real table, not a view: the source query must run once,
         # and a view would re-run it for every count and again for the merge.
+        f"{TRANSFORMATION_BANNER}\n"
         f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n    s.*\n"
         f"  , row_number() OVER (\n"
@@ -180,6 +199,7 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
         f"        ORDER BY (SELECT NULL)\n"
         f"    ) AS `{RANK_COLUMN}`\n"
         f"FROM (\n{_indent(query, 4)}\n) AS s",
+        f"{POSTPROCESSING_BANNER}\n"
         f"CREATE TABLE {names['reject']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n    {_columns('s', business)}\n"
         f"  , CASE WHEN {blank} THEN '{REASON_BLANK_PK}'\n"
@@ -204,7 +224,7 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
     return statements
 
 
-def _full_replace_program(names: dict, query: str, contract: LoadContract) -> list[str]:
+def _full_replace_program(names: dict, body: str, contract: LoadContract) -> list[str]:
     """No key, so no match, no update and nothing to reject.
 
     The target's contents become the source's. There is no reject table at all
@@ -214,10 +234,14 @@ def _full_replace_program(names: dict, query: str, contract: LoadContract) -> li
     audit = delta_audit_names()
     business = _business_columns(contract)
     columns = ", ".join(f"`{name}`" for name in business)
+    preamble, query = split_trailing_query(body)
     return [
-        f"DROP TABLE IF EXISTS {names['staging']}",
+        f"{PREPROCESSING_BANNER}\nDROP TABLE IF EXISTS {names['staging']}",
         f"DROP TABLE IF EXISTS {names['result']}",
+        *(f"{TRANSFORMATION_BANNER}\n{statement}" for statement in split_statements(preamble)),
+        f"{TRANSFORMATION_BANNER}\n"
         f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS\n{query}",
+        f"{POSTPROCESSING_BANNER}\n"
         f"CREATE TABLE {names['result']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n"
         f"    (SELECT count(*) FROM {names['staging']}) AS rows_read\n"
@@ -501,6 +525,7 @@ def _indent(text: str, spaces: int) -> str:
 
 __all__ = [
     "COLUMN_MAPPING",
+    "GENERATED_LOAD_MARKER",
     "FAULT_TOLERANT_DEFAULT",
     "FAULT_TOLERANT_MARKER",
     "REJECTION_REASON",

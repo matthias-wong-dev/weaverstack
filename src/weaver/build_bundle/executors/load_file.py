@@ -21,7 +21,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...declaration.load import SPARK_LOAD_EXTENSION
+from ...declaration.load import TSQL_LOAD_EXTENSION as SQL_EXTENSION
+from ...declaration.spark_load import GENERATED_LOAD_MARKER
+from ...spark import tokens
 from ...errors import InstallError
 from ...targets import FolderTarget
 from ..models import DELETE_FILE, WRITE_FILE, BuildAction
@@ -73,12 +75,31 @@ class LoadFileExecutor:
         Deployed Python is left exactly as authored. A module is source code, not
         a statement, and it addresses its target through the resolved Lakehouse
         it is constructed with.
+
+        **Decided by what the payload is, not by what it is called.** Keying on a
+        ``.spark.sql`` suffix looked right and was wrong: a generated load keeps
+        its *authored* name, ``Sales.OrderSummary.sql``, so the suffix never
+        matched and every installed program shipped with its tokens intact and
+        could not run. A generated Spark program announces itself in its first
+        line, which is a fact about the file rather than about its name.
         """
 
-        if not path.endswith(SPARK_LOAD_EXTENSION):
+        if not path.endswith(SQL_EXTENSION):
             return payload
         text = payload.decode("utf-8")
-        return context.catalogue.expand(text).encode("utf-8")
+        if not text.lstrip().startswith(GENERATED_LOAD_MARKER):
+            return payload
+        destination = context.target.destination
+        if destination is None:
+            raise InstallError(
+                f"a generated load lands in {context.target.bound.id!r}, which "
+                "resolved to no Spark destination, so its object names cannot be "
+                "addressed"
+            )
+        # Resolved against the destination directly rather than through the
+        # catalogue: writing a file needs no Spark session, and asking for one
+        # would make installing a load depend on a capability it never uses.
+        return tokens.expand(text, destination).encode("utf-8")
 
     def _location(self, node_id: str, context: InstallationContext):
         """``Lakehouse/Sales/file:_/Load/lib/dates.py`` under this batch's target.

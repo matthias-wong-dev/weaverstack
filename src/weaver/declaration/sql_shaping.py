@@ -539,3 +539,53 @@ def _is_trivia(token: _FlatToken) -> bool:
 
 def _is_covered(position: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in ranges)
+
+
+def split_trailing_query(sql_text: str) -> tuple[str, str]:
+    """Split a body into everything before its final query, and that query.
+
+    A Weaver object's body is not always one statement. An author may set a
+    temporary view up first and select from it, and that shape is supported —
+    the repository's own fixtures use it. So a load cannot wrap the whole body
+    in a subquery to stage it: only the *last standalone query* produces the
+    rows, and whatever precedes it has to run first, on its own.
+
+    This is the same span the T-SQL build uses to place its ``INTO``
+    (:func:`insert_select_into`), reused rather than re-derived so build and
+    load agree about which part of a body is the query.
+
+    Returns ``(preamble, query)``. ``preamble`` is empty for the ordinary
+    single-statement body.
+    """
+
+    span = _find_last_standalone_query(sql_text)
+    if span is None:
+        return "", sql_text.strip()
+    preamble = sql_text[: span.start].strip().rstrip(";").strip()
+    query = sql_text[span.start : span.end].strip().rstrip(";").strip()
+    return preamble, query
+
+
+def split_statements(sql_text: str) -> tuple[str, ...]:
+    """One body's top-level statements, split on semicolons that separate them.
+
+    Depth-aware, so a semicolon inside parentheses or a string literal does not
+    cut a statement in half — which is exactly why a caller must not do this
+    with ``str.split(';')``.
+    """
+
+    text = sql_text.strip()
+    if not text:
+        return ()
+    statements: list[str] = []
+    start = 0
+    for token in _flatten_with_offsets(text):
+        if token.depth == 0 and token.value.strip() == ";":
+            piece = text[start : token.start].strip()
+            if piece:
+                statements.append(piece)
+            start = token.end
+    tail = text[start:].strip()
+    if tail:
+        statements.append(tail)
+    return tuple(statements)

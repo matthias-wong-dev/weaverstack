@@ -43,19 +43,103 @@ def test_one_root_carries_both_lakehouse_areas():
     assert lakehouse.location.files_root == "abfss://ws@host/lh/Files"
 
 
-def test_a_folder_hangs_off_the_same_root_as_a_table():
-    """One root, both areas — nothing an object reaches depends on a mount."""
+def test_a_folder_hangs_off_the_same_root_as_a_table_locally(tmp_path):
+    """On a filesystem host the two roots *are* one directory.
+
+    This is why the emulator never showed that a Folder needs something a table
+    does not: locally there is nothing to distinguish.
+    """
+
+    lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+
+    assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
+    assert lakehouse.folder_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
+
+
+def test_a_trailing_separator_does_not_double_up(tmp_path):
+    lakehouse = Lakehouse(name="Sales_LH", spark_root=f"{tmp_path}/")
+
+    assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
+    assert lakehouse.folder_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
+
+
+# --- two roots, because two things read them --------------------------------
+
+
+def test_a_table_is_addressed_by_the_spark_root_in_fabric():
+    """Spark reads abfss natively, so a table needs nothing else."""
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.folder_path("Sales", "Export") == "abfss://ws@host/lh/Files/Sales/Export"
-
-
-def test_a_trailing_separator_does_not_double_up():
-    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/")
-
     assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
-    assert lakehouse.folder_path("Sales", "Export") == "abfss://ws@host/lh/Files/Sales/Export"
+
+
+def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
+    """A Folder's authored code is ordinary Python, and `open()` cannot read a URL.
+
+    So the same bytes are presented as a filesystem path: Weaver mounts the root
+    it resolved — not the attachment — and a write through the mount lands in
+    OneLake with nothing copied.
+    """
+
+    import weaver.lakehouse as module
+
+    mounted = {}
+
+    class FakeFs:
+        def mount(self, source, point):
+            mounted[point] = source
+
+        def getMountPath(self, point):
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(module, "_MOUNTS", {})
+
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
+
+    assert lakehouse.folder_path("Sales", "Export") == (
+        "/synfs/notebook/session-1/weaver/lh/Files/Sales/Export"
+    )
+    # Mounted by item id, so a second Lakehouse in the same session cannot
+    # silently address the first.
+    assert mounted == {"/weaver/lh": "abfss://ws@host/lh"}
+
+
+def test_the_mount_is_made_once_per_session(monkeypatch):
+    """Fabric refuses a second mount of the same point, and there is no need."""
+
+    import weaver.lakehouse as module
+
+    calls = []
+
+    class FakeFs:
+        def mount(self, source, point):
+            calls.append(point)
+
+        def getMountPath(self, point):
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(module, "_MOUNTS", {})
+
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
+    lakehouse.folder_path("Sales", "Export")
+    lakehouse.folder_path("Sales", "Other")
+
+    assert calls == ["/weaver/lh"]
+
+
+def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypatch):
+    import weaver.lakehouse as module
+
+    monkeypatch.setattr(module, "_notebook_utils", lambda: None)
+    monkeypatch.setattr(module, "_MOUNTS", {})
+
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
+
+    with pytest.raises(LoadError, match="Fabric notebook utilities"):
+        lakehouse.folder_path("Sales", "Export")
 
 
 def test_a_root_must_be_a_real_root():

@@ -21,7 +21,7 @@ Revision notes:
   - 2026-08-03 Created.
 """
 
-from .Files.Sales__OrderExport import Sales__OrderExport
+from Files.Sales__OrderExport import Sales__OrderExport
 
 from weaver import Table
 

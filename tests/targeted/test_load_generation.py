@@ -289,9 +289,52 @@ def test_an_unkeyed_program_replaces_wholesale():
     assert "_Reject" not in program
 
 
-def test_the_header_does_not_quote_the_delimiter_it_describes():
-    """It once did, and the splitter cut the header in half and fed Spark the
-    first line as a statement."""
+def test_no_statement_is_comment_only():
+    """The header once quoted the delimiter, so it was cut in half and its first
+    line handed to Spark as a statement — which Spark rejects.
+
+    Statements may *open* with a banner naming the section; what must never
+    survive the split is a chunk that is nothing but comments.
+    """
 
     for statement in statements_of(_program()):
-        assert not statement.startswith("--")
+        assert any(
+            line.strip() and not line.lstrip().startswith("--")
+            for line in statement.splitlines()
+        ), statement
+
+
+def test_the_authored_body_is_marked_off_from_the_generated_code():
+    """A generated artefact is read when something has gone wrong, and the first
+    question is which of it the author wrote."""
+
+    program = _program()
+
+    assert "-- Pre-processing" in program
+    assert "-- Data transformation (authored)" in program
+    assert "-- Post-processing" in program
+
+
+def test_a_multi_statement_body_runs_its_preamble_and_stages_only_the_query():
+    """A body may set a temporary view up before selecting from it.
+
+    Wrapping the whole body in a subquery would put a CREATE inside a FROM. Only
+    the last standalone query fills staging; the preamble runs as written.
+    """
+
+    source = SPARK_TABLE.replace(
+        "select `Customer id`, `Customer name` from sales.raw",
+        "create or replace temporary view recent as\n"
+        "select * from sales.raw where `Customer id` is not null;\n\n"
+        "select `Customer id`, `Customer name` from recent",
+    )
+    statements = statements_of(_program(source))
+
+    preamble = [s for s in statements if "temporary view recent" in s]
+    staging = [s for s in statements if "_Staging}} USING delta" in s]
+
+    assert len(preamble) == 1
+    assert "CREATE TABLE" not in preamble[0]
+    # Staging selects from the view the preamble made, not from the whole body.
+    assert "temporary view" not in staging[0]
+    assert "FROM (\n    select `Customer id`, `Customer name` from recent\n) AS s" in staging[0]

@@ -52,7 +52,7 @@ from .metadata import (
     AUDIT_LIVE_DELETE_DATETIME,
     SesDocument,
 )
-from .sql_shaping import render_sql_template
+from .sql_shaping import render_sql_template, split_trailing_query
 from ..runtime.load_contract import (
     REASON_BLANK_PK,
     REASON_DUPLICATE_PK,
@@ -78,6 +78,14 @@ INTOLERANT_MESSAGE = (
 )
 TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
 
+#: Banners marking where the author's own code sits in the generated procedure.
+#: A generated artefact is read by people — usually when something has gone
+#: wrong — and the first question is always "which of this did I write?".
+PREPROCESSING_BANNER = "/*-- Pre-processing --*/"
+TRANSFORMATION_BANNER = "/*---- Data transformation ----*/"
+END_TRANSFORMATION_BANNER = "/*---- End data transformation ----*/"
+POSTPROCESSING_BANNER = "/*-- Post-processing --*/"
+
 
 def generate_tsql_load_script(
     document: SesDocument, body: str, *, procedure_name: str
@@ -101,6 +109,8 @@ def generate_tsql_load_script(
         "load/load_procedure",
         load_procedure=names["procedure"],
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
+        preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
+        postprocessing_banner=_indent(POSTPROCESSING_BANNER, 4),
         start_artifact_cleanup=_indent(_cleanup(names, contract), 4),
         staging_sql=_indent(staging_sql, 4),
         staging_table=names["staging"],
@@ -124,20 +134,28 @@ def _staging_sql(names: dict, body: str, contract: LoadContract) -> str:
     One pass, because the rank is what identifies a duplicate and computing it
     later would mean reading the staged rows twice. With no key there is nothing
     to rank and the query is staged as it stands.
+
+    Only the *last standalone query* is staged. A body may set a temporary view
+    up first and select from it, and wrapping the whole body in a subquery would
+    put a ``create`` inside a ``from`` — so the preamble runs as it was written,
+    and the query it leads to is what fills staging.
     """
 
-    query = body.strip().rstrip(";")
+    preamble, query = split_trailing_query(body)
+    lead = f"{preamble};\n\n" if preamble else ""
     if not contract.primary_key:
-        return f"create table {names['staging']} as\n{query};"
-    partition = ", ".join(f"s.{_quote(column)}" for column in contract.primary_key)
-    return (
-        f"create table {names['staging']} as\n"
-        f"select\n"
-        f"    s.*\n"
-        f"  , row_number() over (partition by {partition} order by (select null)) "
-        f"as {_quote(RANK_COLUMN)}\n"
-        f"from (\n{_indent(query, 4)}\n) as s;"
-    )
+        staged = f"create table {names['staging']} as\n{query};"
+    else:
+        partition = ", ".join(f"s.{_quote(column)}" for column in contract.primary_key)
+        staged = (
+            f"create table {names['staging']} as\n"
+            f"select\n"
+            f"    s.*\n"
+            f"  , row_number() over (partition by {partition} order by (select null)) "
+            f"as {_quote(RANK_COLUMN)}\n"
+            f"from (\n{_indent(query, 4)}\n) as s;"
+        )
+    return f"{TRANSFORMATION_BANNER}\n{lead}{staged}\n{END_TRANSFORMATION_BANNER}"
 
 
 def _primary_key_body(names: dict, contract: LoadContract) -> str:

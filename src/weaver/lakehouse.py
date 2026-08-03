@@ -93,14 +93,40 @@ class Lakehouse:
         return _areas(self.name, self.spark_root)
 
     def table_path(self, schema: str, name: str) -> str:
-        """Where one table's Delta files live."""
+        """Where one table's Delta files live.
+
+        The Spark root, because Spark reads ``abfss://`` natively and a table is
+        only ever reached through it.
+        """
 
         return self.location.table_path(schema, name)
 
-    def folder_path(self, schema: str, name: str) -> str:
-        """Where one folder object's files live."""
+    def files_root(self) -> str:
+        """The ``Files`` area as *Python* can address it, resolved on use.
 
-        return self.location.folder_path(schema, name)
+        Two roots, because two things read them. Spark takes ``abfss://`` and is
+        content; ``open()`` and ``pathlib`` cannot parse a URL at all, and a
+        Folder object's authored code is ordinary Python — it writes files. So a
+        folder needs the same bytes presented as a filesystem path.
+
+        Locally the two are the same directory and this returns it unchanged. In
+        Fabric the storage is object storage, so Weaver mounts its own root and
+        returns the mount path. Nothing is copied: a write through the mount is a
+        write to OneLake, visible immediately at the ``abfss://`` address.
+
+        **The result is session-scoped and must never be stored.** Fabric spells
+        it ``/synfs/notebook/<session id>/…`` — valid only inside the session
+        that made it, and different in the next one. Durable identity is
+        ``spark_root``; this is derived on use and thrown away, which is why it
+        is a method rather than a field.
+        """
+
+        return _files_root(self.name, self.spark_root)
+
+    def folder_path(self, schema: str, name: str) -> str:
+        """Where one folder object's files live, as Python addresses them."""
+
+        return _join(self.files_root(), schema, name)
 
     def qualify(self, schema: str, name: str) -> str:
         """One object, as a statement in this session must name it."""
@@ -174,6 +200,98 @@ def default_lakehouse(spark: Any) -> Lakehouse:
         # the session is attached to, so its catalogue is the session's own.
         destination=SparkDestination(item=name or item),
     )
+
+
+# --- the files root ---------------------------------------------------------
+
+#: Mount points already established in this session, by ``abfss://`` root. A
+#: session is one process, so this is process state: a second load of the same
+#: Lakehouse reuses the mount rather than asking Fabric to make another, which
+#: it refuses.
+_MOUNTS: dict[str, str] = {}
+
+#: Where Weaver mounts a Lakehouse. Keyed by item id rather than fixed, because
+#: an estate spans several Lakehouses and one session may load from more than
+#: one — a single fixed point would let the second quietly address the first.
+_MOUNT_POINT = "/weaver/{item}"
+
+
+def _files_root(name: str, spark_root: str) -> str:
+    """``Files`` as a path ``open()`` understands, for whichever host this is."""
+
+    if not spark_root.startswith("abfss://"):
+        # The emulator: storage already *is* a filesystem, so the two roots are
+        # the same directory and there is nothing to mount.
+        return _join(spark_root, FILES_AREA)
+    return _join(_mounted(name, spark_root), FILES_AREA)
+
+
+def _mounted(name: str, spark_root: str) -> str:
+    """Mount this Lakehouse's OneLake root, or reuse the mount already made.
+
+    A mount turns the remote root into a local address; writes through it go
+    straight to OneLake, so nothing is copied and nothing needs flushing. It is
+    scoped to the job, which is why it is resolved here on use rather than
+    carried in the :class:`Lakehouse`.
+
+    Weaver mounts a root it resolved by name, so this works detached — it is not
+    the ``/lakehouse/default`` attachment, which only ever addresses whatever a
+    notebook happened to attach.
+    """
+
+    cached = _MOUNTS.get(spark_root)
+    if cached:
+        return cached
+
+    utils = _notebook_utils()
+    if utils is None:
+        raise LoadError(
+            f"Lakehouse {name!r} is in OneLake, and reaching its Files area as a "
+            "filesystem needs the Fabric notebook utilities, which are not "
+            "available here. A Folder's authored code writes ordinary files, so "
+            "there is no way to address them from outside a Fabric session."
+        )
+
+    point = _MOUNT_POINT.format(item=_item_of(spark_root))
+    try:
+        utils.fs.mount(spark_root, point)
+    except Exception:
+        # Already mounted, by us in a path that did not reach the cache or by the
+        # host itself. Mounting twice is an error, so the useful move is to ask
+        # where it landed and carry on.
+        pass
+    try:
+        local = utils.fs.getMountPath(point)
+    except Exception as exc:
+        raise LoadError(
+            f"Lakehouse {name!r} could not be mounted at {point!r}: {exc}"
+        ) from exc
+    if not local:
+        raise LoadError(f"Lakehouse {name!r} mounted at {point!r} reports no path")
+    _MOUNTS[spark_root] = local
+    return local
+
+
+def _notebook_utils() -> Any:
+    for module_name in ("notebookutils", "mssparkutils"):
+        try:
+            return __import__(module_name)
+        except Exception:
+            continue
+    return None
+
+
+def _item_of(spark_root: str) -> str:
+    """The item id in an ``abfss://ws@host/item`` root — the mount's name."""
+
+    return spark_root.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _join(root: str, *parts: str) -> str:
+    joined = root.rstrip("/")
+    for part in parts:
+        joined = f"{joined}/{str(part).strip('/')}"
+    return joined
 
 
 # --- reading the host -------------------------------------------------------

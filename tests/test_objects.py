@@ -228,31 +228,54 @@ def test_a_view_is_read_by_name_because_it_has_no_path(spark):
 # --- folders ----------------------------------------------------------------
 
 
-def test_a_folder_is_addressed_from_the_lakehouse_root(spark):
-    """Hadoop-compatible, so a detached load reaches it as readily as a notebook."""
+def test_a_folder_is_addressed_as_a_filesystem_path(spark, tmp_path):
+    """A Folder's authored code writes ordinary files, so it needs a real path.
 
-    export = Sales__OrderExport(spark, lakehouse=LAKEHOUSE)
+    On a filesystem host that is the directory itself. In OneLake it is a mount
+    of the root Weaver resolved, which is what lets the same authored code run
+    in both places unchanged.
+    """
 
-    assert export.path() == (
-        "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/Sales/OrderExport"
+    export = Sales__OrderExport(
+        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
     )
 
+    assert export.path() == f"{tmp_path}/Files/Sales/OrderExport"
 
-def test_staging_is_the_folder_path_with_a_staging_suffix(spark):
-    export = Sales__OrderExport(spark, lakehouse=LAKEHOUSE)
+
+def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
+    export = Sales__OrderExport(
+        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+    )
 
     assert export.staging_folder() == f"{export.path()}_Staging"
     assert export.read() == (f"{export.path()}_Staging", [])
 
 
-def test_a_folder_needs_no_mount_at_all(spark):
-    """The Lakehouse nobody attached is reached exactly like the one somebody did."""
+def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, monkeypatch):
+    """Weaver mounts the root it resolved, never the notebook's attachment.
+
+    That is what keeps a detached orchestrator able to load a Lakehouse nobody
+    attached — the property `/lakehouse/default` could never have provided.
+    """
+
+    import weaver.lakehouse as module
+
+    class FakeFs:
+        def mount(self, source, point):
+            pass
+
+        def getMountPath(self, point):
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(module, "_MOUNTS", {})
 
     export = Sales__OrderExport(
         spark, lakehouse=Lakehouse(name="Other", spark_root="abfss://ws@host/other")
     )
 
-    assert export.path() == "abfss://ws@host/other/Files/Sales/OrderExport"
+    assert export.path() == "/synfs/notebook/session-1/weaver/other/Files/Sales/OrderExport"
 
 
 # --- the surface is only what is documented ---------------------------------

@@ -13,12 +13,14 @@ begin
     declare @weaver_rows_rejected bigint = 0;
     declare @weaver_error varchar(4000) = null;
 
+$preprocessing_banner
 $start_artifact_cleanup
 
 $staging_sql
 
     select @weaver_rows_read = count(*) from $staging_table;
 
+$postprocessing_banner
 $load_body
 
 $end_artifact_cleanup
