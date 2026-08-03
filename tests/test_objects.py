@@ -248,7 +248,7 @@ def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
         spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
     )
 
-    assert export.staging_folder() == f"{export.path()}_Staging"
+    assert export.staging_folder() == f"{export.local_path()}_Staging"
     assert export.read() == (f"{export.path()}_Staging", [])
 
 
@@ -275,7 +275,10 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, mon
         spark, lakehouse=Lakehouse(name="Other", spark_root="abfss://ws@host/other")
     )
 
-    assert export.path() == "/synfs/notebook/session-1/weaver/other/Files/Sales/OrderExport"
+    assert export.path() == "abfss://ws@host/other/Files/Sales/OrderExport"
+    assert export.local_path() == (
+        "/synfs/notebook/session-1/weaver/other/Files/Sales/OrderExport"
+    )
 
 
 # --- the surface is only what is documented ---------------------------------

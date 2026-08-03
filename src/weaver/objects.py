@@ -189,15 +189,27 @@ class Folder(WeaverObject):
     """
 
     def path(self) -> str:
-        """This folder's materialised location, beneath the Lakehouse's own root.
+        """This folder's materialised location, as Spark addresses it.
 
-        Hadoop-compatible, not a mount. ``/lakehouse/default`` addresses whichever
-        Lakehouse a notebook attached, and a load runs detached against Lakehouses
-        it resolved by name — so a folder reachable only through a mount could not
-        be loaded by the thing that loads it.
+        What one object hands another: a table reading these files does it with
+        ``spark.read``, which wants the ``abfss://`` form. Addressed by the root
+        the Lakehouse was resolved to, never by ``/lakehouse/default`` — that
+        names only whatever a notebook attached, and a load runs detached against
+        Lakehouses it resolved by name.
         """
 
         return self.lakehouse.folder_path(*self.identity)
+
+    def local_path(self) -> str:
+        """This folder's location for code that opens files rather than reading
+        them through Spark.
+
+        The same bytes as :meth:`path`, spelled as a filesystem path. In OneLake
+        that is a mount Weaver makes of the resolved root; locally the two are
+        the same directory.
+        """
+
+        return self.lakehouse.folder_local_path(*self.identity)
 
     def staging_folder(self) -> str:
         """The object-local staging directory to write into.
@@ -208,7 +220,7 @@ class Folder(WeaverObject):
         so a failed load leaves exactly one directory to look at.
         """
 
-        return f"{self.path()}_Staging"
+        return f"{self.local_path()}_Staging"
 
     def load(self, fault_tolerant: bool = False) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
@@ -230,7 +242,7 @@ class Folder(WeaverObject):
         # run's files are published again and a replacement concludes that
         # nothing was retired. Clearing afterwards instead would destroy the one
         # directory worth looking at when a load fails.
-        issued = new_staging_folder(self.path(), self.staging_folder())
+        issued = new_staging_folder(self.local_path(), self.staging_folder())
         staged, deletes = _load_pair(self, self.read())
         if str(staged) != issued:
             raise LoadError(
@@ -240,7 +252,7 @@ class Folder(WeaverObject):
             )
         return load_folder(
             contract=contract,
-            destination=self.path(),
+            destination=self.local_path(),
             staging=issued,
             deletes=deletes,
             fault_tolerant=fault_tolerant,

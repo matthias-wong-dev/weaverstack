@@ -54,6 +54,7 @@ def test_a_folder_hangs_off_the_same_root_as_a_table_locally(tmp_path):
 
     assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
     assert lakehouse.folder_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
+    assert lakehouse.folder_local_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
 
 
 def test_a_trailing_separator_does_not_double_up(tmp_path):
@@ -61,6 +62,7 @@ def test_a_trailing_separator_does_not_double_up(tmp_path):
 
     assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
     assert lakehouse.folder_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
+    assert lakehouse.folder_local_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
 
 
 # --- two roots, because two things read them --------------------------------
@@ -98,7 +100,10 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.folder_path("Sales", "Export") == (
+    # Spark keeps the URL; Python gets the mount. Two spellings of one location,
+    # because neither consumer understands the other's.
+    assert lakehouse.folder_path("Sales", "Export") == "abfss://ws@host/lh/Files/Sales/Export"
+    assert lakehouse.folder_local_path("Sales", "Export") == (
         "/synfs/notebook/session-1/weaver/lh/Files/Sales/Export"
     )
     # Mounted by item id, so a second Lakehouse in the same session cannot
@@ -124,8 +129,8 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
-    lakehouse.folder_path("Sales", "Export")
-    lakehouse.folder_path("Sales", "Other")
+    lakehouse.folder_local_path("Sales", "Export")
+    lakehouse.folder_local_path("Sales", "Other")
 
     assert calls == ["/weaver/lh"]
 
@@ -139,7 +144,7 @@ def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypat
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
     with pytest.raises(LoadError, match="Fabric notebook utilities"):
-        lakehouse.folder_path("Sales", "Export")
+        lakehouse.folder_local_path("Sales", "Export")
 
 
 def test_a_root_must_be_a_real_root():

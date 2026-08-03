@@ -124,7 +124,27 @@ class Lakehouse:
         return _files_root(self.name, self.spark_root)
 
     def folder_path(self, schema: str, name: str) -> str:
-        """Where one folder object's files live, as Python addresses them."""
+        """Where one folder object's files live, as *Spark* addresses them.
+
+        The Spark root, because this is what one object hands another. A table
+        reading a folder's files does it with ``spark.read``, and Spark wants the
+        ``abfss://`` form — given a mount path it resolves it against its own
+        default filesystem, which is OneLake, and asks for a path that does not
+        exist.
+        """
+
+        return self.location.folder_path(schema, name)
+
+    def folder_local_path(self, schema: str, name: str) -> str:
+        """The same folder, as *Python* addresses it.
+
+        For code that opens files rather than reading them through Spark: a
+        Folder's own ``read()`` writing into staging, and the reconciliation that
+        publishes what it wrote.
+
+        Two spellings of one location, because two things read them and neither
+        understands the other's. Session-scoped, like :meth:`files_root`.
+        """
 
         return _join(self.files_root(), schema, name)
 
