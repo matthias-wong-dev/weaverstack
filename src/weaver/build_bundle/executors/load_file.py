@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...declaration.load import SPARK_LOAD_EXTENSION
 from ...errors import InstallError
 from ...targets import FolderTarget
 from ..models import DELETE_FILE, WRITE_FILE, BuildAction
@@ -42,6 +43,7 @@ class LoadFileExecutor:
         if action.kind == WRITE_FILE:
             if payload is None:
                 raise InstallError(f"load file action {action.id!r} has no payload")
+            payload = self._addressed(location.value, payload, context)
             context.store.write(location, payload)
             return {"written": location.value, "bytes": len(payload)}
         if action.kind == DELETE_FILE:
@@ -56,6 +58,27 @@ class LoadFileExecutor:
         raise InstallError(
             f"load file action {action.id!r} has unknown kind {action.kind!r}"
         )
+
+    def _addressed(
+        self, path: str, payload: bytes, context: InstallationContext
+    ) -> bytes:
+        """Resolve a generated Spark SQL program's object tokens as it lands.
+
+        The bundle stays destination-free — that is what lets one repository
+        generate the same bytes everywhere and two bundles be diffed for what
+        actually differs. The *installed file* cannot be: it has to be runnable
+        by anyone who opens it, and by then the destination is known, so this is
+        the moment the two requirements stop conflicting.
+
+        Deployed Python is left exactly as authored. A module is source code, not
+        a statement, and it addresses its target through the resolved Lakehouse
+        it is constructed with.
+        """
+
+        if not path.endswith(SPARK_LOAD_EXTENSION):
+            return payload
+        text = payload.decode("utf-8")
+        return context.catalogue.expand(text).encode("utf-8")
 
     def _location(self, node_id: str, context: InstallationContext):
         """``Lakehouse/Sales/file:_/Load/lib/dates.py`` under this batch's target.

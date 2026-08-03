@@ -17,8 +17,8 @@ against the staged data taken *before* the writes, and materialised into a small
 result table the final statement reads. Measuring first is also what makes the
 counts describe the same instant as the decision they justify.
 
-**Fault tolerance is a predicate, not a branch.** ``{{fault_tolerant}}`` is
-substituted with 0 or 1 before execution, and the valid-rows view is gated on
+**Fault tolerance is a predicate, not a branch.** A commented literal reading
+0 is substituted with 1 to tolerate rejects, and the valid-rows view is gated on
 it: with rejects present and no tolerance the view is empty, so the merge and
 the delete run against nothing and the target is untouched. An ``if`` that
 Spark does not have becomes a ``where`` that it does — and the statement list
@@ -53,10 +53,18 @@ from .metadata import (
 #: to paste into a notebook whole.
 STATEMENT_DELIMITER = "-- weaver:statement"
 
-#: Substituted with 1 or 0 before execution. Not an object token: it is a run's
+#: The one hole the installer does *not* fill. Tolerance of rejects is a run's
 #: own choice rather than anything about where the object lives, so it is
-#: resolved by whoever runs the program, not by the installer that placed it.
-FAULT_TOLERANT_TOKEN = "{{fault_tolerant}}"
+#: answered by whoever runs the program.
+#:
+#: Deliberately not a ``{{...}}`` token: that namespace belongs to the
+#: installer's destination resolution, which refuses any token it does not
+#: itself resolve — correctly, since a name left unresolved must never reach the
+#: engine. This is a comment wrapped around a literal instead, so an installed
+#: program is valid SQL with nothing substituted at all, and what it does then
+#: is refuse — the safe answer for anyone who ran the file without choosing.
+FAULT_TOLERANT_MARKER = "/*weaver:fault_tolerant*/"
+FAULT_TOLERANT_DEFAULT = f"{FAULT_TOLERANT_MARKER}0"
 
 #: The rank a duplicate key gets, and the suffixes of the intermediate relations.
 RANK_COLUMN = "__weaver_pk_row_number"
@@ -98,13 +106,16 @@ def generate_spark_load_program(document: SesDocument, body: str) -> str:
     header = (
         f"-- Weaver generated load for {document.qualified}.\n"
         f"-- Statements run in order, separated by the marker below.\n"
-        f"-- Substitute {FAULT_TOLERANT_TOKEN} with 1 to load valid rows despite "
-        "rejects, or 0 to refuse.\n"
+        f"-- Substitute {FAULT_TOLERANT_MARKER}0 with {FAULT_TOLERANT_MARKER}1 to load "
+        "valid rows despite rejects. Unsubstituted, it refuses.\n"
     )
     joined = f"\n\n{STATEMENT_DELIMITER}\n\n".join(
         statement.strip() for statement in statements
     )
-    return f"{header}\n{joined}\n"
+    # A delimiter after the header, so the header is a chunk of its own and the
+    # splitter drops it. Without one it rides along with the first statement and
+    # is re-sent to the engine on every run.
+    return f"{header}\n{STATEMENT_DELIMITER}\n\n{joined}\n"
 
 
 def statements_of(program: str) -> tuple[str, ...]:
@@ -145,7 +156,13 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
         f"DROP TABLE IF EXISTS {names['reject']}",
         f"DROP TABLE IF EXISTS {names['staging']}",
         f"DROP TABLE IF EXISTS {names['result']}",
-        f"DROP TABLE IF EXISTS {names['delete']}",
+        # Only when this program creates one. Dropping a table it never makes
+        # would leave a reader looking for the statement that creates it.
+        *(
+            [f"DROP TABLE IF EXISTS {names['delete']}"]
+            if contract.deletes_absent_rows
+            else []
+        ),
         # Staging is a real table, not a view: the source query must run once,
         # and a view would re-run it for every count and again for the merge.
         f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS\n"
@@ -170,10 +187,7 @@ def _keyed_program(names: dict, query: str, contract: LoadContract) -> list[str]
         f"CREATE OR REPLACE TEMP VIEW {names['valid']} AS\n"
         f"SELECT s.*\nFROM {names['staging']} AS s\n"
         f"WHERE NOT {rejected}\n"
-        f"  AND (\n"
-        f"        {FAULT_TOLERANT_TOKEN} = 1\n"
-        f"     OR (SELECT count(*) FROM {names['reject']}) = 0\n"
-        f"  )",
+        f"  AND {_tolerated(names)}",
         _merge(names, contract, business, audit),
     ]
     if contract.deletes_absent_rows:
@@ -227,7 +241,7 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
     valid = f"(SELECT * FROM {names['staging']} AS s WHERE NOT {rejected})"
     join = key_join("v", "t", contract.primary_key)
     changed = changed_predicate("v", "t", contract)
-    tolerated = f"({FAULT_TOLERANT_TOKEN} = 1 OR (SELECT count(*) FROM {names['reject']}) = 0)"
+    tolerated = _tolerated(names)
     deleted = (
         f"    , CASE WHEN {tolerated} THEN (\n"
         f"          SELECT count(*) FROM {names['target']} AS t\n"
@@ -291,6 +305,20 @@ def _merge(names: dict, contract: LoadContract, business, audit) -> str:
     )
 
 
+def _tolerated(names: dict) -> str:
+    """Whether this run is permitted to write: no rejects, or tolerance asked for.
+
+    One definition, used by the counts, the valid view and the delete key set.
+    They must agree — a count computed under one condition and a write performed
+    under another would report a load that did not happen.
+    """
+
+    return (
+        f"({FAULT_TOLERANT_DEFAULT} = 1 "
+        f"OR (SELECT count(*) FROM {names['reject']}) = 0)"
+    )
+
+
 def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
     """Remove target rows the source stopped producing, in two statements.
 
@@ -300,9 +328,15 @@ def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
     against an empty source matches *every* target row, so the one case that
     must leave the target untouched would empty it instead.
 
-    Materialising the keys first removes both problems. The subquery lives in a
-    ``CREATE TABLE AS``, where it is allowed, and an intolerant run produces an
-    empty key set, so the merge below it deletes nothing.
+    Materialising the keys first removes the ``DELETE`` restriction: the
+    subquery lives in a ``CREATE TABLE AS``, where it is allowed.
+
+    The gate has to be repeated here, and this is the sharp edge. Every other
+    statement is made harmless by an empty valid view, but *this* one inverts
+    it: "in the target and not in valid" selects everything precisely when valid
+    is empty. So an intolerant run would delete the whole table — which is what
+    a test caught, and why the tolerance condition is stated on the key set
+    itself rather than inherited from the view.
     """
 
     join = key_join("v", "t", contract.primary_key)
@@ -313,7 +347,8 @@ def _delete_absent(names: dict, contract: LoadContract) -> list[str]:
         f"FROM {names['target']} AS t\n"
         f"WHERE NOT EXISTS (\n"
         f"    SELECT 1 FROM {names['valid']} AS v WHERE {join}\n"
-        f")",
+        f")\n"
+        f"  AND {_tolerated(names)}",
         f"MERGE INTO {names['target']} AS t\n"
         f"USING {names['delete']} AS d\n"
         f"   ON {key_join('d', 't', contract.primary_key)}\n"
@@ -458,7 +493,8 @@ def _indent(text: str, spaces: int) -> str:
 
 __all__ = [
     "COLUMN_MAPPING",
-    "FAULT_TOLERANT_TOKEN",
+    "FAULT_TOLERANT_DEFAULT",
+    "FAULT_TOLERANT_MARKER",
     "REJECTION_REASON",
     "blank_key_predicate",
     "changed_predicate",

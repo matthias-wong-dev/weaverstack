@@ -96,7 +96,7 @@ def generate_tsql_load_script(
         "load/load_procedure",
         load_procedure=names["procedure"],
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
-        start_artifact_cleanup=_indent(_cleanup(names), 4),
+        start_artifact_cleanup=_indent(_cleanup(names, contract), 4),
         staging_sql=_indent(staging_sql, 4),
         staging_table=names["staging"],
         load_body=_indent(load_body, 4),
@@ -187,13 +187,20 @@ def _missing_reconciliation(names: dict, contract: LoadContract) -> str:
     )
 
 
-def _cleanup(names: dict) -> str:
-    """Drop whatever a previous run left behind, newest dependency first."""
+def _cleanup(names: dict, contract: LoadContract) -> str:
+    """Drop whatever a previous run left behind, newest dependency first.
 
+    Only the tables this procedure actually makes. An unkeyed load has no reject
+    or upsert table — with no key nothing can be matched, so there is nothing to
+    reject and no upsert set — and dropping them anyway would leave a reader
+    hunting for the statement that creates them.
+    """
+
+    keys = ("reject", "upsert", "staging") if contract.primary_key else ("staging",)
     return "\n".join(
         f"if object_id({_sql_literal(names[key])}, N'U') is not null "
         f"drop table {names[key]};"
-        for key in ("reject", "upsert", "staging")
+        for key in keys
     )
 
 
@@ -205,7 +212,7 @@ def _end_cleanup(names: dict, contract: LoadContract) -> str:
     refused, and staging and upsert are what make the rejection explicable.
     """
 
-    cleanup = _cleanup(names)
+    cleanup = _cleanup(names, contract)
     if not contract.primary_key:
         return cleanup
     return (
