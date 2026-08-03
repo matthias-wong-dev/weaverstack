@@ -113,6 +113,46 @@ def test_a_view_has_no_generated_load():
         view.create_load()
 
 
+#: A fingerprint of what each generator currently emits, beside the version that
+#: describes it. See the test below.
+GENERATED_FINGERPRINTS = {
+    "tsql": (3, "53a4b2a4cb9c72a6b5c400b98575a2bd5ce38c9145571ea40da38bdbcffa2925"),
+    "spark": (4, "0e9c38a85a4422d55663ad411b8ddeb86dd92f2bc2cf97d310bca120b8692f1d"),
+}
+
+
+def test_a_change_to_generation_must_move_its_template_version():
+    """A signature is the source's plus the template version.
+
+    So a generator edit that leaves the version alone produces different bytes
+    with an unchanged signature, and incremental selection — correctly — rebuilds
+    nothing: the estate keeps running the previous generation's artefacts. That
+    happened, and it took a Fabric round trip to notice, which is what this test
+    exists to make cheap.
+
+    When it fails, raise the matching version *and* update the hash here in the
+    same edit, so the two cannot drift apart again.
+    """
+
+    import hashlib
+
+    actual = {
+        "tsql": (
+            TSQL_LOAD_VERSION,
+            hashlib.sha256(_warehouse().create_load().payload).hexdigest(),
+        ),
+        "spark": (
+            SPARK_LOAD_VERSION,
+            hashlib.sha256(_spark().create_load().payload).hexdigest(),
+        ),
+    }
+
+    assert actual == GENERATED_FINGERPRINTS, (
+        "generated output changed. Raise the matching *_LOAD_VERSION and update "
+        f"GENERATED_FINGERPRINTS together. Now: {actual}"
+    )
+
+
 def test_generation_is_deterministic():
     assert _warehouse().create_load() == _warehouse().create_load()
     assert _spark().create_load() == _spark().create_load()

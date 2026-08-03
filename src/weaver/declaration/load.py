@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 #: previous generation's artefacts, which is the failure this exists to prevent
 #: and which cost a Fabric round trip to notice.
 TSQL_LOAD_VERSION = 3
-SPARK_LOAD_VERSION = 3
+SPARK_LOAD_VERSION = 4
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
 #: Warehouse load is a stored procedure; a Lakehouse load is a file in the

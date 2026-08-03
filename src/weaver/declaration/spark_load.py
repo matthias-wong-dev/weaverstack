@@ -76,8 +76,14 @@ FAULT_TOLERANT_DEFAULT = f"{FAULT_TOLERANT_MARKER}0"
 RANK_COLUMN = "__weaver_pk_row_number"
 STAGING_SUFFIX = "_Staging"
 REJECT_SUFFIX = "_Reject"
+UPSERT_SUFFIX = "_Upsert"
 RESULT_SUFFIX = "_LoadResult"
 DELETE_SUFFIX = "_Delete"
+
+#: What marks a row of the upsert set as new rather than merely changed. The
+#: same column the Warehouse procedure and the Python load use, so one query
+#: reads a change set whichever engine produced it.
+IS_NEW_COLUMN = "_Is new row"
 
 #: Re-exported from the runtime so the generators and the Python loads write one
 #: vocabulary. A reject table is read by people, and a Warehouse reject that said
@@ -176,6 +182,7 @@ def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
 
     statements = [
         f"{PREPROCESSING_BANNER}\nDROP TABLE IF EXISTS {names['reject']}",
+        f"DROP TABLE IF EXISTS {names['upsert']}",
         f"DROP TABLE IF EXISTS {names['staging']}",
         f"DROP TABLE IF EXISTS {names['result']}",
         # Only when this program creates one. Dropping a table it never makes
@@ -206,9 +213,6 @@ def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
         f"         ELSE '{REASON_DUPLICATE_PK}' END AS `{REJECTION_REASON}`\n"
         f"FROM {names['staging']} AS s\n"
         f"WHERE {rejected}",
-        # Measured before anything is written, so the counts and the decision
-        # they justify describe one instant.
-        _result_table(names, contract, rejected),
         # The gate. With rejects present and no tolerance this view is empty, so
         # every write below it touches nothing and the target is left exactly as
         # it was — the branch a procedure would take, written as a predicate.
@@ -216,6 +220,10 @@ def _keyed_program(names: dict, body: str, contract: LoadContract) -> list[str]:
         f"SELECT s.*\nFROM {names['staging']} AS s\n"
         f"WHERE NOT {rejected}\n"
         f"  AND {_tolerated(names)}",
+        _upsert_table(names, contract, business),
+        # After the upsert set, which it counts, and before any write — so the
+        # counts and the changes they describe are one decision.
+        _result_table(names, contract, rejected),
         _merge(names, contract, business, audit),
     ]
     if contract.deletes_absent_rows:
@@ -272,7 +280,6 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
 
     valid = f"(SELECT * FROM {names['staging']} AS s WHERE NOT {rejected})"
     join = key_join("v", "t", contract.primary_key)
-    changed = changed_predicate("v", "t", contract)
     tolerated = _tolerated(names)
     deleted = (
         f"    , CASE WHEN {tolerated} THEN (\n"
@@ -286,31 +293,52 @@ def _result_table(names: dict, contract: LoadContract, rejected: str) -> str:
         f"CREATE TABLE {names['result']} USING delta {COLUMN_MAPPING} AS\n"
         f"SELECT\n"
         f"      (SELECT count(*) FROM {names['staging']}) AS rows_read\n"
-        f"    , CASE WHEN {tolerated} THEN (\n"
-        f"          SELECT count(*) FROM {valid} AS v\n"
-        f"          WHERE NOT EXISTS (SELECT 1 FROM {names['target']} AS t WHERE {join})\n"
-        f"      ) ELSE 0 END AS rows_inserted\n"
-        f"    , CASE WHEN {tolerated} THEN (\n"
-        f"          SELECT count(*) FROM {valid} AS v\n"
-        f"          JOIN {names['target']} AS t ON {join}\n"
-        f"          WHERE {changed}\n"
-        f"      ) ELSE 0 END AS rows_updated\n"
+        f"    , (SELECT count(*) FROM {names['upsert']} "
+        f"WHERE `{IS_NEW_COLUMN}` = 1) AS rows_inserted\n"
+        f"    , (SELECT count(*) FROM {names['upsert']} "
+        f"WHERE `{IS_NEW_COLUMN}` = 0) AS rows_updated\n"
         f"{deleted}"
         f"    , (SELECT count(*) FROM {names['reject']}) AS rows_rejected"
     )
 
 
-def _merge(names: dict, contract: LoadContract, business, audit) -> str:
-    """Insert new rows and update changed ones, in Delta's own single operation.
+def _upsert_table(names: dict, contract: LoadContract, business) -> str:
+    """What this load has decided to change, materialised before it changes it.
 
-    A matched row is only updated when a comparison column differs. Updating
-    every matched row would be simpler and wrong: it would rewrite the update
+    The Warehouse procedure and the Python load both build this table; the
+    program used to derive the same set inline, three times, in three subqueries.
+    Materialising it means the counts and the writes read one set rather than
+    re-deriving it, and it survives the run — so what Weaver decided is
+    inspectable afterwards, like what it staged and what it refused.
+
+    A matched row appears only when a comparison column differs. Including every
+    matched row would be simpler and wrong: it would rewrite the update
     timestamp of rows nothing changed, so "when did this row last change" would
     come to mean "when was this table last loaded".
     """
 
     join = key_join("s", "t", contract.primary_key)
     changed = changed_predicate("s", "t", contract)
+    missing = f"t.`{contract.primary_key[0]}` IS NULL"
+    return (
+        f"CREATE TABLE {names['upsert']} USING delta {COLUMN_MAPPING} AS\n"
+        f"SELECT\n    {_columns('s', business)}\n"
+        f"  , CASE WHEN {missing} THEN 1 ELSE 0 END AS `{IS_NEW_COLUMN}`\n"
+        f"FROM {names['valid']} AS s\n"
+        f"LEFT JOIN {names['target']} AS t ON {join}\n"
+        f"WHERE {missing} OR ({changed})"
+    )
+
+
+def _merge(names: dict, contract: LoadContract, business, audit) -> str:
+    """Insert the new rows and update the changed ones, from the upsert set.
+
+    One statement rather than two, because Delta has no ``UPDATE ... FROM`` and a
+    merge against a set whose rows are already classified applies exactly the
+    change that set recorded.
+    """
+
+    join = key_join("s", "t", contract.primary_key)
     updates = ", ".join(
         f"t.`{name}` = s.`{name}`"
         for name in business
@@ -329,10 +357,11 @@ def _merge(names: dict, contract: LoadContract, business, audit) -> str:
     values = ", ".join(f"s.`{name}`" for name in business)
     return (
         f"MERGE INTO {names['target']} AS t\n"
-        f"USING {names['valid']} AS s\n"
+        f"USING {names['upsert']} AS s\n"
         f"   ON {join}\n"
-        f"WHEN MATCHED AND ({changed}) THEN UPDATE SET {update_set}\n"
-        f"WHEN NOT MATCHED THEN INSERT ({columns}, {_audit_list(audit)})\n"
+        f"WHEN MATCHED AND s.`{IS_NEW_COLUMN}` = 0 THEN UPDATE SET {update_set}\n"
+        f"WHEN NOT MATCHED AND s.`{IS_NEW_COLUMN}` = 1 "
+        f"THEN INSERT ({columns}, {_audit_list(audit)})\n"
         f"     VALUES ({values}, {_audit_values(audit)})"
     )
 
@@ -418,6 +447,7 @@ def _names(document: SesDocument) -> dict:
         "target": object_token(schema, obj),
         "staging": object_token(schema, obj + STAGING_SUFFIX),
         "reject": object_token(schema, obj + REJECT_SUFFIX),
+        "upsert": object_token(schema, obj + UPSERT_SUFFIX),
         "result": object_token(schema, obj + RESULT_SUFFIX),
         "delete": object_token(schema, obj + DELETE_SUFFIX),
         # A temp view is session-scoped and unqualified: it is the one relation
