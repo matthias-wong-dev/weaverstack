@@ -1279,6 +1279,19 @@ def _validate_columns(
         raise MetadataError(
             f"Identity {identity} collides with a Weaver audit column name"
         )
+    # The primary key must not *be* the identity column, and the reason is a load
+    # one rather than a modelling preference. The engine assigns the identity on
+    # insert, so a source never produces it; a load matching on it could never
+    # find an existing row, and every run would insert duplicates. Caught here
+    # because the alternative is an "Invalid column name" from the engine at
+    # install, which says nothing about what the declaration got wrong.
+    if identity is not None and identity in primary_key:
+        raise MetadataError(
+            f"Primary key names the Identity column {identity!r}. The engine "
+            "assigns the identity on insert, so a load can never match on it — "
+            "key on the business column that identifies a row across loads, and "
+            "let the identity be the surrogate beside it."
+        )
 
     if not declared_columns:
         # A SQL object takes its shape from its query; checked at build instead.

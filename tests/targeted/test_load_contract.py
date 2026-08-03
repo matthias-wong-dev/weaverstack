@@ -86,11 +86,12 @@ def test_a_warehouse_table_carries_its_identity_column():
     """Only a Warehouse table has one, so only this contract names it.
 
     It matters to the load because it is the one column an insert must *not*
-    name: the engine generates it.
+    name: the engine generates it. It sits beside the primary key rather than
+    being it — a load could never match on a column the engine assigns.
     """
 
     header = TABLE_HEADER.replace(
-        "Primary key: Customer id", "Primary key: Customer key\n\nIdentity: Customer key"
+        "Primary key: Customer id", "Primary key: Customer id\n\nIdentity: Customer key"
     )
     contract = LoadContract.from_document(_document(header, language=SQL))
 

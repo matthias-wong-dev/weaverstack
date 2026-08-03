@@ -99,12 +99,12 @@ def test_an_identity_not_produced_by_the_query_is_fine_weaver_adds_it():
         Table ID: Sales.Order
         Description: x
         Lineage: y
-        Primary key: OrderKey
+        Primary key: Order id
         Identity: OrderKey
         """
     )
-    # OrderKey is Weaver's surrogate, not a query column, and the primary key may
-    # name it — so the query need not produce it.
+    # OrderKey is the engine's surrogate, not a query column, so the query need
+    # not produce it. The key is the business column, which it does produce.
     assert resolve_build_columns(document, ("Order id", "Amount")) == (
         "Order id",
         "Amount",

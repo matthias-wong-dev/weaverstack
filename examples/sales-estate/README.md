@@ -3,6 +3,10 @@
 One repository exercising every object form Weaver builds and loads, so the
 whole chain can be read in one place:
 
+The pushable repository is `repository/`; this README sits beside it rather than
+inside it, because a repository root holds nothing but `Lakehouse/` and
+`Warehouse/`.
+
 ```text
 Lakehouse/Sales
   Files/Sales__OrderExport.py    Folder        *.csv, incremental
@@ -59,7 +63,7 @@ cannot declare one, because no Delta version Weaver runs on generates them.
 Bind the logical items to physical ones:
 
 ```bash
-weaver push examples/sales-estate --workspace <workspace> --weaver-lakehouse <control>
+weaver push examples/sales-estate/repository --workspace <workspace> --weaver-lakehouse <control>
 ```
 
 ```bash

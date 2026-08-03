@@ -301,8 +301,8 @@ def test_identity_is_an_engine_generated_bigint_column():
     bigint outside the business schema, which no load ever inserts into."""
     document = parse(
         "Table ID: Sales.Order\nDescription: x\nLineage: y\n"
-        "Primary key: OrderKey\nIdentity: OrderKey\n"
-        "Schema:\n  Amount: decimal(18,2)\n",
+        "Primary key: Order id\nIdentity: OrderKey\n"
+        "Schema:\n  Order id: string\n  Amount: decimal(18,2)\n",
         language=SQL,
     )
     assert document.identity == "OrderKey"
@@ -314,9 +314,31 @@ def test_identity_is_an_engine_generated_bigint_column():
 
 
 def test_identity_must_not_be_declared_in_schema():
-    """The identity column is Weaver's own, so declaring it is a collision."""
+    """The identity column is Weaver's own, so declaring it is a collision.
+
+    Named on a non-key column, so this isolates the schema collision from the
+    separate rule that the primary key may not be the identity.
+    """
+
     with pytest.raises(MetadataError, match="must not appear in Schema"):
-        parse(TABLE_YAML + "\nIdentity: Order id", language=SQL)
+        parse(TABLE_YAML + "\nIdentity: Amount", language=SQL)
+
+
+def test_the_primary_key_may_not_be_the_identity_column():
+    """A load could never match on it, so every run would insert duplicates.
+
+    The engine assigns the identity on insert, so no source produces it. Caught
+    at parse because the alternative is an "Invalid column name" from the engine
+    at install, which says nothing about what the declaration got wrong.
+    """
+
+    with pytest.raises(MetadataError, match="Primary key names the Identity column"):
+        parse(
+            "Table ID: Sales.Order\nDescription: x\nLineage: y\n"
+            "Primary key: OrderKey\nIdentity: OrderKey\n"
+            "Schema:\n  Amount: decimal(18,2)\n",
+            language=SQL,
+        )
 
 
 @pytest.mark.parametrize("language", [PYTHON, SPARK_SQL])

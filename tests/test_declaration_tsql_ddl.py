@@ -179,7 +179,7 @@ IDENTITY_INFERRED = """
     Table ID: Reporting.CustomerReport
     Description: x
     Lineage: $Sales.Customer
-    Primary key: CustomerKey
+    Primary key: CustomerId
     Identity: CustomerKey
     */
     select CustomerId, CustomerName from [Sales_LH].[Sales].[Customer]
@@ -190,12 +190,13 @@ IDENTITY_DECLARED = """
     Table ID: Reporting.CustomerReport
     Description: x
     Lineage: $Sales.Customer
-    Primary key: CustomerKey
+    Primary key: CustomerId
     Identity: CustomerKey
     Schema:
+      CustomerId: bigint
       CustomerName: varchar(200)
     */
-    select CustomerName from [Sales_LH].[Sales].[Customer]
+    select CustomerId, CustomerName from [Sales_LH].[Sales].[Customer]
 """
 
 
@@ -218,8 +219,8 @@ def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     )
     # Guarded so a query producing the same name is refused, not silently doubled.
     assert "throw 51006" in content
-    # The identity is an available column for the metadata check, so a primary key
-    # on the surrogate resolves even though the query does not produce it.
+    # The identity is an available column for the metadata check, so a metadata
+    # reference to the surrogate resolves though the query does not produce it.
     assert "union all\n\n    select N'CustomerKey' as column_name" in content
 
 
