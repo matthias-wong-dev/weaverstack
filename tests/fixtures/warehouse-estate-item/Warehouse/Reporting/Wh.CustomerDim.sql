@@ -1,11 +1,11 @@
 /*
 Table ID: Wh.CustomerDim
 
-Description: Customer dimension with a Weaver-managed surrogate key.
+Description: Customer dimension with an engine-generated surrogate key.
 
 Lineage: $Wh.Customer
 
-Primary key: CustomerKey
+Primary key: CustomerId
 
 Identity: CustomerKey
 */
