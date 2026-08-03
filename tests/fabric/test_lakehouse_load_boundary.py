@@ -32,15 +32,20 @@ pytestmark = [pytest.mark.fabric, pytest.mark.published_weaver]
 #: the deployed tree the way the deployed tree is meant to be imported, loads the
 #: folder through the resolved OneLake path, and runs the generated Spark SQL
 #: program from the file the installer wrote.
-BODY = '''
+BODY = r'''
 import os, sys
 
+from weaver import lakehouse_for
+
+# The body's `target` is an ItemRef — a name, not a destination. Resolving it is
+# the orchestrator's move, and the one an object never makes for itself.
+destination = lakehouse_for(resolver, target)
 results = {}
 
 # The deployed runtime tree, reached as Python must reach it: through the mount
 # Weaver makes of the root it resolved, not through /lakehouse/default, which
 # names only whatever a notebook happened to attach.
-root = target.files_root() + "/_/Load"
+root = destination.files_root() + "/_/Load"
 sys.path.insert(0, root)
 results["deployed"] = sorted(os.listdir(root))
 
@@ -51,8 +56,18 @@ from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 results["imported"] = Raw__CustomerCsv.__name__
 
+# The data file this fixture's folder reads. Placed by the test rather than by
+# the installer: the deployed tree currently carries only `.py` support files,
+# so a module that reads a data file beside it finds nothing. That gap is real
+# and reported separately — it is not what this test is about, and standing on
+# it would stop the folder claim being proved at all.
+data = os.path.join(root, "lib", "data")
+os.makedirs(data, exist_ok=True)
+with open(os.path.join(data, "customers.csv"), "w") as handle:
+    handle.write("CustomerId,CustomerName\n1,Ada\n2,Grace\n")
+
 # The folder load, writing ordinary files to OneLake through the mount.
-export = Raw__CustomerCsv(spark, lakehouse=target)
+export = Raw__CustomerCsv(spark, lakehouse=destination)
 results["folder"] = export.load().as_row()
 results["folder_path_is_local"] = not export.local_path().startswith("abfss://")
 results["folder_path_is_spark"] = export.path().startswith("abfss://")
@@ -74,9 +89,15 @@ def test_the_lakehouse_load_primitives_reach_onelake(fabric_lakehouse_estate):
 
     seen = env.run_python(BODY)
 
-    # The tree the installer wrote, laid out as authored.
+    # The tree the installer wrote, laid out as authored: the item's own modules
+    # at the root, and the `Files/` segment preserved rather than flattened.
     assert "Files" in seen["deployed"]
-    assert "lib" in seen["deployed"]
+    assert "DWG__Customer.py" in seen["deployed"]
+    # `lib/` is absent, and that is a finding rather than an expectation: this
+    # fixture's lib/ holds only a CSV, and the deployed tree carries `.py`
+    # support files alone. A module that reads a data file beside it therefore
+    # finds nothing — see the note in BODY, which supplies the file itself.
+    assert "lib" not in seen["deployed"]
     # The authored path is reproduced verbatim, so the import reads the same.
     assert seen["imported"] == "Raw__CustomerCsv"
     # Two spellings of one location, because two things read them.
