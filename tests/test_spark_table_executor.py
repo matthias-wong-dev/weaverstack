@@ -141,7 +141,6 @@ def _payload(**overrides) -> bytes:
         "declared_columns": None,
         "source_query": "select CustomerId, CustomerName from {{object:Sales.Raw}}",
         "references": [["Primary key", "CustomerId"]],
-        "identity": None,
         "audit_columns": AUDIT,
         "column_mapping": True,
     }
@@ -265,29 +264,21 @@ def test_the_not_null_header_marks_inferred_columns_not_null():
     assert "`Note` string NOT NULL" not in statement
 
 
-def test_the_identity_column_leads_as_a_not_null_bigint():
-    spark = _FakeSpark([("CustomerName", "string")])
-    _run(
-        spark,
-        _payload(
-            identity_column=["CustomerKey", "bigint", True],
-            references=[["Primary key", "CustomerKey"]],
-        ),
-    )
+def test_a_delta_table_is_built_with_no_identity_column():
+    """Identity is a Warehouse declaration, so nothing here materialises one.
+
+    The parser refuses ``Identity`` on a Delta table
+    (:data:`weaver.declaration.metadata.IDENTITY_LANGUAGES`), so the executor has
+    no identity case to handle: the created table is the business columns and the
+    audit columns, and nothing else.
+    """
+
+    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(spark, _payload())
     statement = _create_statement(spark)
-    # The Weaver-managed surrogate is created first, as a plain not-null bigint —
-    # no GENERATED/identity keyword; a later load populates it.
-    assert statement.startswith(
-        f"CREATE TABLE {CUSTOMER} (\n    `CustomerKey` bigint NOT NULL,\n"
-    )
-    assert "generated" not in statement.lower()
+    assert statement.startswith(f"CREATE TABLE {CUSTOMER} (\n    `CustomerId` int")
     assert "identity" not in statement.lower()
-
-
-def test_an_identity_colliding_with_a_query_column_fails_install():
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerKey", "int")])
-    with pytest.raises(BuildError, match="Identity 'CustomerKey' collides"):
-        _run(spark, _payload(identity_column=["CustomerKey", "bigint", True], references=[]))
+    assert "generated" not in statement.lower()
 
 
 def test_declared_table_uses_declared_types_and_nullability_not_the_query():

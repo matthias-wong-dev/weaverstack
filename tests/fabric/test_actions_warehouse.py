@@ -184,7 +184,8 @@ def columns_of(warehouse, schema: str, name: str) -> dict:
         f"""
         select columns.name as column_name,
                types.name as type_name,
-               columns.is_nullable as is_nullable
+               columns.is_nullable as is_nullable,
+               columns.is_identity as is_identity
         from sys.columns as columns
         join sys.types as types on types.user_type_id = columns.user_type_id
         where columns.object_id = object_id(N'{schema}.{name}')
@@ -268,14 +269,17 @@ def test_build_table_action_adds_the_declared_identity_column(
 ):
     """A column the declaration asks for and the query never produces.
 
-    `Identity: CustomerKey` names a surrogate Weaver adds itself, so the query
-    below it selects only the business columns. Whether the engine then creates a
-    `bigint` — and whether it tolerates the create at all — is a Fabric answer.
+    `Identity: CustomerKey` names a surrogate the *engine* generates, so the
+    query below it selects only the business columns. Whether Fabric accepts
+    `identity` at all — the feature is in preview — and whether the column
+    it creates really is an identity are both Fabric answers, which is why they
+    are asserted here and nowhere cheaper.
     """
 
     columns = columns_of(clean_disposable_warehouse, "DWG", "CustomerDim")
 
     assert columns["customerkey"]["type_name"] == "bigint"
+    assert bool(columns["customerkey"]["is_identity"]) is True
     assert {"customerid", "customername"} <= set(columns)
 
 

@@ -35,12 +35,13 @@ def _write(root, relative: str, text: str) -> None:
 class _Documents:
     """The item's documents, addressed by the local ``Schema.Object`` name."""
 
-    def __init__(self, repository):
+    def __init__(self, repository, item=ITEM):
         self.repository = repository
+        self.item = item
 
     def __getitem__(self, qualified: str):
         return self.repository.source_documents[
-            WeaverDocumentId.parse(f"{ITEM}/{qualified}")
+            WeaverDocumentId.parse(f"{self.item}/{qualified}")
         ]
 
     @property
@@ -48,13 +49,15 @@ class _Documents:
         return tuple(self.repository.source_documents.values())
 
 
-def _repo(tmp_path, files: dict[str, str], schemas=("Sales",)):
+def _repo(tmp_path, files: dict[str, str], schemas=("Sales",), item=ITEM):
     root = tmp_path / "repo"
     for schema in schemas:
-        _write(root, f"{ITEM}/schemas/{schema}.yml", f"Schema ID: {schema}\n")
+        _write(root, f"{item}/schemas/{schema}.yml", f"Schema ID: {schema}\n")
     for name, text in files.items():
-        _write(root, f"{ITEM}/{name}", text)
-    return _Documents(parse_item_repository(Location(value=str(root)), store=LocalStore()))
+        _write(root, f"{item}/{name}", text)
+    return _Documents(
+        parse_item_repository(Location(value=str(root)), store=LocalStore()), item
+    )
 
 
 PARENT = """\
@@ -216,10 +219,11 @@ def test_declared_column_notes_are_the_columns_an_author_described(tmp_path):
 
 
 def test_the_identity_column_gets_a_generic_note_no_author_writes(tmp_path):
+    # A Warehouse item, because only a Warehouse table may declare Identity.
     source = PARENT.replace(
         "Schema:", "Identity: Order key\n\nSchema:"
     )
-    repo = _repo(tmp_path, {"Sales.Order.sql": source})
+    repo = _repo(tmp_path, {"Sales.Order.sql": source}, item="Warehouse/Reporting")
     notes = declared_column_notes(repo["Sales.Order"])
     assert notes[0] == ("Order key", notes[0][1])
     assert notes[0][1].literal == IDENTITY_COLUMN_NOTE

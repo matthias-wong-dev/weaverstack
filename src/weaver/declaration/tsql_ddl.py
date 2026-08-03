@@ -105,7 +105,7 @@ def _render_identity_union(column) -> str:
 
     if column is None:
         return ""
-    definition = f"{_quote_part(column.name)} {column.type}{_nullability(column.not_null)}"
+    definition = _column_definition(column)
     # This is the leading SELECT of the all_columns CTE, so it must name both
     # columns — a CTE takes its column names from its first SELECT, and an
     # unnamed literal there is a T-SQL error ("No column name was specified").
@@ -157,10 +157,7 @@ def _render_declared_create(document: SesDocument, temp_table: str) -> str:
 def _render_declared_definitions(document: SesDocument) -> str:
     """Static column definitions: identity, declared business, then audit columns."""
 
-    lines = [
-        f"{_quote_part(column.name)} {column.type}{_nullability(column.not_null)}"
-        for column in document.effective_schema
-    ]
+    lines = [_column_definition(column) for column in document.effective_schema]
     return _leading_comma_list(lines, first_indent="        ", comma_indent="      ")
 
 
@@ -190,6 +187,27 @@ def _render_declared_pk(document: SesDocument, target: str) -> str:
 
 
 # --- shared rendering -------------------------------------------------------
+
+
+def _column_definition(column) -> str:
+    """One column's physical definition, identity included.
+
+    The identity column is the only one whose type is not simply what it
+    declares: the Warehouse generates its values, so the definition carries
+    ``identity`` and a load never names the column in an insert. Nullability
+    still comes from the column, as it does for every other definition here.
+
+    Bare ``identity``, with no seed and increment: Fabric does not let either be
+    chosen and refuses the parenthesised form even where it would spell Fabric's
+    own behaviour. So the values a load sees are the engine's to decide, and
+    nothing may assume they start at one or rise by one.
+    """
+
+    identity = " identity" if column.is_identity else ""
+    return (
+        f"{_quote_part(column.name)} {column.type}{identity}"
+        f"{_nullability(column.not_null)}"
+    )
 
 
 def _render_metadata_validation(document: SesDocument, temp_literal: str) -> str:
