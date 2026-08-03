@@ -48,10 +48,16 @@ if TYPE_CHECKING:
 #: The T-SQL load generator's version, and the Spark SQL one's. Separate because
 #: the two evolve independently: a change to the Spark DML has no bearing on what
 #: a Warehouse procedure should contain, and bumping one must not invalidate the
-#: other's artefacts. Each is a *signature salt*, never part of an identity —
-#: see :data:`weaver.etl.TSQL_ETL_TEMPLATE_VERSION`.
-TSQL_LOAD_VERSION = 2
-SPARK_LOAD_VERSION = 2
+#: other's artefacts. Each is a *signature salt*, never part of an identity.
+#:
+#: **Raise one whenever its generated output changes.** A signature is the
+#: source's plus this number, so an edit to a generator that leaves both alone
+#: produces different bytes with an unchanged signature — and incremental
+#: selection, correctly, rebuilds nothing. The estate then keeps running the
+#: previous generation's artefacts, which is the failure this exists to prevent
+#: and which cost a Fabric round trip to notice.
+TSQL_LOAD_VERSION = 3
+SPARK_LOAD_VERSION = 3
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
 #: Warehouse load is a stored procedure; a Lakehouse load is a file in the
