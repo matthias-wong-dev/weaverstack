@@ -276,6 +276,32 @@ def test_load_dry_run_reports_missing_primitives(session):
     ]
 
 
+def test_a_dry_run_never_reports_an_execution_status(session):
+    """A validated node has not run, and no word for a thing that ran fits it."""
+
+    from dataclasses import replace
+
+    from weaver.load_report import SUCCEEDED, VALIDATION_STATUSES
+
+    raw = session.inventories["Lakehouse/Raw_LH"]
+    session.inventories = {
+        **session.inventories,
+        "Lakehouse/Raw_LH": replace(
+            raw,
+            files=tuple(
+                name for name in raw.files if not name.endswith("Sales__Order.py")
+            ),
+        ),
+    }
+
+    report = dry_run(session)
+
+    statuses = {node.status for node in report.nodes}
+    assert statuses <= set(VALIDATION_STATUSES)
+    assert SUCCEEDED not in statuses
+    assert len(statuses) > 1
+
+
 def test_load_dry_run_blocks_descendants_of_invalid_nodes(session):
     from dataclasses import replace
 

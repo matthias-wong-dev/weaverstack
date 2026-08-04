@@ -318,6 +318,26 @@ def test_load_execution_hands_each_executed_step_to_its_observer(plan):
     assert all(report.executed for report in seen)
 
 
+def test_every_status_a_run_reports_is_one_the_vocabulary_declares(plan):
+    """The status list is a contract, not a comment.
+
+    It reaches a task log and a caller's report, so a status invented at a
+    branch would be a word nobody downstream has a meaning for.
+    """
+
+    from weaver.load_report import EXECUTION_STATUSES
+
+    reports = run(
+        plan,
+        SpyDispatcher({ORDER: RuntimeError("gone"), EXPORT: LoadResult(succeeded=True)}),
+        fault_tolerant=False,
+    )
+
+    assert {report.status for report in reports} <= set(EXECUTION_STATUSES)
+    # And more than one of them, or this would pass on a run that only succeeded.
+    assert len({report.status for report in reports}) > 1
+
+
 # --- importing what the installer deployed ------------------------------------
 #
 # The one part of dispatch that is not a fake here, because it is the one part
