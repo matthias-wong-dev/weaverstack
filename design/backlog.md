@@ -31,16 +31,31 @@
   `sys.modules`, which a second Lakehouse's tree could already have populated
   under the same name. One estate per process is the normal case and this is not
   it.
-- **Issuing a folder's staging directory is not robust on the OneLake mount.**
-  `new_staging_folder` does `shutil.rmtree` then `mkdir(exist_ok=False)`, which
-  is correct on a POSIX filesystem and fragile over `synfs`: OneLake deletes are
-  not immediately consistent, so a directory removed moments earlier can still
-  list entries and the `rmtree` fails with `OSError: [Errno 39] Directory not
-  empty`. Seen when two modules load the *same* folder object into one Lakehouse
-  in one run — the second load's reset meets the first's residue. It needs a
-  retry or a mount-aware reset; the primitive itself is proven, so this is about
-  how staging is issued rather than what a folder load does. Not reproducible
-  locally, where the two are the same directory and deletes are immediate.
+- **A mount outlives what is done to OneLake behind it.** Weaver reaches a
+  Lakehouse's Files area two ways — `abfss://` over DFS for storage work, and a
+  `synfs` mount for authored code that calls `open()` — and `weaver.lakehouse`
+  caches the mount in `_MOUNTS` for the life of the session, deliberately,
+  because Fabric refuses a second mount of the same root. So anything that
+  changes OneLake *outside* the mount is not necessarily visible through it: a
+  wipe over DFS, another session's write, a shortcut created by REST.
+
+  Reproducibly seen as `OSError: [Errno 39] Directory not empty` from
+  `new_staging_folder`, which resets a folder's staging with `shutil.rmtree` then
+  `mkdir(exist_ok=False)`. Correct on a POSIX filesystem; over a stale mount the
+  `rmdir` at the end of `rmtree` meets entries that are already gone on DFS.
+  Only appears when the same folder object is loaded twice into one Lakehouse in
+  one session with a DFS wipe between — the Fabric suite, where the Livy session
+  spans every module.
+
+  Two candidate repairs and they are not the same fix: make the staging reset
+  tolerant (empty rather than replace, and retry), or give the mount a way to be
+  invalidated when Weaver itself changes OneLake behind it. The second is the
+  real one, and it is not only a test concern — the same window exists for any
+  session that wipes and then loads.
+
+  Not reproducible locally, where storage *is* a filesystem, there is no mount,
+  and deletes are immediate. The folder primitive itself is proven
+  (`test_developer_load_primitive`); this is about how staging is issued.
 - **A build does not converge from "catalogue wiped, estate intact".** Losing the
   catalogue while the physical objects survive leaves every declared object
   looking *new*, so the planner emits a create for something already there and

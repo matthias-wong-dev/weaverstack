@@ -400,6 +400,16 @@ artefact the inventory cannot observe is disproved by every reconciliation. The
 Delta side had already been narrowed to the `_` schema rather than excluded; the
 Files side had not, and the asymmetry was invisible while nothing lived there.
 
+**A mount that outlived what was done to OneLake behind it.** Weaver reaches a
+Files area two ways — `abfss://` over DFS, and a `synfs` mount for authored code
+that calls `open()` — and the mount is cached for the life of the session because
+Fabric refuses a second one. A wipe over DFS is therefore not necessarily visible
+through the mount, and a folder load's staging reset met entries already gone.
+Nothing local can see this: storage there *is* a filesystem, there is no mount,
+and there is only one view of it. It is the sharpest example of the rule that a
+claim belongs at the cheapest layer that can answer it — and that "the same code
+runs either side" says nothing about the *storage* underneath.
+
 **A `snapshot=` keyword in a Livy body.** Not a coverage gap of the same kind —
 that code is a *string* sent to a Fabric session and executes only against the
 installed wheel, so no pure test could run it and no import check could see it. It
