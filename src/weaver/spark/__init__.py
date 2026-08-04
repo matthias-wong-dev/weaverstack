@@ -23,7 +23,7 @@ and ``catalog``, so the core stays importable without a JVM.
 
 from __future__ import annotations
 
-from .catalogue import SparkCatalogue
+from .catalogue import SparkCatalogue, drop_local_destination_catalogue
 from .destination import (
     LOCAL_SEPARATOR,
     SparkDestination,
@@ -38,6 +38,7 @@ __all__ = [
     "LOCAL_SEPARATOR",
     "SparkCatalogue",
     "SparkDestination",
+    "drop_local_destination_catalogue",
     "expand",
     "fabric_destination",
     "identifier",

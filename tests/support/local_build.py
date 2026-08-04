@@ -33,7 +33,6 @@ def _local_lakehouse_setup(root, extra=()):
     for item in (weaver, target, *(ItemRef(name) for name in extra)):
         store.make_directory(resolver.files_root(item))
         store.make_directory(resolver.tables_root(item))
-    store.make_directory(resolver.weaver_items_root)
     return workspace, weaver, target, resolver, store
 
 
@@ -61,6 +60,7 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     )
     destination = resolver.spark_destination(target)
     weaver_destination = resolver.spark_destination(weaver)
+    repository_root = Location(str(Path(root) / "repository"))
     from weaver import ItemRef as _ItemRef
 
     named_lakehouses = {
@@ -69,16 +69,16 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     }
 
     def install_repo() -> None:
-        destination = resolver.weaver_items_root
+        destination = repository_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
         _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
-        store.delete(resolver.weaver_items_root, recursive=True)
+        store.delete(repository_root, recursive=True)
 
     def generate(bundle_name: str = "buildtest"):
-        root_location = resolver.weaver_items_root
+        root_location = repository_root
         repository = parse_item_repository(root_location, store=store)
         control = LakehouseBinding(lakehouse=weaver)
         bindings = effective_item_bindings(
@@ -169,7 +169,8 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     try:
         yield BuildEnv(
             label="local", workspace=workspace, weaver=weaver, target=target,
-            resolver=resolver, store=store, generate_spark=spark,
+            resolver=resolver, store=store, repository_root=repository_root,
+            generate_spark=spark,
             install_repo=install_repo, remove_repo=remove_repo, generate=generate,
             install=install, run_query=query, run_columns=columns,
             seed_orphans=seed_orphans, run_schema_exists=schema_exists,
@@ -183,5 +184,4 @@ def _local_build_context(root, spark, weaver_repo_fixture):
                 spark.sql(
                     f"DROP SCHEMA IF EXISTS {place.qualified_schema(schema)} CASCADE"
                 )
-
 

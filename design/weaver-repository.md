@@ -1,21 +1,20 @@
-# Where the Weaver workspace declaration lives
+# Weaver repository sources
 
-A control-plane Lakehouse exposes one fixed declaration root:
+A Weaver repository has no mandatory workspace location. A build receives its
+source explicitly. Supported sources are a local checkout, a Fabric Notebook's
+Resources directory, or an accessible OneLake location. Remote trees are copied
+to driver-local temporary storage before static parsing.
 
-```text
-Control/Files/weaver_items/
-```
-
-One control plane holds one declaration. A Fabric workspace may hold several
-control-plane Lakehouses—for example, one per developer—and each may bind the
-same logical items differently.
+The control Lakehouse holds catalogue state and build transport, not authored
+repository state. The legacy `weaver push` utility may still copy a tree to
+`Files/weaver_items`, but build does not read that location implicitly.
 
 ## Item-owned layout
 
 The first directory is the item type and the second is the logical item name:
 
 ```text
-Files/weaver_items/
+repository/
 ├── Lakehouse/
 │   ├── Raw/
 │   │   ├── schemas/
@@ -105,6 +104,7 @@ From the CLI:
 
 ```bash
 weaver build \
+  ./estate \
   --bind Lakehouses/Raw_Dev=Lakehouse/Raw \
   --bind Warehouses/Reporting_Dev=Warehouse/Reporting \
   --workspace Analytics --environment Runtime \
@@ -112,8 +112,8 @@ weaver build \
 ```
 
 From Python inside the target environment,
-`build_uploaded_item_repository()` is the full application workflow. It copies
-`Files/weaver_items` once to a session-local temporary directory, parses it,
+`build_item_repository_source()` is the full source-neutral workflow. It copies
+a remote source once to a session-local temporary directory when required, parses it,
 reads target and catalogue state, reconciles, and then calls the narrower
 `build_item_repository()` planner/executor seam. The generated bundle contains
 only frozen outputs — every statement, every deployed file, every hash — and no

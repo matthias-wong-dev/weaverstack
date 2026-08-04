@@ -69,7 +69,7 @@ Use `--exists-ok` when the Lakehouse may already exist. It does not suppress
 invalid or incompatible catalogue structures. An ordinary build also recreates
 missing catalogue tables by classifying them as new and creating them strictly.
 
-## Push
+## Push (compatibility utility)
 
 Push validates the complete authored repository before replacing
 `Files/weaver_items/`:
@@ -81,7 +81,7 @@ weaver push ./estate --workspace-config examples/env.yml
 Push is whole-repository only. It does not build targets or mutate catalogue
 rows, and the local source folder name is not added as another remote level.
 `Lakehouse/_weaver` is package-owned and is composed in memory; it must not be
-authored or uploaded.
+authored or uploaded. Build does not consume this destination.
 
 ## Build
 
@@ -89,6 +89,7 @@ Bindings are physical-first:
 
 ```bash
 weaver build \
+  ./estate \
   --workspace-config examples/env.yml \
   --bind Lakehouses/Sales_Dev \
   --bind Warehouses/Reporting_Dev=Warehouse/Alternative
@@ -107,10 +108,12 @@ Unchanged objects receive no physical action; selected changes use an explicit
 drop followed by a strict create. `Prohibit Rebuild` protects an existing
 physical object while allowing its incoming catalogue metadata to advance.
 
-Fabric generation and installation run inside one Environment-backed Livy
-session. Local generation and installation run in-process against the emulator;
-the CLI creates one local Spark session and always stops it in `finally`.
-Warehouses remain Fabric-only.
+For a local CLI targeting Fabric, parsing and request validation happen first;
+one Environment-backed Livy session then returns authoritative build state,
+planning happens locally, and a completed archive is uploaded under
+`Files/cli/<execution-id>/` for one in-session install call. Native Fabric builds
+still prepare, plan, and install in-session. Local targets run in-process against
+the emulator. Warehouses remain Fabric-only.
 
 Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 `--bundle <name>` to choose its name.

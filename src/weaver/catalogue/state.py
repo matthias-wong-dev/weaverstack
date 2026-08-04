@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -74,8 +75,7 @@ class Catalogue:
             else MappingProxyType(dict(registered)),
         )
         # Defaulting to "every table this catalogue carries rows for" keeps a
-        # hand-built catalogue honest without making every caller state it: a
-        # claim is raisable against exactly the tables that are represented.
+        # hand-built catalogue honest without making every caller state it.
         object.__setattr__(
             self,
             "present_tables",
@@ -88,6 +88,56 @@ class Catalogue:
                     for table in tables
                 }
             ),
+        )
+
+    def to_mapping(self) -> dict[str, object]:
+        """A versioned JSON-safe representation for a remote state boundary."""
+
+        return {
+            "format_version": 1,
+            "items": [
+                {
+                    "item": str(item),
+                    "tables": {
+                        table: [
+                            {key: _encode_json_value(value) for key, value in row.items()}
+                            for row in rows
+                        ]
+                        for table, rows in sorted(tables.items())
+                    },
+                }
+                for item, tables in sorted(self.rows.items(), key=lambda pair: str(pair[0]))
+            ],
+            "present_tables": sorted(self.present_tables),
+        }
+
+    @classmethod
+    def from_mapping(cls, mapping) -> "Catalogue":
+        """Reconstruct catalogue state without querying a target locally."""
+
+        version = mapping.get("format_version")
+        if version != 1:
+            raise BuildError(
+                f"unsupported catalogue format_version {version!r}; expected 1"
+            )
+        rows = {
+            WeaverItemId.parse(entry["item"]): MappingProxyType(
+                {
+                    table: tuple(
+                        {
+                            key: _decode_json_value(value)
+                            for key, value in row.items()
+                        }
+                        for row in table_rows
+                    )
+                    for table, table_rows in entry.get("tables", {}).items()
+                }
+            )
+            for entry in mapping.get("items", ())
+        }
+        return cls(
+            rows=MappingProxyType(rows),
+            present_tables=frozenset(mapping.get("present_tables", ())),
         )
 
     # --- constructors ---------------------------------------------------------
@@ -341,6 +391,22 @@ class RegisteredDocument:
     #: When the build that last certified this object published it. ``None`` for
     #: a row written before epochs existed, which orders as older than any epoch.
     build_epoch: object = None
+
+
+def _encode_json_value(value):
+    if isinstance(value, datetime):
+        return {"$weaver_type": "datetime", "value": value.isoformat()}
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise BuildError(
+        f"catalogue state contains a non-JSON value: {type(value).__name__}"
+    )
+
+
+def _decode_json_value(value):
+    if isinstance(value, dict) and value.get("$weaver_type") == "datetime":
+        return datetime.fromisoformat(value["value"])
+    return value
 
 
 def _registered_documents(

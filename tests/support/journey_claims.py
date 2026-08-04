@@ -193,7 +193,7 @@ def _assert_installed(env, step) -> None:
 
     plan = step.bundle.plan
     assert plan.format_version == 1
-    assert plan.repository_name == "weaver_items"
+    assert plan.repository_name == env.repository_root.name
     assert {target.logical_item_name for target in plan.targets} == {"Sales", "_weaver"}
     assert plan.omitted_nodes == ()
 

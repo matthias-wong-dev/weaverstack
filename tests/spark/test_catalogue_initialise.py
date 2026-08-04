@@ -29,7 +29,7 @@ from weaver.catalogue import (
 )
 from weaver.catalogue.reader import read_installation, read_table
 from weaver.spark import SparkCatalogue, local_destination
-from weaver.initialise import INITIALISE_BUNDLE_NAME, initialise_weaver_lakehouse
+from weaver.initialise import initialise_weaver_lakehouse
 
 pytestmark = pytest.mark.spark
 
@@ -58,7 +58,6 @@ def _environment(root):
     resolver = LocalResolver(workspace)
     store.make_directory(resolver.files_root(ItemRef("Weaver")))
     store.make_directory(resolver.tables_root(ItemRef("Weaver")))
-    store.make_directory(resolver.weaver_items_root)
     return workspace, resolver, store
 
 
@@ -124,11 +123,12 @@ def test_initialisation_succeeds(initialised):
 def test_the_package_owned_item_is_not_written_into_authored_source(initialised):
     root = initialised.resolver.weaver_items_root
     assert not initialised.store.exists(root.join("Lakehouse", "_weaver"))
+    assert not initialised.store.exists(root)
 
 
-def test_the_bundle_is_kept_where_bundles_belong(initialised):
-    expected = initialised.resolver.build_bundle(INITIALISE_BUNDLE_NAME)
-    assert initialised.result.bundle.location.value == expected.value
+def test_the_bootstrap_bundle_is_driver_local_and_temporary(initialised):
+    assert initialised.result.plan.bundle_id
+    assert not initialised.store.exists(initialised.resolver.build_bundles_root)
 
 
 def test_every_catalogue_table_exists_and_matches_the_representation(initialised, spark):

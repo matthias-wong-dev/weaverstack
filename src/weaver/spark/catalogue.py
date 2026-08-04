@@ -213,3 +213,33 @@ def _is_missing_schema(exception: Exception) -> bool:
 
 def _escaped(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def drop_local_destination_catalogue(
+    spark: Any, destination: SparkDestination
+) -> tuple[str, ...]:
+    """Forget every namespace folded beneath one emulated Lakehouse.
+
+    Local CLI sessions use a persistent metastore so a later process can see
+    what ``initialise`` and ``build`` registered. A local wipe must therefore
+    clear catalogue registrations as well as the Fabric-shaped filesystem tree;
+    Fabric performs that bookkeeping itself when its Lakehouse storage is
+    emptied and never calls this emulator-only primitive.
+    """
+
+    if destination.namespace or not destination.schema_prefix:
+        raise InstallError("local catalogue cleanup needs a folded local destination")
+    rows = spark.sql("SHOW DATABASES").collect()
+    prefix = destination.schema_prefix.casefold()
+    schemas = []
+    for row in rows:
+        data = row.asDict() if hasattr(row, "asDict") else {}
+        name = data.get("namespace") or data.get("databaseName") or data.get("schemaName")
+        if name and str(name).casefold().startswith(prefix):
+            schemas.append(str(name))
+    statements = []
+    for schema in sorted(schemas, key=str.casefold):
+        statement = f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema[len(destination.schema_prefix):])} CASCADE"
+        spark.sql(statement)
+        statements.append(statement)
+    return tuple(statements)

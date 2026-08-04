@@ -11,13 +11,17 @@ from weaver.spark.session import local_delta_session
 
 
 class _Builder:
+    def __init__(self):
+        self.configured = {}
+
     def appName(self, _value):
         return self
 
     def master(self, _value):
         return self
 
-    def config(self, *_args):
+    def config(self, name, value):
+        self.configured[name] = value
         return self
 
 
@@ -62,3 +66,31 @@ def test_session_stops_and_environment_is_restored_after_failure(monkeypatch):
     assert session.stopped is True
     assert os.environ["JAVA_HOME"] == "/previous"
     assert "PYSPARK_PYTHON" not in os.environ
+
+
+def test_workspace_session_uses_a_persistent_workspace_scoped_metastore(
+    monkeypatch, tmp_path
+):
+    session = _Session()
+    builder = _Builder()
+    monkeypatch.setattr(
+        "weaver.spark.session.import_module",
+        lambda name: (
+            SimpleNamespace(
+                configure_spark_with_delta_pip=lambda _builder: SimpleNamespace(
+                    getOrCreate=lambda: session
+                )
+            )
+            if name == "delta"
+            else SimpleNamespace(SparkSession=SimpleNamespace(builder=builder))
+        ),
+    )
+    monkeypatch.setattr("weaver.spark.session.find_java_home", lambda: "/jdk")
+
+    with local_delta_session(tmp_path):
+        pass
+
+    assert builder.configured["spark.sql.catalogImplementation"] == "hive"
+    assert str(tmp_path / ".weaver" / "spark") in builder.configured[
+        "javax.jdo.option.ConnectionURL"
+    ]

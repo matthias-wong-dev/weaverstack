@@ -346,3 +346,41 @@ def test_existence_is_asked_of_the_qualified_name(fabric):
 def test_a_catalogue_without_a_session_is_refused_at_construction(fabric):
     with pytest.raises(InstallError, match="Play_Lakehouse_1"):
         SparkCatalogue(None, fabric)
+
+
+def test_local_wipe_drops_only_the_destination_folded_namespaces():
+    from weaver.spark import drop_local_destination_catalogue, local_destination
+
+    class Row:
+        def __init__(self, namespace):
+            self.namespace = namespace
+
+        def asDict(self):
+            return {"namespace": self.namespace}
+
+    class Result:
+        def collect(self):
+            return [
+                Row("play_lh__sales"),
+                Row("play_lh__inventory"),
+                Row("other_lh__sales"),
+            ]
+
+    class Spark:
+        def __init__(self):
+            self.statements = []
+
+        def sql(self, statement):
+            self.statements.append(statement)
+            return Result()
+
+    spark = Spark()
+    statements = drop_local_destination_catalogue(
+        spark, local_destination(item="Play_LH", tables_root="/tmp/Play_LH/Tables")
+    )
+
+    assert statements == (
+        "DROP SCHEMA IF EXISTS `play_lh__inventory` CASCADE",
+        "DROP SCHEMA IF EXISTS `play_lh__sales` CASCADE",
+    )
+    assert spark.statements == ["SHOW DATABASES", *statements]

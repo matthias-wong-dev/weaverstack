@@ -105,10 +105,18 @@ def test_confirmed_lakehouse_wipe_is_followed_by_unbind(monkeypatch):
         return {"targets": [], "logical_items": [], "statements": 0}
 
     monkeypatch.setattr("weaver.wipe_lakehouse", wipe)
+    monkeypatch.setattr(
+        cli,
+        "_run_local_wipe_catalogue",
+        lambda _workspace, lakehouses: calls.append(
+            ("catalogue", tuple(item.name for item in lakehouses))
+        ),
+    )
     monkeypatch.setattr(cli, "_run_unbind", unbind)
     assert main(["wipe", "--lakehouse", "Sales", "--workspace", "/tmp/local", "--yes"]) == 0
     assert calls == [
         ("wipe", "Sales", True),
+        ("catalogue", ("Sales",)),
         ("wipe", "Sales", False),
         ("unbind", ("Sales",), ()),
     ]
@@ -128,12 +136,22 @@ def test_empty_target_is_still_unbound(monkeypatch):
     calls = []
     monkeypatch.setattr(
         cli,
+        "_run_local_wipe_catalogue",
+        lambda _workspace, lakehouses: calls.append(
+            {"catalogue": [item.name for item in lakehouses]}
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
         "_run_unbind",
         lambda *_args, **kwargs: calls.append(kwargs)
         or {"targets": [], "logical_items": [], "statements": 0},
     )
     assert main(["wipe", "--lakehouse", "Sales", "--workspace", "/tmp/local"]) == 0
-    assert calls == [{"lakehouses": ["Sales"], "warehouses": []}]
+    assert calls == [
+        {"catalogue": ["Sales"]},
+        {"lakehouses": ["Sales"], "warehouses": []},
+    ]
 
 
 def test_warehouse_wipe_closes_executor_and_unbinds(monkeypatch):

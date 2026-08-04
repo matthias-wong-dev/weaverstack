@@ -30,7 +30,7 @@ A Weaver repository represents an entire Microsoft Fabric workspace.
 The repository is organised around **Weaver Items**, which are the logical declaration of Fabric Items.
 
 ```text
-Files/weaver_items/
+repository/
 ├── Lakehouse/
 │   ├── Raw/
 │   │   ├── schemas/
@@ -470,6 +470,7 @@ For example:
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouses/Raw
 ```
@@ -478,6 +479,7 @@ or
 
 ```bash
 weaver build \
+    ./estate \
     --workspace MyWorkspace \
     --environment Weaver \
     --weaver-lakehouse Weaver \
@@ -566,6 +568,7 @@ Each target is supplied using one or more bindings.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouses/Raw \
     --bind Lakehouses/Curated \
@@ -576,6 +579,7 @@ Where the logical and physical names differ, an explicit mapping may be supplied
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouses/Raw_DEV=Lakehouse/Raw \
     --bind Warehouses/Reporting_DEV=Warehouse/Reporting
@@ -633,6 +637,7 @@ The developer therefore uses a single command.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouses/Raw
 ```
@@ -645,6 +650,7 @@ A Build Bundle may optionally be retained as a deployment record.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouses/Raw \
     --bundle
@@ -656,6 +662,7 @@ A custom name may also be provided.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouses/Raw \
     --bundle release-2026-08
@@ -757,6 +764,7 @@ weaver wipe \
     --yes
 
 weaver build \
+    ./estate \
     --workspace-config workspace-dev.yml \
     --bind Lakehouses/Raw \
     --bind Lakehouses/Curated \
@@ -772,6 +780,7 @@ The normal workflow is simply:
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace-dev.yml \
     --bind Lakehouses/Raw \
     --bind Lakehouses/Curated \

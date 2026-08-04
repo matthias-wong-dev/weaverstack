@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zipfile
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,10 +12,12 @@ import pytest
 from weaver import ItemRef, LocalStore, Location
 from weaver.build_bundle import (
     InstallationEnvironment,
+    BuildState,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
     build_uploaded_item_repository,
+    build_item_repository_source,
     generate_item_build_bundle,
     install_bundle_archive,
     materialise_bundle_archive,
@@ -25,6 +28,7 @@ from weaver.errors import BuildError
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.build_bundle.prune import TargetInventory
+from weaver.build_bundle.prune import read_lakehouse_inventory
 from weaver.catalogue.state import Catalogue, Reconciliation
 
 from test_item_repository import _estate
@@ -155,6 +159,119 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
     assert set(remote.reads.values()) == {1}
     assert result.archive is None
     assert not any(path.endswith("plan.yml") for path in remote.reads)
+
+
+def test_explicit_local_source_does_not_use_the_target_store_for_repository_reads(
+    tmp_path, prepared_state
+):
+    root = Location(str(_estate(tmp_path)))
+    target_store = CountingStore()
+
+    result = build_item_repository_source(
+        root,
+        source_store=LocalStore(),
+        bindings=_bindings(),
+        environment=InstallationEnvironment(
+            store=target_store,
+            resolver=None,
+            executors=_executors(),
+        ),
+        control_lakehouse=_control(),
+    )
+
+    assert result.report.status == "succeeded"
+    assert target_store.reads == {}
+
+
+def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch):
+    repository = parse_item_repository(
+        Location(str(_estate(tmp_path))), store=LocalStore()
+    )
+    unknown = ItemBindings(
+        (
+            ItemBinding(
+                WeaverItemId.parse("Lakehouse/Missing"),
+                LakehouseBinding(ItemRef("Missing_Dev")),
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        "weaver.build_bundle.workflow.read_target_inventories",
+        lambda *_args, **_kwargs: pytest.fail("target state was contacted"),
+    )
+
+    with pytest.raises(BuildError, match="absent from the repository"):
+        build_item_repository_source(
+            Location(str(_estate(tmp_path))),
+            source_store=LocalStore(),
+            bindings=unknown,
+            environment=InstallationEnvironment(
+                store=LocalStore(), resolver=None, executors=_executors()
+            ),
+            control_lakehouse=_control(),
+        )
+
+
+def test_build_state_json_round_trip_preserves_epochs_and_inventory():
+    item = WeaverItemId.parse("Lakehouse/Raw")
+    epoch = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
+    state = BuildState(
+        catalogue=Catalogue(
+            {
+                item: {
+                    "Registry": (
+                        {
+                            "item_type": "Lakehouse",
+                            "item_name": "Raw",
+                            "schema_name": "Sales",
+                            "object_name": "Customer",
+                            "object_type": "table",
+                            "signature": "abc123",
+                            "build_epoch": epoch,
+                        },
+                    )
+                }
+            },
+            present_tables=frozenset({"Registry"}),
+        ),
+        target_inventories=_inventories(),
+    )
+
+    encoded = json.loads(json.dumps(state.to_mapping()))
+    restored = BuildState.from_mapping(encoded)
+
+    assert restored.to_mapping() == state.to_mapping()
+    assert restored.catalogue.registered[
+        next(iter(restored.catalogue.registered))
+    ].build_epoch == epoch
+
+
+def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
+    from weaver import LocalResolver, LocalWorkspace
+
+    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
+    resolver = LocalResolver(workspace)
+    store = LocalStore()
+    target = _bindings().entries[0].to_bound_target()
+    files = resolver.files_root(ItemRef("Raw_Dev"))
+    tables = resolver.tables_root(ItemRef("Raw_Dev"))
+    locations = (
+        files,
+        tables,
+        files / "cli",
+        files / "build_bundles",
+        files / "weaver_items",
+    )
+    for location in locations:
+        store.make_directory(location)
+
+    inventory = read_lakehouse_inventory(
+        target, resolver=resolver, store=store, spark=None
+    )
+
+    assert "cli" not in inventory.folder_schemas
+    assert "build_bundles" not in inventory.folder_schemas
+    assert "weaver_items" in inventory.folder_schemas
 
 
 def test_direct_build_can_upload_one_archive_after_install_without_rereading_source(

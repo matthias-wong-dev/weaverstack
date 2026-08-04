@@ -4,16 +4,33 @@ from __future__ import annotations
 
 import importlib
 import json
+from pathlib import Path
 
-from weaver import FabricWorkspace, ItemBindings, LocalWorkspace, parse_item_binding
+import pytest
+
+from weaver import (
+    FabricWorkspace,
+    ItemBindings,
+    ItemRef,
+    LakehouseBinding,
+    LocalStore,
+    LocalWorkspace,
+    Location,
+    effective_item_bindings,
+    parse_item_binding,
+    parse_item_repository,
+)
 from weaver_cli import main
 from weaver_cli.main import build_parser
+
+REPOSITORY = Path(__file__).parent / "fixtures" / "build-lakehouse-item"
 
 
 def test_build_parser_accepts_repeatable_physical_first_bindings():
     args = build_parser().parse_args(
         [
             "build",
+            str(REPOSITORY),
             "--bind",
             "Lakehouses/Raw_Dev=Lakehouse/Raw",
             "--bind",
@@ -38,6 +55,7 @@ def test_build_parser_does_not_require_a_persisted_bundle_record():
     args = build_parser().parse_args(
         [
             "build",
+            str(REPOSITORY),
             "--bind",
             "Lakehouses/Raw_Dev=Lakehouse/Raw",
             "--workspace",
@@ -51,6 +69,7 @@ def test_build_parser_accepts_timestamped_bundle_record_without_name():
     args = build_parser().parse_args(
         [
             "build",
+            str(REPOSITORY),
             "--bind",
             "Lakehouses/Raw_Dev=Lakehouse/Raw",
             "--bundle",
@@ -97,6 +116,7 @@ def test_build_handler_adds_implicit_weaver_binding_and_emits_json(monkeypatch, 
     assert main(
         [
             "build",
+            str(REPOSITORY),
             "--bind",
             "Lakehouses/Raw_Dev=Lakehouse/Raw",
             "--workspace",
@@ -138,6 +158,7 @@ def test_local_build_routes_in_process(monkeypatch):
     assert main(
         [
             "build",
+            str(REPOSITORY),
             "--bind",
             "Lakehouses/Raw_Dev=Lakehouse/Raw",
             "--workspace",
@@ -163,6 +184,7 @@ def test_fabric_build_requires_environment(monkeypatch, capsys):
     assert main(
         [
             "build",
+            str(REPOSITORY),
             "--bind",
             "Lakehouses/Raw_Dev=Lakehouse/Raw",
             "--workspace",
@@ -172,12 +194,105 @@ def test_fabric_build_requires_environment(monkeypatch, capsys):
     assert "requires --environment" in capsys.readouterr().err
 
 
-def test_fabric_adapter_submits_complete_uploaded_workflow(monkeypatch):
+def test_invalid_repository_fails_before_fabric_execution(monkeypatch, capsys, tmp_path):
     cli = importlib.import_module("weaver_cli.main")
-    captured = {}
+    invalid = tmp_path / "repository"
+    invalid.mkdir()
+    (invalid / "invalid.txt").write_text("not a Weaver item", encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "_resolve_workspace",
+        lambda _args: FabricWorkspace(
+            workspace="Analytics", weaver_lakehouse="Control", environment="Runtime"
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_fabric_item_build",
+        lambda *_args, **_kwargs: pytest.fail("Fabric execution was contacted"),
+    )
+
+    assert main(
+        [
+            "build",
+            str(invalid),
+            "--bind",
+            "Lakehouses/Raw_Dev=Lakehouse/Raw",
+            "--workspace",
+            "Analytics",
+            "--weaver-lakehouse",
+            "Control",
+        ]
+    ) == 1
+    assert "invalid.txt" in capsys.readouterr().err
+
+
+def _fabric_inputs():
+    repository = parse_item_repository(Location(str(REPOSITORY)), store=LocalStore())
+    bindings = effective_item_bindings(
+        ItemBindings((parse_item_binding("Lakehouses/Raw_Dev=Lakehouse/Raw"),)),
+        weaver_lakehouse="Control",
+    )
+    return repository, bindings
+
+
+class _Transport:
+    def __init__(self):
+        self.files = {}
+        self.directories = []
+        self.deleted = []
+
+    def make_directory(self, location):
+        self.directories.append(location.value)
+
+    def write(self, location, data):
+        self.files[location.value] = data
+
+    def delete(self, location, *, recursive=False):
+        self.deleted.append((location.value, recursive))
+
+
+class _Resolver:
+    cli_root = Location("https://onelake/Control/Files/cli")
+    build_bundles_root = Location("https://onelake/Control/Files/build_bundles")
+
+    def cli_execution(self, execution_id):
+        return self.cli_root / execution_id
+
+    def cli_bundle(self, execution_id):
+        return self.cli_execution(execution_id) / "install.weaver.zip"
+
+    def build_bundle(self, name):
+        return Location(f"https://onelake/Control/Files/build_bundles/{name}")
+
+
+def _state_mapping(bindings):
+    from weaver.build_bundle import BuildState
+    from weaver.build_bundle.prune import TargetInventory
+    from weaver.catalogue.state import Catalogue
+
+    return BuildState(
+        catalogue=Catalogue({}),
+        target_inventories={
+            binding.item: TargetInventory(
+                target_id=binding.to_bound_target().id,
+                kind=binding.to_bound_target().kind,
+                target_name=binding.to_bound_target().name,
+            )
+            for binding in bindings.entries
+        },
+    ).to_mapping()
+
+
+def test_fabric_adapter_reads_state_then_installs_uploaded_archive(monkeypatch):
+    cli = importlib.import_module("weaver_cli.main")
+    repository, bindings = _fabric_inputs()
+    captured = {"bodies": []}
+    transport = _Transport()
 
     class _Result:
-        payload = {"status": "succeeded"}
+        def __init__(self, payload):
+            self.payload = payload
 
     class _Session:
         @classmethod
@@ -193,26 +308,38 @@ def test_fabric_adapter_submits_complete_uploaded_workflow(monkeypatch):
 
         def run(self, body):
             compile(body, "<fabric-build>", "exec")
-            captured["body"] = body
-            return _Result()
+            captured["bodies"].append(body)
+            if len(captured["bodies"]) == 1:
+                return _Result(_state_mapping(bindings))
+            return _Result(
+                {"bundle_id": "ignored", "status": "succeeded", "sequences": []}
+            )
 
     monkeypatch.setattr("weaver.fabric.LivySession", _Session)
     monkeypatch.setattr("weaver.fabric.list_workspace_livy_sessions", lambda *a, **k: ())
+    monkeypatch.setattr("weaver.resolution.resolver_for", lambda _workspace: _Resolver())
+    monkeypatch.setattr(cli, "_desktop_store", lambda _workspace: transport)
     workspace = FabricWorkspace(
         workspace="Analytics", weaver_lakehouse="Control", environment="Runtime"
     )
     result = cli._run_fabric_item_build(
         workspace,
-        bindings=ItemBindings(
-            (parse_item_binding("Lakehouses/Raw_Dev=Lakehouse/Raw"),)
-        ),
+        repository=repository,
+        source_store=LocalStore(),
+        bindings=bindings,
+        control_lakehouse=LakehouseBinding(ItemRef("Control")),
         bundle_name="estate-build",
+        source=str(REPOSITORY),
     )
 
     assert result["status"] == "succeeded"
-    assert "build_uploaded_item_repository" in captured["body"]
-    assert "generate_item_build_bundle" not in captured["body"]
-    assert "resolver.build_bundle(record_name)" in captured["body"]
+    assert len(captured["bodies"]) == 2
+    assert "read_build_state" in captured["bodies"][0]
+    assert "install_bundle_archive" in captured["bodies"][1]
+    assert all("parse_item_repository" not in body for body in captured["bodies"])
+    assert any(path.endswith("/install.weaver.zip") for path in transport.files)
+    assert result["archive"].endswith("/estate-build.weaver.zip")
+    assert transport.deleted and transport.deleted[0][1] is True
 
 
 def test_fabric_adapter_reports_queued_session_before_starting(monkeypatch, capsys):
@@ -232,8 +359,12 @@ def test_fabric_adapter_reports_queued_session_before_starting(monkeypatch, caps
         ),
     )
 
+    repository, bindings = _fabric_inputs()
+    transport = _Transport()
+
     class _Result:
-        payload = {"status": "succeeded"}
+        def __init__(self, payload):
+            self.payload = payload
 
     class _Session:
         @classmethod
@@ -248,7 +379,13 @@ def test_fabric_adapter_reports_queued_session_before_starting(monkeypatch, caps
             return False
 
         def run(self, _body):
-            return _Result()
+            if events.count("run") == 0:
+                events.append("run")
+                return _Result(_state_mapping(bindings))
+            events.append("run")
+            return _Result(
+                {"bundle_id": "ignored", "status": "succeeded", "sequences": []}
+            )
 
     def inspect(*_args, **_kwargs):
         events.append("inspect")
@@ -256,16 +393,20 @@ def test_fabric_adapter_reports_queued_session_before_starting(monkeypatch, caps
 
     monkeypatch.setattr("weaver.fabric.LivySession", _Session)
     monkeypatch.setattr("weaver.fabric.list_workspace_livy_sessions", inspect)
+    monkeypatch.setattr("weaver.resolution.resolver_for", lambda _workspace: _Resolver())
+    monkeypatch.setattr(cli, "_desktop_store", lambda _workspace: transport)
     workspace = FabricWorkspace(
         workspace="Analytics", weaver_lakehouse="Control", environment="Runtime"
     )
     cli._run_fabric_item_build(
         workspace,
-        bindings=ItemBindings(
-            (parse_item_binding("Lakehouses/Raw_Dev=Lakehouse/Raw"),)
-        ),
+        repository=repository,
+        source_store=LocalStore(),
+        bindings=bindings,
+        control_lakehouse=LakehouseBinding(ItemRef("Control")),
         bundle_name=None,
+        source=str(REPOSITORY),
     )
 
-    assert events == ["inspect", "start"]
+    assert events == ["inspect", "start", "run", "run"]
     assert "Sales: session 7 (Scheduled/Queued/not_started)" in capsys.readouterr().err

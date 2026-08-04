@@ -5,7 +5,7 @@ name. Everything below belongs to exactly one item.
 
 ::
 
-    Files/weaver_items/
+    repository/
     ├── Lakehouse/
     │   └── Raw/
     │       ├── schemas/Sales.yml
@@ -21,7 +21,7 @@ name. Everything below belongs to exactly one item.
 
 The owning item chooses the SQL dialect, so no document carries one. Reading
 goes through a :class:`~weaver.store.Store`, so the same reader serves a local
-checkout and a declaration installed in the Weaver Lakehouse.
+checkout, Notebook Resources, and an accessible OneLake source.
 """
 
 from __future__ import annotations

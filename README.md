@@ -51,13 +51,12 @@ One Workspace configuration can abbreviate the full desktop lifecycle:
 ```bash
 weaver install     --workspace-config workspace.yml
 weaver initialise  --workspace-config workspace.yml --exists-ok
-weaver push ./estate --workspace-config workspace.yml
-weaver build --workspace-config workspace.yml --bind Lakehouses/Sales_Dev
+weaver build ./estate --workspace-config workspace.yml --bind Lakehouses/Sales_Dev
 ```
 
 The same commands work against a local folder with `--workspace-type local`,
 except Warehouse work, which remains Fabric-only. See
-[CLI usage](design/cli-usage.md) for push, physical-first bindings, wipe and
+[CLI usage](design/cli-usage.md) for repository sources, physical-first bindings, wipe and
 unbind.
 
 ## Documentation

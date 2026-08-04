@@ -3,9 +3,8 @@
 One repository exercising every object form Weaver builds and loads, so the
 whole chain can be read in one place:
 
-The pushable repository is `repository/`; this README sits beside it rather than
-inside it, because a repository root holds nothing but `Lakehouse/` and
-`Warehouse/`.
+The buildable repository is `repository/`; this README sits beside it because a
+repository root contains only `Lakehouse/` and `Warehouse/`.
 
 ```text
 Lakehouse/Sales
@@ -58,16 +57,35 @@ no load ever inserts into the column. The values are Fabric's to choose — not
 consecutive, not ordered — so nothing may read sequence into them. A Delta table
 cannot declare one, because no Delta version Weaver runs on generates them.
 
-## Building it
+## Build it locally with the exact CLI
 
-Bind the logical items to physical ones:
+The local emulator has Lakehouses but no Warehouse SQL engine, so bind the Sales
+Lakehouse item. These commands use only the checked-in example repository:
 
 ```bash
-weaver push examples/sales-estate/repository --workspace <workspace> --weaver-lakehouse <control>
+demo_root="$(mktemp -d)"
+weaver initialise --exists-ok \
+  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
+weaver build examples/sales-estate/repository \
+  --bind Lakehouses/Play_LH=Lakehouse/Sales \
+  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
+weaver wipe --lakehouse Play_LH --yes \
+  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
 ```
 
+## Build it in Fabric from the desktop
+
+The same explicit repository builds both logical items into the named Play
+destinations. Source stays on the desktop: the CLI reads Fabric state, plans
+locally, and submits the completed build bundle for execution inside Fabric.
+
 ```bash
-weaver build --bind <lakehouse>=Sales --bind <warehouse>=Reporting --workspace <workspace> --weaver-lakehouse <control> --environment <environment>
+weaver build examples/sales-estate/repository \
+  --bind Lakehouses/Play_LH=Lakehouse/Sales \
+  --bind Warehouses/Play_WH=Warehouse/Reporting \
+  --workspace PYTEST_WORKSPACE \
+  --weaver-lakehouse Play_Weaver \
+  --environment weaver
 ```
 
 ## Loading it

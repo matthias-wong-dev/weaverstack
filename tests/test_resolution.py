@@ -113,6 +113,13 @@ def test_control_tables_live_under_the_weaver_lakehouse(resolver):
     assert resolver.control_tables_root.value == "/srv/.local/Weaver/Tables"
 
 
+def test_cli_handover_is_isolated_by_execution(resolver):
+    assert resolver.cli_root.value == "/srv/.local/Weaver/Files/cli"
+    assert resolver.cli_bundle("abc123").value == (
+        "/srv/.local/Weaver/Files/cli/abc123/install.weaver.zip"
+    )
+
+
 def test_the_weaver_lakehouse_is_just_another_item(resolver):
     assert resolver.weaver_lakehouse == resolver.lakehouse(ItemRef("Weaver"))
 
