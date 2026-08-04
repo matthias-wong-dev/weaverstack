@@ -43,6 +43,7 @@ from factories import (
     LOAD_PRODUCER,
     LOAD_PRODUCER_TARGET,
     alias_declaration,
+    folder_document,
     installed_catalogue,
     item_bindings,
     lakehouse_table,
@@ -152,6 +153,68 @@ def test_load_dag_orders_direct_dependencies(estate):
         "load:Lakehouse/Raw_LH/Sales.Order",
         "load:Lakehouse/Raw_LH/Sales.Daily",
     ) in dag.edges
+
+
+def test_load_dag_resolves_a_python_import_as_a_dependency(tmp_path):
+    """A Python object declares its dependencies by importing them.
+
+    And the catalogue records a dependency *exactly as its author wrote it* — so
+    for a Python object the stored reference is an import path, ``Files.X__Y``,
+    not a ``Schema.Object`` name. Reversing the graph means reapplying the rule
+    that turned one into an identity.
+
+    Worth its own test because the shape is easy to miss from a fixture: a
+    repository whose dependencies are all declared in SQL never produces one, and
+    an orchestrator that silently dropped these would build a graph with the
+    right nodes and no edges between them.
+    """
+
+    for relative, text in {
+        f"{LOAD_PRODUCER}/schemas/Sales.yml": schema_document("Sales"),
+        f"{LOAD_PRODUCER}/Files/Sales__Drop.py": folder_document("Sales.Drop"),
+        f"{LOAD_PRODUCER}/Sales__Customer.py": '''\
+"""
+Table ID: Sales.Customer
+
+Description: Customers, read from the files the folder delivers.
+
+Lineage: $Files/Sales.Drop
+
+Primary key: CustomerId
+
+Schema:
+  CustomerId: string
+"""
+from Files.Sales__Drop import Sales__Drop
+
+from weaver import Table
+
+
+class Sales__Customer(Table):
+    def read(self):
+        return self.spark.read.csv(Sales__Drop(self).path()), None
+''',
+    }.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    repository = parse_item_repository(Location(str(tmp_path)))
+    catalogue = installed_catalogue(
+        repository, item_bindings((LOAD_PRODUCER, LOAD_PRODUCER_TARGET))
+    )
+
+    # The stored reference really is the import, not a two-part object name.
+    estate = InstalledEstate.from_catalogue(catalogue)
+    assert [edge.reference for edge in estate.dependencies] == ["Files.Sales__Drop"]
+
+    dag = load_dag(estate, targets=(RAW,))
+    assert dag.edges == (
+        ("load:Lakehouse/Raw_LH/Sales.Drop", "load:Lakehouse/Raw_LH/Sales.Customer"),
+    )
 
 
 def test_load_dag_crosses_items_through_aliases(estate):
