@@ -44,6 +44,30 @@ TARGET_LAKEHOUSE = "Sales_LH"
 LAKEHOUSE_SQL = Path(__file__).parent / "fixtures" / "local-lakehouse"
 
 
+def pytest_collection_modifyitems(items):
+    """Make Fabric place and Weaver position a collection-time invariant."""
+
+    errors = []
+    fabric_root = Path(__file__).parent / "fabric"
+    for item in items:
+        path = Path(str(item.path))
+        if path.parent != fabric_root or not path.name.startswith("test_"):
+            continue
+
+        marks = {mark.name for mark in item.iter_markers()}
+        positions = marks & {"remote", "hosted"}
+        if "fabric" not in marks:
+            errors.append(f"{item.nodeid}: missing fabric marker")
+        if len(positions) != 1:
+            errors.append(
+                f"{item.nodeid}: expected exactly one Weaver position "
+                f"(remote or hosted), got {sorted(positions)}"
+            )
+
+    if errors:
+        raise pytest.UsageError("invalid Fabric test markers:\n" + "\n".join(errors))
+
+
 def _sql_statements(name: str, tables_root: str) -> tuple[str, ...]:
     """The saved Spark SQL fixture, rendered for one explicit Tables root."""
 

@@ -16,6 +16,8 @@ from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.journey_claims import drive
 
 pytestmark = [
+    pytest.mark.fabric,
+    pytest.mark.hosted,
     pytest.mark.full_integration,
     pytest.mark.parametrize(
         "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True

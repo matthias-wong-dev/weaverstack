@@ -97,20 +97,22 @@ Every marker says *what a test needs*, and the one that matters most for day-to-
 work is whether a **wheel publish** is one of those things:
 
 ```bash
-pytest -m fabric            # real Fabric, driven from this checkout — no publish
-pytest -m published_weaver  # the installed package is the subject
+pytest -m fabric            # every test against a real Fabric workspace
+pytest -m "fabric and remote" # Weaver runs from this checkout — no publish
+pytest -m "fabric and hosted" # the installed package is the subject
 pytest -m full_integration  # the Fabric lifecycle journey
-pytest -m provisioning      # Fabric creating and deleting items
+pytest -m provision         # Fabric creating and deleting items
 ```
 
-`fabric` versus `published_weaver` is about **what executes**, not about whether
-Livy is involved. Creating a OneLake shortcut is a REST call, refreshing an
+Every Fabric test carries `fabric` and exactly one position. `remote` versus
+`hosted` is about **where Weaver runs**, not about whether Livy is involved.
+Creating a OneLake shortcut is a REST call, refreshing an
 endpoint is another, wiping a Lakehouse is directory removal, and a Warehouse is
 reached over TDS — all of which work perfectly well from this checkout against a
-real workspace. Even a Spark body is `fabric` if it does not import Weaver, which
+real workspace. Even a Spark body is `remote` if it does not import Weaver, which
 is why `LivySession.for_workspace` takes `require_weaver`.
 
-What earns `published_weaver` is being *about* the installed package: that it
+What earns `hosted` is being *about* the installed package: that it
 acquires its own capabilities from the session's identity, that the Environment
 carries it, that it bootstraps its own catalogue. Those are proven once, per
 capability, in `tests/fabric/test_published_weaver.py` — so no feature has to
@@ -135,8 +137,8 @@ and a scheduled job contend for the same slot.
 
 ## Install Weaver when you want to test the installed Weaver
 
-Only two tiers need it — `published_weaver` and `full_integration` — and they are
-the ones whose subject *is* the installed package. `pytest -m fabric` needs no
+The hosted position needs it, including the Fabric lifecycle journey, because
+its subject *is* the installed package. `pytest -m "fabric and remote"` needs no
 publish at all, which is the point: a five-minute publish should not sit between
 you and finding out a REST request body is wrong.
 
@@ -160,11 +162,11 @@ Capacity is billed while it runs, so turn it on, work, turn it off.
 weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
 weaver capacity status  --resource-group <rg> --capacity-name <capacity>
 
-.venv/bin/python -m pytest -m fabric            # no publish needed
+.venv/bin/python -m pytest -m "fabric and remote" # no publish needed
 
 # and, when the installed package is what you want to exercise:
 weaver install --workspace <workspace> --environment weaver
-.venv/bin/python -m pytest -m published_weaver
+.venv/bin/python -m pytest -m "fabric and hosted"
 .venv/bin/python -m pytest -m full_integration
 
 weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
@@ -324,9 +326,10 @@ Two rules keep the cost down and the setup in one place:
   `fabric_build_env` only where a test genuinely needs a fresh target, as the
   prune and failure-path cases in `test_build_bundle.py` do.
 
-`lakehouse_environments` (also in `build_envs.py`) is the marker that runs one
-body against both Spark transports, so `-m spark` and `-m fabric` each select
-their half.
+Local Spark and Fabric keep separate test modules and fixtures. They may share a
+claim helper or declaration fixture, but no test body is parametrised across the
+two transports: each proves only the engine or deployment facts its transport
+can honestly answer.
 
 ### `weaver install` is a precondition of two tiers, not of the suite
 
@@ -335,17 +338,17 @@ working on this codebase: a five-minute publish stood between a developer and
 finding out a REST body was malformed.
 
 **A tier that runs the installed package tests the wheel that was last published,
-not your working tree.** That applies to `published_weaver` and
-`full_integration`, and for them it is the whole point — what is under test is
-Weaver-on-Fabric doing the job.
+not your working tree.** That applies to `fabric and hosted`, including the
+Fabric `full_integration` journey, and for it the whole point is that
+Weaver-on-Fabric is doing the job.
 
-It does not apply to `-m fabric`, which drives real Fabric from this checkout.
+It does not apply to `-m "fabric and remote"`, which drives real Fabric from this checkout.
 The bundle is generated here, in pure Python, so the actions that run are provably
 the ones the build produces; then only the part that must be remote is run — an
 action through `execute_action`, a wipe, a REST call. A change to Weaver Python
 is exercised there immediately, with no publish.
 
-The distinction to hold on to is **what executes**, not whether Livy is involved.
+The distinction to hold on to is **where Weaver runs**, not whether Livy is involved.
 A Spark body that does not import Weaver needs a session, not a published
 package.
 
@@ -355,8 +358,8 @@ package.
 |---|---|---|
 | core | `pytest` | nothing — under twenty seconds |
 | local Spark | `pytest -m spark` | a JDK and the `[spark]` extra |
-| Fabric | `pytest -m fabric` | `az login`, a workspace, a running capacity |
-| installed Weaver | `pytest -m published_weaver` | the above **and** `weaver install` |
+| Fabric, remote | `pytest -m "fabric and remote"` | `az login`, a workspace, a running capacity |
+| Fabric, hosted | `pytest -m "fabric and hosted"` | the above **and** `weaver install` |
 | the journey | `pytest -m full_integration` | the above |
 
 The default run excludes every optional tier, so a contributor with neither a JVM

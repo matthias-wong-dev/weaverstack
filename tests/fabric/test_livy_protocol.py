@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.fabric
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 
 def test_a_failing_statement_reports_its_error(livy_session):

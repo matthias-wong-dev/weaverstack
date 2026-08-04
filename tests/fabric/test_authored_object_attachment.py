@@ -13,7 +13,7 @@ import pytest
 
 from weaver import ItemRef
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 
 def test_an_object_resolves_the_lakehouse_the_session_attached(
@@ -63,4 +63,7 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
     assert payload["inferred"] == expected_root
     assert payload["table_path"] == f"{expected_root}/Tables/Sales/Order"
     assert payload["folder_path"] == f"{expected_root}/Files/Sales/OrderExport"
-    assert payload["staging_folder"] == payload["folder_path"] + "_Staging"
+    assert payload["staging_folder"].startswith("/synfs/notebook/")
+    assert payload["staging_folder"].endswith(
+        "/Files/Sales/OrderExport_Staging"
+    )

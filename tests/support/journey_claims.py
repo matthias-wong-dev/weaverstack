@@ -264,12 +264,14 @@ def _assert_authored_objects_reach_the_build(env) -> None:
     } | AUDIT
     assert reached["empty_columns"] == reached["order_columns"]
 
-    # No mount anywhere in it: the target Lakehouse is not the attached one on
-    # Fabric, and a folder still resolves — the point of addressing it through
-    # the Lakehouse's own root.
+    # Object identity resolves through the Lakehouse's own root. Staging access
+    # is transport-specific: a local path in the emulator and a session mount in
+    # Fabric, both naming the same Files-relative object.
     assert reached["folder_path"] == reached["resolved_folder_path"]
-    assert reached["staging_folder"] == f"{reached['folder_path']}_Staging"
-    assert reached["staging_folder"] == reached["resolved_staging_path"]
+    assert reached["staging_folder"].endswith("/Files/Raw/CustomerCsv_Staging")
+    assert reached["resolved_staging_path"].endswith(
+        "/Files/Raw/CustomerCsv_Staging"
+    )
 
 
 def _assert_unchanged(env, step) -> None:

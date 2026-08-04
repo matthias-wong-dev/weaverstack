@@ -451,11 +451,3 @@ def _install_estate(env) -> InstalledEstate:
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
     return InstalledEstate(env=env, bundle=bundle)
-
-
-#: No transport marks, deliberately — unlike every other parametrised estate here.
-#: The journey answers to `full_integration` alone, so it is opted into by name
-#: and never swept up by `-m spark` or `-m fabric`. Both transports run when it is
-#: asked for, because the composition proof is worth having on both; `-k local` or
-#: `-k fabric` narrows it. Each param still skips itself when its prerequisite is
-#: missing, so asking for the journey without a JDK or a workspace says so.

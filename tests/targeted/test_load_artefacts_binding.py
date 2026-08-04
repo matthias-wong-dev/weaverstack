@@ -1,4 +1,4 @@
-"""What a repository's load layer owns, and how it is selected.
+"""What a repository's load layer owns, and how it is physically bound.
 
 `weaver.etl` answers one question — given this source, which load artefacts
 exist, where do they go, and what is each one signed by — and everything

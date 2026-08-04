@@ -9,7 +9,7 @@ at all. Every name is still overridable (`WEAVER_FABRIC_WORKSPACE`,
 `WEAVER_PYTEST_<ROLE>`) for a tenant that arranges its items differently.
 
 Items are found rather than made, and emptied rather than re-created. The
-lifecycle tests that do create and delete carry their own `provisioning` marker.
+lifecycle tests that do create and delete carry their own `provision` marker.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ def fabric_client(fabric_workspace_item):
 def _disposable_name(role: str) -> str:
     """A name no human would have chosen, so cleanup is unambiguous.
 
-    Still used by the ``provisioning`` tests, whose subject *is* creating and
+    Still used by the ``provision`` tests, whose subject *is* creating and
     deleting items.
     """
 
@@ -548,6 +548,167 @@ def clean_disposable_warehouse(disposable_warehouse):
     )
 
     yield disposable_warehouse
+
+
+@dataclass(frozen=True)
+class WarehousePrimitiveEstate:
+    """One real Warehouse build shared by its action, shape and inventory claims."""
+
+    warehouse: Any
+    repository: Any
+    run: Callable[..., list[Any]]
+    target: Any
+
+    def columns(self, schema: str, name: str) -> dict[str, Any]:
+        rows = self.warehouse.executor.query(
+            f"""
+            select columns.name as column_name,
+                   types.name as type_name,
+                   columns.is_nullable as is_nullable,
+                   columns.is_identity as is_identity
+            from sys.columns as columns
+            join sys.types as types on types.user_type_id = columns.user_type_id
+            where columns.object_id = object_id(N'{schema}.{name}')
+            """
+        )
+        return {str(row["column_name"]).casefold(): row for row in rows}
+
+
+@pytest.fixture(scope="session")
+def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
+    """Build the Warehouse primitive estate once for three claim modules.
+
+    These tests used to share a module-scoped estate in one mixed-claim module.
+    The naming architecture requires separate modules, but a filing decision
+    must not triple the real Fabric build. Session scope preserves the one-build
+    cost; the modules are named together and leave the declared estate intact.
+    """
+
+    from factories import (
+        bound_target,
+        item_id,
+        registered_document,
+        single_document_repository,
+        target_inventory,
+        warehouse_table,
+        warehouse_view,
+    )
+
+    from weaver import ItemRef, wipe_sql_target
+    from weaver.build_bundle import execute_action, plan_item_build
+    from weaver.build_bundle.executors.base import (
+        InstallationContext,
+        ResolvedTarget,
+    )
+
+    wipe_sql_target(
+        disposable_warehouse.target,
+        disposable_warehouse.workspace,
+        sql=disposable_warehouse.executor,
+    )
+    target = ResolvedTarget(
+        bound=bound_target(
+            id="target-1",
+            kind="warehouse",
+            item_id=disposable_warehouse.item.name,
+            logical_item_name="Reporting",
+            logical_item_type="Warehouse",
+        ),
+        lakehouse=ItemRef(disposable_warehouse.item.name),
+        location=None,
+        destination=None,
+    )
+
+    def run(repository, *, inventory=None, rebuild=False, build=True):
+        identity = item_id("Warehouse/Reporting")
+        selected = {
+            key for key in repository.source_documents if key.item == identity
+        }
+        planned = plan_item_build(
+            repository,
+            item=identity,
+            target=target.bound,
+            inventory=(
+                inventory
+                if inventory is not None
+                else target_inventory(
+                    target_id="target-1",
+                    kind="warehouse",
+                    target_name=disposable_warehouse.item.name,
+                )
+            ),
+            target_by_item={identity: target.bound},
+            selected_documents=selected,
+            selected_aliases=set(),
+            selected_for_drop=set(selected) if rebuild else set(),
+            selected_for_build=selected if build else set(),
+            registered=(
+                {key: registered_document(key) for key in selected}
+                if rebuild
+                else {}
+            ),
+        )
+        context = InstallationContext(
+            spark=None,
+            resolver=None,
+            store=None,
+            target=target,
+            sql=disposable_warehouse.executor,
+            targets={target.bound.id: target},
+        )
+        results = []
+        for stage in planned.stages:
+            for batch in stage.batches:
+                for action in batch.actions:
+                    results.append(
+                        execute_action(
+                            action,
+                            (
+                                stage.payloads.get(action.payload)
+                                if action.payload
+                                else None
+                            ),
+                            context=context,
+                        )
+                    )
+        return results
+
+    root = tmp_path_factory.mktemp("warehouse-primitive-estate")
+    repository = single_document_repository(
+        root / "repo",
+        item="Warehouse/Reporting",
+        documents={
+            "DWG.Customer.sql": warehouse_table(
+                "DWG.Customer",
+                select=(
+                    "select cast(1 as int) as CustomerId, "
+                    "cast('a' as varchar(50)) as CustomerName, "
+                    "cast(1.5 as decimal(10,2)) as Score"
+                ),
+            ),
+            "DWG.ActiveCustomer.sql": warehouse_view(
+                "DWG.ActiveCustomer",
+                select="select CustomerId from [DWG].[Customer]",
+                depends_on="DWG.Customer",
+            ),
+            "DWG.CustomerDim.sql": warehouse_table(
+                "DWG.CustomerDim",
+                select="select CustomerId, CustomerName from [DWG].[Customer]",
+                primary_key="CustomerId",
+                identity="CustomerKey",
+            ),
+        },
+    )
+    results = run(repository)
+    failures = {r.action_id: r.error_message for r in results if r.status == "failed"}
+    assert not failures, failures
+
+    return WarehousePrimitiveEstate(
+        warehouse=disposable_warehouse,
+        repository=repository,
+        run=run,
+        target=target,
+    )
 
 # --- one populated lifecycle, on either workspace --------------------------------
 

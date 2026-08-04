@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.fabric
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 
 def test_a_wipe_clears_both_onelake_areas(

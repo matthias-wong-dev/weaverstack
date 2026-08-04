@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-import pytest
-
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
@@ -91,15 +89,4 @@ CROSS_ITEM_ALIAS_FIXTURE = SesFixture(
         "Lakehouse/Raw": "Producer_LH",
         "Lakehouse/Curated": "Consumer_LH",
     },
-)
-
-#: Run one transport-neutral build test against both local Spark and Fabric. The
-#: body drives a ``BuildEnv``; only the marks and fixture differ per environment.
-lakehouse_environments = pytest.mark.parametrize(
-    "build_env",
-    [
-        pytest.param("local_build_env", id="local", marks=pytest.mark.spark),
-        pytest.param("fabric_build_env", id="fabric", marks=pytest.mark.fabric),
-    ],
-    indirect=True,
 )

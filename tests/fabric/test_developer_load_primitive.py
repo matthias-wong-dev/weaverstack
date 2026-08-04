@@ -4,7 +4,7 @@ This is a *primitive* test, and its claim is developer-facing: someone in a
 Fabric session can import a deployed object and run its load, with no planner,
 no catalogue orchestration and no estate-level entry point in the way.
 
-That is also why it is ``published_weaver``. The subject is the API the *wheel
+That is also why it is ``hosted``. The subject is the API the *wheel
 installed in the session* offers — that `.load()` exists there and behaves —
 rather than the load semantics underneath it, which are proved locally in
 ``tests/spark`` for a fraction of the cost.
@@ -29,19 +29,17 @@ One submission, one evidence payload, per the suite's rule: every question about
 the installed estate goes in one body and the assertions run locally against
 what it brings back.
 
-``published_weaver`` alone, never also ``fabric``. The markers are opted into by
-name and neither implies the other, so carrying both would let ``-m fabric``
-select this — and ``-m fabric`` promises a workspace and *nothing published*.
-What needs the wheel is what this is about: the installed package acquiring its
-own capabilities. The platform question underneath it — what a mount is — is a
-``fabric`` test of its own, and runs in a minute without a publish.
+It therefore carries ``fabric`` and ``hosted``: the first says where the
+resources are, the second says where Weaver runs. The platform question
+underneath it — what a mount is — is a ``fabric and remote`` test of its own and
+runs without a publish.
 """
 
 from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.published_weaver
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 
 #: Everything asked of the installed estate, in one round trip. It imports from

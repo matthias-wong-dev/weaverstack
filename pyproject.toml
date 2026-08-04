@@ -90,13 +90,23 @@ packages = ["src/weaver", "src/weaver_cli"]
 testpaths = ["tests"]
 markers = [
     "spark: local Spark/Delta tests, need a JDK (run with: pytest -m spark)",
-    "fabric: opt-in Fabric integration tests, need a workspace and a running capacity (run with: pytest -m fabric)",
-    "provisioning: Fabric item lifecycle — creating and deleting Lakehouses. Opt-in separately from `fabric` (run with: pytest -m provisioning), because it exercises Fabric's resource management rather than Weaver's, changes rarely, and its create/delete churn slows every other run",
-    "published_weaver: needs the wheel published into the Fabric Environment (run with: pytest -m published_weaver, after `weaver install`). These prove the *installed package* wires and authenticates its executors from the session's own identity. Everything else marked `fabric` drives real Fabric from this checkout and needs no publish, so the ordinary loop never waits on one",
-    "full_integration: the one comprehensive lifecycle journey, which proves the whole pipeline composes rather than answering any single question. Opted into by name (run with: pytest -m full_integration) and carried by neither `spark` nor `fabric`, so the expensive composition proof is run by exception rather than swept into every transport run. It runs on both transports; narrow with -k local or -k fabric",
+    # Place. Every test that needs a real workspace carries it, so `-m fabric`
+    # is the whole set rather than a subset that quietly excludes the expensive
+    # half — which is what `fabric` meaning *both* place and precondition cost.
+    "fabric: needs a real Fabric workspace. Carried by every Fabric test, whatever it needs beyond one",
+    # Position — where *Weaver* runs, not where any code runs. Exactly one of
+    # these accompanies `fabric`, so the position of every Fabric test is a
+    # stated fact. That is what makes the parity question answerable by
+    # selection: a capability proven in one position and not the other is a gap
+    # you can see, rather than one someone has to remember to look for.
+    "remote: Weaver runs on this machine and reaches into Fabric — the desktop CLI's position. Needs no publish, so this is the fast loop (pytest -m 'fabric and remote')",
+    "hosted: Weaver runs inside a Fabric session, as the installed wheel — the product's own position. Needs `weaver install` first (pytest -m 'fabric and hosted')",
+    # Scope and subject, layered on top of a position rather than replacing it.
+    "provision: creates and deletes Fabric items. Opted into separately because it exercises Fabric's resource management rather than Weaver's, changes rarely, and its churn slows every other run",
+    "full_integration: the one comprehensive Fabric lifecycle journey, which proves the whole pipeline composes rather than answering any single question. Opted into by name, so the expensive composition proof runs by exception",
 ]
 # Default runs stay fast and need no JVM.
 addopts = [
     "-m",
-    "not spark and not fabric and not provisioning and not full_integration and not published_weaver",
+    "not spark and not fabric and not provision and not full_integration",
 ]
