@@ -1,7 +1,7 @@
 """Workspace and item resolution against a real Fabric workspace.
 
 Resolution is Weaver's business and stays in the ordinary Fabric suite. Creating
-and deleting Lakehouses is **Fabric's**, and is marked ``provisioning`` so it is
+and deleting Lakehouses is **Fabric's**, and is marked ``provision`` so it is
 opt-in separately: it changes rarely, and because ``fabric_lakehouses`` is
 function-scoped, these few tests alone make and destroy eight Lakehouses — churn
 that slows every run and that Fabric's namespace resolver reacts badly to
@@ -19,15 +19,13 @@ import pytest
 from weaver.errors import CommandError
 from weaver.fabric import LAKEHOUSE, find_item, list_items
 
+pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
-
-@pytest.mark.fabric
 def test_the_workspace_resolves_to_an_id(fabric_workspace_item):
     assert fabric_workspace_item.id
     assert fabric_workspace_item.name
 
 
-@pytest.mark.fabric
 def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
     """Takes the fixture it does not read, to inherit its skip.
 

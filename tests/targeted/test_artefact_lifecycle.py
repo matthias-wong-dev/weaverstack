@@ -1,4 +1,4 @@
-"""A build converges on what the source declares, from wherever it starts.
+"""An artefact lifecycle converges on what the source declares, wherever it starts.
 
 ```text
 pytest --collect-only -q -k converges

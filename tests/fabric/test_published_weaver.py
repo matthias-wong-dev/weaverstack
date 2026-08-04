@@ -67,6 +67,8 @@ def warehouse_target(warehouse) -> ResolvedTarget:
 def test_the_installed_package_imports_and_reports_a_version(livy_session):
     """The precondition for every other claim in this file."""
 
+    from hatch_build import compute_version
+
     payload = livy_session.run(
         "import weaver\n"
         "from importlib.metadata import version\n"
@@ -75,7 +77,10 @@ def test_the_installed_package_imports_and_reports_a_version(livy_session):
     ).payload
 
     assert payload["attr"] == payload["dist"]
-    assert payload["dist"]
+    assert payload["dist"] == compute_version(), (
+        "the Fabric Environment contains a stale Weaver wheel; run "
+        "`weaver install` from this checkout before trusting hosted results"
+    )
 
 
 def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
@@ -128,7 +133,7 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
 
     Only a desktop caller injects `desktop_sql_executor`; in a session the
     installed package must reach the Warehouse itself. Everything the T-SQL
-    executors *do* is proven from the checkout in `test_warehouse_boundary.py`.
+    executors *do* is proven from the checkout in the Warehouse primitive modules.
     """
 
     warehouse = clean_disposable_warehouse

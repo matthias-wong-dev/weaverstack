@@ -246,7 +246,7 @@ intermittently report `Artifact not found` for an item that demonstrably exists.
 The suite's real cost is bundle generate/install round trips through Livy.
 
 Item *lifecycle* cover — creating and deleting Lakehouses — is marked
-`provisioning` and opted into separately from `fabric`. It exercises Fabric's
+`provision` and opted into separately from ordinary Fabric work. It exercises Fabric's
 resource management rather than Weaver's, changes rarely, and its create/delete
 churn would otherwise slow every run of the code actually under development.
 
@@ -318,9 +318,11 @@ Each marker is opted into by name, and none implies another.
 ```bash
 pytest                      # pure Python, under a second
 pytest -m spark             # local Spark/Delta, needs a JDK
-pytest -m fabric            # targeted Fabric probes
-pytest -m full_integration  # the lifecycle journey, on both transports
-pytest -m provisioning      # Fabric item lifecycle
+pytest -m fabric            # every test against a real Fabric workspace
+pytest -m "fabric and remote" # Weaver runs here; no published wheel
+pytest -m "fabric and hosted" # Weaver runs as the installed wheel
+pytest -m full_integration  # the comprehensive Fabric lifecycle journey
+pytest -m provision         # Fabric item lifecycle
 ```
 
 Every marker says *what a test needs*:
@@ -328,18 +330,19 @@ Every marker says *what a test needs*:
 | marker | needs |
 |---|---|
 | `spark` | a JDK |
-| `fabric` | a workspace — **and nothing published** |
-| `published_weaver` | a workspace *and* the wheel in the Environment |
-| `full_integration` | a workspace and the wheel |
-| `provisioning` | a workspace |
+| `fabric` | a workspace; carried by every Fabric test |
+| `remote` | Weaver runs on this machine and reaches into Fabric |
+| `hosted` | Weaver runs inside Fabric as the wheel in the Environment |
+| `full_integration` | the composed lifecycle journey |
+| `provision` | creates and deletes Fabric items |
 
-`fabric` and `published_weaver` is the distinction that keeps the loop fast, and
-it is about *what executes*, not about whether Livy is involved. A Spark body
+`remote` and `hosted` are the distinction that keeps the loop legible, and they
+are about *where Weaver runs*, not about whether Livy is involved. A Spark body
 that does not import Weaver needs a session, not a published package — which is
 why `LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
 refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
-run from the checkout against the real workspace. What needs the wheel is what is
-*about* the wheel: that the installed package acquires its own capabilities.
+run from the checkout against the real workspace. What is `hosted` is about the
+wheel: the installed package acquires its own capabilities inside the session.
 
 `full_integration` is the Fabric lifecycle journey alone — one test, no JDK. Its
 local twin lives in `tests/spark` under `spark`, because that is what it needs.

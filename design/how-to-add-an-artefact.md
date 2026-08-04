@@ -77,7 +77,7 @@ it made.
 
 ```text
 tests/spark/boundary/test_actions_delta.py       real Spark
-tests/fabric/test_actions_warehouse.py           real Fabric, over TDS, no Livy
+tests/fabric/test_warehouse_action_primitive.py  real Fabric, over TDS, no Livy
 ```
 
 Named `test_<kind>_action_<what it proves>`, so a test names both the kind and

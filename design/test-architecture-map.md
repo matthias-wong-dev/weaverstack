@@ -15,10 +15,10 @@ two names described different sets and neither was honest.
 |---|---|---|
 | `pytest` | nothing | 14s |
 | `pytest -m spark` | a JDK | ~7m |
-| `pytest -m fabric` | a workspace | ~1m |
-| `pytest -m published_weaver` | a workspace **and a published wheel** | ~2m |
+| `pytest -m "fabric and remote"` | a workspace | ~1m |
+| `pytest -m "fabric and hosted"` | a workspace **and a published wheel** | ~2m |
 | `pytest -m full_integration` | a workspace and a published wheel | ~8m |
-| `pytest -m provisioning` | a workspace | — |
+| `pytest -m provision` | a workspace and permission to create/delete items | — |
 
 The first three are the development loop. **None of them publishes anything**,
 which is the point: a five-minute `weaver install` used to sit between a
@@ -74,7 +74,7 @@ targeted Fabric        one narrow question a workspace alone can answer
     ↓
 one full journey       composition only — never the first sight of a defect
     ↓
-provisioning           opt-in, changes rarely
+provision              opt-in, changes rarely
 ```
 
 Markers are peers; none implies another. See the table above for what each runs.
@@ -154,10 +154,10 @@ Measured across every marker:
 
 | command | tests | runtime | needs |
 |---|---|---|---|
-| `pytest` (incl. 163 targeted) | 1249 | 15s | nothing |
-| `pytest -m spark` (incl. 21 boundary) | 98 | ~7m | a JDK |
-| `pytest -m fabric` | 39 | ~4m | a workspace |
-| `pytest -m published_weaver` | 13 | ~4.5m | a workspace **and the wheel** |
+| `pytest` | 1397 | ~20s | nothing |
+| `pytest -m spark` | 156 | ~7m | a JDK |
+| `pytest -m "fabric and remote"` | 56 | ~4m | a workspace |
+| `pytest -m "fabric and hosted"` | 16 | ~4.5m | a workspace **and the wheel** |
 | `pytest -m full_integration` | 1 | ~8m | a workspace and the wheel |
 
 Fabric transport, over the course of this work:
@@ -198,9 +198,9 @@ rather than the estate around it.
 | which schemas an item needs; alias namespaces; per-side payloads | `item_schema_stage` | `test_schema_stage.py` | — |
 | generate-and-install from prepared state; failure semantics; archives | `build_item_repository` | `test_build_workflow.py` | — |
 | a claim confirmed, disproved, or held about an item with no inventory; malformed Registry rows | `reconcile_catalogue_state` | `test_reconciliation.py` | dictionary-table claim rules in depth |
-| which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts.py` | — |
-| the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan.py` | — |
-| a build converges on what the source declares — from a correct estate, from nothing, from damage, and after a deletion | `generate_item_build_bundle`, `TargetInventory.update_using` | `test_convergence.py` (`-k converges`) | — |
+| which sources own load artefacts; path and procedure identities; signature salts | `load_artefacts` | `test_load_artefacts_binding.py` | — |
+| the load layer's position, its frozen actions, and claim-driven removal | `item_load_stages` | `test_load_plan_binding.py` | — |
+| a build converges on what the source declares — from a correct estate, from nothing, from damage, and after a deletion | `generate_item_build_bundle`, `TargetInventory.update_using` | `test_artefact_lifecycle.py` (`-k converges`) | — |
 | every action that touches a target is declared, and every declaration runs | `target_changes` | `test_build_intent.py` | — |
 | every artefact kind reaches the catalogue, and every instance of one | `Catalogue.from_repository` | `test_catalogue_projection.py` | — |
 
@@ -248,7 +248,7 @@ read produce the same object a fixture builds?**
 | `read_catalogue_state` | a real catalogue reads back into a `Catalogue`; incompatible shapes rejected | partial — `test_item_catalogue.py` covers shape; `test_catalogue_fidelity.py` round-trips load artefacts, whose identities no two-part grammar can express |
 | `read_lakehouse_inventory` | a real Lakehouse reads back into a `TargetInventory` matching what a build left | covered — `test_inventory_fidelity.py`, including the deployed runtime tree file by file |
 | `read_warehouse_inventory` | same, over TDS | **gap** |
-| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered — `spark/boundary/test_actions_delta.py`, `fabric/test_actions_warehouse.py` |
+| genuine DDL | one Weaver document actually builds, and the object has the declared physical types | covered — `spark/boundary/test_actions_delta.py`, `fabric/test_warehouse_action_primitive.py`, `fabric/test_warehouse_definition_primitive.py` |
 | a whole bundle | the physical sequence executes against real Fabric, in manifest order, leaving the declared estate | covered — `fabric/test_bundle_can_install.py`, one Livy session |
 
 The round-trip pairing is the strongest form and does not exist yet: build from a
@@ -265,7 +265,7 @@ replace them; the conversion has not been done.
 | module | Livy | what it actually asks | conversion |
 |---|---|---|---|
 | `test_cross_item_alias.py` | 10 calls / 486s | is a shortcut really created, is it left alone on rebuild, does the endpoint refresh publish it | render + execute the alias action; observe once — **not yet done** |
-| ~~`test_warehouse_build.py`~~ | ~~4 calls / 195s~~ | — | **done**: replaced by `test_warehouse_boundary.py`, 10 tests / 7s / **zero Livy** |
+| ~~`test_warehouse_build.py`~~ | ~~4 calls / 195s~~ | — | **done**: replaced by the Warehouse primitive and binding modules, 10 tests / 7s / **zero Livy** |
 | `test_item_catalogue_fabric.py` | 2 calls / 150s | catalogue build, prune and wipe in-session | genuinely session work; reduce, do not remove |
 
 ### Discarded, claim by claim
@@ -282,12 +282,12 @@ spike was written to anticipate.
 
 | its claim | where it lives now |
 |---|---|
-| tables built empty | `test_warehouse_boundary.py` |
-| declared types survive | `test_warehouse_boundary.py` |
-| PK and audit columns not nullable | `test_warehouse_boundary.py` |
-| objects present in the catalogue | `test_warehouse_boundary.py` (inventory fidelity) |
-| a dimension gets a bigint surrogate | `test_warehouse_boundary.py` |
-| prune removes unmanaged, spares managed | `test_warehouse_boundary.py` (executed, not just planned) |
+| tables built empty | `test_warehouse_action_primitive.py` |
+| declared types survive | `test_warehouse_definition_primitive.py` |
+| PK and audit columns not nullable | `test_warehouse_definition_primitive.py` |
+| objects present in the catalogue | `test_warehouse_inventory_binding.py` |
+| a dimension gets a bigint surrogate | `test_warehouse_definition_primitive.py` |
+| prune removes unmanaged, spares managed | `test_warehouse_action_primitive.py` (executed, not just planned) |
 | **dependency ordering** | `test_item_plan.py` — **pure Python; never needed Fabric** |
 
 Everything already probe-shaped — `test_livy_import.py`,
@@ -361,7 +361,7 @@ Lakehouse-only fixture stops being representative.** Prune, schemas and inventor
 all behave differently across that line.
 
 **Would the fixed-point test have caught it?** No — and the reason is worth
-keeping. `test_convergence.py` composes the three states and asserts a build finds
+keeping. `test_artefact_lifecycle.py` composes the three states and asserts a build finds
 nothing to do, which is the strongest whole-plan property available. It passes
 with that defect reintroduced, because *the planner passed the argument
 correctly*. The bug lived in the seam's **default**, on a path only a direct
@@ -371,7 +371,7 @@ A defaulted argument is two contracts. A composed test can only ever prove the
 one the composition uses. That is why the more important half of the fix was
 removing the parameter rather than adding coverage: with the value derived
 inside, there is one path, and breaking the derivation now fails
-`test_convergence.py` *and* `test_prune.py` together — verified by doing it.
+`test_artefact_lifecycle.py` *and* `test_prune.py` together — verified by doing it.
 
 The rule this suggests: **a seam with a destructive default cannot be covered
 from above.** Either the default goes, or the seam is tested directly on every
@@ -380,7 +380,7 @@ shape it accepts.
 **A `snapshot=` keyword in a Livy body.** Not a coverage gap of the same kind —
 that code is a *string* sent to a Fabric session and executes only against the
 installed wheel, so no pure test could run it and no import check could see it. It
-is the one category where `-m published_weaver` is the first possible sight of the
+is the one category where `-m "fabric and hosted"` is the first possible sight of the
 defect, and it argues for grepping test *bodies* after any signature change rather
 than trusting a mechanical rewrite.
 

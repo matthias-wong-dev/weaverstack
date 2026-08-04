@@ -1,6 +1,6 @@
 """What a OneLake mount does, asked of Fabric rather than of Weaver.
 
-This is a ``fabric`` test, not a ``published_weaver`` one, and the distinction is
+This is a ``remote`` Fabric test, not a ``hosted`` one, and the distinction is
 the point. Nothing here imports the installed package — it asks the *platform*
 what a mount is, which needs a session and nothing else. So it runs in the fast
 loop, with no ``weaver install`` in front of it.
@@ -55,7 +55,7 @@ emit(out)
 
 
 def test_a_mount_makes_onelake_addressable_by_ordinary_python(
-    livy_session, fabric_workspace, fabric_client
+    livy_session, fabric_workspace_item, fabric_target_lakehouse
 ):
     """The contract a Folder load depends on, asked of the platform directly.
 
@@ -64,13 +64,8 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
     attached and could never serve an orchestrator loading somewhere else.
     """
 
-    from weaver.fabric import LAKEHOUSE, find_item, find_workspace
-    from conftest import _fixed_name
-
-    workspace = find_workspace(fabric_workspace.workspace)
-    item = find_item(
-        workspace, _fixed_name("target"), item_type=LAKEHOUSE, client=fabric_client
-    )
+    workspace = fabric_workspace_item
+    item = fabric_target_lakehouse
     root = (
         f"abfss://{workspace.id}@onelake.dfs.fabric.microsoft.com/{item.id}"
     )
