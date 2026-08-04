@@ -9,6 +9,7 @@ import pytest
 from weaver.errors import DiscoveryError
 from weaver.locations import Location
 from weaver.declaration import parse_item_repository
+from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 
 
@@ -369,12 +370,13 @@ def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     builtin = repository["Lakehouse/_weaver"]
 
-    assert len(builtin.documents) == 10
+    # The catalogue tables, plus the one Folder the control plane declares: the
+    # task log every top-level Weaver task writes its evidence beneath.
+    assert len(builtin.documents) == len(CATALOGUE_TABLES) + 1
     assert WeaverSchemaId.parse("Lakehouse/_weaver/_") in repository.schema_documents
-    assert all(
-        str(identity).startswith("Lakehouse/_weaver/_.")
-        for identity in builtin.documents
-    )
+    assert {str(identity) for identity in builtin.documents} == {
+        f"Lakehouse/_weaver/_.{table.name}" for table in CATALOGUE_TABLES
+    } | {"Lakehouse/_weaver/Files/_.Log"}
     assert repository.generated_files
 
 

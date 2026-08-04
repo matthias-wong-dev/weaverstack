@@ -48,6 +48,15 @@ lets a deleted source produce an ordinary prune.
 **Fails until done:** `test_every_declared_object_and_artefact_is_registered`,
 then the convergence tests in `test_fixed_point.py`.
 
+The inventory half is the one that fails *quietly*, and it is worth knowing the
+shape it takes. Adding `_.Log` — an ordinary Folder in the built-in control-plane
+item — surfaced as a build that recreated the folder on every run, because
+`read_lakehouse_inventory` excluded the whole Files area for `_weaver` and so
+could never observe it. Nothing reported a fault: an unobservable artefact is
+disproved by every reconciliation and rebuilt each time, exactly as this step
+warns. If a new artefact lives somewhere an inventory reader currently skips,
+that reader is part of the change.
+
 ## 3. Add it to the planner, and declare what it means
 
 Render its actions, and beside them state their effect on the target — the

@@ -23,6 +23,11 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "wipe",
         "WipeReport",
         "WipeResult",
+        "load",
+        "LoadRunReport",
+        "LoadNodeReport",
+        "LoadMessage",
+        "LoadResult",
         "WeaverObject",
         "Folder",
         "Table",
@@ -61,5 +66,18 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "install_bundle",
         "prepare_weaver_lakehouse",
         "initialise_weaver_lakehouse",
+        # Load planning, resolution, dispatch and logging stay in their owning
+        # modules: what the namespace exposes is the operation and what it
+        # returns, never how it decided.
+        "LoadDag",
+        "LoadNode",
+        "InstalledEstate",
+        "LoadEnvironment",
+        "load_dag",
+        "resolve_load_plan",
+        "dispatch_load_node",
+        "execute_load_plan",
+        "open_task_log",
+        "PhysicalTargetRef",
     }
     assert all(not hasattr(weaver, name) for name in internal)

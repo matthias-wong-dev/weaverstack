@@ -146,15 +146,34 @@ def test_every_catalogue_table_exists_and_matches_the_representation(initialised
 def test_the_catalogue_registers_its_own_tables(initialised, spark):
     """The recursion, made visible: ten tables, each certified in its own Registry."""
 
-    rows = read_table(initialised.catalogue, REGISTRY, scope=SCOPE)
+    rows = [
+        row
+        for row in read_table(initialised.catalogue, REGISTRY, scope=SCOPE)
+        if row["object_type"] == "table"
+    ]
     assert {row["object_name"] for row in rows} == {
         table.name for table in CATALOGUE_TABLES
     }
     for row in rows:
         assert row["schema_name"] == "_"
-        assert row["object_type"] == "table"
         assert row["object_role"] == "data"
         assert row["signature"]
+
+
+def test_the_catalogue_registers_the_task_log_folder_it_declares(initialised, spark):
+    """The control plane owns one Folder as well as its tables, and certifies it."""
+
+    rows = [
+        row
+        for row in read_table(initialised.catalogue, REGISTRY, scope=SCOPE)
+        if row["object_type"] == "folder"
+    ]
+
+    assert [(row["schema_name"], row["object_name"]) for row in rows] == [
+        ("Files/_", "Log")
+    ]
+    assert rows[0]["object_role"] == "data"
+    assert rows[0]["signature"]
 
 
 def test_the_catalogue_records_its_own_installation(initialised, spark):
@@ -165,9 +184,20 @@ def test_the_catalogue_records_its_own_installation(initialised, spark):
 
 
 def test_the_catalogue_describes_its_own_schema(initialised, spark):
-    (row,) = read_table(initialised.catalogue, SCHEMA_DICTIONARY, scope=SCOPE)
-    assert row["schema_name"] == "_"
-    assert "control plane" in row["description"]
+    """Twice, because ``_`` names two namespaces — a Delta one and a Files one.
+
+    The same asymmetry every Lakehouse item has once it owns a Folder: a schema
+    holding tables and a directory holding folders are different places wearing
+    one declared name, and the catalogue records both.
+    """
+
+    rows = {
+        row["schema_name"]: row
+        for row in read_table(initialised.catalogue, SCHEMA_DICTIONARY, scope=SCOPE)
+    }
+
+    assert set(rows) == {"_", "Files/_"}
+    assert all("control plane" in row["description"] for row in rows.values())
 
 
 def test_the_catalogue_describes_its_own_tables_and_their_keys(initialised, spark):
@@ -220,9 +250,20 @@ def test_no_alias_or_relationship_rows_are_invented(initialised, spark):
     assert read["ForeignKeyDictionary"] == ()
 
 
-def test_no_folder_rows_since_the_catalogue_has_no_folders(initialised, spark):
+def test_the_one_folder_the_catalogue_owns_is_described_like_any_other(
+    initialised, spark
+):
+    """The task log, and nothing else. The control plane is otherwise tables."""
+
     read = read_installation(initialised.catalogue, scope=SCOPE, tables=CATALOGUE_TABLES)
-    assert read["FolderDictionary"] == ()
+
+    (row,) = read["FolderDictionary"]
+    assert (row["schema_name"], row["object_name"]) == ("Files/_", "Log")
+    assert row["file_key"] == "**/*"
+    # Nothing loads into it: a task writes its own evidence, exactly as a Folder
+    # object's authored code writes into its destination.
+    assert row["is_static"] is True
+    assert row["is_incremental"] is False
 
 
 # --- ordering, as installed ----------------------------------------------------

@@ -300,7 +300,12 @@ def parse_item_repository(
             schemas_by_item[builtin_item].append(identity)
             continue
         source = read_source_document(relative, data, builtin_item.item_type)
-        identity = WeaverDocumentId(builtin_item, source.object_id)
+        # The control plane declares a Folder as well as its tables — the task
+        # log — and a Folder is a Files document. Read from the same path the
+        # authored branch reads it from, so a generated declaration and an
+        # authored one of the same kind produce the same identity.
+        is_files = f"/{FILES}/" in relative
+        identity = WeaverDocumentId(builtin_item, source.object_id, is_files=is_files)
         source_documents[identity] = replace(source, logical_id=identity)
         documents_by_item[builtin_item].append(identity)
 

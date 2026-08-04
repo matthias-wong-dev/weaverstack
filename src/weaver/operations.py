@@ -17,7 +17,13 @@ from typing import Iterable, Mapping, Sequence
 from .errors import BuildError, CommandError, WeaverError
 from .locations import Location
 from .store import LocalStore, Store
-from .targets import ItemRef, WarehouseTarget
+from .targets import (
+    ItemRef,
+    WarehouseTarget,
+    parse_physical_target,
+    physical_item,
+    physical_kind,
+)
 from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
 
 
@@ -66,21 +72,10 @@ class WipeTarget:
 
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
-        if not isinstance(text, str):
-            raise CommandError("wipe targets must be strings")
-        parts = text.strip().strip("/").split("/")
-        if len(parts) != 2:
-            raise CommandError(
-                "a wipe target must name a whole physical item as "
-                "Lakehouse/Name or Warehouse/Name"
-            )
-        item_type, name = parts
-        if item_type not in ("Lakehouse", "Warehouse"):
-            raise CommandError(
-                "a wipe target must start with Lakehouse or Warehouse, "
-                f"got {item_type!r}"
-            )
-        return cls(item_type=item_type, item=ItemRef.parse(name))
+        target = parse_physical_target(
+            text, what="wipe target", error=CommandError
+        )
+        return cls(item_type=physical_kind(target), item=physical_item(target))
 
     @property
     def physical_name(self) -> str:

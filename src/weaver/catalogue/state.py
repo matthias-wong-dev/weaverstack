@@ -17,9 +17,17 @@ from ..declaration.model import (
 from ..errors import BuildError
 from ..spark.tokens import object_token
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
-from .reader import _is_absent, read_installation
+from .reader import _is_absent, read_installation, read_table
 from .render import InstallationScope
-from .tables import BUILD_EPOCH, CATALOGUE_TABLES, INSTALLATION, OBJECT_TYPES, REGISTRY
+from .tables import (
+    BUILD_EPOCH,
+    CATALOGUE_TABLES,
+    INSTALLATION,
+    OBJECT_TYPES,
+    REGISTRY,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
+)
 
 #: What a Folder's stored schema carries, so a table and a folder of the same
 #: name stay apart. Only the object shape uses it — see :func:`catalogue_schema`.
@@ -499,6 +507,53 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     }
     return Catalogue(
         rows=MappingProxyType(rows),
+        present_tables=frozenset(present),
+    )
+
+
+def read_installed_catalogue(catalogue: Any) -> Catalogue:
+    """Read the whole installed catalogue, without being told what is in it.
+
+    The sibling of :func:`read_catalogue_state`, and the difference is the one
+    that matters to an operation which runs *after* a build. A build knows its
+    items — it is holding the repository that declares them — and reads each
+    installation's scope. Load orchestration knows only physical targets, and
+    has to discover which logical items are installed and where they are bound
+    before it can decide anything at all. So this reads unscoped and groups the
+    rows by the installation scope they carry.
+
+    The shape check is deliberately weaker than the build's: a table that does
+    not exist reads as no rows rather than as a fault, because an estate with no
+    aliases has never had an Alias table written and that is an ordinary state
+    for something that only reads. Nothing here writes, so nothing here needs
+    the guarantee that the catalogue can *be* written.
+    """
+
+    rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
+    present: set[str] = set()
+    for table in CATALOGUE_TABLES:
+        table_rows = read_table(catalogue, table)
+        if table_rows:
+            present.add(table.name)
+        for row in table_rows:
+            item_type = str(row.get(SCOPE_ITEM_TYPE) or "")
+            item_name = str(row.get(SCOPE_ITEM_NAME) or "")
+            if not item_type or not item_name:
+                raise BuildError(
+                    f"{table.qualified} holds a row with no installation scope; "
+                    "every catalogue row names the logical item it belongs to"
+                )
+            item = WeaverItemId(item_type, item_name)
+            rows.setdefault(item, {}).setdefault(table.name, []).append(row)
+    return Catalogue(
+        rows=MappingProxyType(
+            {
+                item: MappingProxyType(
+                    {name: tuple(table_rows) for name, table_rows in tables.items()}
+                )
+                for item, tables in rows.items()
+            }
+        ),
         present_tables=frozenset(present),
     )
 

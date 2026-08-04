@@ -321,6 +321,8 @@ def livy_session(fabric_workspace, fabric_client):
     from weaver.errors import CommandError
     from weaver.fabric import LivyError, LivySession, list_workspace_livy_sessions
 
+    occupied: list[str] = []
+    active_sessions = None
     try:
         active_sessions = list_workspace_livy_sessions(
             fabric_workspace, client=fabric_client, active_only=True
@@ -328,6 +330,16 @@ def livy_session(fabric_workspace, fabric_client):
     except Exception as exc:
         print(f"warning: could not inspect Fabric Spark sessions: {exc}")
     else:
+        occupied = [
+            f"{entry.lakehouse_name}/{entry.session.id}"
+            + (
+                f" (submitted by {entry.session.submitter_name})"
+                if entry.session.submitter_name
+                else ""
+            )
+            for entry in active_sessions
+        ]
+    if active_sessions is not None:
         if not active_sessions:
             print("Fabric Spark preflight: no active or queued sessions.")
         for entry in active_sessions:
@@ -361,7 +373,23 @@ def livy_session(fabric_workspace, fabric_client):
     try:
         session.start()
     except LivyError as exc:
-        pytest.skip(f"could not start a Livy session (Environment installed?): {exc}")
+        # Name the capacity before the Environment. A capacity commonly permits
+        # one Spark session, so the usual cause is that something else already
+        # holds the slot — an interrupted run that never got to close its
+        # session, or a notebook someone left open. The preflight already knows
+        # which, and saying "Environment installed?" instead sent at least one
+        # reader off to check a wheel that was perfectly fine.
+        held = (
+            "the capacity's session slot is held by "
+            + ", ".join(occupied)
+            + " — wait for it to release, or end it if it is yours; otherwise "
+            if occupied
+            else ""
+        )
+        pytest.skip(
+            f"could not start a Livy session: {held}check the Environment is "
+            f"installed ({exc})"
+        )
     startup = time.monotonic() - started
     LEDGER.startup_seconds = startup
     print(f"Fabric Livy session startup: {startup:.2f}s")
@@ -533,7 +561,11 @@ def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
     def empty(name: str) -> None:
         target = ItemRef(name)
         _empty_the_target(
-            livy_session, store, resolver, target, resolver.spark_destination(target)
+            livy_session,
+            store,
+            target,
+            resolver.spark_destination(target),
+            fabric_workspace,
         )
 
     return empty
@@ -807,7 +839,13 @@ def weaver_repo_fixture(request):
 
 @contextmanager
 def _fabric_build_context(
-    fabric_workspace_item, fabric_client, workspace, target_lh, session, weaver_repo_fixture
+    fabric_workspace_item,
+    fabric_client,
+    workspace,
+    target_lh,
+    session,
+    weaver_repo_fixture,
+    warehouse=None,
 ):
     """A build environment run entirely inside Fabric over Livy.
 
@@ -855,12 +893,21 @@ def _fabric_build_context(
     store = OneLakeDfsClient()
     weaver = ItemRef(workspace.weaver_lakehouse)
     target = ItemRef(target_lh.name)
+    warehouse_name = warehouse.item.name if warehouse is not None else None
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
     repository_root = resolver.files_root(weaver).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
-    _empty_the_target(session, store, resolver, target, destination)
     weaver_destination = resolver.spark_destination(weaver)
+    _empty_the_target(
+        session,
+        store,
+        target,
+        destination,
+        workspace,
+        warehouse=warehouse_name,
+        weaver_destination=weaver_destination,
+    )
 
     def install_repo() -> None:
         destination = repository_root
@@ -880,9 +927,17 @@ def _fabric_build_context(
 
     def generate(bundle_name: str = "buildtest"):
         # Generation runs IN the session, against the native Spark catalogue.
+        # The item type chooses its binding, so one context serves a Lakehouse
+        # estate or a mixed one without a test naming a target kind — the same
+        # rule `_bindings_for` applies locally.
         binds = ", ".join(
-            f"ItemBinding(WeaverItemId.parse({item!r}), "
-            f"LakehouseBinding(lakehouse=ItemRef({target.name!r})))"
+            (
+                f"ItemBinding(WeaverItemId.parse({item!r}), "
+                f"WarehouseBinding(warehouse=ItemRef({warehouse_name!r})))"
+                if item.startswith("Warehouse/")
+                else f"ItemBinding(WeaverItemId.parse({item!r}), "
+                f"LakehouseBinding(lakehouse=ItemRef({target.name!r})))"
+            )
             for item in weaver_repo_fixture.items
         )
         body = (
@@ -892,7 +947,8 @@ def _fabric_build_context(
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
-            "LakehouseBinding, InstallationEnvironment, effective_item_bindings\n"
+            "LakehouseBinding, WarehouseBinding, InstallationEnvironment, "
+            "effective_item_bindings\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
@@ -943,7 +999,10 @@ def _fabric_build_context(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            "env = InstallationEnvironment(store=store, resolver=resolver, spark=spark)\n"
+            # The workspace is what lets a Warehouse batch acquire SQL on the
+            # session's own identity. A Lakehouse-only bundle never asks.
+            "env = InstallationEnvironment(store=store, resolver=resolver, "
+            "spark=spark, workspace=workspace)\n"
             f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
             "report = install_bundle(bundle, environment=env)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
@@ -993,8 +1052,10 @@ def _fabric_build_context(
         preamble = (
             "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.targets import ItemRef\n"
-            "from weaver.resolution import resolver_for\n"
-            f"resolver = resolver_for({_workspace_literal()})\n"
+            "from weaver.resolution import resolver_for, store_for\n"
+            f"workspace = {_workspace_literal()}\n"
+            "resolver = resolver_for(workspace)\n"
+            "store = store_for(workspace)\n"
             f"target = ItemRef({target.name!r})\n"
         )
         return _timed_session_run(session, label, preamble + body).payload
@@ -1038,33 +1099,75 @@ def _fabric_build_context(
 _FABRIC_TARGET_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting")
 
 
-def _empty_the_target(session, store, resolver, target, destination) -> None:
-    """Leave the target Lakehouse as though nothing had been built into it.
+def _empty_the_target(
+    session,
+    store,
+    target,
+    destination,
+    workspace,
+    warehouse=None,
+    weaver_destination=None,
+) -> None:
+    """Leave the target Lakehouse *and the control plane* as though nothing had run.
 
-    Catalogue first, then storage: dropping a schema removes its tables and views
-    from the catalogue, and anything left on disk afterwards was never registered.
+    **Through Weaver's own wipe.** This used to sweep the two areas with
+    ``store.delete`` and it is exactly the mistake ``AGENTS.md`` records against
+    the first Fabric suite — test code reproducing what the function would have
+    done, and looking like it was testing ``wipe``. It cost twice over. Once
+    because a hand-rolled sweep is a *list* of what to remove, so it can omit
+    something: skipping ``Files/`` on the Weaver Lakehouse left the declared
+    ``_.Log`` folder behind while its Registry row went, and the next build
+    planned to create a folder already there. And once latently, because it
+    recursively deleted directories without removing shortcuts first — which
+    ``wipe_folder_target`` is careful never to do, since a recursive delete
+    through a shortcut reaches the *producer's* data.
+
+    ``wipe_lakehouse`` has neither problem: it clears both areas completely,
+    keeps only what nothing recreates, and takes shortcuts out through the
+    workspace before any storage is swept.
+
+    **The control plane is wiped too, and that is the point.** Weaver's own
+    record is state like any other, and it accumulates faster than anything else
+    here: the Weaver Lakehouse is shared and permanent while the *logical item
+    names* bound to one physical target change from module to module, so its
+    Registry ends up holding several items' claims on one physical object. No
+    build repairs that, and correctly so — reconciliation is scoped to the items
+    a build binds (``catalogue_items_for_build`` returns those plus alias
+    sources), because an item you are not building has claims you have no
+    business deleting. Right in production; in a suite reusing one Lakehouse
+    under many names it makes the residue permanent.
+
+    What storage cannot reach is the Spark metastore: a *view* exists only
+    there, and the catalogue's schema is assumed by a build rather than created
+    by one. So the session drops the destination's schemas, and drops and
+    restores ``_``.
     """
 
     statements = [
         f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema)} CASCADE"
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
+    if weaver_destination is not None:
+        # Dropped and put back. A build creates the catalogue's tables and
+        # *assumes* its schema, so leaving `_` gone is not clearing the control
+        # plane but damaging it — the same judgement `physical_wipe`
+        # already makes about `dbo`.
+        catalogue_schema = weaver_destination.qualified_schema("_")
+        statements.append(f"DROP SCHEMA IF EXISTS {catalogue_schema} CASCADE")
+        statements.append(f"CREATE SCHEMA IF NOT EXISTS {catalogue_schema}")
     session.run(
         "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n",
         label="empty target",
     )
 
-    for area in (resolver.tables_root(target), resolver.files_root(target)):
-        try:
-            entries = store.list(area)
-        except Exception:  # the area may not exist yet
-            continue
-        for entry in entries:
-            if entry.is_directory and entry.name.lower() != "dbo":
-                try:
-                    store.delete(entry.location, recursive=True)
-                except Exception as exc:
-                    print(f"warning: could not empty {entry.location}: {exc}")
+    from weaver.physical_wipe import wipe_lakehouse
+
+    wiped = [target]
+    if weaver_destination is not None:
+        wiped.append(ItemRef(workspace.weaver_lakehouse))
+    for item in wiped:
+        for report in wipe_lakehouse(item, workspace, store=store):
+            print(f"Fabric wipe: {report}")
 
 
 @pytest.fixture
@@ -1333,4 +1436,32 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
     ) as env:
+        yield _install_estate(env)
+
+
+@pytest.fixture(scope="module")
+def fabric_mixed_estate(request, weaver_repo_fixture):
+    """One estate spanning a Lakehouse *and* a Warehouse, installed together.
+
+    The one arrangement neither single-target context can express, and the one
+    the physical load graph most needs: a Delta table published into a Warehouse
+    through an alias is read across a SQL analytics endpoint, and that boundary
+    is where the refresh barrier lives. Nothing with one physical side has such a
+    boundary to cross.
+
+    Both halves are installed by one bundle, in the session, so the ordering the
+    build gives them is the ordering a real estate has.
+    """
+
+    warehouse = request.getfixturevalue("clean_disposable_warehouse")
+    with _fabric_build_context(
+        request.getfixturevalue("fabric_workspace_item"),
+        request.getfixturevalue("fabric_client"),
+        request.getfixturevalue("fabric_workspace"),
+        request.getfixturevalue("fabric_target_lakehouse"),
+        request.getfixturevalue("livy_session"),
+        weaver_repo_fixture,
+        warehouse=warehouse,
+    ) as env:
+        env.warehouse = warehouse
         yield _install_estate(env)

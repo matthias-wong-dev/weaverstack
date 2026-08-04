@@ -64,9 +64,10 @@ def test_builtin_item_is_built_and_published_by_one_item_bundle(
     ]
 
     registry = spark.table(weaver_catalogue.qualify("_", REGISTRY.name))
+    # Every catalogue table, plus the `_.Log` Folder the control plane declares.
     assert registry.where(
         "item_type = 'Lakehouse' AND item_name = '_weaver'"
-    ).count() == len(CATALOGUE_TABLES)
+    ).count() == len(CATALOGUE_TABLES) + 1
 
 
 def test_public_workflow_materialises_then_installs_from_driver_local_files(

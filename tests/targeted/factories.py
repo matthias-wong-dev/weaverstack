@@ -242,6 +242,83 @@ def _object_type_of(repository, identity) -> str:
     return {"Table": "table", "View": "view", "Folder": "folder"}[str(kind)]
 
 
+def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
+    """The whole catalogue a successful build of this estate would have left.
+
+    Where `FixtureCatalogue.from_repository` gives one item's Registry, this
+    gives the estate: every item's dictionaries, its dependencies, its aliases,
+    the alias destinations the build certified, *and* the Installation rows that
+    say which physical target each logical item is bound to.
+
+    That last part is what load orchestration cannot do without. A build is
+    handed its bindings; an orchestrator is handed physical target names and has
+    to discover the bindings from the catalogue, so a fixture that omitted them
+    would let a reverse-binding claim pass without a binding to reverse.
+
+    Composed from production constructors — `Catalogue.from_repository` and
+    `for_targets` — rather than hand-written rows, so the fixture cannot drift
+    from what a build actually publishes.
+    """
+
+    from weaver.catalogue.state import for_targets
+    from weaver.catalogue.tables import INSTALLATION
+
+    desired = Catalogue.from_repository(repository)
+    identities = set()
+    target_kinds = {}
+    for model in repository.items:
+        item = model.identity
+        identities.update(
+            identity
+            for identity in repository.source_documents
+            if identity.item == item
+        )
+        identities.update(
+            artefact.identity for artefact in item_load_artefacts(repository, item=item)
+        )
+        # An alias destination is certified by the build that made it, and it has
+        # to be here: it is the name the consuming item reads through, so an
+        # estate without it has a dependency pointing at nothing.
+        identities.update(
+            alias.destination
+            for alias in repository.aliases
+            if alias.destination.item == item
+        )
+        target_kinds[item] = (
+            "warehouse" if item.item_type == "Warehouse" else "lakehouse"
+        )
+    bound = for_targets(desired, repository, identities, target_kinds)
+
+    physical = {
+        binding.item: (
+            binding.target.lakehouse.name
+            if isinstance(binding.target, LakehouseBinding)
+            else binding.target.warehouse.name
+        )
+        for binding in bindings.entries
+    }
+    rows = {}
+    for item, tables in bound.rows.items():
+        target_name = physical.get(item)
+        if target_name is None:
+            # An unbound item is not installed, so it contributes no rows at all
+            # — exactly as a build that never targeted it would leave things.
+            continue
+        rows[item] = {
+            **{name: tuple(table_rows) for name, table_rows in tables.items()},
+            INSTALLATION.name: (
+                {
+                    "item_type": item.item_type,
+                    "item_name": item.item_name,
+                    "target_name": target_name,
+                    "weaver_version": "0.0.0+test",
+                    "signature": "installation-signature",
+                },
+            ),
+        }
+    return Catalogue(rows=rows)
+
+
 # --- physical state ---------------------------------------------------------
 
 
@@ -371,6 +448,37 @@ class FixtureInventory(TargetInventory):
                 )
             ),
         )
+
+
+def installed_inventories(repository, bindings: ItemBindings) -> dict:
+    """Each bound physical target's inventory, keyed as a load run addresses it.
+
+    The key is the target's public spelling — ``Lakehouse/Raw_LH`` — because that
+    is what a caller wrote and what a report prints. A second vocabulary between
+    the request and the answer is exactly what the shared target grammar exists
+    to remove.
+    """
+
+    from weaver.load_plan import PhysicalTargetRef
+
+    made = {}
+    for binding in bindings.entries:
+        lakehouse = isinstance(binding.target, LakehouseBinding)
+        name = (
+            binding.target.lakehouse.name
+            if lakehouse
+            else binding.target.warehouse.name
+        )
+        target = PhysicalTargetRef("lakehouse" if lakehouse else "warehouse", name)
+        made[str(target)] = FixtureInventory.from_repository(
+            repository,
+            item=binding.item,
+            target_kind=DELTA_TARGET if lakehouse else SQL_TARGET,
+            target_id=binding.to_bound_target().id,
+            kind=target.kind,
+            target_name=name,
+        )
+    return made
 
 
 def bound_target(
@@ -649,6 +757,87 @@ def estate_inventories(repository, *, empty: bool = False):
             )
         )
     return made
+
+
+#: The two items of :func:`load_estate`, and the physical targets they bind to.
+LOAD_PRODUCER = "Lakehouse/Raw"
+LOAD_CONSUMER = "Warehouse/Reporting"
+LOAD_PRODUCER_TARGET = "Raw_LH"
+LOAD_CONSUMER_TARGET = "Reporting_WH"
+
+
+def load_estate(root: Path):
+    """The canonical physical load scenario, and the smallest estate holding it.
+
+    .. code-block:: text
+
+        Raw Delta table  →  endpoint refresh  →  Warehouse alias consumer
+                                              →  downstream Warehouse table
+
+    Every element earns its place. ``Sales.Order`` is the upstream Delta load;
+    ``Sales.Daily`` proves a second dispatch kind and an ordinary within-item
+    edge; ``Sales.Export`` proves the folder kind. On the Warehouse side the
+    alias is what makes the dependency *cross*, ``Sales.Summary`` is what
+    consumes it, and ``Sales.Live`` is a view — no load work of its own, but a
+    conduit a downstream table still depends through.
+
+    Deliberately mixed across both physical sides, because a Lakehouse-only
+    estate cannot express the one crossing that needs a barrier: a Delta table
+    read as SQL through an endpoint that has not caught up.
+    """
+
+    for relative, text in {
+        f"{LOAD_PRODUCER}/schemas/Sales.yml": schema_document("Sales"),
+        f"{LOAD_PRODUCER}/Sales__Order.py": lakehouse_table(
+            "Sales.Order", columns={"OrderId": "string", "Amount": "decimal(18,2)"}
+        ),
+        f"{LOAD_PRODUCER}/Sales.Daily.sql": SPARK_TABLE_WITH_DEPENDENCY.format(
+            object_id="Sales.Daily", depends_on="Sales.Order"
+        ),
+        f"{LOAD_PRODUCER}/Files/Sales__Export.py": folder_document("Sales.Export"),
+        f"{LOAD_CONSUMER}/schemas/Sales.yml": schema_document("Sales"),
+        f"{LOAD_CONSUMER}/alias.yml": alias_declaration(
+            **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
+        ),
+        f"{LOAD_CONSUMER}/Sales.Summary.sql": warehouse_table(
+            "Sales.Summary",
+            select="select OrderId, Amount from [Sales].[Order]",
+            primary_key="OrderId",
+        ),
+        f"{LOAD_CONSUMER}/Sales.Live.sql": warehouse_view(
+            "Sales.Live",
+            select="select OrderId from [Sales].[Summary]",
+            depends_on="Sales.Summary",
+        ),
+    }.items():
+        _write(root, relative, text)
+    return parse_item_repository(Location(str(root)))
+
+
+def load_estate_bindings() -> ItemBindings:
+    """Both items of :func:`load_estate`, bound to neutral physical targets."""
+
+    return item_bindings(
+        (LOAD_PRODUCER, LOAD_PRODUCER_TARGET), (LOAD_CONSUMER, LOAD_CONSUMER_TARGET)
+    )
+
+
+SPARK_TABLE_WITH_DEPENDENCY = """\
+/*
+Table ID: {object_id}
+
+Description: A Spark SQL table over another table in its own item.
+
+Lineage: ${depends_on}
+
+Dependencies:
+  - {depends_on}
+
+Schema:
+  OrderId: string
+*/
+select OrderId from {depends_on}
+"""
 
 
 def single_document_repository(

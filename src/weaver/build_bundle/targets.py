@@ -258,10 +258,15 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
 
 
 def _parse_physical_item(text: str) -> tuple[str, ItemRef]:
-    prefix, separator, name = text.partition("/")
-    item_type = {"Lakehouse": LAKEHOUSE, "Warehouse": WAREHOUSE}.get(prefix)
-    if not separator or item_type is None or not name or "/" in name:
-        raise BuildError(
-            "a physical target must be Lakehouse/Name or Warehouse/Name"
-        )
-    return item_type, ItemRef.parse(name)
+    """The binding's physical half, through the grammar every operation shares.
+
+    The logical item types and the grammar's spellings happen to be the same two
+    words, so the kind is used directly rather than translated.
+    """
+
+    from ..targets import parse_physical_target, physical_item, physical_kind
+
+    target = parse_physical_target(
+        text, what="binding physical target", error=BuildError
+    )
+    return physical_kind(target), physical_item(target)

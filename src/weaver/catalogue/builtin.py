@@ -36,6 +36,21 @@ from .tables import CATALOGUE_SCHEMA, CATALOGUE_TABLES, CatalogueColumn, Catalog
 ITEM_ROOT = "Lakehouse/_weaver"
 SCHEMA_PATH = f"{ITEM_ROOT}/schemas/{CATALOGUE_SCHEMA}.yml"
 
+#: The folder every top-level Weaver task writes its evidence beneath, and the
+#: document that declares it. ``_`` + ``__`` + ``Log`` spells ``___Log``, which
+#: the parser reads as ``_.Log`` — see
+#: :func:`weaver.declaration.source.python_id_parts`.
+LOG_FOLDER = "Log"
+LOG_FOLDER_ID = f"{CATALOGUE_SCHEMA}.{LOG_FOLDER}"
+LOG_PATH = f"{ITEM_ROOT}/Files/{CATALOGUE_SCHEMA}{'__'}{LOG_FOLDER}.py"
+
+#: Where the folder puts its files, relative to the Weaver Lakehouse's ``Files``
+#: area. Derived from the identity exactly as any Folder's location is, so the
+#: logger addresses the *declared* folder rather than a path it happens to know.
+LOG_ROOT = f"{CATALOGUE_SCHEMA}/{LOG_FOLDER}"
+
+_LOG_CLASS = f"{CATALOGUE_SCHEMA}{'__'}{LOG_FOLDER}"
+
 #: One sentence, the same on every table, saying where the rows come from. It is
 #: not boilerplate: "never loaded" is the fact that makes ``Static: true``
 #: correct, and a reader of any one file should be told it.
@@ -149,8 +164,58 @@ def render_source(table: CatalogueTable) -> str:
     return f"/*\n{header}\n*/\n{_body(table)}"
 
 
+def render_log_file() -> str:
+    """The declaration for ``Files/_/Log`` — where task evidence is written.
+
+    An ordinary Folder document, and that is the whole point. A task log could
+    have been a path the logger alone knew about, but then its creation, its
+    registration, its survival through a prune and its removal would each need a
+    rule of their own. Declared here it is claimed, projected, inventoried,
+    installed, converged and protected by the machinery that already exists, and
+    the logger asks the *folder* where to write rather than composing a path.
+
+    ``Static: true`` because nothing loads into it: a task writes its own
+    evidence beneath it, exactly as a Folder object's authored code writes files
+    into its destination. ``Incremental: false`` for the same reason the runtime
+    tree declares it — the folder itself accumulates nothing that Weaver claims
+    file by file.
+
+    ``File key`` claims everything beneath, because everything beneath *is*
+    Weaver's — task evidence and nothing else. It is an accurate statement of
+    ownership rather than a licence to delete: nothing loads this folder, and a
+    written task file is never rewritten.
+    """
+
+    return f'''\
+"""
+Folder ID: {LOG_FOLDER_ID}
+
+Description: >-
+  Where every top-level Weaver task — wipe, mirror, build, load and test —
+  writes its immutable evidence. One folder per task, partitioned by the UTC
+  date the task started.
+
+Lineage: >-
+  Written by Weaver's own task logger as each top-level task runs. Never
+  authored, and never populated by a load.
+
+File key: "**/*"
+
+Incremental: false
+
+Static: true
+"""
+from weaver import Folder
+
+
+class {_LOG_CLASS}(Folder):
+    def read(self):
+        return self.staging_folder(), []
+'''
+
+
 def render_item_sources() -> dict[str, str]:
-    sources = {SCHEMA_PATH: render_schema_file()}
+    sources = {SCHEMA_PATH: render_schema_file(), LOG_PATH: render_log_file()}
     for table in CATALOGUE_TABLES:
         documented = replace(
             table,

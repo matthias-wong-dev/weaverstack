@@ -87,6 +87,8 @@ def _observe(env, step):
             "views": "SHOW VIEWS IN {{schema:DWG}}",
             "customer_columns": "DESCRIBE TABLE {{object:DWG.Customer}}",
             "customer_rows": "SELECT count(*) AS n FROM {{object:DWG.Customer}}",
+            "order_rows": "SELECT count(*) AS n FROM {{object:DWG.Order}}",
+            "order_total": "SELECT coalesce(sum(Amount), 0) AS n FROM {{object:DWG.Order}}",
             "summary": (
                 "SELECT CustomerCount FROM {{object:DWG.ActiveCustomerSummary}}"
             ),
@@ -319,6 +321,162 @@ def _assert_pruned(env, step) -> None:
         assert max(prunes) < min(builds), "prune must run before anything is built"
 
 
+# --- load orchestration -------------------------------------------------------
+#
+# One more transition in the journey, not a replacement for its build lifecycle.
+# Its purpose here is strategic: can a real installed estate be loaded *from the
+# catalogue*, with the repository playing no part in deciding what runs? The
+# detailed graph, dispatch-location and task-log claims belong to the small
+# orchestration test and the targeted seams; what this asks is whether the whole
+# thing composes over an estate that a real build actually made.
+#
+# Run through `run_load` over a prepared `LoadSession` rather than through
+# `weaver.load(...)` for one reason, and it is a harness reason: the public entry
+# acquires its own Spark session, and the local twin of this journey shares one.
+# Everything below that line is the same code the public entry runs.
+
+LOADED = '''
+from weaver.load import LoadSession, run_load
+from weaver.load_plan import PhysicalTargetRef
+from weaver.locations import Location
+
+requested = (PhysicalTargetRef("lakehouse", target.name),)
+
+
+def orchestrate(dry_run):
+    with LoadSession(workspace, requested, spark=spark, store=store) as session:
+        return run_load(session, requested=requested, dry_run=dry_run).to_mapping()
+
+
+dry = orchestrate(True)
+real = orchestrate(False)
+
+# Listed here rather than from the desktop, and that is not an economy. A
+# location has two spellings — the session's `abfss://` and the desktop's https
+# handle over OneLake DFS — so the evidence is read by whoever wrote it.
+emit({
+    "dry": dry,
+    "real": real,
+    "log": sorted(
+        entry.location.value.rsplit("/", 1)[-1]
+        for entry in store.list(Location(real["task_log"]))
+        if not entry.is_directory
+    ),
+})
+'''
+
+
+def _why(report) -> str:
+    """Every node's status and messages, for an assertion that has to explain.
+
+    A load run's detail is per node — the run-level message stream is usually
+    empty, because what went wrong went wrong somewhere in particular. An
+    assertion reporting only the run level says "failed" and nothing else.
+    """
+
+    return "\n".join(
+        [f"status={report['status']} messages={report['messages']}"]
+        + [
+            f"  {node['status']:<24} {node['node_id']}"
+            + "".join(
+                f"\n      {message['code']}: {message['message']}"
+                for message in node["messages"]
+            )
+            for node in report["nodes"]
+        ]
+    )
+
+
+def _assert_loaded(env, seen) -> None:
+    """The installed estate loads itself, from the catalogue and nothing else."""
+
+    dry, real = seen["dry"], seen["real"]
+
+    # Catalogue-driven: the repository is not the orchestration source, and the
+    # loadable objects, their order and their primitives all came from what the
+    # build recorded.
+    assert dry["status"] == "succeeded", _why(dry)
+    assert dry["dry_run"] is True
+    assert [node["node_id"] for node in dry["nodes"]] == list(dry["order"])
+    assert all(node["status"] == "validated" for node in dry["nodes"])
+    assert all(node["dispatch_location"] for node in dry["nodes"])
+    # Dry run is validation only: no evidence, because nothing happened.
+    assert dry["task_log"] is None
+
+    # The two views own no load work, so the graph is the folder and the two
+    # tables — and the order is the one the dependencies force.
+    order = list(real["order"])
+    assert [node_id.rsplit("/", 1)[-1] for node_id in order] == [
+        "Raw.CustomerCsv",
+        "DWG.Customer",
+        "DWG.Order",
+    ]
+    assert real["status"] == "succeeded", _why(real)
+    assert all(node["executed"] for node in real["nodes"])
+    assert not any(
+        node["status"] in ("blocked", "skipped", "failed") for node in real["nodes"]
+    )
+    # The dry run planned what the real run ran.
+    assert order == list(dry["order"])
+    assert real["edges"] == dry["edges"]
+
+
+def _assert_load_materialised(env, journey) -> None:
+    """Recognisable fixture values, where the estate says they should be.
+
+    The strategic physical claim, and deliberately not a matrix: four customers
+    in, three of them active, and every order derived from a customer that must
+    already have been loaded for the derivation to see it.
+
+    Its own step, so the evidence belongs to *this* moment rather than
+    overwriting the transition before it — the estate has moved since.
+    """
+
+    from support.build_env import Step
+
+    step = journey.steps["load"] = Step(name="load")
+    seen = _observe(env, step)
+
+    assert seen.scalar("customer_rows") == 4
+    assert seen.scalar("summary") == 3
+    assert seen.scalar("order_rows") == 4
+    # Read as a number rather than compared as one: a decimal comes back as a
+    # `Decimal` in this process and as its JSON spelling over Livy, and the claim
+    # is about the value either way.
+    assert float(seen.scalar("order_total")) == 100.0
+    # The Python-defined folder materialised its files, which is what the table
+    # above read to get its rows.
+    assert env.store.exists(_folder(env, "Raw", "CustomerCsv").join("customers.csv"))
+
+
+def _assert_task_log(env, seen) -> None:
+    """One coherent task folder beneath the declared `_.Log` folder.
+
+    Only that it is coherent. Filenames, field contracts and reconciliation
+    belong to the small orchestration and task-logging tests.
+    """
+
+    from weaver.catalogue.builtin import LOG_FOLDER
+
+    real = seen["real"]
+    declared = env.resolver.folder_object(
+        FolderTarget(lakehouse=env.weaver), "_", LOG_FOLDER
+    )
+
+    # `_.Log` is an ordinary Weaver folder artefact, so the desktop finds it
+    # where the build installed it.
+    assert env.store.exists(declared), "`_.Log` must exist as a normal Weaver folder"
+    # And the task wrote beneath it. Matched on the item-relative part, because
+    # the run addressed it as its own environment does and the desktop addresses
+    # the same bytes differently.
+    assert f"/Files/_/{LOG_FOLDER}/task_date=" in real["task_log"]
+
+    written = seen["log"]
+    assert "plan.json" in written
+    assert sum("_load_" in name for name in written) == len(real["nodes"])
+    assert sum("_complete_" in name for name in written) == 1
+
+
 #: The summary view, rewritten. Changing it is what gives the failing transition
 #: something to build: by this point the estate is correct, so an unchanged
 #: repository would plan no work at all and there would be no payload to corrupt.
@@ -433,6 +591,16 @@ def drive(journey):
     _assert_unchanged(env, journey.run("unchanged", before=lambda e: e.install_repo()))
 
     _assert_pruned(env, journey.run("prune", before=lambda e: e.seed_orphans()))
+
+    # Load is one more transition, and it comes here rather than earlier for a
+    # reason the journey's own shape gives: every phase before it asserts an
+    # estate a build made and a load has not touched, so putting rows in one
+    # would change what those phases are about. What follows is the failing
+    # build, which asserts actions rather than rows.
+    loaded = env.run_python(LOADED, label="load the installed estate")
+    _assert_loaded(env, loaded)
+    _assert_load_materialised(env, journey)
+    _assert_task_log(env, loaded)
 
     _assert_failed(
         journey,
