@@ -1160,15 +1160,23 @@ def _empty_the_target(
 
     areas = [resolver.tables_root(target), resolver.files_root(target)]
     if weaver_destination is not None:
-        # The catalogue's *tables*, not the schema directory holding them —
-        # emptying `Tables/_` leaves the namespace a build writes into, where
-        # removing it would leave the Lakehouse unable to resolve a schema it is
-        # supposed to have. `Files/` under the Weaver Lakehouse is left alone
-        # entirely: the repositories a context uploads and the bundles it keeps
-        # are the harness's own scaffolding, not catalogue state.
-        areas.append(
-            resolver.tables_root(ItemRef(workspace.weaver_lakehouse)) / "_"
-        )
+        weaver_item = ItemRef(workspace.weaver_lakehouse)
+        # Both halves of what the control plane owns, and it has to be both. Its
+        # catalogue lives in `Tables/_`; the task-log folder it declares lives in
+        # `Files/_`. Clearing the catalogue alone leaves the estate holding an
+        # artefact Weaver no longer remembers, and the next build — seeing no
+        # Registry row — plans to *create* a folder that is already there and
+        # fails. A wipe has to leave the record and the thing it records
+        # agreeing.
+        #
+        # The contents, never the `_` directories themselves: removing a schema
+        # nothing recreates damages the Lakehouse rather than clearing it, which
+        # is the judgement `physical_wipe._KEPT_SCHEMAS` already makes for `dbo`.
+        #
+        # Everything else under `Files/` stays: the repositories a context
+        # uploads and the bundles it keeps are the harness's own scaffolding.
+        areas.append(resolver.tables_root(weaver_item) / "_")
+        areas.append(resolver.files_root(weaver_item) / "_")
     for area in areas:
         try:
             entries = store.list(area)

@@ -31,6 +31,16 @@
   `sys.modules`, which a second Lakehouse's tree could already have populated
   under the same name. One estate per process is the normal case and this is not
   it.
+- **A build does not converge from "catalogue wiped, estate intact".** Losing the
+  catalogue while the physical objects survive leaves every declared object
+  looking *new*, so the planner emits a create for something already there and
+  the executor correctly refuses to clobber it. `test_artefact_lifecycle.py`
+  covers damage in the other direction — objects deleted, catalogue intact — and
+  nothing covers this one. It is reachable in practice: a control plane restored
+  from an older backup, or a `_` schema dropped by hand. The repair is arguably
+  that an object the catalogue does not certify but the inventory *does* see
+  should be rebuilt rather than created, which is the same information prune
+  already reads. Found by wiping the control plane in the Fabric harness.
 - **Parallel execution.** The executor asks the graph what is ready and runs it,
   so the shape is there; only the sequential loop would change.
 - **Object-level load selection**, retries, bookmarks, resumable runs and
