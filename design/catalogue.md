@@ -242,6 +242,36 @@ Three scopes, and they are deliberately different operations:
 Only the first is part of a build. A build that did not bind an item has no opinion
 about it, so nothing in the build path can reach its installation rows.
 
+### Reconciliation self-heals, but only within scope
+
+Worth stating plainly, because "reconciliation removes claims reality disproves"
+invites the belief that the catalogue eventually repairs anything. It does not,
+and must not.
+
+`catalogue_items_for_build` returns the bound items plus the source items of any
+alias they consume. `read_build_state` reads the catalogue for exactly those, so
+`reconcile_catalogue_state` only ever walks rows belonging to them. An item the
+build did not bind is never read, never compared against an inventory, and never
+healed — because its claims may be perfectly true about a Lakehouse this build
+cannot see, and deleting them would destroy the record of a real installation.
+
+The consequence is worth knowing before it surprises someone: **a physical target
+accumulates a Registry row for every logical item ever bound to it**, and only the
+current one is being maintained. In production that is rare and usually means an
+item was rebound, which is what `weaver.wipe(..., unbind_from=...)` is for. Where
+one physical target is deliberately reused under many logical names — a test
+suite, a shared development workspace — the residue is permanent, and the honest
+reset is to *wipe* the control plane rather than to unbind target by target: a
+wipe needs no list of what to forget, so it cannot forget half of it, and the next
+build bootstraps the catalogue from the built-in item exactly as a first build
+does.
+
+Load orchestration is where this becomes visible, because it reads the *whole*
+installed catalogue rather than one build's scope — so it is the first operation
+that can see two items claiming one physical object. It refuses such a request
+(`load_dag`), and deliberately only when the ambiguity touches what was asked
+for.
+
 Schema `_` in the Weaver Lakehouse's `Tables` area is reserved from ordinary
 prune. An application build normally cannot see it — prune is scoped to the bound
 destination's own storage, and the catalogue lives in the Weaver Lakehouse — but a
