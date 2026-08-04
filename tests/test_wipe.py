@@ -146,19 +146,28 @@ def test_the_report_reads_usefully(populated_folders):
 
 
 @pytest.mark.parametrize(
-    ("value", "item_type", "area"),
+    ("value", "item_type"),
     [
-        ("Lakehouse/Sales", "Lakehouse", None),
-        ("Lakehouse/Sales/Files", "Lakehouse", "Files"),
-        ("Lakehouse/Sales/Tables", "Lakehouse", "Tables"),
-        ("Warehouse/Reporting", "Warehouse", None),
+        ("Lakehouse/Sales", "Lakehouse"),
+        ("Warehouse/Reporting", "Warehouse"),
     ],
 )
-def test_public_wipe_uses_one_typed_target_grammar(value, item_type, area):
+def test_public_wipe_uses_one_typed_target_grammar(value, item_type):
     target = WipeTarget.parse(value)
     assert target.item_type == item_type
-    assert target.area == area
     assert str(target) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Lakehouse/Sales/Files",
+        "Lakehouse/Sales/Tables",
+    ],
+)
+def test_public_wipe_rejects_partial_lakehouse_targets(value):
+    with pytest.raises(CommandError, match="whole physical item"):
+        WipeTarget.parse(value)
 
 
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):

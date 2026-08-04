@@ -17,7 +17,7 @@ from typing import Iterable, Mapping, Sequence
 from .errors import BuildError, CommandError, WeaverError
 from .locations import Location
 from .store import LocalStore, Store
-from .targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
+from .targets import ItemRef, WarehouseTarget
 from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
 
 
@@ -63,53 +63,37 @@ class BuildResult:
 class WipeTarget:
     item_type: str
     item: ItemRef
-    area: str | None = None
 
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
         if not isinstance(text, str):
             raise CommandError("wipe targets must be strings")
         parts = text.strip().strip("/").split("/")
-        if len(parts) not in (2, 3):
+        if len(parts) != 2:
             raise CommandError(
-                "a wipe target must be Lakehouse/Name, Lakehouse/Name/Files, "
-                "Lakehouse/Name/Tables, or Warehouse/Name"
+                "a wipe target must name a whole physical item as "
+                "Lakehouse/Name or Warehouse/Name"
             )
-        item_type, name = parts[:2]
-        area = parts[2] if len(parts) == 3 else None
-        if item_type == "Lakehouse":
-            if area not in (None, "Files", "Tables"):
-                raise CommandError(
-                    "a Lakehouse wipe area must be Files or Tables, "
-                    f"got {area!r}"
-                )
-        elif item_type == "Warehouse":
-            if area is not None:
-                raise CommandError("a Warehouse wipe target cannot name an area")
-        else:
+        item_type, name = parts
+        if item_type not in ("Lakehouse", "Warehouse"):
             raise CommandError(
                 "a wipe target must start with Lakehouse or Warehouse, "
                 f"got {item_type!r}"
             )
-        return cls(item_type=item_type, item=ItemRef.parse(name), area=area)
+        return cls(item_type=item_type, item=ItemRef.parse(name))
 
     @property
     def physical_name(self) -> str:
         return self.item.name
 
     def __str__(self) -> str:
-        suffix = f"/{self.area}" if self.area else ""
-        return f"{self.item_type}/{self.item}{suffix}"
+        return f"{self.item_type}/{self.item}"
 
 
 def _unbind_target_names(targets: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Parse unbind selection through the same typed grammar used by wipe."""
 
     parsed = tuple(WipeTarget.parse(target) for target in targets)
-    if any(target.area is not None for target in parsed):
-        raise CommandError(
-            "unbind targets must name a whole Lakehouse or Warehouse, not an area"
-        )
     return (
         tuple(target.physical_name for target in parsed if target.item_type == "Lakehouse"),
         tuple(target.physical_name for target in parsed if target.item_type == "Warehouse"),
@@ -239,7 +223,7 @@ def wipe(
     unbind_from: str | None = None,
     dry_run: bool = False,
 ) -> WipeResult:
-    """Wipe one or more explicitly typed physical targets."""
+    """Empty one or more whole Lakehouse or Warehouse items."""
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
     parsed = tuple(WipeTarget.parse(value) for value in values)
@@ -270,7 +254,7 @@ def wipe(
     whole_lakehouses = {
         target.physical_name
         for target in parsed
-        if target.item_type == "Lakehouse" and target.area is None
+        if target.item_type == "Lakehouse"
     }
     if not dry_run and control and control not in whole_lakehouses:
         catalogue_workspace = replace(
@@ -669,20 +653,10 @@ def _operation_store(workspace: Workspace) -> Store:
 
 
 def _wipe_one(target: WipeTarget, workspace, *, store, dry_run):
-    from .physical_wipe import (
-        wipe_delta_target,
-        wipe_folder_target,
-        wipe_lakehouse,
-        wipe_sql_target,
-    )
+    from .physical_wipe import wipe_lakehouse, wipe_sql_target
 
     if target.item_type == "Lakehouse":
-        if target.area == "Files":
-            low = (wipe_folder_target(FolderTarget(target.item), workspace, store=store, dry_run=dry_run),)
-        elif target.area == "Tables":
-            low = (wipe_delta_target(DeltaTarget(target.item), workspace, store=store, dry_run=dry_run),)
-        else:
-            low = wipe_lakehouse(target.item, workspace, store=store, dry_run=dry_run)
+        low = wipe_lakehouse(target.item, workspace, store=store, dry_run=dry_run)
         return tuple(
             WipeReport(
                 target=str(target),
@@ -715,7 +689,7 @@ def _wipe_one(target: WipeTarget, workspace, *, store, dry_run):
 def _drop_local_catalogue(workspace, targets: Sequence[WipeTarget]) -> None:
     if not isinstance(workspace, LocalWorkspace):
         return
-    lakehouses = {target.item for target in targets if target.area in (None, "Tables")}
+    lakehouses = {target.item for target in targets}
     if not lakehouses:
         return
     from .resolution import resolver_for
