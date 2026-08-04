@@ -31,9 +31,9 @@ than against a flag.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Mapping
+from typing import Callable
 
-from .errors import LoadError, WeaverError
+from .errors import LoadError
 from .etl import LOAD_ROOT, load_procedure_name
 from .load_plan import (
     ENDPOINT_REFRESH,
@@ -48,7 +48,6 @@ from .load_report import (
     DISPATCH_EXCEPTION,
     ENDPOINT_REFRESH_FAILURE,
     FAILED,
-    MODULE_IMPORT_FAILURE,
     PENDING,
     PRIMITIVE_FAILURE,
     PRIMITIVE_REJECTS,

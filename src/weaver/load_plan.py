@@ -15,10 +15,14 @@ The direction of travel is the interesting part. A build establishes
 
 and load orchestration needs the reverse, because a caller names physical
 targets. So the first thing that happens is that the Installation and Registry
-rows are turned inside out into :class:`InstalledEstate`, and ambiguity is
-refused there rather than tolerated into the graph: two logical objects resolving
-to one physical object would make "load Warehouse/Reporting" a request with two
-possible meanings.
+rows are turned inside out into :class:`InstalledEstate`.
+
+Two logical objects resolving to one physical object would make "load
+Warehouse/Reporting" a request with two possible meanings, and no such request is
+carried out. But the *reading* records that finding rather than raising on it, and
+:func:`load_dag` refuses when it touches what was asked for — because an estate
+accumulates a Registry row for every item ever bound to a target, and a stale
+duplicate in one Warehouse must not stop a load of an unrelated Lakehouse.
 
 **The graph is physical, and the alias is why that matters.** A logical
 dependency that crosses items is not an edge between two objects; it is a
@@ -53,36 +57,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
-from .catalogue.tables import (
-    ALIAS,
-    DEPENDENCY,
-    INSTALLATION,
-    REGISTRY,
-    SCOPE_ITEM_NAME,
-    SCOPE_ITEM_TYPE,
-)
+from .catalogue.tables import ALIAS, DEPENDENCY, INSTALLATION
 from .declaration.metadata import ObjectId
 from .declaration.model import (
     FILE_SHAPE,
     LAKEHOUSE,
-    PROCEDURE_SHAPE,
     WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
 )
 from .errors import LoadError
 from .etl import LOAD_ROOT, load_procedure_id
-from .load_report import (
-    CATALOGUE_BINDING_INVALID,
-    DAG_CYCLE,
-    DEPENDENCY_EXTERNAL,
-    DEPENDENCY_UNRESOLVED,
-    LoadMessage,
-    info,
-)
+from .load_report import DEPENDENCY_EXTERNAL, LoadMessage, info
 from .targets import LAKEHOUSE_KIND, WAREHOUSE_KIND
 
 # --- the primitive kinds ------------------------------------------------------

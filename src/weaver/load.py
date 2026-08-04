@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from .errors import CommandError, LoadError
 from .load_execution import execute_load_plan
@@ -56,9 +56,7 @@ from .load_plan import (
     load_dag,
 )
 from .load_report import (
-    LoadMessage,
     LoadNodeReport,
-    LoadResult,
     LoadRunReport,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
@@ -71,7 +69,6 @@ from .targets import (
     WarehouseTarget,
     parse_physical_target,
     physical_item,
-    physical_kind,
 )
 from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
 
