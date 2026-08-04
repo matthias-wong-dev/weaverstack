@@ -321,6 +321,8 @@ def livy_session(fabric_workspace, fabric_client):
     from weaver.errors import CommandError
     from weaver.fabric import LivyError, LivySession, list_workspace_livy_sessions
 
+    occupied: list[str] = []
+    active_sessions = None
     try:
         active_sessions = list_workspace_livy_sessions(
             fabric_workspace, client=fabric_client, active_only=True
@@ -328,6 +330,16 @@ def livy_session(fabric_workspace, fabric_client):
     except Exception as exc:
         print(f"warning: could not inspect Fabric Spark sessions: {exc}")
     else:
+        occupied = [
+            f"{entry.lakehouse_name}/{entry.session.id}"
+            + (
+                f" (submitted by {entry.session.submitter_name})"
+                if entry.session.submitter_name
+                else ""
+            )
+            for entry in active_sessions
+        ]
+    if active_sessions is not None:
         if not active_sessions:
             print("Fabric Spark preflight: no active or queued sessions.")
         for entry in active_sessions:
@@ -361,7 +373,23 @@ def livy_session(fabric_workspace, fabric_client):
     try:
         session.start()
     except LivyError as exc:
-        pytest.skip(f"could not start a Livy session (Environment installed?): {exc}")
+        # Name the capacity before the Environment. A capacity commonly permits
+        # one Spark session, so the usual cause is that something else already
+        # holds the slot — an interrupted run that never got to close its
+        # session, or a notebook someone left open. The preflight already knows
+        # which, and saying "Environment installed?" instead sent at least one
+        # reader off to check a wheel that was perfectly fine.
+        held = (
+            "the capacity's session slot is held by "
+            + ", ".join(occupied)
+            + " — wait for it to release, or end it if it is yours; otherwise "
+            if occupied
+            else ""
+        )
+        pytest.skip(
+            f"could not start a Livy session: {held}check the Environment is "
+            f"installed ({exc})"
+        )
     startup = time.monotonic() - started
     LEDGER.startup_seconds = startup
     print(f"Fabric Livy session startup: {startup:.2f}s")
