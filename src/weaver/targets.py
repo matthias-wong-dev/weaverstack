@@ -175,3 +175,83 @@ class WarehouseTarget:
 
     def __str__(self) -> str:
         return self.warehouse.name
+
+
+# --- the one typed physical grammar the public operations share ---------------
+#
+# ``Lakehouse/Name`` and ``Warehouse/Name`` are what a caller writes at every
+# boundary that names a whole physical item: a build binding's left-hand side, a
+# wipe target, an unbind target, a load target. One parser, deliberately — four
+# spellings of one grammar is four places for it to drift, and the drift would
+# show up as one operation accepting a target another refuses.
+#
+# It returns the *existing* typed targets rather than a fifth wrapper, so what a
+# caller gets back is what the resolvers and executors already take.
+
+LAKEHOUSE_KIND = "Lakehouse"
+WAREHOUSE_KIND = "Warehouse"
+
+#: How the grammar spells each kind, in the order the error message lists them.
+PHYSICAL_KINDS = (LAKEHOUSE_KIND, WAREHOUSE_KIND)
+
+_PHYSICAL_TYPES = {LAKEHOUSE_KIND: DeltaTarget, WAREHOUSE_KIND: WarehouseTarget}
+
+
+def parse_physical_target(
+    text: object, *, what: str = "target", error: type[Exception] = IdentityError
+):
+    """``Lakehouse/Name`` or ``Warehouse/Name``, as the typed physical target.
+
+    ``what`` names the caller's own noun so the message reads in that operation's
+    vocabulary — "a wipe target must …", "a load target must …". ``error`` is the
+    class the caller's boundary raises, because *which* error a malformed request
+    produces belongs to the operation and not to the grammar.
+    """
+
+    if not isinstance(text, str):
+        raise error(f"{what}s must be strings, got {type(text).__name__}")
+    parts = text.strip().strip("/").split("/")
+    if len(parts) != 2 or not all(part.strip() for part in parts):
+        raise error(
+            f"a {what} must name a whole physical item as "
+            + " or ".join(f"{kind}/Name" for kind in PHYSICAL_KINDS)
+            + f", got {text!r}"
+        )
+    kind, name = parts[0].strip(), parts[1].strip()
+    if kind not in _PHYSICAL_TYPES:
+        raise error(
+            f"a {what} must start with "
+            + " or ".join(PHYSICAL_KINDS)
+            + f", got {kind!r}"
+        )
+    return _PHYSICAL_TYPES[kind](ItemRef.parse(name))
+
+
+def physical_kind(target) -> str:
+    """``Lakehouse`` or ``Warehouse`` for one typed physical target."""
+
+    if isinstance(target, DeltaTarget):
+        return LAKEHOUSE_KIND
+    if isinstance(target, WarehouseTarget):
+        return WAREHOUSE_KIND
+    raise IdentityError(
+        f"{type(target).__name__} is not a typed physical target"
+    )
+
+
+def physical_item(target) -> ItemRef:
+    """The item one typed physical target names."""
+
+    if isinstance(target, DeltaTarget):
+        return target.lakehouse
+    if isinstance(target, WarehouseTarget):
+        return target.warehouse
+    raise IdentityError(
+        f"{type(target).__name__} is not a typed physical target"
+    )
+
+
+def physical_target_text(target) -> str:
+    """One typed physical target, spelled back in the grammar it was parsed from."""
+
+    return f"{physical_kind(target)}/{physical_item(target).name}"

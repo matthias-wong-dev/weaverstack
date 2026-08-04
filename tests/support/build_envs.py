@@ -62,6 +62,17 @@ MIXED_ESTATE_FIXTURE = SesFixture(
 WAREHOUSE_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "warehouse-estate-item", ("Warehouse/Reporting",)
 )
+#: The smallest estate a load run can be orchestrated over: a Folder that
+#: produces files, the Python table that reads them, and the Spark SQL table that
+#: reads *that*. Three objects, three dispatch kinds, one dependency chain — so a
+#: failure names the orchestration layer rather than an unrelated transition.
+#:
+#: Every object really loads, which is what separates it from the other Lakehouse
+#: fixtures: several of them raise from ``read()`` on purpose, to prove a build
+#: never calls one.
+LOAD_ORCHESTRATION_FIXTURE = SesFixture(
+    _FIXTURES / "load-orchestration", ("Lakehouse/Sales",)
+)
 #: The one Lakehouse estate a journey drives, and deliberately the only Fabric
 #: fixture that declares ``Lakehouse/Sales``.
 #:

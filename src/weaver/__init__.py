@@ -11,6 +11,8 @@ from __future__ import annotations
 from . import config as _config  # establish declaration/workspace import order
 from .errors import CommandError, ConfigError, IdentityError, WeaverError
 from .operations import BuildResult, WipeReport, WipeResult, build, wipe
+from .load import load
+from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
 from .objects import Folder, Table, View, WeaverObject
 
@@ -36,6 +38,11 @@ __all__ = [
     "wipe",
     "WipeReport",
     "WipeResult",
+    "load",
+    "LoadRunReport",
+    "LoadNodeReport",
+    "LoadMessage",
+    "LoadResult",
     # authored objects
     "WeaverObject",
     "Folder",

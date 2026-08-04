@@ -230,13 +230,19 @@ def read_lakehouse_inventory(
         for schema in schemas
         for entry in _child_dirs(store, tables_root / schema)
     )
-    folder_schema_entries = (
-        ()
-        if control_item
-        else tuple(
-            entry
-            for entry in _child_dirs(store, files_root)
-            if entry.name not in _RESERVED_FILES_AREAS
+    # The same narrowing the Delta side uses, and for the same reason. The
+    # control item's Files area holds Weaver's own working directories — the
+    # declaration, retained bundles, CLI handover — none of which is a Folder
+    # object; what it *does* declare is the task log, under the reserved schema.
+    # Excluding the whole area instead left that folder unobservable, so every
+    # build concluded it was absent and tried to create it again.
+    folder_schema_entries = tuple(
+        entry
+        for entry in _child_dirs(store, files_root)
+        if (
+            entry.name.casefold() == CATALOGUE_SCHEMA.casefold()
+            if control_item
+            else entry.name not in _RESERVED_FILES_AREAS
         )
     )
     folders = tuple(

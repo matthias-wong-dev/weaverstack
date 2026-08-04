@@ -123,8 +123,10 @@ def test_a_freshly_built_catalogue_is_published_and_certified(
     built_catalogue, spark, weaver_catalogue
 ):
     assert spark.table(weaver_catalogue.qualify("_", INSTALLATION.name)).count() == 1
-    assert spark.table(weaver_catalogue.qualify("_", REGISTRY.name)).count() == len(
-        CATALOGUE_TABLES
+    # Every table, plus the one Folder the control plane declares: `_.Log`, the
+    # task log. It is certified like any other artefact because it is one.
+    assert spark.table(weaver_catalogue.qualify("_", REGISTRY.name)).count() == (
+        len(CATALOGUE_TABLES) + 1
     )
 
 
@@ -145,6 +147,7 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     kinds = {action.kind for _s, _b, action in plan.actions()}
     assert {
         "build_table",
+        "build_folder",
         "publish_catalogue",
         "publish_registry",
         "refresh_sql_endpoint",
@@ -153,6 +156,9 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     executors = {action.executor for _s, _b, action in plan.actions()}
     assert executors == {
         "spark_table",
+        # The task log is a declared Folder, so it is created by the ordinary
+        # folder executor — the same one an application repository's folder gets.
+        "folder",
         "spark_sql_batch",
         "sql_endpoint_refresh",
     }
@@ -186,6 +192,6 @@ def test_rebuilding_the_unchanged_repository_succeeds_again(
         output=resolver.build_bundle("catalogue-bootstrap-again"),
     )
     assert result.report.status == "succeeded", _failures(result.report)
-    assert spark.table(weaver_catalogue.qualify("_", REGISTRY.name)).count() == len(
-        CATALOGUE_TABLES
+    assert spark.table(weaver_catalogue.qualify("_", REGISTRY.name)).count() == (
+        len(CATALOGUE_TABLES) + 1
     )
