@@ -563,10 +563,9 @@ def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
         _empty_the_target(
             livy_session,
             store,
-            resolver,
             target,
             resolver.spark_destination(target),
-            workspace=fabric_workspace,
+            fabric_workspace,
         )
 
     return empty
@@ -903,10 +902,9 @@ def _fabric_build_context(
     _empty_the_target(
         session,
         store,
-        resolver,
         target,
         destination,
-        workspace=workspace,
+        workspace,
         warehouse=warehouse_name,
         weaver_destination=weaver_destination,
     )
@@ -1104,38 +1102,45 @@ _FABRIC_TARGET_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting")
 def _empty_the_target(
     session,
     store,
-    resolver,
     target,
     destination,
-    workspace=None,
+    workspace,
     warehouse=None,
     weaver_destination=None,
 ) -> None:
     """Leave the target Lakehouse *and the control plane* as though nothing had run.
 
-    Spark catalogue first, then storage: dropping a schema removes its tables and
-    views — a view exists only in the metastore — and anything left on disk
-    afterwards was never registered.
+    **Through Weaver's own wipe.** This used to sweep the two areas with
+    ``store.delete`` and it is exactly the mistake ``AGENTS.md`` records against
+    the first Fabric suite — test code reproducing what the function would have
+    done, and looking like it was testing ``wipe``. It cost twice over. Once
+    because a hand-rolled sweep is a *list* of what to remove, so it can omit
+    something: skipping ``Files/`` on the Weaver Lakehouse left the declared
+    ``_.Log`` folder behind while its Registry row went, and the next build
+    planned to create a folder already there. And once latently, because it
+    recursively deleted directories without removing shortcuts first — which
+    ``wipe_folder_target`` is careful never to do, since a recursive delete
+    through a shortcut reaches the *producer's* data.
 
-    **The catalogue is wiped, not unbound.** Weaver's own record is state like any
-    other state, and it accumulates faster than anything else here: the Weaver
-    Lakehouse is shared and permanent while the *logical item names* bound to one
-    physical target change from module to module, so its Registry ends up holding
-    several items' claims on the same physical object. That is not something a
-    build repairs. Reconciliation is deliberately scoped to the items a build
-    binds — ``catalogue_items_for_build`` returns those plus alias sources, and
-    ``reconcile_catalogue_state`` never sees a row for anything else — because an
-    item you are not building has claims you have no business deleting. Correct
-    in production; in a suite that reuses one Lakehouse under many names it means
-    the residue is permanent.
+    ``wipe_lakehouse`` has neither problem: it clears both areas completely,
+    keeps only what nothing recreates, and takes shortcuts out through the
+    workspace before any storage is swept.
 
-    Unbinding the specific targets would clear it too, and was how this started.
-    Wiping is the better answer and the one the product leads with: it needs no
-    list of what to forget, so it cannot forget half of it, and the next build
-    bootstraps the catalogue from the built-in item exactly as a first build
-    does. That path is asserted in its own right
-    (``test_catalogue_builtin_build.py``), so exercising it here costs one
-    catalogue build per context and buys an estate with no history at all.
+    **The control plane is wiped too, and that is the point.** Weaver's own
+    record is state like any other, and it accumulates faster than anything else
+    here: the Weaver Lakehouse is shared and permanent while the *logical item
+    names* bound to one physical target change from module to module, so its
+    Registry ends up holding several items' claims on one physical object. No
+    build repairs that, and correctly so — reconciliation is scoped to the items
+    a build binds (``catalogue_items_for_build`` returns those plus alias
+    sources), because an item you are not building has claims you have no
+    business deleting. Right in production; in a suite reusing one Lakehouse
+    under many names it makes the residue permanent.
+
+    What storage cannot reach is the Spark metastore: a *view* exists only
+    there, and the catalogue's schema is assumed by a build rather than created
+    by one. So the session drops the destination's schemas, and drops and
+    restores ``_``.
     """
 
     statements = [
@@ -1143,13 +1148,10 @@ def _empty_the_target(
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
     if weaver_destination is not None:
-        # The control plane's own schema, emptied and *put back*. Dropped through
-        # the session because the catalogue's tables are registered, unlike a
-        # destination's — but a build creates the catalogue's tables and assumes
-        # its schema, so leaving `_` gone is not clearing the control plane, it is
-        # damaging it: every later build then has nowhere to write the catalogue
-        # and fails. The same judgement `physical_wipe._KEPT_SCHEMAS` makes about
-        # `dbo`, for the same reason.
+        # Dropped and put back. A build creates the catalogue's tables and
+        # *assumes* its schema, so leaving `_` gone is not clearing the control
+        # plane but damaging it — the same judgement `physical_wipe`
+        # already makes about `dbo`.
         catalogue_schema = weaver_destination.qualified_schema("_")
         statements.append(f"DROP SCHEMA IF EXISTS {catalogue_schema} CASCADE")
         statements.append(f"CREATE SCHEMA IF NOT EXISTS {catalogue_schema}")
@@ -1158,36 +1160,14 @@ def _empty_the_target(
         label="empty target",
     )
 
-    areas = [resolver.tables_root(target), resolver.files_root(target)]
+    from weaver.physical_wipe import wipe_lakehouse
+
+    wiped = [target]
     if weaver_destination is not None:
-        weaver_item = ItemRef(workspace.weaver_lakehouse)
-        # Both halves of what the control plane owns, and it has to be both. Its
-        # catalogue lives in `Tables/_`; the task-log folder it declares lives in
-        # `Files/_`. Clearing the catalogue alone leaves the estate holding an
-        # artefact Weaver no longer remembers, and the next build — seeing no
-        # Registry row — plans to *create* a folder that is already there and
-        # fails. A wipe has to leave the record and the thing it records
-        # agreeing.
-        #
-        # The contents, never the `_` directories themselves: removing a schema
-        # nothing recreates damages the Lakehouse rather than clearing it, which
-        # is the judgement `physical_wipe._KEPT_SCHEMAS` already makes for `dbo`.
-        #
-        # Everything else under `Files/` stays: the repositories a context
-        # uploads and the bundles it keeps are the harness's own scaffolding.
-        areas.append(resolver.tables_root(weaver_item) / "_")
-        areas.append(resolver.files_root(weaver_item) / "_")
-    for area in areas:
-        try:
-            entries = store.list(area)
-        except Exception:  # the area may not exist yet
-            continue
-        for entry in entries:
-            if entry.is_directory and entry.name.lower() != "dbo":
-                try:
-                    store.delete(entry.location, recursive=True)
-                except Exception as exc:
-                    print(f"warning: could not empty {entry.location}: {exc}")
+        wiped.append(ItemRef(workspace.weaver_lakehouse))
+    for item in wiped:
+        for report in wipe_lakehouse(item, workspace, store=store):
+            print(f"Fabric wipe: {report}")
 
 
 @pytest.fixture
