@@ -62,7 +62,7 @@ def test_weaver_wipes_a_populated_warehouse(
         f"{len(before)} fixture objects present before wipe"
     )
 
-    from weaver import wipe_sql_target
+    from weaver.physical_wipe import wipe_sql_target
 
     started = time.monotonic()
     # The production implementation, given the SQL executor explicitly — which is

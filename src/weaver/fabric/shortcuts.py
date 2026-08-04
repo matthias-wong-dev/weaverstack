@@ -109,7 +109,7 @@ def delete_shortcut(
     Removing the shortcut is not removing what it points at: the data belongs to
     the item that produced it, and this only takes away this item's name for it.
     That distinction is the whole reason a wipe must remove shortcuts *through the
-    workspace* rather than by deleting a directory (see :mod:`weaver.wipe`).
+    workspace* rather than by deleting a directory (see :mod:`weaver.physical_wipe`).
     """
 
     client.request(

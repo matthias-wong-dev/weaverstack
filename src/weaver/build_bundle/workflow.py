@@ -1,10 +1,10 @@
-"""One in-environment item build, with optional archive handover.
+"""Source preparation, state handover, bundle generation, and installation.
 
-The ordinary product path starts with a repository in OneLake and Weaver already
-running inside Fabric. The session copies that repository once onto its driver,
-then discovery, planning, snapshotting and installation use driver-local files.
-Persisting a ZIP is optional and happens after generation or installation; it is
-not a prerequisite for a development build.
+A repository source is independent of the target estate. Remote sources are
+materialised once onto the current process's local filesystem; parsing and
+request validation finish before target state is read. Native builds keep all
+four stages in-environment. A desktop Fabric build serialises only ``BuildState``
+out and hands only a completed archive back for execution.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from .prune import (
     read_warehouse_inventory,
 )
 from ..catalogue.state import (
+    Catalogue,
     Reconciliation,
     read_catalogue_state,
     reconcile_catalogue_state,
@@ -53,6 +54,14 @@ class MaterialisedTree:
 
 
 @dataclass(frozen=True)
+class PreparedRepository:
+    """A parsed repository and the process-local store that owns its files."""
+
+    repository: WeaverRepository
+    store: LocalStore
+
+
+@dataclass(frozen=True)
 class ItemBuildResult:
     """Durable in-memory result of a temporary in-environment build."""
 
@@ -65,6 +74,130 @@ class ItemBuildResult:
     @property
     def bundle_id(self) -> str:
         return self.plan.bundle_id
+
+
+@dataclass(frozen=True)
+class BuildState:
+    """Authoritative target state handed from Fabric to a local planner."""
+
+    catalogue: Catalogue
+    target_inventories: Mapping[WeaverItemId, TargetInventory]
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "format_version": 1,
+            "catalogue": self.catalogue.to_mapping(),
+            "target_inventories": [
+                {
+                    "item": str(item),
+                    "inventory": inventory.to_mapping(),
+                }
+                for item, inventory in sorted(
+                    self.target_inventories.items(), key=lambda pair: str(pair[0])
+                )
+            ],
+        }
+
+    @classmethod
+    def from_mapping(cls, mapping) -> "BuildState":
+        version = mapping.get("format_version")
+        if version != 1:
+            raise BuildError(
+                f"unsupported build state format_version {version!r}; expected 1"
+            )
+        return cls(
+            catalogue=Catalogue.from_mapping(mapping["catalogue"]),
+            target_inventories={
+                WeaverItemId.parse(entry["item"]): TargetInventory.from_mapping(
+                    entry["inventory"]
+                )
+                for entry in mapping.get("target_inventories", ())
+            },
+        )
+
+
+def catalogue_items_for_build(
+    repository: WeaverRepository, bindings: ItemBindings
+) -> tuple[WeaverItemId, ...]:
+    """Catalogue scope needed for selection and cross-item alias freshness."""
+
+    bound = set(bindings.by_item)
+    items = bound | {
+        alias.source.item
+        for alias in repository.aliases
+        if alias.destination.item in bound and alias.source.item not in bound
+    }
+    return tuple(sorted(items, key=str))
+
+
+def validate_build_request(
+    repository: WeaverRepository,
+    bindings: ItemBindings,
+    *,
+    control_lakehouse: LakehouseBinding,
+) -> tuple[WeaverItemId, ...]:
+    """Validate repository-dependent input before any target is contacted."""
+
+    if control_lakehouse is None:
+        raise BuildError("every build needs an explicit control-plane Lakehouse")
+    if not bindings.entries:
+        raise BuildError("at least one Weaver item must be bound")
+    known = {item.identity for item in repository.items}
+    unknown = set(bindings.by_item) - known
+    if unknown:
+        raise BuildError(
+            "binding names item(s) absent from the repository: "
+            + ", ".join(sorted(map(str, unknown)))
+        )
+    placed = {item for layer in repository.item_layers for item in layer}
+    missing = set(bindings.by_item) - placed
+    if missing:
+        raise BuildError(
+            "bound item(s) absent from the repository item graph: "
+            + ", ".join(sorted(map(str, missing)))
+        )
+    builtin = WeaverItemId.parse("Lakehouse/_weaver")
+    binding = bindings.by_item.get(builtin)
+    if binding is not None and not isinstance(binding.target, LakehouseBinding):
+        raise BuildError("Lakehouse/_weaver requires a Lakehouse binding")
+    if (
+        binding is not None
+        and binding.target.lakehouse.name != control_lakehouse.lakehouse.name
+    ):
+        raise BuildError(
+            "Lakehouse/_weaver must be bound to the explicit control-plane Lakehouse"
+        )
+    return catalogue_items_for_build(repository, bindings)
+
+
+def read_build_state(
+    bindings: ItemBindings,
+    *,
+    required_catalogue_items,
+    environment: InstallationEnvironment,
+    sql_by_item=None,
+) -> BuildState:
+    """Read only the authoritative state a source-independent planner needs."""
+
+    inventories = read_target_inventories(
+        bindings, environment=environment, sql_by_item=sql_by_item
+    )
+    if environment.spark is None:
+        raise BuildError("every build needs Spark to read and publish the catalogue")
+    workspace = environment.workspace
+    if workspace is None or not workspace.weaver_lakehouse:
+        raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
+    from ..spark import SparkCatalogue
+    from ..targets import ItemRef
+
+    catalogue = SparkCatalogue(
+        environment.spark,
+        environment.resolver.spark_destination(ItemRef(workspace.weaver_lakehouse)),
+    )
+    return BuildState(
+        catalogue=read_catalogue_state(catalogue, required_catalogue_items),
+        target_inventories=inventories,
+    )
 
 
 @contextmanager
@@ -98,6 +231,20 @@ def materialise_tree(
                 f"materialising {source.value} did not create {destination}"
             )
         yield MaterialisedTree(Location(destination.as_posix()), LocalStore())
+
+
+@contextmanager
+def prepare_repository(
+    source: Location,
+    *,
+    source_store: Store,
+) -> Iterator[PreparedRepository]:
+    """Make a repository process-local when needed, then parse it completely."""
+
+    with _local_tree(source, source_store, prefix="weaver-repository-") as root:
+        store = LocalStore()
+        repository = parse_item_repository(Location(root.as_posix()), store=store)
+        yield PreparedRepository(repository=repository, store=store)
 
 
 def _copy_tree_through_store(source: Location, store: Store, destination: Path) -> None:
@@ -213,6 +360,10 @@ def build_item_repository(
     parse authored files, inspect a Workspace, or discover target state.
     """
 
+    validate_build_request(
+        repository, bindings, control_lakehouse=control_lakehouse
+    )
+
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
         bundle = generate_item_build_bundle(
             repository,
@@ -251,10 +402,38 @@ def build_uploaded_item_repository(
     archive_store: Store | None = None,
     sql_by_item=None,
 ) -> ItemBuildResult:
-    """Materialise and prepare one uploaded repository, then build it."""
+    """Compatibility wrapper for a repository stored with the target estate."""
 
-    with materialise_tree(repository_root, store=environment.store) as materialised:
-        repository = parse_item_repository(materialised.location, store=materialised.store)
+    return build_item_repository_source(
+        repository_root,
+        source_store=environment.store,
+        bindings=bindings,
+        environment=environment,
+        control_lakehouse=control_lakehouse,
+        archive=archive,
+        archive_store=archive_store,
+        sql_by_item=sql_by_item,
+    )
+
+
+def build_item_repository_source(
+    source: Location,
+    *,
+    source_store: Store,
+    bindings: ItemBindings,
+    environment: InstallationEnvironment,
+    control_lakehouse: LakehouseBinding,
+    archive: Location | None = None,
+    archive_store: Store | None = None,
+    sql_by_item=None,
+) -> ItemBuildResult:
+    """Prepare an explicit source independently from the target, then build it."""
+
+    with prepare_repository(source, source_store=source_store) as prepared:
+        repository = prepared.repository
+        validate_build_request(
+            repository, bindings, control_lakehouse=control_lakehouse
+        )
         inventories = read_target_inventories(
             bindings, environment=environment, sql_by_item=sql_by_item
         )
@@ -270,7 +449,7 @@ def build_uploaded_item_repository(
             target_inventories=inventories,
             reconciliation=reconciled,
             environment=environment,
-            source_store=materialised.store,
+            source_store=prepared.store,
             control_lakehouse=control_lakehouse,
             archive=archive,
             archive_store=archive_store,
@@ -373,7 +552,7 @@ def _local_tree(
     prefix: str,
 ) -> Iterator[Path]:
     if isinstance(store, LocalStore) and not source.is_url:
-        yield source.path
+        yield source.path.resolve()
         return
     with materialise_tree(source, store=store, prefix=prefix) as tree:
         yield tree.location.path

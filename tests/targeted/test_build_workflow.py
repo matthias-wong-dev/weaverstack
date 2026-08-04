@@ -25,7 +25,11 @@ from factories import (
     target_inventory,
 )
 
-from weaver import ItemRef, LocalResolver, LocalStore, LocalWorkspace, Location
+from weaver.targets import ItemRef
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
+from weaver.workspaces import LocalWorkspace
+from weaver.locations import Location
 from weaver.build_bundle import (
     InstallationEnvironment,
     LakehouseBinding,

@@ -209,7 +209,7 @@ def test_build_folder_action_creates_the_directory(
 ):
     """A folder has no statement and no catalogue name — it is a path."""
 
-    from weaver import FolderTarget
+    from weaver.targets import FolderTarget
 
     repository = single_document_repository(
         tmp_path / "repo",
@@ -347,7 +347,7 @@ def test_drop_folder_action_removes_the_directory(
     """
 
     from factories import bound_target, single_document_repository
-    from weaver import FolderTarget
+    from weaver.targets import FolderTarget
     from weaver.build_bundle.prune import read_lakehouse_inventory
 
     repository = single_document_repository(

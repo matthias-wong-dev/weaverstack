@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import Location, Store
+from weaver.locations import Location
+from weaver.store import Store
 from weaver.errors import CommandError
 from weaver.fabric import OneLakeDfsClient, onelake_url, parse_onelake
 from weaver.store import StoreError

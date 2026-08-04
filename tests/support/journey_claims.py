@@ -39,7 +39,7 @@ from dataclasses import replace
 import pytest
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
-from weaver import FolderTarget
+from weaver.targets import FolderTarget
 
 #: `full_integration` is this file's *only* selector — it carries neither `spark`
 #: nor `fabric`, so `pytest -m fabric` runs the targeted probes and leaves the
@@ -141,7 +141,8 @@ def _readable(env, seen) -> None:
 # exist yet. They mirror the fixture's own documents.
 
 AUTHORED = '''
-from weaver import DeltaTarget, Folder, FolderTarget, Table, lakehouse_for
+from weaver.targets import DeltaTarget, FolderTarget
+from weaver import Folder, Table, lakehouse_for
 
 lakehouse = lakehouse_for(resolver, target)
 delta_target = DeltaTarget(lakehouse=target)
@@ -193,7 +194,7 @@ def _assert_installed(env, step) -> None:
 
     plan = step.bundle.plan
     assert plan.format_version == 1
-    assert plan.repository_name == "weaver_items"
+    assert plan.repository_name == env.repository_root.name
     assert {target.logical_item_name for target in plan.targets} == {"Sales", "_weaver"}
     assert plan.omitted_nodes == ()
 

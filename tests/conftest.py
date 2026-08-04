@@ -37,7 +37,11 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
 
 
-from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore, Location
+from weaver.targets import ItemRef
+from weaver.workspaces import LocalWorkspace
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
+from weaver.locations import Location
 
 WEAVER_LAKEHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
@@ -92,7 +96,7 @@ def lakehouse_sql_statements():
 def _populate_folder_files(store, resolver, target: ItemRef) -> None:
     """The file side of the populated-Lakehouse fixture, transport-neutral."""
 
-    from weaver import FolderTarget
+    from weaver.targets import FolderTarget
 
     folder_target = FolderTarget(lakehouse=target)
     export = resolver.folder_object(folder_target, "Sales", "OrderExport")

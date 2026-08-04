@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import DeltaTarget, FolderTarget
+from weaver.targets import DeltaTarget, FolderTarget
 
 pytestmark = pytest.mark.spark
 

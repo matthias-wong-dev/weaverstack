@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import (
-    DeltaTarget,
-    FolderTarget,
-    ItemRef,
-    WarehouseTarget,
-)
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 from weaver.errors import IdentityError
 
 ROUND_TRIP = [

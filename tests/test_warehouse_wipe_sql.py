@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from weaver import generate_warehouse_wipe_sql
+from weaver.sql import generate_warehouse_wipe_sql
 
 
 def test_the_wipe_sql_is_deterministic_and_carries_the_proven_object_scope():

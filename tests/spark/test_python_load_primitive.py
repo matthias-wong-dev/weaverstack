@@ -19,7 +19,8 @@ import textwrap
 
 import pytest
 
-from weaver import DeltaTarget, ItemRef, lakehouse_for
+from weaver.targets import DeltaTarget, ItemRef
+from weaver import lakehouse_for
 from weaver.errors import LoadError
 from weaver.runtime.load_contract import (
     REASON_BLANK_PK,

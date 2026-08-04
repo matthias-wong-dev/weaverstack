@@ -17,11 +17,12 @@ from typing import Iterable, Mapping
 
 from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..etl import LOAD_ROOT
-from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA
+from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
 from ..spark import SparkCatalogue, object_token, schema_token
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
+from ..errors import BuildError
 from ..store import Store
 from ..targets import ItemRef
 from .models import (
@@ -45,7 +46,7 @@ from .targets import BoundTarget
 
 #: Files areas a prune never touches: they are Weaver's own, not an item's
 #: materialised output.
-_RESERVED_FILES_AREAS = frozenset({WEAVER_ITEMS_AREA, BUILD_BUNDLES_AREA})
+_RESERVED_FILES_AREAS = frozenset({BUILD_BUNDLES_AREA, CLI_AREA})
 
 #: *Delta* schemas a prune never touches. A schema-enabled Fabric Lakehouse has a
 #: default ``dbo`` schema that cannot be dropped and that Weaver does not manage;
@@ -100,6 +101,45 @@ class TargetInventory:
     files: tuple[str, ...] = ()
     #: Generated load procedures, as ``<schema>.<name>``.
     procedures: tuple[str, ...] = ()
+
+    def to_mapping(self) -> dict[str, object]:
+        """A versioned JSON-safe representation for remote state handover."""
+
+        return {
+            "format_version": 1,
+            "target_id": self.target_id,
+            "kind": self.kind,
+            "target_name": self.target_name,
+            "schemas": list(self.schemas),
+            "folder_schemas": list(self.folder_schemas),
+            "folders": list(self.folders),
+            "tables": list(self.tables),
+            "views": list(self.views),
+            "files": list(self.files),
+            "procedures": list(self.procedures),
+        }
+
+    @classmethod
+    def from_mapping(cls, mapping) -> "TargetInventory":
+        """Reconstruct an inventory returned by an in-Fabric state read."""
+
+        version = mapping.get("format_version")
+        if version != 1:
+            raise BuildError(
+                f"unsupported target inventory format_version {version!r}; expected 1"
+            )
+        return cls(
+            target_id=mapping["target_id"],
+            kind=mapping["kind"],
+            target_name=mapping["target_name"],
+            schemas=tuple(mapping.get("schemas", ())),
+            folder_schemas=tuple(mapping.get("folder_schemas", ())),
+            folders=tuple(mapping.get("folders", ())),
+            tables=tuple(mapping.get("tables", ())),
+            views=tuple(mapping.get("views", ())),
+            files=tuple(mapping.get("files", ())),
+            procedures=tuple(mapping.get("procedures", ())),
+        )
 
     def update_using(self, plan) -> "TargetInventory":
         """This target as the plan intends to leave it.

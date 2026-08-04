@@ -6,6 +6,7 @@ import os
 import sys
 from importlib import import_module
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator
 
 from ..diagnostics import SUPPORTED_JAVA, find_java_home
@@ -13,8 +14,15 @@ from ..errors import CommandError
 
 
 @contextmanager
-def local_delta_session() -> Iterator[object]:
-    """Create one local Delta session and always stop it before returning."""
+def local_delta_session(workspace=None) -> Iterator[object]:
+    """Create one local Delta session and always stop it before returning.
+
+    CLI invocations are separate JVMs. When a local Workspace is supplied its
+    Spark metastore therefore lives beneath that emulator root, so namespaces
+    and table registrations created by ``initialise`` remain visible to the next
+    ``build`` command just as Fabric's catalogue remains visible between
+    sessions. Tests that supply no Workspace keep Spark's process-local default.
+    """
 
     try:
         configure_spark_with_delta_pip = import_module(
@@ -50,6 +58,17 @@ def local_delta_session() -> Iterator[object]:
         .config("spark.sql.shuffle.partitions", "1")
         .config("spark.databricks.delta.snapshotPartitions", "1")
     )
+    if workspace is not None:
+        root_value = getattr(workspace, "workspace", workspace)
+        root = Path(root_value).expanduser().resolve() / ".weaver" / "spark"
+        builder = (
+            builder.config("spark.sql.catalogImplementation", "hive")
+            .config("spark.sql.warehouse.dir", str(root / "warehouse"))
+            .config(
+                "javax.jdo.option.ConnectionURL",
+                f"jdbc:derby:;databaseName={root / 'metastore'};create=true",
+            )
+        )
     session = None
     try:
         session = configure_spark_with_delta_pip(builder).getOrCreate()

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from weaver import FabricWorkspace, ItemRef, WarehouseTarget
+from weaver.workspaces import FabricWorkspace
+from weaver.targets import ItemRef, WarehouseTarget
 from weaver.fabric import FabricResolver, FabricSessionResolver
 
 

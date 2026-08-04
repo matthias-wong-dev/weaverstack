@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 from support.build_envs import MIXED_ESTATE_FIXTURE
 
-from weaver import FolderTarget
+from weaver.targets import FolderTarget
 
 pytestmark = pytest.mark.parametrize("weaver_repo_fixture", [MIXED_ESTATE_FIXTURE], indirect=True)
 

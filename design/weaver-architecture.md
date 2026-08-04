@@ -30,7 +30,7 @@ A Weaver repository represents an entire Microsoft Fabric workspace.
 The repository is organised around **Weaver Items**, which are the logical declaration of Fabric Items.
 
 ```text
-Files/weaver_items/
+repository/
 ├── Lakehouse/
 │   ├── Raw/
 │   │   ├── schemas/
@@ -470,18 +470,20 @@ For example:
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouses/Raw
+    --bind Lakehouse/Raw
 ```
 
 or
 
 ```bash
 weaver build \
+    ./estate \
     --workspace MyWorkspace \
     --environment Weaver \
     --weaver-lakehouse Weaver \
-    --bind Lakehouses/Raw
+    --bind Lakehouse/Raw
 ```
 
 The repository never contains deployment-specific information.
@@ -496,18 +498,18 @@ The Workspace determines **where** the logical declarations are deployed.
 
 ```bash
 weaver wipe \
+    Lakehouse/Raw \
     --workspace-config workspace.yml \
-    --lakehouse Raw
 ```
 
 Multiple targets may be supplied.
 
 ```bash
 weaver wipe \
+    Lakehouse/Raw \
+    Lakehouse/Curated \
+    Warehouse/Reporting \
     --workspace-config workspace.yml \
-    --lakehouse Raw \
-    --lakehouse Curated \
-    --warehouse Reporting
 ```
 
 Unlike incremental build, a wipe removes **all user-created objects** from the selected target, not only those previously created by Weaver.
@@ -538,8 +540,8 @@ A dry-run previews the operation without modifying the workspace.
 
 ```bash
 weaver wipe \
+    Lakehouse/Raw \
     --workspace-config workspace.yml \
-    --lakehouse Raw \
     --dry-run
 ```
 
@@ -547,12 +549,14 @@ For unattended execution, confirmation can be skipped.
 
 ```bash
 weaver wipe \
+    Lakehouse/Raw \
     --workspace-config workspace.yml \
-    --lakehouse Raw \
     --yes
 ```
 
-After the physical objects are removed, Weaver removes the corresponding bindings from the central catalogue.
+Physical wipe is independent of catalogue cleanup. Add `--unbind-from Weaver`
+when stale claims should be removed immediately; otherwise the next build
+reconciles them against physical inventory.
 
 The authored repository is never modified.
 
@@ -566,19 +570,21 @@ Each target is supplied using one or more bindings.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouses/Raw \
-    --bind Lakehouses/Curated \
-    --bind Warehouses/Reporting
+    --bind Lakehouse/Raw \
+    --bind Lakehouse/Curated \
+    --bind Warehouse/Reporting
 ```
 
 Where the logical and physical names differ, an explicit mapping may be supplied.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouses/Raw_DEV=Lakehouse/Raw \
-    --bind Warehouses/Reporting_DEV=Warehouse/Reporting
+    --bind Lakehouse/Raw_DEV=Lakehouse/Raw \
+    --bind Warehouse/Reporting_DEV=Warehouse/Reporting
 ```
 
 The build process performs the following steps.
@@ -633,8 +639,9 @@ The developer therefore uses a single command.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouses/Raw
+    --bind Lakehouse/Raw
 ```
 
 ---
@@ -645,8 +652,9 @@ A Build Bundle may optionally be retained as a deployment record.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouses/Raw \
+    --bind Lakehouse/Raw \
     --bundle
 ```
 
@@ -656,8 +664,9 @@ A custom name may also be provided.
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouses/Raw \
+    --bind Lakehouse/Raw \
     --bundle release-2026-08
 ```
 
@@ -750,17 +759,19 @@ A complete rebuild of a development workspace might be:
 
 ```bash
 weaver wipe \
+    Lakehouse/Raw \
+    Lakehouse/Curated \
+    Warehouse/Reporting \
     --workspace-config workspace-dev.yml \
-    --lakehouse Raw \
-    --lakehouse Curated \
-    --warehouse Reporting \
+    --unbind-from Weaver \
     --yes
 
 weaver build \
+    ./estate \
     --workspace-config workspace-dev.yml \
-    --bind Lakehouses/Raw \
-    --bind Lakehouses/Curated \
-    --bind Warehouses/Reporting
+    --bind Lakehouse/Raw \
+    --bind Lakehouse/Curated \
+    --bind Warehouse/Reporting
 
 weaver load \
     --workspace-config workspace-dev.yml
@@ -772,10 +783,11 @@ The normal workflow is simply:
 
 ```bash
 weaver build \
+    ./estate \
     --workspace-config workspace-dev.yml \
-    --bind Lakehouses/Raw \
-    --bind Lakehouses/Curated \
-    --bind Warehouses/Reporting
+    --bind Lakehouse/Raw \
+    --bind Lakehouse/Curated \
+    --bind Warehouse/Reporting
 
 weaver load \
     --workspace-config workspace-dev.yml

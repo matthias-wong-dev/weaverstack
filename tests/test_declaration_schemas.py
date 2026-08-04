@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import Location
+from weaver.locations import Location
 from weaver.errors import DiscoveryError
 from weaver.declaration import (
     SchemaSes,
@@ -189,5 +189,4 @@ class _StubStore:
             if location.value.endswith(relative):
                 return data
         raise KeyError(location.value)
-
 

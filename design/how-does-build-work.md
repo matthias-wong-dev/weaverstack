@@ -75,14 +75,16 @@ flowchart LR
     G --> F["Frozen build bundle"]
 ```
 
-Repository parsing, target inspection, catalogue reads, and name resolution all
-happen before `generate_item_build_bundle`. The planner consumes prepared state;
-it performs no external discovery. The installer later executes only what the
-bundle contains.
+Repository parsing and request validation happen before any target inspection,
+catalogue read, Fabric item resolution, or Livy session. The planner consumes
+prepared state; it performs no external discovery. The installer later executes
+only what the bundle contains.
 
-In Fabric, both preparation and installation run in the target Fabric session.
-The installed repository is materialised once to a driver-local directory for
-static parsing. The desktop is not a hidden planning tier in the product path.
+In a native Fabric build, preparation, planning, and installation all run in the
+target session; a remote repository is materialised once to driver-local storage.
+For the desktop CLI targeting Fabric, the parsed local repository stays local:
+Fabric returns a serialised `BuildState`, the desktop freezes the complete
+bundle, and Fabric receives only that archive for installation.
 
 ## 4. Repository parsing and binding
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from weaver import ItemRef, LocalStore, Location
+from weaver.targets import ItemRef
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,

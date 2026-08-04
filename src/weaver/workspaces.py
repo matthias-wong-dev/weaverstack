@@ -18,6 +18,7 @@ from .targets import validate_name
 
 WEAVER_ITEMS_AREA = "weaver_items"
 BUILD_BUNDLES_AREA = "build_bundles"
+CLI_AREA = "cli"
 FABRIC = "fabric"
 LOCAL = "local"
 WORKSPACE_TYPES = (FABRIC, LOCAL)

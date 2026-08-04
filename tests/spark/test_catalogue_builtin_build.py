@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
 from weaver.initialise import initialise_weaver_lakehouse
 
@@ -47,7 +47,7 @@ def built_catalogue(lakehouses, spark, weaver_catalogue):
     # Spark catalogue is shared by every test while each gets its own Lakehouse
     # directory, so a schema left registered would make the next test's create a
     # no-op and send its tables here.
-    return result.bundle, result.report
+    return result.plan, result.report
 
 
 def _failures(report) -> str:
@@ -141,8 +141,8 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
     Nothing here knows it is building a catalogue.
     """
 
-    bundle, _report = built_catalogue
-    kinds = {action.kind for _s, _b, action in bundle.plan.actions()}
+    plan, _report = built_catalogue
+    kinds = {action.kind for _s, _b, action in plan.actions()}
     assert {
         "build_table",
         "publish_catalogue",
@@ -150,7 +150,7 @@ def test_the_bundle_is_an_ordinary_bundle_with_no_catalogue_specific_action(
         "refresh_sql_endpoint",
     } <= kinds
     assert "create_schema" not in kinds
-    executors = {action.executor for _s, _b, action in bundle.plan.actions()}
+    executors = {action.executor for _s, _b, action in plan.actions()}
     assert executors == {
         "spark_table",
         "spark_sql_batch",

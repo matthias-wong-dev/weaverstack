@@ -4,13 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from weaver import (
-    ExecutionSettings,
-    FabricWorkspace,
-    LocalWorkspace,
-    TargetDeclaration,
-    WeaverItemId,
-)
+from weaver.workspaces import ExecutionSettings, FabricWorkspace, LocalWorkspace, TargetDeclaration
+from weaver.declaration.model import WeaverItemId
 from weaver.errors import ConfigError, IdentityError
 
 

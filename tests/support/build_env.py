@@ -23,7 +23,8 @@ from typing import Any, Mapping
 import pytest
 from .observation import Observation, observation_from, observe_body
 
-from weaver import ItemRef, Store
+from weaver.targets import ItemRef
+from weaver.store import Store
 
 
 @dataclass(frozen=True)
@@ -108,10 +109,9 @@ class Journey:
 
     **A journey owns its state.** Its own repository root, its own logical item
     names, its own physical targets. Estates in one run otherwise collide through
-    three shared things — the ``weaver_items`` root, where the last writer wins;
-    the Registry, which is keyed by logical item so identically-named items in
-    two fixtures are one row; and the fixed Lakehouses. Each of those has already
-    produced a confusing failure.
+    shared things — repository source locations, the Registry (which is keyed by
+    logical item), and the fixed Lakehouses. Each of those has already produced
+    a confusing failure, so every environment carries its source explicitly.
 
     **A failed transition does not cascade.** The step records the exception and
     every later step is skipped with its name, so a broken journey reports one
@@ -203,9 +203,10 @@ class BuildEnv:
     target: ItemRef
     resolver: Any
     store: Store
+    repository_root: Any
     generate_spark: Any
-    #: Install this env's declaration into the Weaver Lakehouse, replacing
-    #: whatever was there. The fixture chooses the content and the bindings.
+    #: Install this env's explicit repository source, replacing whatever was
+    #: there. The fixture chooses the content and the bindings.
     install_repo: Callable[[], None]
     remove_repo: Callable[[], None]
     generate: Callable[..., Any]
@@ -354,7 +355,7 @@ class BuildEnv:
         """
 
         self.store.write(
-            self.resolver.weaver_items_root.join(*relative.split("/")),
+            self.repository_root.join(*relative.split("/")),
             content.encode("utf-8"),
         )
 

@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 from weaver.build_bundle import execute_action
 from weaver.build_bundle.catalogue_actions import render_catalogue_after_build
 from weaver.catalogue.state import Catalogue, read_catalogue_state

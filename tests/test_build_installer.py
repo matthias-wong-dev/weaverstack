@@ -12,7 +12,10 @@ from dataclasses import replace
 
 import pytest
 
-from weaver import LocalResolver, LocalStore, LocalWorkspace, Location
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
+from weaver.workspaces import LocalWorkspace
+from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
     BuildAction,

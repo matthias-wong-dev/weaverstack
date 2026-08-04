@@ -29,9 +29,11 @@ to share the control Lakehouse.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import tempfile
 from typing import Any
 
-from .build_bundle.bundle import BuildBundle, load_bundle
+from .build_bundle.models import BuildPlan
 from .build_bundle.installer import InstallationEnvironment, install_bundle
 from .build_bundle.planner import generate_item_build_bundle
 from .build_bundle.report import InstallationReport
@@ -43,13 +45,12 @@ from .declaration.model import WeaverItemId
 from .errors import CommandError
 from .locations import Location
 from .resolution import resolver_for
-from .store import Store
+from .store import LocalStore, Store
 from .targets import ItemRef
 from .workspaces import FabricWorkspace, LocalWorkspace
 
-#: The bundle directory initialisation writes under the Weaver Lakehouse's
-#: build_bundles area. A fixed name, because initialisation is idempotent and
-#: there is no value in accumulating one bundle per run.
+#: The driver-local bundle directory used while initialisation runs. A fixed
+#: name is enough because the containing temporary directory is per invocation.
 INITIALISE_BUNDLE_NAME = "weaver-initialise"
 
 
@@ -59,7 +60,7 @@ class InitialiseResult:
 
     item: str
     weaver_lakehouse: str
-    bundle: BuildBundle
+    plan: BuildPlan
     report: InstallationReport
 
     @property
@@ -76,7 +77,7 @@ class InitialiseResult:
         return {
             "item": self.item,
             "weaver_lakehouse": self.weaver_lakehouse,
-            "bundle_id": self.bundle.plan.bundle_id,
+            "bundle_id": self.plan.bundle_id,
             "status": self.report.status,
             "tables": list(self.tables),
         }
@@ -113,7 +114,6 @@ def prepare_weaver_lakehouse(
             )
         store.make_directory(resolver.files_root(ItemRef(name)))
         store.make_directory(resolver.tables_root(ItemRef(name)))
-        store.make_directory(resolver.weaver_items_root)
         return PreparedWeaverLakehouse(str(workspace.workspace), name, not existed)
 
     if isinstance(workspace, FabricWorkspace):
@@ -161,9 +161,6 @@ def initialise_weaver_lakehouse(
     """
 
     resolver = resolver_for(workspace)
-    if not store.exists(resolver.weaver_items_root):
-        store.make_directory(resolver.weaver_items_root)
-    repository = parse_item_repository(resolver.weaver_items_root, store=store)
     control = LakehouseBinding(lakehouse=weaver_lakehouse)
     bindings = ItemBindings(
         (
@@ -176,29 +173,37 @@ def initialise_weaver_lakehouse(
     environment = InstallationEnvironment(
         store=store, resolver=resolver, spark=spark, workspace=workspace
     )
-    inventories = read_target_inventories(bindings, environment=environment)
-    reconciled = read_reconciled_catalogue(
-        bindings, inventories=inventories, environment=environment, repository=repository
-    )
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=bindings,
-        output=output or resolver.build_bundle(INITIALISE_BUNDLE_NAME),
-        store=store,
-        control_lakehouse=control,
-        target_inventories=inventories,
-        catalogue=reconciled.catalogue,
-        stale_claims=reconciled.stale_claims,
-    )
+    with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
+        local_store = LocalStore()
+        repository_root = Path(temporary) / "repository"
+        repository_root.mkdir()
+        repository = parse_item_repository(
+            Location(repository_root.as_posix()), store=local_store
+        )
+        inventories = read_target_inventories(bindings, environment=environment)
+        reconciled = read_reconciled_catalogue(
+            bindings,
+            inventories=inventories,
+            environment=environment,
+            repository=repository,
+        )
+        bundle = generate_item_build_bundle(
+            repository,
+            bindings=bindings,
+            output=output
+            or Location((Path(temporary) / INITIALISE_BUNDLE_NAME).as_posix()),
+            store=local_store,
+            control_lakehouse=control,
+            target_inventories=inventories,
+            catalogue=reconciled.catalogue,
+            stale_claims=reconciled.stale_claims,
+        )
 
-    report = install_bundle(
-        load_bundle(bundle.location, store=store),
-        environment=environment,
-    )
+        report = install_bundle(bundle, environment=environment)
 
     return InitialiseResult(
         item="Lakehouse/_weaver",
         weaver_lakehouse=weaver_lakehouse.name,
-        bundle=bundle,
+        plan=bundle.plan,
         report=report,
     )

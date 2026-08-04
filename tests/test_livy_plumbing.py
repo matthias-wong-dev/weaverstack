@@ -6,7 +6,7 @@ returned value is told from printed output — verified without a workspace.
 
 from __future__ import annotations
 
-from weaver import FabricWorkspace
+from weaver.workspaces import FabricWorkspace
 from weaver.fabric.livy import (
     RESULT_PREFIX,
     LivySessionInfo,

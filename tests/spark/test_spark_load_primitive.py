@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, lakehouse_for
+from weaver.targets import ItemRef
+from weaver import lakehouse_for
 from weaver.declaration import read_source_document
 from weaver.declaration.model import LAKEHOUSE
 from weaver.errors import LoadError

@@ -12,7 +12,7 @@ import pytest
 from factories import bound_target, item_id, registered_document, target_inventory
 from support.local_build import _local_build_context
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 from weaver.build_bundle import execute_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.locations import Location
@@ -108,7 +108,8 @@ def local_lakehouse_journey(request, weaver_repo_fixture):
 def populated_local_lakehouse(populated_local_lakehouses):
     """A local Lakehouse holding tables and files, with its own wipe."""
 
-    from weaver import DeltaTarget, wipe_delta_target
+    from weaver.targets import DeltaTarget
+    from weaver.physical_wipe import wipe_delta_target
     from support.build_env import PopulatedLakehouse
 
     lakehouses = populated_local_lakehouses
@@ -126,4 +127,3 @@ def populated_local_lakehouse(populated_local_lakehouses):
         store=lakehouses.store,
         wipe=wipe,
     )
-

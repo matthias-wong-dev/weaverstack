@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, LocalResolver, LocalStore, LocalWorkspace, Location
+from weaver.targets import ItemRef
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
+from weaver.workspaces import LocalWorkspace
+from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.folder import FolderExecutor
 from weaver.build_bundle.models import (

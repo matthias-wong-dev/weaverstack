@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 from factories import FixtureCatalogue, alias_repository, item_bindings
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
@@ -68,7 +68,8 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     source = at["producer"].qualify("DWG", "Customer")
 
     payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import (InstallationEnvironment, execute_action, "
         "load_bundle)\n"

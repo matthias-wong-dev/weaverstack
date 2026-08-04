@@ -8,7 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver import FabricWorkspace, ItemRef, Location, Store
+from weaver.workspaces import FabricWorkspace
+from weaver.targets import ItemRef
+from weaver.locations import Location
+from weaver.store import Store
 from weaver.errors import CommandError
 from weaver.fabric import FabricSessionResolver, FabricStore
 

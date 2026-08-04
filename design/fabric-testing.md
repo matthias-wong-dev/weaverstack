@@ -122,8 +122,8 @@ Item **lifecycle** tests — creating and deleting Lakehouses — are separated 
 different reason.
 They are separated because they exercise Fabric's resource management rather
 than Weaver's and change rarely, while their create/delete churn slows every run
-of the code actually under development. `create_lakehouse` is still real product
-surface — `weaver initialise` makes the Weaver Lakehouse with it — so this says
+of the code actually under development. `create_lakehouse` is still required
+platform integration — ordinary `weaver build` ensures the control Lakehouse — so this says
 *when* to run the cover, not that it is unnecessary.
 
 The item names above are defaults; each has a matching
@@ -224,21 +224,20 @@ Terminal output records item creation, endpoint readiness, first SQL
 connection, first `select 1`, fixture population, Livy startup, Fabric wipe,
 Warehouse deletion, and total fixture lifetime.
 
-## The build bundle runs entirely in Fabric
+## Native Fabric builds run entirely in Fabric
 
 `tests/fabric/test_build_bundle.py` runs the same four behavioural tests in
 Fabric and its local emulator, selected by an indirect `build_env` parameter
 (`local`/`fabric`). It is the reference for the Fabric-first rule: **both phases
 of a build — *generate* and *install* — run in the target environment.** On
 Fabric that is inside the Livy session, against the native Spark catalogue: the
-test uploads the repository to the Weaver Lakehouse (the push), then a Livy
-program calls the public `build_uploaded_item_repository` workflow. That workflow copies
-the OneLake repository once to the session driver's temporary filesystem, then
-generates and installs from local files while target inspection still uses the
-authoritative Fabric catalogue. In the emulator the same workflow runs
-in-process against local Spark.
-The desktop's only job on Fabric is to push the repository and read results back
-for assertions — it never plans.
+test places an explicit repository source under a test-only OneLake location,
+then its Livy programs parse that source, generate the bundle, and install it.
+In the emulator the same logical workflow runs in-process against local Spark
+from an explicit local repository root.
+This exercises the native Fabric path. The separate desktop CLI path intentionally
+plans locally after a Fabric state read, then hands a frozen archive back for
+installation.
 
 Both Lakehouses are created **schema-enabled**: the target so a managed table
 lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver

@@ -33,14 +33,20 @@ from .physical import RenderedAction, render_document_build_action
 from .planner import PlannedItem, generate_item_build_bundle, plan_item_build
 from .report import InstallationReport
 from .workflow import (
+    BuildState,
     ItemBuildResult,
     build_item_repository,
+    build_item_repository_source,
     build_uploaded_item_repository,
+    catalogue_items_for_build,
     install_bundle_archive,
     materialise_bundle_archive,
     materialise_tree,
+    prepare_repository,
     persist_bundle_archive,
     timestamped_archive_name,
+    read_build_state,
+    validate_build_request,
 )
 from .targets import (
     BoundTarget,
@@ -87,9 +93,15 @@ __all__ = [
     "install_bundle",
     "InstallationReport",
     "ItemBuildResult",
+    "BuildState",
     "build_item_repository",
+    "build_item_repository_source",
     "build_uploaded_item_repository",
     "materialise_tree",
+    "prepare_repository",
+    "catalogue_items_for_build",
+    "read_build_state",
+    "validate_build_request",
     "persist_bundle_archive",
     "materialise_bundle_archive",
     "install_bundle_archive",

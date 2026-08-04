@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver import FabricWorkspace, WarehouseTarget
+from weaver.workspaces import FabricWorkspace
+from weaver.targets import WarehouseTarget
 from weaver.errors import CommandError
 from weaver.fabric.auth import SQL_SCOPE
 from weaver.fabric.sql import (

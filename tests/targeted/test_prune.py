@@ -263,7 +263,7 @@ def warehouse_estate(tmp_path):
     """
 
     from factories import WAREHOUSE_ITEM, schema_document, warehouse_table
-    from weaver import Location
+    from weaver.locations import Location
     from weaver.declaration import parse_item_repository
 
     root = tmp_path / "repo"

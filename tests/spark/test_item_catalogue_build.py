@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, Location
+from weaver.targets import ItemRef
+from weaver.locations import Location
 from weaver.build_bundle import (
     InstallationEnvironment,
     ItemBinding,
@@ -109,7 +110,7 @@ def test_public_workflow_materialises_then_installs_from_driver_local_files(
 def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
     tmp_path, lakehouses, spark, weaver_catalogue
 ):
-    from weaver import wipe_lakehouse
+    from weaver.physical_wipe import wipe_lakehouse
 
     target_catalogue = SparkCatalogue(
         spark, lakehouses.resolver.spark_destination(lakehouses.target)

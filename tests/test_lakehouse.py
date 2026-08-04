@@ -7,15 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from weaver import (
-    DeltaTarget,
-    FolderTarget,
-    ItemRef,
-    Lakehouse,
-    LocalResolver,
-    LocalWorkspace,
-    lakehouse_for,
-)
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef
+from weaver import Lakehouse, lakehouse_for
+from weaver.resolution import LocalResolver
+from weaver.workspaces import LocalWorkspace
 from weaver.errors import LoadError
 from weaver.lakehouse import default_lakehouse
 from weaver.spark import local_destination

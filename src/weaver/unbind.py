@@ -55,9 +55,7 @@ def plan_unbind(
         for scope in scopes
         for statement in prune_installation(scope)
     )
-    targets = tuple(
-        f"{item_type}s/{name}" for item_type, name in sorted(selected)
-    )
+    targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
     return UnbindResult(
         targets=targets,
         logical_items=tuple(map(str, scopes)),

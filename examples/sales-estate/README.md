@@ -3,9 +3,8 @@
 One repository exercising every object form Weaver builds and loads, so the
 whole chain can be read in one place:
 
-The pushable repository is `repository/`; this README sits beside it rather than
-inside it, because a repository root holds nothing but `Lakehouse/` and
-`Warehouse/`.
+The buildable repository is `repository/`; this README sits beside it because a
+repository root contains only `Lakehouse/` and `Warehouse/`.
 
 ```text
 Lakehouse/Sales
@@ -58,16 +57,65 @@ no load ever inserts into the column. The values are Fabric's to choose — not
 consecutive, not ordered — so nothing may read sequence into them. A Delta table
 cannot declare one, because no Delta version Weaver runs on generates them.
 
-## Building it
+## Build it locally with the exact CLI
 
-Bind the logical items to physical ones:
+The local emulator has Lakehouses but no Warehouse SQL engine, so bind the Sales
+Lakehouse item. These commands use only the checked-in example repository:
 
 ```bash
-weaver push examples/sales-estate/repository --workspace <workspace> --weaver-lakehouse <control>
+demo_root="$(mktemp -d)"
+weaver build examples/sales-estate/repository \
+  --bind Lakehouse/Play_LH=Lakehouse/Sales \
+  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
+weaver wipe Lakehouse/Play_LH --yes \
+  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
 ```
 
+## Build it in Fabric from the desktop
+
+The same explicit repository builds both logical items into the named Play
+destinations. Source stays on the desktop: the CLI reads Fabric state, plans
+locally, and submits the completed build bundle for execution inside Fabric.
+
 ```bash
-weaver build --bind <lakehouse>=Sales --bind <warehouse>=Reporting --workspace <workspace> --weaver-lakehouse <control> --environment <environment>
+weaver build examples/sales-estate/repository \
+  --bind Lakehouse/Play_LH=Lakehouse/Sales \
+  --bind Warehouse/Play_WH=Warehouse/Reporting \
+  --workspace PYTEST_WORKSPACE \
+  --weaver-lakehouse Play_Weaver \
+  --environment weaver
+```
+
+[`Sales example.ipynb`](Sales%20example.ipynb) is a self-contained version of
+the same demonstration. Because the public Notebook definition API does not
+transport Notebook Resources, the checked-in repository is embedded in the
+notebook source and extracted into its session-local working directory. A test
+keeps that embedded copy byte-for-byte aligned with `repository/`.
+
+Deploy and execute it with the optional desktop utilities:
+
+```bash
+weaver install --workspace PYTEST_WORKSPACE --environment weaver
+weaver notebook push "examples/sales-estate/Sales example.ipynb" \
+  --workspace PYTEST_WORKSPACE
+weaver notebook run "Sales example" \
+  --workspace PYTEST_WORKSPACE \
+  --lakehouse Play_Weaver \
+  --environment weaver
+```
+
+The run attaches `Play_Weaver` as the default Lakehouse. Inside the notebook,
+the public call has no workspace argument at all:
+
+```python
+result = weaver.build(
+    repository,
+    bind=[
+        "Lakehouse/Play_LH=Lakehouse/Sales",
+        "Warehouse/Play_WH=Warehouse/Reporting",
+    ],
+)
+assert result.succeeded
 ```
 
 ## Loading it

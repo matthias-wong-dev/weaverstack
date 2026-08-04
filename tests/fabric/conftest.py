@@ -40,7 +40,9 @@ from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.livy_telemetry import LEDGER, OUTSIDE_A_TEST, CountedLivySession
 from support.observation import Observation, observation_from, observe_body
 
-from weaver import Workspace, ItemRef, Store
+from weaver.workspaces import Workspace
+from weaver.targets import ItemRef
+from weaver.store import Store
 from weaver.spark import SparkCatalogue
 
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
@@ -298,7 +300,7 @@ def environment_name():
 def fabric_workspace(fabric_workspace_item, fabric_weaver_lakehouse, environment_name):
     """A workspace that names the Environment Weaver was installed into."""
 
-    from weaver import FabricWorkspace
+    from weaver.workspaces import FabricWorkspace
 
     return FabricWorkspace(
         workspace=fabric_workspace_item.name,
@@ -403,7 +405,7 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
     Warehouse and must still wait. They simply cost nothing on the runs after.
     """
 
-    from weaver import WarehouseTarget
+    from weaver.targets import WarehouseTarget
     from weaver.fabric import (
         FabricResolver,
         WAREHOUSE,
@@ -539,7 +541,7 @@ def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
 
 @pytest.fixture(scope="module")
 def clean_disposable_warehouse(disposable_warehouse):
-    from weaver import wipe_sql_target
+    from weaver.physical_wipe import wipe_sql_target
 
     wipe_sql_target(
         disposable_warehouse.target,
@@ -594,7 +596,8 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
         warehouse_view,
     )
 
-    from weaver import ItemRef, wipe_sql_target
+    from weaver.targets import ItemRef
+    from weaver.physical_wipe import wipe_sql_target
     from weaver.build_bundle import execute_action, plan_item_build
     from weaver.build_bundle.executors.base import (
         InstallationContext,
@@ -765,7 +768,8 @@ def populated_fabric_lakehouse(
             removal.
             """
 
-            from weaver import DeltaTarget, wipe_delta_target
+            from weaver.targets import DeltaTarget
+            from weaver.physical_wipe import wipe_delta_target
 
             report = wipe_delta_target(
                 DeltaTarget(lakehouse=target), fabric_workspace, store=store
@@ -809,8 +813,8 @@ def _fabric_build_context(
 
     Weaver is Fabric-first: both **generation and installation** run in the
     session, against the native Spark catalogue, so planning sees catalogue views
-    and nothing is contorted to fit a desktop planner. The desktop only pushes the
-    repository and reads back results. Both Lakehouses are disposable and are
+    and nothing is contorted to fit a desktop planner. The desktop only places
+    the explicit repository source and reads back results. Both Lakehouses are disposable and are
     deleted when the run ends.
 
     **The session attaches to the Weaver Lakehouse**, which is the production
@@ -851,19 +855,21 @@ def _fabric_build_context(
     store = OneLakeDfsClient()
     weaver = ItemRef(workspace.weaver_lakehouse)
     target = ItemRef(target_lh.name)
+    repository_relative = ("test_repositories", weaver_repo_fixture.name)
+    repository_root = resolver.files_root(weaver).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
     _empty_the_target(session, store, resolver, target, destination)
     weaver_destination = resolver.spark_destination(weaver)
 
     def install_repo() -> None:
-        destination = resolver.weaver_items_root
+        destination = repository_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
         _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
-        store.delete(resolver.weaver_items_root, recursive=True)
+        store.delete(repository_root, recursive=True)
 
     def _workspace_literal() -> str:
         return (
@@ -880,7 +886,9 @@ def _fabric_build_context(
             for item in weaver_repo_fixture.items
         )
         body = (
-            "from weaver import ItemRef, FabricWorkspace, WeaverItemId\n"
+            "from weaver.targets import ItemRef\n"
+            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.declaration.model import WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
@@ -891,7 +899,9 @@ def _fabric_build_context(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            "repository = parse_item_repository(resolver.weaver_items_root, store=store)\n"
+            f"repository_root = resolver.files_root(ItemRef({weaver.name!r})).join"
+            f"(*{repository_relative!r})\n"
+            "repository = parse_item_repository(repository_root, store=store)\n"
             f"control = LakehouseBinding(lakehouse=ItemRef({weaver.name!r}))\n"
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
@@ -926,7 +936,7 @@ def _fabric_build_context(
         # re-resolves the name to the session-native path.
         bundle_name = bundle.location.name
         body = (
-            "from weaver import FabricWorkspace\n"
+            "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.build_bundle import install_bundle, load_bundle, "
             "InstallationEnvironment\n"
@@ -981,7 +991,8 @@ def _fabric_build_context(
         """
 
         preamble = (
-            "from weaver import FabricWorkspace, ItemRef\n"
+            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.targets import ItemRef\n"
             "from weaver.resolution import resolver_for\n"
             f"resolver = resolver_for({_workspace_literal()})\n"
             f"target = ItemRef({target.name!r})\n"
@@ -1011,7 +1022,8 @@ def _fabric_build_context(
 
     yield BuildEnv(
         label="fabric", workspace=workspace, weaver=weaver, target=target,
-        resolver=resolver, store=store, generate_spark=True,  # in-session catalogue
+        resolver=resolver, store=store, repository_root=repository_root,
+        generate_spark=True,  # in-session catalogue
         install_repo=install_repo, remove_repo=remove_repo, generate=generate,
         install=install, run_query=query, run_columns=columns,
         seed_orphans=seed_orphans, run_schema_exists=schema_exists,
@@ -1081,11 +1093,11 @@ def _warehouse_build_env(
     target Warehouse's system schema through Weaver's *own* Fabric-native mssql
     connector (``fabric_sql_executor``, the session identity) to compile the prune
     into the bundle, and installation runs the frozen T-SQL through that same
-    connector. The desktop uploads only the Weaver document repository and reads results back
-    for assertions; it never plans and never compiles a bundle locally.
+    connector. The desktop uploads only the explicit Weaver repository source and
+    reads results back for assertions; it never plans and never compiles a bundle locally.
     """
 
-    from weaver import ItemRef as _ItemRef
+    from weaver.targets import ItemRef as _ItemRef
     from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
@@ -1093,6 +1105,8 @@ def _warehouse_build_env(
     store = OneLakeDfsClient()
     weaver = _ItemRef(weaver_lakehouse.name)
     warehouse_ref = _ItemRef(warehouse.item.name)
+    repository_relative = ("test_repositories", weaver_repo_fixture.name)
+    repository_root = resolver.files_root(weaver).join(*repository_relative)
     # Desktop SQL is test infrastructure only: it stages fixtures and inspects the
     # catalogue for assertions. Weaver itself never uses it here.
     sql = warehouse.executor
@@ -1105,13 +1119,13 @@ def _warehouse_build_env(
         )
 
     def install_repo() -> None:
-        destination = resolver.weaver_items_root
+        destination = repository_root
         if store.exists(destination):
             store.delete(destination, recursive=True)
         _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
-        store.delete(resolver.weaver_items_root, recursive=True)
+        store.delete(repository_root, recursive=True)
 
     def generate(bundle_name: str = "whtest"):
         # Generation runs IN Fabric and reads the Warehouse catalogue there
@@ -1122,7 +1136,9 @@ def _warehouse_build_env(
             for item in weaver_repo_fixture.items
         )
         body = (
-            "from weaver import ItemRef, FabricWorkspace, WeaverItemId\n"
+            "from weaver.targets import ItemRef\n"
+            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.declaration.model import WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
@@ -1134,7 +1150,9 @@ def _warehouse_build_env(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            "repository = parse_item_repository(resolver.weaver_items_root, store=store)\n"
+            f"repository_root = resolver.files_root(ItemRef({weaver.name!r})).join"
+            f"(*{repository_relative!r})\n"
+            "repository = parse_item_repository(repository_root, store=store)\n"
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
             "selected, weaver_lakehouse=workspace.weaver_lakehouse)\n"
@@ -1166,7 +1184,7 @@ def _warehouse_build_env(
         # session identity, so no executor is injected.
         bundle_name = bundle.location.name
         body = (
-            "from weaver import FabricWorkspace\n"
+            "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.build_bundle import install_bundle, load_bundle, "
             "InstallationEnvironment\n"
@@ -1242,7 +1260,8 @@ def _warehouse_build_env(
 
     return BuildEnv(
         label="warehouse", workspace=fabric_workspace, weaver=weaver, target=warehouse_ref,
-        resolver=resolver, store=store, generate_spark=None,
+        resolver=resolver, store=store, repository_root=repository_root,
+        generate_spark=None,
         install_repo=install_repo, remove_repo=remove_repo, generate=generate,
         install=install, run_query=query, run_columns=columns,
         seed_orphans=seed_orphans,

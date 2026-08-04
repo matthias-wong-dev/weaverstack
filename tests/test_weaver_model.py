@@ -4,14 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import (
-    DeltaTarget,
-    WeaverDocumentId,
-    WeaverItem,
-    WeaverItemId,
-    WeaverRepository,
-    WeaverSchemaId,
-)
+from weaver.targets import DeltaTarget
+from weaver.declaration.model import WeaverDocumentId, WeaverItem, WeaverItemId, WeaverRepository, WeaverSchemaId
 from weaver.errors import DiscoveryError, IdentityError
 from weaver.declaration import WeaverDocument
 from weaver.declaration.metadata import SesDocument

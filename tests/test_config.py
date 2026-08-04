@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from weaver import FabricWorkspace, LocalWorkspace, load_workspace, parse_workspace
+from weaver.workspaces import FabricWorkspace, LocalWorkspace
+from weaver.config import load_workspace, parse_workspace
 from weaver.errors import ConfigError
 
 
