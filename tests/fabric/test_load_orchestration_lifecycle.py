@@ -230,7 +230,17 @@ def test_the_upstream_delta_rows_exist_and_the_folder_materialised(orchestrated)
 def test_the_real_task_wrote_one_coherent_log_under_the_declared_folder(orchestrated):
     env, seen = orchestrated
 
-    assert f"/{env.weaver.name}/Files/_/Log/task_date=" in seen["task_log"]
+    from weaver.task_logging import log_folder
+
+    # `_.Log` is an ordinary Weaver folder artefact, so the desktop finds it
+    # where the build installed it — asked over OneLake DFS, which is how a
+    # desktop addresses the same bytes.
+    assert env.store.exists(log_folder(env.resolver, env.weaver))
+    # The task wrote beneath it, matched on the item-relative part: a session
+    # names a Lakehouse by item id and the desktop by display name, so the two
+    # spellings of one location agree only from `Files/` down.
+    assert "/Files/_/Log/task_date=" in seen["task_log"]
+
     written = seen["log"]
     assert "plan.json" in written
     assert sum("_refresh_" in name for name in written) == 1
