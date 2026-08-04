@@ -871,6 +871,7 @@ def _fabric_build_context(
     repository_root = resolver.files_root(weaver).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
+    weaver_destination = resolver.spark_destination(weaver)
     _empty_the_target(
         session,
         store,
@@ -879,8 +880,8 @@ def _fabric_build_context(
         destination,
         workspace=workspace,
         warehouse=warehouse_name,
+        weaver_destination=weaver_destination,
     )
-    weaver_destination = resolver.spark_destination(weaver)
 
     def install_repo() -> None:
         destination = repository_root
@@ -1073,49 +1074,64 @@ _FABRIC_TARGET_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting")
 
 
 def _empty_the_target(
-    session, store, resolver, target, destination, workspace=None, warehouse=None
+    session,
+    store,
+    resolver,
+    target,
+    destination,
+    workspace=None,
+    warehouse=None,
+    weaver_destination=None,
 ) -> None:
-    """Leave the target Lakehouse as though nothing had been built into it.
+    """Leave the target Lakehouse *and the control plane* as though nothing had run.
 
     Spark catalogue first, then storage: dropping a schema removes its tables and
-    views, and anything left on disk afterwards was never registered.
+    views — a view exists only in the metastore — and anything left on disk
+    afterwards was never registered.
 
-    And then Weaver's *own* catalogue, which is the half that is easy to forget
-    and the half that outlives everything else here. The Weaver Lakehouse is
-    shared and permanent, so a Registry row survives an emptied target and goes
-    on claiming objects that are no longer there — and it claims them for
-    whichever logical item was bound at the time, which is rarely the one the
-    next test binds. Isolation in Fabric comes from emptying rather than from a
-    fresh item, so the cleaning path has to reach every place state accumulates.
+    **The catalogue is wiped, not unbound.** Weaver's own record is state like any
+    other state, and it accumulates faster than anything else here: the Weaver
+    Lakehouse is shared and permanent while the *logical item names* bound to one
+    physical target change from module to module, so its Registry ends up holding
+    several items' claims on the same physical object. That is not something a
+    build repairs. Reconciliation is deliberately scoped to the items a build
+    binds — ``catalogue_items_for_build`` returns those plus alias sources, and
+    ``reconcile_catalogue_state`` never sees a row for anything else — because an
+    item you are not building has claims you have no business deleting. Correct
+    in production; in a suite that reuses one Lakehouse under many names it means
+    the residue is permanent.
 
-    Through ``unbind_targets`` rather than statements composed here: it is the
-    production path, and a harness reproducing what it would have done is how a
-    cleaning path stops being evidence of anything.
+    Unbinding the specific targets would clear it too, and was how this started.
+    Wiping is the better answer and the one the product leads with: it needs no
+    list of what to forget, so it cannot forget half of it, and the next build
+    bootstraps the catalogue from the built-in item exactly as a first build
+    does. That path is asserted in its own right
+    (``test_catalogue_builtin_build.py``), so exercising it here costs one
+    catalogue build per context and buys an estate with no history at all.
     """
 
     statements = [
         f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema)} CASCADE"
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
-    body = "".join(f"spark.sql({s!r})\n" for s in statements)
-    if workspace is not None:
-        body += (
-            "from weaver.targets import ItemRef\n"
-            "from weaver.workspaces import FabricWorkspace\n"
-            "from weaver.resolution import resolver_for\n"
-            "from weaver.spark import SparkCatalogue\n"
-            "from weaver.unbind import unbind_targets\n"
-            f"workspace = FabricWorkspace(workspace={workspace.workspace!r}, "
-            f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
-            f"environment={workspace.environment!r})\n"
-            "catalogue = SparkCatalogue(spark, resolver_for(workspace)"
-            ".spark_destination(ItemRef(workspace.weaver_lakehouse)))\n"
-            f"unbind_targets(catalogue, lakehouses=({target.name!r},), "
-            f"warehouses={() if warehouse is None else (warehouse,)!r})\n"
+    if weaver_destination is not None:
+        # The control plane's own schema. Dropped through the session because the
+        # catalogue's tables *are* registered, unlike a destination's.
+        statements.append(
+            f"DROP SCHEMA IF EXISTS {weaver_destination.qualified_schema('_')} CASCADE"
         )
-    session.run(body + "emit(True)\n", label="empty target")
+    session.run(
+        "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n",
+        label="empty target",
+    )
 
-    for area in (resolver.tables_root(target), resolver.files_root(target)):
+    areas = [resolver.tables_root(target), resolver.files_root(target)]
+    if weaver_destination is not None:
+        # Only the Delta area: `Files/` under the Weaver Lakehouse holds the
+        # repositories a context uploads and the bundles it keeps, which are the
+        # harness's own scaffolding rather than catalogue state.
+        areas.append(resolver.tables_root(ItemRef(workspace.weaver_lakehouse)))
+    for area in areas:
         try:
             entries = store.list(area)
         except Exception:  # the area may not exist yet
