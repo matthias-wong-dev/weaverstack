@@ -1143,11 +1143,16 @@ def _empty_the_target(
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
     if weaver_destination is not None:
-        # The control plane's own schema. Dropped through the session because the
-        # catalogue's tables *are* registered, unlike a destination's.
-        statements.append(
-            f"DROP SCHEMA IF EXISTS {weaver_destination.qualified_schema('_')} CASCADE"
-        )
+        # The control plane's own schema, emptied and *put back*. Dropped through
+        # the session because the catalogue's tables are registered, unlike a
+        # destination's — but a build creates the catalogue's tables and assumes
+        # its schema, so leaving `_` gone is not clearing the control plane, it is
+        # damaging it: every later build then has nowhere to write the catalogue
+        # and fails. The same judgement `physical_wipe._KEPT_SCHEMAS` makes about
+        # `dbo`, for the same reason.
+        catalogue_schema = weaver_destination.qualified_schema("_")
+        statements.append(f"DROP SCHEMA IF EXISTS {catalogue_schema} CASCADE")
+        statements.append(f"CREATE SCHEMA IF NOT EXISTS {catalogue_schema}")
     session.run(
         "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n",
         label="empty target",
@@ -1155,10 +1160,15 @@ def _empty_the_target(
 
     areas = [resolver.tables_root(target), resolver.files_root(target)]
     if weaver_destination is not None:
-        # Only the Delta area: `Files/` under the Weaver Lakehouse holds the
-        # repositories a context uploads and the bundles it keeps, which are the
-        # harness's own scaffolding rather than catalogue state.
-        areas.append(resolver.tables_root(ItemRef(workspace.weaver_lakehouse)))
+        # The catalogue's *tables*, not the schema directory holding them —
+        # emptying `Tables/_` leaves the namespace a build writes into, where
+        # removing it would leave the Lakehouse unable to resolve a schema it is
+        # supposed to have. `Files/` under the Weaver Lakehouse is left alone
+        # entirely: the repositories a context uploads and the bundles it keeps
+        # are the harness's own scaffolding, not catalogue state.
+        areas.append(
+            resolver.tables_root(ItemRef(workspace.weaver_lakehouse)) / "_"
+        )
     for area in areas:
         try:
             entries = store.list(area)
