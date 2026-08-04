@@ -122,8 +122,8 @@ Item **lifecycle** tests — creating and deleting Lakehouses — are separated 
 different reason.
 They are separated because they exercise Fabric's resource management rather
 than Weaver's and change rarely, while their create/delete churn slows every run
-of the code actually under development. `create_lakehouse` is still real product
-surface — `weaver initialise` makes the Weaver Lakehouse with it — so this says
+of the code actually under development. `create_lakehouse` is still required
+platform integration — ordinary `weaver build` ensures the control Lakehouse — so this says
 *when* to run the cover, not that it is unnecessary.
 
 The item names above are defaults; each has a matching

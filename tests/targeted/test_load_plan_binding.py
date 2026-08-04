@@ -26,7 +26,7 @@ from factories import (
     warehouse_table,
 )
 
-from weaver import Location
+from weaver.locations import Location
 from weaver.build_bundle import plan_item_build
 from weaver.declaration import parse_item_repository
 from weaver.etl import LOAD_ROOT, item_load_artefacts

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import DeltaTarget, Folder, FolderTarget, ItemRef, Table, View, lakehouse_for
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef
+from weaver import Folder, Table, View, lakehouse_for
 
 pytestmark = pytest.mark.spark
 

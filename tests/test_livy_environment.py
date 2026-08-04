@@ -12,7 +12,7 @@ import types
 
 import pytest
 
-from weaver import FabricWorkspace
+from weaver.workspaces import FabricWorkspace
 from weaver.fabric import livy
 from weaver.fabric.livy import LivySession, environment_bootstrap
 from weaver.fabric.resources import Item

@@ -34,7 +34,7 @@ from __future__ import annotations
 import pytest
 from factories import item_id, single_document_repository, warehouse_table
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 from weaver.build_bundle.executors.base import ResolvedTarget
 from weaver.build_bundle.prune import read_warehouse_inventory
 
@@ -101,7 +101,8 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
     """
 
     payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef, WarehouseTarget\n"
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.targets import ItemRef, WarehouseTarget\n"
         "from weaver.resolution import resolver_for\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
         f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
@@ -138,7 +139,8 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
 
     warehouse = clean_disposable_warehouse
     payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import InstallationEnvironment\n"
         "from weaver.build_bundle.targets import BoundTarget\n"
@@ -171,7 +173,8 @@ def test_a_spark_executor_runs_one_action_in_the_session(
     """
 
     payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import InstallationEnvironment, execute_action\n"
         "from weaver.build_bundle.models import BuildAction\n"
@@ -228,7 +231,8 @@ def test_the_session_native_store_reads_back_what_it_wrote(
     """
 
     payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
         f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
@@ -283,7 +287,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     desktop read the tests above rely on.
     """
 
-    from weaver import wipe_sql_target
+    from weaver.physical_wipe import wipe_sql_target
     from weaver.build_bundle import generate_item_build_bundle
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
@@ -370,7 +374,8 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     )
 
     payload = livy_session.run(
-        "from weaver import FabricWorkspace, ItemRef\n"
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import (InstallationEnvironment, install_bundle, "
         "load_bundle)\n"

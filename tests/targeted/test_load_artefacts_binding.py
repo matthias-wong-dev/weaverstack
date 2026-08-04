@@ -28,7 +28,7 @@ from factories import (
     warehouse_view,
 )
 
-from weaver import Location
+from weaver.locations import Location
 from weaver.build_bundle.incremental import select_build
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId

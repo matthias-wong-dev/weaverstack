@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import DeltaTarget, FolderTarget, wipe, wipe_delta_target
+from weaver.targets import DeltaTarget, FolderTarget
+from weaver.physical_wipe import wipe, wipe_delta_target
 
 pytestmark = pytest.mark.spark
 

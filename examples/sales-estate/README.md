@@ -64,12 +64,10 @@ Lakehouse item. These commands use only the checked-in example repository:
 
 ```bash
 demo_root="$(mktemp -d)"
-weaver initialise --exists-ok \
-  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
 weaver build examples/sales-estate/repository \
-  --bind Lakehouses/Play_LH=Lakehouse/Sales \
+  --bind Lakehouse/Play_LH=Lakehouse/Sales \
   --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
-weaver wipe --lakehouse Play_LH --yes \
+weaver wipe Lakehouse/Play_LH --yes \
   --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
 ```
 
@@ -81,11 +79,43 @@ locally, and submits the completed build bundle for execution inside Fabric.
 
 ```bash
 weaver build examples/sales-estate/repository \
-  --bind Lakehouses/Play_LH=Lakehouse/Sales \
-  --bind Warehouses/Play_WH=Warehouse/Reporting \
+  --bind Lakehouse/Play_LH=Lakehouse/Sales \
+  --bind Warehouse/Play_WH=Warehouse/Reporting \
   --workspace PYTEST_WORKSPACE \
   --weaver-lakehouse Play_Weaver \
   --environment weaver
+```
+
+[`Sales example.ipynb`](Sales%20example.ipynb) is a self-contained version of
+the same demonstration. Because the public Notebook definition API does not
+transport Notebook Resources, the checked-in repository is embedded in the
+notebook source and extracted into its session-local working directory. A test
+keeps that embedded copy byte-for-byte aligned with `repository/`.
+
+Deploy and execute it with the optional desktop utilities:
+
+```bash
+weaver install --workspace PYTEST_WORKSPACE --environment weaver
+weaver notebook push "examples/sales-estate/Sales example.ipynb" \
+  --workspace PYTEST_WORKSPACE
+weaver notebook run "Sales example" \
+  --workspace PYTEST_WORKSPACE \
+  --lakehouse Play_Weaver \
+  --environment weaver
+```
+
+The run attaches `Play_Weaver` as the default Lakehouse. Inside the notebook,
+the public call has no workspace argument at all:
+
+```python
+result = weaver.build(
+    repository,
+    bind=[
+        "Lakehouse/Play_LH=Lakehouse/Sales",
+        "Warehouse/Play_WH=Warehouse/Reporting",
+    ],
+)
+assert result.succeeded
 ```
 
 ## Loading it

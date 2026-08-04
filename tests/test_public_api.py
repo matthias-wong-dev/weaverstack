@@ -1,4 +1,4 @@
-"""The minimal public surface at checkpoint 0."""
+"""The intentionally small notebook-facing product namespace."""
 
 from __future__ import annotations
 
@@ -15,42 +15,51 @@ def test_error_hierarchy_has_one_root():
     assert issubclass(WeaverError, Exception)
 
 
-def test_item_repository_and_build_are_the_primary_public_surface():
-    expected = {
-        "WeaverRepository",
-        "WeaverItem",
-        "WeaverDocument",
-        "WeaverItemId",
-        "WeaverDocumentId",
-        "parse_item_repository",
-        "ItemBinding",
-        "ItemBindings",
-        "LakehouseBinding",
-        "WarehouseBinding",
-        "parse_item_binding",
-        "generate_item_build_bundle",
-        "InstallationEnvironment",
-        "install_bundle",
+def test_the_top_level_is_the_ordinary_notebook_surface_only():
+    assert set(weaver.__all__) == {
+        "__version__",
+        "build",
+        "BuildResult",
+        "wipe",
+        "WipeReport",
+        "WipeResult",
+        "WeaverObject",
+        "Folder",
+        "Table",
+        "View",
+        "Lakehouse",
+        "default_lakehouse",
+        "lakehouse_for",
+        "WeaverError",
+        "CommandError",
+        "ConfigError",
+        "IdentityError",
     }
-    assert expected <= set(weaver.__all__)
-    assert {
+
+
+def test_internal_composition_seams_are_not_top_level_attributes():
+    internal = {
+        "Workspace",
+        "FabricWorkspace",
+        "LocalWorkspace",
+        "Location",
+        "Store",
+        "LocalStore",
+        "ItemRef",
         "FolderTarget",
         "DeltaTarget",
+        "WarehouseTarget",
+        "parse_item_repository",
+        "ItemBindings",
+        "InstallationEnvironment",
         "wipe_folder_target",
         "wipe_delta_target",
-    }.isdisjoint(weaver.__all__)
-    assert {"InitialiseResult", "initialise_weaver_lakehouse"} <= set(weaver.__all__)
-
-
-def test_public_binding_parser_separates_logical_and_physical_identity():
-    lakehouse = weaver.parse_item_binding(
-        "Lakehouses/Curated_Dev=Lakehouse/Curated"
-    )
-    warehouse = weaver.parse_item_binding(
-        "Warehouses/Reporting_Dev=Warehouse/Reporting"
-    )
-
-    assert str(lakehouse.item) == "Lakehouse/Curated"
-    assert lakehouse.target.lakehouse.name == "Curated_Dev"
-    assert str(warehouse.item) == "Warehouse/Reporting"
-    assert warehouse.target.warehouse.name == "Reporting_Dev"
+        "wipe_lakehouse",
+        "wipe_sql_target",
+        "generate_item_build_bundle",
+        "build_uploaded_item_repository",
+        "install_bundle",
+        "prepare_weaver_lakehouse",
+        "initialise_weaver_lakehouse",
+    }
+    assert all(not hasattr(weaver, name) for name in internal)

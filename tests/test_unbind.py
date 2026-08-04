@@ -68,7 +68,7 @@ def test_plan_unbind_selects_by_physical_target_and_orders_dependent_deletes():
     catalogue = _Catalogue(ROWS)
     result = plan_unbind(catalogue, lakehouses=("Sales_Dev",))
 
-    assert result.targets == ("Lakehouses/Sales_Dev",)
+    assert result.targets == ("Lakehouse/Sales_Dev",)
     assert result.logical_items == ("Lakehouse/Sales",)
     assert "Registry" in result.statements[0]
     assert all("Inventory" not in statement for statement in result.statements)

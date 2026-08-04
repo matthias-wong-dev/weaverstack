@@ -20,7 +20,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping
 
-from weaver import ItemRef, LocalStore, Location
+from weaver.targets import ItemRef
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.build_bundle import (
     BuildAction,
     BuildBatch,

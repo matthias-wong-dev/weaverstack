@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import Location
+from weaver.locations import Location
 from weaver.fabric.onelake import OneLakeDfsClient
 
 

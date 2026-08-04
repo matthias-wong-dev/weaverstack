@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 

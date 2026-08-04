@@ -13,7 +13,8 @@ import pytest
 
 from pathlib import Path
 
-from weaver import LocalStore, Location
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.errors import DiscoveryError
 from weaver.declaration import (
     IDENTITY_COLUMN_NOTE,

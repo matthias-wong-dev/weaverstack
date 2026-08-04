@@ -16,7 +16,8 @@ from dataclasses import replace
 import pytest
 import yaml
 
-from weaver import LocalStore, Location
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
     BuildAction,

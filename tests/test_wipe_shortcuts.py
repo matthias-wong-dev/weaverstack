@@ -16,13 +16,11 @@ import sys
 
 import pytest
 
-from weaver import DeltaTarget, FolderTarget, ItemRef, wipe_delta_target, wipe_folder_target
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 from weaver.fabric.shortcuts import Shortcut
-from weaver.wipe import wipe_lakehouse
+from weaver.physical_wipe import wipe_delta_target, wipe_folder_target, wipe_lakehouse
 
-#: The package exports a ``wipe`` *function*, so ``weaver.wipe`` as an attribute
-#: path names that rather than this module. Patch the module object itself.
-WIPE_MODULE = sys.modules["weaver.wipe"]
+WIPE_MODULE = sys.modules["weaver.physical_wipe"]
 
 
 # --- the emulator: a link is unlinked, never followed --------------------------

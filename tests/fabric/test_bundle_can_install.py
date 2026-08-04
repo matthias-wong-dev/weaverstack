@@ -190,7 +190,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     assert planned_order, "the bundle planned no physical work to install"
 
     payload = livy_session.run(
-        "from weaver import FabricWorkspace\n"
+        "from weaver.workspaces import FabricWorkspace\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import (InstallationEnvironment, install_bundle, "
         "load_bundle)\n"

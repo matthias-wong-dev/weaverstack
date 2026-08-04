@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY
 from weaver.initialise import initialise_weaver_lakehouse
 

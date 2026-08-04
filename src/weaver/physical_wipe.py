@@ -1,4 +1,4 @@
-"""Clearing a physical target.
+"""Internal mechanics for clearing a physical target.
 
 Wipe is per target, because the three are different places with different
 mechanics. It is also the bluntest thing Weaver does, so it reports what it

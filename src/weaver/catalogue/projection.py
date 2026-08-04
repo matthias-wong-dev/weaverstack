@@ -28,7 +28,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from ..build_bundle.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 from ..declaration.metadata import FOLDER, TABLE, VIEW, ObjectId, Reference
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
 from ..declaration.references import declared_column_notes, resolve_text
@@ -53,6 +52,13 @@ from .tables import (
     TABLE_DICTIONARY,
     CatalogueTable,
 )
+
+# Catalogue projection consumes the stable persisted target-kind vocabulary; it
+# does not depend on build-package binding classes. Keeping these values here
+# also prevents importing the build package while catalogue reconciliation is
+# still initialising.
+LAKEHOUSE_TARGET = "lakehouse"
+WAREHOUSE_TARGET = "warehouse"
 
 #: How an Weaver document kind names itself in the catalogue. Deliberately a translation
 #: rather than a reuse: Weaver document kinds are title case and the catalogue's vocabulary

@@ -65,7 +65,9 @@ from factories import (
     item_id,
 )
 
-from weaver import ItemRef, LocalStore, Location
+from weaver.targets import ItemRef
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository

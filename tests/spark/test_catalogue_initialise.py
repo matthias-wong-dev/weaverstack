@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 from weaver.catalogue import (
     CATALOGUE_TABLES,
     DEPENDENCY,
@@ -51,7 +51,10 @@ class Bootstrapped:
 def _environment(root):
     """A disposable Weaver Lakehouse skeleton at one root."""
 
-    from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
+    from weaver.targets import ItemRef
+    from weaver.workspaces import LocalWorkspace
+    from weaver.resolution import LocalResolver
+    from weaver.store import LocalStore
 
     workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
     store = LocalStore()

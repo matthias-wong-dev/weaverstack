@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import ItemRef, LocalWorkspace, LocalResolver
+from weaver.targets import ItemRef
+from weaver.workspaces import LocalWorkspace
+from weaver.resolution import LocalResolver
 from weaver.errors import IdentityError
 from weaver.locations import LakehouseSparkLocation
 

@@ -25,10 +25,11 @@ Workspace described by the configuration file. A local Workspace is simply a
 folder path:
 
 ```bash
-weaver initialise \
+weaver build ./estate \
   --workspace .local \
   --workspace-type local \
-  --weaver-lakehouse Weaver
+  --weaver-lakehouse Weaver \
+  --bind Lakehouse/Sales=Lakehouse/Sales
 ```
 
 A configuration is shorthand for the same values. Physical target names are
@@ -48,7 +49,7 @@ warehouses:
 
 See [`examples/env.yml`](../examples/env.yml) for the expanded form.
 
-## Install and initialise
+## Install and control-plane bootstrap
 
 Install Weaver into a Fabric Environment:
 
@@ -56,18 +57,9 @@ Install Weaver into a Fabric Environment:
 weaver install --workspace Analytics --environment Runtime
 ```
 
-Create or prepare the Weaver Lakehouse and build its package-owned catalogue:
-
-```bash
-weaver initialise \
-  --workspace Analytics \
-  --environment Runtime \
-  --weaver-lakehouse Control
-```
-
-Use `--exists-ok` when the Lakehouse may already exist. It does not suppress
-invalid or incompatible catalogue structures. An ordinary build also recreates
-missing catalogue tables by classifying them as new and creating them strictly.
+There is no separate initialise lifecycle. Every ordinary build ensures the
+configured Weaver Lakehouse and package-owned catalogue exist before it reads
+authoritative state. A full reset is therefore a wipe followed by a build.
 
 ## Push (compatibility utility)
 
@@ -91,8 +83,8 @@ Bindings are physical-first:
 weaver build \
   ./estate \
   --workspace-config examples/env.yml \
-  --bind Lakehouses/Sales_Dev \
-  --bind Warehouses/Reporting_Dev=Warehouse/Alternative
+  --bind Lakehouse/Sales_Dev \
+  --bind Warehouse/Reporting_Dev=Warehouse/Alternative
 ```
 
 Without `=`, the physical target uses its configured logical default. With `=`,
@@ -126,8 +118,8 @@ inspecting or deleting those targets:
 ```bash
 weaver unbind \
   --workspace-config examples/env.yml \
-  --lakehouse Sales_Dev \
-  --warehouse Reporting_Dev
+  Lakehouse/Sales_Dev \
+  Warehouse/Reporting_Dev
 ```
 
 It works even when the physical target has already disappeared. Unrelated
@@ -135,15 +127,17 @@ installations remain.
 
 ## Wipe
 
-Wipe is intentionally broader: it clears everything in each selected target for
-the object types Weaver knows how to remove, then automatically unbinds that
-target from the catalogue.
+Wipe is intentionally broader: it clears everything in each selected typed
+target. Physical wipe does not require catalogue access; immediate catalogue
+cleanup is selected separately with `--unbind-from` (or the configured control
+Lakehouse).
 
 ```bash
 weaver wipe \
+  Lakehouse/Sales_Dev \
+  Warehouse/Reporting_Dev \
   --workspace-config examples/env.yml \
-  --lakehouse Sales_Dev \
-  --warehouse Reporting_Dev \
+  --unbind-from Control \
   --dry-run
 ```
 

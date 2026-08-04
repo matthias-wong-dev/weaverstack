@@ -50,8 +50,7 @@ One Workspace configuration can abbreviate the full desktop lifecycle:
 
 ```bash
 weaver install     --workspace-config workspace.yml
-weaver initialise  --workspace-config workspace.yml --exists-ok
-weaver build ./estate --workspace-config workspace.yml --bind Lakehouses/Sales_Dev
+weaver build ./estate --workspace-config workspace.yml --bind Lakehouse/Sales_Dev
 ```
 
 The same commands work against a local folder with `--workspace-type local`,

@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from weaver import Entry, Location, LocalStore, Store
+from weaver.store import Entry, LocalStore, Store
+from weaver.locations import Location
 from weaver.errors import CommandError
 from weaver.store import StoreError
 

@@ -23,7 +23,8 @@ from typing import Any, Mapping
 import pytest
 from .observation import Observation, observation_from, observe_body
 
-from weaver import ItemRef, Store
+from weaver.targets import ItemRef
+from weaver.store import Store
 
 
 @dataclass(frozen=True)

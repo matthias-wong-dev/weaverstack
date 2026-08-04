@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from weaver import DeltaTarget, ItemRef, wipe_delta_target
+from weaver.targets import DeltaTarget, ItemRef
+from weaver.physical_wipe import wipe_delta_target
 
 pytestmark = pytest.mark.spark
 

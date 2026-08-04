@@ -26,7 +26,8 @@ def test_a_wipe_clears_both_onelake_areas(
     this no longer waits on a wheel.
     """
 
-    from weaver import ItemRef, wipe_lakehouse
+    from weaver.targets import ItemRef
+    from weaver.physical_wipe import wipe_lakehouse
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     resolver = FabricResolver(fabric_workspace, client=fabric_client)

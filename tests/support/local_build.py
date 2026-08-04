@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalResolver, LocalStore, LocalWorkspace, Location
+from weaver.targets import ItemRef
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
+from weaver.workspaces import LocalWorkspace
+from weaver.locations import Location
 from weaver.spark import SparkCatalogue
 
 from .build_env import BuildEnv, InstallOutcome, _bindings_for, _outcome_from_report, _upload_tree
@@ -24,7 +28,10 @@ _LOCAL_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting", "Wh", "Rpt", "_"
 
 
 def _local_lakehouse_setup(root, extra=()):
-    from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
+    from weaver.targets import ItemRef
+    from weaver.workspaces import LocalWorkspace
+    from weaver.resolution import LocalResolver
+    from weaver.store import LocalStore
 
     workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
     store = LocalStore()
@@ -61,7 +68,7 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     destination = resolver.spark_destination(target)
     weaver_destination = resolver.spark_destination(weaver)
     repository_root = Location(str(Path(root) / "repository"))
-    from weaver import ItemRef as _ItemRef
+    from weaver.targets import ItemRef as _ItemRef
 
     named_lakehouses = {
         item: _ItemRef(name)
@@ -184,4 +191,3 @@ def _local_build_context(root, spark, weaver_repo_fixture):
                 spark.sql(
                     f"DROP SCHEMA IF EXISTS {place.qualified_schema(schema)} CASCADE"
                 )
-

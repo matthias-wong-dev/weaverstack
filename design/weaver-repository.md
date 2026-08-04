@@ -105,17 +105,17 @@ From the CLI:
 ```bash
 weaver build \
   ./estate \
-  --bind Lakehouses/Raw_Dev=Lakehouse/Raw \
-  --bind Warehouses/Reporting_Dev=Warehouse/Reporting \
+  --bind Lakehouse/Raw_Dev=Lakehouse/Raw \
+  --bind Warehouse/Reporting_Dev=Warehouse/Reporting \
   --workspace Analytics --environment Runtime \
   --weaver-lakehouse Control
 ```
 
-From Python inside the target environment,
-`build_item_repository_source()` is the full source-neutral workflow. It copies
+From Python inside the target environment, `weaver.build(source, bind=...)` is
+the ordinary source-neutral operation. It copies
 a remote source once to a session-local temporary directory when required, parses it,
-reads target and catalogue state, reconciles, and then calls the narrower
-`build_item_repository()` planner/executor seam. The generated bundle contains
+ensures the control plane, reads target and catalogue state, reconciles, and
+then calls internal planner and installer seams. The generated bundle contains
 only frozen outputs — every statement, every deployed file, every hash — and no
 copy of the source, so installation cannot reopen or reinterpret the repository
 even in principle. `repository_signature` still records which authored state the

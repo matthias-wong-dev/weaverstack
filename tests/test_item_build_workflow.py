@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalStore, Location
+from weaver.targets import ItemRef
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.build_bundle import (
     InstallationEnvironment,
     BuildState,
@@ -247,7 +249,8 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
 
 
 def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
-    from weaver import LocalResolver, LocalWorkspace
+    from weaver.resolution import LocalResolver
+    from weaver.workspaces import LocalWorkspace
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
     resolver = LocalResolver(workspace)

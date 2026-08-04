@@ -24,7 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from weaver import ItemRef, LocalWorkspace, LocalResolver, LocalStore
+from weaver.targets import ItemRef
+from weaver.workspaces import LocalWorkspace
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
 from weaver.build_bundle import (
     InstallationEnvironment,
     ItemBinding,

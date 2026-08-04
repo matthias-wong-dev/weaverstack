@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import Location
+from weaver.locations import Location
 from weaver.declaration import PYTHON, SPARK_SQL, SQL, parse_item_repository
 
 FIXTURE = Location(str(Path(__file__).parent / "fixtures" / "estate-item"))

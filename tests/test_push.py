@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import LocalStore, Location, push_item_repository
+from weaver.store import LocalStore
+from weaver.locations import Location
+from weaver.push import push_item_repository
 from weaver.errors import DiscoveryError
 
 from test_item_repository import _estate, _write

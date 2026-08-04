@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import DeltaTarget, FolderTarget, WarehouseTarget, wipe, wipe_folder_target
+from weaver.targets import DeltaTarget, FolderTarget, WarehouseTarget
+from weaver.workspaces import LocalWorkspace
+from weaver.locations import Location
+from weaver import wipe as public_wipe
+from weaver.operations import WipeReport as PublicWipeReport, WipeTarget
+from weaver.physical_wipe import wipe, wipe_folder_target
 from weaver.errors import CommandError
 from weaver.sql import SqlExecutionError
 
@@ -73,7 +78,7 @@ def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(lakehouses, m
     def forbidden_store(_workspace):
         raise AssertionError("Warehouse-only wipe asked for a Store")
 
-    monkeypatch.setattr(importlib.import_module("weaver.wipe"), "store_for", forbidden_store)
+    monkeypatch.setattr(importlib.import_module("weaver.physical_wipe"), "store_for", forbidden_store)
     reports = wipe(
         lakehouses.workspace,
         sql_target=WarehouseTarget.parse("Reporting_WH"),
@@ -125,7 +130,7 @@ def test_targets_are_independently_optional(populated_folders):
 
 def test_a_wipe_refuses_to_reach_outside_the_workspace_root(lakehouses, tmp_path):
     from weaver.locations import Location
-    from weaver.wipe import _guard
+    from weaver.physical_wipe import _guard
 
     with pytest.raises(CommandError, match="outside the workspace root"):
         _guard(Location(str(tmp_path.parent / "elsewhere")), Location(str(lakehouses.root)))
@@ -135,3 +140,78 @@ def test_the_report_reads_usefully(populated_folders):
     report = wipe_folder_target(folder_target(), populated_folders.workspace, dry_run=True)
     assert "would remove" in str(report)
     assert "Sales_LH/Files" in str(report)
+
+
+# --- public operation --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "item_type", "area"),
+    [
+        ("Lakehouse/Sales", "Lakehouse", None),
+        ("Lakehouse/Sales/Files", "Lakehouse", "Files"),
+        ("Lakehouse/Sales/Tables", "Lakehouse", "Tables"),
+        ("Warehouse/Reporting", "Warehouse", None),
+    ],
+)
+def test_public_wipe_uses_one_typed_target_grammar(value, item_type, area):
+    target = WipeTarget.parse(value)
+    assert target.item_type == item_type
+    assert target.area == area
+    assert str(target) == value
+
+
+def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
+    operations = __import__("weaver.operations", fromlist=["operations"])
+    workspace = LocalWorkspace(workspace="/tmp/local")
+    monkeypatch.setattr(operations, "_operation_store", lambda _workspace: object())
+    monkeypatch.setattr(operations, "_drop_local_catalogue", lambda *_args: None)
+    monkeypatch.setattr(
+        operations,
+        "_wipe_one",
+        lambda target, *_args, **kwargs: (
+            PublicWipeReport(
+                str(target), Location("/tmp/local/Sales"), ("table",), kwargs["dry_run"]
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        operations,
+        "_unbind_physical_targets",
+        lambda *_args, **_kwargs: pytest.fail("unbind was not requested"),
+    )
+
+    result = public_wipe("Lakehouse/Sales", workspace=workspace)
+    assert result.count == 1
+    assert result.unbound is None
+
+
+def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
+    monkeypatch,
+):
+    operations = __import__("weaver.operations", fromlist=["operations"])
+    workspace = LocalWorkspace(workspace="/tmp/local", weaver_lakehouse="Control")
+    calls = []
+    monkeypatch.setattr(operations, "_operation_store", lambda _workspace: object())
+    monkeypatch.setattr(operations, "_drop_local_catalogue", lambda *_args: None)
+    monkeypatch.setattr(
+        operations,
+        "_wipe_one",
+        lambda target, *_args, **kwargs: (
+            PublicWipeReport(
+                str(target), Location("/tmp/local/target"), (), kwargs["dry_run"]
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        operations,
+        "_unbind_physical_targets",
+        lambda control, targets: calls.append(
+            (control.weaver_lakehouse, tuple(map(str, targets)))
+        )
+        or {"targets": []},
+    )
+
+    public_wipe("Lakehouse/Sales", workspace=workspace)
+    public_wipe("Lakehouse/Control", workspace=workspace)
+    assert calls == [("Control", ("Lakehouse/Sales",))]

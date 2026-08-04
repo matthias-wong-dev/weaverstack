@@ -218,8 +218,8 @@ def effective_item_bindings(
 def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
     """Parse a typed physical selector with an optional logical override.
 
-    ``Lakehouses/Sales`` uses the configured default.  The self-contained form
-    ``Lakehouses/Sales=Lakehouse/Raw`` needs no configured target declaration.
+    ``Lakehouse/Sales`` uses the configured default.  The self-contained form
+    ``Lakehouse/Sales=Lakehouse/Raw`` needs no configured target declaration.
     """
 
     if not isinstance(text, str) or text.count("=") > 1:
@@ -259,9 +259,9 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
 
 def _parse_physical_item(text: str) -> tuple[str, ItemRef]:
     prefix, separator, name = text.partition("/")
-    item_type = {"Lakehouses": LAKEHOUSE, "Warehouses": WAREHOUSE}.get(prefix)
+    item_type = {"Lakehouse": LAKEHOUSE, "Warehouse": WAREHOUSE}.get(prefix)
     if not separator or item_type is None or not name or "/" in name:
         raise BuildError(
-            "a physical target must be Lakehouses/Name or Warehouses/Name"
+            "a physical target must be Lakehouse/Name or Warehouse/Name"
         )
     return item_type, ItemRef.parse(name)

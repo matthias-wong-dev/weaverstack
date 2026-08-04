@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from weaver import FabricWorkspace, ItemRef, LocalStore, Location
+from weaver.workspaces import FabricWorkspace
+from weaver.targets import ItemRef
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.sql_endpoint_refresh import (
     SqlEndpointRefreshExecutor,

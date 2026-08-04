@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import (
-    DeltaTarget,
-    FolderTarget,
-    ItemRef,
-    LocalWorkspace,
-    LocalResolver,
-    WarehouseTarget,
-)
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
+from weaver.workspaces import LocalWorkspace
+from weaver.resolution import LocalResolver
 from weaver.errors import CommandError
 
 
@@ -139,7 +134,7 @@ def test_resolution_touches_nothing(tmp_path):
 
 
 def test_a_fabric_workspace_is_refused():
-    from weaver import FabricWorkspace
+    from weaver.workspaces import FabricWorkspace
 
     with pytest.raises(CommandError, match="LocalWorkspace"):
         LocalResolver(FabricWorkspace(workspace="Analytics"))

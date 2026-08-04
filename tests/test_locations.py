@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from weaver import Location
+from weaver.locations import Location
 from weaver.errors import IdentityError
 
 ABFSS = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse-id"

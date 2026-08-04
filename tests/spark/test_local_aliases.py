@@ -18,7 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from weaver import DeltaTarget, ItemRef, LocalResolver, LocalStore, LocalWorkspace
+from weaver.targets import DeltaTarget, ItemRef
+from weaver.resolution import LocalResolver
+from weaver.store import LocalStore
+from weaver.workspaces import LocalWorkspace
 from weaver.build_bundle import (
     InstallationEnvironment,
     ItemBinding,

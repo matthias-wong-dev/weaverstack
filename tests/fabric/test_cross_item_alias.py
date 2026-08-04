@@ -43,7 +43,7 @@ from pathlib import Path
 import pytest
 from factories import FixtureCatalogue, alias_repository, item_id
 
-from weaver import ItemRef
+from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 

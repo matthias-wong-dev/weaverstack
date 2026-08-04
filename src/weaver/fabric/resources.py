@@ -15,6 +15,7 @@ from .client import FabricClient, FabricError
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
 ENVIRONMENT = "Environment"
+NOTEBOOK = "Notebook"
 SQL_ENDPOINT = "SQLEndpoint"
 
 #: A Lakehouse grows a SQLEndpoint sibling of the same name, a little after it

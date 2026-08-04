@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver import LocalStore, Location
+from weaver.store import LocalStore
+from weaver.locations import Location
 from weaver.errors import DiscoveryError, MetadataError
 from weaver.declaration import PYTHON, SPARK_SQL, parse_document, parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
