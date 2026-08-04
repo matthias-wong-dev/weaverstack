@@ -291,24 +291,102 @@ def _catalogue(**by_item):
     )
 
 
-def test_load_dag_rejects_ambiguous_physical_bindings():
-    """Two logical items cannot be installed into one physical target."""
+def _colliding_catalogue(target: str = "Shared_LH"):
+    """Two items that each installed ``Sales.Order`` into one physical target."""
 
-    catalogue = _catalogue(
+    return _catalogue(
         **{
             "Lakehouse/Raw": _rows(
-                Installation=[_installation("Lakehouse/Raw", "Shared_LH")],
+                Installation=[_installation("Lakehouse/Raw", target)],
                 Registry=[_registry("Lakehouse/Raw", "Sales", "Order")],
             ),
             "Lakehouse/Staging": _rows(
-                Installation=[_installation("Lakehouse/Staging", "Shared_LH")],
+                Installation=[_installation("Lakehouse/Staging", target)],
                 Registry=[_registry("Lakehouse/Staging", "Sales", "Order")],
             ),
         }
     )
 
-    with pytest.raises(LoadError, match="a physical target holds one logical item"):
-        InstalledEstate.from_catalogue(catalogue)
+
+def test_load_dag_rejects_ambiguous_physical_bindings():
+    """Two logical objects cannot resolve to one physical object."""
+
+    estate = InstalledEstate.from_catalogue(_colliding_catalogue())
+
+    with pytest.raises(LoadError, match="two logical objects at one physical address"):
+        load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),))
+
+
+def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estate):
+    """A stale duplicate in one target is not a fault report about another.
+
+    An estate accumulates a Registry row for every item ever bound to a target,
+    so a rebound Warehouse can carry a duplicated address indefinitely. Refusing
+    every load in the workspace because of it would name the wrong thing.
+    """
+
+    colliding = InstalledEstate.from_catalogue(_colliding_catalogue("Elsewhere_LH"))
+    assert colliding.ambiguous
+
+    # The canonical estate is untouched by a collision it does not contain.
+    dag = load_dag(estate, targets=(RAW,))
+
+    assert node_ids(dag) == (
+        "load:Lakehouse/Raw_LH/Sales.Export",
+        "load:Lakehouse/Raw_LH/Sales.Order",
+        "load:Lakehouse/Raw_LH/Sales.Daily",
+    )
+
+
+def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
+    """A request names a target and means everything installed there.
+
+    An estate accumulates an Installation row for every item ever bound to a
+    target, so refusing the *item* overlap would stop a load of a target whose
+    objects are perfectly unambiguous.
+    """
+
+    catalogue = _catalogue(
+        **{
+            "Lakehouse/Raw": _rows(
+                Installation=[_installation("Lakehouse/Raw", "Shared_LH")],
+                Registry=[
+                    _registry("Lakehouse/Raw", "Sales", "Order"),
+                    _registry(
+                        "Lakehouse/Raw",
+                        "_/Load",
+                        "Sales__Order.py",
+                        object_type="file",
+                        role="load",
+                    ),
+                ],
+            ),
+            "Lakehouse/Staging": _rows(
+                Installation=[_installation("Lakehouse/Staging", "Shared_LH")],
+                Registry=[
+                    _registry("Lakehouse/Staging", "Sales", "Customer"),
+                    _registry(
+                        "Lakehouse/Staging",
+                        "_/Load",
+                        "Sales__Customer.py",
+                        object_type="file",
+                        role="load",
+                    ),
+                ],
+            ),
+        }
+    )
+    dag = load_dag(
+        InstalledEstate.from_catalogue(catalogue),
+        targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),),
+    )
+
+    # Ordered by *logical* identity, so the two items' objects interleave by
+    # item name rather than by the physical name they share.
+    assert node_ids(dag) == (
+        "load:Lakehouse/Shared_LH/Sales.Order",
+        "load:Lakehouse/Shared_LH/Sales.Customer",
+    )
 
 
 def test_load_dag_rejects_missing_bindings():

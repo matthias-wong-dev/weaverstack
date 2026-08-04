@@ -151,6 +151,11 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             "spark": spark,
             "resolver": resolver,
             "target": target,
+            # A body that orchestrates rather than reads needs to say *where* it
+            # is running as well as what it is running against. Bound on both
+            # sides, so a body that acquires nothing itself stays identical.
+            "workspace": workspace,
+            "store": store,
             "emit": emitted.append,
         }
         exec(compile(body, "<shared body>", "exec"), namespace)

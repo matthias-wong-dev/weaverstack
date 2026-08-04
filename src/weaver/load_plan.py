@@ -206,13 +206,32 @@ class InstalledEstate:
     primitives: Mapping[WeaverDocumentId, InstalledObject]
     dependencies: tuple[InstalledDependency, ...]
     aliases: tuple[InstalledAlias, ...]
+    #: Physical addresses two logical objects both claim, by the target they are
+    #: in. Recorded rather than raised — see :meth:`from_catalogue`.
+    ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(
+        default_factory=dict
+    )
 
     @classmethod
     def from_catalogue(cls, catalogue: Catalogue) -> "InstalledEstate":
+        """Reverse the whole catalogue, recording ambiguity rather than refusing it.
+
+        Two logical objects at one physical address is a real fault and load
+        planning must not proceed through one — but *where* it stops matters. An
+        estate accumulates Registry rows for every item ever bound to a target, so
+        a Warehouse that was rebound years ago can carry a duplicate claim
+        indefinitely; refusing here would make that stale row stop a load of an
+        unrelated Lakehouse, which is a fault report about the wrong thing.
+
+        So the finding is kept and :func:`load_dag` refuses when it touches the
+        request — which is exactly when the request is genuinely ambiguous.
+        """
+
         installations = _installations(catalogue)
         objects: dict[WeaverDocumentId, InstalledObject] = {}
         primitives: dict[WeaverDocumentId, InstalledObject] = {}
         physical_owner: dict[tuple, WeaverDocumentId] = {}
+        ambiguous: dict[PhysicalTargetRef, list[str]] = {}
         for identity, document in sorted(
             catalogue.registered.items(), key=lambda pair: str(pair[0])
         ):
@@ -236,12 +255,11 @@ class InstalledEstate:
             )
             owner = physical_owner.get(key)
             if owner is not None:
-                raise LoadError(
-                    f"{owner} and {identity} both resolve to the physical object "
-                    f"{where} in {target}; one installed estate cannot hold two "
-                    "logical objects at one physical address"
+                ambiguous.setdefault(target, []).append(
+                    f"{owner} and {identity} both resolve to {where}"
                 )
-            physical_owner[key] = identity
+            else:
+                physical_owner[key] = identity
             if identity.is_load_artefact:
                 primitives[identity] = installed
             else:
@@ -252,6 +270,9 @@ class InstalledEstate:
             primitives=MappingProxyType(primitives),
             dependencies=_dependencies(catalogue),
             aliases=_aliases(catalogue),
+            ambiguous=MappingProxyType(
+                {target: tuple(found) for target, found in ambiguous.items()}
+            ),
         )
 
     def target_for(self, item: WeaverItemId) -> PhysicalTargetRef:
@@ -268,10 +289,22 @@ class InstalledEstate:
 
 
 def _installations(catalogue: Catalogue) -> dict[WeaverItemId, PhysicalTargetRef]:
-    """Each logical item's bound physical target, keyed for reverse lookup."""
+    """Each logical item's bound physical target, keyed for reverse lookup.
+
+    Several logical items may name one physical target, and that is not an error
+    to catch here. A request names a *target*, and what it means is "everything
+    installed there" — which is answerable whoever installed it, as long as no
+    two objects claim one address. That narrower question is the one ambiguity
+    actually turns on, and :meth:`InstalledEstate.from_catalogue` asks it per
+    object.
+
+    Refusing at the item level instead looked equivalent and was not: an estate
+    accumulates Installation rows from every item ever bound to a target, so a
+    binding that has since moved on would stop a load of a target it no longer
+    has a single object in.
+    """
 
     bound: dict[WeaverItemId, PhysicalTargetRef] = {}
-    physical: dict[tuple[str, str], WeaverItemId] = {}
     for item, tables in catalogue.rows.items():
         for row in tables.get(INSTALLATION.name, ()):
             name = str(row.get("target_name") or "")
@@ -285,16 +318,7 @@ def _installations(catalogue: Catalogue) -> dict[WeaverItemId, PhysicalTargetRef
                     f"{item} has item type {item.item_type!r}, which names no "
                     "physical target kind"
                 )
-            target = PhysicalTargetRef(kind=kind, name=name)
-            key = (kind, name.casefold())
-            other = physical.get(key)
-            if other is not None and other != item:
-                raise LoadError(
-                    f"{other} and {item} are both installed into {target}; a "
-                    "physical target holds one logical item"
-                )
-            physical[key] = item
-            bound[item] = target
+            bound[item] = PhysicalTargetRef(kind=kind, name=name)
     return bound
 
 
@@ -640,6 +664,7 @@ class _Planner:
     # --- planning -------------------------------------------------------------
 
     def plan(self, requested: tuple[PhysicalTargetRef, ...]) -> LoadDag:
+        self._refuse_ambiguity(requested)
         seeds = sorted(
             (
                 identity
@@ -662,7 +687,26 @@ class _Planner:
         # to whoever consumes the graph — a planner that returned a cyclic graph
         # would have made a decision it could not defend.
         dag.order()
+        self._refuse_ambiguity(
+            tuple(dict.fromkeys(node.physical_target for node in dag.nodes))
+        )
         return dag
+
+    def _refuse_ambiguity(self, targets: tuple[PhysicalTargetRef, ...]) -> None:
+        """Stop if any target this request touches holds a duplicated address.
+
+        Asked twice — of what was requested, and of what the upstream closure
+        walked into — because both are targets this run would dispatch against,
+        and neither is known at the moment the other is.
+        """
+
+        for target in targets:
+            found = self.estate.ambiguous.get(target)
+            if found:
+                raise LoadError(
+                    f"{target} holds two logical objects at one physical "
+                    f"address, so a load of it is ambiguous: {found[0]}"
+                )
 
     def _select(self, identity: WeaverDocumentId, visited: set) -> str:
         """Add this loadable object and everything it needs, returning its node id."""

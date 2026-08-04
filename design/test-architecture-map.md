@@ -203,6 +203,11 @@ rather than the estate around it.
 | a build converges on what the source declares — from a correct estate, from nothing, from damage, and after a deletion | `generate_item_build_bundle`, `TargetInventory.update_using` | `test_artefact_lifecycle.py` (`-k converges`) | — |
 | every action that touches a target is declared, and every declaration runs | `target_changes` | `test_build_intent.py` | — |
 | every artefact kind reaches the catalogue, and every instance of one | `Catalogue.from_repository` | `test_catalogue_projection.py` | — |
+| the installed catalogue reversed into a physical load graph: bindings, dependencies, alias crossings, refresh barriers, determinism, cycles | `load_dag` | `test_load_dag_binding.py` | — |
+| whether the orchestrator can *locate* what it would dispatch, per primitive kind | `resolve_load_plan` | `test_load_resolution_binding.py` | — |
+| sequential dispatch, result normalisation, and failure propagation by graph | `execute_load_plan` | `test_load_execution_binding.py` | — |
+| the whole orchestration path with dispatch removed | `weaver.load(dry_run=True)` | `test_load_dry_run_lifecycle.py` | — |
+| immutable task evidence, generic across all five top-level tasks | `open_task_log` | `test_task_logging_lifecycle.py` | — |
 
 ### Covered by old tests, not yet re-homed
 
@@ -376,6 +381,24 @@ inside, there is one path, and breaking the derivation now fails
 The rule this suggests: **a seam with a destructive default cannot be covered
 from above.** Either the default goes, or the seam is tested directly on every
 shape it accepts.
+
+**A `pathlib.Path` wrapped around an `abfss://` URL.** Two fixtures joined a
+folder's `path()` to a filename with `pathlib`, which is correct locally — where
+the value is a directory — and silently wrong in Fabric, where `Path` collapses
+`abfss://` to `abfss:/` and rebuilds a location that does not exist. Nothing
+caught it for a simple reason: no test had ever *run* those objects' `read()`,
+because until load orchestration existed there was nothing to run them. The
+general shape: **a fixture written to be parsed is not a fixture proven to
+execute**, and the two look identical until something executes it.
+
+**A control item that could not see its own folders.** `read_lakehouse_inventory`
+excluded the whole Files area for `_weaver`, on the reasoning that the Weaver
+Lakehouse's Files hold Weaver's own working directories rather than Folder
+objects. That became untrue the moment the control plane declared one — the task
+log — and the symptom was a build that recreated it every time, because an
+artefact the inventory cannot observe is disproved by every reconciliation. The
+Delta side had already been narrowed to the `_` schema rather than excluded; the
+Files side had not, and the asymmetry was invisible while nothing lived there.
 
 **A `snapshot=` keyword in a Livy body.** Not a coverage gap of the same kind —
 that code is a *string* sent to a Fabric session and executes only against the
