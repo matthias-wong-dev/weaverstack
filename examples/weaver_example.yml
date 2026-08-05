@@ -8,10 +8,10 @@ execution:
 
 # Physical target names are keys; logical items are their configured defaults.
 lakehouses:
-  Sales_Dev: Lakehouse/Sales
+  Sales: Lakehouse/Sales
 
 warehouses:
-  Reporting_Dev:
+  Reporting:
     item: Warehouse/Reporting
     execution:
       parallel_workers: 2
