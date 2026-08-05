@@ -81,7 +81,7 @@ locally, and submits the completed build bundle for execution inside Fabric.
 weaver build examples/sales-estate/repository \
   --bind Lakehouse/Play_LH=Lakehouse/Sales \
   --bind Warehouse/Play_WH=Warehouse/Reporting \
-  --workspace PYTEST_WORKSPACE \
+  --workspace "Weaver Example" \
   --weaver-lakehouse Play_Weaver \
   --environment weaver
 ```
@@ -95,11 +95,11 @@ keeps that embedded copy byte-for-byte aligned with `repository/`.
 Deploy and execute it with the optional desktop utilities:
 
 ```bash
-weaver install --workspace PYTEST_WORKSPACE --environment weaver
+weaver install --workspace "Weaver Example" --environment weaver
 weaver notebook push "examples/sales-estate/Sales example.ipynb" \
-  --workspace PYTEST_WORKSPACE
+  --workspace "Weaver Example"
 weaver notebook run "Sales example" \
-  --workspace PYTEST_WORKSPACE \
+  --workspace "Weaver Example" \
   --lakehouse Play_Weaver \
   --environment weaver
 ```
