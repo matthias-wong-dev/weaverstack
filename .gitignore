@@ -227,3 +227,7 @@ __marimo__/
 # Spark's default warehouse directory, created in the working directory by any
 # local Spark run — including `pytest -m spark`
 spark-warehouse/
+
+
+# Derby
+derby.log
