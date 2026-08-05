@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Environment",
+    "displayName": "weaver",
+    "description": "Weaver runtime"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "f2346c37-1d0a-9f65-447d-0af85c370d9f"
+  }
+}

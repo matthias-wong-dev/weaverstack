@@ -1,0 +1,17 @@
+# The external packages a Weaver Fabric Environment installs.
+#
+# `weaver install` uploads this file to the Environment's staging area, where
+# Fabric resolves the pip list into the published Spark image. A Fabric custom
+# wheel does not pull its own transitive dependencies, so every runtime package
+# Weaver imports must be named here explicitly.
+#
+# This list mirrors the runtime `dependencies` in pyproject.toml, which stays
+# authoritative for Python packaging. `tests/test_environment_definition.py`
+# fails if a runtime dependency is added there but not here, so the two cannot
+# drift apart silently. Desktop-only and local-Spark packages are deliberately
+# absent — installing Weaver into Fabric must not drag them along.
+dependencies:
+  - pip:
+      - pyyaml
+      - sqlparse
+      - mssql-python
