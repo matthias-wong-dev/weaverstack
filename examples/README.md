@@ -1,140 +1,120 @@
-# A worked sales estate
+# Weaver Example
 
-One repository exercising every object form Weaver builds and loads, so the
-whole chain can be read in one place:
+This example demonstrates that the **same Weaver repository** can be
+built in two different ways.
 
-The buildable repository is `repository/`; this README sits beside it because a
-repository root contains only `Lakehouse/` and `Warehouse/`.
+Both modes produce exactly the same Fabric estate.
 
-```text
-Lakehouse/Sales
-  Files/Sales__OrderExport.py    Folder        *.csv, incremental
-  Sales__Customer.py             Delta table   Python, keyed, replaced
-  Sales__Order.py                Delta table   Python, keyed, incremental
-  Sales.OrderSummary.sql         Delta table   Spark SQL, keyed
-  lib/dates.py                   helper        deployed, declares nothing
+    Weaver
+    Sales
+    Reporting
 
-Warehouse/Reporting
-  alias.yml                      makes the Lakehouse summary addressable
-  Reporting.CustomerRevenue.sql  Warehouse table, keyed, identity
+The repository is authored once and stored inside the notebook's
+built-in resources:
+
+``` text
+Sales-Estate.Notebook/
+└── Resources/
+    └── builtin/
+        └── repository/
 ```
 
-The names are deliberately generic. Nothing here says which Lakehouse or
-Warehouse it lands in — that is decided at build time by `--bind`, which is why
-the same repository builds into any estate.
+The difference is simply **where `weaver.build()` executes**.
 
-## The chain
+------------------------------------------------------------------------
 
-Files arrive in the export folder; the two Python tables read them; the Spark
-SQL table summarises those; the alias carries the summary into the Warehouse,
-where the reporting table adds a surrogate key for a BI model.
+# Notebook mode
 
-```text
-Sales.OrderExport ──> Sales.Customer ──┐
-                 └──> Sales.Order   ───┴──> Sales.OrderSummary
-                                                   │  (alias)
-                                                   └──> Reporting.CustomerRevenue
-```
+In Notebook mode, everything runs inside Microsoft Fabric.
 
-## What each declaration is demonstrating
+The notebook reads the repository directly from its built-in resources.
 
-**`Sales.OrderExport` is incremental** because the export is a nightly drop and
-the sales system keeps only thirty days. A load adds tonight's file and must not
-retire the ones before it.
+``` python
+from pathlib import Path
+import weaver
 
-**`Sales.Order` is incremental too**, and it is the interesting case: an order
-missing from tonight's file has not been cancelled, it is simply older than the
-window. So absence deletes nothing, and a cancellation is reported as an
-*explicit* delete instead — the object stating that a row is gone rather than
-Weaver inferring it.
+repository = Path.cwd() / "repository"
 
-**`Sales.Customer` is not incremental.** The export is the whole customer list
-every night, so absence really does mean the customer went away.
+weaver.wipe([
+    "Lakehouse/Sales",
+    "Warehouse/Reporting",
+    "Lakehouse/Weaver",
+])
 
-**`Reporting.CustomerRevenue` declares an `Identity`.** That is a Warehouse-only
-declaration: build emits `bigint identity`, the engine assigns the values, and
-no load ever inserts into the column. The values are Fabric's to choose — not
-consecutive, not ordered — so nothing may read sequence into them. A Delta table
-cannot declare one, because no Delta version Weaver runs on generates them.
-
-## Build it locally with the exact CLI
-
-The local emulator has Lakehouses but no Warehouse SQL engine, so bind the Sales
-Lakehouse item. These commands use only the checked-in example repository:
-
-```bash
-demo_root="$(mktemp -d)"
-weaver build examples/sales-estate/repository \
-  --bind Lakehouse/Play_LH=Lakehouse/Sales \
-  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
-weaver wipe Lakehouse/Play_LH --yes \
-  --workspace-type local --workspace "$demo_root" --weaver-lakehouse Play_Weaver
-```
-
-## Build it in Fabric from the desktop
-
-The same explicit repository builds both logical items into the named Play
-destinations. Source stays on the desktop: the CLI reads Fabric state, plans
-locally, and submits the completed build bundle for execution inside Fabric.
-
-```bash
-weaver build examples/sales-estate/repository \
-  --bind Lakehouse/Play_LH=Lakehouse/Sales \
-  --bind Warehouse/Play_WH=Warehouse/Reporting \
-  --workspace "Weaver Example" \
-  --weaver-lakehouse Play_Weaver \
-  --environment weaver
-```
-
-[`Sales example.ipynb`](Sales%20example.ipynb) is a self-contained version of
-the same demonstration. Because the public Notebook definition API does not
-transport Notebook Resources, the checked-in repository is embedded in the
-notebook source and extracted into its session-local working directory. A test
-keeps that embedded copy byte-for-byte aligned with `repository/`.
-
-Deploy and execute it with the optional desktop utilities:
-
-```bash
-weaver install --workspace "Weaver Example" --environment weaver
-weaver notebook push "examples/sales-estate/Sales example.ipynb" \
-  --workspace "Weaver Example"
-weaver notebook run "Sales example" \
-  --workspace "Weaver Example" \
-  --lakehouse Play_Weaver \
-  --environment weaver
-```
-
-The run attaches `Play_Weaver` as the default Lakehouse. Inside the notebook,
-the public call has no workspace argument at all:
-
-```python
 result = weaver.build(
     repository,
     bind=[
-        "Lakehouse/Play_LH=Lakehouse/Sales",
-        "Warehouse/Play_WH=Warehouse/Reporting",
+        "Lakehouse/Sales=Lakehouse/Sales",
+        "Warehouse/Reporting=Warehouse/Reporting",
     ],
 )
+
 assert result.succeeded
 ```
 
-## Loading it
+Inside Fabric, Weaver automatically discovers:
 
-Build creates structure; load puts rows in it. Each primitive runs on its own,
-with no orchestrator:
+-   the current workspace
+-   the attached Weaver control Lakehouse
 
-```python
-Sales__OrderExport(spark).load()
-Sales__Customer(spark).load()
+No workspace configuration file is required.
+
+Notebook mode is intended for:
+
+-   interactive development
+-   demonstrations
+-   building directly inside Fabric
+
+------------------------------------------------------------------------
+
+# Desktop mode
+
+Exactly the same repository can be built from a desktop checkout.
+
+The CLI simply points at the exported notebook resources.
+
+``` text
+examples/
+└── Weaver Example/
+    ├── weaver_example.yml
+    └── workspace/
+        └── Sales-Estate.Notebook/
+            └── Resources/
+                └── builtin/
+                    └── repository/
 ```
 
-```python
-run_load_program(spark, installed_sql, fault_tolerant=False)
+The destination workspace is described by:
+
+``` text
+weaver_example.yml
 ```
 
-```sql
-exec [_].[Load Reporting.CustomerRevenue] @fault_tolerant = 0;
+Example:
+
+``` bash
+weaver build \
+  "examples/Weaver Example/workspace/Sales-Estate.Notebook/Resources/builtin/repository" \
+  --workspace-config examples/Weaver\ Example/weaver_example.yml
 ```
 
-Every one returns the same `LoadResult`: whether it succeeded, and how many rows
-were read, inserted, updated, deleted and rejected.
+Desktop mode parses the repository locally, computes the build plan,
+uploads the build bundle, and executes it in Fabric.
+
+The resulting Fabric estate is identical to Notebook mode.
+
+------------------------------------------------------------------------
+
+# Why two modes?
+
+Notebook mode is convenient when authoring directly inside Fabric.
+
+Desktop mode is convenient when using local editors, Git workflows,
+CI/CD, or AI coding agents.
+
+The important architectural idea is that the **repository is portable**.
+
+The repository is authored once.
+
+It can be executed from a Fabric notebook or from the desktop CLI
+without modification.
