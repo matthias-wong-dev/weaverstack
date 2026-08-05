@@ -20,13 +20,11 @@
 
 # CELL ********************
 
-from pathlib import Path
-
 import weaver
 
-repository = Path.cwd() / "repository"
+from pathlib import Path
 
-print(f"Repository: {repository}")
+repository = Path("builtin") / "repository"
 
 # METADATA ********************
 
@@ -67,8 +65,18 @@ for report in wipe_result.reports:
 
 # CELL ********************
 
+from weaver.workspaces import FabricWorkspace
+
+
+workspace = FabricWorkspace(
+    workspace="Weaver Example",
+    weaver_lakehouse="Weaver",
+    environment="weaver",
+)
+
 build_result = weaver.build(
     repository,
+    workspace=workspace,    ## TODO this should just take weaver_lakehouse='Weaver'
     bind=[
         "Lakehouse/Sales=Lakehouse/Sales",
         "Warehouse/Reporting=Warehouse/Reporting",
@@ -86,6 +94,16 @@ print(f"Build succeeded: {build_result.bundle_id}")
 
 for item in build_result.items:
     print(f"Built: {item}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 
 # METADATA ********************
 
