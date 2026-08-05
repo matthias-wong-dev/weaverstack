@@ -71,7 +71,6 @@ from weaver.workspaces import FabricWorkspace
 workspace = FabricWorkspace(
     workspace="Weaver Example",
     weaver_lakehouse="Weaver",
-    environment="weaver",
 )
 
 build_result = weaver.build(
