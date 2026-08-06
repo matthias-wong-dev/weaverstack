@@ -140,24 +140,46 @@ def build(
     *,
     bind: str | Sequence[str] | None = None,
     workspace: str | Path | Workspace | None = None,
+    weaver_lakehouse: str | None = None,
     workspace_config: str | Path | None = None,
     bundle: str | None = None,
 ) -> BuildResult:
     """Build an authored repository using simple notebook-facing values.
 
-    ``workspace=None`` means the current Fabric session.  A typed ``Workspace``
+    Every value resolves the same way: an explicit argument first, then an
+    already-resolved typed ``Workspace``, then workspace configuration, then —
+    inside a Fabric notebook only — the session's own context. What is still
+    unresolved after that is an error, stated as one sentence rather than left
+    to fail later as a Fabric, Py4J or Spark traceback.
+
+    ``workspace=None`` means the current Fabric session. A typed ``Workspace``
     remains accepted as an advanced/testing seam and is what the CLI supplies
-    after applying its explicit ``--workspace-type`` flags.
+    after applying its explicit ``--workspace-type`` flags; it arrives already
+    resolved, so configuration is never layered over it.
+
+    ``weaver_lakehouse`` names the Weaver control Lakehouse. Inside a notebook
+    it defaults to the attached default Lakehouse — which is the control
+    Lakehouse only, and does not become an authored target unless a binding
+    says so.
     """
 
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config
     )
+    if weaver_lakehouse is not None:
+        # An explicit argument outranks a configured or already-resolved value,
+        # so a notebook can override what it inferred without rebuilding the
+        # Workspace it inferred it into.
+        resolved_workspace = replace(
+            resolved_workspace,
+            weaver_lakehouse=ItemRef.parse(str(weaver_lakehouse)).name,
+        )
     resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
     if not resolved_workspace.weaver_lakehouse:
         raise CommandError(
-            "build needs a Weaver control Lakehouse in workspace configuration "
-            "or as the notebook's attached default Lakehouse"
+            "build needs a Weaver control Lakehouse: pass weaver_lakehouse=, "
+            "give one in workspace configuration, or run inside a Fabric "
+            "notebook with one attached as the default Lakehouse"
         )
 
     selected = _item_bindings(bind, resolved_workspace)
@@ -496,8 +518,18 @@ def _build_desktop_fabric(
     )
     from .catalogue.state import reconcile_catalogue_state
     from .fabric import LivySession, OneLakeDfsClient
+    from .fabric.preflight import preflight_fabric_targets
     from .resolution import resolver_for
 
+    # Above the session, deliberately. Every item this build needs is proved to
+    # exist from one workspace listing, so a missing target costs a REST call
+    # rather than a Livy session and a Spark traceback about a catalogue.
+    preflight_fabric_targets(
+        bindings,
+        workspace=workspace.workspace,
+        weaver_lakehouse=workspace.weaver_lakehouse,
+        environment=workspace.environment,
+    )
     resolver = resolver_for(workspace)
     transport_store = OneLakeDfsClient()
     binding_texts = [_binding_text(binding) for binding in bindings.entries]
