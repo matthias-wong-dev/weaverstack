@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     ItemBinding,
@@ -276,7 +276,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     assert existing not in selection.selected_for_build
     assert new in selection.selected_for_build
 
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         repository,
         bindings=_raw_binding(),
@@ -386,7 +386,7 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
         repository,
         bindings=_alias_bindings(),
         output=Location(str(tmp_path / name)),
-        store=LocalStore(),
+        store=FilesystemStore(),
         target_inventories=_alias_inventories(
             repository, alias_installed=alias_installed
         ),
@@ -661,7 +661,7 @@ def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
 
 def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = _alias_bundle(tmp_path, repository, rows={})
     registry = next(
         action
@@ -678,7 +678,7 @@ def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
 
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
     repository = _repository(_estate(tmp_path))
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         repository,
         bindings=_raw_binding(),
@@ -716,7 +716,7 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         repository,
         bindings=_raw_binding(),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         target_inventories=_raw_inventory(repository),
         catalogue=_catalogue(
             repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
@@ -770,7 +770,7 @@ select 1 as Id
 """,
     )
     desired = _repository(root)
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         desired,
         bindings=_raw_binding(),
@@ -818,7 +818,7 @@ def test_registered_document_removed_from_repository_is_uncertified_before_prune
         folders=inventory.folders + ("Sales.Retired",),
     )
 
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         desired,
         bindings=_raw_binding(),

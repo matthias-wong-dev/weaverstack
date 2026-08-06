@@ -27,7 +27,7 @@ import pytest
 from weaver.targets import ItemRef
 from weaver.workspaces import LocalWorkspace
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.build_bundle import (
     InstallationEnvironment,
     ItemBinding,
@@ -57,7 +57,7 @@ def estate(tmp_path, spark):
     """A Weaver Lakehouse and two destinations, all reachable from one session."""
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER)
-    store, resolver = LocalStore(), LocalResolver(workspace)
+    store, resolver = FilesystemStore(), LocalResolver(workspace)
     for name in (WEAVER, FIRST, SECOND):
         store.make_directory(resolver.files_root(ItemRef(name)))
         store.make_directory(resolver.tables_root(ItemRef(name)))

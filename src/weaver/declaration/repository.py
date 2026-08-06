@@ -35,7 +35,7 @@ import yaml
 
 from ..errors import DiscoveryError, IdentityError, MetadataError
 from ..locations import Location
-from ..store import LocalStore, Store
+from ..store import FilesystemStore, Store
 from .graph import Graph
 from .metadata import (
     DELTA_TARGET,
@@ -92,7 +92,7 @@ def parse_item_repository(
 ) -> WeaverRepository:
     """Read the workspace declaration without executing authored code."""
 
-    store = store or LocalStore()
+    store = store or FilesystemStore()
     if not store.exists(root):
         raise DiscoveryError(f"repository root does not exist: {root}")
     if not store.is_directory(root):

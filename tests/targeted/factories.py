@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Mapping
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     BuildAction,
@@ -896,7 +896,7 @@ def build_action(
 def single_action_bundle(
     location: Location,
     *,
-    store: LocalStore,
+    store: FilesystemStore,
     action: BuildAction,
     payload: bytes | None = None,
     target: BoundTarget | None = None,

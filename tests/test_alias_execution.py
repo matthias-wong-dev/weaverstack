@@ -13,7 +13,7 @@ from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, Build
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 from weaver.workspaces import LocalWorkspace
 
@@ -64,7 +64,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
         spark=None,
         resolver=resolver
         or LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")),
-        store=store or LocalStore(),
+        store=store or FilesystemStore(),
         target=destination,
         targets={DESTINATION_TARGET_ID: destination, SOURCE_TARGET_ID: source},
     )
@@ -74,7 +74,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
 
 
 def test_a_local_alias_links_the_destination_to_the_source_table(tmp_path):
-    store = LocalStore()
+    store = FilesystemStore()
     context = _local_context(tmp_path, store=store)
     produced = context.resolver.tables_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
     store.make_directory(produced)
@@ -92,7 +92,7 @@ def test_a_local_alias_links_the_destination_to_the_source_table(tmp_path):
 def test_a_local_alias_replaces_one_that_is_already_there(tmp_path):
     """An alias holds no data, so re-running a build re-points it rather than failing."""
 
-    store = LocalStore()
+    store = FilesystemStore()
     context = _local_context(tmp_path, store=store)
     tables = context.resolver.tables_root
     for name in ("Customer", "Other"):
@@ -115,7 +115,7 @@ def test_a_local_alias_over_a_missing_source_fails_rather_than_dangling(tmp_path
 
 
 def test_a_files_alias_links_into_the_destination_files_area(tmp_path):
-    store = LocalStore()
+    store = FilesystemStore()
     context = _local_context(tmp_path, store=store)
     produced = context.resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Export"
     store.make_directory(produced)
@@ -231,7 +231,7 @@ def _addressable_context(tmp_path, spark, resolver):
     return InstallationContext(
         spark=spark,
         resolver=resolver,
-        store=LocalStore(),
+        store=FilesystemStore(),
         target=destination,
         targets={DESTINATION_TARGET_ID: destination, SOURCE_TARGET_ID: source},
     )
@@ -280,7 +280,7 @@ def test_a_files_alias_needs_no_readability_wait(tmp_path, monkeypatch):
     assert "addressable_after_seconds" not in details
 
 
-class _NoTransportStore(LocalStore):
+class _NoTransportStore(FilesystemStore):
     """A store with no link operation, as a OneLake DFS client has none."""
 
     link = None
@@ -344,7 +344,7 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
     context = InstallationContext(
         spark=None,
         resolver=None,
-        store=LocalStore(),
+        store=FilesystemStore(),
         target=_target(DESTINATION_TARGET_ID, "Reporting_WH"),
         sql=sql,
     )

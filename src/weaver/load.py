@@ -442,11 +442,11 @@ def _load_session(workspace: Workspace, requested) -> LoadSession:
 
     if isinstance(workspace, LocalWorkspace):
         from .spark import local_delta_session
-        from .store import LocalStore
+        from .store import FilesystemStore
 
         session = local_delta_session(workspace)
         spark = session.__enter__()
-        opened = LoadSession(workspace, requested, spark=spark, store=LocalStore())
+        opened = LoadSession(workspace, requested, spark=spark, store=FilesystemStore())
         opened._opened.append(_Closing(lambda: session.__exit__(None, None, None)))
         return opened
     if not _inside_fabric_session(workspace):

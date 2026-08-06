@@ -309,12 +309,12 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
     """A real store and resolver, because placement is the claim being made."""
 
     from weaver.resolution import LocalResolver
-    from weaver.store import LocalStore
+    from weaver.store import FilesystemStore
     from weaver.workspaces import LocalWorkspace
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
     return installation_context(
-        store=LocalStore(),
+        store=FilesystemStore(),
         resolver=LocalResolver(workspace),
         target=resolved_target(),
         spark=_TableSpark(tuple(columns) + AUDIT),

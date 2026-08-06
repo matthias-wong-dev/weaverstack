@@ -45,7 +45,7 @@ from .declaration.model import WeaverItemId
 from .errors import CommandError
 from .locations import Location
 from .resolution import resolver_for
-from .store import LocalStore, Store
+from .store import FilesystemStore, Store
 from .targets import ItemRef
 from .workspaces import FabricWorkspace, LocalWorkspace
 
@@ -103,9 +103,9 @@ def prepare_weaver_lakehouse(
         raise CommandError("initialise requires a configured Weaver Lakehouse")
     name = workspace.weaver_lakehouse
     if isinstance(workspace, LocalWorkspace):
-        from .store import LocalStore
+        from .store import FilesystemStore
 
-        store = store or LocalStore()
+        store = store or FilesystemStore()
         resolver = resolver_for(workspace)
         existed = store.exists(resolver.weaver_lakehouse)
         if existed and not exists_ok:
@@ -174,7 +174,7 @@ def initialise_weaver_lakehouse(
         store=store, resolver=resolver, spark=spark, workspace=workspace
     )
     with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
-        local_store = LocalStore()
+        local_store = FilesystemStore()
         repository_root = Path(temporary) / "repository"
         repository_root.mkdir()
         repository = parse_item_repository(

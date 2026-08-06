@@ -66,7 +66,7 @@ from factories import (
 )
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.catalogue.state import Catalogue
@@ -131,7 +131,7 @@ def build(repository, tmp_path):
         repository,
         bindings=bindings,
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         target_inventories={
             item_id(ITEM): FixtureInventory.from_repository(
                 repository,
@@ -272,7 +272,7 @@ def converged(repository, tmp_path, *, inventories, catalogue):
             (ITEM, LAKEHOUSE_TARGET_NAME), (WAREHOUSE_ITEM, WAREHOUSE_TARGET_NAME)
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         target_inventories=inventories,
         catalogue=reconciled.catalogue,
         stale_claims=reconciled.stale_claims,

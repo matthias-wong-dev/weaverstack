@@ -278,10 +278,10 @@ def store_for(workspace):
     """
 
     from .workspaces import FabricWorkspace, LocalWorkspace
-    from .store import LocalStore
+    from .store import FilesystemStore
 
     if isinstance(workspace, LocalWorkspace):
-        return LocalStore()
+        return FilesystemStore()
     if isinstance(workspace, FabricWorkspace):
         from .fabric.store import FabricStore
 

@@ -16,7 +16,7 @@ from typing import Iterable, Mapping, Sequence
 
 from .errors import BuildError, CommandError, WeaverError
 from .locations import Location
-from .store import LocalStore, Store
+from .store import FilesystemStore, Store
 from .targets import (
     ItemRef,
     WarehouseTarget,
@@ -351,7 +351,7 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
         from .fabric.store import FabricStore
 
         return location, FabricStore()
-    return location, LocalStore()
+    return location, FilesystemStore()
 
 
 def _item_bindings(bind, workspace: Workspace):
@@ -483,7 +483,7 @@ def _build_local(workspace, **kwargs) -> BuildResult:
 
     with local_delta_session(workspace) as session:
         return _build_in_process(
-            workspace, spark=session, store=LocalStore(), **kwargs
+            workspace, spark=session, store=FilesystemStore(), **kwargs
         )
 
 
@@ -577,8 +577,8 @@ def _build_desktop_fabric(
                     control_lakehouse=control_lakehouse,
                 )
                 local_archive = Location((root / "install.weaver.zip").as_posix())
-                persist_bundle_archive(bundle, local_archive, store=LocalStore())
-                archive_bytes = LocalStore().read(local_archive)
+                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
+                archive_bytes = FilesystemStore().read(local_archive)
                 transport_store.make_directory(resolver.cli_root)
                 transport_store.make_directory(execution)
                 transport_store.write(remote_archive, archive_bytes)
@@ -637,7 +637,7 @@ def _binding_text(binding) -> str:
 
 def _operation_store(workspace: Workspace) -> Store:
     if isinstance(workspace, LocalWorkspace):
-        return LocalStore()
+        return FilesystemStore()
     if _inside_fabric_session(workspace):
         from .fabric.store import FabricStore
 

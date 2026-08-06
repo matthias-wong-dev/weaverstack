@@ -88,7 +88,7 @@ So the storage picture has two parts, and they must not be conflated:
 
 | execution | environment configuration | store |
 |---|---|---|
-| local process | `LocalWorkspace` emulator | `LocalStore` |
+| local process | `LocalWorkspace` emulator | `FilesystemStore` |
 | Fabric session | `FabricWorkspace` | `FabricStore` over `notebookutils.fs` |
 
 *Cross-boundary access* — a local caller reaching into a workspace:
@@ -99,10 +99,17 @@ So the storage picture has two parts, and they must not be conflated:
 | Fabric integration tests | Fabric workspace | `OneLakeDfsClient` |
 
 `OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is **not** the Fabric equivalent of
-`LocalStore`. It is how the desktop crosses in, constructed explicitly by the
+`FilesystemStore`. It is how the desktop crosses in, constructed explicitly by the
 caller that crosses. Inside Fabric, `store_for(FabricWorkspace)` returns the
 session-native `FabricStore`; from a desktop that construction fails rather
 than silently substituting DFS.
+
+`FilesystemStore` is named for the transport it is, not for the workspace it
+usually serves: a build reads its repository through one whatever environment it
+runs in, because every incoming source tree is copied to a temporary filesystem
+snapshot before it is parsed. That copy is unconditional — see `_temp_copy` in
+`weaver.build_bundle.workflow`. A source already on this filesystem is copied
+too, so a build never reads a tree the caller can still edit underneath it.
 
 Above resolution and the store, nothing knows which environment it is using. An
 `if isinstance(workspace, …)` in core operation code means the abstraction is being

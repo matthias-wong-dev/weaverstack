@@ -16,7 +16,7 @@ from dataclasses import replace
 import pytest
 import yaml
 
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
@@ -156,7 +156,7 @@ def test_bundle_id_changes_when_a_payload_hash_changes():
 
 
 def test_write_then_load_returns_an_equal_plan(tmp_path):
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
     bundle = write_bundle(
         location,
@@ -174,7 +174,7 @@ def test_write_then_load_returns_an_equal_plan(tmp_path):
 
 
 def test_manifest_is_written_last(tmp_path, monkeypatch):
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
     written: list[str] = []
     real_write = store.write
@@ -192,7 +192,7 @@ def test_manifest_is_written_last(tmp_path, monkeypatch):
 
 
 def _write_valid(tmp_path):
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
     write_bundle(location, plan=_identified_plan(), payloads=_payloads(), store=store)
     return store, location
@@ -213,7 +213,7 @@ def test_load_rejects_a_missing_payload(tmp_path):
 
 
 def test_load_rejects_a_missing_manifest(tmp_path):
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "empty"))
     store.make_directory(location)
     with pytest.raises(BuildError, match="no bundle manifest"):
@@ -221,7 +221,7 @@ def test_load_rejects_a_missing_manifest(tmp_path):
 
 
 def test_load_rejects_an_unsupported_format_version(tmp_path):
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
     plan = replace(_identified_plan(), format_version=2)
     store.write(location.join("plan.yml"), plan_to_yaml(plan).encode("utf-8"))

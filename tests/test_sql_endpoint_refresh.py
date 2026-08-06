@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from weaver.workspaces import FabricWorkspace
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.sql_endpoint_refresh import (
@@ -35,7 +35,7 @@ def _context(resolver):
     return InstallationContext(
         spark=None,
         resolver=resolver,
-        store=LocalStore(),
+        store=FilesystemStore(),
         target=ResolvedTarget(bound=bound, lakehouse=ItemRef("Sales")),
     )
 
