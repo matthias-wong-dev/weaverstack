@@ -423,25 +423,39 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     to accommodate them would trade a real production guarantee for a fixture's
     convenience.
 
-    **A missing table is not automatically a fault, and not automatically fine.**
-    Three states have to be told apart, and the difference between them is what
-    else is there:
+    **A missing table is either the first run or damage, and what tells them
+    apart is whether anything else is there.**
 
-    *Bootstrap.* Nothing exists yet. The build that is about to run creates the
-    catalogue, so every table missing is the ordinary first-run state and reads
-    as an empty catalogue.
+    *Nothing at all.* Bootstrap. The build about to run creates the catalogue,
+    so every table missing is the ordinary first-run state and reads as an empty
+    catalogue.
 
-    *A dictionary table missing from a populated catalogue.* Ordinary too: the
-    built-in item declares every catalogue table on every build, so a dictionary
-    table that is not there is one the plan is about to create. Its rows are
-    empty, which is what an absent table honestly contains.
+    *Some tables missing, others present.* Damage, whichever tables they are,
+    and the build stops.
 
-    *Registry or Installation missing from a populated catalogue.* A fault, and
-    the one worth stopping for. Those two record what is certified and where it
-    is bound, and neither can be re-derived from the repository — a build that
-    read them as empty would conclude that nothing had ever been installed and
-    plan to build an entire estate again. Everything else being present is the
-    evidence that this is damage rather than a first run.
+    The tempting exception is a *dictionary* table, and it is wrong. The
+    built-in item does declare every catalogue table on every build, so the
+    physical table would indeed be recreated — but recreating the table is not
+    the same as restoring its contents, and only the contents make the catalogue
+    true. An ordinary build is scoped to the items it was pointed at:
+    :func:`retaining` and :func:`for_targets` narrow the desired catalogue to
+    the bound items, so the republication after the table is recreated carries
+    rows for *those* items and no others.
+
+    So on an estate holding ``Sales`` and ``Finance``, a build scoped to
+    ``Sales`` alone would recreate the table, write Sales' rows, and leave
+    Finance with none — while Finance's Registry and Installation rows survived,
+    still claiming objects the dictionaries no longer describe. Nothing later
+    would notice, because the next build sees a table that exists and rows that
+    match whatever it was scoped to.
+
+    Registry and Installation carry the same property for a different reason:
+    they hold build-time facts — what was certified, which target it was bound
+    to — that no repository can re-derive at all.
+
+    Repairing a partial catalogue therefore needs authority over every
+    installation, which an ordinary build does not have and should not acquire.
+    That is a separate explicit path; this one refuses.
     """
 
     present: set[str] = set()
@@ -478,18 +492,18 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             "catalogue schema is incompatible; missing required column(s): "
             + ", ".join(incompatible)
         )
-    unrecoverable = sorted(
-        name for name in (REGISTRY.name, INSTALLATION.name) if name in missing
-    )
-    if present and unrecoverable:
+    if present and missing:
         raise BuildError(
             "catalogue is incomplete: "
-            + ", ".join(unrecoverable)
+            + ", ".join(sorted(missing))
             + " missing while "
             + ", ".join(sorted(present))
-            + " remain. Registry and Installation record what is certified and "
-            "where it is bound, and neither can be re-derived from the "
-            "repository; restore them rather than rebuilding over them."
+            + " remain. An ordinary build is scoped to the items it was pointed "
+            "at, so it can only republish those; rows belonging to other "
+            "installed items would be lost when the table was recreated, while "
+            "their Registry and Installation rows survived to claim them. "
+            "Restoring a partial catalogue needs a repair with authority over "
+            "every installation, not a scoped build."
         )
 
     wanted = tuple(items)
