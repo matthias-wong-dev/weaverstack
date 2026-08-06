@@ -373,26 +373,6 @@ def _item_bindings(bind, workspace: Workspace):
     )
 
 
-def _ensure_control_plane(workspace: Workspace, *, store: Store, spark) -> None:
-    from .initialise import initialise_weaver_lakehouse, prepare_weaver_lakehouse
-
-    resolver = None
-    client = None
-    if isinstance(workspace, FabricWorkspace) and _inside_fabric_session(workspace):
-        from .resolution import resolver_for
-
-        resolver = resolver_for(workspace)
-        factory = getattr(resolver, "_rest_client", None)
-        client = factory() if callable(factory) else None
-    prepare_weaver_lakehouse(workspace, exists_ok=True, store=store, client=client)
-    initialise_weaver_lakehouse(
-        weaver_lakehouse=ItemRef(workspace.weaver_lakehouse),
-        workspace=workspace,
-        store=store,
-        spark=spark,
-    )
-
-
 def _archive_location(resolver, bundle_name: str | None):
     if bundle_name is None:
         return None
@@ -443,7 +423,6 @@ def _build_in_process(
     from .catalogue.state import reconcile_catalogue_state
     from .resolution import resolver_for
 
-    _ensure_control_plane(workspace, store=store, spark=spark)
     resolver = resolver_for(workspace)
     environment = InstallationEnvironment(
         store=store, resolver=resolver, spark=spark, workspace=workspace
@@ -517,10 +496,8 @@ def _build_desktop_fabric(
     )
     from .catalogue.state import reconcile_catalogue_state
     from .fabric import LivySession, OneLakeDfsClient
-    from .initialise import prepare_weaver_lakehouse
     from .resolution import resolver_for
 
-    prepare_weaver_lakehouse(workspace, exists_ok=True)
     resolver = resolver_for(workspace)
     transport_store = OneLakeDfsClient()
     binding_texts = [_binding_text(binding) for binding in bindings.entries]
@@ -537,14 +514,10 @@ def _build_desktop_fabric(
         "from weaver.declaration.model import WeaverItemId\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBindings, "
         "parse_item_binding, read_build_state)\n"
-        "from weaver.initialise import initialise_weaver_lakehouse\n"
-        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"workspace = {workspace_literal}\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"
-        "initialise_weaver_lakehouse(weaver_lakehouse=ItemRef("
-        "workspace.weaver_lakehouse), workspace=workspace, store=store, spark=spark)\n"
         f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
         "environment = InstallationEnvironment("
         "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"

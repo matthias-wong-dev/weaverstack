@@ -1,11 +1,14 @@
-"""Bootstrapping the Weaver Lakehouse — Weaver installing its own control plane.
+"""Preparing a Weaver Lakehouse, and the compatibility wrapper that fills one.
 
-Initialisation composes the package-owned catalogue item into the parsed
-repository in memory and builds it through the *ordinary* planner and installer. There is
-deliberately no second "create the control tables" path: if the catalogue needed
-privileged machinery to exist, the claim that a catalogue table is an ordinary
-Weaver object would be false, and every later assumption resting on that claim
-would be resting on nothing.
+There is deliberately no second "create the control tables" path. If the
+catalogue needed privileged machinery to exist, the claim that a catalogue table
+is an ordinary Weaver object would be false, and every later assumption resting
+on that claim would be resting on nothing.
+
+So the catalogue is built the way everything else is: the package-owned
+``Lakehouse/_weaver`` item is composed into every parsed repository and bound to
+the configured Weaver Lakehouse, and *ordinary build* creates the catalogue
+tables through ordinary planned actions. Nothing here runs before a build.
 
 The bootstrap looks circular and is not. One bundle does the whole of it, because
 the barriers already order it correctly:
@@ -17,13 +20,18 @@ the barriers already order it correctly:
     certify them in Registry last
 
 The catalogue's own DML runs after the tables it writes to exist, so no special
-first-run mode is needed and generation reads nothing — the statements are
-rendered from the projection and are correct against an absent catalogue as much
-as a populated one.
+first-run mode is needed.
 
 The built-in ``_weaver`` item's inventory is scoped to the reserved ``_`` schema,
 so the ordinary authoritative prune cannot touch application schemas that happen
 to share the control Lakehouse.
+
+**What is left here is environment setup, not build.** A Fabric Lakehouse is a
+workspace item, and creating one is provisioning rather than building — so
+:func:`prepare_weaver_lakehouse` is called by an operator or a test harness, and
+a build against a missing Weaver Lakehouse fails preflight instead of quietly
+provisioning one. In the local emulator the same function makes the directory
+skeleton that stands in for the Fabric item.
 """
 
 from __future__ import annotations
@@ -34,13 +42,11 @@ import tempfile
 from typing import Any
 
 from .build_bundle.models import BuildPlan
-from .build_bundle.installer import InstallationEnvironment, install_bundle
-from .build_bundle.planner import generate_item_build_bundle
+from .build_bundle.installer import InstallationEnvironment
 from .build_bundle.report import InstallationReport
 from .build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
-from .build_bundle.workflow import read_reconciled_catalogue, read_target_inventories
+from .build_bundle.workflow import build_item_repository_source
 from .catalogue.tables import CATALOGUE_TABLES
-from .declaration import parse_item_repository
 from .declaration.model import WeaverItemId
 from .errors import CommandError
 from .locations import Location
@@ -48,10 +54,6 @@ from .resolution import resolver_for
 from .store import FilesystemStore, Store
 from .targets import ItemRef
 from .workspaces import FabricWorkspace, LocalWorkspace
-
-#: The driver-local bundle directory used while initialisation runs. A fixed
-#: name is enough because the containing temporary directory is per invocation.
-INITIALISE_BUNDLE_NAME = "weaver-initialise"
 
 
 @dataclass(frozen=True)
@@ -150,17 +152,23 @@ def initialise_weaver_lakehouse(
     spark: Any = None,
     output: Location | None = None,
 ) -> InitialiseResult:
-    """Install Weaver's catalogue into the Weaver Lakehouse, through the normal build.
+    """Build the built-in Weaver item alone, through the ordinary build path.
 
-    Idempotent to re-run in *shape*: the same package produces the same bundle, and
-    the catalogue's own reconciliation is a no-op when nothing changed.
+    A compatibility wrapper and nothing more. It owns no catalogue DDL, no
+    catalogue publication and no control-plane preparation: it selects no
+    authored item, and the built-in ``Lakehouse/_weaver`` that every build
+    injects is therefore the whole of what it builds.
 
-    An unchanged incremental plan emits no physical table work, so re-running
-    initialisation preserves existing catalogue rows while its catalogue tail
-    reconciles the built-in item.
+    Ordinary builds do not call this. They inject the same item and bind it the
+    same way, so calling it first would build the catalogue twice — see
+    :mod:`weaver.operations`, which used to.
+
+    An empty source directory is the input because the built-in item is composed
+    into a *parsed* repository rather than authored into one: there is nothing
+    for a caller to supply, and supplying a real repository here would silently
+    ignore it.
     """
 
-    resolver = resolver_for(workspace)
     control = LakehouseBinding(lakehouse=weaver_lakehouse)
     bindings = ItemBindings(
         (
@@ -171,39 +179,26 @@ def initialise_weaver_lakehouse(
         )
     )
     environment = InstallationEnvironment(
-        store=store, resolver=resolver, spark=spark, workspace=workspace
+        store=store,
+        resolver=resolver_for(workspace),
+        spark=spark,
+        workspace=workspace,
     )
     with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
-        local_store = FilesystemStore()
         repository_root = Path(temporary) / "repository"
         repository_root.mkdir()
-        repository = parse_item_repository(
-            Location(repository_root.as_posix()), store=local_store
-        )
-        inventories = read_target_inventories(bindings, environment=environment)
-        reconciled = read_reconciled_catalogue(
-            bindings,
-            inventories=inventories,
-            environment=environment,
-            repository=repository,
-        )
-        bundle = generate_item_build_bundle(
-            repository,
+        result = build_item_repository_source(
+            Location(repository_root.as_posix()),
+            source_store=FilesystemStore(),
             bindings=bindings,
-            output=output
-            or Location((Path(temporary) / INITIALISE_BUNDLE_NAME).as_posix()),
-            store=local_store,
+            environment=environment,
             control_lakehouse=control,
-            target_inventories=inventories,
-            catalogue=reconciled.catalogue,
-            stale_claims=reconciled.stale_claims,
+            output=output,
         )
-
-        report = install_bundle(bundle, environment=environment)
 
     return InitialiseResult(
         item="Lakehouse/_weaver",
         weaver_lakehouse=weaver_lakehouse.name,
-        plan=bundle.plan,
-        report=report,
+        plan=result.plan,
+        report=result.report,
     )

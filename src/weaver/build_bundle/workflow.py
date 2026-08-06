@@ -369,11 +369,16 @@ def build_item_repository(
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
+    output: Location | None = None,
 ) -> ItemBuildResult:
     """Generate and install from already parsed source and already read state.
 
     This is the planner/executor seam.  It deliberately cannot materialise or
     parse authored files, inspect a Workspace, or discover target state.
+
+    ``output`` places the generated bundle tree somewhere durable instead of the
+    temporary directory this otherwise uses. Only a caller that wants the bundle
+    afterwards passes it; the build itself does not care where it sat.
     """
 
     validate_build_request(
@@ -384,7 +389,7 @@ def build_item_repository(
         bundle = generate_item_build_bundle(
             repository,
             bindings=bindings,
-            output=Location((Path(temporary) / "bundle").as_posix()),
+            output=output or Location((Path(temporary) / "bundle").as_posix()),
             store=source_store,
             target_inventories=target_inventories,
             catalogue=reconciliation.catalogue,
@@ -441,6 +446,7 @@ def build_item_repository_source(
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
+    output: Location | None = None,
     sql_by_item=None,
 ) -> ItemBuildResult:
     """Prepare an explicit source independently from the target, then build it."""
@@ -469,6 +475,7 @@ def build_item_repository_source(
             control_lakehouse=control_lakehouse,
             archive=archive,
             archive_store=archive_store,
+            output=output,
         )
 
 
