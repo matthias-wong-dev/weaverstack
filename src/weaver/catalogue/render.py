@@ -132,6 +132,23 @@ class InstallationScopes:
         return self.predicate_for()
 
     def predicate_for(self, qualifier: str = "") -> str:
+        """The scopes as one predicate, safe to compose with ``AND``.
+
+        The outer parentheses are not decoration and removing them is a
+        data-loss bug rather than a style change. ``AND`` binds tighter than
+        ``OR``, so a bare ``(a AND b) OR (c AND d)`` embedded in
+
+        .. code-block:: text
+
+            WHERE <scopes> AND NOT (<keep>)
+
+        reassociates to ``(a AND b) OR ((c AND d) AND NOT (<keep>))`` — the
+        first scope's rows are then deleted unconditionally, keep-list and all.
+        The same reassociation in a ``MERGE`` ``ON`` clause makes every source
+        row match every target row in the later scopes. Both are silent until
+        a second installation exists.
+        """
+
         if not self.scopes:
             raise BuildError(
                 "an installation-scope predicate over no scopes would address "
@@ -139,9 +156,10 @@ class InstallationScopes:
             )
         if len(self.scopes) == 1:
             return self.scopes[0].predicate_for(qualifier)
-        return " OR ".join(
+        disjunction = " OR ".join(
             f"({scope.predicate_for(qualifier)})" for scope in self.scopes
         )
+        return f"({disjunction})"
 
     def owns(self, row: Row) -> bool:
         return any(scope.owns(row) for scope in self.scopes)
@@ -231,7 +249,10 @@ def sorted_rows(table: CatalogueTable, rows: Iterable[Row]) -> tuple[Row, ...]:
 
 
 def render_merge(
-    table: CatalogueTable, rows: Sequence[Row], *, scope: InstallationScope
+    table: CatalogueTable,
+    rows: Sequence[Row],
+    *,
+    scope: InstallationScope | InstallationScopes,
 ) -> str | None:
     """A scoped ``MERGE`` that inserts new rows and updates changed ones.
 
@@ -363,7 +384,10 @@ def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
 
 
 def render_delete_obsolete(
-    table: CatalogueTable, rows: Sequence[Row], *, scope: InstallationScope
+    table: CatalogueTable,
+    rows: Sequence[Row],
+    *,
+    scope: InstallationScope | InstallationScopes,
 ) -> str | None:
     """A scoped ``DELETE`` of everything in this installation the rows do not claim.
 
@@ -386,10 +410,18 @@ def render_delete_obsolete(
     if not rows:
         return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
-    # Only the key columns beyond the scope: the scope is already in the WHERE.
-    identity = tuple(name for name in table.key if name not in scope.columns)
-    if not identity:
+    beyond = tuple(name for name in table.key if name not in scope.columns)
+    if not beyond:
         return None
+
+    # Which key columns the kept rows are identified by, and the one place the
+    # aggregated form genuinely differs. Within *one* installation the scope is
+    # already in the WHERE, so the columns beyond it identify a row. Across
+    # several, they do not: two installations can hold the same `DWG.Customer`,
+    # and a keep-list naming only the object would spare one installation's row
+    # because another installation still claims that name. So the aggregated
+    # delete identifies rows by the whole key, scope columns included.
+    identity = table.key if isinstance(scope, InstallationScopes) else beyond
 
     keep = "\n           OR ".join(
         "("
@@ -449,7 +481,9 @@ def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
 
 
 def _check_scope(
-    table: CatalogueTable, rows: Iterable[Row], scope: InstallationScope
+    table: CatalogueTable,
+    rows: Iterable[Row],
+    scope: InstallationScope | InstallationScopes,
 ) -> None:
     """Refuse to render a statement over rows from another installation.
 

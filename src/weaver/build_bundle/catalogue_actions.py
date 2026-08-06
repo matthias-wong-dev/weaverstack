@@ -7,11 +7,15 @@ from collections import defaultdict
 from typing import Iterable, Mapping
 
 from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
-from ..catalogue.state import Catalogue, for_targets, retaining
-from ..catalogue.reconcile import reconcile
+from ..catalogue.reconcile import publish
 from ..catalogue.render import InstallationScope, identifier, literal
 from ..catalogue.state import Catalogue, for_targets, retaining
-from ..catalogue.tables import DICTIONARY_TABLES, REGISTRY, CatalogueTable
+from ..catalogue.tables import (
+    DICTIONARY_TABLES,
+    INSTALLATION,
+    REGISTRY,
+    CatalogueTable,
+)
 from ..declaration.model import WeaverDocumentId
 from ..spark.tokens import object_token
 from .models import (
@@ -164,6 +168,27 @@ def _item_signature(repository, item) -> str:
     )
 
 
+def _with_installation_rows(desired: Catalogue, installation) -> Catalogue:
+    """Put each item's binding facts into the desired catalogue.
+
+    A repository-derived catalogue cannot know them and must not invent them:
+    which physical target an item is bound to, and which Weaver published it, are
+    facts about *this build*, not about the source. They are folded in here so
+    the diff compares complete rows against complete rows.
+    """
+
+    from types import MappingProxyType
+
+    rows = {}
+    for item, tables in desired.rows.items():
+        merged = dict(tables)
+        binding = installation.get(item)
+        if binding is not None:
+            merged[INSTALLATION.name] = tuple(binding)
+        rows[item] = MappingProxyType(merged)
+    return Catalogue(rows=MappingProxyType(rows))
+
+
 def render_catalogue_after_build(
     repository,
     selected_ids: Iterable[WeaverDocumentId],
@@ -184,10 +209,6 @@ def render_catalogue_after_build(
 
     selected_ids = set(selected_ids)
 
-    # The publication is a diff: what the repository describes, against what is
-    # persisted. Only the desired side drives the statements — see
-    # `CatalogueChanges` — but routing production through the same call the
-    # reporting uses is what stops the two drifting apart.
     # Logical, then narrowed, then bound — in that order and visibly so. The
     # narrowing is what keeps a Registry row meaning "this succeeded"; the
     # binding is what lets an alias be certified as the thing it physically is.
@@ -211,20 +232,22 @@ def render_catalogue_after_build(
         )
         for item in target_by_item
     }
-    by_item = (current or Catalogue(rows={})).diff(desired).render_dml(
-        installation=binding_rows
-    )
+    desired = _with_installation_rows(desired, binding_rows)
 
-    catalogue_statements: list[str] = []
-    registry_statements: list[str] = []
-    for item in sorted(target_by_item, key=str):
-        result = by_item[item]
-        # Registry last, in its own barrier — taken from the structure rather
-        # than recovered from the SQL, so the ordering invariant is carried by
-        # the type instead of by a string match.
-        for table_plan in (*result.dictionaries, result.installation):
-            catalogue_statements.extend(table_plan.statements)
-        registry_statements.extend(result.registry.statements)
+    # The publication is a genuine diff against what is persisted: a table whose
+    # rows are all unchanged produces no statement, so an identical second build
+    # appends nothing here and the endpoint refresh below is not reached.
+    publication = publish(current or Catalogue(rows={}), desired)
+
+    # Registry last, in its own barrier — taken from the structure rather than
+    # recovered from the SQL, so the ordering invariant is carried by the type
+    # instead of by a string match.
+    catalogue_statements: list[str] = [
+        statement
+        for table_plan in (*publication.dictionaries, publication.installation)
+        for statement in table_plan.statements
+    ]
+    registry_statements: list[str] = list(publication.registry.statements)
 
     rendered = (
         _stage(

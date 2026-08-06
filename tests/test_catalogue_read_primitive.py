@@ -264,6 +264,54 @@ def test_several_scopes_render_as_a_disjunction_of_conjunctions():
     assert "'Sales'" in scopes.predicate and "'Reporting'" in scopes.predicate
 
 
+def test_a_multi_scope_predicate_is_parenthesised_so_it_survives_composition():
+    """`AND` binds tighter than `OR`, and every use of this composes with `AND`.
+
+    Unparenthesised, ``WHERE <scopes> AND NOT (<keep>)`` reassociates to
+    ``(a AND b) OR ((c AND d) AND NOT (<keep>))`` — the first scope's rows are
+    deleted regardless of the keep-list — and a ``MERGE`` ``ON`` clause matches
+    every source row to every target row in the later scopes. This cost a real
+    Delta failure to find, and it is invisible until a second installation
+    exists, so it is pinned here where it costs nothing to check.
+    """
+
+    scopes = InstallationScopes(
+        (
+            InstallationScope("Lakehouse", "Sales"),
+            InstallationScope("Lakehouse", "Inventory"),
+        )
+    )
+
+    rendered = scopes.predicate
+
+    assert rendered.startswith("(") and rendered.endswith(")")
+    # The whole disjunction is inside one group, not merely each conjunct.
+    depth = 0
+    for character in rendered[:-1]:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        assert depth > 0, "the outer group closes before the predicate ends"
+
+
+def test_composing_a_multi_scope_predicate_with_and_keeps_every_scope_guarded():
+    """The composition itself, rather than its punctuation."""
+
+    scopes = InstallationScopes(
+        (
+            InstallationScope("Lakehouse", "Sales"),
+            InstallationScope("Lakehouse", "Inventory"),
+        )
+    )
+
+    composed = f"WHERE {scopes.predicate} AND NOT (`object_name` = 'X')"
+
+    # Every scope must sit inside the group that the trailing AND applies to.
+    guarded = composed[composed.index("(") : composed.rindex(") AND NOT")]
+    assert "'Sales'" in guarded and "'Inventory'" in guarded
+
+
 def test_a_repeated_scope_is_addressed_once():
     scopes = InstallationScopes(
         (

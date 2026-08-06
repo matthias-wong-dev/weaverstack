@@ -60,7 +60,15 @@ def statements(stage) -> list[str]:
     ]
 
 
-def after(repository, *names):
+def after(repository, *names, current=None):
+    """Publication for one build.
+
+    ``current`` is what the catalogue already holds. It is the difference
+    against that state which decides what gets written, so a test asserting a
+    delete has to say what there was to delete — a build against a catalogue
+    holding nothing has nothing to remove, however little it certifies.
+    """
+
     item = item_id()
     target = bound_target()
     return render_catalogue_after_build(
@@ -68,6 +76,7 @@ def after(repository, *names):
         {document_id(name) for name in names},
         {item: target},
         control_target=target,
+        current=current,
     )
 
 
@@ -206,19 +215,25 @@ def test_publication_closes_with_a_control_endpoint_refresh(repository):
     assert stages[-1].slug == "refresh-control-endpoint"
 
 
-def test_a_build_certifying_nothing_still_removes_what_it_no_longer_claims(
+def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
     repository,
 ):
     """Not "nothing to publish, nothing to do" — the opposite.
 
-    Publication is delete-then-merge per table, and the delete keeps exactly the
-    keys this installation projects. Projecting none means the scope's rows are
-    all obsolete, so the build must say so. Skipping the stage would leave the
-    catalogue certifying an item that no longer declares anything, which is the
-    one state nothing else would ever correct.
+    Projecting no rows for a scope means everything persisted under it is
+    obsolete, so the build must say so. Skipping it would leave the catalogue
+    certifying an item that no longer declares anything, which is the one state
+    nothing else would ever correct.
     """
 
-    stages = after(repository)
+    held = FixtureCatalogue.holding(
+        Registry=[registry_row(CUSTOMER)],
+        TableDictionary=[registry_row(CUSTOMER)],
+        ColumnDictionary=[registry_row(CUSTOMER)],
+        Alias=[registry_row(CUSTOMER)],
+    )
+
+    stages = after(repository, current=held)
 
     assert stages, "an empty projection still has removals to publish"
     lines = statements(stages[0]) + statements(stages[1])
@@ -234,6 +249,23 @@ def test_a_build_certifying_nothing_still_removes_what_it_no_longer_claims(
     # nothing. Losing it would make the item look as though it had never been
     # bound at all.
     assert any(line.startswith("MERGE INTO") and "Installation" in line for line in lines)
+
+
+def test_a_build_certifying_nothing_against_an_empty_catalogue_removes_nothing(
+    repository,
+):
+    """The other side of it, and the whole point of the diff.
+
+    A delete is emitted because rows exist that the desired state no longer
+    claims — never merely because a table was considered. With nothing
+    persisted there is nothing to remove, and the build says nothing.
+    """
+
+    stages = after(repository)
+
+    lines = [line for stage in stages for line in statements(stage)]
+
+    assert not any(line.startswith("DELETE FROM") for line in lines)
 
 
 def test_every_published_statement_is_scoped_to_its_item(repository):
@@ -264,16 +296,63 @@ def test_the_publication_epoch_stays_a_token(repository):
     assert any("{{epoch}}" in line for line in lines)
 
 
-def test_publication_both_removes_and_merges(repository):
-    """Two statements per table: delete what this installation no longer claims,
-    then merge what it does.
+def test_a_mixed_change_removes_then_merges(repository):
+    """Delete first, merge second, when the table has both to do.
 
-    Neither depends on having read the catalogue — the delete keeps exactly the
-    keys the projection claims and the merge is idempotent — so the pair is
-    correct against any prior state, including one the planner could not see.
+    The order is not cosmetic: the merge re-asserts what the build certifies, so
+    a delete running after it could remove a row the build had just written.
     """
 
-    lines = statements(after(repository, CUSTOMER)[1])
+    held = FixtureCatalogue.holding(
+        Registry=[registry_row("DWG.Departed")],
+        TableDictionary=[registry_row("DWG.Departed")],
+    )
 
-    assert any(line.startswith("DELETE FROM") for line in lines)
-    assert any("MERGE" in line for line in lines)
+    lines = statements(after(repository, CUSTOMER, current=held)[0])
+
+    # Within one table. Tables are independent of each other, so one table's
+    # merge may well precede another's delete; what may never happen is a
+    # delete running after the merge that re-asserted the same table's rows.
+    dictionary = [index for index, line in enumerate(lines) if "TableDictionary" in line]
+    deletes = [index for index in dictionary if lines[index].startswith("DELETE FROM")]
+    merges = [index for index in dictionary if lines[index].startswith("MERGE INTO")]
+
+    assert deletes and merges
+    assert max(deletes) < min(merges)
+
+
+def test_an_unchanged_table_produces_no_statement_at_all(repository):
+    """The fixed point, at the level the statements are decided.
+
+    A table whose desired rows are exactly what is persisted needs neither a
+    delete nor a merge. Emitting an idempotent pair anyway would be correct and
+    would still make every build write the whole catalogue.
+    """
+
+    first = after(repository, CUSTOMER)
+    desired = _published_catalogue(repository, CUSTOMER)
+
+    again = after(repository, CUSTOMER, current=desired)
+
+    assert first, "the first build against an empty catalogue does publish"
+    assert not any(
+        line
+        for stage in again
+        for line in statements(stage)
+        if "TableDictionary" in line
+    )
+
+
+def _published_catalogue(repository, *names):
+    """The catalogue state a successful build of ``names`` would have left."""
+
+    from weaver.catalogue.state import Catalogue, for_targets, retaining
+
+    identities = {document_id(name) for name in names}
+    logical = Catalogue.from_repository(repository)
+    return for_targets(
+        retaining(logical, repository, identities),
+        repository,
+        identities,
+        {item_id(): bound_target().kind},
+    )

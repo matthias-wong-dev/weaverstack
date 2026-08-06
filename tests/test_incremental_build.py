@@ -228,6 +228,13 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
 
 def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path):
     root = _estate(tmp_path)
+    # The catalogue as the *previous* build left it — projected before today's
+    # edits, so it carries the old description and knows nothing of the folder
+    # authored below. Deriving it from the edited repository instead would make
+    # the persisted state already agree with the desired state, and a
+    # publication driven by their difference would correctly write nothing.
+    installed = _catalogue(_repository(root), "Lakehouse/Raw")
+
     existing_path = root / "Lakehouse/Raw/Sales__Customer.py"
     existing_path.write_text(
         existing_path.read_text().replace(
@@ -258,16 +265,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         for identity in repository.source_documents
         if str(identity.item) == "Lakehouse/Raw"
     }
-    catalogue = _catalogue(
-        repository, "Lakehouse/Raw", old=(("Sales", "Customer"),)
-    )
-    # The newly authored protected folder is not installed yet.
-    item = WeaverItemId.parse("Lakehouse/Raw")
-    tables = dict(catalogue.rows[item])
-    tables[REGISTRY.name] = tuple(
-        row for row in tables[REGISTRY.name] if row["object_name"] != "Protected"
-    )
-    catalogue = Catalogue({item: tables})
+    catalogue = installed
     selection = select_build(repository, catalogue.registered, selected=selected)
     existing = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
     new = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Protected")

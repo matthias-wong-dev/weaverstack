@@ -202,14 +202,23 @@ def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
     assert selection.impact.changed == ()
 
 
-def test_the_catalogue_tail_is_still_published(estate, tmp_path):
-    """The half that is *meant* to run, so "no work" cannot pass by planning
-    nothing at all.
+def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_path):
+    """"No work" must not be able to pass by planning nothing at all.
 
-    Publication is idempotent and unconditional by design — the statements are
-    correct against any prior state, including one the planner never read — so a
-    no-op build still writes them. A bundle with no actions whatever would
-    satisfy the test above for entirely the wrong reason.
+    The estate here is already correct, so no physical action is expected — but
+    a bundle with no actions *whatever* would satisfy the two tests above for
+    entirely the wrong reason. This pins what is left: everything the build still
+    does is catalogue work against the control plane, and nothing else has crept
+    in under the cover of a quiet plan.
+
+    Publication is a difference now, so what appears here depends on what the
+    persisted catalogue already holds. This fixture's state is the repository's
+    own projection — the whole logical catalogue, carrying no Installation row,
+    because a repository does not know which target it was bound to. So the
+    Installation row is genuinely new and the tail genuinely publishes it. A
+    build against a catalogue that has *everything*, Installation included,
+    publishes nothing at all; that is the fixed point, and it is proven in
+    `test_build_fixed_point_lifecycle`.
     """
 
     kinds = {
@@ -217,9 +226,10 @@ def test_the_catalogue_tail_is_still_published(estate, tmp_path):
         for _sequence, _batch, action in build(estate, tmp_path)[0].plan.actions()
     }
 
-    assert "publish_registry" in kinds
-    # The control Lakehouse's endpoint refresh rides with the publication, for
-    # the same reason: its catalogue tables were just written.
+    assert "publish_catalogue" in kinds, "the new Installation row is recorded"
+    # The control Lakehouse's endpoint refresh rides with the publication: its
+    # catalogue tables were just written, so its analytics endpoint has to
+    # catch up.
     assert kinds <= {
         "delete_catalogue_claims",
         "publish_catalogue",

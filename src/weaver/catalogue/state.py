@@ -206,9 +206,11 @@ class Catalogue:
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
 
-        Read it as: *persisted* `.diff(` *derived from source* `)`. The result
-        reports from both sides and renders statements from ``desired`` alone —
-        see :class:`CatalogueChanges` for why that asymmetry is deliberate.
+        Read it as: *persisted* `.diff(` *derived from source* `)`. This is the
+        **report** — what a reviewer sees before a bundle runs. The statements
+        come from :func:`weaver.catalogue.reconcile.publish`, which compares the
+        same two sides; the two are separate because a count is not a statement
+        and a reader should not have to infer one from the other.
         """
 
         return CatalogueChanges(current=self, desired=desired)
@@ -216,22 +218,15 @@ class Catalogue:
 
 @dataclass(frozen=True)
 class CatalogueChanges:
-    """How a persisted catalogue would move toward the one a repository describes.
+    """What moving a persisted catalogue to a desired one would change.
 
-    Carries both sides, and uses them for different things — which is the whole
-    of the design and the part worth not getting wrong.
+    Reporting only. How many rows are new, changed, unchanged and removed, per
+    item and per table, so a bundle can be reviewed before it is installed.
 
-    ``current`` informs *reporting*: how many rows are new, changed, unchanged
-    and removed, so a reviewer can see what a bundle will do before it runs.
-
-    ``desired`` alone drives the *statements*. The delete keeps exactly the keys
-    the desired catalogue claims and the merge is idempotent, so the pair is
-    correct against any prior state — including one the reader never saw. Deriving
-    the delete from the row-level difference instead would look equivalent and
-    would not be: a partial or scoped-wrong read returns fewer rows in
-    ``current``, so the diff would emit fewer deletes and obsolete claims would
-    survive indefinitely, with nothing to notice. As it stands a bad read costs a
-    misleading *report* and cannot corrupt the catalogue.
+    A row is *unchanged* when every non-key column matches, which is exactly the
+    condition publication tests before it emits anything — so a reported no-op
+    and a silent build are the same fact, arrived at the same way, rather than
+    two claims that happen to agree.
     """
 
     current: "Catalogue"
@@ -260,39 +255,6 @@ class CatalogueChanges:
             for changes in self.per_table().values()
             for change in changes
         )
-
-    def render_dml(self, *, installation=None):
-        """``{item: CatalogueReconciliation}`` making the catalogue match ``desired``.
-
-        A structured result rather than flat statements, and deliberately: the
-        caller needs the dictionaries, the Installation row and the Registry
-        separated, because Registry is written last in its own barrier so a row
-        certifying an object cannot outrun the work it attests to. Handing back
-        one list would leave the caller to recover that ordering by inspecting
-        the SQL, which is a guess dressed as a grouping.
-
-        ``installation`` supplies the binding facts per item — which target, which
-        Weaver — because a repository-derived catalogue does not know them and
-        must not invent them.
-        """
-
-        from .projection import CatalogueProjection
-        from .reconcile import reconcile
-
-        installation = dict(installation or {})
-        rendered = {}
-        for item, wanted in self.desired.rows.items():
-            rows = dict(wanted)
-            binding = installation.get(item)
-            if binding is not None:
-                rows[INSTALLATION.name] = tuple(binding)
-            projection = CatalogueProjection(
-                scope=InstallationScope(item.item_type, item.item_name),
-                rows=rows,
-            )
-            rendered[item] = reconcile(projection)
-        return rendered
-
 
 def retaining(catalogue: Catalogue, repository, identities) -> Catalogue:
     """Narrow a desired catalogue to what a build actually certified.
