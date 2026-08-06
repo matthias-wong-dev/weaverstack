@@ -29,7 +29,7 @@ from factories import (
 )
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE, TargetChange
@@ -72,7 +72,7 @@ def build(repository, tmp_path, *, inventories=None, catalogue=None):
         repository,
         bindings=estate_bindings(),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         target_inventories=inventories
         if inventories is not None
         else estate_inventories(repository, empty=True),

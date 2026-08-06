@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from weaver.store import Entry, LocalStore, Store
+from weaver.store import Entry, FilesystemStore, Store
 from weaver.locations import Location
 from weaver.errors import CommandError
 from weaver.store import StoreError
 
 
 @pytest.fixture
-def store() -> LocalStore:
-    return LocalStore()
+def store() -> FilesystemStore:
+    return FilesystemStore()
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def root(tmp_path: Path) -> Location:
 
 
 def test_the_local_store_satisfies_the_protocol():
-    assert isinstance(LocalStore(), Store)
+    assert isinstance(FilesystemStore(), Store)
 
 
 def test_write_creates_missing_parents(store, root):

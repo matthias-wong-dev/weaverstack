@@ -106,7 +106,7 @@ class OneLakeDfsClient:
     This is how a local caller — the CLI, or a Fabric integration test — reaches
     into a workspace: authenticated HTTPS to the OneLake DFS endpoint. It
     satisfies the :class:`~weaver.store.Store` protocol so the CLI can hand it to
-    the same code a ``LocalStore`` drives, but it is *cross-boundary access*, not
+    the same code a ``FilesystemStore`` drives, but it is *cross-boundary access*, not
     the store Weaver uses when it runs inside Fabric. The in-Fabric,
     session-native store is a separate implementation for when it exists.
 

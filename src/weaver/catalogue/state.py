@@ -17,8 +17,8 @@ from ..declaration.model import (
 from ..errors import BuildError
 from ..spark.tokens import object_token
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
-from .reader import _is_absent, read_installation, read_table
-from .render import InstallationScope
+from .reader import _is_absent, read_installations, read_table
+from .render import InstallationScope, InstallationScopes
 from .tables import (
     BUILD_EPOCH,
     CATALOGUE_TABLES,
@@ -206,9 +206,11 @@ class Catalogue:
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
 
-        Read it as: *persisted* `.diff(` *derived from source* `)`. The result
-        reports from both sides and renders statements from ``desired`` alone —
-        see :class:`CatalogueChanges` for why that asymmetry is deliberate.
+        Read it as: *persisted* `.diff(` *derived from source* `)`. This is the
+        **report** — what a reviewer sees before a bundle runs. The statements
+        come from :func:`weaver.catalogue.reconcile.publish`, which compares the
+        same two sides; the two are separate because a count is not a statement
+        and a reader should not have to infer one from the other.
         """
 
         return CatalogueChanges(current=self, desired=desired)
@@ -216,22 +218,15 @@ class Catalogue:
 
 @dataclass(frozen=True)
 class CatalogueChanges:
-    """How a persisted catalogue would move toward the one a repository describes.
+    """What moving a persisted catalogue to a desired one would change.
 
-    Carries both sides, and uses them for different things — which is the whole
-    of the design and the part worth not getting wrong.
+    Reporting only. How many rows are new, changed, unchanged and removed, per
+    item and per table, so a bundle can be reviewed before it is installed.
 
-    ``current`` informs *reporting*: how many rows are new, changed, unchanged
-    and removed, so a reviewer can see what a bundle will do before it runs.
-
-    ``desired`` alone drives the *statements*. The delete keeps exactly the keys
-    the desired catalogue claims and the merge is idempotent, so the pair is
-    correct against any prior state — including one the reader never saw. Deriving
-    the delete from the row-level difference instead would look equivalent and
-    would not be: a partial or scoped-wrong read returns fewer rows in
-    ``current``, so the diff would emit fewer deletes and obsolete claims would
-    survive indefinitely, with nothing to notice. As it stands a bad read costs a
-    misleading *report* and cannot corrupt the catalogue.
+    A row is *unchanged* when every non-key column matches, which is exactly the
+    condition publication tests before it emits anything — so a reported no-op
+    and a silent build are the same fact, arrived at the same way, rather than
+    two claims that happen to agree.
     """
 
     current: "Catalogue"
@@ -260,39 +255,6 @@ class CatalogueChanges:
             for changes in self.per_table().values()
             for change in changes
         )
-
-    def render_dml(self, *, installation=None):
-        """``{item: CatalogueReconciliation}`` making the catalogue match ``desired``.
-
-        A structured result rather than flat statements, and deliberately: the
-        caller needs the dictionaries, the Installation row and the Registry
-        separated, because Registry is written last in its own barrier so a row
-        certifying an object cannot outrun the work it attests to. Handing back
-        one list would leave the caller to recover that ordering by inspecting
-        the SQL, which is a guess dressed as a grouping.
-
-        ``installation`` supplies the binding facts per item — which target, which
-        Weaver — because a repository-derived catalogue does not know them and
-        must not invent them.
-        """
-
-        from .projection import CatalogueProjection
-        from .reconcile import reconcile
-
-        installation = dict(installation or {})
-        rendered = {}
-        for item, wanted in self.desired.rows.items():
-            rows = dict(wanted)
-            binding = installation.get(item)
-            if binding is not None:
-                rows[INSTALLATION.name] = tuple(binding)
-            projection = CatalogueProjection(
-                scope=InstallationScope(item.item_type, item.item_name),
-                rows=rows,
-            )
-            rendered[item] = reconcile(projection)
-        return rendered
-
 
 def retaining(catalogue: Catalogue, repository, identities) -> Catalogue:
     """Narrow a desired catalogue to what a build actually certified.
@@ -460,6 +422,40 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     wanting a Registry-only catalogue can construct one directly — weakening this
     to accommodate them would trade a real production guarantee for a fixture's
     convenience.
+
+    **A missing table is either the first run or damage, and what tells them
+    apart is whether anything else is there.**
+
+    *Nothing at all.* Bootstrap. The build about to run creates the catalogue,
+    so every table missing is the ordinary first-run state and reads as an empty
+    catalogue.
+
+    *Some tables missing, others present.* Damage, whichever tables they are,
+    and the build stops.
+
+    The tempting exception is a *dictionary* table, and it is wrong. The
+    built-in item does declare every catalogue table on every build, so the
+    physical table would indeed be recreated — but recreating the table is not
+    the same as restoring its contents, and only the contents make the catalogue
+    true. An ordinary build is scoped to the items it was pointed at:
+    :func:`retaining` and :func:`for_targets` narrow the desired catalogue to
+    the bound items, so the republication after the table is recreated carries
+    rows for *those* items and no others.
+
+    So on an estate holding ``Sales`` and ``Finance``, a build scoped to
+    ``Sales`` alone would recreate the table, write Sales' rows, and leave
+    Finance with none — while Finance's Registry and Installation rows survived,
+    still claiming objects the dictionaries no longer describe. Nothing later
+    would notice, because the next build sees a table that exists and rows that
+    match whatever it was scoped to.
+
+    Registry and Installation carry the same property for a different reason:
+    they hold build-time facts — what was certified, which target it was bound
+    to — that no repository can re-derive at all.
+
+    Repairing a partial catalogue therefore needs authority over every
+    installation, which an ordinary build does not have and should not acquire.
+    That is a separate explicit path; this one refuses.
     """
 
     present: set[str] = set()
@@ -496,14 +492,57 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             "catalogue schema is incompatible; missing required column(s): "
             + ", ".join(incompatible)
         )
+    if present and missing:
+        raise BuildError(
+            "catalogue is incomplete: "
+            + ", ".join(sorted(missing))
+            + " missing while "
+            + ", ".join(sorted(present))
+            + " remain. An ordinary build is scoped to the items it was pointed "
+            "at, so it can only republish those; rows belonging to other "
+            "installed items would be lost when the table was recreated, while "
+            "their Registry and Installation rows survived to claim them. "
+            "Restoring a partial catalogue needs a repair with authority over "
+            "every installation, not a scoped build."
+        )
+
+    wanted = tuple(items)
+    scopes = InstallationScopes(
+        tuple(InstallationScope(item.item_type, item.item_name) for item in wanted)
+    )
+    by_table = read_installations(catalogue, scopes=scopes)
+
+    # Seeded before grouping, and that is not tidiness. An item with no rows yet
+    # is an ordinary state — it has never been built — and it must still appear,
+    # because everything downstream iterates the catalogue's items to decide what
+    # to compare, reconcile and publish. An item that fell out here would look
+    # like an item the build was never pointed at.
+    grouped: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {
+        item: {table.name: [] for table in CATALOGUE_TABLES} for item in wanted
+    }
+    for table_name, table_rows in by_table.items():
+        for row in table_rows:
+            item = WeaverItemId(
+                str(row.get(SCOPE_ITEM_TYPE) or ""),
+                str(row.get(SCOPE_ITEM_NAME) or ""),
+            )
+            scoped = grouped.get(item)
+            if scoped is None:
+                # The predicate asked for these scopes and no others, so this is
+                # a read that did not do what it was told rather than a row worth
+                # keeping. Dropping it silently would let a widened predicate
+                # pull an unrelated installation into a build's state.
+                raise BuildError(
+                    f"{table_name} returned a row for {item}, which this build "
+                    "did not ask for; the catalogue read was not scoped correctly"
+                )
+            scoped[table_name].append(row)
+
     rows = {
         item: MappingProxyType(
-            read_installation(
-                catalogue,
-                scope=InstallationScope(item.item_type, item.item_name),
-            )
+            {name: tuple(table_rows) for name, table_rows in tables.items()}
         )
-        for item in items
+        for item, tables in grouped.items()
     }
     return Catalogue(
         rows=MappingProxyType(rows),

@@ -49,7 +49,7 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "LocalWorkspace",
         "Location",
         "Store",
-        "LocalStore",
+        "FilesystemStore",
         "ItemRef",
         "FolderTarget",
         "DeltaTarget",

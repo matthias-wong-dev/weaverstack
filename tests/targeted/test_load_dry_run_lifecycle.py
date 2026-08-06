@@ -32,7 +32,7 @@ from weaver.load_report import (
 )
 from weaver.load_resolution import LoadEnvironment
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 
 from factories import (

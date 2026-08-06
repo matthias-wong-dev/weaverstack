@@ -81,7 +81,7 @@ class Store(Protocol):
     def make_directory(self, location: Location) -> None: ...
 
 
-class LocalStore:
+class FilesystemStore:
     """Filesystem implementation.
 
     Not sandboxed to a workspace root, because push reads from arbitrary source
@@ -95,7 +95,9 @@ class LocalStore:
                 f"store operations take a Location, got {type(location).__name__}"
             )
         if location.is_url:
-            raise CommandError(f"LocalStore cannot address the URL location {location.value!r}")
+            raise CommandError(
+                f"FilesystemStore cannot address the URL location {location.value!r}"
+            )
         return location.path
 
     def exists(self, location: Location) -> bool:

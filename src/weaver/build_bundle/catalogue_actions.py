@@ -7,11 +7,15 @@ from collections import defaultdict
 from typing import Iterable, Mapping
 
 from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
-from ..catalogue.state import Catalogue, for_targets, retaining
-from ..catalogue.reconcile import reconcile
+from ..catalogue.reconcile import publish
 from ..catalogue.render import InstallationScope, identifier, literal
 from ..catalogue.state import Catalogue, for_targets, retaining
-from ..catalogue.tables import DICTIONARY_TABLES, REGISTRY, CatalogueTable
+from ..catalogue.tables import (
+    DICTIONARY_TABLES,
+    INSTALLATION,
+    REGISTRY,
+    CatalogueTable,
+)
 from ..declaration.model import WeaverDocumentId
 from ..spark.tokens import object_token
 from .models import (
@@ -164,36 +168,52 @@ def _item_signature(repository, item) -> str:
     )
 
 
-def render_catalogue_after_build(
+def _with_installation_rows(desired: Catalogue, installation) -> Catalogue:
+    """Put each item's binding facts into the desired catalogue.
+
+    A repository-derived catalogue cannot know them and must not invent them:
+    which physical target an item is bound to, and which Weaver published it, are
+    facts about *this build*, not about the source. They are folded in here so
+    the diff compares complete rows against complete rows.
+    """
+
+    from types import MappingProxyType
+
+    rows = {}
+    for item, tables in desired.rows.items():
+        merged = dict(tables)
+        binding = installation.get(item)
+        if binding is not None:
+            merged[INSTALLATION.name] = tuple(binding)
+        rows[item] = MappingProxyType(merged)
+    return Catalogue(rows=MappingProxyType(rows))
+
+
+def desired_catalogue(
     repository,
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
-    *,
-    control_target,
-    current: Catalogue | None = None,
-) -> tuple[PlannedStage, ...]:
-    """Publish dictionaries and Installation in one batch, Registry last.
+) -> Catalogue:
+    """The catalogue state a successful build of ``selected_ids`` would leave.
 
-    A final refresh of the Weaver Lakehouse's own SQL analytics endpoint closes
-    the build: the catalogue is a set of Delta tables like any other, and the next
-    reader of it — a report, a GUI, the next build — reaches it through that
-    endpoint.
+    Logical, then narrowed, then bound — in that order and visibly so. The
+    narrowing is what keeps a Registry row meaning "this succeeded"; the binding
+    is what lets an alias be certified as the thing it physically is, and what
+    supplies the Installation facts a repository cannot know.
+
+    Named and separate because it is *both* halves of the fixed point. It is what
+    publication compares the persisted catalogue against, and it is therefore
+    exactly what the catalogue should already contain when nothing has changed —
+    so a test can feed it back as the current state and hold the build to
+    producing nothing, without restating any of this arithmetic itself.
     """
 
     from .. import __version__
 
     selected_ids = set(selected_ids)
-
-    # The publication is a diff: what the repository describes, against what is
-    # persisted. Only the desired side drives the statements — see
-    # `CatalogueChanges` — but routing production through the same call the
-    # reporting uses is what stops the two drifting apart.
-    # Logical, then narrowed, then bound — in that order and visibly so. The
-    # narrowing is what keeps a Registry row meaning "this succeeded"; the
-    # binding is what lets an alias be certified as the thing it physically is.
     logical = Catalogue.from_repository(repository)
     certified = retaining(logical, repository, selected_ids)
-    desired = for_targets(
+    bound = for_targets(
         certified,
         repository,
         selected_ids,
@@ -211,20 +231,42 @@ def render_catalogue_after_build(
         )
         for item in target_by_item
     }
-    by_item = (current or Catalogue(rows={})).diff(desired).render_dml(
-        installation=binding_rows
-    )
+    return _with_installation_rows(bound, binding_rows)
 
-    catalogue_statements: list[str] = []
-    registry_statements: list[str] = []
-    for item in sorted(target_by_item, key=str):
-        result = by_item[item]
-        # Registry last, in its own barrier — taken from the structure rather
-        # than recovered from the SQL, so the ordering invariant is carried by
-        # the type instead of by a string match.
-        for table_plan in (*result.dictionaries, result.installation):
-            catalogue_statements.extend(table_plan.statements)
-        registry_statements.extend(result.registry.statements)
+
+def render_catalogue_after_build(
+    repository,
+    selected_ids: Iterable[WeaverDocumentId],
+    target_by_item: Mapping,
+    *,
+    control_target,
+    current: Catalogue | None = None,
+) -> tuple[PlannedStage, ...]:
+    """Publish dictionaries and Installation in one batch, Registry last.
+
+    A final refresh of the Weaver Lakehouse's own SQL analytics endpoint closes
+    the build, and only when some catalogue DML was actually emitted: the
+    catalogue is a set of Delta tables like any other, so its endpoint has to
+    catch up when it is written to — and has nothing to catch up on when it is
+    not.
+    """
+
+    desired = desired_catalogue(repository, selected_ids, target_by_item)
+
+    # The publication is a genuine diff against what is persisted: a table whose
+    # rows are all unchanged produces no statement, so an identical second build
+    # appends nothing here and the endpoint refresh below is not reached.
+    publication = publish(current or Catalogue(rows={}), desired)
+
+    # Registry last, in its own barrier — taken from the structure rather than
+    # recovered from the SQL, so the ordering invariant is carried by the type
+    # instead of by a string match.
+    catalogue_statements: list[str] = [
+        statement
+        for table_plan in (*publication.dictionaries, publication.installation)
+        for statement in table_plan.statements
+    ]
+    registry_statements: list[str] = list(publication.registry.statements)
 
     rendered = (
         _stage(

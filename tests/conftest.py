@@ -40,7 +40,7 @@ _sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
 from weaver.targets import ItemRef
 from weaver.workspaces import LocalWorkspace
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 
 WEAVER_LAKEHOUSE = "Weaver"
@@ -111,7 +111,7 @@ def _populate_folder_files(store, resolver, target: ItemRef) -> None:
 
 @pytest.fixture
 def populate_folder_files():
-    """Shared fixture setup through LocalStore or desktop OneLake access."""
+    """Shared fixture setup through FilesystemStore or desktop OneLake access."""
 
     return _populate_folder_files
 
@@ -125,7 +125,7 @@ class LocalLakehouses:
 
     workspace: LocalWorkspace
     resolver: LocalResolver
-    store: LocalStore
+    store: FilesystemStore
     root: Path
 
     @property
@@ -157,7 +157,7 @@ def lakehouses(tmp_path: Path) -> LocalLakehouses:
     """
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER_LAKEHOUSE)
-    store = LocalStore()
+    store = FilesystemStore()
     resolver = LocalResolver(workspace)
 
     for item in (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE):

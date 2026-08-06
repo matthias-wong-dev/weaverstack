@@ -30,7 +30,7 @@ from weaver.declaration.model import WeaverDocumentId
 from weaver.errors import CommandError
 from weaver.locations import Location
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 from weaver.task_logging import (
     COMPLETE_STEP,
@@ -109,15 +109,15 @@ def at(text: str) -> datetime:
 
 
 def contents(location: Location) -> dict:
-    return json.loads(LocalStore().read(location).decode("utf-8"))
+    return json.loads(FilesystemStore().read(location).decode("utf-8"))
 
 
-def names(store: LocalStore, location: Location) -> list[str]:
+def names(store: FilesystemStore, location: Location) -> list[str]:
     return sorted(entry.name for entry in store.list(location))
 
 
 def test_task_logging_writes_beneath_the_declared_log_folder(folder):
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
 
     assert log.root.value.startswith(folder.value + "/")
@@ -127,7 +127,7 @@ def test_task_logging_partitions_by_utc_task_date(folder):
     log = open_task_log(
         task_type="load",
         folder=folder,
-        store=LocalStore(),
+        store=FilesystemStore(),
         clock=fixed_clock(at("2026-08-03T09:15:22.123456")),
     )
 
@@ -144,7 +144,7 @@ def test_a_task_stays_in_the_partition_it_started_in(folder):
     log = open_task_log(
         task_type="load",
         folder=folder,
-        store=LocalStore(),
+        store=FilesystemStore(),
         clock=fixed_clock(
             at("2026-08-03T23:59:59.000000"), at("2026-08-04T00:00:31.000000")
         ),
@@ -156,7 +156,7 @@ def test_a_task_stays_in_the_partition_it_started_in(folder):
 
 
 def test_task_logging_writes_one_immutable_plan(folder):
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
 
     location = log.write_plan({"order": ["one", "two"], "mode": "execute"})
@@ -172,7 +172,7 @@ def test_task_logging_writes_one_immutable_plan(folder):
 
 
 def test_task_logging_writes_one_result_file_per_executed_step(folder):
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
 
     log.write_step("load", {"node_id": "one"})
@@ -186,7 +186,7 @@ def test_task_logging_writes_one_result_file_per_executed_step(folder):
 
 
 def test_a_step_file_names_its_broad_kind_and_carries_its_exact_identity(folder):
-    log = open_task_log(task_type="load", folder=folder, store=LocalStore())
+    log = open_task_log(task_type="load", folder=folder, store=FilesystemStore())
 
     location = log.write_step(
         "refresh",
@@ -201,7 +201,7 @@ def test_a_step_file_names_its_broad_kind_and_carries_its_exact_identity(folder)
 def test_task_logging_embeds_messages_in_the_step_result(folder):
     """One file per step, never one per message."""
 
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
 
     location = log.write_step(
@@ -220,7 +220,7 @@ def test_task_logging_embeds_messages_in_the_step_result(folder):
 
 
 def test_task_logging_writes_one_completion_file(folder):
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
     log.write_step("load", {"node_id": "one"})
 
@@ -234,7 +234,7 @@ def test_task_logging_writes_one_completion_file(folder):
 def test_task_logging_leaves_no_completion_file_for_an_interrupted_task(folder):
     """The absence of the completion file is how an interruption is visible."""
 
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
     log.write_plan({"order": ["one", "two"]})
     log.write_step("load", {"node_id": "one"})
@@ -249,7 +249,7 @@ def test_task_logging_leaves_no_completion_file_for_an_interrupted_task(folder):
 
 
 def test_nothing_is_rewritten_after_it_is_written(folder):
-    store = LocalStore()
+    store = FilesystemStore()
     log = open_task_log(task_type="load", folder=folder, store=store)
 
     first = log.write_step("load", {"node_id": "one"})
@@ -261,7 +261,7 @@ def test_nothing_is_rewritten_after_it_is_written(folder):
 
 
 def test_task_log_layout_supports_build_load_wipe_mirror_and_test(folder):
-    store = LocalStore()
+    store = FilesystemStore()
 
     roots = {
         task_type: open_task_log(
@@ -278,7 +278,7 @@ def test_task_log_layout_supports_build_load_wipe_mirror_and_test(folder):
 def test_a_plan_need_not_be_a_dag(folder):
     """The format is generic: a build's plan is stages, and that is a plan too."""
 
-    log = open_task_log(task_type="build", folder=folder, store=LocalStore())
+    log = open_task_log(task_type="build", folder=folder, store=FilesystemStore())
 
     location = log.write_plan(
         {"stages": [{"name": "prune"}, {"name": "schema"}, {"name": "build"}]}
@@ -293,4 +293,4 @@ def test_a_plan_need_not_be_a_dag(folder):
 
 def test_an_unknown_task_type_is_refused(folder):
     with pytest.raises(CommandError, match="is not a Weaver task type"):
-        open_task_log(task_type="reticulate", folder=folder, store=LocalStore())
+        open_task_log(task_type="reticulate", folder=folder, store=FilesystemStore())

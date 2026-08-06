@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.push import push_item_repository
 from weaver.errors import DiscoveryError
@@ -21,7 +21,7 @@ def test_push_replaces_destination_without_an_extra_source_root(tmp_path):
     result = push_item_repository(
         Location(str(source)),
         Location(str(destination)),
-        destination_store=LocalStore(),
+        destination_store=FilesystemStore(),
     )
 
     assert not (destination / "obsolete.txt").exists()
@@ -44,7 +44,7 @@ def test_invalid_source_fails_before_existing_destination_is_touched(tmp_path):
         push_item_repository(
             Location(str(source)),
             Location(str(destination)),
-            destination_store=LocalStore(),
+            destination_store=FilesystemStore(),
         )
 
     assert sentinel.read_text(encoding="utf-8") == "keep"

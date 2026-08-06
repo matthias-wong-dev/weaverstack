@@ -57,9 +57,17 @@ Install Weaver into a Fabric Environment:
 weaver install --workspace Analytics --environment Runtime
 ```
 
-There is no separate initialise lifecycle. Every ordinary build ensures the
-configured Weaver Lakehouse and package-owned catalogue exist before it reads
-authoritative state. A full reset is therefore a wipe followed by a build.
+There is no separate initialise lifecycle. The package-owned catalogue is built
+by the ordinary build: `Lakehouse/_weaver` is composed into every parsed
+repository, bound to the configured Weaver Lakehouse, and its tables are created
+by ordinary planned actions. A full reset is therefore a wipe followed by a
+build.
+
+The Weaver Lakehouse itself must already exist. It is a Fabric workspace item,
+so creating one is provisioning rather than building, and a build against a
+missing Weaver Lakehouse fails preflight instead of quietly making one. A
+desktop build proves it — along with the Environment and every bound Lakehouse
+and Warehouse — from a single workspace listing before it starts a Livy session.
 
 ## Push (compatibility utility)
 

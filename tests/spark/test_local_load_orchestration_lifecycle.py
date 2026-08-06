@@ -38,7 +38,7 @@ from weaver.catalogue.builtin import LOG_FOLDER
 from weaver.load import LoadSession, run_load
 from weaver.load_plan import PYTHON_FOLDER, PYTHON_TABLE, SPARK_SQL_FILE, PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED, VALIDATED
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.targets import FolderTarget, ItemRef
 from weaver.task_logging import COMPLETE_STEP, PLAN_FILE
 
@@ -192,7 +192,7 @@ def test_the_folder_materialised_the_files_its_object_staged(real, estate):
 
 
 def written(estate, real) -> dict[str, dict]:
-    store = LocalStore()
+    store = FilesystemStore()
     from weaver.locations import Location
 
     root = Location(real.task_log)

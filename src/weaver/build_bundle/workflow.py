@@ -22,7 +22,7 @@ from ..errors import BuildError
 from ..locations import Location
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
-from ..store import LocalStore, Store
+from ..store import FilesystemStore, Store
 from .bundle import BuildBundle, load_bundle
 from .installer import InstallationEnvironment, install_bundle
 from .planner import generate_item_build_bundle
@@ -50,7 +50,7 @@ class MaterialisedTree:
     """A source tree copied onto the current process's local filesystem."""
 
     location: Location
-    store: LocalStore
+    store: FilesystemStore
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class PreparedRepository:
     """A parsed repository and the process-local store that owns its files."""
 
     repository: WeaverRepository
-    store: LocalStore
+    store: FilesystemStore
 
 
 @dataclass(frozen=True)
@@ -220,7 +220,7 @@ def materialise_tree(
         raise BuildError(f"source is not a directory: {source.value}")
 
     with tempfile.TemporaryDirectory(prefix=prefix) as temporary:
-        destination = Path(temporary) / source.name
+        destination = Path(temporary) / _snapshot_name(source)
         copier = getattr(store, "copy_to_local", None)
         if callable(copier):
             copier(source, destination)
@@ -230,7 +230,23 @@ def materialise_tree(
             raise BuildError(
                 f"materialising {source.value} did not create {destination}"
             )
-        yield MaterialisedTree(Location(destination.as_posix()), LocalStore())
+        yield MaterialisedTree(Location(destination.as_posix()), FilesystemStore())
+
+
+def _snapshot_name(source: Location) -> str:
+    """A usable directory name for the snapshot of ``source``.
+
+    ``.`` and ``..`` are ordinary ways to name a repository on a desktop and
+    neither can name a directory: joining either onto the temporary root would
+    address the root itself, and the copy would fail or land in the wrong place.
+    A filesystem source is therefore resolved first, so the snapshot is named for
+    the directory it actually copies rather than for the way the caller spelled
+    it. A filesystem root, and anything else that leaves no final segment, falls
+    back to a fixed name — the snapshot's identity is its contents, not its name.
+    """
+
+    name = source.name if source.is_url else source.path.resolve().name
+    return name if name and name not in (".", "..") else "repository"
 
 
 @contextmanager
@@ -239,10 +255,10 @@ def prepare_repository(
     *,
     source_store: Store,
 ) -> Iterator[PreparedRepository]:
-    """Make a repository process-local when needed, then parse it completely."""
+    """Snapshot a repository to a temporary copy, then parse it completely."""
 
-    with _local_tree(source, source_store, prefix="weaver-repository-") as root:
-        store = LocalStore()
+    with _temp_copy(source, source_store, prefix="weaver-repository-") as root:
+        store = FilesystemStore()
         repository = parse_item_repository(Location(root.as_posix()), store=store)
         yield PreparedRepository(repository=repository, store=store)
 
@@ -288,7 +304,7 @@ def persist_bundle_archive(
             f"bundle archive must end with {ARCHIVE_SUFFIX!r}: {destination.value}"
         )
     bundle_store = bundle.store or store
-    with _local_tree(bundle.location, bundle_store, prefix="weaver-bundle-source-") as root:
+    with _temp_copy(bundle.location, bundle_store, prefix="weaver-bundle-source-") as root:
         with tempfile.TemporaryDirectory(prefix="weaver-bundle-archive-") as temporary:
             archive = Path(temporary) / destination.name
             _write_archive(root, archive)
@@ -326,7 +342,7 @@ def materialise_bundle_archive(
         root = temporary_path / "bundle"
         root.mkdir()
         _extract_archive(local_archive, root)
-        local_store = LocalStore()
+        local_store = FilesystemStore()
         yield load_bundle(Location(root.as_posix()), store=local_store)
 
 
@@ -353,11 +369,16 @@ def build_item_repository(
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
+    output: Location | None = None,
 ) -> ItemBuildResult:
     """Generate and install from already parsed source and already read state.
 
     This is the planner/executor seam.  It deliberately cannot materialise or
     parse authored files, inspect a Workspace, or discover target state.
+
+    ``output`` places the generated bundle tree somewhere durable instead of the
+    temporary directory this otherwise uses. Only a caller that wants the bundle
+    afterwards passes it; the build itself does not care where it sat.
     """
 
     validate_build_request(
@@ -368,7 +389,7 @@ def build_item_repository(
         bundle = generate_item_build_bundle(
             repository,
             bindings=bindings,
-            output=Location((Path(temporary) / "bundle").as_posix()),
+            output=output or Location((Path(temporary) / "bundle").as_posix()),
             store=source_store,
             target_inventories=target_inventories,
             catalogue=reconciliation.catalogue,
@@ -425,6 +446,7 @@ def build_item_repository_source(
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
+    output: Location | None = None,
     sql_by_item=None,
 ) -> ItemBuildResult:
     """Prepare an explicit source independently from the target, then build it."""
@@ -453,6 +475,7 @@ def build_item_repository_source(
             control_lakehouse=control_lakehouse,
             archive=archive,
             archive_store=archive_store,
+            output=output,
         )
 
 
@@ -545,15 +568,24 @@ def read_target_inventories(
 
 
 @contextmanager
-def _local_tree(
+def _temp_copy(
     source: Location,
     store: Store,
     *,
     prefix: str,
 ) -> Iterator[Path]:
-    if isinstance(store, LocalStore) and not source.is_url:
-        yield source.path.resolve()
-        return
+    """Always copy ``source`` to a temporary tree, whatever store holds it.
+
+    There is deliberately no shortcut for a source that is already on this
+    filesystem. A build that parsed the caller's own directory would be reading a
+    tree the caller can still edit — so a repository could change between parsing
+    and bundle generation, and the bundle would describe a source that never
+    existed as a whole. Copying every source makes the snapshot the only thing
+    the build ever reads, and makes that true identically in a notebook, on a
+    desktop and over OneLake rather than only where the transport happened to
+    force it.
+    """
+
     with materialise_tree(source, store=store, prefix=prefix) as tree:
         yield tree.location.path
 

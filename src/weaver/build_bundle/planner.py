@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Mapping
 
+from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
@@ -39,6 +40,7 @@ from ..store import Store
 from .aliases import plan_item_aliases
 from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
 from .catalogue_actions import (
+    collect_claims,
     render_catalogue_after_build,
     render_catalogue_before_build,
 )
@@ -93,19 +95,9 @@ def generate_item_build_bundle(
     # the third, and are kept out of everything that assumes a selected identity
     # maps to a parsed declaration: they are signed from their own content and
     # installed by the item's final layer.
-    selected_documents = {
-        identity for identity in repository.source_documents if identity.item in by_item
-    }
-    selected_aliases = {
-        alias.destination
-        for alias in repository.aliases
-        if alias.destination.item in by_item
-    }
-    selected_loads = {
-        artefact.identity
-        for artefact in load_artefacts(repository)
-        if artefact.identity.item in by_item
-    }
+    selected_documents, selected_aliases, selected_loads = _selectable(
+        repository, by_item
+    )
     selected_ids = selected_documents | selected_aliases | selected_loads
 
     targets = tuple(
@@ -147,6 +139,16 @@ def generate_item_build_bundle(
 
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
+
+    # Collected once and used twice, and the second use is the important one.
+    # These rows are deleted before any physical work; publication must
+    # therefore compare against the catalogue *without* them, or an object
+    # dropped and rebuilt whose projection did not change would compare equal,
+    # produce no merge, and stay deleted.
+    deleted_claims = collect_claims(
+        catalogue, removed | selected_for_drop, stale_claims=stale_claims
+    )
+    catalogue_after_deletions = without_claims(catalogue, deleted_claims)
 
     catalogue_before = render_catalogue_before_build(
         catalogue,
@@ -190,9 +192,9 @@ def generate_item_build_bundle(
             selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
-            # Passed for the *report* the diff can produce. The statements come
-            # from the desired side alone, so a bad read cannot change them.
-            current=catalogue,
+            # The catalogue as the claim deletions above will leave it, not as
+            # it was read — see `without_claims`.
+            current=catalogue_after_deletions,
         )
     )
 
@@ -225,6 +227,47 @@ def generate_item_build_bundle(
         payloads=payloads,
         store=store,
     )
+
+
+def _selectable(repository: WeaverRepository, by_item: Mapping) -> tuple[set, set, set]:
+    """The three selectable kinds, separately — see the comment at the call site."""
+
+    return (
+        {
+            identity
+            for identity in repository.source_documents
+            if identity.item in by_item
+        },
+        {
+            alias.destination
+            for alias in repository.aliases
+            if alias.destination.item in by_item
+        },
+        {
+            artefact.identity
+            for artefact in load_artefacts(repository)
+            if artefact.identity.item in by_item
+        },
+    )
+
+
+def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> set:
+    """Every object a build of these items could certify.
+
+    Everything a bound item owns, whatever this particular build decides to do
+    about it — an object left alone because nothing changed is still certified,
+    and still belongs in the catalogue afterwards. What a build *did* is
+    narrowed later, by the planner's uncertified set.
+
+    Named because the fixed point needs it: what the catalogue should already
+    hold when nothing has changed is derived from this, so a test that restated
+    the rule could agree with a broken planner. It shares ``_selectable`` with
+    the planner rather than re-deriving the same three sets, so the two cannot
+    drift into disagreeing about what a build certifies.
+    """
+
+    documents, aliases, loads = _selectable(repository, by_item)
+    return documents | aliases | loads
 
 
 def _item_layers(

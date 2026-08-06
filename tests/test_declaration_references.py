@@ -13,7 +13,7 @@ import pytest
 
 from pathlib import Path
 
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.errors import DiscoveryError
 from weaver.declaration import (
@@ -57,7 +57,7 @@ def _repo(tmp_path, files: dict[str, str], schemas=("Sales",), item=ITEM):
     for name, text in files.items():
         _write(root, f"{item}/{name}", text)
     return _Documents(
-        parse_item_repository(Location(value=str(root)), store=LocalStore()), item
+        parse_item_repository(Location(value=str(root)), store=FilesystemStore()), item
     )
 
 
@@ -194,7 +194,7 @@ def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
     ).replace("Dependencies: []\n\n", "")
     _write(root, "Warehouse/Reporting/Sales.Order.sql", warehouse_source)
 
-    repository = parse_item_repository(Location(value=str(root)), store=LocalStore())
+    repository = parse_item_repository(Location(value=str(root)), store=FilesystemStore())
     warehouse = repository.source_documents[
         WeaverDocumentId.parse("Warehouse/Reporting/Sales.Order")
     ]

@@ -366,10 +366,10 @@ def _desktop_store(workspace):
     """
 
     from weaver.workspaces import LocalWorkspace
-    from weaver.store import LocalStore
+    from weaver.store import FilesystemStore
 
     if isinstance(workspace, LocalWorkspace):
-        return LocalStore()
+        return FilesystemStore()
     from weaver.fabric import OneLakeDfsClient
 
     return OneLakeDfsClient()
