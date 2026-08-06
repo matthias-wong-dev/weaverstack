@@ -17,8 +17,8 @@ from ..declaration.model import (
 from ..errors import BuildError
 from ..spark.tokens import object_token
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
-from .reader import _is_absent, read_installation, read_table
-from .render import InstallationScope
+from .reader import _is_absent, read_installations, read_table
+from .render import InstallationScope, InstallationScopes
 from .tables import (
     BUILD_EPOCH,
     CATALOGUE_TABLES,
@@ -460,6 +460,26 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     wanting a Registry-only catalogue can construct one directly — weakening this
     to accommodate them would trade a real production guarantee for a fixture's
     convenience.
+
+    **A missing table is not automatically a fault, and not automatically fine.**
+    Three states have to be told apart, and the difference between them is what
+    else is there:
+
+    *Bootstrap.* Nothing exists yet. The build that is about to run creates the
+    catalogue, so every table missing is the ordinary first-run state and reads
+    as an empty catalogue.
+
+    *A dictionary table missing from a populated catalogue.* Ordinary too: the
+    built-in item declares every catalogue table on every build, so a dictionary
+    table that is not there is one the plan is about to create. Its rows are
+    empty, which is what an absent table honestly contains.
+
+    *Registry or Installation missing from a populated catalogue.* A fault, and
+    the one worth stopping for. Those two record what is certified and where it
+    is bound, and neither can be re-derived from the repository — a build that
+    read them as empty would conclude that nothing had ever been installed and
+    plan to build an entire estate again. Everything else being present is the
+    evidence that this is damage rather than a first run.
     """
 
     present: set[str] = set()
@@ -496,14 +516,57 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             "catalogue schema is incompatible; missing required column(s): "
             + ", ".join(incompatible)
         )
+    unrecoverable = sorted(
+        name for name in (REGISTRY.name, INSTALLATION.name) if name in missing
+    )
+    if present and unrecoverable:
+        raise BuildError(
+            "catalogue is incomplete: "
+            + ", ".join(unrecoverable)
+            + " missing while "
+            + ", ".join(sorted(present))
+            + " remain. Registry and Installation record what is certified and "
+            "where it is bound, and neither can be re-derived from the "
+            "repository; restore them rather than rebuilding over them."
+        )
+
+    wanted = tuple(items)
+    scopes = InstallationScopes(
+        tuple(InstallationScope(item.item_type, item.item_name) for item in wanted)
+    )
+    by_table = read_installations(catalogue, scopes=scopes)
+
+    # Seeded before grouping, and that is not tidiness. An item with no rows yet
+    # is an ordinary state — it has never been built — and it must still appear,
+    # because everything downstream iterates the catalogue's items to decide what
+    # to compare, reconcile and publish. An item that fell out here would look
+    # like an item the build was never pointed at.
+    grouped: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {
+        item: {table.name: [] for table in CATALOGUE_TABLES} for item in wanted
+    }
+    for table_name, table_rows in by_table.items():
+        for row in table_rows:
+            item = WeaverItemId(
+                str(row.get(SCOPE_ITEM_TYPE) or ""),
+                str(row.get(SCOPE_ITEM_NAME) or ""),
+            )
+            scoped = grouped.get(item)
+            if scoped is None:
+                # The predicate asked for these scopes and no others, so this is
+                # a read that did not do what it was told rather than a row worth
+                # keeping. Dropping it silently would let a widened predicate
+                # pull an unrelated installation into a build's state.
+                raise BuildError(
+                    f"{table_name} returned a row for {item}, which this build "
+                    "did not ask for; the catalogue read was not scoped correctly"
+                )
+            scoped[table_name].append(row)
+
     rows = {
         item: MappingProxyType(
-            read_installation(
-                catalogue,
-                scope=InstallationScope(item.item_type, item.item_name),
-            )
+            {name: tuple(table_rows) for name, table_rows in tables.items()}
         )
-        for item in items
+        for item, tables in grouped.items()
     }
     return Catalogue(
         rows=MappingProxyType(rows),

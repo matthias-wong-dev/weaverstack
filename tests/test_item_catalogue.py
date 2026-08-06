@@ -314,14 +314,77 @@ def test_a_registry_without_the_epoch_column_is_refused_by_name():
         read_catalogue_state(_Shaped({"Registry": older}), ())
 
 
+def _shaped(*names: str):
+    """A catalogue holding exactly these tables, each with its full shape."""
+
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+
+    by_name = {table.name: table for table in CATALOGUE_TABLES}
+    return _Shaped({name: list(by_name[name].physical_columns) for name in names})
+
+
 def test_a_registry_with_the_epoch_column_is_accepted():
     from weaver.catalogue.state import read_catalogue_state
 
+    state = read_catalogue_state(_shaped("Registry", "Installation"), ())
+
+    assert state.present_tables == frozenset({"Registry", "Installation"})
+
+
+# --- which absences are ordinary, and which are damage ------------------------
+
+
+def test_a_catalogue_with_no_tables_at_all_is_the_bootstrap_state():
+    """The first build creates the catalogue, so nothing there is not a fault."""
+
+    from weaver.catalogue.state import read_catalogue_state
+
+    state = read_catalogue_state(_Shaped({}), ())
+
+    assert state.present_tables == frozenset()
+    assert not state.rows
+
+
+def test_a_missing_dictionary_table_is_read_as_empty_rather_than_refused():
+    """The built-in item declares it, so the plan about to run will create it."""
+
+    from weaver.catalogue.state import read_catalogue_state
+
     state = read_catalogue_state(
-        _Shaped({"Registry": list(REGISTRY.physical_columns)}), ()
+        _shaped("Registry", "Installation", "TableDictionary"), ()
     )
 
-    # A catalogue holding only some of its tables is read, not rejected —
-    # `present_tables` is what says which, and it is what reconciliation then
-    # uses to decide whether a claim can be raised at all.
-    assert state.present_tables == frozenset({"Registry"})
+    assert "Alias" not in state.present_tables
+    assert "TableDictionary" in state.present_tables
+
+
+def test_a_missing_registry_beside_a_populated_catalogue_is_refused():
+    """It cannot be re-derived, and reading it as empty would rebuild the estate."""
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="catalogue is incomplete"):
+        read_catalogue_state(_shaped("Installation", "TableDictionary"), ())
+
+
+def test_a_missing_installation_beside_a_populated_catalogue_is_refused():
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="Installation missing"):
+        read_catalogue_state(_shaped("Registry", "TableDictionary"), ())
+
+
+def test_the_incomplete_catalogue_error_says_what_survived():
+    """A reader has to be able to tell damage from a first run, so name both."""
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError) as raised:
+        read_catalogue_state(_shaped("Registry", "Alias", "Dependency"), ())
+
+    message = str(raised.value)
+    assert "Installation missing" in message
+    assert "Alias" in message and "Dependency" in message

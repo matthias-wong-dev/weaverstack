@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
+from ..errors import BuildError
 from ..spark.tokens import EPOCH_TOKEN, object_token
 from .tables import (
     AUDIT_DELETE_COLUMN,
@@ -88,6 +89,65 @@ class InstallationScope:
 
     def __str__(self) -> str:
         return f"{self.item_type}/{self.item_name}"
+
+
+@dataclass(frozen=True)
+class InstallationScopes:
+    """Several installations addressed by one statement.
+
+    A build reads and writes for every item it was pointed at, and those items
+    live in the same physical catalogue tables. Addressing them one at a time
+    costs one round trip per item per table for an answer that one predicate
+    already contains — so the read, and the aggregated publication that follows
+    it, take this instead of a single scope.
+
+    It is still a *bounded* address, which is the property that matters: the
+    predicate names exactly the scopes it was given, so widening what a build
+    touches requires widening this, visibly, at the call site. An empty
+    collection addresses nothing and is refused rather than rendered, because
+    ``WHERE`` with no predicate is every row in the catalogue — the one mistake
+    here that would be silent and unbounded.
+    """
+
+    scopes: tuple[InstallationScope, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scopes", tuple(dict.fromkeys(self.scopes)))
+
+    def __bool__(self) -> bool:
+        return bool(self.scopes)
+
+    def __iter__(self):
+        return iter(self.scopes)
+
+    def __len__(self) -> int:
+        return len(self.scopes)
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        return ITEM_SCOPE_COLUMNS
+
+    @property
+    def predicate(self) -> str:
+        return self.predicate_for()
+
+    def predicate_for(self, qualifier: str = "") -> str:
+        if not self.scopes:
+            raise BuildError(
+                "an installation-scope predicate over no scopes would address "
+                "the whole catalogue; the caller must not reach a statement"
+            )
+        if len(self.scopes) == 1:
+            return self.scopes[0].predicate_for(qualifier)
+        return " OR ".join(
+            f"({scope.predicate_for(qualifier)})" for scope in self.scopes
+        )
+
+    def owns(self, row: Row) -> bool:
+        return any(scope.owns(row) for scope in self.scopes)
+
+    def __str__(self) -> str:
+        return ", ".join(str(scope) for scope in self.scopes)
 
 
 def identifier(name: str) -> str:
