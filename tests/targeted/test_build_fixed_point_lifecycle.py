@@ -218,6 +218,133 @@ def test_a_third_build_is_as_silent_as_the_second(estate, tmp_path):
     assert second.plan.bundle_id == third.plan.bundle_id
 
 
+# --- a rebuilt object is re-certified, not silently dropped -------------------
+
+
+def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
+    """The bug the Fabric journey found, at the level it should have been caught.
+
+    A build removes the catalogue claims of everything it is about to drop
+    *before* any physical work, so nothing stays certified while the object
+    behind it is replaced. The catalogue the planner read still holds those
+    rows — it was read before any of that was decided.
+
+    So a diff against the catalogue *as read* would compare an unchanged
+    projection equal, emit no merge, and leave the row deleted by the
+    before-stage with nothing to put it back. The object would come out of the
+    build physically present and permanently uncertified, and the next load —
+    which reads the catalogue, not the estate — would not find it.
+
+    Here the whole estate is dropped and rebuilt while its declarations are
+    unchanged, which is exactly that shape.
+    """
+
+    from weaver.build_bundle.catalogue_actions import collect_claims
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.catalogue.tables import REGISTRY
+
+    state = installed_catalogue(estate)
+    bindings = _bindings()
+    by_item = {binding.item: binding for binding in bindings.entries}
+    identities = certifiable_identities(estate, by_item)
+
+    # Everything certified is about to be dropped: the before-stage will delete
+    # every claim, so every row must be published again.
+    claims = collect_claims(state, identities)
+    assert claims, "the fixture must hold claims for this to be about anything"
+
+    from weaver.catalogue.claims import without_claims
+
+    remaining = without_claims(state, claims)
+
+    for item, tables in remaining.rows.items():
+        assert tables.get(REGISTRY.name, ()) == (), (
+            f"{item} kept Registry rows the claim deletion removes"
+        )
+
+    # And publishing against that state re-merges them.
+    from weaver.catalogue.reconcile import publish
+
+    result = publish(remaining, state)
+
+    assert result.registry.merge, "a dropped object must be certified again"
+
+
+def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
+    estate, tmp_path
+):
+    """The bug end-to-end, through the planner, where it actually bit.
+
+    `DWG.ActiveCustomer` is a view over `DWG.Customer`. Editing Customer makes
+    ActiveCustomer an *impacted descendant*: it is dropped and rebuilt, but its
+    own declaration did not change, so its projected catalogue rows are
+    identical to what is persisted.
+
+    That is the precise shape the diff got wrong. Its claims are deleted before
+    the physical work, and comparing against the catalogue as *read* found
+    nothing to do — so the view came out of the build present and permanently
+    uncertified. The next load reads the catalogue rather than the estate, and
+    could not see it.
+    """
+
+    from weaver.declaration import parse_item_repository
+
+    state = installed_catalogue(estate)
+
+    customer = estate.root.path / "Lakehouse" / "Sales" / "DWG__Customer.py"
+    customer.write_text(
+        customer.read_text(encoding="utf-8").replace(
+            "Description: ", "Description: revised — ", 1
+        ),
+        encoding="utf-8",
+    )
+    changed = parse_item_repository(estate.root)
+
+    bundle = build(changed, tmp_path, catalogue=state)
+
+    registry = [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    ]
+    assert registry, "the rebuild must publish a Registry barrier"
+
+    payload = bundle.store.read(
+        bundle.location.join(*registry[0].payload.split("/"))
+    ).decode()
+
+    assert "ActiveCustomer" in payload, (
+        "the rebuilt descendant's certification was deleted and never restored"
+    )
+
+
+def test_the_claim_view_only_ever_removes_rows(estate):
+    """A narrowing, so the worst a mistake can do is publish something twice."""
+
+    from weaver.build_bundle.catalogue_actions import collect_claims
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.catalogue.claims import without_claims
+
+    state = installed_catalogue(estate)
+    by_item = {binding.item: binding for binding in _bindings().entries}
+    claims = collect_claims(state, certifiable_identities(estate, by_item))
+
+    remaining = without_claims(state, claims)
+
+    for item, tables in state.rows.items():
+        for name, rows in tables.items():
+            assert len(remaining.rows[item].get(name, ())) <= len(rows)
+    assert remaining.present_tables == state.present_tables
+
+
+def test_no_claims_leaves_the_catalogue_untouched(estate):
+    from weaver.catalogue.claims import without_claims
+
+    state = installed_catalogue(estate)
+
+    assert without_claims(state, ()) is state
+
+
 # --- a real change still publishes -------------------------------------------
 
 

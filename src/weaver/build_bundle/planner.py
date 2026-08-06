@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Mapping
 
+from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
@@ -39,6 +40,7 @@ from ..store import Store
 from .aliases import plan_item_aliases
 from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
 from .catalogue_actions import (
+    collect_claims,
     render_catalogue_after_build,
     render_catalogue_before_build,
 )
@@ -138,6 +140,16 @@ def generate_item_build_bundle(
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
 
+    # Collected once and used twice, and the second use is the important one.
+    # These rows are deleted before any physical work; publication must
+    # therefore compare against the catalogue *without* them, or an object
+    # dropped and rebuilt whose projection did not change would compare equal,
+    # produce no merge, and stay deleted.
+    deleted_claims = collect_claims(
+        catalogue, removed | selected_for_drop, stale_claims=stale_claims
+    )
+    catalogue_after_deletions = without_claims(catalogue, deleted_claims)
+
     catalogue_before = render_catalogue_before_build(
         catalogue,
         removed | selected_for_drop,
@@ -180,9 +192,9 @@ def generate_item_build_bundle(
             selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
-            # Passed for the *report* the diff can produce. The statements come
-            # from the desired side alone, so a bad read cannot change them.
-            current=catalogue,
+            # The catalogue as the claim deletions above will leave it, not as
+            # it was read — see `without_claims`.
+            current=catalogue_after_deletions,
         )
     )
 
