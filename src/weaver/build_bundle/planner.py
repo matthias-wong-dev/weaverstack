@@ -106,7 +106,7 @@ def generate_item_build_bundle(
         for artefact in load_artefacts(repository)
         if artefact.identity.item in by_item
     }
-    selected_ids = selected_documents | selected_aliases | selected_loads
+    selected_ids = certifiable_identities(repository, by_item)
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -224,6 +224,38 @@ def generate_item_build_bundle(
         plan=plan,
         payloads=payloads,
         store=store,
+    )
+
+
+def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> set:
+    """Every object a build of these items could certify.
+
+    Everything a bound item owns, whatever this particular build decides to do
+    about it — an object left alone because nothing changed is still certified,
+    and still belongs in the catalogue afterwards. What a build *did* is
+    narrowed later, by the planner's uncertified set.
+
+    Named because the fixed point needs it: what the catalogue should already
+    hold when nothing has changed is derived from this, so a test that restated
+    the rule could agree with a broken planner.
+    """
+
+    return (
+        {
+            identity
+            for identity in repository.source_documents
+            if identity.item in by_item
+        }
+        | {
+            alias.destination
+            for alias in repository.aliases
+            if alias.destination.item in by_item
+        }
+        | {
+            artefact.identity
+            for artefact in load_artefacts(repository)
+            if artefact.identity.item in by_item
+        }
     )
 
 

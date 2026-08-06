@@ -189,32 +189,31 @@ def _with_installation_rows(desired: Catalogue, installation) -> Catalogue:
     return Catalogue(rows=MappingProxyType(rows))
 
 
-def render_catalogue_after_build(
+def desired_catalogue(
     repository,
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
-    *,
-    control_target,
-    current: Catalogue | None = None,
-) -> tuple[PlannedStage, ...]:
-    """Publish dictionaries and Installation in one batch, Registry last.
+) -> Catalogue:
+    """The catalogue state a successful build of ``selected_ids`` would leave.
 
-    A final refresh of the Weaver Lakehouse's own SQL analytics endpoint closes
-    the build: the catalogue is a set of Delta tables like any other, and the next
-    reader of it — a report, a GUI, the next build — reaches it through that
-    endpoint.
+    Logical, then narrowed, then bound — in that order and visibly so. The
+    narrowing is what keeps a Registry row meaning "this succeeded"; the binding
+    is what lets an alias be certified as the thing it physically is, and what
+    supplies the Installation facts a repository cannot know.
+
+    Named and separate because it is *both* halves of the fixed point. It is what
+    publication compares the persisted catalogue against, and it is therefore
+    exactly what the catalogue should already contain when nothing has changed —
+    so a test can feed it back as the current state and hold the build to
+    producing nothing, without restating any of this arithmetic itself.
     """
 
     from .. import __version__
 
     selected_ids = set(selected_ids)
-
-    # Logical, then narrowed, then bound — in that order and visibly so. The
-    # narrowing is what keeps a Registry row meaning "this succeeded"; the
-    # binding is what lets an alias be certified as the thing it physically is.
     logical = Catalogue.from_repository(repository)
     certified = retaining(logical, repository, selected_ids)
-    desired = for_targets(
+    bound = for_targets(
         certified,
         repository,
         selected_ids,
@@ -232,7 +231,27 @@ def render_catalogue_after_build(
         )
         for item in target_by_item
     }
-    desired = _with_installation_rows(desired, binding_rows)
+    return _with_installation_rows(bound, binding_rows)
+
+
+def render_catalogue_after_build(
+    repository,
+    selected_ids: Iterable[WeaverDocumentId],
+    target_by_item: Mapping,
+    *,
+    control_target,
+    current: Catalogue | None = None,
+) -> tuple[PlannedStage, ...]:
+    """Publish dictionaries and Installation in one batch, Registry last.
+
+    A final refresh of the Weaver Lakehouse's own SQL analytics endpoint closes
+    the build, and only when some catalogue DML was actually emitted: the
+    catalogue is a set of Delta tables like any other, so its endpoint has to
+    catch up when it is written to — and has nothing to catch up on when it is
+    not.
+    """
+
+    desired = desired_catalogue(repository, selected_ids, target_by_item)
 
     # The publication is a genuine diff against what is persisted: a table whose
     # rows are all unchanged produces no statement, so an identical second build
