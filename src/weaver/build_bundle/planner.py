@@ -93,20 +93,10 @@ def generate_item_build_bundle(
     # the third, and are kept out of everything that assumes a selected identity
     # maps to a parsed declaration: they are signed from their own content and
     # installed by the item's final layer.
-    selected_documents = {
-        identity for identity in repository.source_documents if identity.item in by_item
-    }
-    selected_aliases = {
-        alias.destination
-        for alias in repository.aliases
-        if alias.destination.item in by_item
-    }
-    selected_loads = {
-        artefact.identity
-        for artefact in load_artefacts(repository)
-        if artefact.identity.item in by_item
-    }
-    selected_ids = certifiable_identities(repository, by_item)
+    selected_documents, selected_aliases, selected_loads = _selectable(
+        repository, by_item
+    )
+    selected_ids = selected_documents | selected_aliases | selected_loads
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -227,6 +217,28 @@ def generate_item_build_bundle(
     )
 
 
+def _selectable(repository: WeaverRepository, by_item: Mapping) -> tuple[set, set, set]:
+    """The three selectable kinds, separately — see the comment at the call site."""
+
+    return (
+        {
+            identity
+            for identity in repository.source_documents
+            if identity.item in by_item
+        },
+        {
+            alias.destination
+            for alias in repository.aliases
+            if alias.destination.item in by_item
+        },
+        {
+            artefact.identity
+            for artefact in load_artefacts(repository)
+            if artefact.identity.item in by_item
+        },
+    )
+
+
 def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> set:
     """Every object a build of these items could certify.
 
@@ -237,26 +249,13 @@ def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> se
 
     Named because the fixed point needs it: what the catalogue should already
     hold when nothing has changed is derived from this, so a test that restated
-    the rule could agree with a broken planner.
+    the rule could agree with a broken planner. It shares ``_selectable`` with
+    the planner rather than re-deriving the same three sets, so the two cannot
+    drift into disagreeing about what a build certifies.
     """
 
-    return (
-        {
-            identity
-            for identity in repository.source_documents
-            if identity.item in by_item
-        }
-        | {
-            alias.destination
-            for alias in repository.aliases
-            if alias.destination.item in by_item
-        }
-        | {
-            artefact.identity
-            for artefact in load_artefacts(repository)
-            if artefact.identity.item in by_item
-        }
-    )
+    documents, aliases, loads = _selectable(repository, by_item)
+    return documents | aliases | loads
 
 
 def _item_layers(
