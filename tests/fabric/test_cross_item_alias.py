@@ -434,22 +434,61 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         "if schema_id(N'DWG') is null exec(N'create schema DWG');"
     )
     # And the source has to exist, which is the one thing needing a session.
+    #
+    # Seeded in the same exact-case scope Weaver's own table build uses
+    # (`weaver.build_bundle.executors.spark_case.exact_identifier_case`, switched
+    # on by `fabric_destination`'s `preserve_table_identifier_case`). Fabric folds
+    # a table identifier to lower case at creation otherwise, and a Warehouse
+    # collates case-sensitively — so a bare CREATE lands `customer` while the view
+    # below asks, correctly, for `Customer`, and the alias fails with "Invalid
+    # object name" as though the alias SQL were wrong. The conf is set inline
+    # rather than through the helper because this body must not need the wheel.
+    #
+    # The DROP is deliberately *outside* that scope, so it resolves
+    # case-insensitively and catches a predecessor of any spelling. Inside the
+    # scope it would miss `customer`, and `CREATE ... IF NOT EXISTS` would then
+    # match that predecessor case-insensitively and skip — which is exactly how
+    # this failed. A build never does this: it refuses to drop a case variant
+    # implicitly (test_fabric_creation_never_drops_a_legacy_case_variant_implicitly),
+    # so a fixture that wants one gone has to say so itself.
     livy_session.run(
-        f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at.qualified_schema('DWG')}')\n"
-        f"spark.sql('CREATE TABLE IF NOT EXISTS {source} (CustomerId string) USING delta')\n"
+        f"spark.sql('DROP TABLE IF EXISTS {source}')\n"
+        "previous = spark.conf.get('spark.sql.caseSensitive')\n"
+        "spark.conf.set('spark.sql.caseSensitive', 'true')\n"
+        "try:\n"
+        f"    spark.sql('CREATE SCHEMA IF NOT EXISTS {at.qualified_schema('DWG')}')\n"
+        f"    spark.sql('CREATE TABLE {source} (CustomerId string) USING delta')\n"
+        "finally:\n"
+        "    spark.conf.set('spark.sql.caseSensitive', previous)\n"
         "emit(True)\n",
         label="seed the source",
     )
 
     # The producer's endpoint must catch up before the Warehouse can see the
     # table through it — a REST call, made from here.
-    for _sequence, refresh_batch, action in bundle.plan.actions():
-        if action.kind == "refresh_sql_endpoint" and "AliasHouseProducer" in action.id:
-            run_from_here(
-                action, bundle, workspace=fabric_workspace, resolver=resolver,
-                store=store, batch_target=refresh_batch.target_id,
-            )
-            break
+    #
+    # Whether the plan *contains* that refresh is a claim in its own right: the
+    # stage is only emitted when the item's planned work mutated Delta (see
+    # `weaver.build_bundle.endpoints.item_refresh_stage`). A plan that dropped it
+    # would leave the Warehouse reading an endpoint that never caught up, and the
+    # alias below would fail with "Invalid object name" — a symptom that reads
+    # like broken alias SQL and is nothing of the kind. So the search says so
+    # rather than falling through in silence.
+    refreshes = [
+        (refresh_batch, action)
+        for _sequence, refresh_batch, action in bundle.plan.actions()
+        if action.kind == "refresh_sql_endpoint" and "AliasHouseProducer" in action.id
+    ]
+    assert refreshes, (
+        "the plan carries no SQL endpoint refresh for the producer, so the "
+        "Warehouse would read an endpoint that never caught up: "
+        f"{[a.id for _s, _b, a in bundle.plan.actions()]}"
+    )
+    refresh_batch, refresh_action = refreshes[0]
+    run_from_here(
+        refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
+        store=store, batch_target=refresh_batch.target_id,
+    )
 
     result = run_from_here(
         alias_action, bundle, workspace=fabric_workspace, resolver=resolver,

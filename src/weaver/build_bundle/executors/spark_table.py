@@ -32,7 +32,6 @@ from typing import Any
 from ...errors import InstallError
 from ...declaration.columns import validate_build_columns
 from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
-from ...spark import tokens
 from ..models import BuildAction
 from .base import InstallationContext
 from .spark_case import exact_identifier_case
@@ -110,12 +109,7 @@ class SparkTableExecutor:
                 physical,
                 column_mapping=instruction.get("column_mapping", True),
             )
-            _create_preserving_identifier_case(
-                context.spark,
-                statement,
-                catalogue=catalogue,
-                logical_object=instruction["object"],
-            )
+            context.spark.sql(statement)
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
@@ -175,38 +169,6 @@ def _create_table_sql(
         "USING delta"
         f"{mapping}\n"
     )
-
-
-def _create_preserving_identifier_case(
-    spark,
-    statement: str,
-    *,
-    catalogue,
-    logical_object: str,
-) -> None:
-    """Create one exact-case table without leaking session configuration."""
-
-    spark.sql(statement)
-
-
-def _drop_case_variant(catalogue, logical_object: str) -> None:
-    match = tokens.OBJECT.fullmatch(logical_object)
-    if match is None:  # expand() reports the useful token error on the main path
-        return
-    schema, declared = match.groups()
-    matches = [
-        existing
-        for existing in catalogue.tables(schema)
-        if existing.casefold() == declared.casefold()
-    ]
-    if not matches or matches == [declared]:
-        return
-    if len(matches) != 1:
-        raise InstallError(
-            f"{schema}.{declared}: target contains case-colliding tables: "
-            + ", ".join(sorted(matches))
-        )
-    catalogue.spark.sql(f"DROP TABLE {catalogue.qualify(schema, matches[0])}")
 
 
 def _ident(name: str) -> str:
