@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     InstallationEnvironment,
@@ -40,7 +40,7 @@ class CountingStore:
     """A remote-shaped Store with no native-copy shortcut."""
 
     def __init__(self):
-        self.delegate = LocalStore()
+        self.delegate = FilesystemStore()
         self.reads: dict[str, int] = {}
         self.writes: list[str] = []
 
@@ -140,7 +140,7 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
     remote = CountingStore()
     expected_files = {
         entry.location.value
-        for entry in LocalStore().list(root, recursive=True)
+        for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
     environment = InstallationEnvironment(
@@ -171,7 +171,7 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
 
     result = build_item_repository_source(
         root,
-        source_store=LocalStore(),
+        source_store=FilesystemStore(),
         bindings=_bindings(),
         environment=InstallationEnvironment(
             store=target_store,
@@ -187,7 +187,7 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
 
 def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch):
     repository = parse_item_repository(
-        Location(str(_estate(tmp_path))), store=LocalStore()
+        Location(str(_estate(tmp_path))), store=FilesystemStore()
     )
     unknown = ItemBindings(
         (
@@ -205,10 +205,10 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
     with pytest.raises(BuildError, match="absent from the repository"):
         build_item_repository_source(
             Location(str(_estate(tmp_path))),
-            source_store=LocalStore(),
+            source_store=FilesystemStore(),
             bindings=unknown,
             environment=InstallationEnvironment(
-                store=LocalStore(), resolver=None, executors=_executors()
+                store=FilesystemStore(), resolver=None, executors=_executors()
             ),
             control_lakehouse=_control(),
         )
@@ -254,7 +254,7 @@ def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
     resolver = LocalResolver(workspace)
-    store = LocalStore()
+    store = FilesystemStore()
     target = _bindings().entries[0].to_bound_target()
     files = resolver.files_root(ItemRef("Raw_Dev"))
     tables = resolver.tables_root(ItemRef("Raw_Dev"))
@@ -285,7 +285,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     archive = Location(str(tmp_path / "records" / "record.weaver.zip"))
     expected_files = {
         entry.location.value
-        for entry in LocalStore().list(root, recursive=True)
+        for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
     result = build_uploaded_item_repository(
@@ -309,7 +309,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
 
 def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
     root = Location(str(_estate(tmp_path)))
-    store = LocalStore()
+    store = FilesystemStore()
     repository = parse_item_repository(root, store=store)
     bundle = generate_item_build_bundle(
         repository,
@@ -340,7 +340,7 @@ def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
 
 def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path):
     root = Location(str(_estate(tmp_path)))
-    store = LocalStore()
+    store = FilesystemStore()
     repository = parse_item_repository(root, store=store)
     bundle = generate_item_build_bundle(
         repository,
@@ -375,7 +375,7 @@ def test_archive_rejects_traversal_before_extracting(tmp_path):
         zipped.writestr("../outside.txt", b"no")
 
     with pytest.raises(BuildError, match="unsafe path"):
-        with materialise_bundle_archive(Location(str(archive)), store=LocalStore()):
+        with materialise_bundle_archive(Location(str(archive)), store=FilesystemStore()):
             pass
     assert not (tmp_path / "outside.txt").exists()
 

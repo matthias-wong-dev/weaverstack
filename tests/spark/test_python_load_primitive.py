@@ -105,8 +105,6 @@ File key: "*.csv"
 
 Incremental: false
 """
-from pathlib import Path
-
 from weaver import Folder
 
 
@@ -114,11 +112,11 @@ class Sales__Export(Folder):
     files = {}
 
     def read(self):
-        staging = Path(self.staging_folder())
-        staging.mkdir(parents=True, exist_ok=True)
-        for name, text in self.files.items():
-            (staging / name).write_text(text, encoding="utf-8")
-        return str(staging), []
+        with self.staging_folder() as staging:
+            for name, text in self.files.items():
+                (staging.path / name).write_text(text, encoding="utf-8")
+
+        return staging, []
 '''
 
 
@@ -867,7 +865,7 @@ def test_a_non_incremental_folder_may_not_name_explicit_deletes(
 
     path = deployed / "Sales__Export.py"
     path.write_text(
-        EXPORT_MODULE.replace("return str(staging), []", "return str(staging), ['a.csv']"),
+        EXPORT_MODULE.replace("return staging, []", "return staging, ['a.csv']"),
         encoding="utf-8",
     )
     module = importlib.reload(importlib.import_module("Sales__Export"))
@@ -884,7 +882,7 @@ def test_a_delete_that_escapes_the_folder_is_refused(spark, lakehouse, export, d
     path = deployed / "Sales__Export.py"
     path.write_text(
         EXPORT_MODULE.replace("Incremental: false", "Incremental: true").replace(
-            "return str(staging), []", "return str(staging), ['../../escape.csv']"
+            "return staging, []", "return staging, ['../../escape.csv']"
         ),
         encoding="utf-8",
     )
@@ -897,7 +895,12 @@ def test_a_delete_that_escapes_the_folder_is_refused(spark, lakehouse, export, d
 def test_a_folder_that_returns_someone_elses_directory_is_refused(
     spark, lakehouse, deployed, tmp_path
 ):
-    """Weaver publishes the tree it issued and validated, not one it was handed."""
+    """Weaver publishes the tree it issued and validated, not one it was handed.
+
+    Identity, not equality: what makes the returned object publishable is that
+    it came from the call that emptied the directory, and a value naming the
+    same place proves nothing about that.
+    """
 
     import importlib
 
@@ -906,11 +909,11 @@ def test_a_folder_that_returns_someone_elses_directory_is_refused(
     elsewhere.mkdir()
     path.write_text(
         EXPORT_MODULE.replace(
-            "return str(staging), []", f"return {str(elsewhere)!r}, []"
-        ),
+            "return staging, []", f"return Path({str(elsewhere)!r}), []"
+        ).replace("from weaver import Folder", "from pathlib import Path\n\nfrom weaver import Folder"),
         encoding="utf-8",
     )
     module = importlib.reload(importlib.import_module("Sales__Export"))
 
-    with pytest.raises(LoadError, match="not the staging folder Weaver issued"):
+    with pytest.raises(LoadError, match="must return the StagingFolder"):
         _load_folder(module.Sales__Export, spark, lakehouse, {})

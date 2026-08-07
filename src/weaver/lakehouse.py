@@ -34,6 +34,7 @@ every resolved Lakehouse, attached or not, which is why it is the only one here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .errors import LoadError
@@ -123,30 +124,36 @@ class Lakehouse:
 
         return _files_root(self.name, self.spark_root)
 
-    def folder_path(self, schema: str, name: str) -> str:
-        """Where one folder object's files live, as *Spark* addresses them.
+    def folder_path(self, schema: str, name: str) -> Path:
+        """Where one folder object's files live, as *Python* addresses them.
 
-        The Spark root, because this is what one object hands another. A table
-        reading a folder's files does it with ``spark.read``, and Spark wants the
-        ``abfss://`` form — given a mount path it resolves it against its own
-        default filesystem, which is OneLake, and asks for a path that does not
-        exist.
+        A real :class:`pathlib.Path`, because a Folder's authored code is
+        ordinary Python — it globs, opens and writes files — and handing it a
+        string would make every author's first line ``Path(...)``. Locally this
+        is the directory itself; in OneLake it is Weaver's own mount of the
+        resolved root, so a write through it *is* a write to OneLake.
+
+        Session-scoped, like :meth:`files_root`, and for the same reason: Fabric
+        spells a mount ``/synfs/notebook/<session id>/…``, which is meaningless
+        in the next session. Never store one.
+        """
+
+        return Path(_join(self.files_root(), schema, name))
+
+    def folder_spark_path(self, schema: str, name: str) -> str:
+        """The same folder, as *Spark* addresses it.
+
+        The Spark root, because this is what one object hands another when the
+        reader is an engine rather than Python. A table reading a folder's files
+        does it with ``spark.read``, and Spark wants the ``abfss://`` form —
+        given a mount path it resolves it against its own default filesystem,
+        which is OneLake, and asks for a path that does not exist.
+
+        Two spellings of one location, because two things read them and neither
+        understands the other's.
         """
 
         return self.location.folder_path(schema, name)
-
-    def folder_local_path(self, schema: str, name: str) -> str:
-        """The same folder, as *Python* addresses it.
-
-        For code that opens files rather than reading them through Spark: a
-        Folder's own ``read()`` writing into staging, and the reconciliation that
-        publishes what it wrote.
-
-        Two spellings of one location, because two things read them and neither
-        understands the other's. Session-scoped, like :meth:`files_root`.
-        """
-
-        return _join(self.files_root(), schema, name)
 
     def qualify(self, schema: str, name: str) -> str:
         """One object, as a statement in this session must name it."""
@@ -235,6 +242,21 @@ _MOUNTS: dict[str, str] = {}
 #: one — a single fixed point would let the second quietly address the first.
 _MOUNT_POINT = "/weaver/{item}"
 
+#: Mount configuration, and the whole of it. ``fileCacheTimeout=0`` is the repair
+#: for the one way a mount can lie: Weaver reaches the same Files area two ways —
+#: ``abfss://`` for storage work and this mount for authored Python — so anything
+#: that changes OneLake *outside* the mount must be visible through it
+#: immediately. A wipe over DFS, another session's write, a shortcut created by
+#: REST. With caching on, it is not, and the symptom is a directory listing that
+#: still holds entries the storage no longer has: ``shutil.rmtree`` deletes what
+#: it was told about and then fails to remove the directory, as ``ENOTEMPTY``.
+#:
+#: Invalidating the cache afterwards is not an alternative. Dropping Weaver's own
+#: record of the mount leaves the host's mount in place, and asking for the mount
+#: path again recovers the same stale view — so the only repair that works is not
+#: to cache in the first place.
+MOUNT_OPTIONS = {"fileCacheTimeout": 0}
+
 
 def _files_root(name: str, spark_root: str) -> str:
     """``Files`` as a path ``open()`` understands, for whichever host this is."""
@@ -274,7 +296,7 @@ def _mounted(name: str, spark_root: str) -> str:
 
     point = _MOUNT_POINT.format(item=_item_of(spark_root))
     try:
-        utils.fs.mount(spark_root, point)
+        utils.fs.mount(spark_root, point, MOUNT_OPTIONS)
     except Exception:
         # Already mounted, by us in a path that did not reach the cache or by the
         # host itself. Mounting twice is an error, so the useful move is to ask

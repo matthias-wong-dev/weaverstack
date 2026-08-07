@@ -701,8 +701,7 @@ result = build_uploaded_item_repository(
             </details>
             <details>
               <summary>Can I use Weaver from my desktop?</summary>
-              <div class="answer"><p>Yes. The CLI installs Weaver, initialises the control plane, validates and pushes the repository, and invokes builds for selected physical targets.</p><pre>weaver install --workspace-config workspace.yml
-weaver initialise --workspace-config workspace.yml --exists-ok
+              <div class="answer"><p>Yes. The CLI installs Weaver, validates and pushes the repository, and invokes builds for selected physical targets. There is no separate control-plane step: an ordinary build creates and maintains Weaver's own catalogue.</p><pre>weaver install --workspace-config workspace.yml
 weaver push ./estate --workspace-config workspace.yml
 weaver build --workspace-config workspace.yml \
   --bind Lakehouses/Sales_Dev \

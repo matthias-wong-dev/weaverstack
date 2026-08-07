@@ -20,44 +20,28 @@ generate itself. It asks for a payload and carries what it gets, which is why
 replacing what this module returns moves exactly the artefacts whose bytes
 changed and nothing else.
 
-**Neither generated load is finished here**, and that is the shape both share
-rather than a limitation of either. What a load writes are the *physical*
-target's columns, and they are not knowable while the target is still a
-declaration: a Warehouse table and a Spark SQL table may each leave their shape
-to be inferred at build. So generation produces something destination-free and
-incomplete, and installation finishes it against the table that now exists:
-
-.. code-block:: text
-
-    create_load()               a destination-free instruction
-      → the target DDL is built
-      → the installer reads the physical target's columns
-      → the installer renders the executable definition
-      → destination tokens are resolved
-      → the runnable artefact is installed
-
-The two differ only in where that rendering happens. A Warehouse load is an
-*installer script*: it carries the assembly with it and runs it server-side,
-reading ``sys.columns`` and creating the procedure in one execution. A Spark SQL
-load is an *instruction*, because Spark has no way to assemble a program from
-inside one — so the ``load_file`` executor reads the built table's schema,
-renders the program and writes it down.
-
 Which sources own a load, and in what form:
 
 .. code-block:: text
 
     Warehouse table (T-SQL)     an installer script for [_].[Load S.N]
-    Lakehouse table (Spark SQL) an instruction the installer renders
+    Lakehouse table (Spark SQL) a deployed SparkSqlTable module
     Lakehouse table (Python)    the authored module itself
     Folder (Python)             the authored module itself
 
-The two Python forms are not generated at all, and that is the honest answer
-rather than a gap: the author's module *is* the executable artefact, so it is
-deployed verbatim and signed by its own bytes. It also needs no second phase —
-a Python load reads its target's columns when it runs, which is the same
-question answered at the same place. A view owns no load; its definition is its
-query, so there is nothing to run.
+**Only the Warehouse load is finished by its installer.** What a T-SQL load
+writes are the *physical* target's columns, and they are not knowable while the
+target is still a declaration, so generation produces a destination-free
+installer script that assembles the procedure server-side from ``sys.columns``.
+
+Every Lakehouse load is a Python module, generated or authored, and none of them
+needs a second phase: a module reads its target's columns when it runs, which is
+the same question answered at the same place. A Spark SQL table is *compiled*
+into such a module (:mod:`weaver.declaration.spark_sql_module`) rather than into
+a load program, so the whole Delta load lifecycle stays in
+:func:`weaver.runtime.table_load.load_table` instead of being emitted twice in
+two languages. A view owns no load; its definition is its query, so there is
+nothing to run.
 """
 
 from __future__ import annotations
@@ -81,8 +65,12 @@ if TYPE_CHECKING:
 #: selection, correctly, rebuilds nothing. The estate then keeps running the
 #: previous generation's artefacts, which is the failure this exists to prevent
 #: and which cost a Fabric round trip to notice.
-TSQL_LOAD_VERSION = 5
-SPARK_LOAD_VERSION = 7
+#: 6 baked the ``Static`` gate into the generated procedure, so every
+#: previously installed load procedure is stale.
+TSQL_LOAD_VERSION = 6
+#: 8 replaced the generated SQL load program with a deployed ``SparkSqlTable``
+#: module, so every previously installed Spark load artefact is stale.
+SPARK_LOAD_VERSION = 8
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
 #: Warehouse load is a stored procedure; a Lakehouse load is a file in the
@@ -91,7 +79,8 @@ PROCEDURE_OBJECT = "stored_procedure"
 FILE_OBJECT = "file"
 
 TSQL_LOAD_EXTENSION = ".sql"
-SPARK_LOAD_EXTENSION = ".spark.sql"
+#: A Spark SQL table's load is a deployed Python module, so it is spelled as one.
+SPARK_LOAD_EXTENSION = ".py"
 
 
 @dataclass(frozen=True)
@@ -163,14 +152,19 @@ def _tsql_load(document: "SourceDocument") -> GeneratedLoad:
 
 
 def _spark_load(document: "SourceDocument") -> GeneratedLoad:
-    from .spark_load import generate_spark_load_instruction
+    from .metadata import extract_sql_metadata_and_body
+    from .spark_sql_module import addressed, render_spark_sql_module
 
-    # An instruction, not the program: the columns a load writes are the built
-    # table's, and a Spark SQL table may infer its schema at build. The
-    # installer reads them and renders the file into place — the same two-phase
-    # shape the Warehouse load uses with sys.columns.
-    content = generate_spark_load_instruction(
-        document.document, document.sql_body or ""
+    # The finished module, not an instruction. Nothing here needs the built
+    # table: the primitive reads its own contract from the docstring and its own
+    # columns from the target when it runs, which is the same question answered
+    # at the same place a Python-authored table answers it.
+    header, _body = extract_sql_metadata_and_body(document.text)
+    content = render_spark_sql_module(
+        document.document,
+        header=header,
+        body=addressed((document.sql_body or "").strip()),
+        source_name=document.relative_path.rpartition("/")[2],
     )
     return GeneratedLoad(
         object_type=FILE_OBJECT,

@@ -13,7 +13,7 @@ from dataclasses import replace
 import pytest
 
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
@@ -96,7 +96,7 @@ def _bundle(tmp_path):
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
 
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
     write_bundle(location, plan=plan, payloads=payloads, store=store)
     return location, store
@@ -208,7 +208,7 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
-    store = LocalStore()
+    store = FilesystemStore()
     location = Location(str(tmp_path / "refresh-bundle"))
     bundle = write_bundle(
         location, plan=plan, payloads={}, store=store

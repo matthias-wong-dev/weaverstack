@@ -21,7 +21,7 @@ class DWG__Customer(Table):
     def read(self):
         # Joined as text: `path()` is the `abfss://` URL Spark reads, and
         # `pathlib` cannot parse one — it collapses the scheme's slashes.
-        source = f"{DWG__Seed(self).path()}/customers.csv"
+        source = f"{DWG__Seed(self).spark_path()}/customers.csv"
         raw = self.spark.read.csv(source, header=True, inferSchema=False)
         shaped = raw.selectExpr(
             "cast(CustomerId as int) as CustomerId",

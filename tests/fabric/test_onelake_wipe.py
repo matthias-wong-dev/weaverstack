@@ -24,6 +24,11 @@ def test_a_wipe_clears_both_onelake_areas(
     it runs from here against the real workspace. Only the seed needs a session —
     a Delta table has to be made by Spark — and that body imports nothing, so
     this no longer waits on a wheel.
+
+    "Clears" is not "empties": a schema-enabled Lakehouse is created holding
+    `dbo`, Fabric owns it, and a wipe empties it rather than removing it — see
+    :data:`weaver.physical_wipe._KEPT_SCHEMAS`. So the claim below is that what
+    the seed put there is gone and the default schema is still standing.
     """
 
     from weaver.targets import ItemRef
@@ -50,8 +55,10 @@ def test_a_wipe_clears_both_onelake_areas(
         "Tables": [e.name for e in store.list(resolver.tables_root(target))],
     }
     # The seed has to have landed, or an empty wipe would pass for a working one.
+    # `dbo` is under Tables whether or not it landed, so this asks for the schema
+    # the seed actually made rather than for mere non-emptiness.
     assert seeded["Files"], seeded
-    assert seeded["Tables"], seeded
+    assert "Sales" in seeded["Tables"], seeded
 
     reports = wipe_lakehouse(target, fabric_workspace, store=store)
 
@@ -60,4 +67,7 @@ def test_a_wipe_clears_both_onelake_areas(
         "folder",
     ]
     assert [e.name for e in store.list(resolver.files_root(target))] == []
-    assert [e.name for e in store.list(resolver.tables_root(target))] == []
+    # `Sales` is gone; `dbo` is kept, deliberately and by the same judgement
+    # prune makes. A wipe that took it away would leave the Lakehouse unable to
+    # resolve a schema it is supposed to have, which is damage rather than a wipe.
+    assert [e.name for e in store.list(resolver.tables_root(target))] == ["dbo"]

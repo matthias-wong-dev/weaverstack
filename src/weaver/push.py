@@ -12,7 +12,7 @@ from .declaration.repository import (
 )
 from .errors import CommandError
 from .locations import Location
-from .store import LocalStore, Store
+from .store import FilesystemStore, Store
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ def push_item_repository(
 ) -> PushResult:
     """Validate ``source`` completely, then replace ``destination`` with it."""
 
-    source_store = source_store or LocalStore()
+    source_store = source_store or FilesystemStore()
     repository = parse_item_repository(source, store=source_store)
     if source_store is destination_store and source == destination:
         raise CommandError("push source and destination are the same repository")

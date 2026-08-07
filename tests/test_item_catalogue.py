@@ -314,14 +314,116 @@ def test_a_registry_without_the_epoch_column_is_refused_by_name():
         read_catalogue_state(_Shaped({"Registry": older}), ())
 
 
+def _shaped(*names: str):
+    """A catalogue holding exactly these tables, each with its full shape."""
+
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+
+    by_name = {table.name: table for table in CATALOGUE_TABLES}
+    return _Shaped({name: list(by_name[name].physical_columns) for name in names})
+
+
+def _whole():
+    """Every catalogue table present — the only complete state a build accepts."""
+
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+
+    return _shaped(*(table.name for table in CATALOGUE_TABLES))
+
+
 def test_a_registry_with_the_epoch_column_is_accepted():
     from weaver.catalogue.state import read_catalogue_state
+    from weaver.catalogue.tables import CATALOGUE_TABLES
 
-    state = read_catalogue_state(
-        _Shaped({"Registry": list(REGISTRY.physical_columns)}), ()
-    )
+    state = read_catalogue_state(_whole(), ())
 
-    # A catalogue holding only some of its tables is read, not rejected —
-    # `present_tables` is what says which, and it is what reconciliation then
-    # uses to decide whether a claim can be raised at all.
-    assert state.present_tables == frozenset({"Registry"})
+    assert state.present_tables == {table.name for table in CATALOGUE_TABLES}
+
+
+# --- which absences are the first run, and which are damage -------------------
+#
+# One rule, and the thing that decides it is whether anything else is there.
+# The tempting exception — a *dictionary* table, because the built-in item will
+# recreate it — is the case these tests exist to refuse. Recreating the table is
+# not restoring its contents, and an ordinary build is scoped to the items it
+# was pointed at, so it can only ever write those items' rows back.
+
+
+def test_a_catalogue_with_no_tables_at_all_is_the_bootstrap_state():
+    """The first build creates the catalogue, so nothing there is not a fault."""
+
+    from weaver.catalogue.state import read_catalogue_state
+
+    state = read_catalogue_state(_Shaped({}), ())
+
+    assert state.present_tables == frozenset()
+    assert not state.rows
+
+
+def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
+    """The physical table would come back; another item's rows would not.
+
+    On an estate holding `Sales` and `Finance`, a build scoped to `Sales` would
+    recreate the table and write Sales' rows — leaving Finance with none, while
+    Finance's Registry and Installation rows survived to claim objects the
+    dictionaries no longer describe. Nothing later notices: the next build finds
+    a table that exists and rows that match whatever it was scoped to.
+    """
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+
+    all_but_one = [
+        table.name for table in CATALOGUE_TABLES if table.name != "TableDictionary"
+    ]
+
+    with pytest.raises(BuildError, match="catalogue is incomplete"):
+        read_catalogue_state(_shaped(*all_but_one), ())
+
+
+def test_a_missing_registry_beside_a_populated_catalogue_is_refused():
+    """It cannot be re-derived at all, so it is the plainest case of the rule."""
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="catalogue is incomplete"):
+        read_catalogue_state(_shaped("Installation", "TableDictionary"), ())
+
+
+def test_a_missing_installation_beside_a_populated_catalogue_is_refused():
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="catalogue is incomplete"):
+        read_catalogue_state(_shaped("Registry", "TableDictionary"), ())
+
+
+def test_the_incomplete_catalogue_error_names_what_is_gone_and_what_survived():
+    """A reader has to tell damage from a first run, and know where to look."""
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError) as raised:
+        read_catalogue_state(_shaped("Registry", "Alias", "Dependency"), ())
+
+    message = str(raised.value)
+    assert "Installation" in message and "TableDictionary" in message
+    assert "Alias" in message and "Dependency" in message
+
+
+def test_the_incomplete_catalogue_error_sends_the_reader_to_a_repair():
+    """Not to a rebuild: a scoped build is the thing that cannot fix this."""
+
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError) as raised:
+        read_catalogue_state(_shaped("Registry", "Installation"), ())
+
+    message = str(raised.value)
+    assert "repair" in message
+    assert "scoped build" in message

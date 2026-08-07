@@ -119,3 +119,54 @@ def claim_rules_for_document_kind(kind: str) -> tuple[CatalogueClaimRule, ...]:
     except KeyError as exc:
         raise BuildError(f"unsupported Weaver document kind {kind!r}") from exc
     return claim_rules_for_object_type(object_type)
+
+
+def without_claims(catalogue, claims):
+    """The catalogue as the build's claim-deletion stage will leave it.
+
+    A build removes the catalogue claims of everything it is about to drop
+    *before* it does any physical work, so a row can never stay certified while
+    the object behind it is being replaced. The catalogue the planner read still
+    contains those rows, though — it was read before any of this was decided.
+
+    That matters now that publication is a difference. An object dropped and
+    rebuilt whose projection did not change would compare equal against the
+    catalogue as read, produce no merge, and stay deleted: the before-stage
+    removed it and nothing put it back. Comparing against the state the deletes
+    will actually produce is what makes "unchanged" mean unchanged.
+
+    It is a narrowing, never a widening — rows are only ever removed here — so
+    the worst a mistake in it can do is publish a row that did not need
+    publishing.
+    """
+
+    from types import MappingProxyType
+
+    from .state import Catalogue
+
+    by_item: dict = {}
+    for claim in claims:
+        by_item.setdefault(claim.identity.item, []).append(claim)
+    if not by_item:
+        return catalogue
+
+    rows = {}
+    for item, tables in catalogue.rows.items():
+        item_claims = by_item.get(item)
+        if not item_claims:
+            rows[item] = tables
+            continue
+        kept = {}
+        for name, table_rows in tables.items():
+            owners = [claim for claim in item_claims if claim.rule.table.name == name]
+            kept[name] = tuple(
+                row
+                for row in table_rows
+                if not any(
+                    claim.rule.owns(row, claim.identity) for claim in owners
+                )
+            )
+        rows[item] = MappingProxyType(kept)
+    return Catalogue(
+        rows=MappingProxyType(rows), present_tables=catalogue.present_tables
+    )

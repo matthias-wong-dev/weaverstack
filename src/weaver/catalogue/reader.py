@@ -35,7 +35,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .render import InstallationScope, Row, identifier, qualified_name
+from .render import (
+    InstallationScope,
+    InstallationScopes,
+    Row,
+    identifier,
+    qualified_name,
+)
 from .tables import CatalogueTable
 
 #: Spark's error class for a table or view that is not registered. A missing
@@ -68,7 +74,7 @@ def read_table(
     catalogue: Any,
     table: CatalogueTable,
     *,
-    scope: InstallationScope | None = None,
+    scope: InstallationScope | InstallationScopes | None = None,
 ) -> tuple[Row, ...]:
     """Every row of one catalogue table, projected through its expected schema.
 
@@ -150,3 +156,35 @@ def read_installation(
         table.name: read_table(catalogue, table, scope=scope)
         for table in (tables if tables is not None else CATALOGUE_TABLES)
     }
+
+
+def read_installations(
+    catalogue: Any, *, scopes: InstallationScopes, tables=None
+) -> dict[str, tuple[Row, ...]]:
+    """Every catalogue table, read **once** for every installation at issue.
+
+    The read a build wants. A build is pointed at several items and they share
+    the same physical catalogue tables, so reading per item would cost
+
+    .. code-block:: text
+
+        catalogue tables × bound items
+
+    round trips to answer what one predicate per table already answers. More
+    items make the predicate longer and the result larger; they do not make it
+    another read. That is the whole difference, and it is why this returns rows
+    for all scopes together and leaves the grouping to Python — see
+    :func:`weaver.catalogue.state.read_catalogue_state`.
+
+    Still scoped, and returns nothing outside ``scopes``: a build has no more
+    business seeing an unrelated installation's rows than it had before.
+    """
+
+    from .tables import CATALOGUE_TABLES
+
+    wanted = tables if tables is not None else CATALOGUE_TABLES
+    if not scopes:
+        # Nothing was asked for. Reading with no predicate would return the whole
+        # catalogue, so the answer is stated rather than queried.
+        return {table.name: () for table in wanted}
+    return {table.name: read_table(catalogue, table, scope=scopes) for table in wanted}

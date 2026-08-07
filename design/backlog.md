@@ -3,12 +3,14 @@
 ## Core build and execution
 
 1. **Implement basic ETL for a single Weaver item**
-   - The lifecycle is in place: load artefacts are claimed, registered, signed,
-     built, pruned and deployed to `Files/_/Load`, with a generated procedure per
-     Warehouse table. What remains is the generated bodies themselves, and
-     running them.
-   - `SPARK_ETL_TEMPLATE_VERSION` and `TSQL_ETL_TEMPLATE_VERSION` exist so
-     replacing a proxy body rebuilds exactly what it renders.
+   - Done. Load artefacts are claimed, registered, signed, built, pruned and
+     deployed to `Files/_/Load`; a Warehouse table gets a generated procedure and
+     every Lakehouse table gets a deployed Python module. A Spark-SQL-authored
+     table is *compiled* into a `SparkSqlTable` module rather than into a load
+     program of its own, so the Delta load lifecycle exists once instead of once
+     per authoring language.
+   - `TSQL_LOAD_VERSION` and `SPARK_LOAD_VERSION` salt the artefact signatures,
+     so replacing a generated body rebuilds exactly what it renders.
 2. **Implement ETL across Weaver items using catalogue dependencies**
    - Done: `weaver.load([...])` reads the installed catalogue, reverses the
      build's physical bindings, and executes the physical load DAG — including
@@ -18,44 +20,22 @@
 
 ### Follow-ups from load orchestration
 
-- **A deployed module's imports must be absolute, and nothing says so.** The
-  deployed tree flattens the item root to the runtime root, so a top-level
-  module has no parent package and `from .Files.X import X` cannot resolve —
-  while the repository parser accepts it happily. A build therefore succeeds and
-  the load fails, which is the wrong end to find out. Either the parser refuses
-  a relative import, or the deployed tree gains the package structure to honour
-  one. Two shipped fixtures had this and had never been executed.
-- **Two runtime trees, one module name.** `_import_deployed` puts the runtime
-  root first on `sys.path` and loads by exact file, so the module *it*
-  dispatches is unambiguous — but a module that module imports resolves through
-  `sys.modules`, which a second Lakehouse's tree could already have populated
-  under the same name. One estate per process is the normal case and this is not
-  it.
-- **A mount outlives what is done to OneLake behind it.** Weaver reaches a
-  Lakehouse's Files area two ways — `abfss://` over DFS for storage work, and a
-  `synfs` mount for authored code that calls `open()` — and `weaver.lakehouse`
-  caches the mount in `_MOUNTS` for the life of the session, deliberately,
-  because Fabric refuses a second mount of the same root. So anything that
-  changes OneLake *outside* the mount is not necessarily visible through it: a
-  wipe over DFS, another session's write, a shortcut created by REST.
-
-  Reproducibly seen as `OSError: [Errno 39] Directory not empty` from
-  `new_staging_folder`, which resets a folder's staging with `shutil.rmtree` then
-  `mkdir(exist_ok=False)`. Correct on a POSIX filesystem; over a stale mount the
-  `rmdir` at the end of `rmtree` meets entries that are already gone on DFS.
-  Only appears when the same folder object is loaded twice into one Lakehouse in
-  one session with a DFS wipe between — the Fabric suite, where the Livy session
-  spans every module.
-
-  Two candidate repairs and they are not the same fix: make the staging reset
-  tolerant (empty rather than replace, and retry), or give the mount a way to be
-  invalidated when Weaver itself changes OneLake behind it. The second is the
-  real one, and it is not only a test concern — the same window exists for any
-  session that wipes and then loads.
-
-  Not reproducible locally, where storage *is* a filesystem, there is no mount,
-  and deletes are immediate. The folder primitive itself is proven
-  (`test_developer_load_primitive`); this is about how staging is issued.
+- **Done — two runtime trees, one module name.** Deployed modules now import
+  under a context-qualified package (`_weaver_runtime.<item>__<target>.lib.dates`),
+  so the context is part of the `sys.modules` key rather than only of the search.
+  Two Lakehouses each deploying a `lib/dates.py` get their own, concurrently.
+  See `weaver.runtime.python_context`. A side effect worth knowing: a deployed
+  module is now a submodule of its context package, so the relative imports the
+  parser used to accept and the load used to reject (`from .Files.X import X`)
+  resolve correctly.
+- **Done — a mount outliving what is done to OneLake behind it.** Weaver mounts
+  with `fileCacheTimeout=0`, which is the real repair rather than invalidation:
+  dropping `_MOUNTS[spark_root]` leaves the host mount in place and
+  `getMountPath()` recovers the same stale view. The `ENOTEMPTY` from
+  `new_staging_folder` is gone, and staging reset and cleanup additionally carry
+  a bounded retry for transient remote-filesystem behaviour. Proved by
+  `tests/fabric/test_onelake_mount_contract.py`, which stages through the mount,
+  wipes over DFS, and resets through the same mount in the same Livy session.
 - **A build does not converge from "catalogue wiped, estate intact".** Losing the
   catalogue while the physical objects survive leaves every declared object
   looking *new*, so the planner emits a create for something already there and
@@ -66,8 +46,15 @@
   that an object the catalogue does not certify but the inventory *does* see
   should be rebuilt rather than created, which is the same information prune
   already reads. Found by wiping the control plane in the Fabric harness.
+- **`Has load artefact: false` for internal objects.** `_.Log` and `_.Load` are
+  declared folders that nothing loads, and they are excluded from orchestration
+  today only because the built-in item and generated documents produce no load
+  artefacts at all. Saying so in the declaration would make the exclusion a
+  property of the object rather than a consequence of where it came from.
 - **Parallel execution.** The executor asks the graph what is ready and runs it,
-  so the shape is there; only the sequential loop would change.
+  so the shape is there; only the sequential loop would change. Runtime
+  isolation was built for it — different contexts are independently importable
+  at the same time, and that is asserted under threads.
 - **Object-level load selection**, retries, bookmarks, resumable runs and
   cancellation — all deliberately out of scope for this phase.
 

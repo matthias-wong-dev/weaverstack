@@ -27,7 +27,7 @@ ENVIRONMENT_TELLS = {
     "FabricWorkspace",
     "LocalWorkspace",
     "FabricStore",
-    "LocalStore",
+    "FilesystemStore",
     "OneLakeDfsClient",
     "FabricResolver",
     "LocalResolver",

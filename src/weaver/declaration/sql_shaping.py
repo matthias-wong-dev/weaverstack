@@ -8,6 +8,13 @@ work over a flattened, offset-carrying token stream rather than by string
 munging, so nested queries, CTEs, set operations and existing ``WHERE`` clauses
 are handled correctly.
 
+**Everything here is T-SQL's.** The keyword sets, the ``GO`` boundary, the
+``SELECT INTO`` placement and the shape-only guard are all this dialect's, and
+they stay here for that reason. What is *not* dialect-specific — flattening text
+into offset-carrying tokens, and finding where one statement ends — lives in
+:mod:`weaver.sql_statements`, because Spark SQL needs the same answer and a
+second splitter would be a second set of bugs about string literals.
+
 Ported from the proven ``weaver_runtime.dbrep.sql.wrangle`` reference
 implementation; only the dependency-finding and CTAS helpers (which weaverstack
 covers elsewhere) were dropped. :func:`render_sql_template` fills the T-SQL DDL
@@ -21,8 +28,10 @@ from pathlib import Path
 import re
 from string import Template
 
-import sqlparse
 from sqlparse import tokens as T
+
+from ..sql_statements import SqlToken as _FlatToken
+from ..sql_statements import flatten_with_offsets as _flatten_with_offsets
 
 
 SQL_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -63,16 +72,6 @@ _STATEMENT_START_KEYWORDS = {
     "WAITFOR",
     "WHILE",
 }
-
-
-@dataclass(frozen=True)
-class _FlatToken:
-    value: str
-    normalized: str
-    ttype: object
-    start: int
-    end: int
-    depth: int
 
 
 @dataclass(frozen=True)
@@ -403,37 +402,6 @@ def _replacement_for_select(
     )
 
 
-def _flatten_with_offsets(sql_text: str) -> list[_FlatToken]:
-    flat: list[_FlatToken] = []
-    offset = 0
-    depth = 0
-
-    for statement in sqlparse.parse(sql_text):
-        for token in statement.flatten():
-            value = token.value
-            token_depth = depth
-            if value == ")":
-                depth = max(0, depth - 1)
-                token_depth = depth
-
-            flat.append(
-                _FlatToken(
-                    value=value,
-                    normalized=token.normalized.upper(),
-                    ttype=token.ttype,
-                    start=offset,
-                    end=offset + len(value),
-                    depth=token_depth,
-                )
-            )
-            offset += len(value)
-
-            if value == "(":
-                depth += 1
-
-    return flat
-
-
 def _find_scope_end(tokens: list[_FlatToken], select_index: int) -> int:
     select_token = tokens[select_index]
 
@@ -564,28 +532,3 @@ def split_trailing_query(sql_text: str) -> tuple[str, str]:
     preamble = sql_text[: span.start].strip().rstrip(";").strip()
     query = sql_text[span.start : span.end].strip().rstrip(";").strip()
     return preamble, query
-
-
-def split_statements(sql_text: str) -> tuple[str, ...]:
-    """One body's top-level statements, split on semicolons that separate them.
-
-    Depth-aware, so a semicolon inside parentheses or a string literal does not
-    cut a statement in half — which is exactly why a caller must not do this
-    with ``str.split(';')``.
-    """
-
-    text = sql_text.strip()
-    if not text:
-        return ()
-    statements: list[str] = []
-    start = 0
-    for token in _flatten_with_offsets(text):
-        if token.depth == 0 and token.value.strip() == ";":
-            piece = text[start : token.start].strip()
-            if piece:
-                statements.append(piece)
-            start = token.end
-    tail = text[start:].strip()
-    if tail:
-        statements.append(tail)
-    return tuple(statements)

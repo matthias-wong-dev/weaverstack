@@ -1,29 +1,23 @@
 """Writing and removing one file of a Lakehouse item's deployed runtime tree.
 
-The load layer's file half — and for one kind of file, its second phase.
+The load layer's file half, and it is deliberately one phase. A ``write_file``
+action carries the exact bytes to put down: an authored Python module travels
+verbatim, and a Spark SQL table's *generated* module is complete when it is
+generated — it needs no built table, because a module reads its target's columns
+when it runs rather than when it is written.
 
-A ``write_file`` action usually carries the exact bytes to put down: a deployed
-Python module is authored source and travels verbatim. A **generated Spark SQL
-load does not**. Its payload is an instruction, and finishing it is this
-executor's job:
+One thing still happens on the way down. A generated module carries its object
+references as ``{{object:…}}`` tokens, because a bundle must produce the same
+bytes wherever it is built; the installed file cannot, because it has to be
+runnable by whoever opens it. So the tokens are resolved here, which is the
+first moment the destination is known.
 
 .. code-block:: text
 
-    read the built target's schema, through Spark
-    take its physical business columns
-    render the executable program from the instruction
-    resolve the destination tokens
-    write the file
+    authored module     written exactly as it was authored
+    generated module    object tokens resolved, then written
 
-That two-phase shape is the same one the Warehouse load uses, which ships a
-script that reads ``sys.columns`` and assembles the procedure server-side. The
-reason is the same too: what a load writes are the *physical* target's columns,
-and a Spark SQL table may leave its schema to be inferred at build — so the
-program cannot be finished while the table is still a declaration. Writing a
-file up front would be writing down a guess.
-
-A consequence worth stating: installing a generated load therefore **needs a
-Spark session**, where deploying a module needs only the store.
+Installing a load therefore needs only the store. Nothing here needs Spark.
 
 A ``delete_file`` action removes a file whose source has stopped claiming it.
 
@@ -44,29 +38,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...declaration.load import TSQL_LOAD_EXTENSION as SQL_EXTENSION
-from ...declaration.spark_load import GENERATED_LOAD_MARKER
-from ...spark import tokens
-
-
-def _generated_load(text: str) -> dict | None:
-    """The instruction this payload carries, or ``None`` if it is not one."""
-
-    import json
-
-    from ...declaration.spark_load import GENERATED_LOAD_INSTRUCTION
-
-    stripped = text.lstrip()
-    if not stripped.startswith("{"):
-        return None
-    try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return payload if payload.get("weaver") == GENERATED_LOAD_INSTRUCTION else None
+from ...declaration.load import SPARK_LOAD_EXTENSION as MODULE_EXTENSION
+from ...declaration.spark_sql_module import GENERATED_MODULE_MARKER
 from ...errors import InstallError
+from ...spark import tokens
 from ...targets import FolderTarget
 from ..models import DELETE_FILE, WRITE_FILE, BuildAction
 from .base import InstallationContext
@@ -108,11 +83,6 @@ class LoadFileExecutor:
     ) -> bytes:
         """Finish a generated load, and address it, on the way down.
 
-        Two steps, not one. An instruction is first *rendered* into a program
-        against the built target's columns (:meth:`_render`); whatever program
-        results then has its object tokens resolved. A payload that is already a
-        program — one written by an older bundle — skips straight to the second.
-
         The bundle stays destination-free, which is what lets one repository
         generate the same bytes everywhere and two bundles be diffed for what
         actually differs. The *installed file* cannot be: it has to be runnable
@@ -121,23 +91,21 @@ class LoadFileExecutor:
 
         Deployed Python is left exactly as authored. A module is source code, not
         a statement, and it addresses its target through the resolved Lakehouse
-        it is constructed with.
+        it is constructed with — so only a *generated* module has anything to
+        resolve.
 
-        **Decided by what the payload is, not by what it is called.** Keying on a
-        ``.spark.sql`` suffix looked right and was wrong: a generated load keeps
-        its *authored* name, ``Sales.OrderSummary.sql``, so the suffix never
-        matched and every installed program shipped with its tokens intact and
-        could not run. A generated Spark program announces itself in its first
-        line, which is a fact about the file rather than about its name.
+        **Decided by what the payload is, not by what it is called.** An authored
+        module and a generated one are both ``.py`` in one tree, so the name
+        cannot tell them apart; a generated module says what it is on its first
+        line, which is a fact about the file. (Keying on a name was tried in the
+        design this replaced, and shipped every installed program with its tokens
+        intact.)
         """
 
-        if not path.endswith(SQL_EXTENSION):
+        if not path.endswith(MODULE_EXTENSION):
             return payload
         text = payload.decode("utf-8")
-        instruction = _generated_load(text)
-        if instruction is not None:
-            text = self._render(instruction, context)
-        elif not text.lstrip().startswith(GENERATED_LOAD_MARKER):
+        if not text.lstrip().startswith(GENERATED_MODULE_MARKER):
             return payload
         destination = context.target.destination
         if destination is None:
@@ -150,42 +118,6 @@ class LoadFileExecutor:
         # catalogue: writing a file needs no Spark session, and asking for one
         # would make installing a load depend on a capability it never uses.
         return tokens.expand(text, destination).encode("utf-8")
-
-    def _render(self, instruction: dict, context: InstallationContext) -> str:
-        """Finish a generated load from the table it will write to.
-
-        The columns are the one thing generation cannot know: a Spark SQL table
-        may leave its schema to be inferred at build, and even a declared one is
-        materialised as the physical table the program has to name. So the
-        bundle carries an instruction and this reads the built table — the same
-        two-phase shape the Warehouse load uses with ``sys.columns``, rather
-        than writing a file from a guess and hoping the guess held.
-        """
-
-        from ...declaration.spark_load import render_installed_program
-        # The module rather than the name. `tests/test_core_boundary.py` matches
-        # raw source text, so pulling in a symbol whose name begins with the
-        # engine's reads to it as the forbidden dependency.
-        from ...runtime import load_contract
-
-        if context.spark is None:
-            raise InstallError(
-                f"a generated load for {instruction['qualified']} must read its "
-                "target's columns, and no Spark session was provided"
-            )
-        target = context.catalogue.expand(instruction["object"])
-        audit = set(load_contract.delta_audit_columns())
-        columns = tuple(
-            field.name
-            for field in context.spark.table(target).schema.fields
-            if field.name not in audit
-        )
-        if not columns:
-            raise InstallError(
-                f"{target} has no loadable columns; build the table before "
-                "installing its load"
-            )
-        return render_installed_program(instruction, columns)
 
     def _location(self, node_id: str, context: InstallationContext):
         """``Lakehouse/Sales/file:_/Load/lib/dates.py`` under this batch's target.

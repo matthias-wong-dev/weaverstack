@@ -48,6 +48,7 @@ pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 #: program from the file the installer wrote.
 BODY = r'''
 import os, sys
+from pathlib import Path
 
 from weaver import lakehouse_for
 
@@ -77,9 +78,22 @@ results["lib"] = sorted(os.listdir(os.path.join(root, "lib", "data")))
 # The folder load, writing ordinary files to OneLake through the mount.
 export = Raw__CustomerCsv(spark, lakehouse=destination)
 results["folder"] = export.load().as_row()
-results["folder_path_is_local"] = not export.local_path().startswith("abfss://")
-results["folder_path_is_spark"] = export.path().startswith("abfss://")
-results["published"] = sorted(os.listdir(export.local_path()))
+# Two spellings of one location, and only one of them is a filesystem path.
+results["folder_path_is_mounted"] = not str(export.path()).startswith("abfss://")
+results["folder_path_is_a_path"] = isinstance(export.path(), Path)
+results["spark_path_is_abfss"] = export.spark_path().startswith("abfss://")
+results["published"] = sorted(p.name for p in export.path().iterdir())
+
+# The SQL-authored table, which is a deployed Python module like every other:
+# `DWG.NamedCustomer.sql` was compiled into `DWG__NamedCustomer.py`, so it
+# imports, constructs and loads exactly as the hand-written ones do.
+from DWG__NamedCustomer import DWG__NamedCustomer
+
+results["sql_authored_module"] = DWG__NamedCustomer.__name__
+results["sql_authored_is_generated"] = (
+    sys.modules[DWG__NamedCustomer.__module__].__doc__ or ""
+).lstrip().startswith("Table ID: DWG.NamedCustomer")
+results["sql_authored_load"] = DWG__NamedCustomer(spark, lakehouse=destination).load().as_row()
 
 emit(results)
 '''
@@ -108,9 +122,36 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
     assert seen["lib"] == ["customers.csv"]
     # The authored path is reproduced verbatim, so the import reads the same.
     assert seen["imported"] == "Raw__CustomerCsv"
-    # Two spellings of one location, because two things read them.
-    assert seen["folder_path_is_local"] is True
-    assert seen["folder_path_is_spark"] is True
+    # Two spellings of one location, because two things read them — and the one
+    # authored code gets is a real Path, not a string it has to convert.
+    assert seen["folder_path_is_mounted"] is True
+    assert seen["folder_path_is_a_path"] is True
+    assert seen["spark_path_is_abfss"] is True
     # And the files reached OneLake rather than a directory named after a URL.
     assert seen["folder"]["succeeded"] is True
     assert seen["published"], "the folder load published nothing"
+
+
+def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
+    fabric_lakehouse_estate,
+):
+    """The conversion's claim, asked of Fabric.
+
+    `DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
+    `DWG__NamedCustomer.py`. What this asserts is that the file the build wrote
+    is importable in the session, carries its authored contract, and loads
+    through the ordinary `Table.load()` — so a SQL-authored table and a
+    Python-authored one are the same primitive by the time anything runs.
+    """
+
+    env = fabric_lakehouse_estate.env
+
+    seen = env.run_python(BODY)
+
+    assert "DWG__NamedCustomer.py" in seen["deployed"]
+    # No installed `.sql` load file survives the conversion.
+    assert not [name for name in seen["deployed"] if name.endswith(".sql")]
+    assert seen["sql_authored_module"] == "DWG__NamedCustomer"
+    # The authored header travelled whole and is what the primitive reads.
+    assert seen["sql_authored_is_generated"] is True
+    assert seen["sql_authored_load"]["succeeded"] is True

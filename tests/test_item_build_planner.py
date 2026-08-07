@@ -8,7 +8,7 @@ import shutil
 import pytest
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     InstallationEnvironment,
@@ -134,7 +134,7 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     assert {
@@ -166,7 +166,7 @@ def test_at_least_one_binding_is_required(tmp_path):
             repository,
             bindings=ItemBindings(()),
             output=Location(str(tmp_path / "bundle")),
-            store=LocalStore(),
+            store=FilesystemStore(),
         )
 
 
@@ -183,7 +183,7 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
         repository,
         bindings=ItemBindings((_binding("Warehouse/Reporting", "Reporting_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     omitted = {
@@ -207,7 +207,7 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
         for _s, _b, action in bundle.plan.actions()
         if action.kind == "publish_registry"
     )
-    payload = LocalStore().read(
+    payload = FilesystemStore().read(
         bundle.location.join(*registry.payload.split("/"))
     ).decode()
     assert "PortableCustomer" not in payload
@@ -215,7 +215,7 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
 
 def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         repository,
         bindings=ItemBindings(
@@ -257,7 +257,7 @@ def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
         "aliases:\n  Sales.Landed: Lakehouse/Raw/Sales.Customer\n",
     )
     repository = _repository(root)
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         repository,
         bindings=ItemBindings(
@@ -304,7 +304,7 @@ def test_an_alias_is_materialised_before_the_documents_that_use_it(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     at = {
@@ -331,7 +331,7 @@ def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     at = {
@@ -355,7 +355,7 @@ def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         sql_by_item={item: _AliasInventory()},
     )
 
@@ -374,10 +374,10 @@ def test_authored_three_part_name_is_preserved_in_payload(tmp_path):
         repository,
         bindings=ItemBindings((_binding("Warehouse/Audit", "Audit_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
     payloads = [
-        LocalStore().read(bundle.location.join(*action.payload.split("/"))).decode()
+        FilesystemStore().read(bundle.location.join(*action.payload.split("/"))).decode()
         for _, _, action in bundle.plan.actions()
         if action.payload and action.kind == "build_table"
     ]
@@ -391,13 +391,13 @@ def test_bundle_identity_is_deterministic_for_same_repository_and_bindings(tmp_p
         repository,
         bindings=bindings,
         output=Location(str(tmp_path / "first")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
     second = generate_item_build_bundle(
         repository,
         bindings=bindings,
         output=Location(str(tmp_path / "second")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
     assert first.bundle_id == second.bundle_id
 
@@ -418,7 +418,7 @@ class _Resolver:
 def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
     root = _estate(tmp_path)
     repository = _repository(root)
-    store = LocalStore()
+    store = FilesystemStore()
     bundle = generate_item_build_bundle(
         repository,
         bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
@@ -586,7 +586,7 @@ def test_sequence_numbers_describe_the_assembled_order_and_nothing_else(tmp_path
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     numbers = [sequence.number for sequence in bundle.plan.sequences]
@@ -611,7 +611,7 @@ def test_a_consumer_items_whole_group_follows_its_producers(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     numbers = {"Curated": set(), "Reporting": set()}
@@ -637,7 +637,7 @@ def test_independent_items_share_their_barriers(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     shared = _stage(bundle, "build dependency layer")
@@ -664,7 +664,7 @@ def test_a_lakehouse_item_that_mutated_delta_is_closed_by_a_refresh(tmp_path):
         repository,
         bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     refresh = _stage(bundle, "refresh mutated Lakehouse SQL endpoints")
@@ -679,7 +679,7 @@ def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
         repository,
         bindings=ItemBindings((_binding("Warehouse/Audit", "Audit_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     # Only the control Lakehouse's own refresh, after catalogue publication.
@@ -697,7 +697,7 @@ def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
         repository,
         bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     assert _refreshed(bundle) == {"control-lakehouse-Weaver_Control"}
@@ -721,7 +721,7 @@ def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
         repository,
         bindings=ItemBindings((_binding(str(item), "Audit_Dev"),)),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         sql_by_item={item: _WarehouseInventory()},
     )
 
@@ -745,7 +745,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
     )
 
@@ -762,7 +762,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     )
     assert len(registry.batches) == 1
     registry_payloads = [
-        LocalStore().read(bundle.location.join(*action.payload.split("/"))).decode()
+        FilesystemStore().read(bundle.location.join(*action.payload.split("/"))).decode()
         for batch in registry.batches
         for action in batch.actions
     ]
@@ -796,7 +796,7 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     refreshed = {
@@ -836,7 +836,7 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
             )
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
     )
 
     refreshed = {
@@ -855,7 +855,7 @@ def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
             repository,
             bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
             output=Location(str(tmp_path / "bundle")),
-            store=LocalStore(),
+            store=FilesystemStore(),
             control_lakehouse=None,
         )
 
@@ -869,7 +869,7 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
             (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
         ),
         output=Location(str(tmp_path / "bundle")),
-        store=LocalStore(),
+        store=FilesystemStore(),
         control_lakehouse=control,
     )
 

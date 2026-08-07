@@ -1,22 +1,36 @@
-"""Turning a projection into the statements a build appends, and nothing wider.
+"""Turning a catalogue difference into the statements a build appends.
 
-Reconciliation for one installation is two statements per table: delete the rows
-this installation no longer projects, then merge the rows it does. Both are scoped
-to one ``(repository, target_type)``, so the reach of a whole build's catalogue
-work is bounded by construction rather than by care.
+**The statements are driven by the difference between what is persisted and what
+the build certifies.** A table whose rows are all unchanged produces nothing at
+all: no delete, no merge, no action in the bundle. That is what makes an
+identical second build a genuine no-op rather than one that rewrites the whole
+catalogue to the same values.
 
-**The statements do not depend on reading the catalogue first.** The delete keeps
-exactly the keys the projection claims and the merge is idempotent, so the pair is
-correct against any prior state — including a state the planner could not see.
-That is deliberate: a build that derived its deletes from an inventory would have
-its deletion scope widened by a failed read, which is the failure mode
-how-does-build-work §6 exists to prevent. Here a failed read cannot widen anything,
-because nothing is derived from it.
+This reverses an earlier design, deliberately, and the trade is worth stating
+because the old argument was a good one. Statements used to be rendered from the
+desired side alone — the delete kept exactly the keys the projection claimed, the
+merge was idempotent — so the pair was correct against *any* prior state,
+including a state the planner had misread. A bad read cost a misleading report
+and could not corrupt anything.
 
-Reading is still worth doing, for a different reason: a reviewer should be able to
-see what a bundle will change before it runs (§3, §17). :func:`compare` produces
-that summary — how many rows are new, changed, unchanged and removed — without any
-statement depending on it.
+The cost of that safety was that a build could never do nothing. Every build
+rewrote every catalogue table it touched, so "an unchanged estate produces no
+work" was false at the catalogue, and the endpoint refresh that follows catalogue
+DML ran every time.
+
+What makes the reversal safe is that the read is now authoritative rather than
+advisory: :func:`~weaver.catalogue.state.read_catalogue_state` validates each
+table's shape, distinguishes a bootstrap absence from a damaged catalogue, and
+refuses rows outside the scopes it asked for. An incomplete or unreadable
+catalogue stops the build *before* planning, so the case the old design defended
+against — deriving deletes from a read that silently returned too little — is now
+a failure rather than a diff. Any authoritative scoped replacement belongs in an
+explicit repair mode, not in ordinary build.
+
+**Publication is oriented by physical table, not by logical item.** The write
+unit is one catalogue table across every changed scope, because that is what the
+engine actually does work for. Per-item statements meant a ten-item build wrote
+each table ten times to achieve what one predicate achieves once.
 
 **Ordering is the one strict invariant.** Dictionaries describe, Installation
 records the binding, Registry certifies. Registry is written last, so a row in it
@@ -33,6 +47,7 @@ from typing import Iterable, Mapping, Sequence
 from .projection import CatalogueProjection
 from .render import (
     InstallationScope,
+    InstallationScopes,
     Row,
     render_delete_obsolete,
     render_delete_scope,
@@ -43,6 +58,8 @@ from .tables import (
     DICTIONARY_TABLES,
     INSTALLATION,
     REGISTRY,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
     CatalogueTable,
 )
 
@@ -73,7 +90,12 @@ class TableChanges:
 
 @dataclass(frozen=True)
 class TableReconciliation:
-    """One table's scoped statements, in the order they must run."""
+    """One table's scoped statements, in the order they must run.
+
+    The *unconditional* form — see :func:`reconcile`. Ordinary build uses
+    :class:`TablePublication`, which emits nothing for a table with nothing to
+    do.
+    """
 
     table: CatalogueTable
     #: None only for Installation, whose key *is* the installation scope: there is
@@ -93,11 +115,13 @@ class TableReconciliation:
 
 @dataclass(frozen=True)
 class CatalogueReconciliation:
-    """Every catalogue statement one build appends, grouped by when it may run.
+    """One installation's catalogue statements, unconditionally.
 
     The grouping is the contract: dictionaries may run in any order among
     themselves, Installation follows them, and Registry follows everything. A
     caller turns each group into its own barrier.
+
+    Not what a build produces — see :class:`CataloguePublication`.
     """
 
     scope: InstallationScope
@@ -126,7 +150,20 @@ class CatalogueReconciliation:
 
 
 def reconcile(projection: CatalogueProjection) -> CatalogueReconciliation:
-    """The statements that make one installation's catalogue match its projection."""
+    """Authoritative scoped replacement of one installation, from its projection.
+
+    **Not the build path.** A build publishes a *difference* — see
+    :func:`publish` — so that an unchanged table produces no statement and an
+    identical second build does nothing at all. This renders one installation's
+    statements from the desired side alone, unconditionally: the delete keeps
+    exactly the keys the projection claims and the merge is idempotent, so the
+    pair is correct against any prior state including one nobody read.
+
+    That property is exactly what an explicit repair mode wants and exactly what
+    ordinary build must not have. Reaching this from a build path would restore
+    the unconditional rewrite this module's header describes replacing, so the
+    two are kept apart by name rather than by a flag.
+    """
 
     scope = projection.scope
     return CatalogueReconciliation(
@@ -153,6 +190,140 @@ def _for_table(
 
 
 # --- what it would change ----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TablePublication:
+    """One physical catalogue table's statements, aggregated across scopes."""
+
+    table: CatalogueTable
+    #: Present only when some scope holds rows the desired state no longer
+    #: claims. A delete is never emitted merely because the table was considered.
+    delete: str | None
+    #: Present only when some row is new or changed. Unchanged rows are left
+    #: alone rather than merged to the same values.
+    merge: str | None
+
+    @property
+    def statements(self) -> tuple[str, ...]:
+        return tuple(
+            statement
+            for statement in (self.delete, self.merge)
+            if statement is not None
+        )
+
+    @property
+    def is_noop(self) -> bool:
+        return not self.statements
+
+
+@dataclass(frozen=True)
+class CataloguePublication:
+    """Every catalogue statement one build appends, grouped by when it may run.
+
+    The grouping is the contract, and it survives the change of orientation:
+    dictionaries may run in any order among themselves, Installation follows
+    them, and Registry follows everything.
+    """
+
+    dictionaries: tuple[TablePublication, ...]
+    installation: TablePublication
+    registry: TablePublication
+
+    @property
+    def groups(self) -> tuple[tuple[str, tuple[TablePublication, ...]], ...]:
+        return (
+            ("reconcile catalogue dictionaries", self.dictionaries),
+            ("record the installation", (self.installation,)),
+            ("publish the registry", (self.registry,)),
+        )
+
+    @property
+    def statements(self) -> tuple[str, ...]:
+        return tuple(
+            statement
+            for _description, group in self.groups
+            for publication in group
+            for statement in publication.statements
+        )
+
+    @property
+    def is_noop(self) -> bool:
+        return not self.statements
+
+
+def publish(current, desired) -> CataloguePublication:
+    """The statements that move ``current`` to ``desired``, table by table.
+
+    Read it as *persisted* → *certified*. Only the items ``desired`` names are
+    considered, so a scoped build cannot touch an installation it was not
+    pointed at, however much of the catalogue it read.
+    """
+
+    return CataloguePublication(
+        dictionaries=tuple(
+            _publish_table(table, current=current, desired=desired)
+            for table in DICTIONARY_TABLES
+        ),
+        installation=_publish_table(INSTALLATION, current=current, desired=desired),
+        registry=_publish_table(REGISTRY, current=current, desired=desired),
+    )
+
+
+def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublication:
+    """One table's delete and merge, across every scope that needs them.
+
+    The two are computed from different row sets, and conflating them would be a
+    silent data-loss bug rather than an inefficiency. The *merge* carries only
+    rows that are new or changed, because an unchanged row needs no statement.
+    The *delete* is given every desired row for the scopes it covers, because it
+    works by keeping what is claimed — handing it only the changed rows would
+    make it delete every unchanged row in those scopes.
+    """
+
+    changed: list[Row] = []
+    delete_scopes: list[InstallationScope] = []
+    keep: list[Row] = []
+
+    for item in sorted(desired.rows, key=str):
+        scope = InstallationScope(item.item_type, item.item_name)
+        wanted = _keyed(table, desired.rows[item].get(table.name, ()))
+        found = _keyed(table, current.rows.get(item, {}).get(table.name, ()))
+
+        for key, row in wanted.items():
+            existing = found.get(key)
+            if existing is None or any(
+                row.get(name) != existing.get(name)
+                for name in table.comparison_columns
+            ):
+                changed.append(row)
+
+        if any(key not in wanted for key in found):
+            delete_scopes.append(scope)
+            keep.extend(wanted.values())
+
+    delete = None
+    if delete_scopes:
+        delete = render_delete_obsolete(
+            table, keep, scope=InstallationScopes(tuple(delete_scopes))
+        )
+
+    merge = None
+    if changed:
+        merge = render_merge(table, changed, scope=_scopes_of(changed))
+
+    return TablePublication(table=table, delete=delete, merge=merge)
+
+
+def _scopes_of(rows: Iterable[Row]) -> InstallationScopes:
+    return InstallationScopes(
+        tuple(
+            InstallationScope(
+                str(row.get(SCOPE_ITEM_TYPE) or ""), str(row.get(SCOPE_ITEM_NAME) or "")
+            )
+            for row in rows
+        )
+    )
 
 
 def key_of(table: CatalogueTable, row: Row) -> tuple:

@@ -19,7 +19,7 @@ from weaver import Table
 
 class Sales__Customer(Table):
     def read(self):
-        source = Sales__Seed(self).path()
+        source = Sales__Seed(self).spark_path()
         rows = self.spark.read.csv(source, header=True)
         # No explicit deletes: the extract is the whole truth, so a row's absence
         # from it is what retires it.

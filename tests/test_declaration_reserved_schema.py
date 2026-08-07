@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.errors import DiscoveryError, MetadataError
 from weaver.declaration import PYTHON, SPARK_SQL, parse_document, parse_item_repository
@@ -54,7 +54,7 @@ Schema:
 select cast(null as string) as repository
      , cast(null as string) as schema_name
      , cast(null as string) as object_name
- where 1 = 0
+ where 1 = 0;
 """
 
 
@@ -115,7 +115,7 @@ def _repo(tmp_path, files: dict[str, str], schemas=("_Control",)):
         path = root / ITEM / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    return _Documents(parse_item_repository(Location(value=str(root)), store=LocalStore()))
+    return _Documents(parse_item_repository(Location(value=str(root)), store=FilesystemStore()))
 
 
 def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):

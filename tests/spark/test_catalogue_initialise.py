@@ -54,10 +54,10 @@ def _environment(root):
     from weaver.targets import ItemRef
     from weaver.workspaces import LocalWorkspace
     from weaver.resolution import LocalResolver
-    from weaver.store import LocalStore
+    from weaver.store import FilesystemStore
 
     workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
-    store = LocalStore()
+    store = FilesystemStore()
     resolver = LocalResolver(workspace)
     store.make_directory(resolver.files_root(ItemRef("Weaver")))
     store.make_directory(resolver.tables_root(ItemRef("Weaver")))

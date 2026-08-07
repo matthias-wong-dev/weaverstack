@@ -53,8 +53,11 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
         "  'name': order.lakehouse.name,\n"
         "  'spark_root': order.spark_root,\n"
         "  'table_path': order.lakehouse.table_path(*order.identity),\n"
-        "  'folder_path': export.path(),\n"
-        "  'staging_folder': export.staging_folder(),\n"
+        "  'folder_path': str(export.path()),\n"
+        "  'folder_spark_path': export.spark_path(),\n"
+        # The staging *path*, not an issued StagingFolder: one is only issued
+        # inside a load, and nothing here runs one.
+        "  'staging_path': str(export._staging_path()),\n"
         "  'inferred': default_lakehouse(spark).spark_root,\n"
         "})\n"
     ).payload
@@ -62,8 +65,11 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
     assert payload["spark_root"] == expected_root
     assert payload["inferred"] == expected_root
     assert payload["table_path"] == f"{expected_root}/Tables/Sales/Order"
-    assert payload["folder_path"] == f"{expected_root}/Files/Sales/OrderExport"
-    assert payload["staging_folder"].startswith("/synfs/notebook/")
-    assert payload["staging_folder"].endswith(
-        "/Files/Sales/OrderExport_Staging"
-    )
+    # Spark gets the abfss:// form of the root inference produced.
+    assert payload["folder_spark_path"] == f"{expected_root}/Files/Sales/OrderExport"
+    # Python gets the mount of that same root — an inferred Lakehouse is reached
+    # exactly as a resolved one is, which is what keeps a notebook and a detached
+    # load running the same authored code.
+    assert payload["folder_path"].startswith("/synfs/notebook/")
+    assert payload["folder_path"].endswith("/Files/Sales/OrderExport")
+    assert payload["staging_path"] == f"{payload['folder_path']}_Staging"

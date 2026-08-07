@@ -32,7 +32,7 @@ from weaver.load_report import (
 )
 from weaver.load_resolution import LoadEnvironment
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 
 from factories import (
@@ -172,7 +172,7 @@ def test_load_dry_run_resolves_the_exact_dispatch_location_of_every_node(
     assert {node.node_id: node.dispatch_location for node in report.nodes} == {
         EXPORT: f"{root}/Raw_LH/Files/_/Load/Files/Sales__Export.py",
         ORDER: f"{root}/Raw_LH/Files/_/Load/Sales__Order.py",
-        DAILY: f"{root}/Raw_LH/Files/_/Load/Sales.Daily.sql",
+        DAILY: f"{root}/Raw_LH/Files/_/Load/Sales__Daily.py",
         REFRESH: "Lakehouse/Raw_LH/sql_endpoint",
         SUMMARY: "Warehouse/Reporting_WH/[_].[Load Sales.Summary]",
     }

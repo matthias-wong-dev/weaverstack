@@ -40,7 +40,6 @@ from .load_plan import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
     PYTHON_TABLE,
-    SPARK_SQL_FILE,
     WAREHOUSE_PROCEDURE,
     LoadDag,
     LoadNode,
@@ -60,6 +59,14 @@ from .load_report import (
     warning,
 )
 from .targets import ItemRef
+
+def _new_runtime_scope():
+    """A fresh runtime scope. Imported lazily so this module stays cheap."""
+
+    from .runtime.python_context import RuntimeScope
+
+    return RuntimeScope.new()
+
 
 #: What a refresh resolves to when the host can perform one. Not a physical
 #: object — a Lakehouse's SQL analytics endpoint is a capability of the item, so
@@ -92,6 +99,12 @@ class LoadEnvironment:
     spark: Any = None
     sql: Mapping[str, Any] = field(default_factory=dict)
     workspace: Any = None
+    #: Where this run's deployed Python modules live, and how long they live.
+    #: One scope per environment, and an environment is built once per run — so
+    #: a rebuilt module is executed by the next load rather than shadowed by the
+    #: one the session already imported. See
+    #: :class:`weaver.runtime.python_context.RuntimeScope`.
+    runtime_scope: Any = field(default_factory=lambda: _new_runtime_scope())
 
     def inventory(self, target: PhysicalTargetRef) -> TargetInventory | None:
         return self.inventories.get(str(target))
@@ -279,14 +292,11 @@ def _dispatch_location(
     if node.primitive_kind == WAREHOUSE_PROCEDURE:
         procedure = load_procedure_name(node.logical_id.object_id)
         return f"{node.physical_target}/{procedure}", None
-    if node.primitive_kind in (SPARK_SQL_FILE, PYTHON_TABLE, PYTHON_FOLDER):
-        location = installed_file_location(node, environment)
-        expected = (
-            _module_class(node.primitive_object.object)
-            if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER)
-            else None
+    if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER):
+        return (
+            installed_file_location(node, environment),
+            _module_class(node.primitive_object.object),
         )
-        return location, expected
     return None, None
 
 

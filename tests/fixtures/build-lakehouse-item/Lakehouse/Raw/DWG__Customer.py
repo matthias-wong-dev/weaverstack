@@ -16,8 +16,6 @@ Revision notes:
   - 2026-07-24 Created.
 """
 
-from pathlib import Path
-
 from .Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 from weaver import Table
@@ -25,8 +23,10 @@ from weaver import Table
 
 class DWG__Customer(Table):
     def read(self):
-        source = Path(Raw__CustomerCsv(self).path()) / "customers.csv"
-        raw = self.spark.read.csv(str(source), header=True, inferSchema=False)
+        # spark_path(), because Spark is what reads it. path() is the mounted
+        # Path an ordinary Python open() wants, and Spark cannot use one.
+        source = f"{Raw__CustomerCsv(self).spark_path()}/customers.csv"
+        raw = self.spark.read.csv(source, header=True, inferSchema=False)
         shaped = raw.selectExpr(
             "cast(CustomerId as int) as CustomerId",
             "CustomerName as CustomerName",

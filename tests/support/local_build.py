@@ -16,7 +16,7 @@ import pytest
 
 from weaver.targets import ItemRef
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.spark import SparkCatalogue
@@ -31,10 +31,10 @@ def _local_lakehouse_setup(root, extra=()):
     from weaver.targets import ItemRef
     from weaver.workspaces import LocalWorkspace
     from weaver.resolution import LocalResolver
-    from weaver.store import LocalStore
+    from weaver.store import FilesystemStore
 
     workspace = LocalWorkspace(workspace=root, weaver_lakehouse="Weaver")
-    store = LocalStore()
+    store = FilesystemStore()
     resolver = LocalResolver(workspace)
     weaver, target = ItemRef("Weaver"), ItemRef("Sales_LH")
     for item in (weaver, target, *(ItemRef(name) for name in extra)):

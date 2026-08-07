@@ -115,6 +115,10 @@ def _body(table: CatalogueTable) -> str:
     executor resolves the query's schema to create the table, and resolving a
     schema reads no rows. Build creates structure; this is the smallest possible
     statement that describes one.
+
+    Terminated, like every other authored Spark SQL statement: what Weaver
+    generates has to satisfy the rule Weaver enforces, or the built-in item
+    would be the one repository nobody could have written by hand.
     """
 
     def line(column: CatalogueColumn, first: bool) -> str:
@@ -122,7 +126,7 @@ def _body(table: CatalogueTable) -> str:
         return f"{lead} cast(null as {column.type}) as `{column.name}`"
 
     lines = [line(column, index == 0) for index, column in enumerate(table.columns)]
-    return "\n".join(lines) + "\n where 1 = 0\n"
+    return "\n".join(lines) + "\n where 1 = 0;\n"
 
 
 def render_source(table: CatalogueTable) -> str:

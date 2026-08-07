@@ -196,7 +196,11 @@ def _lakehouse_artefacts(
             artefacts.append(
                 _file_artefact(
                     item,
-                    relative,
+                    # Not the authored path. A Spark SQL table is compiled into a
+                    # deployed module, so it lands where a module lands and under
+                    # the name a module is imported by — which is what lets
+                    # orchestration stop caring which language it was authored in.
+                    _deployed_module_relative(relative, identity.object_id),
                     payload=generated.payload,
                     signature=_salted(
                         source.effective_signature, generated.template_version
@@ -296,6 +300,21 @@ def _salted(signature: str, version: int) -> str:
     digest.update(b"\0")
     digest.update(str(version).encode("ascii"))
     return digest.hexdigest()
+
+
+def _deployed_module_relative(relative: str, object_id: ObjectId) -> str:
+    """``Sales.OrderSummary.sql`` -> ``Sales__OrderSummary.py``, where it was.
+
+    The directory is preserved and only the filename is recompiled, so a
+    document's position in the item is still what decides its position in the
+    deployed tree — the same rule the authored Python files follow.
+    """
+
+    from .declaration.spark_sql_module import deployed_module_name
+
+    directory, _, _name = relative.rpartition("/")
+    module = deployed_module_name(object_id)
+    return f"{directory}/{module}" if directory else module
 
 
 def _within_item(relative: str, item: WeaverItemId) -> str:

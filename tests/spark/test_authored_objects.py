@@ -113,18 +113,16 @@ def test_a_view_is_read_by_the_name_its_destination_gives_it(spark, lakehouses, 
 
 
 def test_a_folder_stages_beside_its_destination(spark, lakehouses, lakehouse):
-    """Locally the Lakehouse root is a directory, so the Spark-addressed folder
-    path and the resolver's own answer are the same string."""
+    """Locally the Lakehouse root is a directory, so the object's two spellings
+    and the resolver's own answer name the same place."""
 
     target = FolderTarget(lakehouse=ItemRef(TARGET))
     export = Sales__OrderExport(spark, lakehouse=lakehouse)
 
-    staging, deletes = export.read()
-
-    assert deletes == []
-    assert export.path() == lakehouses.resolver.folder_object(
+    assert export.spark_path() == lakehouses.resolver.folder_object(
         target, "Sales", "OrderExport"
     ).value
-    assert staging == lakehouses.resolver.folder_staging(
+    assert str(export.path()) == export.spark_path()
+    assert str(export._staging_path()) == lakehouses.resolver.folder_staging(
         target, "Sales", "OrderExport"
     ).value

@@ -36,9 +36,9 @@ from support.build_envs import LOAD_ORCHESTRATION_FIXTURE
 
 from weaver.catalogue.builtin import LOG_FOLDER
 from weaver.load import LoadSession, run_load
-from weaver.load_plan import PYTHON_FOLDER, PYTHON_TABLE, SPARK_SQL_FILE, PhysicalTargetRef
+from weaver.load_plan import PYTHON_FOLDER, PYTHON_TABLE, PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED, VALIDATED
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.targets import FolderTarget, ItemRef
 from weaver.task_logging import COMPLETE_STEP, PLAN_FILE
 
@@ -100,12 +100,12 @@ def test_a_complete_load_plan_locates_every_primitive_without_executing_it(dry, 
     assert {node.node_id: node.primitive_kind for node in dry.nodes} == {
         SEED: PYTHON_FOLDER,
         CUSTOMER: PYTHON_TABLE,
-        NAMED: SPARK_SQL_FILE,
+        NAMED: PYTHON_TABLE,
     }
     assert {node.node_id: node.dispatch_location for node in dry.nodes} == {
         SEED: f"{files_root}/_/Load/Files/Sales__Seed.py",
         CUSTOMER: f"{files_root}/_/Load/Sales__Customer.py",
-        NAMED: f"{files_root}/_/Load/Sales.Named.sql",
+        NAMED: f"{files_root}/_/Load/Sales__Named.py",
     }
     assert all(node.status == VALIDATED for node in dry.nodes)
     assert all(not node.executed for node in dry.nodes)
@@ -146,7 +146,7 @@ def test_every_step_dispatched_through_its_intended_primitive_kind(real):
     assert [(node.node_id, node.primitive_kind) for node in real.nodes] == [
         (SEED, PYTHON_FOLDER),
         (CUSTOMER, PYTHON_TABLE),
-        (NAMED, SPARK_SQL_FILE),
+        (NAMED, PYTHON_TABLE),
     ]
     assert all(node.executed for node in real.nodes)
 
@@ -192,7 +192,7 @@ def test_the_folder_materialised_the_files_its_object_staged(real, estate):
 
 
 def written(estate, real) -> dict[str, dict]:
-    store = LocalStore()
+    store = FilesystemStore()
     from weaver.locations import Location
 
     root = Location(real.task_log)

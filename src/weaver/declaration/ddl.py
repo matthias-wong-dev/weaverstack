@@ -50,6 +50,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..errors import DiscoveryError
 from ..spark.tokens import object_token
 from .columns import metadata_column_references
 from .dependencies import rewrite_sql_references
@@ -200,13 +201,19 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
 
     ses = document.document
     declared = ses.has_declared_schema
+    setup, query = _shape_program(document)
     payload = {
         "object": _object_name(document),
         "schema_mode": "declared" if declared else "inferred",
         "declared_columns": (
             [_column_entry(column) for column in ses.schema] if declared else None
         ),
-        "source_query": _addressed((document.sql_body or "").strip()),
+        # The statements that must run first — a temporary view the query reads —
+        # and the one query whose shape *is* the table's. A body may hold two
+        # queries (staging, then the keys to delete), and only the first says
+        # what the table looks like.
+        "setup": [_addressed(statement) for statement in setup],
+        "source_query": _addressed(query),
         "references": [list(pair) for pair in metadata_column_references(ses)],
         "audit_columns": [_column_entry(column) for column in ses.audit_columns],
         "column_mapping": True,
@@ -214,6 +221,36 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     return GeneratedDdl(
         executor=SPARK_TABLE_EXECUTOR, content=content, extension=SPARK_TABLE_EXTENSION
+    )
+
+
+def _shape_program(document: "SourceDocument") -> tuple[tuple[str, ...], str]:
+    """The setup a shape inference must run, and the query whose shape it reads.
+
+    A Spark SQL table's body may set a temporary view up before selecting from
+    it, and may carry a second query naming the keys to delete. Neither is the
+    table's shape: the first query is, and the setup before it is what has to
+    have run for that query to resolve. Handing the whole body to one
+    ``spark.sql`` call would fail on the first semicolon.
+    """
+
+    from .spark_sql_program import parse_spark_sql_program
+
+    program = parse_spark_sql_program(
+        document.sql_body or "",
+        what=document.relative_path,
+        error=DiscoveryError,
+    )
+    setup: list[str] = []
+    for statement in program.statements:
+        if statement.produces_result:
+            return tuple(setup), statement.sql
+        setup.append(statement.sql)
+    # Unreachable for a validated document — parsing already refused a body with
+    # no query — but a build must not depend on that having happened.
+    raise DiscoveryError(
+        f"{document.relative_path}: a Spark SQL table must end in a query that "
+        "produces its rows, and this body has none"
     )
 
 

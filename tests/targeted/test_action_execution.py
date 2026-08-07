@@ -309,12 +309,12 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
     """A real store and resolver, because placement is the claim being made."""
 
     from weaver.resolution import LocalResolver
-    from weaver.store import LocalStore
+    from weaver.store import FilesystemStore
     from weaver.workspaces import LocalWorkspace
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
     return installation_context(
-        store=LocalStore(),
+        store=FilesystemStore(),
         resolver=LocalResolver(workspace),
         target=resolved_target(),
         spark=_TableSpark(tuple(columns) + AUDIT),
@@ -352,12 +352,13 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     assert context.store.read(Location(written)) == b"def parse(value):\n"
 
 
-def test_a_generated_load_program_is_addressed_as_it_lands(tmp_path):
+def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     """The bundle stays destination-free; the installed file must be runnable.
 
-    Keyed on what the payload *is*, not what it is called — a generated load
-    keeps its authored `.sql` name, so a suffix rule matched nothing and every
-    installed program shipped with its tokens intact.
+    Keyed on what the payload *is*, not what it is called. A generated module and
+    an authored one are both `.py` in one tree, so only the first line tells them
+    apart — and a rule that read the name instead once shipped every installed
+    program with its tokens intact.
     """
 
     from weaver.declaration import read_source_document
@@ -379,16 +380,14 @@ def test_a_generated_load_program_is_addressed_as_it_lands(tmp_path):
         ),
     )
     action = _load_action(
-        kind="write_file", relative="Sales.OrderSummary.sql", payload="p.payload"
+        kind="write_file", relative="Sales__OrderSummary.py", payload="p.payload"
     )
 
     result = execute_action(action, payload, context=context)
     written = context.store.read(Location(result.details["written"])).decode()
 
-    # The bundle carries an instruction; the installer renders the program from
-    # the columns the built table reports.
     assert b"{{object:" in payload, "the bundle payload is destination-free"
-    assert written.lstrip().startswith("-- Weaver generated load")
+    assert written.lstrip().startswith("# Weaver generated load")
     assert "Total amount" in written
     assert "{{" not in written, "the installed file names its destination"
     assert "Sales_LH" in written or "sales_lh" in written
@@ -429,7 +428,7 @@ Schema:
   Total amount: decimal(18,2)
 */
 select `Customer id`, cast(sum(`Amount`) as decimal(18,2)) as `Total amount`
-  from Sales.Order group by `Customer id`
+  from Sales.Order group by `Customer id`;
 """
 
 

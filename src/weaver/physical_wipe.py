@@ -22,7 +22,7 @@ have. Shortcuts are therefore removed through the workspace, and removed before
 any storage is swept, so the sweep can never meet one.
 
 The local emulator materialises an alias as a symbolic link, and
-:meth:`weaver.store.LocalStore.delete` unlinks a link rather than following it —
+:meth:`weaver.store.FilesystemStore.delete` unlinks a link rather than following it —
 so the emulator reaches the same guarantee by a different mechanism, and neither
 needs the other's.
 
@@ -47,7 +47,7 @@ from .errors import CommandError
 from .workspaces import Workspace, LocalWorkspace
 from .locations import Location
 from .resolution import TABLES_AREA, LocalResolver, resolver_for, store_for
-from .store import LocalStore, Store
+from .store import FilesystemStore, Store
 from .targets import FILES_AREA, DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 
 

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Mapping
 
 from weaver.targets import ItemRef
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     BuildAction,
@@ -692,7 +692,7 @@ Schema:
   CustomerId: string
 */
 select cast(null as string) as CustomerId
- where 1 = 0
+ where 1 = 0;
 """
 
 
@@ -836,7 +836,7 @@ Dependencies:
 Schema:
   OrderId: string
 */
-select OrderId from {depends_on}
+select OrderId from {depends_on};
 """
 
 
@@ -896,7 +896,7 @@ def build_action(
 def single_action_bundle(
     location: Location,
     *,
-    store: LocalStore,
+    store: FilesystemStore,
     action: BuildAction,
     payload: bytes | None = None,
     target: BoundTarget | None = None,

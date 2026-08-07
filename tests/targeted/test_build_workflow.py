@@ -27,7 +27,7 @@ from factories import (
 
 from weaver.targets import ItemRef
 from weaver.resolution import LocalResolver
-from weaver.store import LocalStore
+from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
@@ -66,7 +66,7 @@ def estate(tmp_path):
     )
 
     workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Weaver")
-    store = LocalStore()
+    store = FilesystemStore()
     resolver = LocalResolver(workspace)
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))

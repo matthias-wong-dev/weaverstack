@@ -84,7 +84,18 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         f"spark.sql('DROP SCHEMA IF EXISTS {at['consumer'].qualified_schema('DWG')} CASCADE')\n"
         f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at['producer'].qualified_schema('DWG')}')\n"
         f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at['consumer'].qualified_schema('DWG')}')\n"
-        f"spark.sql('CREATE TABLE IF NOT EXISTS {source} (CustomerId string) USING delta')\n"
+        # Exact case, as Weaver's own table build creates — Fabric folds a table
+        # identifier to lower case otherwise, and the shortcut this test creates
+        # points at a path spelled the declared way. The producer is shared, so
+        # unlike the Warehouse case in test_cross_item_alias this only has to get
+        # a *new* table's spelling right; a properly-cased one already there makes
+        # the create the no-op it should be.
+        "previous = spark.conf.get('spark.sql.caseSensitive')\n"
+        "spark.conf.set('spark.sql.caseSensitive', 'true')\n"
+        "try:\n"
+        f"    spark.sql('CREATE TABLE IF NOT EXISTS {source} (CustomerId string) USING delta')\n"
+        "finally:\n"
+        "    spark.conf.set('spark.sql.caseSensitive', previous)\n"
         "environment = InstallationEnvironment(store=store, resolver=resolver, "
         "spark=spark, workspace=workspace)\n"
         "bundle = load_bundle(resolver.build_bundle('aliasdiscovery'), store=store)\n"

@@ -160,7 +160,7 @@ Dependencies:
 Schema:
   CustomerCount: bigint
 */
-select count(*) as CustomerCount from DWG.Customer
+select count(*) as CustomerCount from DWG.Customer;
 """
 
 
@@ -208,11 +208,40 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     # Audit columns are frozen into the instruction so the executor never reopens
     # the Weaver document source to learn them.
     assert ["row_insert_datetime", "timestamp", True] in payload["audit_columns"]
+    # Nothing to run first, so nothing is carried.
+    assert payload["setup"] == []
+
+
+def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
+    """A body is not always one statement, and only one of them is the shape.
+
+    Handing the whole body to one ``spark.sql`` call fails on the first
+    semicolon, so the setup travels separately and runs for its effect. Which
+    matters more now than it did: a body may also carry a *second* query naming
+    the keys to delete, and that one says nothing about the table's shape
+    either.
+    """
+
+    source = SPARK_TABLE_SOURCE.replace(
+        "select count(*) as CustomerCount from DWG.Customer;",
+        "create or replace temporary view live as\n"
+        "select * from DWG.Customer where IsActive;\n"
+        "\n"
+        "select count(*) as CustomerCount from live;",
+    )
+
+    payload = json.loads(_doc("DWG.CustomerCount.sql", source).create_ddl().content)
+
+    assert payload["setup"] == [
+        "create or replace temporary view live as\n"
+        "select * from {{object:DWG.Customer}} where IsActive"
+    ]
+    assert payload["source_query"] == "select count(*) as CustomerCount from live"
 
 
 def test_an_inferred_spark_sql_table_carries_no_declared_columns():
     source = SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip() + "\n*/\n" + (
-        "select count(*) as CustomerCount from DWG.Customer\n"
+        "select count(*) as CustomerCount from DWG.Customer;\n"
     )
     ddl = _doc("DWG.CustomerCount.sql", source).create_ddl()
 

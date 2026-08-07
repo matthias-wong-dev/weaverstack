@@ -56,8 +56,11 @@ from .load_plan import (
     load_dag,
 )
 from .load_report import (
+    BLOCKED,
+    FAILED,
     LoadNodeReport,
     LoadRunReport,
+    SEVERITY_ERROR,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
     final_status,
@@ -80,6 +83,7 @@ def load(
     targets: str | Sequence[str],
     *,
     workspace: str | Path | Workspace | None = None,
+    weaver_lakehouse: str | None = None,
     workspace_config: str | Path | None = None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
@@ -91,8 +95,18 @@ def load(
     there, plus whatever upstream work those objects need*. Object-level
     selection is not part of this phase.
 
-    ``workspace=None`` means the current Fabric session, exactly as it does for
-    ``build`` and ``wipe``.
+    Every value resolves the same way, and it is the way ``build`` resolves them:
+
+    .. code-block:: text
+
+        an explicit argument
+          → a workspace configuration file
+            → what the notebook is attached to
+              → a configuration error naming what is missing
+
+    So ``workspace=None`` means the current Fabric session, and an explicit
+    ``weaver_lakehouse`` stands on its own — a caller who names both the
+    workspace and the control Lakehouse needs no configuration file at all.
     """
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
@@ -103,15 +117,27 @@ def load(
         for value in values
     )
 
+    from dataclasses import replace
+
     from .operations import _operation_workspace, _with_inferred_control_lakehouse
 
-    resolved_workspace = _with_inferred_control_lakehouse(
-        _operation_workspace(workspace=workspace, workspace_config=workspace_config)
+    resolved_workspace = _operation_workspace(
+        workspace=workspace, workspace_config=workspace_config
     )
+    if weaver_lakehouse is not None:
+        # An explicit argument outranks a configured or already-resolved value,
+        # so a caller can override what it inferred without rebuilding the
+        # Workspace it inferred it into.
+        resolved_workspace = replace(
+            resolved_workspace,
+            weaver_lakehouse=ItemRef.parse(str(weaver_lakehouse)).name,
+        )
+    resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
     if not resolved_workspace.weaver_lakehouse:
         raise CommandError(
-            "load needs a Weaver control Lakehouse in workspace configuration "
-            "or as the notebook's attached default Lakehouse"
+            "load needs a Weaver control Lakehouse: pass weaver_lakehouse=, "
+            "give one in workspace configuration, or run inside a Fabric "
+            "notebook with one attached as the default Lakehouse"
         )
     if isinstance(resolved_workspace, LocalWorkspace) and any(
         isinstance(target, WarehouseTarget) for target in requested
@@ -145,10 +171,40 @@ def run_load(
     """
 
     started = datetime.now(timezone.utc)
-    dag = load_dag(
-        InstalledEstate.from_catalogue(session.read_catalogue()), targets=requested
-    )
+    estate = InstalledEstate.from_catalogue(session.read_catalogue())
+    _refuse_uninstalled_targets(estate, requested)
+    dag = load_dag(estate, targets=requested)
     environment = session.environment(dag)
+    try:
+        return _run(
+            session,
+            dag=dag,
+            environment=environment,
+            requested=requested,
+            fault_tolerant=fault_tolerant,
+            dry_run=dry_run,
+            started=started,
+        )
+    finally:
+        # Every deployed module this run imported goes with it. A Fabric session
+        # outlives a build, and a build rewrites deployed Python in place — so a
+        # module kept past the run that imported it is a module the next load
+        # would use instead of the one now on disk.
+        environment.runtime_scope.close()
+
+
+def _run(
+    session: "LoadSession",
+    *,
+    dag: LoadDag,
+    environment: LoadEnvironment,
+    requested: Sequence[PhysicalTargetRef],
+    fault_tolerant: bool,
+    dry_run: bool,
+    started: datetime,
+) -> LoadRunReport:
+    """One run, between the scope opening and closing around it."""
+
     plan = resolve_load_plan(dag, environment=environment)
 
     common = {
@@ -195,7 +251,83 @@ def run_load(
     )
     if log is not None:
         log.write_completion(_completion_document(report))
+    if not fault_tolerant:
+        _raise_for_failure(report)
     return report
+
+
+def _raise_for_failure(report: LoadRunReport) -> None:
+    """Turn an intolerant run's recorded failure into the exception it is.
+
+    **Everything durable is already written.** Every planned node has its final
+    record, and the completion document says the task reached a decided outcome
+    — so the absence of one still means an interruption rather than an ordinary
+    handled failure, which is the distinction a reader depends on.
+
+    Only then does this raise. ``fault_tolerant=False`` is a caller saying *stop
+    if anything fails*, and returning an ordinary report would make that
+    indistinguishable from success to everyone who did not read it. A tolerant
+    run is the opposite instruction and returns its report as it always did.
+
+    The exception carries what the report knew: the failing node's counts, the
+    partial report, and where the evidence went.
+    """
+
+    failed = [node for node in report.nodes if node.status == FAILED]
+    if not failed:
+        return
+    first = failed[0]
+    detail = next(
+        (
+            message.message
+            for message in first.messages
+            if message.severity == SEVERITY_ERROR
+        ),
+        first.result.error_message if first.result is not None else None,
+    )
+    blocked = sum(1 for node in report.nodes if node.status == BLOCKED)
+    raise LoadError(
+        f"{first.node_id} failed"
+        + (f": {detail}" if detail else "")
+        + (f"; {len(failed)} node(s) failed" if len(failed) > 1 else "")
+        + (f", {blocked} blocked" if blocked else ""),
+        result=first.result,
+        report=report,
+        task_log=report.task_log,
+    )
+
+
+# --- preflight ----------------------------------------------------------------
+#
+# One check, and it is about the *catalogue*: nobody ever built into this target,
+# so there is no estate to load. Almost always a typo, and reporting it as "no
+# work to do" is the single worst answer available, because it looks like
+# success.
+#
+# Whether the physical item still exists is deliberately *not* asked here. That
+# check exists to save a desktop the forty seconds of starting a Livy session for
+# a request already known to be bad, so it belongs where that cost is paid —
+# in the CLI, before the session — and nowhere else. By the time this runs the
+# session exists, the saving is spent, and asking again would be paying for an
+# answer nobody can act on. See ``weaver_cli.main._refuse_absent_targets``.
+#
+# An item the workspace no longer holds still fails, and says so: reading its
+# inventory raises carrying the cause.
+
+
+def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:
+    """Refuse a requested target the installed estate has never heard of."""
+
+    installed = set(estate.targets)
+    unknown = [target for target in requested if target not in installed]
+    if not unknown:
+        return
+    known = ", ".join(str(target) for target in estate.targets) or "none"
+    raise CommandError(
+        "no installed estate in "
+        + ", ".join(str(target) for target in unknown)
+        + f" — the catalogue binds no logical item to it. Installed: {known}"
+    )
 
 
 def _step_type(report: LoadNodeReport) -> str:
@@ -348,10 +480,13 @@ class LoadSession:
     def environment(self, dag: LoadDag) -> LoadEnvironment:
         """Runtime services plus the physical state every planned target is in.
 
-        The inventory read happens once, here, and the whole of resolution then
-        runs against frozen state — the same discipline a build follows, and for
-        the same reason: a decision made against state that is still moving is a
+        The reading happens once, here, and the whole of resolution then runs
+        against frozen state — the same discipline a build follows, and for the
+        same reason: a decision made against state that is still moving is a
         decision nobody can reproduce.
+
+        Only the targets the *graph* touches, because only they have anything to
+        be looked up in them.
         """
 
         targets = tuple(dict.fromkeys(node.physical_target for node in dag.nodes))
@@ -383,6 +518,14 @@ class LoadSession:
     # --- reading physical state ---------------------------------------------
 
     def _inventory(self, target: PhysicalTargetRef):
+        """This target's inventory, or a failure that says what went wrong.
+
+        The cause is carried rather than flattened. A deleted item, an expired
+        credential, an unavailable SQL endpoint and a defect in the reader are
+        four different problems with four different fixes, and a reader who is
+        told only "missing" is sent to check the one thing that may be fine.
+        """
+
         from .build_bundle.prune import (
             read_lakehouse_inventory,
             read_warehouse_inventory,
@@ -395,19 +538,25 @@ class LoadSession:
                 return read_lakehouse_inventory(
                     bound, resolver=self.resolver, store=self.store, spark=self.spark
                 )
-            except Exception:
-                # A target that cannot be read is a target that is not there, as
-                # far as this run is concerned. Resolution says so per node,
-                # naming the target, rather than the whole run failing on a read.
-                return None
+            except Exception as exc:  # noqa: BLE001 - re-raised with its cause
+                raise LoadError(
+                    f"{target}: the catalogue says it is installed, but its "
+                    f"inventory could not be read: {type(exc).__name__}: {exc}"
+                ) from exc
         bound = WarehouseBinding(ItemRef(target.name)).to_bound_target()
         sql = self._warehouse_sql(target.name)
         if sql is None:
-            return None
+            raise LoadError(
+                f"{target} needs a SQL capability to read its inventory, and "
+                "this run has none"
+            )
         try:
             return read_warehouse_inventory(bound, sql=sql)
-        except Exception:
-            return None
+        except Exception as exc:  # noqa: BLE001 - re-raised with its cause
+            raise LoadError(
+                f"{target}: the catalogue says it is installed, but its inventory "
+                f"could not be read: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def _warehouse_sql(self, name: str):
         if name in self._sql:
@@ -442,11 +591,11 @@ def _load_session(workspace: Workspace, requested) -> LoadSession:
 
     if isinstance(workspace, LocalWorkspace):
         from .spark import local_delta_session
-        from .store import LocalStore
+        from .store import FilesystemStore
 
         session = local_delta_session(workspace)
         spark = session.__enter__()
-        opened = LoadSession(workspace, requested, spark=spark, store=LocalStore())
+        opened = LoadSession(workspace, requested, spark=spark, store=FilesystemStore())
         opened._opened.append(_Closing(lambda: session.__exit__(None, None, None)))
         return opened
     if not _inside_fabric_session(workspace):

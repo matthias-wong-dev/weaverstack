@@ -17,4 +17,4 @@ Schema:
 select
     CustomerId,
     CustomerName
-from Sales.Customer
+from Sales.Customer;

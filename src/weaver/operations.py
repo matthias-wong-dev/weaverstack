@@ -16,7 +16,7 @@ from typing import Iterable, Mapping, Sequence
 
 from .errors import BuildError, CommandError, WeaverError
 from .locations import Location
-from .store import LocalStore, Store
+from .store import FilesystemStore, Store
 from .targets import (
     ItemRef,
     WarehouseTarget,
@@ -140,24 +140,46 @@ def build(
     *,
     bind: str | Sequence[str] | None = None,
     workspace: str | Path | Workspace | None = None,
+    weaver_lakehouse: str | None = None,
     workspace_config: str | Path | None = None,
     bundle: str | None = None,
 ) -> BuildResult:
     """Build an authored repository using simple notebook-facing values.
 
-    ``workspace=None`` means the current Fabric session.  A typed ``Workspace``
+    Every value resolves the same way: an explicit argument first, then an
+    already-resolved typed ``Workspace``, then workspace configuration, then —
+    inside a Fabric notebook only — the session's own context. What is still
+    unresolved after that is an error, stated as one sentence rather than left
+    to fail later as a Fabric, Py4J or Spark traceback.
+
+    ``workspace=None`` means the current Fabric session. A typed ``Workspace``
     remains accepted as an advanced/testing seam and is what the CLI supplies
-    after applying its explicit ``--workspace-type`` flags.
+    after applying its explicit ``--workspace-type`` flags; it arrives already
+    resolved, so configuration is never layered over it.
+
+    ``weaver_lakehouse`` names the Weaver control Lakehouse. Inside a notebook
+    it defaults to the attached default Lakehouse — which is the control
+    Lakehouse only, and does not become an authored target unless a binding
+    says so.
     """
 
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config
     )
+    if weaver_lakehouse is not None:
+        # An explicit argument outranks a configured or already-resolved value,
+        # so a notebook can override what it inferred without rebuilding the
+        # Workspace it inferred it into.
+        resolved_workspace = replace(
+            resolved_workspace,
+            weaver_lakehouse=ItemRef.parse(str(weaver_lakehouse)).name,
+        )
     resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
     if not resolved_workspace.weaver_lakehouse:
         raise CommandError(
-            "build needs a Weaver control Lakehouse in workspace configuration "
-            "or as the notebook's attached default Lakehouse"
+            "build needs a Weaver control Lakehouse: pass weaver_lakehouse=, "
+            "give one in workspace configuration, or run inside a Fabric "
+            "notebook with one attached as the default Lakehouse"
         )
 
     selected = _item_bindings(bind, resolved_workspace)
@@ -351,7 +373,7 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
         from .fabric.store import FabricStore
 
         return location, FabricStore()
-    return location, LocalStore()
+    return location, FilesystemStore()
 
 
 def _item_bindings(bind, workspace: Workspace):
@@ -370,26 +392,6 @@ def _item_bindings(bind, workspace: Workspace):
         )
     return ItemBindings(
         tuple(parse_item_binding(value, workspace=workspace) for value in values)
-    )
-
-
-def _ensure_control_plane(workspace: Workspace, *, store: Store, spark) -> None:
-    from .initialise import initialise_weaver_lakehouse, prepare_weaver_lakehouse
-
-    resolver = None
-    client = None
-    if isinstance(workspace, FabricWorkspace) and _inside_fabric_session(workspace):
-        from .resolution import resolver_for
-
-        resolver = resolver_for(workspace)
-        factory = getattr(resolver, "_rest_client", None)
-        client = factory() if callable(factory) else None
-    prepare_weaver_lakehouse(workspace, exists_ok=True, store=store, client=client)
-    initialise_weaver_lakehouse(
-        weaver_lakehouse=ItemRef(workspace.weaver_lakehouse),
-        workspace=workspace,
-        store=store,
-        spark=spark,
     )
 
 
@@ -443,7 +445,6 @@ def _build_in_process(
     from .catalogue.state import reconcile_catalogue_state
     from .resolution import resolver_for
 
-    _ensure_control_plane(workspace, store=store, spark=spark)
     resolver = resolver_for(workspace)
     environment = InstallationEnvironment(
         store=store, resolver=resolver, spark=spark, workspace=workspace
@@ -483,7 +484,7 @@ def _build_local(workspace, **kwargs) -> BuildResult:
 
     with local_delta_session(workspace) as session:
         return _build_in_process(
-            workspace, spark=session, store=LocalStore(), **kwargs
+            workspace, spark=session, store=FilesystemStore(), **kwargs
         )
 
 
@@ -517,10 +518,18 @@ def _build_desktop_fabric(
     )
     from .catalogue.state import reconcile_catalogue_state
     from .fabric import LivySession, OneLakeDfsClient
-    from .initialise import prepare_weaver_lakehouse
+    from .fabric.preflight import preflight_fabric_targets
     from .resolution import resolver_for
 
-    prepare_weaver_lakehouse(workspace, exists_ok=True)
+    # Above the session, deliberately. Every item this build needs is proved to
+    # exist from one workspace listing, so a missing target costs a REST call
+    # rather than a Livy session and a Spark traceback about a catalogue.
+    preflight_fabric_targets(
+        bindings,
+        workspace=workspace.workspace,
+        weaver_lakehouse=workspace.weaver_lakehouse,
+        environment=workspace.environment,
+    )
     resolver = resolver_for(workspace)
     transport_store = OneLakeDfsClient()
     binding_texts = [_binding_text(binding) for binding in bindings.entries]
@@ -537,14 +546,10 @@ def _build_desktop_fabric(
         "from weaver.declaration.model import WeaverItemId\n"
         "from weaver.build_bundle import (InstallationEnvironment, ItemBindings, "
         "parse_item_binding, read_build_state)\n"
-        "from weaver.initialise import initialise_weaver_lakehouse\n"
-        "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"workspace = {workspace_literal}\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"
-        "initialise_weaver_lakehouse(weaver_lakehouse=ItemRef("
-        "workspace.weaver_lakehouse), workspace=workspace, store=store, spark=spark)\n"
         f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
         "environment = InstallationEnvironment("
         "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
@@ -577,8 +582,8 @@ def _build_desktop_fabric(
                     control_lakehouse=control_lakehouse,
                 )
                 local_archive = Location((root / "install.weaver.zip").as_posix())
-                persist_bundle_archive(bundle, local_archive, store=LocalStore())
-                archive_bytes = LocalStore().read(local_archive)
+                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
+                archive_bytes = FilesystemStore().read(local_archive)
                 transport_store.make_directory(resolver.cli_root)
                 transport_store.make_directory(execution)
                 transport_store.write(remote_archive, archive_bytes)
@@ -637,7 +642,7 @@ def _binding_text(binding) -> str:
 
 def _operation_store(workspace: Workspace) -> Store:
     if isinstance(workspace, LocalWorkspace):
-        return LocalStore()
+        return FilesystemStore()
     if _inside_fabric_session(workspace):
         from .fabric.store import FabricStore
 

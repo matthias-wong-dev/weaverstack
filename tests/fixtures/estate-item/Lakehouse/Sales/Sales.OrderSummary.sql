@@ -34,4 +34,4 @@ select r.`Customer id`
      , sum(r.`Amount`)   as `Total amount`
   from recent r
   left anti join Sales.Cancelled x on x.`Order id` = r.`Order id`
- group by r.`Customer id`
+ group by r.`Customer id`;
