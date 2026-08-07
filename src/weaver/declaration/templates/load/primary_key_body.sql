@@ -69,14 +69,7 @@ begin
         set @weaver_error = @weaver_error + '; the target was not modified';
         if @fault_tolerant = 0
             throw 51021, @weaver_error, 1;
-        select
-            cast(0 as bit) as succeeded
-          , @weaver_rows_read as rows_read
-          , cast(0 as bigint) as rows_inserted
-          , cast(0 as bigint) as rows_updated
-          , cast(0 as bigint) as rows_deleted
-          , @weaver_rows_rejected as rows_rejected
-          , @weaver_error as error_message;
+$breach_result_assignment
         return;
     end;
 end;

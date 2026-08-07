@@ -29,6 +29,7 @@ import pytest
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
+from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
@@ -82,6 +83,25 @@ where c.[Active] = 1;
 
 select w.[Customer id], w.[Customer name]
 from #Working as w
+"""
+
+#: Authored setup that returns rows of its own. Legal — dynamic SQL is setup,
+#: and Weaver does not read inside it — and it is exactly what makes "the result
+#: set this procedure produced" a question with no answer.
+NOISY_SETUP = f"""/*
+Table ID: {SCHEMA}.ProgramNoisy
+
+Description: Customers, staged after setup that returns rows of its own.
+
+Lineage: The sales system.
+
+Primary key: Customer id
+*/
+exec sp_executesql N'select 4000 as [rows_read], ''not the load result'' as [why]';
+
+select c.[Customer id], c.[Customer name]
+from [{SCHEMA}].[ProgramCustomer] as c
+where c.[Active] = 1
 """
 
 #: The two-query contract. The staging query is a window — an incremental
@@ -185,8 +205,13 @@ def _literal(value) -> str:
 
 
 def _load(executor, name: str) -> LoadResult:
-    rows = executor.query(f"exec [_].[Load {SCHEMA}.{name}] @fault_tolerant = 0;")
-    return LoadResult.from_row(rows[0])
+    return LoadResult.from_row(
+        executor.call_procedure(
+            f"[_].[Load {SCHEMA}.{name}]",
+            inputs=(("fault_tolerant", 0),),
+            outputs=RESULT_PARAMETERS,
+        )
+    )
 
 
 def _contents(executor, name: str, columns: str = "[Customer id], [Customer name]"):
@@ -273,6 +298,53 @@ def test_setup_runs_and_the_query_over_it_becomes_staging(warehouse):
     assert _contents(warehouse, "ProgramWorking") == [("c1", "One"), ("c2", "Two")]
 
     _drop_object(warehouse, "ProgramWorking")
+
+
+def test_setup_that_returns_rows_does_not_become_the_load_result(warehouse):
+    """The reason the result is in the signature rather than in a result set.
+
+    This body's setup returns a row that looks exactly like a load result and
+    is not one. A caller reading "the first result set the procedure produced"
+    would report 4000 rows read; a caller reading named outputs cannot.
+    """
+
+    _install(warehouse, "ProgramNoisy", NOISY_SETUP)
+    _rows(
+        warehouse,
+        "ProgramCustomer",
+        "[Customer id], [Customer name], [Active]",
+        [("c1", "One", 1), ("c2", "Two", 1), ("c3", "Gone", 0)],
+    )
+
+    result = _load(warehouse, "ProgramNoisy")
+
+    assert result.succeeded is True, result.error_message
+    assert (result.rows_read, result.rows_inserted) == (2, 2)
+    assert _contents(warehouse, "ProgramNoisy") == [("c1", "One"), ("c2", "Two")]
+
+    _drop_object(warehouse, "ProgramNoisy")
+
+
+def test_the_procedure_declares_its_result_as_optional_outputs(warehouse):
+    """Optional, so a person can still run it by hand without declaring any."""
+
+    _install(warehouse, "ProgramNoisy", NOISY_SETUP)
+
+    rows = warehouse.query(
+        "select p.name as parameter, p.is_output as is_output "
+        "from sys.parameters as p "
+        # Bracketed: the procedure's own name contains a dot, so unquoted it
+        # would parse as a three-part name and resolve to nothing.
+        f"where p.[object_id] = object_id(N'[_].[Load {SCHEMA}.ProgramNoisy]') "
+        "order by p.parameter_id;"
+    )
+    outputs = {str(row["parameter"]) for row in rows if row["is_output"]}
+
+    assert outputs == {f"@{name}" for name, _type in RESULT_PARAMETERS}
+
+    warehouse.execute_script(f"exec [_].[Load {SCHEMA}.ProgramNoisy];")
+
+    _drop_object(warehouse, "ProgramNoisy")
 
 
 # --- two result queries --------------------------------------------------------

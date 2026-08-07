@@ -25,7 +25,16 @@ primitive::
     exec [_].[Load Sales.Customer] @fault_tolerant = 1;
 
 It reads no repository, consults no catalogue and calls nothing else Weaver
-owns. It returns one row of :data:`weaver.runtime.load_result.RESULT_COLUMNS`.
+owns.
+
+**Its result is in its signature.** The fields of
+:data:`weaver.runtime.load_result.RESULT_COLUMNS` are optional output
+parameters (:data:`RESULT_PARAMETERS`), not a final ``SELECT``. A procedure
+whose authored setup runs ``EXEC`` or ``sp_executesql`` may return rows of its
+own, and it may return several — so "the result set this procedure produced" is
+a question with no answer, and a caller reading the first or the last of them
+would be interpreting somebody else's SQL. Naming the outputs removes the
+question. They are optional so the line above still works typed by hand.
 
 **The intermediate tables are real.** ``Sales.Customer_Staging``, ``_Upsert``
 and ``_Reject`` are ordinary tables in the object's own schema, as they were in
@@ -74,6 +83,23 @@ from ..runtime.load_contract import (
 #: Weaver's: it sits beside the author's own columns in a real table, so a name
 #: an author might have chosen would be a collision waiting to happen.
 RANK_COLUMN = "__weaver_pk_row_number"
+
+#: The procedure's result, as parameters rather than as a projection, and their
+#: T-SQL types. One definition, read from both ends: the generator writes the
+#: signature from it and :mod:`weaver.load_execution` declares locals to match,
+#: so a field cannot be added to one and forgotten in the other.
+#:
+#: Ordered as :data:`weaver.runtime.load_result.RESULT_COLUMNS` is, and named
+#: identically, because a caller reads the two as one contract.
+RESULT_PARAMETERS = (
+    ("succeeded", "bit"),
+    ("rows_read", "bigint"),
+    ("rows_inserted", "bigint"),
+    ("rows_updated", "bigint"),
+    ("rows_deleted", "bigint"),
+    ("rows_rejected", "bigint"),
+    ("error_message", "varchar(4000)"),
+)
 
 #: The suffixes of the intermediate tables, in the object's own schema.
 STAGING_SUFFIX = "_Staging"
@@ -129,6 +155,8 @@ def generate_tsql_load_script(
     procedure = render_sql_template(
         "load/load_procedure",
         load_procedure=names["procedure"],
+        result_parameters=_result_parameters(),
+        result_assignment=_indent(_result_assignment(), 4),
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
         preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
         postprocessing_banner=_indent(POSTPROCESSING_BANNER, 4),
@@ -148,6 +176,44 @@ def generate_tsql_load_script(
         column_metadata_sql=_column_metadata_sql(names, contract),
         procedure_template_sql_literal=_sql_literal(procedure),
     )
+
+
+# --- the result, as a signature ----------------------------------------------
+
+
+def _result_parameters() -> str:
+    """The result fields, declared as optional outputs on the procedure.
+
+    Optional so that ``exec [_].[Load Sales.Customer];`` still works by hand:
+    someone running the load to see whether it works should not have to declare
+    seven variables first. A caller that wants the numbers asks for them.
+    """
+
+    return "\n".join(
+        f"  , @{name} {type_name} = null output" for name, type_name in RESULT_PARAMETERS
+    )
+
+
+def _result_assignment(**values: str) -> str:
+    """Fill the output parameters, at one of the procedure's exits.
+
+    Every exit assigns *all* of them. A caller reading a field the procedure
+    happened not to set on the path it took would get the ``null`` default and
+    have no way to tell it from a real one, so the defaults exist to make the
+    parameters optional rather than to be observed.
+    """
+
+    defaults = {
+        "succeeded": "cast(case when @weaver_error is null then 1 else 0 end as bit)",
+        "rows_read": "@weaver_rows_read",
+        "rows_inserted": "@weaver_rows_inserted",
+        "rows_updated": "@weaver_rows_updated",
+        "rows_deleted": "@weaver_rows_deleted",
+        "rows_rejected": "@weaver_rows_rejected",
+        "error_message": "@weaver_error",
+    }
+    defaults.update(values)
+    return "\n".join(f"set @{name} = {defaults[name]};" for name, _ in RESULT_PARAMETERS)
 
 
 # --- the pieces of the procedure ---------------------------------------------
@@ -171,20 +237,14 @@ def _static_gate(names: dict, contract: LoadContract) -> str:
 
     if not contract.static:
         return "-- Not static: this object is loaded on every run."
+    seeded = _result_assignment(succeeded="cast(1 as bit)")
     return (
         "-- Static: seeded once, into an empty target. Already populated means\n"
         "-- the load has nothing to do, and reports a successful load of nothing\n"
         "-- rather than repeating work or being skipped from outside.\n"
         f"if exists (select 1 from {names['target']})\n"
         "begin\n"
-        "    select\n"
-        "        cast(1 as bit) as succeeded\n"
-        "      , cast(0 as bigint) as rows_read\n"
-        "      , cast(0 as bigint) as rows_inserted\n"
-        "      , cast(0 as bigint) as rows_updated\n"
-        "      , cast(0 as bigint) as rows_deleted\n"
-        "      , cast(0 as bigint) as rows_rejected\n"
-        "      , cast(null as varchar(4000)) as error_message;\n"
+        f"{_indent(seeded, 4)}\n"
         "    return;\n"
         "end;"
     )
@@ -326,6 +386,18 @@ def _primary_key_body(
         duplicate_reason=REASON_DUPLICATE_PK,
         intolerant_message=_escape_literal(INTOLERANT_MESSAGE),
         tolerated_message=_escape_literal(TOLERATED_MESSAGE),
+        breach_result_assignment=_indent(
+            # A refused load wrote nothing, so the three counts of what it wrote
+            # are zero rather than whatever they had reached. rows_read stands:
+            # the source really was read, which is how the breach was measured.
+            _result_assignment(
+                succeeded="cast(0 as bit)",
+                rows_inserted="cast(0 as bigint)",
+                rows_updated="cast(0 as bigint)",
+                rows_deleted="cast(0 as bigint)",
+            ),
+            8,
+        ),
     ).rstrip()
 
 

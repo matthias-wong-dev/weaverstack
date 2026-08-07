@@ -123,7 +123,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (7, "5bd8c91bba2553c3b34b892337099c0c81037ea159871da2547af48d30ed60d8"),
+    "tsql": (8, "aad6d1857f1c284b64377206111a59159a6b43758a2ed1e77f4626acc9ae6f51"),
     "spark": (8, "817cb4d0e2cb82d571a232ee4a73f7a956f4b255cf4378bc49af6c26cd665664"),
 }
 
@@ -210,11 +210,31 @@ def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
     assert "@fault_tolerant bit = 0" in payload
 
 
-def test_the_procedure_returns_the_result_contract():
+def test_the_procedure_returns_the_result_contract_through_its_signature():
+    """Not through a result set, which a caller could not have identified.
+
+    Authored setup may run EXEC or sp_executesql that returns rows of its own,
+    so "the result set this procedure produced" is ambiguous in exactly the
+    bodies the two-query contract now encourages. A named output is not.
+    """
+
     payload = _warehouse().create_load().payload.decode()
 
     for column in RESULT_COLUMNS:
-        assert f"as {column}" in payload
+        assert f"@{column} " in payload
+        assert f"= null output" in payload
+        assert f"set @{column} = " in payload
+    assert "as succeeded" not in payload
+
+
+def test_the_outputs_are_optional_so_the_procedure_stays_runnable_by_hand():
+    """`exec [_].[Load Sales.Customer];` must still work, undeclared."""
+
+    payload = _warehouse().create_load().payload.decode()
+
+    for column in RESULT_COLUMNS:
+        assert f"@{column} " in payload
+    assert payload.count("= null output") == len(RESULT_COLUMNS)
 
 
 def test_the_identity_column_is_excluded_by_asking_the_engine():

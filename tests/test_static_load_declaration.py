@@ -277,15 +277,20 @@ def test_a_static_warehouse_load_returns_early_when_the_target_holds_a_row():
     assert "return;" in payload
 
 
-def test_the_static_gate_projects_the_same_result_contract_as_a_real_load():
-    """A no-op is a *result*, and a caller must not have to tell them apart."""
+def test_the_static_gate_reports_the_same_result_contract_as_a_real_load():
+    """A no-op is a *result*, and a caller must not have to tell them apart.
+
+    Every output is set, not just the interesting ones: a field left at its
+    ``null`` default would be indistinguishable from a real null, and the
+    defaults exist to make the parameters optional rather than to be read.
+    """
 
     payload = _procedure(static=True)
     gate = payload[: payload.index("Pre-processing")]
 
     for column in RESULT_COLUMNS:
-        assert f"as {column}" in gate
-    assert "cast(1 as bit) as succeeded" in gate
+        assert f"set @{column} = " in gate
+    assert "set @succeeded = cast(1 as bit);" in gate
 
 
 def test_the_static_gate_precedes_the_staging_query():

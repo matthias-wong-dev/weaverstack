@@ -1,6 +1,11 @@
+-- The load's result is in the signature, not in a result set. Authored setup
+-- may run EXEC or sp_executesql that returns rows of its own, and a caller
+-- reading "the result set this procedure produced" would then be reading
+-- somebody else's. Optional outputs cannot be confused with anything.
 create or alter procedure $load_procedure
     @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
+$result_parameters
 as
 begin
     set nocount on;
@@ -39,12 +44,5 @@ $end_artifact_cleanup
         @weaver_target_before + @weaver_rows_inserted - count(*)
     from $target_table;
 
-    select
-        cast(case when @weaver_error is null then 1 else 0 end as bit) as succeeded
-      , @weaver_rows_read as rows_read
-      , @weaver_rows_inserted as rows_inserted
-      , @weaver_rows_updated as rows_updated
-      , @weaver_rows_deleted as rows_deleted
-      , @weaver_rows_rejected as rows_rejected
-      , @weaver_error as error_message;
+$result_assignment
 end;

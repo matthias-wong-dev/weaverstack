@@ -71,7 +71,11 @@ if TYPE_CHECKING:
 #: query, and gives a two-query incremental table a ``_Delete`` working table —
 #: so the transformation section, the delete reconciliation and the prospective
 #: delete count all changed.
-TSQL_LOAD_VERSION = 7
+#: 8 moves the load result out of a final ``SELECT`` and into optional output
+#: parameters, so a caller no longer has to identify Weaver's result set among
+#: any the authored setup produced. The procedure's signature changed, which
+#: means every installed one is not merely stale but incompatible.
+TSQL_LOAD_VERSION = 8
 #: 8 replaced the generated SQL load program with a deployed ``SparkSqlTable``
 #: module, so every previously installed Spark load artefact is stale.
 SPARK_LOAD_VERSION = 8

@@ -404,15 +404,18 @@ def _dispatch_warehouse_procedure(
             f"{resolved.node_id} needs a SQL capability for {target}, and this "
             "run has none"
         )
+    from .declaration.tsql_load import RESULT_PARAMETERS
+
     procedure = load_procedure_name(resolved.node.logical_id.object_id)
-    rows = sql.query(
-        f"exec {procedure} @fault_tolerant = {1 if fault_tolerant else 0}"
+    # Asked for by name. The procedure's authored setup may run EXEC and return
+    # rows of its own, so "the result set it produced" is not a thing a caller
+    # can identify — the outputs are, and they are in its signature.
+    row = sql.call_procedure(
+        procedure,
+        inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
+        outputs=RESULT_PARAMETERS,
     )
-    if not rows:
-        raise LoadError(
-            f"{procedure} returned no row — a load procedure projects its result"
-        )
-    return LoadResult.from_row(rows[0])
+    return LoadResult.from_row(row)
 
 
 def _dispatch_python(
