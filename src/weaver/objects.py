@@ -498,6 +498,127 @@ class View(WeaverObject):
         return self.spark.table(self.lakehouse.qualify(*self.identity))
 
 
+class Assumption(WeaverObject):
+    """A statement about the estate that returns the rows contradicting it.
+
+    An Assumption succeeds when it returns nothing::
+
+        \"\"\"
+        Assumption ID: Sales.OrdersUpToDate
+
+        Description: Orders contain data up to the expected business date.
+        \"\"\"
+
+        from Sales__Orders import Sales__Orders
+
+        from weaver import Assumption
+
+
+        class Sales__OrdersUpToDate(Assumption):
+            def read(self):
+                orders = Sales__Orders(self).dataframe()
+                return orders.where(...)   # empty when the assumption holds
+
+    ``read()`` is authored, and what it returns *is* the evidence — there is no
+    expected relation to compare against and so nothing to correlate. That is
+    why an Assumption may not declare a primary key.
+
+    It is an ordinary Weaver object in every other way: constructed from a
+    session, or from another object with ``Sales__Orders(self)``, reaching its
+    dependencies through the same imports as a Table does.
+    """
+
+    def read(self):
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement read(), returning the rows that "
+            "contradict the assumption — no rows means it holds"
+        )
+
+
+class Test(WeaverObject):
+    """A comparison of an expected relation with an actual one.
+
+    A Test succeeds when the two are the same set::
+
+        \"\"\"
+        Test ID: Sales.OrdersReconcile
+
+        Description: Orders reconcile to the independently derived expected relation.
+
+        Primary key: Order id
+        \"\"\"
+
+        from Sales__Orders import Sales__Orders
+        from Sales__OrderSource import Sales__OrderSource
+
+        from weaver import Test
+
+
+        class Sales__OrdersReconcile(Test):
+            def expected(self):
+                return Sales__OrderSource(self).dataframe()
+
+            def actual(self):
+                return Sales__Orders(self).dataframe()
+
+    **The author writes the two sides; Weaver writes the comparison.** ``read()``
+    computes the symmetric difference and is deliberately not authorable — a Test
+    that could redefine it would still be called a Test while meaning something
+    else, and the one thing a reader must be able to assume about every Test in
+    an estate is what passing means. An override is refused here and by the
+    repository parser, so it fails whether the class is written in a notebook or
+    committed to a repository.
+
+    The declared primary key correlates diagnostic rows across the two sides. It
+    changes nothing about what is compared or counted — see
+    :mod:`weaver.runtime.test_compare`.
+    """
+
+    #: Not a pytest test class. Weaver's Test is a data validation and pytest's
+    #: collector recognises only the name, so it would warn about every module
+    #: that imports this one into a test.
+    __test__ = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "read" in cls.__dict__:
+            raise LoadError(
+                f"{cls.__name__} must not define read() — a Test's comparison is "
+                "Weaver's, so that passing means the same thing for every Test. "
+                "Write expected() and actual(); to author the returned rows "
+                "directly, declare an Assumption instead"
+            )
+
+    def expected(self):
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement expected(), returning the "
+            "relation the actual data is required to match"
+        )
+
+    def actual(self):
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement actual(), returning the "
+            "relation under test"
+        )
+
+    def read(self):
+        """The rows on which expected and actual disagree.
+
+        Empty when the Test passes. Each row carries ``_weaver_side`` — which
+        side it came from — and ``_weaver_sk``, which pairs the two sides of one
+        changed entity when a primary key is declared.
+        """
+
+        from .runtime.test_compare import compare
+
+        return compare(
+            self.expected(),
+            self.actual(),
+            primary_key=self._document().primary_key,
+            what=type(self).__name__,
+        )
+
+
 def _load_pair(obj, returned):
     """Unpack what ``read()`` returned, refusing anything else by name.
 
@@ -549,5 +670,11 @@ def _identity(class_name: str) -> tuple[str, str]:
 #: installed form of a ``.sql`` table — and admitting it here would make the same
 #: object authorable two ways, with two parsers, two dependency readings and two
 #: chances to disagree about what it declared.
-BASE_CLASSES = {"Folder": Folder, "Table": Table, "View": View}
+BASE_CLASSES = {
+    "Folder": Folder,
+    "Table": Table,
+    "View": View,
+    "Test": Test,
+    "Assumption": Assumption,
+}
 BASE_CLASS_NAMES = frozenset(cls.__name__ for cls in BASE_CLASSES.values())

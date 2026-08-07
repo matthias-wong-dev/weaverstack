@@ -33,6 +33,8 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "Table",
         "SparkSqlTable",
         "View",
+        "Test",
+        "Assumption",
         "Lakehouse",
         "default_lakehouse",
         "lakehouse_for",
@@ -40,6 +42,7 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "CommandError",
         "ConfigError",
         "IdentityError",
+        "ValidationError",
     }
 
 

@@ -9,12 +9,26 @@ optional desktop CLI.
 from __future__ import annotations
 
 from . import config as _config  # establish declaration/workspace import order
-from .errors import CommandError, ConfigError, IdentityError, WeaverError
+from .errors import (
+    CommandError,
+    ConfigError,
+    IdentityError,
+    ValidationError,
+    WeaverError,
+)
 from .operations import BuildResult, WipeReport, WipeResult, build, wipe
 from .load import load
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
-from .objects import Folder, SparkSqlTable, Table, View, WeaverObject
+from .objects import (
+    Assumption,
+    Folder,
+    SparkSqlTable,
+    Table,
+    Test,
+    View,
+    WeaverObject,
+)
 
 
 def _resolve_version() -> str:
@@ -49,6 +63,9 @@ __all__ = [
     "Table",
     "SparkSqlTable",
     "View",
+    # authored validation
+    "Test",
+    "Assumption",
     "Lakehouse",
     "default_lakehouse",
     "lakehouse_for",
@@ -57,4 +74,5 @@ __all__ = [
     "CommandError",
     "ConfigError",
     "IdentityError",
+    "ValidationError",
 ]
