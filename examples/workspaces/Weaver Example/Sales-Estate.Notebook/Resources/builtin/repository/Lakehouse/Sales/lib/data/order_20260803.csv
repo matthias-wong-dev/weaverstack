@@ -1,0 +1,6 @@
+Order id,Customer id,Customer name,Order date,Amount,Order status
+O-1001,C-01,Ada Lovelace,2026-08-03,120.50,confirmed
+O-1002,C-01,Ada Lovelace,2026-08-03,80.00,confirmed
+O-1003,C-02,Grace Hopper,2026-08-03,240.00,confirmed
+O-1004,C-02,Grace Hopper,2026-08-03,15.75,cancelled
+O-1005,C-03,Katherine Johnson,2026-08-03,310.25,confirmed

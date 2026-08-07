@@ -18,21 +18,27 @@ Revision notes:
   - 2026-08-03 Created.
 """
 
+import shutil
+from pathlib import Path
+
 from weaver import Folder
+
+#: Where this example's stand-in for the nightly drop lives. A real deployment
+#: fetches from the source system here instead — over SFTP, an API, whatever the
+#: system offers. It is shipped in the item's own ``lib/`` so the estate loads
+#: with nothing set up beside it, which is what lets ``weaver load`` run the
+#: whole chain from a desktop.
+DROP = Path(__file__).parent.parent / "lib" / "data"
 
 
 class Sales__OrderExport(Folder):
-    #: What a real deployment fetches from the source system. Set by the caller
-    #: in this example so the estate has data to carry through the chain.
-    incoming = {}
-
     def read(self):
         # Weaver issues the staging directory and empties it before read() runs,
         # so an object fills what it was given rather than choosing where to
         # write — and returns that same object, which is what load() publishes.
         with self.staging_folder() as staging:
-            for name, text in self.incoming.items():
-                (staging.path / name).write_text(text, encoding="utf-8")
+            for source in sorted(DROP.glob("*.csv")):
+                shutil.copyfile(source, staging.path / source.name)
 
         return staging, []
 
