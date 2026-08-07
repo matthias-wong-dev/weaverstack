@@ -434,7 +434,7 @@ def _dispatch_python(
     """
 
     from .lakehouse import lakehouse_for
-    from .runtime.python_context import import_deployed_module, runtime_context
+    from .runtime.python_context import import_deployed_module
 
     if environment.spark is None:
         raise LoadError(f"{resolved.node_id} needs a Spark session, and this run has none")
@@ -446,7 +446,7 @@ def _dispatch_python(
         f"{resolved.node.primitive_object.object}"
     )
     within = relative[len(LOAD_ROOT) + 1 :] if relative.startswith(LOAD_ROOT) else relative
-    context = runtime_context(
+    context = environment.runtime_scope.context_for(
         # The logical item, not the object: everything one item deployed into one
         # target shares a tree, because that is what its author wrote against.
         logical_item=resolved.node.logical_id.item,

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pytest
 
+from weaver import Table
 from weaver.declaration import read_source_document
 from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
@@ -145,37 +146,113 @@ def test_a_warehouse_tables_declaration_reaches_its_load_contract(static):
     assert LoadContract.from_document(document.document).static is static
 
 
-# --- what the contract decides ------------------------------------------------
+# --- the population check is only asked when it can matter --------------------
+#
+# `static` is checked *before* the target is inspected, and the order is not
+# style. Python evaluates arguments eagerly, so a predicate taking `populated=`
+# would run the query on every ordinary load to answer a question only a static
+# object can act on — a Spark action per table, a tree walk per folder, on every
+# load in the estate.
 
 
-def _table(static: bool) -> LoadContract:
-    return LoadContract(
-        object_id=ObjectId(schema="Sales", object="Country"), static=static
+class _Session:
+    """A Spark session that fails loudly if a load reaches past the gate."""
+
+    def __getattr__(self, name):
+        def refuse(*args, **kwargs):
+            raise AssertionError(
+                f"a static no-op must not reach the session; {name} was called"
+            )
+
+        return refuse
+
+
+class _TableUnderTest(Table):
+    """A table whose contract is attached rather than parsed from a docstring.
+
+    This file's own module docstring is not a Weaver document, so the contract
+    is supplied directly — the parsing route is covered above.
+    """
+
+    static = False
+    reads = 0
+
+    def _document(self):
+        from weaver.declaration.metadata import PYTHON, parse_document
+
+        return parse_document(
+            "Table ID: Sales.Country\n\n"
+            "Description: The country reference list.\n\n"
+            "Lineage: Seeded once.\n\n"
+            "Primary key: Code\n\n"
+            + ("Static: true\n\n" if self.static else "")
+            + "Schema:\n  Code: string\n  Name: string\n",
+            language=PYTHON,
+        )
+
+    def read(self):
+        type(self).reads += 1
+        raise AssertionError("read() must not run when the gate closed")
+
+
+def _counting(monkeypatch, module_name: str, attribute: str, answer: bool):
+    """Replace a population check with one that records being asked."""
+
+    import importlib
+
+    module = importlib.import_module(module_name)
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(True)
+        return answer
+
+    monkeypatch.setattr(module, attribute, counted)
+    return calls
+
+
+def test_a_non_static_table_never_asks_whether_its_target_is_populated(
+    monkeypatch, tmp_path
+):
+    """The cost this ordering removes from every ordinary load in an estate."""
+
+    from weaver import Lakehouse
+
+    calls = _counting(
+        monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
     )
 
+    class Sales__Country(_TableUnderTest):
+        static = False
 
-def test_a_static_object_with_a_populated_target_has_nothing_to_do():
-    assert _table(static=True).is_a_no_op_for(populated=True)
+    table = Sales__Country(
+        _Session(), lakehouse=Lakehouse(name="LH", spark_root=str(tmp_path))
+    )
+    # It goes on to read(), which this double refuses — the point is only that
+    # it got there without asking the target anything.
+    with pytest.raises(AssertionError, match="read\\(\\) must not run"):
+        table.load()
 
-
-def test_a_static_object_with_an_empty_target_loads_normally():
-    """The first load is the one a static object exists for."""
-
-    assert not _table(static=True).is_a_no_op_for(populated=False)
-
-
-def test_a_non_static_object_reloads_whatever_the_target_holds():
-    assert not _table(static=False).is_a_no_op_for(populated=True)
-    assert not _table(static=False).is_a_no_op_for(populated=False)
+    assert calls == []
 
 
-def test_a_folder_answers_the_same_question_the_same_way():
-    contract = FolderLoadContract(
-        object_id=ObjectId(schema="Sales", object="Seed"), static=True
+def test_a_static_table_does_ask(monkeypatch, tmp_path):
+    from weaver import Lakehouse
+
+    calls = _counting(
+        monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
     )
 
-    assert contract.is_a_no_op_for(populated=True)
-    assert not contract.is_a_no_op_for(populated=False)
+    class Sales__Country(_TableUnderTest):
+        static = True
+
+    result = Sales__Country(
+        _Session(), lakehouse=Lakehouse(name="LH", spark_root=str(tmp_path))
+    ).load()
+
+    assert calls == [True]
+    assert result.succeeded
+    assert result.rows_read == 0
 
 
 # --- the Warehouse procedure carries it ---------------------------------------

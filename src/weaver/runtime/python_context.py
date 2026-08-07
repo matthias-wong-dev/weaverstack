@@ -17,15 +17,38 @@ deployed module is imported under a name that carries the tree it came from:
 
 .. code-block:: text
 
-    lib.dates          ->  _weaver_runtime.lakehouse_raw__raw_lh.lib.dates
-    Files.Sales__Seed  ->  _weaver_runtime.lakehouse_raw__raw_lh.Files.Sales__Seed
+    lib.dates          ->  _weaver_runtime.c7f3e1….lib.dates
+    Files.Sales__Seed  ->  _weaver_runtime.c7f3e1….Files.Sales__Seed
 
     the same file in another target
-                       ->  _weaver_runtime.lakehouse_curated__curated_lh.lib.dates
+                       ->  _weaver_runtime.c91a04….lib.dates
 
 Two entries, two modules, no collision — and both importable at once, which a
 scheme that deleted ``lib.*`` between loads could not offer. That scheme would
 also need a global lock and would make parallel dispatch impossible.
+
+**The identity is opaque, and it lasts one run.** Both properties are there to
+stop the module table telling a lie.
+
+*Opaque*, because deriving the package name from Weaver names means normalising
+them, and normalisation is not injective: two distinct valid identities can
+reduce to one Python package and then quietly share modules. A UUID cannot.
+
+*One run*, because a deployed file is not immutable. An ordinary rebuild
+rewrites ``Files/_/Load/Sales__Customer.py`` in place, and a Fabric session
+outlives it:
+
+.. code-block:: text
+
+    load 1   imports Sales__Customer, version A
+    build    rewrites the same path with version B
+    load 2   must execute version B
+
+A context that survived between orchestrations would find version A in
+``sys.modules`` and never look at the file. So each :class:`RuntimeScope` mints
+fresh ids and drops its whole namespace when the run ends — no
+deployment-generation tracking, no staleness to detect, because nothing is
+carried across the boundary in the first place.
 
 **Nothing about the authored surface changes.** The rewriting happens in one
 place: each deployed module executes with its own ``__import__``, which redirects
@@ -34,11 +57,11 @@ exactly the names its own tree defines and passes everything else — ``weaver``
 untouched, so a developer importing an object by hand in a notebook gets
 ordinary Python.
 
-**One context per logical item and physical target.** Objects deployed together
-share a tree, because they were authored to: ``Sales__Customer`` and
-``Sales__Order`` in one item read the same ``lib/dates``, and giving them
-separate copies would break the sharing the author intended. Different targets
-share nothing, which is the whole point.
+**One context per logical item and physical target, within a run.** Objects
+deployed together share a tree, because they were authored to:
+``Sales__Customer`` and ``Sales__Order`` in one item read the same
+``lib/dates``, and giving them separate copies would break the sharing the
+author intended. Different targets share nothing, which is the whole point.
 """
 
 from __future__ import annotations
@@ -47,6 +70,7 @@ import builtins
 import importlib
 import sys
 import threading
+import uuid
 from dataclasses import dataclass, field
 from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
@@ -81,22 +105,67 @@ class PythonRuntimeContext:
         return f"{self.package}.{name}"
 
 
-def runtime_context(
-    *, logical_item, physical_target, runtime_root: str | Path
-) -> PythonRuntimeContext:
-    """The context one node's module is imported under.
+class RuntimeScope:
+    """One ``weaver.load()``'s worth of runtime contexts.
 
-    Derived from values the resolved node already carries, so nothing has to be
-    threaded through or looked up — and deterministic, so the same node in the
-    same run reaches the same modules however many times it is dispatched.
+    Created per run, and torn down when the run ends. Within it, a logical item
+    in a physical target maps to one context however many of its objects are
+    dispatched — so they share their ``lib/`` and ``Files/`` modules, as their
+    author wrote them to. Across runs nothing is shared at all, which is what
+    makes a rebuilt module take effect on the next load rather than the next
+    session.
     """
 
-    root = Path(str(runtime_root))
-    return PythonRuntimeContext(
-        context_id=_identifier(f"{logical_item}__{physical_target}"),
-        runtime_root=root,
-        top_level=_top_level_names(root),
-    )
+    def __init__(self) -> None:
+        self._contexts: dict[tuple[str, str], PythonRuntimeContext] = {}
+        self._lock = threading.Lock()
+
+    @classmethod
+    def new(cls) -> "RuntimeScope":
+        return cls()
+
+    def context_for(
+        self, *, logical_item, physical_target, runtime_root: str | Path
+    ) -> PythonRuntimeContext:
+        """This run's context for one item deployed into one target."""
+
+        key = (str(logical_item), str(physical_target))
+        with self._lock:
+            known = self._contexts.get(key)
+            if known is not None:
+                return known
+            root = Path(str(runtime_root))
+            context = PythonRuntimeContext(
+                # Opaque, and unrelated to any Weaver name: normalising an
+                # identity into a Python package name is not injective, and two
+                # distinct items that normalised alike would share modules.
+                context_id=f"c{uuid.uuid4().hex}",
+                runtime_root=root,
+                top_level=_top_level_names(root),
+            )
+            self._contexts[key] = context
+            return context
+
+    def close(self) -> None:
+        """Drop every module this run imported.
+
+        The whole namespace goes, because the alternative is deciding *which*
+        modules a later run may keep — and the answer depends on whether a build
+        has rewritten them since, which nothing here can see.
+        """
+
+        with self._lock:
+            contexts = list(self._contexts.values())
+            self._contexts.clear()
+        for context in contexts:
+            forget(context)
+
+    def __enter__(self) -> "RuntimeScope":
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.close()
+        return False
 
 
 def import_deployed_module(
@@ -112,6 +181,9 @@ def import_deployed_module(
 
     _install_finder()
     _FINDER.register(context)
+    # A build may have added files since anything last looked at this directory,
+    # and the finder caches directory listings per path.
+    importlib.invalidate_caches()
 
     dotted = relative[: -len(".py")] if relative.endswith(".py") else relative
     name = context.qualified(dotted.replace("/", "."))
@@ -154,11 +226,11 @@ def import_deployed_module(
 
 
 def forget(context: PythonRuntimeContext) -> None:
-    """Drop one context's modules. For tests; a run never needs it.
+    """Drop one context's modules, its finder entry and its builtins.
 
-    A load leaves its context in place deliberately — a second load of the same
-    target reuses it, which is what makes repeated dispatch cheap and what keeps
-    a module's identity stable across a run.
+    Called by :meth:`RuntimeScope.close` when a run ends. Nothing survives it:
+    the package name is never minted again, so anything left behind would be
+    unreachable memory rather than a cache.
     """
 
     _forget_modules(context.package)
@@ -192,21 +264,47 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
         if level == 0 and name:
             head = name.split(".", 1)[0]
             if head in context.top_level:
+                # Qualify the name and then hand it to the *real* import.
+                # Anything less reimplements Python's import semantics, and the
+                # part most easily missed is `fromlist`: ``from lib import
+                # dates`` calls this with name="lib" and fromlist=("dates",),
+                # and it is the real machinery that then loads the submodule and
+                # attaches it to its package. Returning the package unchanged
+                # leaves ``dates`` never imported, and the import fails on a
+                # name that is perfectly valid Python.
                 qualified = context.qualified(name)
-                importlib.import_module(qualified)
-                # ``import lib.dates`` binds the *top* name; ``from lib.dates
-                # import x`` wants the module itself. The real __import__ makes
-                # the same distinction, and callers rely on it.
-                return sys.modules[
-                    qualified if fromlist else context.qualified(head)
-                ]
+                imported = real(qualified, globals, locals, fromlist or (), level)
+                if fromlist:
+                    return imported
+                # Without a fromlist, ``__import__`` returns the *root* package —
+                # ``import lib.dates`` binds ``lib``. The real call returned
+                # ``_weaver_runtime``, which is Weaver's root and not the
+                # author's, so the redirected head is what belongs here.
+                return sys.modules[context.qualified(head)]
         return real(name, globals, locals, fromlist or (), level)
 
     return {**vars(builtins), "__import__": importer}
 
 
 class _ContextLoader:
-    """A loader that runs a deployed module with its context's builtins."""
+    """Runs a deployed module with its context's builtins, from source.
+
+    **From source, and that is not an optimisation in reverse.** Python caches
+    compiled bytecode beside the file and decides whether the cache is current
+    from the source's size and its mtime *to the second*. A deployed module is
+    rewritten in place by builds, so a rebuild that changes a module without
+    changing its length — the generated ``SparkSqlTable`` wrapper, whose length
+    moves only if the embedded SQL does — can land inside the same second and be
+    indistinguishable from no change at all. The next load then runs the
+    previous build's code, silently.
+
+    Compiling from source each time removes the question. It also stops
+    ``__pycache__`` directories appearing inside the deployed tree, which in
+    Fabric means inside OneLake, inside a folder Weaver manages and prunes.
+
+    The cost is a compile per module per run, against modules that are a few
+    dozen lines and a load that is about to touch a warehouse.
+    """
 
     def __init__(self, inner, context: PythonRuntimeContext) -> None:
         self._inner = inner
@@ -215,10 +313,17 @@ class _ContextLoader:
     def create_module(self, spec):
         return self._inner.create_module(spec)
 
+    def get_code(self, fullname):
+        source = self._inner.get_source(fullname)
+        if source is None:  # pragma: no cover - a namespace or extension module
+            return self._inner.get_code(fullname)
+        return compile(source, self._inner.get_filename(fullname), "exec")
+
     def exec_module(self, module):
+        code = self.get_code(module.__name__)
         # Before execution, because the module's own imports run during it.
         module.__dict__["__builtins__"] = _BUILTINS[self._context.package]
-        self._inner.exec_module(module)
+        exec(code, module.__dict__)  # noqa: S102 - deployed Weaver source
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
@@ -232,24 +337,15 @@ class _WeaverRuntimeFinder:
         self._lock = threading.Lock()
 
     def register(self, context: PythonRuntimeContext) -> None:
-        """Bind a context, forgetting what it held if its tree has moved.
+        """Bind a context so its package resolves against its own tree.
 
-        One item in one target is one tree, so within a session the root for a
-        given context does not change — the Lakehouse it resolves to is the same
-        Lakehouse. When it *does* change, the tree has been redeployed
-        somewhere else and the modules already imported describe the old one.
-        Rebinding and dropping them is the only answer that cannot serve stale
-        code; raising would refuse work that is perfectly valid, and keeping the
-        old root would quietly load the wrong estate.
+        No rebinding case to handle: an id is minted once, by one scope, and is
+        never seen again — so a package name cannot come to mean a second tree,
+        and there are no modules under it left over from anything earlier.
         """
 
         with self._lock:
-            known = self.contexts.get(context.package)
-            moved = known is not None and known.runtime_root != context.runtime_root
             self.contexts[context.package] = context
-            if moved:
-                _forget_modules(context.package)
-                _BUILTINS.pop(context.package, None)
             _BUILTINS.setdefault(context.package, _context_builtins(context))
 
     def find_spec(self, fullname, path=None, target=None):
@@ -309,27 +405,10 @@ def _top_level_names(root: Path) -> frozenset:
     return frozenset(names)
 
 
-def _identifier(value: str) -> str:
-    """A safe, deterministic package name for one item-and-target pair.
-
-    Lower-cased and reduced to word characters, because it becomes a Python
-    identifier — and deterministic rather than hashed, because a name in a
-    traceback should say which estate it came from.
-    """
-
-    cleaned = "".join(
-        character if character.isalnum() or character == "_" else "_"
-        for character in str(value)
-    ).strip("_")
-    while "___" in cleaned:
-        cleaned = cleaned.replace("___", "__")
-    return cleaned.lower() or "unnamed"
-
-
 __all__ = [
     "ROOT_PACKAGE",
     "PythonRuntimeContext",
+    "RuntimeScope",
     "forget",
     "import_deployed_module",
-    "runtime_context",
 ]

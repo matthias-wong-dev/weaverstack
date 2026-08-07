@@ -1,7 +1,7 @@
 """
 Table ID: Sales.Customer
 
-Description: revised — revised — revised — revised — revised — revised — revised — revised — revised — revised — revised — One row per customer, the Lakehouse base table.
+Description: One row per customer, the Lakehouse base table.
 
 Lineage: $Files/Raw.Orders
 

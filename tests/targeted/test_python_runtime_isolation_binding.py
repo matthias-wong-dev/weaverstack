@@ -28,9 +28,8 @@ import pytest
 from weaver.errors import LoadError
 from weaver.runtime.python_context import (
     ROOT_PACKAGE,
-    forget,
+    RuntimeScope,
     import_deployed_module,
-    runtime_context,
 )
 
 
@@ -61,25 +60,29 @@ def tree(root, stamp: str, **extra: str):
 
 
 @pytest.fixture
-def raw(tmp_path):
-    context = runtime_context(
+def scope():
+    """One run's worth of contexts, closed when the run would end."""
+
+    with RuntimeScope.new() as opened:
+        yield opened
+
+
+@pytest.fixture
+def raw(scope, tmp_path):
+    return scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
         runtime_root=tree(tmp_path, "raw"),
     )
-    yield context
-    forget(context)
 
 
 @pytest.fixture
-def curated(tmp_path):
-    context = runtime_context(
+def curated(scope, tmp_path):
+    return scope.context_for(
         logical_item="Lakehouse/Curated",
         physical_target="Lakehouse/Curated_LH",
         runtime_root=tree(tmp_path, "curated"),
     )
-    yield context
-    forget(context)
 
 
 def _customer(context):
@@ -120,7 +123,7 @@ def test_a_deployed_folder_module_is_named_for_its_place_in_the_tree(raw):
     assert module.__name__.endswith(".Files.Sales__Seed")
 
 
-def test_an_import_of_something_outside_the_tree_is_untouched(tmp_path):
+def test_an_import_of_something_outside_the_tree_is_untouched(scope, tmp_path):
     """Only names the tree defines are redirected.
 
     Everything else — ``weaver``, ``pyspark``, the standard library — goes to
@@ -128,7 +131,7 @@ def test_an_import_of_something_outside_the_tree_is_untouched(tmp_path):
     something new.
     """
 
-    context = runtime_context(
+    context = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
         runtime_root=tree(
@@ -144,12 +147,10 @@ def test_an_import_of_something_outside_the_tree_is_untouched(tmp_path):
             },
         ),
     )
-    try:
-        module = _customer(context)
 
-        assert module.Sales__Customer.reached == ("json", "LoadError")
-    finally:
-        forget(context)
+    module = _customer(context)
+
+    assert module.Sales__Customer.reached == ("json", "LoadError")
 
 
 # --- isolation ----------------------------------------------------------------
@@ -281,99 +282,159 @@ def test_a_module_that_is_not_there_names_the_path_it_was_not_at(raw):
         )
 
 
-def test_a_module_that_will_not_import_is_reported_as_data(tmp_path):
-    context = runtime_context(
+def test_a_module_that_will_not_import_is_reported_as_data(scope, tmp_path):
+    context = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
         runtime_root=tree(
             tmp_path, "raw", **{"Sales__Customer.py": "import no_such_module\n"}
         ),
     )
-    try:
-        with pytest.raises(LoadError, match="raised ModuleNotFoundError"):
-            _customer(context)
-    finally:
-        forget(context)
+
+    with pytest.raises(LoadError, match="raised ModuleNotFoundError"):
+        _customer(context)
 
 
-def test_a_module_missing_its_declared_class_says_which_one(tmp_path):
-    context = runtime_context(
+def test_a_module_missing_its_declared_class_says_which_one(scope, tmp_path):
+    context = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
         runtime_root=tree(
             tmp_path, "raw", **{"Sales__Customer.py": "class Wrong:\n    pass\n"}
         ),
     )
-    try:
-        with pytest.raises(LoadError, match="defines no class 'Sales__Customer'"):
-            _customer(context)
-    finally:
-        forget(context)
+
+    with pytest.raises(LoadError, match="defines no class 'Sales__Customer'"):
+        _customer(context)
 
 
-def test_a_context_whose_tree_moved_forgets_what_it_held(raw, tmp_path):
-    """One item in one target is one tree, and within a session it does not move.
+# --- what a run does not carry into the next one ------------------------------
 
-    When it does — a redeployment somewhere else — the modules already imported
-    describe the old tree. Rebinding and dropping them is the only answer that
-    cannot serve stale code: raising would refuse valid work, and keeping the old
-    root would quietly load the wrong estate.
+
+def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
+    """The regression this lifetime exists for.
+
+    A Fabric session outlives a build, and a build rewrites deployed Python *in
+    place* — same target, same path, new implementation. A context that survived
+    between orchestrations would find the old module in ``sys.modules`` and
+    never look at the file again, so the load after a rebuild would run the code
+    the load before it ran.
+
+    .. code-block:: text
+
+        run 1    imports Sales__Customer, version A
+        build    rewrites the same path with version B
+        run 2    must execute version B
     """
 
-    first = _customer(raw)
-
-    moved = runtime_context(
-        logical_item="Lakehouse/Raw",
-        physical_target="Lakehouse/Raw_LH",
-        runtime_root=tree(tmp_path / "moved", "relocated"),
+    root = tree(tmp_path, "raw")
+    deployed = root / "Sales__Customer.py"
+    deployed.write_text(
+        "class Sales__Customer:\n    version = 'A'\n", encoding="utf-8"
     )
-    try:
-        again = _customer(moved)
 
-        assert moved.context_id == raw.context_id
-        assert again is not first
-        assert again.Sales__Customer.reached == ("relocated", "relocated")
-    finally:
-        forget(moved)
+    with RuntimeScope.new() as first_run:
+        first = _customer(
+            first_run.context_for(
+                logical_item="Lakehouse/Raw",
+                physical_target="Lakehouse/Raw_LH",
+                runtime_root=root,
+            )
+        )
+        assert first.Sales__Customer.version == "A"
+
+    # The build, rewriting the same physical path.
+    deployed.write_text(
+        "class Sales__Customer:\n    version = 'B'\n", encoding="utf-8"
+    )
+
+    with RuntimeScope.new() as second_run:
+        second = _customer(
+            second_run.context_for(
+                logical_item="Lakehouse/Raw",
+                physical_target="Lakehouse/Raw_LH",
+                runtime_root=root,
+            )
+        )
+
+        assert second.Sales__Customer.version == "B"
+
+
+def test_closing_a_scope_leaves_nothing_of_it_behind(tmp_path):
+    """The namespace goes whole, because deciding what may be kept would mean
+    knowing whether a build has rewritten it — which nothing here can see."""
+
+    with RuntimeScope.new() as scope:
+        context = scope.context_for(
+            logical_item="Lakehouse/Raw",
+            physical_target="Lakehouse/Raw_LH",
+            runtime_root=tree(tmp_path, "raw"),
+        )
+        _customer(context)
+        assert any(name.startswith(context.package) for name in sys.modules)
+
+    assert not [name for name in sys.modules if name.startswith(context.package)]
+
+
+def test_two_runs_never_share_a_context_identity(tmp_path):
+    """Which is why nothing has to detect staleness: the name is never reused."""
+
+    root = tree(tmp_path, "raw")
+    ids = []
+    for _ in range(2):
+        with RuntimeScope.new() as scope:
+            ids.append(
+                scope.context_for(
+                    logical_item="Lakehouse/Raw",
+                    physical_target="Lakehouse/Raw_LH",
+                    runtime_root=root,
+                ).context_id
+            )
+
+    assert ids[0] != ids[1]
 
 
 # --- the context name ---------------------------------------------------------
 
 
-def test_a_context_names_the_estate_it_came_from(raw):
-    """Deterministic and legible, because it appears in every traceback."""
+def test_a_context_identity_is_opaque_rather_than_derived_from_weaver_names(raw):
+    """Deriving it from Weaver names means normalising them, and normalisation
+    is not injective: two distinct valid identities could reduce to one Python
+    package and then quietly share modules. A UUID cannot."""
 
-    assert raw.context_id == "lakehouse_raw__lakehouse_raw_lh"
-    assert raw.package == f"{ROOT_PACKAGE}.lakehouse_raw__lakehouse_raw_lh"
+    assert raw.context_id.startswith("c")
+    assert "raw" not in raw.context_id.lower()
+    assert raw.package == f"{ROOT_PACKAGE}.{raw.context_id}"
 
 
-def test_the_same_item_and_target_always_produce_the_same_context():
-    first = runtime_context(
+def test_one_item_in_one_target_is_one_context_within_a_run(scope, tmp_path):
+    root = tree(tmp_path, "raw")
+    first = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
-        runtime_root="/anywhere",
+        runtime_root=root,
     )
-    second = runtime_context(
+    second = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
-        runtime_root="/anywhere",
+        runtime_root=root,
     )
 
-    assert first.context_id == second.context_id
+    assert first is second
 
 
-def test_two_targets_of_one_item_are_two_contexts():
+def test_two_targets_of_one_item_are_two_contexts(scope, tmp_path):
     """The same repository built into two Lakehouses is two estates."""
 
-    first = runtime_context(
+    first = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Raw_LH",
-        runtime_root="/a",
+        runtime_root=tree(tmp_path / "a", "raw"),
     )
-    second = runtime_context(
+    second = scope.context_for(
         logical_item="Lakehouse/Raw",
         physical_target="Lakehouse/Other_LH",
-        runtime_root="/b",
+        runtime_root=tree(tmp_path / "b", "other"),
     )
 
     assert first.context_id != second.context_id

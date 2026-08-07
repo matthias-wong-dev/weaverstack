@@ -60,6 +60,14 @@ from .load_report import (
 )
 from .targets import ItemRef
 
+def _new_runtime_scope():
+    """A fresh runtime scope. Imported lazily so this module stays cheap."""
+
+    from .runtime.python_context import RuntimeScope
+
+    return RuntimeScope.new()
+
+
 #: What a refresh resolves to when the host can perform one. Not a physical
 #: object — a Lakehouse's SQL analytics endpoint is a capability of the item, so
 #: the location names the item and the capability rather than a path.
@@ -87,10 +95,20 @@ class LoadEnvironment:
 
     resolver: Any = None
     inventories: Mapping[str, TargetInventory] = field(default_factory=dict)
+    #: Targets the catalogue says are installed and the workspace does not hold.
+    #: Distinct from "no inventory entry", which can also mean the inventory was
+    #: never asked for — preflight must not read one as the other.
+    missing: frozenset = field(default_factory=frozenset)
     store: Any = None
     spark: Any = None
     sql: Mapping[str, Any] = field(default_factory=dict)
     workspace: Any = None
+    #: Where this run's deployed Python modules live, and how long they live.
+    #: One scope per environment, and an environment is built once per run — so
+    #: a rebuilt module is executed by the next load rather than shadowed by the
+    #: one the session already imported. See
+    #: :class:`weaver.runtime.python_context.RuntimeScope`.
+    runtime_scope: Any = field(default_factory=lambda: _new_runtime_scope())
 
     def inventory(self, target: PhysicalTargetRef) -> TargetInventory | None:
         return self.inventories.get(str(target))

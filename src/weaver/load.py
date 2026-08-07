@@ -174,8 +174,38 @@ def run_load(
     estate = InstalledEstate.from_catalogue(session.read_catalogue())
     _refuse_uninstalled_targets(estate, requested)
     dag = load_dag(estate, targets=requested)
-    environment = session.environment(dag)
-    _refuse_absent_targets(dag, environment)
+    environment = session.environment(dag, requested)
+    try:
+        return _run(
+            session,
+            dag=dag,
+            environment=environment,
+            requested=requested,
+            fault_tolerant=fault_tolerant,
+            dry_run=dry_run,
+            started=started,
+        )
+    finally:
+        # Every deployed module this run imported goes with it. A Fabric session
+        # outlives a build, and a build rewrites deployed Python in place — so a
+        # module kept past the run that imported it is a module the next load
+        # would use instead of the one now on disk.
+        environment.runtime_scope.close()
+
+
+def _run(
+    session: "LoadSession",
+    *,
+    dag: LoadDag,
+    environment: LoadEnvironment,
+    requested: Sequence[PhysicalTargetRef],
+    fault_tolerant: bool,
+    dry_run: bool,
+    started: datetime,
+) -> LoadRunReport:
+    """One run, between the scope opening and closing around it."""
+
+    _refuse_absent_targets(dag, environment, requested=requested)
     plan = resolve_load_plan(dag, environment=environment)
 
     common = {
@@ -303,21 +333,35 @@ def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:
     )
 
 
-def _refuse_absent_targets(dag: LoadDag, environment: LoadEnvironment) -> None:
-    """Refuse when a target this plan needs cannot be read.
+def _refuse_absent_targets(
+    dag: LoadDag, environment: LoadEnvironment, *, requested=()
+) -> None:
+    """Refuse when a target this run needs is not in the workspace.
 
-    Every target the *graph* touches, not only the ones asked for: a load of a
-    Warehouse may depend on a Lakehouse upstream, and a run that discovered its
-    dependency was gone halfway through would already have written to the
-    Warehouse.
+    Two sets, and both are needed.
+
+    Every target the *graph* touches, because a Warehouse load may depend on a
+    Lakehouse upstream and a run that discovered its dependency was gone halfway
+    through would already have written to the Warehouse.
+
+    And every target that was *asked for*, because an installed item holding
+    nothing loadable contributes no nodes at all — so a graph-derived set would
+    never look at it, and a request naming a Lakehouse somebody has since
+    deleted would come back "succeeded, nothing to do". Which is the one answer
+    it must never give.
     """
 
-    needed = tuple(dict.fromkeys(node.physical_target for node in dag.nodes))
-    absent = [target for target in needed if environment.inventory(target) is None]
+    needed = tuple(
+        dict.fromkeys(
+            list(requested) + [node.physical_target for node in dag.nodes]
+        )
+    )
+    absent = [target for target in needed if str(target) in environment.missing]
     if not absent:
         return
     raise LoadError(
-        "the catalogue says these are installed, but they could not be read: "
+        "the catalogue says these are installed, but the workspace does not "
+        "hold them: "
         + ", ".join(str(target) for target in absent)
         + " — the estate and the workspace disagree, so nothing was loaded"
     )
@@ -470,24 +514,45 @@ class LoadSession:
             )
         )
 
-    def environment(self, dag: LoadDag) -> LoadEnvironment:
+    def environment(self, dag: LoadDag, requested=()) -> LoadEnvironment:
         """Runtime services plus the physical state every planned target is in.
 
-        The inventory read happens once, here, and the whole of resolution then
-        runs against frozen state — the same discipline a build follows, and for
-        the same reason: a decision made against state that is still moving is a
+        The reading happens once, here, and the whole of resolution then runs
+        against frozen state — the same discipline a build follows, and for the
+        same reason: a decision made against state that is still moving is a
         decision nobody can reproduce.
+
+        ``requested`` is included alongside the graph's own targets because an
+        installed item holding nothing loadable contributes no nodes, and a
+        request naming one that has since been deleted must not come back as a
+        successful no-op.
+
+        **Existence and readability are two questions.** Whether the workspace
+        holds the item is asked first and answered on its own; only then is its
+        inventory read, and a failure *there* keeps its own diagnosis. Folding
+        the two together — which is what catching everything and reporting
+        "missing" does — turns an expired credential, an unavailable SQL
+        endpoint or a bug in the reader into "somebody deleted your Lakehouse".
         """
 
-        targets = tuple(dict.fromkeys(node.physical_target for node in dag.nodes))
+        targets = tuple(
+            dict.fromkeys(
+                list(requested) + [node.physical_target for node in dag.nodes]
+            )
+        )
         inventories = {}
+        missing = set()
         for target in targets:
+            if self._is_absent(target):
+                missing.add(str(target))
+                continue
             observed = self._inventory(target)
             if observed is not None:
                 inventories[str(target)] = observed
         return LoadEnvironment(
             resolver=self.resolver,
             inventories=inventories,
+            missing=frozenset(missing),
             store=self.store,
             spark=self.spark,
             sql=self._sql,
@@ -507,7 +572,37 @@ class LoadSession:
 
     # --- reading physical state ---------------------------------------------
 
+    def _is_absent(self, target: PhysicalTargetRef) -> bool:
+        """Whether the workspace genuinely does not hold this item.
+
+        A *not found*, and nothing else. Anything that goes wrong while asking
+        is left to raise, because "I could not tell" and "it is not there" are
+        different answers and only one of them is this method's to give.
+        """
+
+        from .fabric.resources import LAKEHOUSE, WAREHOUSE
+
+        item = ItemRef(target.name)
+        item_type = LAKEHOUSE if target.kind == LAKEHOUSE_TARGET else WAREHOUSE
+        resolve = getattr(self.resolver, "resolve", None)
+        if resolve is not None:
+            try:
+                resolve(item, item_type=item_type)
+            except CommandError:
+                return True
+            return False
+        # The emulator, where a Lakehouse *is* a directory and there is no
+        # workspace to ask.
+        return not self.store.exists(self.resolver.lakehouse(item))
+
     def _inventory(self, target: PhysicalTargetRef):
+        """This target's inventory, or a failure that says what went wrong.
+
+        The item is known to exist by the time this runs, so a failure here is
+        about *reading* it — a credential, an endpoint, a driver, a defect — and
+        the cause is carried rather than flattened into an absence.
+        """
+
         from .build_bundle.prune import (
             read_lakehouse_inventory,
             read_warehouse_inventory,
@@ -520,19 +615,25 @@ class LoadSession:
                 return read_lakehouse_inventory(
                     bound, resolver=self.resolver, store=self.store, spark=self.spark
                 )
-            except Exception:
-                # A target that cannot be read is a target that is not there, as
-                # far as this run is concerned. Resolution says so per node,
-                # naming the target, rather than the whole run failing on a read.
-                return None
+            except Exception as exc:  # noqa: BLE001 - re-raised with its cause
+                raise LoadError(
+                    f"{target} is installed and present, but its inventory could "
+                    f"not be read: {type(exc).__name__}: {exc}"
+                ) from exc
         bound = WarehouseBinding(ItemRef(target.name)).to_bound_target()
         sql = self._warehouse_sql(target.name)
         if sql is None:
-            return None
+            raise LoadError(
+                f"{target} needs a SQL capability to read its inventory, and "
+                "this run has none"
+            )
         try:
             return read_warehouse_inventory(bound, sql=sql)
-        except Exception:
-            return None
+        except Exception as exc:  # noqa: BLE001 - re-raised with its cause
+            raise LoadError(
+                f"{target} is installed and present, but its inventory could not "
+                f"be read: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def _warehouse_sql(self, name: str):
         if name in self._sql:

@@ -95,7 +95,7 @@ class PreparedSession:
     def read_catalogue(self):
         return self.catalogue
 
-    def environment(self, dag):
+    def environment(self, dag, requested=()):
         return LoadEnvironment(
             resolver=self.resolver,
             inventories=self.inventories,

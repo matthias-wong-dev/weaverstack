@@ -65,14 +65,19 @@ class PreparedSession:
     inventories: dict
     workspace: object
     resolver: object
+    #: Targets the workspace does not hold. Set by a test to say so *directly*,
+    #: rather than by removing an inventory — the two are different facts, and
+    #: conflating them is the defect these tests exist to prevent.
+    missing: frozenset = frozenset()
 
     def read_catalogue(self):
         return self.catalogue
 
-    def environment(self, dag):
+    def environment(self, dag, requested=()):
         return LoadEnvironment(
             resolver=self.resolver,
             inventories=self.inventories,
+            missing=self.missing,
             store=Unreached(),
             spark=Unreached(),
             sql={"Reporting_WH": Unreached()},
@@ -160,13 +165,9 @@ def test_one_unknown_target_refuses_the_whole_request(session):
 def test_a_target_that_cannot_be_read_refuses_the_run(session):
     """Installed according to the catalogue, absent according to the workspace."""
 
-    session.inventories = {
-        key: value
-        for key, value in session.inventories.items()
-        if key != "Lakehouse/Raw_LH"
-    }
+    session.missing = frozenset({"Lakehouse/Raw_LH"})
 
-    with pytest.raises(LoadError, match="could not be read"):
+    with pytest.raises(LoadError, match="does not hold them"):
         _run(session, RAW)
 
 
@@ -181,11 +182,7 @@ def test_the_two_refusals_are_told_apart_by_their_messages(session):
     with pytest.raises(CommandError) as unknown:
         _run(session, MISTYPED)
 
-    session.inventories = {
-        key: value
-        for key, value in session.inventories.items()
-        if key != "Lakehouse/Raw_LH"
-    }
+    session.missing = frozenset({"Lakehouse/Raw_LH"})
     with pytest.raises(LoadError) as absent:
         _run(session, RAW)
 
@@ -201,55 +198,58 @@ def test_an_upstream_target_is_checked_even_though_it_was_not_requested(session)
     anything runs.
     """
 
-    session.inventories = {
-        key: value
-        for key, value in session.inventories.items()
-        if key != "Lakehouse/Raw_LH"
-    }
+    session.missing = frozenset({"Lakehouse/Raw_LH"})
 
     with pytest.raises(LoadError, match="Lakehouse/Raw_LH"):
         _run(session, REPORTING)
 
 
 def test_a_dry_run_refuses_an_absent_target_too(session):
-    session.inventories = {
-        key: value
-        for key, value in session.inventories.items()
-        if key != "Lakehouse/Raw_LH"
-    }
+    session.missing = frozenset({"Lakehouse/Raw_LH"})
 
-    with pytest.raises(LoadError, match="could not be read"):
+    with pytest.raises(LoadError, match="does not hold them"):
         _run(session, RAW, dry_run=True)
 
 
 # --- an installed target with nothing loadable --------------------------------
 
 
-def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
-    tmp_path,
-):
-    """The case the refusal must not swallow.
+#: An item that owns no load work at all. A view's definition *is* its query, so
+#: it is built and never loaded — an item of nothing but views is installed and
+#: has genuinely nothing to do, which is the only way to get an empty graph.
+#:
+#: A table would not do, and the first version of this test used one: a Python
+#: table is itself a load artefact, so the graph had a node in it and the case
+#: under test was never reached.
+VIEW_ONLY = """/*
+View ID: DWG.Nothing
 
-    "Installed and holding nothing loadable" and "never installed" both produce
-    an empty graph, and telling them apart is the whole reason the check reads
-    the catalogue rather than counting nodes. A view owns no load work, so an
-    item of nothing but views is installed and has nothing to do.
-    """
+Description: A view over a literal, so the item owns no load work at all.
 
-    from factories import ITEM, item_bindings, single_document_repository, spark_view
+Lineage: Declared for a test.
+
+Dependencies: []
+*/
+select 1 as CustomerId;
+"""
+
+VIEWS_LH = PhysicalTargetRef("lakehouse", "Views_LH")
+
+
+@pytest.fixture
+def empty_estate(tmp_path):
+    """An installed target with an empty load graph, and a session over it."""
+
+    from factories import ITEM, item_bindings, single_document_repository
 
     repository = single_document_repository(
-        tmp_path / "views",
-        documents={
-            "DWG__Customer.py": _table_document(),
-            "DWG.Active.sql": spark_view("DWG.Active", depends_on="DWG.Customer"),
-        },
+        tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
     )
     bindings = item_bindings((ITEM, "Views_LH"))
     workspace = LocalWorkspace(
         workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
     )
-    session = Logged(
+    return Logged(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
@@ -257,20 +257,59 @@ def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
         log_root=_log_root(tmp_path),
     )
 
+
+def test_the_fixture_really_does_produce_an_empty_graph(empty_estate):
+    """Asserted directly, because the two tests below are vacuous without it —
+    and the version of this test that used a Python table *was* vacuous."""
+
+    from weaver.load_plan import InstalledEstate, load_dag
+
+    estate = InstalledEstate.from_catalogue(empty_estate.catalogue)
+    dag = load_dag(estate, targets=(VIEWS_LH,))
+
+    assert VIEWS_LH in estate.targets
+    assert dag.nodes == ()
+
+
+def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
+    empty_estate,
+):
+    """Installed, present, and nothing to do. That is a success."""
+
     report = run_load(
-        session,
-        requested=(PhysicalTargetRef("lakehouse", "Views_LH"),),
-        fault_tolerant=False,
-        dry_run=True,
+        empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=False
     )
 
     assert report.status == TASK_SUCCEEDED
+    assert report.nodes == ()
 
 
-def _table_document() -> str:
-    from factories import lakehouse_table
+def test_a_requested_target_that_is_gone_is_refused_even_with_an_empty_graph(
+    empty_estate,
+):
+    """The hole a graph-derived preflight leaves.
 
-    return lakehouse_table("DWG.Customer", columns={"CustomerId": "string"})
+    An item holding nothing loadable contributes no nodes, so a check built from
+    the graph never looks at it — and a request naming a Lakehouse somebody has
+    since deleted comes back "succeeded, nothing to do". Which is exactly the
+    answer that must never be given for a target that is not there.
+    """
+
+    empty_estate.missing = frozenset({"Lakehouse/Views_LH"})
+
+    with pytest.raises(LoadError, match="does not hold them"):
+        run_load(
+            empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=False
+        )
+
+
+def test_the_same_holds_for_a_dry_run(empty_estate):
+    empty_estate.missing = frozenset({"Lakehouse/Views_LH"})
+
+    with pytest.raises(LoadError, match="does not hold them"):
+        run_load(
+            empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=True
+        )
 
 
 def _log_root(tmp_path):

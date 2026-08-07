@@ -72,7 +72,9 @@ class LoadContract:
     incremental: bool = False
     #: Loaded once, into an empty target, and never again. A reference list, a
     #: seeded dimension, a fixture — something whose source is a *starting*
-    #: state rather than a running one. See :meth:`is_a_no_op_for`.
+    #: state rather than a running one. A load asks this *first* and only then
+    #: whether the target is populated, because the second question costs a query
+    #: and cannot change the answer for anything else.
     static: bool = False
     delete_threshold: int = DEFAULT_DELETE_THRESHOLD
     update_threshold: int = DEFAULT_UPDATE_THRESHOLD
@@ -81,19 +83,6 @@ class LoadContract:
     @property
     def qualified(self) -> str:
         return self.object_id.qualified
-
-    def is_a_no_op_for(self, *, populated: bool) -> bool:
-        """Whether this load has nothing to do, given the target's state.
-
-        The decision is the *primitive's*, not an orchestrator's, and the
-        difference matters: what happens here is that the load ran and found the
-        work already done, so it reports a successful load of nothing. An
-        orchestration skip would say the node never ran, which is a different
-        claim about a different thing and cannot be made from outside the
-        primitive anyway — only the primitive can see the target.
-        """
-
-        return self.static and populated
 
     @property
     def replaces_wholesale(self) -> bool:
@@ -191,23 +180,14 @@ class FolderLoadContract:
     file_keys: tuple[str, ...] = ()
     incremental: bool = False
     #: Materialised once and never again — see :attr:`LoadContract.static`.
+    #: Checked before staging is issued and before ``read()`` is invoked,
+    #: which is the whole point for a folder: a populated static folder must
+    #: not download anything, create a staging directory or reconcile files.
     static: bool = False
 
     @property
     def qualified(self) -> str:
         return self.object_id.qualified
-
-    def is_a_no_op_for(self, *, populated: bool) -> bool:
-        """Whether this load has nothing to do, given the folder's state.
-
-        Checked *before* staging is issued and before ``read()`` is invoked,
-        which is the whole point for a folder: a static folder that is already
-        populated must not download anything, must not create a staging
-        directory and must not reconcile files. Deciding after ``read()`` would
-        already have done the expensive and irreversible part.
-        """
-
-        return self.static and populated
 
     @property
     def replaces_wholesale(self) -> bool:

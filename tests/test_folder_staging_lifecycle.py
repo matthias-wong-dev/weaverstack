@@ -451,3 +451,48 @@ def test_a_non_static_folder_reloads_whatever_the_destination_holds(export):
 
     assert result.rows_updated == 1
     assert (export.path() / "seed.csv").read_text(encoding="utf-8") == "second run"
+
+
+def test_a_non_static_folder_never_asks_whether_its_destination_is_populated(
+    export, monkeypatch
+):
+    """`static` is checked before the folder is inspected, and the order matters.
+
+    Python evaluates arguments eagerly, so asking whether the destination is
+    populated *inside* a predicate would walk the managed tree on every ordinary
+    load — to answer a question only a static folder can act on.
+    """
+
+    import weaver.runtime.folder_load as module
+
+    asked = []
+    monkeypatch.setattr(
+        module,
+        "folder_is_populated",
+        lambda *a, **k: asked.append(True) or True,
+    )
+    export.static = False
+    export.files = {"a.csv": "x"}
+
+    result = export.load()
+
+    assert asked == []
+    assert result.rows_inserted == 1
+
+
+def test_a_static_folder_does_ask(export, monkeypatch):
+    import weaver.runtime.folder_load as module
+
+    asked = []
+    real = module.folder_is_populated
+    monkeypatch.setattr(
+        module,
+        "folder_is_populated",
+        lambda *a, **k: (asked.append(True), real(*a, **k))[1],
+    )
+    export.static = True
+    export.files = {"a.csv": "x"}
+
+    export.load()
+
+    assert asked == [True]

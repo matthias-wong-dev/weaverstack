@@ -306,9 +306,12 @@ class Folder(WeaverObject):
         # Before staging and before read(), which is the whole point for a
         # folder: a populated static folder must not create a staging directory,
         # must not run the author's download and must not reconcile files.
-        if contract.is_a_no_op_for(
-            populated=folder_is_populated(self.path(), contract.file_keys)
-        ):
+        #
+        # `static` first, and the order is not style: Python evaluates arguments
+        # eagerly, so asking whether the folder is populated *inside* the call
+        # would walk the managed tree on every ordinary load to answer a question
+        # only a static one can act on.
+        if contract.static and folder_is_populated(self.path(), contract.file_keys):
             return LoadResult(succeeded=True)
 
         issued = new_staging_folder(self.path(), self._staging_path())
@@ -395,10 +398,13 @@ class Table(WeaverObject):
         # — no query against the source, no staging table, no comparison. The
         # primitive ran and found the work done; that is not an orchestration
         # skip, and the successful no-op result says as much.
-        if contract.is_a_no_op_for(
-            populated=table_is_populated(
-                self.spark, contract=contract, lakehouse=self.lakehouse
-            )
+        #
+        # `static` first, and the order is not style: Python evaluates arguments
+        # eagerly, so asking whether the target is populated *inside* the call
+        # would put a Spark action on every ordinary load to answer a question
+        # only a static one can act on.
+        if contract.static and table_is_populated(
+            self.spark, contract=contract, lakehouse=self.lakehouse
         ):
             return LoadResult(succeeded=True)
 
