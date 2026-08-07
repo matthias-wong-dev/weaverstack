@@ -123,7 +123,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (6, "9a9e2a3c8278c81ebf8b6af6327d0d1bc39ece86fd7fcf51593c839782fd40df"),
+    "tsql": (7, "4204be4e52bf11f4c8cc89e72c464bc826b2c2bf3703fed84929bd953ea5edbe"),
     "spark": (8, "817cb4d0e2cb82d571a232ee4a73f7a956f4b255cf4378bc49af6c26cd665664"),
 }
 
@@ -269,13 +269,100 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
 def test_an_incremental_load_deletes_nothing():
     """Absence from a window is not a retirement."""
 
-    source = WAREHOUSE_TABLE.replace(
-        "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
-    )
-    payload = _warehouse(source).create_load().payload.decode()
+    payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load().payload.decode()
 
     assert "delete c\n" not in payload
     assert "not a retirement" in payload
+
+
+# --- an incremental table's explicit deletes -----------------------------------
+
+
+def _incremental(source: str) -> str:
+    return source.replace(
+        "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
+    )
+
+
+#: Setup, the staging query, and a second query naming the keys to retire. The
+#: setup sits *between* the two queries deliberately: where an author puts it is
+#: where it has to run, or the second query reads a table that does not exist yet.
+TWO_QUERY_WAREHOUSE = _incremental(WAREHOUSE_TABLE).replace(
+    "select [Customer id], [Customer name] from [Src].[Raw]",
+    """select [Customer id], [Customer name] from [Src].[Raw];
+
+select [Customer id] into #Retired from [Src].[Retirement];
+
+select [Customer id] from #Retired""",
+)
+
+
+def _two_query_payload() -> str:
+    return _warehouse(TWO_QUERY_WAREHOUSE).create_load().payload.decode()
+
+
+def test_a_second_query_becomes_a_delete_working_table():
+    payload = _two_query_payload()
+
+    assert "create table [Sales].[Customer_Delete] as" in payload
+    assert "select [Customer id] from #Retired" in payload
+
+
+def test_the_delete_claim_is_narrowed_before_anything_is_counted():
+    """Distinct, not blank, and present in the target — all three, up front.
+
+    The stability threshold has to be checked against what will really be
+    removed. A count of the raw claim would be a count of what was asked for,
+    which is a different number whenever a key is repeated or was never there.
+    """
+
+    payload = _two_query_payload()
+
+    assert "select distinct c.[Customer id]" in payload
+    assert "inner join (" in payload
+    assert "where not (nullif(trim(cast(d.[Customer id]" in payload
+
+
+def test_the_delete_claim_is_what_the_threshold_counts():
+    payload = _two_query_payload()
+
+    assert (
+        "select @weaver_prospective_deletes = count(*) from [Sales].[Customer_Delete];"
+        in payload
+    )
+    assert "not a retirement" not in payload
+
+
+def test_the_target_loses_exactly_the_claimed_keys():
+    payload = _two_query_payload()
+
+    assert "inner join [Sales].[Customer_Delete] as d" in payload
+    # Still reported from cardinality, so a key that was not there to begin with
+    # deletes nothing and inflates nothing.
+    assert "@weaver_target_before + @weaver_rows_inserted - count(*)" in payload
+
+
+def test_the_delete_table_is_cleaned_up_with_the_others():
+    payload = _two_query_payload()
+
+    assert payload.count("drop table [Sales].[Customer_Delete];") == 2
+
+
+def test_setup_runs_where_the_author_put_it():
+    """Between the two queries, because that is where it was written."""
+
+    payload = _two_query_payload()
+    staging = payload.index("create table [Sales].[Customer_Staging] as")
+    setup = payload.index("select [Customer id] into #Retired")
+    deletes = payload.index("create table [Sales].[Customer_Delete] as")
+
+    assert staging < setup < deletes
+
+
+def test_a_one_query_incremental_table_has_no_delete_table():
+    payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load().payload.decode()
+
+    assert "Customer_Delete" not in payload
 
 
 # --- stability thresholds ------------------------------------------------------

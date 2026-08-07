@@ -47,12 +47,14 @@ the ``fault_tolerant`` contract and structured result added.
 
 from __future__ import annotations
 
+from ..errors import DiscoveryError
 from .metadata import (
     AUDIT_COLUMNS,
     AUDIT_LIVE_DELETE_DATETIME,
     SesDocument,
 )
-from .sql_shaping import render_sql_template, split_trailing_query
+from .sql_shaping import render_sql_template
+from .tsql_program import TsqlProgram, parse_tsql_program, validate_query_contract
 from ..runtime.load_contract import (
     REASON_BLANK_PK,
     REASON_DUPLICATE_PK,
@@ -65,10 +67,11 @@ from ..runtime.load_contract import (
 #: an author might have chosen would be a collision waiting to happen.
 RANK_COLUMN = "__weaver_pk_row_number"
 
-#: The suffixes of the three intermediate tables, in the object's own schema.
+#: The suffixes of the intermediate tables, in the object's own schema.
 STAGING_SUFFIX = "_Staging"
 UPSERT_SUFFIX = "_Upsert"
 REJECT_SUFFIX = "_Reject"
+DELETE_SUFFIX = "_Delete"
 
 #: What a run reports when it refused to start, and when it went ahead anyway.
 #: Both say rejects occurred; they differ in what happened to the target, which
@@ -97,11 +100,21 @@ def generate_tsql_load_script(
     """
 
     contract = LoadContract.from_document(document)
+    program = parse_tsql_program(body, what=document.qualified, error=DiscoveryError)
+    validate_query_contract(
+        program,
+        what=document.qualified,
+        primary_key=document.primary_key,
+        incremental=document.is_incremental,
+        error=DiscoveryError,
+    )
+
     names = _table_names(document, procedure_name)
-    staging_sql = _staging_sql(names, body, contract)
+    claims_deletes = program.deletes is not None
+    staging_sql = _staging_sql(names, program, contract)
 
     if contract.primary_key:
-        load_body = _primary_key_body(names, contract)
+        load_body = _primary_key_body(names, contract, claims_deletes)
     else:
         load_body = _full_replace_body(names)
 
@@ -112,12 +125,14 @@ def generate_tsql_load_script(
         preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
         postprocessing_banner=_indent(POSTPROCESSING_BANNER, 4),
         static_gate=_indent(_static_gate(names, contract), 4),
-        start_artifact_cleanup=_indent(_cleanup(names, contract), 4),
+        start_artifact_cleanup=_indent(_cleanup(names, contract, claims_deletes), 4),
         staging_sql=_indent(staging_sql, 4),
         staging_table=names["staging"],
         target_table=names["target"],
         load_body=_indent(load_body, 4),
-        end_artifact_cleanup=_indent(_end_cleanup(names, contract), 4),
+        end_artifact_cleanup=_indent(
+            _end_cleanup(names, contract, claims_deletes), 4
+        ),
     ).rstrip()
 
     return render_sql_template(
@@ -167,37 +182,84 @@ def _static_gate(names: dict, contract: LoadContract) -> str:
     )
 
 
-def _staging_sql(names: dict, body: str, contract: LoadContract) -> str:
-    """Materialise the object's query, ranking duplicate keys as it goes.
+def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> str:
+    """Run the author's program, materialising each query it produces.
 
-    One pass, because the rank is what identifies a duplicate and computing it
-    later would mean reading the staged rows twice. With no key there is nothing
-    to rank and the query is staged as it stands.
+    The body is emitted in the order it was written. Setup is not a preamble
+    that happens to come first — an author may build a working table, stage from
+    it, then build another and name the retired keys from *that* — so a setup
+    statement written between two queries is run between them, where it was put.
 
-    Only the *last standalone query* is staged. A body may set a temporary view
-    up first and select from it, and wrapping the whole body in a subquery would
-    put a ``create`` inside a ``from`` — so the preamble runs as it was written,
-    and the query it leads to is what fills staging.
+    The staging query is wrapped rather than inlined, because a duplicate key is
+    identified by its rank and computing the rank later would mean reading the
+    staged rows twice. With no key there is nothing to rank and the query is
+    staged as it stands.
     """
 
-    preamble, query = split_trailing_query(body)
-    lead = f"{preamble};\n\n" if preamble else ""
+    pieces = [TRANSFORMATION_BANNER]
+    query_number = 0
+    for statement in program.statements:
+        if not statement.produces_result:
+            pieces.append(f"{statement.sql};")
+            continue
+        query_number += 1
+        if query_number == 1:
+            pieces.append(_staging_table_sql(names, statement.sql, contract))
+        else:
+            pieces.append(_delete_claim_sql(names, statement.sql, contract))
+    pieces.append(END_TRANSFORMATION_BANNER)
+    return "\n\n".join(pieces)
+
+
+def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
     if not contract.primary_key:
-        staged = f"create table {names['staging']} as\n{query};"
-    else:
-        partition = ", ".join(f"s.{_quote(column)}" for column in contract.primary_key)
-        staged = (
-            f"create table {names['staging']} as\n"
-            f"select\n"
-            f"    s.*\n"
-            f"  , row_number() over (partition by {partition} order by (select null)) "
-            f"as {_quote(RANK_COLUMN)}\n"
-            f"from (\n{_indent(query, 4)}\n) as s;"
-        )
-    return f"{TRANSFORMATION_BANNER}\n{lead}{staged}\n{END_TRANSFORMATION_BANNER}"
+        return f"create table {names['staging']} as\n{query};"
+    partition = ", ".join(f"s.{_quote(column)}" for column in contract.primary_key)
+    return (
+        f"create table {names['staging']} as\n"
+        f"select\n"
+        f"    s.*\n"
+        f"  , row_number() over (partition by {partition} order by (select null)) "
+        f"as {_quote(RANK_COLUMN)}\n"
+        f"from (\n{_indent(query, 4)}\n) as s;"
+    )
 
 
-def _primary_key_body(names: dict, contract: LoadContract) -> str:
+def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
+    """Settle which target rows the author's second query actually names.
+
+    Three things are decided here rather than at the delete, and the reason is
+    the same for all three: the stability threshold has to be checked against
+    what will *really* be removed, and a count taken from the raw claim would
+    be a count of what was asked for.
+
+    .. code-block:: text
+
+        distinct      naming a key twice is one deletion, not two
+        not blank     whitespace identifies no row a person would call a match
+        in the target claiming a key that was never there deletes nothing
+
+    So this table is both the count and the driver: what it holds is exactly
+    what will go, and ``rows_deleted`` stays a report of rows actually removed.
+    The target is read before anything modifies it, which is what makes the
+    guard a decision not to start rather than an unwind.
+    """
+
+    keys = ", ".join(f"c.{_quote(column)}" for column in contract.primary_key)
+    join = _join("d", "c", contract.primary_key)
+    return (
+        f"create table {names['delete']} as\n"
+        f"select distinct {keys}\n"
+        f"from {names['target']} as c\n"
+        f"inner join (\n{_indent(query, 4)}\n) as d\n"
+        f"    on {join}\n"
+        f"where not ({_blank_key_predicate(contract.primary_key, alias='d')});"
+    )
+
+
+def _primary_key_body(
+    names: dict, contract: LoadContract, claims_deletes: bool
+) -> str:
     blank = _blank_key_predicate(contract.primary_key)
     return render_sql_template(
         "load/primary_key_body",
@@ -210,8 +272,8 @@ def _primary_key_body(names: dict, contract: LoadContract) -> str:
         staging_target_join=_join("s", "t", contract.primary_key),
         target_upsert_join=_join("c", "u", contract.primary_key),
         target_missing_predicate=f"t.{_quote(contract.primary_key[0])} is null",
-        missing_reconciliation=_missing_reconciliation(names, contract),
-        prospective_deletes=_prospective_deletes(names, contract),
+        missing_reconciliation=_reconciliation(names, contract, claims_deletes),
+        prospective_deletes=_prospective_deletes(names, contract, claims_deletes),
         delete_threshold=contract.delete_threshold,
         update_threshold=contract.update_threshold,
         stability_rows=contract.stability_rows,
@@ -231,13 +293,23 @@ def _full_replace_body(names: dict) -> str:
     ).rstrip()
 
 
-def _prospective_deletes(names: dict, contract: LoadContract) -> str:
+def _prospective_deletes(
+    names: dict, contract: LoadContract, claims_deletes: bool
+) -> str:
     """Count what the load is about to delete, before it deletes any of it.
 
     A number obtained by deleting would be a report rather than a check, and the
-    whole point of the guard is to decide *not* to.
+    whole point of the guard is to decide *not* to. Two ways to arrive at the
+    number, because there are two ways a row is retired — the source stopped
+    producing it, or the author named it — and one object never uses both.
     """
 
+    if claims_deletes:
+        return (
+            "-- The delete claim was already narrowed to keys the target holds,\n"
+            "-- so its size is the number of rows that will really go.\n"
+            f"select @weaver_prospective_deletes = count(*) from {names['delete']};"
+        )
     if not contract.deletes_absent_rows:
         return (
             "-- Incremental: nothing is deleted, so there is nothing to count."
@@ -252,18 +324,30 @@ def _prospective_deletes(names: dict, contract: LoadContract) -> str:
     )
 
 
-def _missing_reconciliation(names: dict, contract: LoadContract) -> str:
-    """Delete target rows the source stopped producing — a physical delete.
+def _reconciliation(
+    names: dict, contract: LoadContract, claims_deletes: bool
+) -> str:
+    """Remove the target rows this load retires — a physical delete.
 
-    Only for a keyed, non-incremental load. An incremental source shows a window
-    rather than the whole truth, so absence from it is not a retirement and
-    deleting on it would destroy rows the source never claimed to describe.
+    Which rows those are is the whole of what ``Incremental`` decides. A
+    non-incremental source is the whole truth, so a row it stopped producing has
+    been retired and absence is the signal. An incremental source shows a window
+    instead, so absence says nothing and only an explicit second query can
+    retire anything.
     """
 
+    if claims_deletes:
+        join = _join("d", "c", contract.primary_key)
+        return (
+            f"delete c\n"
+            f"from {names['target']} as c\n"
+            f"inner join {names['delete']} as d\n"
+            f"    on {join};"
+        )
     if not contract.deletes_absent_rows:
         return (
-            "-- Incremental: absence from the source is not a retirement, so\n"
-            "-- nothing is deleted."
+            "-- Incremental, and no delete query. Absence from the source is\n"
+            "-- not a retirement, so nothing is deleted."
         )
     join = _join("s", "c", contract.primary_key)
     return (
@@ -275,16 +359,22 @@ def _missing_reconciliation(names: dict, contract: LoadContract) -> str:
     )
 
 
-def _cleanup(names: dict, contract: LoadContract) -> str:
+def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     """Drop whatever a previous run left behind, newest dependency first.
 
     Only the tables this procedure actually makes. An unkeyed load has no reject
     or upsert table — with no key nothing can be matched, so there is nothing to
-    reject and no upsert set — and dropping them anyway would leave a reader
-    hunting for the statement that creates them.
+    reject and no upsert set — and a load whose author named no deletes has no
+    delete table. Dropping them anyway would leave a reader hunting for the
+    statement that creates them.
     """
 
-    keys = ("reject", "upsert", "staging") if contract.primary_key else ("staging",)
+    if not contract.primary_key:
+        keys = ("staging",)
+    elif claims_deletes:
+        keys = ("reject", "upsert", "delete", "staging")
+    else:
+        keys = ("reject", "upsert", "staging")
     return "\n".join(
         f"if object_id({_sql_literal(names[key])}, N'U') is not null "
         f"drop table {names[key]};"
@@ -292,15 +382,15 @@ def _cleanup(names: dict, contract: LoadContract) -> str:
     )
 
 
-def _end_cleanup(names: dict, contract: LoadContract) -> str:
+def _end_cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     """Clear the intermediate tables, unless they are the evidence of a problem.
 
     A run that rejected nothing leaves nothing to look at, so its artefacts go.
-    A run that rejected rows keeps all three: the reject table names what was
-    refused, and staging and upsert are what make the rejection explicable.
+    A run that rejected rows keeps them all: the reject table names what was
+    refused, and the others are what make the rejection explicable.
     """
 
-    cleanup = _cleanup(names, contract)
+    cleanup = _cleanup(names, contract, claims_deletes)
     if not contract.primary_key:
         return cleanup
     return (
@@ -396,6 +486,7 @@ def _table_names(document: SesDocument, procedure_name: str) -> dict:
         "staging": f"{qualified}{_quote(obj + STAGING_SUFFIX)}",
         "upsert": f"{qualified}{_quote(obj + UPSERT_SUFFIX)}",
         "reject": f"{qualified}{_quote(obj + REJECT_SUFFIX)}",
+        "delete": f"{qualified}{_quote(obj + DELETE_SUFFIX)}",
         "procedure": procedure_name,
     }
 
@@ -406,16 +497,16 @@ def _join(left: str, right: str, columns: tuple[str, ...]) -> str:
     )
 
 
-def _blank_key_predicate(columns: tuple[str, ...]) -> str:
+def _blank_key_predicate(columns: tuple[str, ...], *, alias: str = "s") -> str:
     """A key column that is null, empty or only spaces is not a key.
 
     Blank is rejected alongside null deliberately: a key that is whitespace
     matches nothing a human would call a match, and letting it through would
-    create a row nobody can find again.
+    create a row nobody can find again — or, on the delete side, claim one.
     """
 
     predicates = [
-        f"nullif(trim(cast(s.{_quote(column)} as varchar(max))), '') is null"
+        f"nullif(trim(cast({alias}.{_quote(column)} as varchar(max))), '') is null"
         for column in columns
     ]
     if len(predicates) == 1:
