@@ -1,6 +1,6 @@
 """What a load checks about its targets before it dispatches anything.
 
-Three answers that must not be confused with each other:
+Two answers that must not be confused with each other:
 
 .. code-block:: text
 
@@ -8,19 +8,25 @@ Three answers that must not be confused with each other:
                              no estate to load — and the one answer that must
                              never be given is "succeeded, nothing to do".
 
-    Lakehouse/Sales, deleted the catalogue says the estate is there and the
-                             workspace disagrees. Refused whole, rather than
-                             discovered node by node once part of the run has
-                             already written somewhere else.
-
     Lakehouse/Empty          installed, and holding nothing loadable. A
                              successful no-op, because that is exactly what was
                              asked for and exactly what happened.
 
-The first two are refusals *before* the first primitive runs, in a dry run as
-much as in a real one: a mistyped target is a mistyped target whichever was
-asked for, and a dry run that reported it as a plan of nothing would be the same
-misleading answer one step earlier.
+The refusal comes *before* the first primitive runs, in a dry run as much as in
+a real one: a mistyped target is a mistyped target whichever was asked for, and
+a dry run that reported it as a plan of nothing would be the same misleading
+answer one step earlier.
+
+Whether the workspace still *holds* the item is a third question, and it is not
+asked here. It is worth asking only where a wrong answer is cheap to act on —
+in the CLI, before a Livy session costs forty seconds to start — and by the
+time this code runs that session already exists. See
+``tests/test_cli_load_binding.py``, where that guard is proved to reach the
+answer over REST alone, without a catalogue or a graph.
+
+An item the workspace no longer holds is not thereby silent: reading its
+inventory fails, and the failure carries what actually went wrong rather than
+being flattened into a guess. That is the last section below.
 """
 
 from __future__ import annotations
@@ -65,19 +71,14 @@ class PreparedSession:
     inventories: dict
     workspace: object
     resolver: object
-    #: Targets the workspace does not hold. Set by a test to say so *directly*,
-    #: rather than by removing an inventory — the two are different facts, and
-    #: conflating them is the defect these tests exist to prevent.
-    missing: frozenset = frozenset()
 
     def read_catalogue(self):
         return self.catalogue
 
-    def environment(self, dag, requested=()):
+    def environment(self, dag):
         return LoadEnvironment(
             resolver=self.resolver,
             inventories=self.inventories,
-            missing=self.missing,
             store=Unreached(),
             spark=Unreached(),
             sql={"Reporting_WH": Unreached()},
@@ -159,64 +160,16 @@ def test_one_unknown_target_refuses_the_whole_request(session):
         _run(session, RAW, MISTYPED)
 
 
-# --- a target the workspace no longer holds -----------------------------------
-
-
-def test_a_target_that_cannot_be_read_refuses_the_run(session):
-    """Installed according to the catalogue, absent according to the workspace."""
-
-    session.missing = frozenset({"Lakehouse/Raw_LH"})
-
-    with pytest.raises(LoadError, match="does not hold them"):
-        _run(session, RAW)
-
-
-def test_the_two_refusals_are_told_apart_by_their_messages(session):
-    """Same outcome, different fault, different fix.
-
-    One is a typo in the request; the other is an estate that no longer matches
-    its catalogue. A single message for both would send half the readers to the
-    wrong place.
-    """
-
-    with pytest.raises(CommandError) as unknown:
-        _run(session, MISTYPED)
-
-    session.missing = frozenset({"Lakehouse/Raw_LH"})
-    with pytest.raises(LoadError) as absent:
-        _run(session, RAW)
-
-    assert "no installed estate" in str(unknown.value)
-    assert "the estate and the workspace disagree" in str(absent.value)
-
-
-def test_an_upstream_target_is_checked_even_though_it_was_not_requested(session):
-    """A Warehouse load depends on a Lakehouse upstream of it.
-
-    Discovering that dependency was gone halfway through would already have
-    written to the Warehouse, so the whole graph's targets are checked before
-    anything runs.
-    """
-
-    session.missing = frozenset({"Lakehouse/Raw_LH"})
-
-    with pytest.raises(LoadError, match="Lakehouse/Raw_LH"):
-        _run(session, REPORTING)
-
-
-def test_a_dry_run_refuses_an_absent_target_too(session):
-    session.missing = frozenset({"Lakehouse/Raw_LH"})
-
-    with pytest.raises(LoadError, match="does not hold them"):
-        _run(session, RAW, dry_run=True)
-
-
 # --- an installed target with nothing loadable --------------------------------
 
 
 #: An item that owns no load work at all. A view's definition *is* its query, so
 #: it is built and never loaded — an item of nothing but views is installed and
 #: has genuinely nothing to do, which is the only way to get an empty graph.
+#:
+#: This is the shape a graph-derived check cannot see: no nodes, so nothing to
+#: derive a target list from. It is why the CLI's guard works from what was
+#: *requested* rather than from what was planned.
 #:
 #: A table would not do, and the first version of this test used one: a Python
 #: table is itself a load artefact, so the graph had a node in it and the case
@@ -274,7 +227,7 @@ def test_the_fixture_really_does_produce_an_empty_graph(empty_estate):
 def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
     empty_estate,
 ):
-    """Installed, present, and nothing to do. That is a success."""
+    """Installed, and nothing to do. That is a success."""
 
     report = run_load(
         empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=False
@@ -282,34 +235,6 @@ def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
 
     assert report.status == TASK_SUCCEEDED
     assert report.nodes == ()
-
-
-def test_a_requested_target_that_is_gone_is_refused_even_with_an_empty_graph(
-    empty_estate,
-):
-    """The hole a graph-derived preflight leaves.
-
-    An item holding nothing loadable contributes no nodes, so a check built from
-    the graph never looks at it — and a request naming a Lakehouse somebody has
-    since deleted comes back "succeeded, nothing to do". Which is exactly the
-    answer that must never be given for a target that is not there.
-    """
-
-    empty_estate.missing = frozenset({"Lakehouse/Views_LH"})
-
-    with pytest.raises(LoadError, match="does not hold them"):
-        run_load(
-            empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=False
-        )
-
-
-def test_the_same_holds_for_a_dry_run(empty_estate):
-    empty_estate.missing = frozenset({"Lakehouse/Views_LH"})
-
-    with pytest.raises(LoadError, match="does not hold them"):
-        run_load(
-            empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=True
-        )
 
 
 def _log_root(tmp_path):
@@ -334,3 +259,109 @@ class Logged(PreparedSession):
         return open_task_log(
             task_type="load", folder=self.log_root, store=FilesystemStore()
         )
+
+
+# --- an installed target the workspace cannot answer for ----------------------
+#
+# Every target in the graph has its inventory read before resolution runs, and
+# that read can fail for reasons that are nothing like each other. What must not
+# happen is the flattening: catching everything and calling it "missing" tells a
+# reader with an expired credential to go looking for a Lakehouse that is
+# sitting right there.
+
+
+class _Node:
+    def __init__(self, target):
+        self.physical_target = target
+
+
+class _Dag:
+    def __init__(self, *targets):
+        self.nodes = tuple(_Node(target) for target in targets)
+
+
+@pytest.fixture
+def real_session(tmp_path):
+    """An actual LoadSession, because the diagnosis is built inside one."""
+
+    from weaver.load import LoadSession
+
+    workspace = LocalWorkspace(
+        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
+    )
+    return LoadSession(workspace, ())
+
+
+def _failing_reader(monkeypatch, exc):
+    import weaver.build_bundle.prune as prune
+
+    def refuse(*args, **kwargs):
+        raise exc
+
+    monkeypatch.setattr(prune, "read_lakehouse_inventory", refuse)
+
+
+def test_an_inventory_that_cannot_be_read_fails_the_run(monkeypatch, real_session):
+    from weaver.fabric import ItemNotFoundError
+
+    _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
+
+    with pytest.raises(LoadError):
+        real_session.environment(_Dag(RAW))
+
+
+def test_the_failure_names_the_target_it_was_reading(monkeypatch, real_session):
+    from weaver.fabric import ItemNotFoundError
+
+    _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
+
+    with pytest.raises(LoadError) as raised:
+        real_session.environment(_Dag(RAW))
+
+    assert "Lakehouse/Raw_LH" in str(raised.value)
+
+
+def test_a_deleted_item_is_diagnosed_as_a_deleted_item(monkeypatch, real_session):
+    """The catalogue and the workspace disagree, and the message says which."""
+
+    from weaver.fabric import ItemNotFoundError
+
+    _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
+
+    with pytest.raises(LoadError) as raised:
+        real_session.environment(_Dag(RAW))
+
+    assert "ItemNotFoundError" in str(raised.value)
+    assert "no Lakehouse named 'Raw_LH'" in str(raised.value)
+
+
+def test_a_credential_failure_is_not_reported_as_a_deleted_item(
+    monkeypatch, real_session
+):
+    """The flattening this exists to prevent.
+
+    An expired token and a deleted Lakehouse are read by the same call and fixed
+    in entirely different places. A run that answers "missing" for both sends
+    half its readers to check something that is fine.
+    """
+
+    _failing_reader(monkeypatch, PermissionError("token expired"))
+
+    with pytest.raises(LoadError) as raised:
+        real_session.environment(_Dag(RAW))
+
+    assert "PermissionError" in str(raised.value)
+    assert "token expired" in str(raised.value)
+    assert "missing" not in str(raised.value)
+
+
+def test_the_original_exception_is_kept_as_the_cause(monkeypatch, real_session):
+    """So a traceback still reaches the line that actually failed."""
+
+    original = PermissionError("token expired")
+    _failing_reader(monkeypatch, original)
+
+    with pytest.raises(LoadError) as raised:
+        real_session.environment(_Dag(RAW))
+
+    assert raised.value.__cause__ is original

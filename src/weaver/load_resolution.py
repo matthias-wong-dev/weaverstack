@@ -95,10 +95,6 @@ class LoadEnvironment:
 
     resolver: Any = None
     inventories: Mapping[str, TargetInventory] = field(default_factory=dict)
-    #: Targets the catalogue says are installed and the workspace does not hold.
-    #: Distinct from "no inventory entry", which can also mean the inventory was
-    #: never asked for — preflight must not read one as the other.
-    missing: frozenset = field(default_factory=frozenset)
     store: Any = None
     spark: Any = None
     sql: Mapping[str, Any] = field(default_factory=dict)
