@@ -568,9 +568,57 @@ def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool):
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
         )
+    _refuse_absent_targets(workspace, targets)
     return _run_load_over_livy(
         workspace, targets=targets, fault_tolerant=fault_tolerant, dry_run=dry_run
     )
+
+
+def _refuse_absent_targets(workspace, targets) -> None:
+    """Check the requested items exist, over REST, before a session is opened.
+
+    A guard bought cheaply and spent well. Starting a Livy session costs tens of
+    seconds and a capacity's only session slot; resolving a name over REST costs
+    one call. So a request that can already be rejected — a mistyped
+    ``Lakehouse/Rwa``, a Warehouse somebody deleted — is rejected before any of
+    that is spent.
+
+    Deliberately *only* that. The catalogue is not read, no graph is built, no
+    upstream target is discovered and no inventory is fetched: those need the
+    estate, the estate is inside Fabric, and asking about them here would be
+    doing the remote run's work on the wrong side of the boundary. What is
+    checked is exactly what the user typed.
+
+    A genuine not-found is the missing-target error. Anything else — an expired
+    credential, an unreachable tenant, a name that matches two items — keeps its
+    own diagnosis, because "your Lakehouse is gone" is a bad answer to "your
+    token expired".
+    """
+
+    from weaver.errors import CommandError
+    from weaver.fabric import FabricResolver, ItemNotFoundError
+    from weaver.fabric.resources import LAKEHOUSE, WAREHOUSE
+    from weaver.targets import DeltaTarget, parse_physical_target, physical_item
+
+    resolver = FabricResolver(workspace)
+    absent = []
+    for value in targets:
+        target = parse_physical_target(value, what="load target", error=CommandError)
+        item_type = LAKEHOUSE if isinstance(target, DeltaTarget) else WAREHOUSE
+        try:
+            resolver.resolve(physical_item(target), item_type=item_type)
+        except ItemNotFoundError:
+            # What the user typed, not a re-spelling of it: this message exists
+            # to help them see a typo, and showing them a normalised form is
+            # showing them something they did not write.
+            absent.append(value)
+    if absent:
+        raise CommandError(
+            "no such item in "
+            + f"{workspace.workspace!r}: "
+            + ", ".join(absent)
+            + " — check the name, or build into it first"
+        )
 
 
 #: What the submitted program sends back. A failure is *data* on the way across:

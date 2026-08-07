@@ -337,13 +337,36 @@ class _FakeLivy:
         return Result()
 
 
+class _FakeResolver:
+    """A REST resolver that answers from a set of names it pretends exist."""
+
+    present: set = set()
+    asked: list = []
+
+    def __init__(self, workspace, **kwargs) -> None:
+        self.workspace = workspace
+
+    def resolve(self, item, *, item_type):
+        from weaver.fabric import ItemNotFoundError
+
+        type(self).asked.append((item.name, item_type))
+        if item.name not in type(self).present:
+            raise ItemNotFoundError(
+                f"no {item_type} named {item.name!r} in workspace"
+            )
+        return object()
+
+
 @pytest.fixture
 def livy(monkeypatch):
     import weaver.fabric
 
     _FakeLivy.submitted = []
     _FakeLivy.answer = {"failed": False, "report": _report().to_mapping()}
+    _FakeResolver.present = {"Sales", "Reporting"}
+    _FakeResolver.asked = []
     monkeypatch.setattr(weaver.fabric, "LivySession", _FakeLivy)
+    monkeypatch.setattr(weaver.fabric, "FabricResolver", _FakeResolver)
     monkeypatch.setattr(_cli_module(), "_prefer_desktop_credential", lambda: None)
     return _FakeLivy
 
@@ -453,3 +476,136 @@ def test_the_command_module_contains_no_orchestration_of_its_own():
     )
 
     assert [name for name in forbidden if name in source] == []
+
+
+# --- the cheap guard in front of the session ----------------------------------
+#
+# Starting a Livy session costs tens of seconds and a capacity's only session
+# slot. Resolving a name over REST costs one call. So a request that can already
+# be rejected is rejected before any of that is spent.
+
+
+def test_the_requested_targets_are_resolved_before_a_session_is_opened(livy, capsys):
+    main(_fabric())
+
+    assert _FakeResolver.asked == [("Sales", "Lakehouse")]
+    assert livy.submitted, "the session should still have been used"
+
+
+def test_a_target_that_does_not_exist_is_refused_without_opening_a_session(
+    livy, capsys
+):
+    """The whole point: nothing is spent on a request already known to be bad."""
+
+    _FakeResolver.present = set()
+
+    exit_code = main(_fabric())
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "no such item" in captured.err
+    assert "Lakehouse/Sales" in captured.err
+    assert livy.submitted == [], "no session should have been started"
+
+
+def test_every_requested_target_is_checked_not_only_the_first(livy, capsys):
+    _FakeResolver.present = {"Sales"}
+
+    exit_code = main(
+        [
+            "load",
+            "--targets",
+            "Lakehouse/Sales",
+            "Warehouse/Reporting",
+            "--workspace",
+            "My Workspace",
+            "--weaver-lakehouse",
+            "Weaver",
+            "--environment",
+            "weaver",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Warehouse/Reporting" in captured.err
+    assert ("Reporting", "Warehouse") in _FakeResolver.asked
+    assert livy.submitted == []
+
+
+def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
+    """Identity is workspace + type + name, so a bare name is never asked
+    "what are you?" — and a Lakehouse and its SQL endpoint share a name."""
+
+    main(
+        [
+            "load",
+            "--targets",
+            "Lakehouse/Sales",
+            "Warehouse/Reporting",
+            "--workspace",
+            "My Workspace",
+            "--weaver-lakehouse",
+            "Weaver",
+            "--environment",
+            "weaver",
+        ]
+    )
+
+    assert _FakeResolver.asked == [
+        ("Sales", "Lakehouse"),
+        ("Reporting", "Warehouse"),
+    ]
+
+
+def test_a_resolver_failure_that_is_not_a_missing_item_keeps_its_own_diagnosis(
+    livy, capsys
+):
+    """"Your Lakehouse is gone" is a bad answer to "your token expired"."""
+
+    from weaver.errors import CommandError
+
+    def expired(self, item, *, item_type):
+        raise CommandError("the credential could not be refreshed")
+
+    _FakeResolver.resolve = expired
+
+    try:
+        exit_code = main(_fabric())
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert "credential could not be refreshed" in captured.err
+        assert "no such item" not in captured.err
+    finally:
+        del _FakeResolver.resolve
+
+
+def test_the_guard_reads_no_catalogue_and_builds_no_graph():
+    """It checks exactly what the user typed, and nothing that needs the estate.
+
+    The catalogue, the graph, upstream discovery and inventories all live on the
+    far side of the boundary; reaching for any of them here would be doing the
+    remote run's work in the wrong place — and before a session exists to do it
+    in.
+    """
+
+    import ast
+    import inspect
+
+    # The body only. The docstring explains what is deliberately *not* reached,
+    # so scanning it would flag the very sentence that promises the rule.
+    tree = ast.parse(inspect.getsource(_cli_module()._refuse_absent_targets).strip())
+    body = tree.body[0].body
+    if isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+        body = body[1:]
+    source = "\n".join(ast.dump(node) for node in body)
+
+    for reached_too_far in (
+        "read_catalogue",
+        "InstalledEstate",
+        "load_dag",
+        "inventory",
+        "LivySession",
+    ):
+        assert reached_too_far not in source
