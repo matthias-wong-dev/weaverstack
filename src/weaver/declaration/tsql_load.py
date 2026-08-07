@@ -27,13 +27,21 @@ primitive::
 It reads no repository, consults no catalogue and calls nothing else Weaver
 owns. It returns one row of :data:`weaver.runtime.load_result.RESULT_COLUMNS`.
 
-**The intermediate tables are real.** ``Sales.Customer_Staging``,
-``_Upsert`` and ``_Reject`` are ordinary tables in the object's own schema, as
-they were in the reference implementation. Real tables are what make a failed
-load inspectable: when rows are rejected the evidence is still there afterwards,
+**The intermediate tables are real.** ``Sales.Customer_Staging``, ``_Upsert``
+and ``_Reject`` are ordinary tables in the object's own schema, as they were in
+the reference implementation, joined by ``_Delete`` when an incremental table's
+author names the keys to retire. Real tables are what make a failed load
+inspectable: when rows are rejected the evidence is still there afterwards,
 addressable by anyone with a query tool. They are dropped at the start of every
 run and again at the end, but only when the run was clean — the whole point of
 keeping a reject table is that a run which rejected rows leaves it behind.
+
+**Absence retires a row; so, for an incremental table, does naming it.** A
+non-incremental source is the whole truth, so a row it stopped producing is
+gone. An incremental source shows a window, so absence says nothing — and the
+only way such a table can retire anything is a second query naming the keys.
+That is the same contract Spark SQL states, because it belongs to the table load
+rather than to either dialect.
 
 **No history.** The reference carried a ``_Current``/``_History`` pair behind a
 view. Weaver builds only the authored table, so a load updates it directly and a
