@@ -389,15 +389,37 @@ class WeaverItem:
     identity: WeaverItemId
     schemas: tuple[WeaverSchemaId, ...] = ()
     documents: tuple[WeaverDocumentId, ...] = ()
+    #: The item's Tests and Assumptions. Held apart from :attr:`documents`
+    #: because they are logical declarations that materialise nothing: a
+    #: projection that walks an item's documents is asking what this item puts
+    #: in the estate, and the answer must not include a Test merely because a
+    #: Test has a Schema.Object identity too.
+    validations: tuple[WeaverDocumentId, ...] = ()
     signature: str = ""
 
     def __post_init__(self) -> None:
         if any(schema.item != self.identity for schema in self.schemas):
             raise DiscoveryError(f"every schema must belong to item {self.identity}")
-        if any(document.item != self.identity for document in self.documents):
-            raise DiscoveryError(f"every document must belong to item {self.identity}")
+        for declared in (self.documents, self.validations):
+            if any(document.item != self.identity for document in declared):
+                raise DiscoveryError(
+                    f"every document must belong to item {self.identity}"
+                )
         _reject_duplicates(self.schemas, what="schema")
-        _reject_duplicates(self.documents, what="document")
+        # One namespace across both, so a Test and a Table cannot both claim
+        # Sales.Order inside one item.
+        _reject_duplicates(self.documents + self.validations, what="document")
+
+    @property
+    def declarations(self) -> tuple[WeaverDocumentId, ...]:
+        """Everything this item declares — objects and validation alike.
+
+        The common view, for the readers that genuinely span both: dependency
+        resolution, reference checking and the item signature. Anything asking
+        what the item *materialises* wants :attr:`documents`.
+        """
+
+        return self.documents + self.validations
 
     def __getitem__(self, relative: str) -> WeaverDocumentId:
         for document in self.documents:

@@ -38,11 +38,13 @@ from ..locations import Location
 from ..store import FilesystemStore, Store
 from .graph import Graph
 from .metadata import (
+    ASSUMPTION,
     DELTA_TARGET,
     FOLDER_TARGET,
     LAKEHOUSE_NAMESPACE,
     PYTHON,
     SQL_TARGET,
+    TEST,
     WAREHOUSE_NAMESPACE,
     ObjectId,
 )
@@ -78,11 +80,89 @@ IGNORED_DIRECTORIES = frozenset(
 IGNORED_FILENAMES = frozenset({".DS_Store", "Thumbs.db"})
 IGNORED_SUFFIXES = (".pyc", ".pyo", ".swp", ".orig", ".rej")
 
+#: Where validation is authored, and what each directory declares. Both are
+#: allowed under a Lakehouse and a Warehouse item: validation is not a property
+#: of one engine, and the item continues to choose the SQL dialect.
+#:
+#: The directory names the kind rather than merely grouping it, so a file cannot
+#: sit in ``tests/`` and declare an Assumption. Two names beat one directory
+#: plus a header everyone has to open the file to read.
+VALIDATION_DIRECTORIES = {"tests": TEST, "assumptions": ASSUMPTION}
+
+#: The subdirectories an item may author, for the message that lists them.
+_AUTHORED_SUBDIRECTORIES = (
+    "only schemas/, lib/, tests/, assumptions/ and Lakehouse Files/ are authored "
+    "subdirectories of an item"
+)
 
 
 
 
 
+
+
+
+def _read_validation(
+    relative: str,
+    within: list[str],
+    *,
+    item: WeaverItemId,
+    root: Location,
+    store: Store,
+    source_documents: dict[WeaverDocumentId, SourceDocument],
+    validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]],
+) -> None:
+    """Read one file from ``tests/`` or ``assumptions/`` into the repository.
+
+    Inserted into the same ``source_documents`` map as the objects, deliberately.
+    A validation carries the ordinary item-qualified ``Schema.Object`` identity,
+    so a Test and a Table that both claim ``Sales.Order`` in one item are an
+    ambiguous duplicate and are refused by the machinery that already refuses
+    two tables of the same name — rather than by a second rule that would have
+    to be remembered.
+    """
+
+    directory = within[0]
+    kind = VALIDATION_DIRECTORIES[directory]
+    if len(within) != 2:
+        raise DiscoveryError(
+            f"{relative}: a {kind} lives directly under {directory}/, with no "
+            "further subdirectories"
+        )
+
+    filename = within[1]
+    language = language_for_filename(filename, item.item_type)
+    if language is None:
+        raise DiscoveryError(f"{relative}: not a Weaver validation file")
+    if language == PYTHON and item.item_type != LAKEHOUSE:
+        raise DiscoveryError(
+            f"{relative}: Python validation runs through Spark, so it belongs to a "
+            f"Lakehouse item. Write a {kind} for a {item.item_type} in SQL"
+        )
+
+    source = read_source_document(
+        relative, store.read(root.join(*relative.split("/"))), item.item_type
+    )
+    if source.document.kind != kind:
+        raise DiscoveryError(
+            f"{relative}: {directory}/ declares a {kind}, and this file declares a "
+            f"{source.document.kind}. Move it to "
+            f"{_directory_for(source.document.kind)}/"
+        )
+
+    identity = WeaverDocumentId(item, source.object_id)
+    source = replace(source, logical_id=identity)
+    _insert_exact_case(
+        source_documents, identity, source, relative, what="declaration"
+    )
+    validations_by_item[item].append(identity)
+
+
+def _directory_for(kind: str) -> str:
+    for directory, declared in VALIDATION_DIRECTORIES.items():
+        if declared == kind:
+            return directory
+    return "the item root"  # pragma: no cover - every validation kind has one
 
 
 def parse_item_repository(
@@ -168,10 +248,9 @@ def parse_item_repository(
             continue
         if within[0] == "lib" and item.item_type == LAKEHOUSE:
             continue
-        raise DiscoveryError(
-            f"{relative}: only schemas/, lib/ and Lakehouse Files/ are authored "
-            "subdirectories of an item"
-        )
+        if within[0] in VALIDATION_DIRECTORIES and len(within) == 1:
+            continue
+        raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
 
     item_ids: set[WeaverItemId] = set()
     files: list[str] = []
@@ -205,6 +284,14 @@ def parse_item_repository(
         item: [] for item in item_ids
     }
     schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {
+        item: [] for item in item_ids
+    }
+    #: Validation declarations, held apart from the objects. They share the one
+    #: ``source_documents`` keyspace — which is what makes a Test and a Table of
+    #: the same name within one item an ordinary duplicate — but they are not
+    #: data objects, and every projection that asks an item for its documents
+    #: must not be handed something nothing materialises.
+    validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
         item: [] for item in item_ids
     }
 
@@ -244,6 +331,18 @@ def parse_item_repository(
             schemas_by_item[item].append(identity)
             continue
 
+        if within[0] in VALIDATION_DIRECTORIES:
+            _read_validation(
+                relative,
+                within,
+                item=item,
+                root=root,
+                store=store,
+                source_documents=source_documents,
+                validations_by_item=validations_by_item,
+            )
+            continue
+
         is_files = within[0] == FILES
         if is_files:
             if item.item_type != LAKEHOUSE:
@@ -253,10 +352,7 @@ def parse_item_repository(
                     f"{relative}: Folder documents live directly under Files/"
                 )
         elif len(within) != 1:
-            raise DiscoveryError(
-                f"{relative}: only schemas/, lib/ and Lakehouse Files/ are authored "
-                "subdirectories of an item"
-            )
+            raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
 
         filename = within[-1]
         if language_for_filename(filename, item.item_type) is None:
@@ -362,15 +458,26 @@ def parse_item_repository(
     for item_id in sorted(item_ids):
         schemas = tuple(sorted(schemas_by_item[item_id], key=str))
         documents = tuple(sorted(documents_by_item[item_id], key=str))
+        validations = tuple(sorted(validations_by_item.get(item_id, ()), key=str))
         declared = {schema.schema for schema in schemas}
-        for document_id in documents:
+        # A validation names a schema the same way an object does, and for the
+        # same reason: the schema is the item's declared namespace, not a
+        # convenience of the thing that happens to sit in it.
+        for document_id in documents + validations:
             if document_id.object_id.schema not in declared:
                 source = source_documents[document_id]
                 raise DiscoveryError(
                     f"{source.relative_path}: schema {document_id.object_id.schema!r} "
                     f"is not declared by item {item_id}"
                 )
-        items.append(WeaverItem(item_id, schemas=schemas, documents=documents))
+        items.append(
+            WeaverItem(
+                item_id,
+                schemas=schemas,
+                documents=documents,
+                validations=validations,
+            )
+        )
 
     aliases = _read_item_aliases(
         root,
@@ -590,7 +697,9 @@ def _item_signature(
     from .source import content_hash
 
     entries: list[tuple[str, str]] = []
-    for identity in item.documents:
+    # Validation too: a changed Test is a changed item, and an item signature
+    # that ignored it would leave an edited Test installed as the old one.
+    for identity in item.declarations:
         source = source_documents[identity]
         entries.append((source.relative_path, source.source_hash))
     for identity in item.schemas:
