@@ -54,7 +54,7 @@ Schema:
 select cast(null as string) as repository
      , cast(null as string) as schema_name
      , cast(null as string) as object_name
- where 1 = 0
+ where 1 = 0;
 """
 
 

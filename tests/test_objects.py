@@ -10,6 +10,7 @@ answer those calls is proved under ``pytest -m spark`` in
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -240,7 +241,20 @@ def test_a_folder_is_addressed_as_a_filesystem_path(spark, tmp_path):
         spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
     )
 
-    assert export.path() == f"{tmp_path}/Files/Sales/OrderExport"
+    assert export.path() == tmp_path / "Files/Sales/OrderExport"
+    assert isinstance(export.path(), Path)
+
+
+def test_a_folder_hands_spark_a_string_and_python_a_path(spark, tmp_path):
+    """Neither consumer can use the other's spelling, so there are two methods."""
+
+    export = Sales__OrderExport(
+        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+    )
+
+    assert isinstance(export.path(), Path)
+    assert isinstance(export.spark_path(), str)
+    assert str(export.path()) == export.spark_path()
 
 
 def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
@@ -248,8 +262,22 @@ def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
         spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
     )
 
-    assert export.staging_folder() == f"{export.local_path()}_Staging"
-    assert export.read() == (f"{export.path()}_Staging", [])
+    assert export._staging_path() == tmp_path / "Files/Sales/OrderExport_Staging"
+
+
+def test_staging_is_issued_by_a_load_and_asking_outside_one_says_so(spark, tmp_path):
+    """There is nothing to hand back before a load has reset one.
+
+    Answering anyway would name a directory nobody emptied, which is exactly the
+    state a load must never publish from.
+    """
+
+    export = Sales__OrderExport(
+        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+    )
+
+    with pytest.raises(LoadError, match="issued by load"):
+        export.staging_folder()
 
 
 def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, monkeypatch):
@@ -262,7 +290,7 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, mon
     import weaver.lakehouse as module
 
     class FakeFs:
-        def mount(self, source, point):
+        def mount(self, source, point, options=None):
             pass
 
         def getMountPath(self, point):
@@ -275,8 +303,8 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, mon
         spark, lakehouse=Lakehouse(name="Other", spark_root="abfss://ws@host/other")
     )
 
-    assert export.path() == "abfss://ws@host/other/Files/Sales/OrderExport"
-    assert export.local_path() == (
+    assert export.spark_path() == "abfss://ws@host/other/Files/Sales/OrderExport"
+    assert export.path() == Path(
         "/synfs/notebook/session-1/weaver/other/Files/Sales/OrderExport"
     )
 
@@ -299,7 +327,6 @@ def test_read_must_be_implemented(spark):
         "empty_frame",
         "folder_path",
         "context",
-        "path",
         "fuse_root",
         "schema",
         "primary_key",
@@ -312,9 +339,14 @@ def test_the_context_era_surface_is_gone(removed):
     assert not any(hasattr(base, removed) for base in (WeaverObject, Table, View))
 
 
-def test_the_folder_keeps_only_its_two_methods():
+def test_the_folder_keeps_only_the_methods_it_documents():
     assert not hasattr(Folder, "folder_path")
+    # The Spark-meaning-of-path() era. `path()` is now the filesystem spelling,
+    # so a call site that meant the other one must fail rather than silently
+    # hand Spark a mount it cannot resolve.
+    assert not hasattr(Folder, "local_path")
     assert callable(Folder.path)
+    assert callable(Folder.spark_path)
     assert callable(Folder.staging_folder)
 
 

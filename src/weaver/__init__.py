@@ -14,7 +14,7 @@ from .operations import BuildResult, WipeReport, WipeResult, build, wipe
 from .load import load
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
-from .objects import Folder, Table, View, WeaverObject
+from .objects import Folder, SparkSqlTable, Table, View, WeaverObject
 
 
 def _resolve_version() -> str:
@@ -47,6 +47,7 @@ __all__ = [
     "WeaverObject",
     "Folder",
     "Table",
+    "SparkSqlTable",
     "View",
     "Lakehouse",
     "default_lakehouse",

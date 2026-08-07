@@ -29,7 +29,6 @@ from weaver.load_plan import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
     PYTHON_TABLE,
-    SPARK_SQL_FILE,
     WAREHOUSE_PROCEDURE,
     InstalledEstate,
     LoadDag,
@@ -90,7 +89,8 @@ def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
     } == {
         "load:Lakehouse/Raw_LH/Sales.Export": PYTHON_FOLDER,
         "load:Lakehouse/Raw_LH/Sales.Order": PYTHON_TABLE,
-        "load:Lakehouse/Raw_LH/Sales.Daily": SPARK_SQL_FILE,
+        # A Spark-SQL-authored table dispatches as what it installs as.
+        "load:Lakehouse/Raw_LH/Sales.Daily": PYTHON_TABLE,
         "refresh:Lakehouse/Raw_LH": ENDPOINT_REFRESH,
         "load:Warehouse/Reporting_WH/Sales.Summary": WAREHOUSE_PROCEDURE,
     }

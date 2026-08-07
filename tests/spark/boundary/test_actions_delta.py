@@ -293,7 +293,7 @@ def test_build_table_action_infers_the_shape_of_a_query_shaped_table(
         "Schema:\n  CustomerId: string\n  Score: double\n*/\n"
         "select cast(null as string) as CustomerId\n"
         "     , cast(null as double) as Score\n"
-        " where 1 = 0\n"
+        " where 1 = 0;\n"
     )
     repository = single_document_repository(
         tmp_path / "repo", documents={"DWG.Summary.sql": body}

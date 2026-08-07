@@ -1,14 +1,19 @@
 """``SourceDocument.create_load()`` — the generated load, as text.
 
-Rendering claims only. That the generated procedure and program *work* is proved
-by executing them (``tests/fabric/test_warehouse_load_primitive.py`` and
-``tests/spark/test_spark_load_primitive.py``); what is established here is that
-the right thing was generated at all, and cheaply enough to run on every commit.
+Rendering claims only. That the generated procedure *works* is proved by
+executing it (``tests/fabric/test_warehouse_load_primitive.py``); what is
+established here is that the right thing was generated at all, and cheaply
+enough to run on every commit.
 
 So these assert decisions, not layout: that a keyed load rejects and an unkeyed
 one replaces, that an incremental load does not delete, that identity never
-reaches an insert list, that the payload is destination-free. Pinning whole
-scripts would make every legitimate edit look like a regression.
+reaches an insert list. Pinning whole scripts would make every legitimate edit
+look like a regression.
+
+**The Warehouse procedure is the only generated load *program*.** A Spark SQL
+table is compiled into a deployed module instead, so what it generates is
+asserted in ``test_spark_sql_module_render.py`` and what it *does* is the
+ordinary ``Table.load()``, proved once for both authoring languages.
 """
 
 from __future__ import annotations
@@ -23,11 +28,6 @@ from weaver.declaration.load import (
     TSQL_LOAD_VERSION,
 )
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
-from weaver.declaration.spark_load import (
-    FAULT_TOLERANT_DEFAULT,
-    FAULT_TOLERANT_MARKER,
-    statements_of,
-)
 from weaver.runtime.load_contract import REASON_BLANK_PK, REASON_DUPLICATE_PK
 from weaver.runtime.load_result import RESULT_COLUMNS
 
@@ -62,7 +62,7 @@ Schema:
   Customer id: string
   Customer name: string
 */
-select `Customer id`, `Customer name` from sales.raw
+select `Customer id`, `Customer name` from sales.raw;
 """
 
 
@@ -93,11 +93,18 @@ def test_a_warehouse_table_generates_a_stored_procedure():
     assert b"create or alter procedure [_].[Load Sales.Customer]" in load.payload
 
 
-def test_a_spark_sql_table_generates_a_runnable_program():
+def test_a_spark_sql_table_generates_a_deployed_module():
+    """Compiled into a primitive, not into a load program.
+
+    What the artefact *is* is asserted here; what it contains is
+    ``test_spark_sql_module_render.py``'s.
+    """
+
     load = _spark().create_load()
 
     assert load.object_type == FILE_OBJECT
     assert load.template_version == SPARK_LOAD_VERSION
+    assert load.payload.decode().lstrip().startswith("# Weaver generated load")
 
 
 def test_a_view_has_no_generated_load():
@@ -116,8 +123,8 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (5, "4235710f72b79d3923425256aee74bfcf8ecdd60c4d28910ac20c6eacf9c5fdf"),
-    "spark": (7, "f95e8ec19ab88c027e43741b3ce2c14f70feed33f6d4d4ddacac4cbca22605bf"),
+    "tsql": (6, "9a9e2a3c8278c81ebf8b6af6327d0d1bc39ece86fd7fcf51593c839782fd40df"),
+    "spark": (8, "817cb4d0e2cb82d571a232ee4a73f7a956f4b255cf4378bc49af6c26cd665664"),
 }
 
 
@@ -238,8 +245,6 @@ def test_a_keyed_load_rejects_blank_and_duplicate_keys():
 
     assert REASON_BLANK_PK in payload
     assert REASON_DUPLICATE_PK in payload
-    assert REASON_BLANK_PK in _program()
-    assert REASON_DUPLICATE_PK in _program()
 
 
 def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
@@ -314,211 +319,3 @@ def test_the_defaults_are_the_documented_ones():
     assert "@weaver_target_rows >= 1000000" in payload
     assert "/ @weaver_target_rows > 5" in payload
     assert "/ @weaver_target_rows > 20" in payload
-
-
-def test_the_program_records_the_threshold_decision_once():
-    """Three things need the answer — the writes, the delete set and the result.
-
-    Recomputing it in each would let them disagree, and a load that reported one
-    thing and did another is what the guard exists to prevent.
-    """
-
-    program = _program()
-
-    assert program.count("AS within_thresholds") == 1
-    # Everything else reads the recorded column rather than deriving it again.
-    assert program.count("SELECT within_thresholds FROM") >= 2
-
-
-# --- the Spark SQL program ----------------------------------------------------
-
-
-#: The columns the built table would report. Generation cannot know them — a
-#: Spark SQL table may infer its schema at build — so the installer reads them
-#: and renders the program, and these tests do the same.
-BUILT_COLUMNS = ("Customer id", "Customer name")
-
-
-def _instruction(source: str = SPARK_TABLE) -> dict:
-    import json
-
-    return json.loads(_spark(source).create_load().payload)
-
-
-def _program(source: str = SPARK_TABLE, columns=BUILT_COLUMNS) -> str:
-    from weaver.declaration.spark_load import render_installed_program
-
-    return render_installed_program(_instruction(source), columns)
-
-
-def test_the_program_is_a_statement_list_ending_in_the_result():
-    statements = statements_of(_program())
-
-    assert len(statements) > 1
-    for column in RESULT_COLUMNS:
-        assert column in statements[-1]
-
-
-def test_every_declared_column_is_carried_not_only_the_compared_ones():
-    """Comparison columns say what *change* means, not what the table is.
-
-    A declaration may narrow them to one column out of many. Deriving the
-    writable set from them dropped every other non-key column from staging,
-    rejects, the upsert set, inserts and updates — silently.
-    """
-
-    source = SPARK_TABLE.replace(
-        "Primary key: Customer id",
-        "Primary key: Customer id\n\nComparison columns: Amount",
-    ).replace(
-        "  Customer name: string", "  Customer name: string\n  Amount: decimal(18,2)"
-    )
-    program = _program(source, columns=("Customer id", "Customer name", "Amount"))
-
-    # Carried into the target...
-    assert "`Customer name`" in program
-    # ...but not consulted when deciding whether a matched row changed.
-    changed = [line for line in program.splitlines() if "<=>" in line]
-    assert changed, "the program must compare something"
-    assert all("Customer name" not in line for line in changed)
-
-
-def test_the_columns_come_from_the_built_table_not_the_declaration():
-    """The bundle carries an instruction; the installer finishes the program.
-
-    A Spark SQL table may leave its schema to be inferred at build, so the
-    columns are only knowable once the table exists — the same reason the
-    Warehouse installer reads sys.columns rather than guessing.
-    """
-
-    instruction = _instruction()
-
-    assert instruction["weaver"] == "weaver:generated-load"
-    assert "columns" not in instruction
-    # Whatever the table turns out to have is what the program writes.
-    rendered = _program(columns=("Customer id", "Surprise"))
-    assert "`Surprise`" in rendered
-
-
-def test_the_program_is_destination_free():
-    """A bundle payload must generate identically in every environment.
-
-    The installer addresses the file as it writes it; until then every managed
-    name is a token, so the same repository produces the same bytes anywhere.
-    """
-
-    program = _program()
-
-    assert "{{object:Sales.Customer}}" in program
-    assert "sales_lh" not in program.lower()
-
-
-def test_fault_tolerance_is_a_substituted_answer_not_a_branch():
-    """Spark has no `if`, so the gate is a predicate the runner answers.
-
-    It is a commented literal rather than a `{{...}}` token, because that
-    namespace belongs to the installer and the installer refuses any token it
-    cannot resolve. Reading 0 already, the file refuses rejects unsubstituted.
-    """
-
-    program = _program()
-
-    assert FAULT_TOLERANT_MARKER in program
-    assert f"{FAULT_TOLERANT_DEFAULT} = 1" in program
-    # Nothing in the installer's namespace is left for the runner to answer.
-    assert "{{fault_tolerant}}" not in program
-
-
-def test_the_program_creates_every_table_with_column_mapping():
-    """Weaver permits declared column names with spaces; Delta needs mapping on."""
-
-    for statement in statements_of(_program()):
-        if statement.startswith("CREATE TABLE"):
-            assert "delta.columnMapping.mode" in statement
-
-
-def test_a_keyed_program_merges_and_only_updates_what_changed():
-    program = _program()
-
-    assert "MERGE INTO {{object:Sales.Customer}}" in program
-    # Null-safe, so a column going to or from null counts as a change.
-    assert "NOT (s.`Customer name` <=> t.`Customer name`)" in program
-
-
-def test_a_keyed_program_deletes_through_a_materialised_key_set():
-    """Delta refuses a subquery in DELETE, and NOT MATCHED BY SOURCE would empty
-    the target on the one run that must not touch it."""
-
-    program = _program()
-
-    assert "{{object:Sales.Customer_Delete}}" in program
-    assert "WHEN MATCHED THEN DELETE" in program
-
-
-def test_an_incremental_program_deletes_nothing():
-    source = SPARK_TABLE.replace(
-        "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
-    )
-    program = _program(source)
-
-    assert "WHEN MATCHED THEN DELETE" not in program
-    assert "_Delete" not in program
-
-
-def test_an_unkeyed_program_replaces_wholesale():
-    program = _program(_no_key(SPARK_TABLE))
-
-    assert "DELETE FROM {{object:Sales.Customer}}" in program
-    assert "MERGE INTO" not in program
-    assert "_Reject" not in program
-
-
-def test_no_statement_is_comment_only():
-    """The header once quoted the delimiter, so it was cut in half and its first
-    line handed to Spark as a statement — which Spark rejects.
-
-    Statements may *open* with a banner naming the section; what must never
-    survive the split is a chunk that is nothing but comments.
-    """
-
-    for statement in statements_of(_program()):
-        assert any(
-            line.strip() and not line.lstrip().startswith("--")
-            for line in statement.splitlines()
-        ), statement
-
-
-def test_the_authored_body_is_marked_off_from_the_generated_code():
-    """A generated artefact is read when something has gone wrong, and the first
-    question is which of it the author wrote."""
-
-    program = _program()
-
-    assert "-- Pre-processing" in program
-    assert "-- Data transformation (authored)" in program
-    assert "-- Post-processing" in program
-
-
-def test_a_multi_statement_body_runs_its_preamble_and_stages_only_the_query():
-    """A body may set a temporary view up before selecting from it.
-
-    Wrapping the whole body in a subquery would put a CREATE inside a FROM. Only
-    the last standalone query fills staging; the preamble runs as written.
-    """
-
-    source = SPARK_TABLE.replace(
-        "select `Customer id`, `Customer name` from sales.raw",
-        "create or replace temporary view recent as\n"
-        "select * from sales.raw where `Customer id` is not null;\n\n"
-        "select `Customer id`, `Customer name` from recent",
-    )
-    statements = statements_of(_program(source))
-
-    preamble = [s for s in statements if "temporary view recent" in s]
-    staging = [s for s in statements if "_Staging}} USING delta" in s]
-
-    assert len(preamble) == 1
-    assert "CREATE TABLE" not in preamble[0]
-    # Staging selects from the view the preamble made, not from the whole body.
-    assert "temporary view" not in staging[0]
-    assert "FROM (\n    select `Customer id`, `Customer name` from recent\n) AS s" in staging[0]

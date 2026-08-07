@@ -31,18 +31,39 @@ class MetadataError(WeaverError):
 class LoadError(WeaverError):
     """Raised when an object cannot be executed or its context is unavailable.
 
-    ``result`` carries the load's counts when one was under way, because a
-    failure is still an outcome worth reporting: how many rows were read and how
-    many refused is exactly what a caller wants, and losing it to an exception
-    would force a second query against the reject table to find out.
+    Three optional pieces of context, each the answer to a question the message
+    alone cannot answer, and each present only where the failure knew it:
 
-    It is optional, so the many places that raise this before a load has begun
+    ``result``
+        the load's counts when one was under way. A failure is still an outcome
+        worth reporting — how many rows were read and how many refused is
+        exactly what a caller wants, and losing it to an exception would force a
+        second query against the reject table to find out.
+    ``report``
+        the whole run as far as it got, when orchestration raised. Which nodes
+        succeeded, which failed and which never started is what somebody
+        restarting the run needs, and it is gone the moment the exception
+        replaces it.
+    ``task_log``
+        where the durable evidence for that run was written, so the answer
+        outlives the process that produced it.
+
+    All optional, so the many places that raise this before a load has begun
     stay unchanged.
     """
 
-    def __init__(self, message: str, *, result: object | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        result: object | None = None,
+        report: object | None = None,
+        task_log: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.result = result
+        self.report = report
+        self.task_log = task_log
 
 
 class DiscoveryError(WeaverError):

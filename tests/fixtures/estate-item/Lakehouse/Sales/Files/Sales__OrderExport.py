@@ -20,6 +20,8 @@ from weaver import Folder
 
 class Sales__OrderExport(Folder):
     def read(self):
-        staging = self.staging_folder()
-        # …fetch into staging…
+        with self.staging_folder() as staging:
+            # …fetch into staging.path…
+            pass
+
         return staging, []

@@ -73,7 +73,7 @@ Schema:
 */
 select cast(null as string) as CustomerId
      , cast(null as double) as Score
- where 1 = 0
+ where 1 = 0;
 """
 
 

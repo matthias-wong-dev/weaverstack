@@ -25,10 +25,11 @@ from weaver import Table
 
 class DWG__Customer(Table):
     def read(self):
-        # Joined as text, not through `pathlib`. `path()` is what *Spark* reads,
-        # and in Fabric that is an `abfss://` URL — which `Path` collapses to
-        # `abfss:/` and then rebuilds into a location that does not exist.
-        source = f"{Raw__CustomerCsv(self).path()}/customers.csv"
+        # `spark_path()`, because Spark is what reads it: in Fabric that is an
+        # `abfss://` URL, which `pathlib` collapses to `abfss:/` and rebuilds
+        # into a location that does not exist. `path()` is the mounted Path for
+        # ordinary Python, and Spark cannot use one.
+        source = f"{Raw__CustomerCsv(self).spark_path()}/customers.csv"
         raw = self.spark.read.csv(source, header=True, inferSchema=False)
         shaped = raw.selectExpr(
             "cast(CustomerId as int) as CustomerId",

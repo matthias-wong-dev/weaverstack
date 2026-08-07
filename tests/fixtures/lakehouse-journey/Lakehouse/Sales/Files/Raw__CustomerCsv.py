@@ -19,8 +19,9 @@ from weaver import Folder
 
 class Raw__CustomerCsv(Folder):
     def read(self):
-        staging = Path(self.staging_folder())
         item_root = Path(__file__).parent.parent
         source = item_root / "lib" / "data" / "customers.csv"
-        shutil.copyfile(source, staging / "customers.csv")
+        with self.staging_folder() as staging:
+            shutil.copyfile(source, staging.path / "customers.csv")
+
         return staging, []

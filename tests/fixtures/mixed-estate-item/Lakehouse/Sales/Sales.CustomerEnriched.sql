@@ -10,4 +10,4 @@ Primary key: CustomerId
 Dependencies:
   - Sales.Customer
 */
-select CustomerId, CustomerName from Sales.Customer
+select CustomerId, CustomerName from Sales.Customer;

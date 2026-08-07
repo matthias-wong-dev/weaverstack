@@ -692,7 +692,7 @@ Schema:
   CustomerId: string
 */
 select cast(null as string) as CustomerId
- where 1 = 0
+ where 1 = 0;
 """
 
 
@@ -836,7 +836,7 @@ Dependencies:
 Schema:
   OrderId: string
 */
-select OrderId from {depends_on}
+select OrderId from {depends_on};
 """
 
 

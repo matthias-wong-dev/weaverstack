@@ -547,7 +547,12 @@ def _read_sql(
             f"{analysis.statement_count}."
         )
 
-    if analysis.determined and analysis.result_set_count != 1:
+    if language == SPARK_SQL and document.kind == TABLE:
+        # A Spark SQL table installs as an importable primitive whose read()
+        # returns (staging, deletes), so it may produce two results rather than
+        # one — and the rule about which is the parser's, not this counter's.
+        _check_spark_sql_program(relative_path, document, body)
+    elif analysis.determined and analysis.result_set_count != 1:
         raise DiscoveryError(
             f"{relative_path}: a SQL object must produce exactly one result set, "
             f"found {analysis.result_set_count}. Intermediate work is fine — only "
@@ -563,6 +568,27 @@ def _read_sql(
         sql_body=body,
         sql_analysis=analysis,
         discovered_references=extract_sql_references(body),
+    )
+
+
+def _check_spark_sql_program(relative_path: str, document: SesDocument, body: str) -> None:
+    """Refuse an authored Spark SQL table body that cannot mean a load.
+
+    The same two checks the deployed primitive runs, made here so a body that
+    could never load is refused by a build rather than discovered by one.
+    """
+
+    from .spark_sql_program import parse_spark_sql_program, validate_query_contract
+
+    program = parse_spark_sql_program(
+        body, what=relative_path, error=DiscoveryError
+    )
+    validate_query_contract(
+        program,
+        what=relative_path,
+        primary_key=document.primary_key,
+        incremental=document.is_incremental,
+        error=DiscoveryError,
     )
 
 

@@ -97,12 +97,19 @@ def test_load_resolution_finds_a_warehouse_procedure(estate):
     assert resolved.valid
 
 
-def test_load_resolution_finds_a_spark_sql_file(estate):
+def test_load_resolution_finds_a_sql_authored_tables_deployed_module(estate):
+    """Resolved exactly as a Python-authored table is, because it is one.
+
+    A Spark SQL table is compiled into a ``SparkSqlTable`` module, so what
+    resolution locates is a module and a class — and nothing downstream can tell
+    which language the table was written in.
+    """
+
     resolved = resolve(estate).by_id[DAILY]
 
-    assert resolved.dispatch_location == ".local/Raw_LH/Files/_/Load/Sales.Daily.sql"
+    assert resolved.dispatch_location == ".local/Raw_LH/Files/_/Load/Sales__Daily.py"
     assert resolved.primitive_exists
-    assert resolved.expected_class is None
+    assert resolved.expected_class == "Sales__Daily"
 
 
 def test_load_resolution_finds_a_python_table_module_and_class(estate):
@@ -174,7 +181,7 @@ def test_load_resolution_reports_a_missing_file(estate):
         files=tuple(
             name
             for name in inventories["Lakehouse/Raw_LH"].files
-            if not name.endswith("Sales.Daily.sql")
+            if not name.endswith("Sales__Daily.py")
         ),
     )
     resolved = resolve((catalogue, trimmed)).by_id[DAILY]

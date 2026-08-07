@@ -12,7 +12,7 @@ from weaver import Lakehouse, lakehouse_for
 from weaver.resolution import LocalResolver
 from weaver.workspaces import LocalWorkspace
 from weaver.errors import LoadError
-from weaver.lakehouse import default_lakehouse
+from weaver.lakehouse import MOUNT_OPTIONS, default_lakehouse
 from weaver.spark import local_destination
 
 
@@ -48,16 +48,33 @@ def test_a_folder_hangs_off_the_same_root_as_a_table_locally(tmp_path):
     lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
 
     assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
-    assert lakehouse.folder_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
-    assert lakehouse.folder_local_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
+    assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
+    assert lakehouse.folder_spark_path("Sales", "Export") == (
+        f"{tmp_path}/Files/Sales/Export"
+    )
+
+
+def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
+    """The distinction the two methods exist to keep.
+
+    Authored folder code globs and opens files, so it is handed something that
+    can; Spark cannot use that at all, so it is handed a string it can parse.
+    """
+
+    lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+
+    assert isinstance(lakehouse.folder_path("Sales", "Export"), Path)
+    assert isinstance(lakehouse.folder_spark_path("Sales", "Export"), str)
 
 
 def test_a_trailing_separator_does_not_double_up(tmp_path):
     lakehouse = Lakehouse(name="Sales_LH", spark_root=f"{tmp_path}/")
 
     assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
-    assert lakehouse.folder_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
-    assert lakehouse.folder_local_path("Sales", "Export") == f"{tmp_path}/Files/Sales/Export"
+    assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
+    assert lakehouse.folder_spark_path("Sales", "Export") == (
+        f"{tmp_path}/Files/Sales/Export"
+    )
 
 
 # --- two roots, because two things read them --------------------------------
@@ -84,8 +101,8 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
     mounted = {}
 
     class FakeFs:
-        def mount(self, source, point):
-            mounted[point] = source
+        def mount(self, source, point, options=None):
+            mounted[point] = (source, options)
 
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
@@ -97,13 +114,47 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
 
     # Spark keeps the URL; Python gets the mount. Two spellings of one location,
     # because neither consumer understands the other's.
-    assert lakehouse.folder_path("Sales", "Export") == "abfss://ws@host/lh/Files/Sales/Export"
-    assert lakehouse.folder_local_path("Sales", "Export") == (
+    assert lakehouse.folder_spark_path("Sales", "Export") == (
+        "abfss://ws@host/lh/Files/Sales/Export"
+    )
+    assert lakehouse.folder_path("Sales", "Export") == Path(
         "/synfs/notebook/session-1/weaver/lh/Files/Sales/Export"
     )
     # Mounted by item id, so a second Lakehouse in the same session cannot
     # silently address the first.
-    assert mounted == {"/weaver/lh": "abfss://ws@host/lh"}
+    assert mounted == {"/weaver/lh": ("abfss://ws@host/lh", MOUNT_OPTIONS)}
+
+
+def test_the_mount_caches_nothing(monkeypatch):
+    """The repair for a mount that disagrees with the storage behind it.
+
+    Weaver reaches one Files area two ways, and changes made through the other
+    one — a DFS wipe, a shortcut created by REST — have to be visible here
+    immediately. With caching on they are not, and the symptom is a listing that
+    still holds entries the storage no longer has.
+    """
+
+    import weaver.lakehouse as module
+
+    options = {}
+
+    class FakeFs:
+        def mount(self, source, point, config=None):
+            options.update(config or {})
+
+        def getMountPath(self, point):
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
+    monkeypatch.setattr(module, "_MOUNTS", {})
+
+    Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh").folder_path(
+        "Sales", "Export"
+    )
+
+    assert options["fileCacheTimeout"] == 0
 
 
 def test_the_mount_is_made_once_per_session(monkeypatch):
@@ -114,7 +165,7 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
     calls = []
 
     class FakeFs:
-        def mount(self, source, point):
+        def mount(self, source, point, options=None):
             calls.append(point)
 
         def getMountPath(self, point):
@@ -124,8 +175,8 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
-    lakehouse.folder_local_path("Sales", "Export")
-    lakehouse.folder_local_path("Sales", "Other")
+    lakehouse.folder_path("Sales", "Export")
+    lakehouse.folder_path("Sales", "Other")
 
     assert calls == ["/weaver/lh"]
 
@@ -139,7 +190,7 @@ def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypat
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
     with pytest.raises(LoadError, match="Fabric notebook utilities"):
-        lakehouse.folder_local_path("Sales", "Export")
+        lakehouse.folder_path("Sales", "Export")
 
 
 def test_a_root_must_be_a_real_root():
@@ -222,7 +273,7 @@ def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path)
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 
-    assert lakehouse.folder_path("Sales", "Export") == resolver.folder_object(
+    assert str(lakehouse.folder_path("Sales", "Export")) == resolver.folder_object(
         target, "Sales", "Export"
     ).value
     assert f"{lakehouse.folder_path('Sales', 'Export')}_Staging" == resolver.folder_staging(

@@ -111,6 +111,7 @@ def generate_tsql_load_script(
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
         preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
         postprocessing_banner=_indent(POSTPROCESSING_BANNER, 4),
+        static_gate=_indent(_static_gate(names, contract), 4),
         start_artifact_cleanup=_indent(_cleanup(names, contract), 4),
         staging_sql=_indent(staging_sql, 4),
         staging_table=names["staging"],
@@ -127,6 +128,43 @@ def generate_tsql_load_script(
 
 
 # --- the pieces of the procedure ---------------------------------------------
+
+
+def _static_gate(names: dict, contract: LoadContract) -> str:
+    """The check a ``Static`` object makes before it does anything else.
+
+    Baked into the procedure rather than performed by whoever calls it, because
+    the procedure is an independently runnable artefact: someone executing it by
+    hand must get the same answer an orchestrated run gets, and a caller-side
+    check would be a rule that only applied when Weaver was driving.
+
+    Before the staging query, so a populated static table costs one existence
+    check rather than a full source read. And ``exists`` rather than a count:
+    the question is whether the table has been seeded, not how much.
+
+    A non-static object gets a comment. Emitting the branch and disabling it
+    would leave a reader wondering which way it went.
+    """
+
+    if not contract.static:
+        return "-- Not static: this object is loaded on every run."
+    return (
+        "-- Static: seeded once, into an empty target. Already populated means\n"
+        "-- the load has nothing to do, and reports a successful load of nothing\n"
+        "-- rather than repeating work or being skipped from outside.\n"
+        f"if exists (select 1 from {names['target']})\n"
+        "begin\n"
+        "    select\n"
+        "        cast(1 as bit) as succeeded\n"
+        "      , cast(0 as bigint) as rows_read\n"
+        "      , cast(0 as bigint) as rows_inserted\n"
+        "      , cast(0 as bigint) as rows_updated\n"
+        "      , cast(0 as bigint) as rows_deleted\n"
+        "      , cast(0 as bigint) as rows_rejected\n"
+        "      , cast(null as varchar(4000)) as error_message;\n"
+        "    return;\n"
+        "end;"
+    )
 
 
 def _staging_sql(names: dict, body: str, contract: LoadContract) -> str:

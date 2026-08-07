@@ -524,8 +524,15 @@ Three of them, from three kinds of source:
 ```text
 Warehouse/Reporting/Sales__Customer.sql   ->  _.[Load Sales.Customer]
 Lakehouse/Sales/lib/dates.py              ->  Files/_/Load/lib/dates.py
-Lakehouse/Sales/Sales__Customer.sql       ->  Files/_/Load/Sales__Customer.sql
+Lakehouse/Sales/Sales.OrderSummary.sql    ->  Files/_/Load/Sales__OrderSummary.py
 ```
+
+The third is the one worth reading twice. A Spark SQL table is *compiled* into a
+deployed `SparkSqlTable` module rather than into a load program of its own, so
+it installs where a module installs, under the name a module is imported by, and
+loads through the same `Table.load()` a Python-authored table does. What that
+buys is that validation, rejection, fault tolerance, stability thresholds and
+static behaviour exist once for Delta rather than once per authoring language.
 
 A view produces nothing on either engine: its definition *is* its query, so there
 is no work to schedule. A Python file produces *two* targets — the table or folder
@@ -547,9 +554,9 @@ be used: the Registry stores what the target actually calls the object.
 
 **Signatures say what would make an artefact wrong.** A deployed module is signed
 by its own bytes. A generated body is signed by the document it renders *plus* the
-version of the generator that rendered it — `SPARK_ETL_TEMPLATE_VERSION` and
-`TSQL_ETL_TEMPLATE_VERSION`, separate because the two generators evolve
-separately. Raising one invalidates exactly the artefacts it renders. Neither
+version of the generator that rendered it — `SPARK_LOAD_VERSION` and
+`TSQL_LOAD_VERSION`, separate because the two generators evolve separately.
+Raising one invalidates exactly the artefacts it renders. Neither
 reaches `repository.signature`, which describes authored content.
 
 Selection is per artefact and nothing else. Changing one module rebuilds that

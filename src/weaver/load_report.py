@@ -139,6 +139,16 @@ class LoadMessage:
             "source": self.source,
         }
 
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadMessage":
+        return cls(
+            severity=payload["severity"],
+            code=payload["code"],
+            message=payload["message"],
+            detail=payload.get("detail"),
+            source=payload.get("source"),
+        )
+
 
 def error(code: str, message: str, **extra: str | None) -> LoadMessage:
     return LoadMessage(SEVERITY_ERROR, code, message, **extra)
@@ -189,19 +199,28 @@ class LoadNodeReport:
             "executed": self.executed,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            "rows": None if self.result is None else _counts(self.result),
+            "rows": None if self.result is None else self.result.as_row(),
             "messages": [message.to_mapping() for message in self.messages],
         }
 
-
-def _counts(result: LoadResult) -> dict[str, int]:
-    return {
-        "rows_read": result.rows_read,
-        "rows_inserted": result.rows_inserted,
-        "rows_updated": result.rows_updated,
-        "rows_deleted": result.rows_deleted,
-        "rows_rejected": result.rows_rejected,
-    }
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadNodeReport":
+        rows = payload.get("rows")
+        return cls(
+            node_id=payload["node_id"],
+            logical_id=payload.get("logical_id"),
+            physical_target=payload["physical_target"],
+            primitive_kind=payload["primitive_kind"],
+            dispatch_location=payload.get("dispatch_location"),
+            status=payload["status"],
+            executed=bool(payload.get("executed", False)),
+            messages=tuple(
+                LoadMessage.from_mapping(one) for one in payload.get("messages") or ()
+            ),
+            result=None if rows is None else LoadResult.from_row(rows),
+            started_at=payload.get("started_at"),
+            finished_at=payload.get("finished_at"),
+        )
 
 
 @dataclass(frozen=True)
@@ -252,6 +271,39 @@ class LoadRunReport:
             "nodes": [node.to_mapping() for node in self.nodes],
             "messages": [message.to_mapping() for message in self.messages],
         }
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadRunReport":
+        """Reconstruct a report that crossed a process boundary.
+
+        The desktop CLI runs a load *inside* Fabric and gets its report back as
+        JSON, and what it renders has to be the same object an in-session caller
+        holds — otherwise the two would drift into two renderers and the CLI
+        would quietly become the second place that knows what a load report
+        means.
+        """
+
+        return cls(
+            requested=tuple(payload.get("requested") or ()),
+            status=payload["status"],
+            dry_run=bool(payload.get("dry_run", False)),
+            fault_tolerant=bool(payload.get("fault_tolerant", False)),
+            nodes=tuple(
+                LoadNodeReport.from_mapping(one) for one in payload.get("nodes") or ()
+            ),
+            edges=tuple(
+                (edge[0], edge[1]) for edge in payload.get("edges") or ()
+            ),
+            order=tuple(payload.get("order") or ()),
+            messages=tuple(
+                LoadMessage.from_mapping(one) for one in payload.get("messages") or ()
+            ),
+            task_id=payload.get("task_id"),
+            task_log=payload.get("task_log"),
+            started_at=payload.get("started_at"),
+            finished_at=payload.get("finished_at"),
+            workspace=payload.get("workspace"),
+        )
 
 
 def final_status(nodes: tuple[LoadNodeReport, ...], *, dry_run: bool) -> str:

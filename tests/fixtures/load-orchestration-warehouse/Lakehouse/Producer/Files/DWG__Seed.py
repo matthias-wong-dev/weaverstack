@@ -16,10 +16,10 @@ from weaver import Folder
 
 class DWG__Seed(Folder):
     def read(self):
-        staging = Path(self.staging_folder())
-        staging.mkdir(parents=True, exist_ok=True)
-        (staging / "customers.csv").write_text(
-            "CustomerId,CustomerName\n1,Ada\n2,Grace\n3,Katherine\n",
-            encoding="utf-8",
-        )
-        return str(staging), []
+        with self.staging_folder() as staging:
+            (staging.path / "customers.csv").write_text(
+                "CustomerId,CustomerName\n1,Ada\n2,Grace\n3,Katherine\n",
+                encoding="utf-8",
+            )
+
+        return staging, []

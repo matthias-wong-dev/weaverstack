@@ -11,7 +11,7 @@ and what it does with a two-phase installer reading ``sys.columns`` are its
 answers, not ours — which is why the semantics are established here rather than
 inferred from a local approximation.
 
-The outcomes match ``tests/spark/test_spark_load_primitive.py`` deliberately.
+The outcomes match ``tests/spark/test_python_load_primitive.py`` deliberately.
 Two engines, one set of load semantics; if the two files disagree, the semantics
 have diverged.
 """
@@ -282,4 +282,95 @@ def test_a_clean_run_tidies_its_intermediate_tables_away(estate):
     )
 
     assert result.succeeded is True
+    assert leftover[0]["n"] == 0
+
+
+# --- static -------------------------------------------------------------------
+#
+# The fourth authored form, and the only one whose static behaviour is written in
+# SQL rather than in Python. The gate is *inside* the procedure — see
+# `weaver.declaration.tsql_load._static_gate` — so it has to be executed to be
+# proved, and only a Warehouse can execute it. What the generator emits is
+# asserted cheaply in `tests/test_static_load_declaration.py`; this is the half
+# that needs an engine.
+
+STATIC_SOURCE = SOURCE.replace(
+    "Primary key: Customer id", "Primary key: Customer id\n\nStatic: true"
+)
+
+
+@pytest.fixture(scope="module")
+def static_document():
+    return read_source_document(
+        f"{SCHEMA}.LoadCustomer.sql", STATIC_SOURCE.encode("utf-8"), WAREHOUSE
+    )
+
+
+@pytest.fixture
+def static_estate(clean_disposable_warehouse, static_document):
+    """The same table, declared static, with its own generated procedure."""
+
+    executor = clean_disposable_warehouse.executor
+    executor.execute_script(
+        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
+        "if schema_id(N'_') is null exec('create schema [_]');"
+    )
+    _drop(executor)
+    executor.execute_script(
+        f"create table [{SCHEMA}].[LoadRaw] "
+        "([Customer id] varchar(50) null, [Customer name] varchar(200) null);"
+    )
+    executor.execute_script(static_document.create_ddl().content)
+    executor.execute_script(static_document.create_load().payload.decode("utf-8"))
+    yield executor
+    _drop(executor)
+
+
+def test_a_static_warehouse_load_seeds_an_empty_target(static_estate):
+    _source_rows(static_estate, CLEAN)
+
+    result = _load(static_estate, fault_tolerant=False)
+
+    assert result.succeeded is True
+    assert result.rows_inserted == 2
+    assert _contents(static_estate) == CLEAN
+
+
+def test_a_second_static_warehouse_load_is_a_successful_no_op(static_estate):
+    """The source is changed between the runs and the target does not move.
+
+    Which is the whole claim: the procedure returned without reading its query,
+    so what the source now says never reached staging.
+    """
+
+    _source_rows(static_estate, CLEAN)
+    _load(static_estate, fault_tolerant=False)
+
+    _source_rows(static_estate, [("c9", "Different")])
+    result = _load(static_estate, fault_tolerant=False)
+
+    assert result.succeeded is True
+    assert (
+        result.rows_read,
+        result.rows_inserted,
+        result.rows_updated,
+        result.rows_deleted,
+        result.rows_rejected,
+    ) == (0, 0, 0, 0, 0)
+    assert _contents(static_estate) == CLEAN
+
+
+def test_a_static_no_op_leaves_no_intermediate_tables_behind(static_estate):
+    """It returned before staging, so there was never anything to tidy."""
+
+    _source_rows(static_estate, CLEAN)
+    _load(static_estate, fault_tolerant=False)
+    _load(static_estate, fault_tolerant=False)
+
+    leftover = static_estate.query(
+        f"select count(*) as n from sys.tables "
+        f"where schema_id = schema_id(N'{SCHEMA}') "
+        f"and name like 'LoadCustomer[_]%';"
+    )
+
     assert leftover[0]["n"] == 0
