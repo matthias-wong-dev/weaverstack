@@ -24,6 +24,14 @@ class SqlExecutor(Protocol):
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]: ...
 
+    def call_procedure(
+        self,
+        procedure: str,
+        *,
+        inputs: Sequence[tuple[str, object]] = (),
+        outputs: Sequence[tuple[str, str]] = (),
+    ) -> SqlRow: ...
+
 
 class PooledSqlExecutor:
     """Execute through one owned or injected bounded connection pool."""
@@ -45,6 +53,45 @@ class PooledSqlExecutor:
     ) -> Sequence[SqlRow]:
         return self._run(statement, parameters=parameters, query=True, drain=False)
 
+    def call_procedure(
+        self,
+        procedure: str,
+        *,
+        inputs: Sequence[tuple[str, object]] = (),
+        outputs: Sequence[tuple[str, str]] = (),
+    ) -> SqlRow:
+        """Call a procedure and read back the values it set on its outputs.
+
+        ``mssql-python`` does not bind output parameters — ``callproc`` is
+        declared and raises ``NotSupportedError`` — so they are marshalled in
+        T-SQL instead: locals are declared, passed as ``output``, and projected
+        by a ``select`` this method writes.
+
+        That last detail is the point. The projection is the final statement of
+        a batch *Weaver* composed, so the row read back is Weaver's own however
+        many result sets the procedure emitted on the way — which is the whole
+        reason the load result stopped being one of them. Anything the
+        procedure's authored setup returned is passed over, not parsed.
+        """
+
+        if not outputs:
+            raise SqlExecutionError(
+                f"{procedure} was called for its outputs and none were named"
+            )
+        row = self._run(
+            _output_parameter_batch(procedure, inputs, outputs),
+            parameters=[value for _name, value in inputs],
+            query=True,
+            drain=False,
+            last_result_set=True,
+        )
+        if not row:
+            raise SqlExecutionError(
+                f"{procedure} returned no output row — it may have been altered "
+                "outside Weaver, or replaced by a version without these outputs"
+            )
+        return row[0]
+
     def _run(
         self,
         statement: str,
@@ -52,6 +99,7 @@ class PooledSqlExecutor:
         parameters: Sequence[object] | None,
         query: bool,
         drain: bool,
+        last_result_set: bool = False,
     ):
         with self.pool.lease() as lease:
             connection = lease.connection
@@ -64,11 +112,9 @@ class PooledSqlExecutor:
                     cursor.execute(statement, tuple(parameters))
 
                 if query:
-                    if cursor.description is None:
-                        rows = []
-                    else:
-                        columns = [column[0] for column in cursor.description]
-                        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                    rows = (
+                        _final_rows(cursor) if last_result_set else _rows(cursor)
+                    )
                     connection.commit()
                     return rows
 
@@ -104,6 +150,57 @@ class PooledSqlExecutor:
     def __exit__(self, *exc) -> bool:
         self.close()
         return False
+
+
+def _output_parameter_batch(
+    procedure: str,
+    inputs: Sequence[tuple[str, object]],
+    outputs: Sequence[tuple[str, str]],
+) -> str:
+    """A batch that calls ``procedure`` and hands its outputs back as a row.
+
+    The locals are prefixed so they cannot collide with a parameter name, since
+    ``@rows_read = @rows_read output`` would be legal and unreadable.
+
+    Input *values* are placeholders rather than literals — the values come from
+    a caller and are the one part of this text that is not Weaver's own.
+    """
+
+    locals_ = [f"@weaver_out_{name}" for name, _type in outputs]
+    declares = "\n".join(
+        f"declare @weaver_out_{name} {type_name};" for name, type_name in outputs
+    )
+    arguments = [f"@{name} = ?" for name, _value in inputs] + [
+        f"@{name} = @weaver_out_{name} output" for name, _type in outputs
+    ]
+    projection = ", ".join(
+        f"@weaver_out_{name} as {name}" for name, _type in outputs
+    )
+    call = f"exec {procedure}\n    " + "\n  , ".join(arguments) + ";"
+    return f"{declares}\n\n{call}\n\nselect {projection};"
+
+
+def _rows(cursor) -> list[SqlRow]:
+    if cursor.description is None:
+        return []
+    columns = [column[0] for column in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _final_rows(cursor) -> list[SqlRow]:
+    """The last result set the batch produced, and only it.
+
+    For a batch whose *own* trailing ``select`` is the answer: everything before
+    it belongs to whatever the batch called, and has to be consumed to be got
+    past rather than interpreted.
+    """
+
+    latest: list[SqlRow] = []
+    while True:
+        if cursor.description is not None:
+            latest = _rows(cursor)
+        if not cursor.nextset():
+            return latest
 
 
 def _drain(cursor) -> None:

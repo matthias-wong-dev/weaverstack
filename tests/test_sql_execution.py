@@ -106,6 +106,117 @@ def test_query_returns_dictionaries_and_commits():
     assert connection.commits == 1
 
 
+# --- calling a procedure for its outputs ---------------------------------------
+
+
+class MultiSetCursor(Cursor):
+    """A cursor over several result sets, walked with ``nextset()``.
+
+    Which is what a Warehouse load procedure now looks like from outside: the
+    authored setup may run ``EXEC`` and return rows of its own, and Weaver's
+    answer is the projection its *own* batch ends with.
+    """
+
+    def __init__(self, sets):
+        super().__init__()
+        self._sets = list(sets)
+        self._index = 0
+        self._apply()
+
+    def _apply(self):
+        rows, columns = self._sets[self._index]
+        self.rows = list(rows)
+        self.description = [(name,) for name in columns] or None
+
+    def nextset(self):
+        if self._index + 1 >= len(self._sets):
+            return False
+        self._index += 1
+        self._apply()
+        return True
+
+
+LOAD_OUTPUTS = (
+    ("succeeded", "bit"),
+    ("rows_read", "bigint"),
+    ("error_message", "varchar(4000)"),
+)
+
+
+def test_call_procedure_declares_locals_and_passes_them_as_outputs():
+    cursor = MultiSetCursor([([(True, 4, None)], ["succeeded", "rows_read", "error_message"])])
+    executor, _ = _executor([Connection(cursor)])
+
+    executor.call_procedure(
+        "[_].[Load Sales.Customer]",
+        inputs=(("fault_tolerant", 1),),
+        outputs=LOAD_OUTPUTS,
+    )
+
+    batch, parameters = cursor.calls[0]
+    assert "declare @weaver_out_succeeded bit;" in batch
+    assert "@fault_tolerant = ?" in batch
+    assert "@succeeded = @weaver_out_succeeded output" in batch
+    assert parameters == (1,)
+
+
+def test_call_procedure_reads_its_own_projection_not_the_procedures_rows():
+    """The reason the load result stopped being a result set.
+
+    Authored setup returned two result sets here. Neither is the answer, and a
+    caller reading "the first result set" would have reported four thousand
+    rows read from a table nobody asked about.
+    """
+
+    cursor = MultiSetCursor(
+        [
+            ([("something the author selected",)], ["whatever"]),
+            ([(4000,)], ["rows_read"]),
+            ([(True, 4, None)], ["succeeded", "rows_read", "error_message"]),
+        ]
+    )
+    executor, _ = _executor([Connection(cursor)])
+
+    row = executor.call_procedure(
+        "[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS
+    )
+
+    assert row == {"succeeded": True, "rows_read": 4, "error_message": None}
+
+
+def test_call_procedure_ends_the_batch_with_its_projection():
+    """Last, so that nothing the procedure emits can come after it."""
+
+    cursor = MultiSetCursor([([(True, 4, None)], ["succeeded", "rows_read", "error_message"])])
+    executor, _ = _executor([Connection(cursor)])
+
+    executor.call_procedure("[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS)
+
+    batch = cursor.calls[0][0].rstrip()
+    assert batch.endswith(
+        "select @weaver_out_succeeded as succeeded, "
+        "@weaver_out_rows_read as rows_read, "
+        "@weaver_out_error_message as error_message;"
+    )
+
+
+def test_call_procedure_refuses_a_call_that_names_no_outputs():
+    executor, _ = _executor([Connection(Cursor())])
+
+    with pytest.raises(SqlExecutionError, match="none were named"):
+        executor.call_procedure("[_].[Load Sales.Customer]")
+
+
+def test_call_procedure_reports_a_procedure_that_returned_nothing():
+    """Which means the installed one is not the one Weaver generated."""
+
+    cursor = MultiSetCursor([([], [])])
+    executor, _ = _executor([Connection(cursor)])
+
+    with pytest.raises(SqlExecutionError, match="altered outside Weaver"):
+        executor.call_procedure("[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS)
+
+
 def test_query_commits_before_the_cursor_closes_and_the_lease_is_released():
     events = []
 
