@@ -29,13 +29,17 @@ import re
 
 import yaml
 
+from ..errors import DiscoveryError
 from .columns import metadata_column_references
 from .metadata import SesDocument
 from .sql_shaping import (
     insert_select_into,
     insert_where_one_eq_zero,
+    query_spans,
     render_sql_template,
+    selects_into,
 )
+from .tsql_program import parse_tsql_program, validate_query_contract
 
 TYPE_MAPPING_PATH = Path(__file__).resolve().parent / "warehouse_type_mapping.yml"
 
@@ -44,25 +48,137 @@ TYPE_MAPPING_PATH = Path(__file__).resolve().parent / "warehouse_type_mapping.ym
 
 
 def generate_tsql_table_script(document: SesDocument, body: str) -> str:
-    """A self-contained T-SQL script that builds ``document``'s main table."""
+    """A self-contained T-SQL script that builds ``document``'s main table.
+
+    The table's shape comes from the *staging* query and only from it. A body
+    that also names the keys to delete describes two things — what the object
+    holds, and which rows are leaving — and only the first is the table. The
+    second is still materialised, but into a temp table of its own, so the build
+    can say now that it names the primary key and nothing else rather than
+    leaving the load to discover it.
+    """
 
     mapping = _load_type_mapping()
+    program = parse_tsql_program(body, what=document.qualified, error=DiscoveryError)
+    validate_query_contract(
+        program,
+        what=document.qualified,
+        primary_key=document.primary_key,
+        incremental=document.is_incremental,
+        error=DiscoveryError,
+    )
+
     temp_table = _weaver_temp_table_name("#weaver_shape", document.qualified)
-    guarded = insert_where_one_eq_zero(body)
-    shape_sql = _ensure_terminated(insert_select_into(guarded, temp_table))
+    delete_temp_table = _weaver_temp_table_name(
+        "#weaver_delete_shape", document.qualified
+    )
+    shape_sql = _ensure_terminated(
+        _materialise_shapes(
+            body,
+            len(program.queries),
+            temp_table,
+            delete_temp_table,
+            what=document.qualified,
+        )
+    )
 
     if document.has_declared_schema:
         create_sql = _render_declared_create(document, temp_table)
     else:
         create_sql = _render_inferred_create(document, temp_table, mapping)
 
+    deletes = program.deletes is not None
     return (
         "/* weaver generated table build script. */\n"
         "set nocount on;\n\n"
-        f"if object_id('tempdb..{temp_table}') is not null drop table {temp_table};\n\n"
+        f"{_drop_temp_tables(temp_table, delete_temp_table if deletes else None)}\n\n"
         f"{shape_sql}\n\n"
+        f"{_render_delete_shape_validation(document, delete_temp_table) if deletes else ''}"
         f"{create_sql}\n"
-        f"\ndrop table {temp_table};\n"
+        f"\n{_drop_temp_tables(temp_table, delete_temp_table if deletes else None)}\n"
+    )
+
+
+def _materialise_shapes(
+    body: str,
+    query_count: int,
+    temp_table: str,
+    delete_temp_table: str,
+    *,
+    what: str,
+) -> str:
+    """The whole body in shape-only form, each query diverted to its temp table.
+
+    Guarded first and re-read afterwards, because guarding rewrites the text:
+    the spans are recomputed over what will actually run, so the ``INTO`` lands
+    in the query the server will see rather than in the one the author wrote.
+
+    Later query first. Inserting text moves everything after it, and going
+    backwards means no offset needs adjusting for an edit that has already
+    happened.
+
+    **The guard reaches only what it can see.** A body whose setup builds its
+    working table through ``EXEC`` or ``sp_executesql`` runs that setup for
+    real, because the alternative is reading the SQL inside a string literal —
+    which Weaver does not do. Shape-only is a promise about the queries Weaver
+    interprets, not about statements it merely passes on.
+    """
+
+    guarded = insert_where_one_eq_zero(body)
+    spans = tuple(
+        span for span in query_spans(guarded) if not selects_into(guarded, span)
+    )
+    if len(spans) != query_count:
+        raise DiscoveryError(
+            f"{what}: the shape-only form of this body has {len(spans)} result "
+            f"queries where the body has {query_count}. The build and the load "
+            "would stage different statements, so neither is generated."
+        )
+
+    shaped = guarded
+    if len(spans) > 1:
+        shaped = insert_select_into(shaped, delete_temp_table, span=spans[1])
+    return insert_select_into(shaped, temp_table, span=spans[0])
+
+
+def _drop_temp_tables(*names: str | None) -> str:
+    return "\n".join(
+        f"if object_id('tempdb..{name}') is not null drop table {name};"
+        for name in names
+        if name
+    )
+
+
+def _render_delete_shape_validation(document: SesDocument, temp_table: str) -> str:
+    """Refuse a delete query that does not name exactly the primary key.
+
+    The load deletes target rows by key, so a delete query producing anything
+    else is either missing part of the key — in which case it would retire rows
+    it never named — or carrying columns that mean nothing to a deletion. Both
+    are authoring mistakes, and both are cheaper to state here than to discover
+    in a load that has already begun.
+
+    Case-exact, under a binary collation, like every other column-name contract
+    in a Weaver build.
+    """
+
+    columns = _leading_comma_list(
+        [f"({_sql_literal(name)})" for name in document.primary_key],
+        first_indent="        ",
+        comma_indent="      ",
+    )
+    return (
+        render_sql_template(
+            "ddl/delete_shape_validation",
+            temp_object_literal=_sql_literal(f"tempdb..{temp_table}"),
+            primary_key_columns_cte=(
+                "    select column_name\n"
+                "    from (values\n"
+                f"{columns}\n"
+                "    ) as pk(column_name)"
+            ),
+        ).rstrip()
+        + "\n\n"
     )
 
 
