@@ -20,8 +20,8 @@ new or changed. It goes through the same phases the Warehouse procedure runs::
       → apply explicit deletes, separately, by key
       → delete absent rows, for non-incremental loads only
 
-**The intermediate tables are real**, as they are in the Warehouse and in the
-generated Spark SQL program: ``<Schema>.<Object>_Staging``, ``_Upsert`` and
+**The intermediate tables are real**, as they are in the Warehouse:
+``<Schema>.<Object>_Staging``, ``_Upsert`` and
 ``_Reject``. That is what makes a load inspectable — what the source produced,
 what was refused, and what Weaver decided to change are all still there
 afterwards, and a run that failed can be understood without re-running the
@@ -48,7 +48,8 @@ is Weaver's own addition: an intolerant run returns before any target mutation.
 
 from __future__ import annotations
 
-from ..declaration.spark_load import (
+from ..errors import LoadError
+from .delta_sql import (
     COLUMN_MAPPING,
     blank_key_predicate,
     changed_predicate,
@@ -56,7 +57,6 @@ from ..declaration.spark_load import (
     key_join,
     live_delete_literal,
 )
-from ..errors import LoadError
 from .load_contract import (
     REASON_BLANK_PK,
     REASON_DUPLICATE_PK,
@@ -93,6 +93,19 @@ TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
 #: surfaced — raised, or returned as a failed result — because a change this
 #: large being *tolerated* is what ``ignore_stability_threshold`` is for.
 BREACH_MESSAGE = "{reason}; the target was not modified"
+
+
+def table_is_populated(spark, *, contract: LoadContract, lakehouse) -> bool:
+    """Whether the target already holds a row.
+
+    One row is the whole question — a static object's load is *has this been
+    seeded* — so the query stops at one rather than counting. An empty table is
+    not populated: the table existing is what a build guarantees, and a static
+    load's job is to put the first rows in it.
+    """
+
+    target = lakehouse.qualify(contract.object_id.schema, contract.object_id.object)
+    return bool(spark.sql(f"SELECT 1 FROM {target} LIMIT 1").take(1))
 
 
 def load_table(

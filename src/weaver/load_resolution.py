@@ -40,7 +40,6 @@ from .load_plan import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
     PYTHON_TABLE,
-    SPARK_SQL_FILE,
     WAREHOUSE_PROCEDURE,
     LoadDag,
     LoadNode,
@@ -279,14 +278,11 @@ def _dispatch_location(
     if node.primitive_kind == WAREHOUSE_PROCEDURE:
         procedure = load_procedure_name(node.logical_id.object_id)
         return f"{node.physical_target}/{procedure}", None
-    if node.primitive_kind in (SPARK_SQL_FILE, PYTHON_TABLE, PYTHON_FOLDER):
-        location = installed_file_location(node, environment)
-        expected = (
-            _module_class(node.primitive_object.object)
-            if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER)
-            else None
+    if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER):
+        return (
+            installed_file_location(node, environment),
+            _module_class(node.primitive_object.object),
         )
-        return location, expected
     return None, None
 
 

@@ -75,6 +75,11 @@ class SparkTableExecutor:
             context.spark,
             enabled=catalogue.destination.preserve_table_identifier_case,
         ):
+            # An authored body may build a temporary view before selecting from
+            # it. The setup runs for its effect; the query that follows is the
+            # one whose shape becomes the table.
+            for statement in instruction.get("setup") or ():
+                context.spark.sql(catalogue.expand(statement))
             frame = context.spark.sql(query)
             query_columns = tuple(field.name for field in frame.schema.fields)
             query_types = {

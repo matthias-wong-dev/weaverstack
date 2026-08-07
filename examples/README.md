@@ -105,6 +105,54 @@ The resulting Fabric estate is identical to Notebook mode.
 
 ------------------------------------------------------------------------
 
+# Loading the estate
+
+A build creates structure; a load puts rows in it. The Sales Lakehouse
+carries one of each primitive Weaver installs, and all four are loaded
+the same way — by importing the deployed module and calling `.load()`:
+
+``` python
+from Files.Sales__OrderExport import Sales__OrderExport   # a Python folder
+from Sales__Customer import Sales__Customer               # a Python table
+from Sales__Order import Sales__Order                     # a Python table
+from Sales__OrderSummary import Sales__OrderSummary       # a Spark SQL table
+
+Sales__OrderExport(spark).load()
+Sales__Customer(spark).load()
+Sales__Order(spark).load()
+Sales__OrderSummary(spark).load()
+```
+
+`Sales.OrderSummary` is authored as `Sales.OrderSummary.sql` and
+installed as `Sales__OrderSummary.py` — a `SparkSqlTable` carrying the
+authored SQL. Nothing about loading it differs, which is the point: the
+whole Delta load lifecycle lives in one place, so a table authored in SQL
+and one authored in Python cannot come to behave differently.
+
+Or orchestrate the lot, in dependency order, from either mode:
+
+``` bash
+weaver load --targets Lakehouse/Sales Warehouse/Reporting \
+  --workspace-config examples/Weaver\ Example/weaver_example.yml
+```
+
+------------------------------------------------------------------------
+
+# Two spellings of one folder
+
+A `Folder` is reached two ways, because two things read it and neither
+understands the other's spelling:
+
+``` python
+folder.path()        # pathlib.Path — open(), glob(), write_text()
+folder.spark_path()  # str — spark.read, and abfss:// on Fabric
+```
+
+`Sales__OrderExport` uses the first to read its own files; `Sales__Order`
+and `Sales__Customer` use the second to hand the folder to Spark.
+
+------------------------------------------------------------------------
+
 # Why two modes?
 
 Notebook mode is convenient when authoring directly inside Fabric.

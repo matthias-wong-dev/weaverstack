@@ -29,4 +29,4 @@ select o.`Customer id`
      , cast(sum(o.`Amount`) as decimal(18,2))  as `Total amount`
   from Sales.Order o
   join Sales.Customer c on c.`Customer id` = o.`Customer id`
- group by o.`Customer id`, c.`Customer name`
+ group by o.`Customer id`, c.`Customer name`;

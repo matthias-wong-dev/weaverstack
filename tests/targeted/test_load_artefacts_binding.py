@@ -58,7 +58,7 @@ Schema:
   CustomerId: string
 */
 select cast(null as string) as CustomerId
- where 1 = 0
+ where 1 = 0;
 """
 
 
@@ -117,8 +117,9 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     """
 
     assert identities(load_artefacts(estate)) == [
-        f"{ITEM}/file:{LOAD_ROOT}/DWG.Summary.sql",
         f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py",
+        # The SQL-authored table, compiled into the module it deploys as.
+        f"{ITEM}/file:{LOAD_ROOT}/DWG__Summary.py",
         f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py",
         f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv",
         f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
@@ -260,7 +261,7 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
 
     import weaver.declaration.load
 
-    spark_file = f"{ITEM}/file:{LOAD_ROOT}/DWG.Summary.sql"
+    spark_file = f"{ITEM}/file:{LOAD_ROOT}/DWG__Summary.py"
     procedure = f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer"
     module = f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py"
     before = {

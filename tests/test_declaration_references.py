@@ -80,7 +80,7 @@ Column notes:
 */
 select cast(null as string) as `Order id`
      , cast(null as decimal(18,2)) as `Amount`
- where 1 = 0
+ where 1 = 0;
 """
 
 
@@ -247,7 +247,7 @@ Column notes:
 */
 select cast(null as string) as `Customer id`
      , cast(null as decimal(18,2)) as `Total amount`
- where 1 = 0
+ where 1 = 0;
 """
     repo = _repo(tmp_path, {"Sales.Order.sql": PARENT, "Sales.Summary.sql": source})
     notes = declared_column_notes(repo["Sales.Summary"])

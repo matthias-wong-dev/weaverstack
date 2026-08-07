@@ -18,6 +18,8 @@ begin
     declare @weaver_prospective_updates bigint = 0;
     declare @weaver_target_before bigint = 0;
 
+$static_gate
+
 $preprocessing_banner
 $start_artifact_cleanup
 

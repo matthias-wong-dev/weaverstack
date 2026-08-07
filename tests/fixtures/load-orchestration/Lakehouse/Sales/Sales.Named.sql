@@ -12,4 +12,4 @@ Dependencies:
 */
 select `Customer id`, upper(`Customer name`) as `Customer name`
   from Sales.Customer
- where `Customer name` is not null
+ where `Customer name` is not null;

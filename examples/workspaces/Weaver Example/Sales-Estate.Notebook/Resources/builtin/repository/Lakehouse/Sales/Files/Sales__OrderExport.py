@@ -18,8 +18,6 @@ Revision notes:
   - 2026-08-03 Created.
 """
 
-from pathlib import Path
-
 from weaver import Folder
 
 
@@ -29,7 +27,23 @@ class Sales__OrderExport(Folder):
     incoming = {}
 
     def read(self):
-        staging = Path(self.staging_folder())
-        for name, text in self.incoming.items():
-            (staging / name).write_text(text, encoding="utf-8")
-        return str(staging), []
+        # Weaver issues the staging directory and empties it before read() runs,
+        # so an object fills what it was given rather than choosing where to
+        # write — and returns that same object, which is what load() publishes.
+        with self.staging_folder() as staging:
+            for name, text in self.incoming.items():
+                (staging.path / name).write_text(text, encoding="utf-8")
+
+        return staging, []
+
+    def most_recent(self):
+        """The newest export on disk, read with ordinary Python.
+
+        ``path()`` is a ``pathlib.Path``, so a folder's own files are reachable
+        the way any other files are — globbed, opened, read. Compare
+        ``spark_path()``, which is what ``Sales.Customer`` and ``Sales.Order``
+        hand to Spark.
+        """
+
+        exports = sorted(self.path().glob("*.csv"))
+        return exports[-1].read_text(encoding="utf-8") if exports else ""

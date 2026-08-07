@@ -173,8 +173,11 @@ export = Raw__CustomerCsv(order)
 emit({
     "ids": [order.object_id, customer.object_id, export.object_id],
     "table_path": lakehouse.table_path(*order.identity),
-    "folder_path": export.path(),
-    "staging_folder": export.staging_folder(),
+    # Two spellings of one location, and the journey checks both: the mounted
+    # Path an author writes through, and the abfss:// form an engine reads.
+    "folder_path": str(export.path()),
+    "folder_spark_path": export.spark_path(),
+    "staging_path": str(export._staging_path()),
     "resolved_table_path": resolver.delta_table(delta_target, "DWG", "Order").value,
     "resolved_folder_path": resolver.folder_object(
         folder_target, "Raw", "CustomerCsv"
@@ -248,6 +251,7 @@ def _assert_installed(env, step) -> None:
         "DWG.ActiveCustomerSummary"
     )
     assert when("DWG.Customer") < when("DWG.Order")
+    assert when("DWG.Customer") < when("DWG.NamedCustomer")
 
 
 def _assert_authored_objects_reach_the_build(env) -> None:
@@ -270,8 +274,9 @@ def _assert_authored_objects_reach_the_build(env) -> None:
     # Object identity resolves through the Lakehouse's own root. Staging access
     # is transport-specific: a local path in the emulator and a session mount in
     # Fabric, both naming the same Files-relative object.
-    assert reached["folder_path"] == reached["resolved_folder_path"]
-    assert reached["staging_folder"].endswith("/Files/Raw/CustomerCsv_Staging")
+    assert reached["folder_spark_path"] == reached["resolved_folder_path"]
+    assert reached["folder_path"].endswith("/Files/Raw/CustomerCsv")
+    assert reached["staging_path"].endswith("/Files/Raw/CustomerCsv_Staging")
     assert reached["resolved_staging_path"].endswith(
         "/Files/Raw/CustomerCsv_Staging"
     )
@@ -403,14 +408,25 @@ def _assert_loaded(env, seen) -> None:
     # Dry run is validation only: no evidence, because nothing happened.
     assert dry["task_log"] is None
 
-    # The two views own no load work, so the graph is the folder and the two
+    # The two views own no load work, so the graph is the folder and the three
     # tables — and the order is the one the dependencies force.
+    #
+    # ``DWG.NamedCustomer`` is the SQL-authored one, and it is here to prove that
+    # orchestration cannot tell: it installs as a deployed module like the others
+    # and takes its place in the graph by its declared dependency, not by its
+    # authoring language.
     order = list(real["order"])
     assert [node_id.rsplit("/", 1)[-1] for node_id in order] == [
         "Raw.CustomerCsv",
         "DWG.Customer",
+        "DWG.NamedCustomer",
         "DWG.Order",
     ]
+    kinds = {
+        node["node_id"].rsplit("/", 1)[-1]: node["primitive_kind"]
+        for node in real["nodes"]
+    }
+    assert kinds["DWG.NamedCustomer"] == kinds["DWG.Customer"] == "python_table"
     assert real["status"] == "succeeded", _why(real)
     assert all(node["executed"] for node in real["nodes"])
     assert not any(

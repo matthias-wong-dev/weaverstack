@@ -76,20 +76,24 @@ from .targets import LAKEHOUSE_KIND, WAREHOUSE_KIND
 
 # --- the primitive kinds ------------------------------------------------------
 #
-# What an installed load *is*, in the vocabulary dispatch branches on. Five
-# values, four of them a real installed artefact and one a barrier the planner
+# What an installed load *is*, in the vocabulary dispatch branches on. Four
+# values, three of them a real installed artefact and one a barrier the planner
 # inserts. They are strings rather than a class hierarchy because they cross into
 # a plan file and a task log, where a reader needs to see the word.
+#
+# There is no kind for a Spark-SQL-authored table, deliberately. It installs as
+# a deployed ``SparkSqlTable`` module and dispatches as ``python_table``, so the
+# language it was authored in is a fact about its *declaration* — recorded in the
+# catalogue, where a reader can ask — and not about how it runs. A kind that said
+# otherwise would be orchestration knowing something it must not act on.
 
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
-SPARK_SQL_FILE = "spark_sql_file"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
 
 PRIMITIVE_KINDS = (
     WAREHOUSE_PROCEDURE,
-    SPARK_SQL_FILE,
     PYTHON_TABLE,
     PYTHON_FOLDER,
     ENDPOINT_REFRESH,
@@ -447,10 +451,16 @@ def primitive_candidates(
 
     Derived from identity and object type alone, because that is all a build has
     when it decides where to put one — the naming is the contract, not a lookup
-    table. Returning candidates rather than an answer is what lets the Registry
-    settle it: a Lakehouse table's load is either a deployed module or a
-    generated Spark SQL file depending on what its author wrote, and the estate
-    knows which was installed.
+    table. Returning candidates rather than an answer keeps the shape the
+    Registry settles, and keeps this honest about the one case that still has
+    two: a Warehouse table's load is a procedure, a Lakehouse object's is a
+    deployed module.
+
+    **A Lakehouse table has one candidate whatever it was authored in.** A Spark
+    SQL table is compiled into a ``SparkSqlTable`` module and deployed under the
+    module's own name, so ``Sales.OrderSummary.sql`` and a hand-written
+    ``Sales__OrderSummary.py`` install to one path — which they cannot both do,
+    because the repository already refuses one object declared twice.
     """
 
     item = identity.item
@@ -468,10 +478,7 @@ def primitive_candidates(
         )
     if object_type != "table":
         return ()
-    return (
-        (PYTHON_TABLE, _deployed_file(item, f"{schema}__{name}.py")),
-        (SPARK_SQL_FILE, _deployed_file(item, f"{schema}.{name}.sql")),
-    )
+    return ((PYTHON_TABLE, _deployed_file(item, f"{schema}__{name}.py")),)
 
 
 def _deployed_file(item: WeaverItemId, relative: str) -> WeaverDocumentId:
@@ -904,7 +911,6 @@ __all__ = [
     "PYTHON_TABLE",
     "PhysicalObjectRef",
     "PhysicalTargetRef",
-    "SPARK_SQL_FILE",
     "WAREHOUSE_PROCEDURE",
     "WAREHOUSE_TARGET",
     "load_dag",

@@ -70,6 +70,10 @@ class LoadContract:
     comparison_columns: tuple[str, ...] = ()
     identity_column: str | None = None
     incremental: bool = False
+    #: Loaded once, into an empty target, and never again. A reference list, a
+    #: seeded dimension, a fixture — something whose source is a *starting*
+    #: state rather than a running one. See :meth:`is_a_no_op_for`.
+    static: bool = False
     delete_threshold: int = DEFAULT_DELETE_THRESHOLD
     update_threshold: int = DEFAULT_UPDATE_THRESHOLD
     stability_rows: int = DEFAULT_STABILITY_ROWS
@@ -77,6 +81,19 @@ class LoadContract:
     @property
     def qualified(self) -> str:
         return self.object_id.qualified
+
+    def is_a_no_op_for(self, *, populated: bool) -> bool:
+        """Whether this load has nothing to do, given the target's state.
+
+        The decision is the *primitive's*, not an orchestrator's, and the
+        difference matters: what happens here is that the load ran and found the
+        work already done, so it reports a successful load of nothing. An
+        orchestration skip would say the node never ran, which is a different
+        claim about a different thing and cannot be made from outside the
+        primitive anyway — only the primitive can see the target.
+        """
+
+        return self.static and populated
 
     @property
     def replaces_wholesale(self) -> bool:
@@ -153,6 +170,7 @@ class LoadContract:
             comparison_columns=document.comparison_columns,
             identity_column=document.identity,
             incremental=document.is_incremental,
+            static=document.static,
             delete_threshold=document.delete_threshold,
             update_threshold=document.update_threshold,
             stability_rows=document.stability_rows,
@@ -172,10 +190,24 @@ class FolderLoadContract:
     object_id: ObjectId
     file_keys: tuple[str, ...] = ()
     incremental: bool = False
+    #: Materialised once and never again — see :attr:`LoadContract.static`.
+    static: bool = False
 
     @property
     def qualified(self) -> str:
         return self.object_id.qualified
+
+    def is_a_no_op_for(self, *, populated: bool) -> bool:
+        """Whether this load has nothing to do, given the folder's state.
+
+        Checked *before* staging is issued and before ``read()`` is invoked,
+        which is the whole point for a folder: a static folder that is already
+        populated must not download anything, must not create a staging
+        directory and must not reconcile files. Deciding after ``read()`` would
+        already have done the expensive and irreversible part.
+        """
+
+        return self.static and populated
 
     @property
     def replaces_wholesale(self) -> bool:
@@ -194,16 +226,20 @@ class FolderLoadContract:
             object_id=document.object_id,
             file_keys=document.file_keys,
             incremental=document.is_incremental,
+            static=document.static,
         )
 
 
-def document_for_module(module) -> SesDocument:
-    """Parse an installed Python module's own docstring into a document.
+def module_metadata_text(module) -> str:
+    """One installed module's metadata block, from its own docstring.
 
     The docstring *is* the metadata block — the repository reader extracts the
     same text with :func:`ast.get_docstring`, and ``cleandoc`` reproduces the
     dedenting it does, so the runtime and the repository read one document from
     one source of truth.
+
+    Separated from the parse because a generated Spark SQL module carries its
+    *authored* header, which has to be read in the language it was written in.
     """
 
     doc = getattr(module, "__doc__", None)
@@ -214,12 +250,18 @@ def document_for_module(module) -> SesDocument:
             "begin with its docstring metadata block, which is the contract its "
             "load runs from"
         )
-    return parse_document(inspect.cleandoc(doc), language=PYTHON)
+    return inspect.cleandoc(doc)
 
 
-#: Why a row was refused. One spelling for all four primitives, so a reject
-#: table written by a Warehouse procedure and one written by a Python load can
-#: be read by the same query. Taken from the reference implementation rather
+def document_for_module(module) -> SesDocument:
+    """Parse an authored Python module's own docstring into a document."""
+
+    return parse_document(module_metadata_text(module), language=PYTHON)
+
+
+#: Why a row was refused. One spelling on both engines, so a reject table
+#: written by a Warehouse procedure and one written by a Delta load can be read
+#: by the same query. Taken from the reference implementation rather
 #: than reinvented — these strings are already in use against real data.
 REASON_BLANK_PK = "blank_primary_key"
 REASON_DUPLICATE_PK = "duplicate_primary_key"
@@ -242,4 +284,5 @@ __all__ = [
     "LoadContract",
     "delta_audit_columns",
     "document_for_module",
+    "module_metadata_text",
 ]

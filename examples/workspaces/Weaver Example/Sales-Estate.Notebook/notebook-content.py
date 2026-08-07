@@ -102,8 +102,62 @@ for item in build_result.items:
 # META   "language_group": "synapse_pyspark"
 # META }
 
+# MARKDOWN ********************
+
+# ## Load the estate
+#
+# A build creates structure; a load puts rows in it. One call orchestrates
+# both items in dependency order — the folder, the two Python tables, the
+# Spark SQL table, the endpoint refresh that lets the Warehouse read across,
+# and the Warehouse table that consumes it.
+
 # CELL ********************
 
+load_result = weaver.load(
+    [
+        "Lakehouse/Sales",
+        "Warehouse/Reporting",
+    ],
+    workspace=workspace,
+)
+
+print(f"Load {load_result.status}")
+
+for node in load_result.nodes:
+    rows = "" if node.result is None else f"  (+{node.result.rows_inserted})"
+    print(f"{node.status:<24} {node.node_id}{rows}")
+
+print(f"Evidence: {load_result.task_log}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## Or run one primitive on its own
+#
+# Every deployed object is independently runnable — no orchestrator, no
+# catalogue, no bundle. `Sales__OrderSummary` is the generated form of the
+# authored `Sales.OrderSummary.sql`, and nothing about calling it differs.
+
+# CELL ********************
+
+import sys
+
+from weaver import lakehouse_for
+from weaver.resolution import resolver_for
+from weaver.targets import ItemRef
+
+destination = lakehouse_for(resolver_for(workspace), ItemRef("Sales"))
+sys.path.insert(0, f"{destination.files_root()}/_/Load")
+
+from Sales__OrderSummary import Sales__OrderSummary
+
+print(Sales__OrderSummary(spark, lakehouse=destination).load().as_row())
 
 # METADATA ********************
 

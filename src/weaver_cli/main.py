@@ -75,6 +75,30 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(push)
     push.set_defaults(handler=handle_push)
 
+    load = subcommands.add_parser(
+        "load", help="load every installed object in named physical targets"
+    )
+    load.add_argument(
+        "--targets",
+        nargs="+",
+        required=True,
+        metavar="TARGET",
+        help="Lakehouse/Name or Warehouse/Name",
+    )
+    load.add_argument(
+        "--fault-tolerant",
+        action="store_true",
+        help="continue independent branches after a node fails, and report",
+    )
+    load.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="resolve and render the plan without dispatching anything",
+    )
+    load.add_argument("--json", action="store_true", help="emit the report as JSON")
+    _add_workspace_args(load)
+    load.set_defaults(handler=handle_load)
+
     unbind = subcommands.add_parser(
         "unbind", help="remove catalogue state for named physical targets"
     )
@@ -483,6 +507,159 @@ def _run_unbind(workspace, *, lakehouses, warehouses) -> dict:
     )
     with LivySession.for_workspace(workspace) as session:
         return session.run(body).payload
+
+
+def handle_load(args: argparse.Namespace) -> int:
+    """Adapt command-line values to :func:`weaver.load`, wherever it has to run.
+
+    The CLI owns exactly one thing the API does not: the *host boundary*. A load
+    runs where the data is, so a desktop asking for a Fabric workspace has to
+    reach into a session to get one — and that crossing is the CLI's, the same
+    way it is for ``build`` and ``unbind``. Everything else — resolving the
+    workspace, validating targets, planning, orchestrating, reporting — happens
+    once, inside :func:`weaver.load`, whichever side of the boundary it runs on.
+    """
+
+    import json
+
+    from weaver.errors import LoadError
+
+    workspace = _resolve_workspace(args)
+    try:
+        report = _run_load(
+            workspace,
+            targets=args.targets,
+            fault_tolerant=args.fault_tolerant,
+            dry_run=args.dry_run,
+        )
+    except LoadError as exc:
+        # An intolerant failure. The report is the useful half of the answer and
+        # the message is the other, so both are shown before the non-zero exit.
+        if getattr(exc, "report", None) is not None:
+            _print_load(exc.report)
+        print(f"error: {exc}", file=sys.stderr)
+        if getattr(exc, "task_log", None):
+            print(f"  evidence: {exc.task_log}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    else:
+        _print_load(report)
+    return 0 if report.succeeded else 1
+
+
+def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool):
+    """One load, run where the data is.
+
+    Local and in-session are the same call; a desktop reaching into Fabric is
+    the same call submitted through Livy. What comes back is a real
+    :class:`~weaver.load_report.LoadRunReport` either way, so the renderer below
+    cannot tell which happened.
+    """
+
+    from weaver.operations import _inside_fabric_session
+    from weaver.workspaces import LocalWorkspace
+
+    if isinstance(workspace, LocalWorkspace) or _inside_fabric_session(workspace):
+        return weaver.load(
+            list(targets),
+            workspace=workspace,
+            fault_tolerant=fault_tolerant,
+            dry_run=dry_run,
+        )
+    return _run_load_over_livy(
+        workspace, targets=targets, fault_tolerant=fault_tolerant, dry_run=dry_run
+    )
+
+
+#: What the submitted program sends back. A failure is *data* on the way across:
+#: an exception raised inside a Fabric session cannot be re-raised on a desktop
+#: that has never heard of its class, so what travels is the diagnosis rather
+#: than the exception, and the desktop raises its own.
+_LOAD_BODY = """\
+from weaver.workspaces import FabricWorkspace
+import weaver
+
+workspace = FabricWorkspace(workspace={workspace!r}, environment={environment!r},
+                            weaver_lakehouse={weaver_lakehouse!r})
+try:
+    report = weaver.load(
+        {targets!r},
+        workspace=workspace,
+        fault_tolerant={fault_tolerant!r},
+        dry_run={dry_run!r},
+    )
+except Exception as exc:
+    carried = getattr(exc, "report", None)
+    result = getattr(exc, "result", None)
+    emit({{
+        "failed": True,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "result": None if result is None else result.as_row(),
+        "report": None if carried is None else carried.to_mapping(),
+        "task_log": getattr(exc, "task_log", None),
+    }})
+else:
+    emit({{"failed": False, "report": report.to_mapping()}})
+"""
+
+
+def _run_load_over_livy(workspace, *, targets, fault_tolerant: bool, dry_run: bool):
+    from weaver.errors import CommandError, LoadError
+    from weaver.fabric import LivySession
+    from weaver.load_report import LoadRunReport
+    from weaver.runtime.load_result import LoadResult
+
+    body = _LOAD_BODY.format(
+        workspace=workspace.workspace,
+        environment=workspace.environment,
+        weaver_lakehouse=workspace.weaver_lakehouse,
+        targets=list(targets),
+        fault_tolerant=fault_tolerant,
+        dry_run=dry_run,
+    )
+    with LivySession.for_workspace(workspace) as session:
+        payload = session.run(body).payload
+    if payload is None:
+        raise CommandError(
+            "the load ran in Fabric but returned nothing; see the Livy session output"
+        )
+    if not payload.get("failed"):
+        return LoadRunReport.from_mapping(payload["report"])
+
+    carried = payload.get("report")
+    counts = payload.get("result")
+    raise LoadError(
+        f"{payload['error_type']}: {payload['message']}",
+        result=None if counts is None else LoadResult.from_row(counts),
+        report=None if carried is None else LoadRunReport.from_mapping(carried),
+        task_log=payload.get("task_log"),
+    )
+
+
+def _print_load(report) -> None:
+    """One renderer, for a report produced here or one that crossed Livy."""
+
+    mode = "plan" if report.dry_run else "load"
+    print(f"{mode} {report.status}: {', '.join(report.requested)}\n")
+    for node in report.nodes:
+        counts = ""
+        if node.result is not None:
+            counts = (
+                f"  (read {node.result.rows_read}, "
+                f"+{node.result.rows_inserted} "
+                f"~{node.result.rows_updated} "
+                f"-{node.result.rows_deleted} "
+                f"!{node.result.rows_rejected})"
+            )
+        print(f"  {node.status:<24} {node.node_id}{counts}")
+        for message in node.messages:
+            if message.severity != "info":
+                print(f"      {message.severity}: {message.message}")
+    if report.task_log:
+        print(f"\n  evidence: {report.task_log}")
 
 
 def handle_wipe(args: argparse.Namespace) -> int:

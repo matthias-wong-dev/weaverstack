@@ -395,7 +395,7 @@ def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path)
     lost_files = set(holdings(before[item_id(ITEM)])["files"]) - set(
         holdings(reached[item_id(ITEM)])["files"]
     )
-    assert lost_files == {"_/load/dwg.summary.sql"}
+    assert lost_files == {"_/load/dwg__summary.py"}
 
 
 def test_converges_and_stays_converged_on_a_second_pass(estate, tmp_path):

@@ -28,7 +28,10 @@ from weaver import Table
 
 class Sales__Customer(Table):
     def read(self):
-        exported = Sales__OrderExport(self).path()
+        # spark_path(), because Spark is what reads it: on Fabric that is
+        # the abfss:// form, which pathlib cannot express. path() is the
+        # mounted Path for ordinary Python — see the folder's own module.
+        exported = Sales__OrderExport(self).spark_path()
         rows = (
             self.spark.read.option("header", True)
             .csv(exported)

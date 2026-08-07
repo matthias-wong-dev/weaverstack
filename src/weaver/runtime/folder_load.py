@@ -42,6 +42,7 @@ import fnmatch
 import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..errors import LoadError
@@ -72,8 +73,8 @@ TOLERATED_MESSAGE = "staged files were rejected and excluded from the load"
 def load_folder(
     *,
     contract: FolderLoadContract,
-    destination: str,
-    staging: str,
+    destination: str | Path,
+    staging: str | Path,
     deletes=(),
     fault_tolerant: bool = False,
 ) -> LoadResult:
@@ -116,8 +117,54 @@ def load_folder(
     return result
 
 
-def new_staging_folder(destination: str, staging: str) -> str:
-    """Reset and create the object-local staging directory, and return it.
+@dataclass(frozen=True)
+class StagingFolder:
+    """The directory Weaver issued for one load, and the object's to fill.
+
+    A value rather than a string, and a context manager rather than a value,
+    because both are how authored code actually uses it::
+
+        def read(self):
+            with self.staging_folder() as staging:
+                download_files(staging.path)
+
+            return staging, ()
+
+    The ``with`` block is a scope for the author's own work — Weaver publishes
+    from the same directory after ``read()`` returns, so leaving the block does
+    not remove anything. What it buys is that the download and the staging
+    directory are visibly one thing.
+
+    **Identity is the contract.** ``load()`` checks that what ``read()`` returned
+    *is* the object it issued, not merely one that compares equal. A path can be
+    reconstructed, a dataclass can be copied, and either would mean Weaver
+    publishing a directory it never issued and never reset.
+    """
+
+    path: Path
+
+    def __enter__(self) -> "StagingFolder":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        return False
+
+
+def folder_is_populated(destination: str | Path, patterns) -> bool:
+    """Whether the destination already holds a file this folder manages.
+
+    Scoped by the file key deliberately. A folder may sit beside files nobody
+    declared — an archive subdirectory the key does not claim — and those say
+    nothing about whether *this* folder has been materialised. A directory that
+    exists but holds nothing the key claims is not populated: existing is what a
+    build guarantees, and a static load's job is to put the first files in it.
+    """
+
+    return bool(managed_relative_files(Path(destination), patterns))
+
+
+def new_staging_folder(destination: str | Path, staging: str | Path) -> StagingFolder:
+    """Reset and create the object-local staging directory, and issue it.
 
     Reset rather than reused: a run must begin from nothing it did not itself
     produce, or the previous run's files are published again and a replacement
@@ -125,16 +172,71 @@ def new_staging_folder(destination: str, staging: str) -> str:
     """
 
     _destination_path, staging_path = _validate_paths(destination, staging)
-    if staging_path.exists():
-        shutil.rmtree(staging_path)
-    staging_path.mkdir(parents=True, exist_ok=False)
-    return str(staging_path)
+    reset_staging(staging_path)
+    return StagingFolder(path=staging_path)
+
+
+#: How many times a transient remote-filesystem failure is tolerated, and how
+#: long between tries. The mount fronts object storage rather than a local disk,
+#: so a delete that has been acknowledged may not yet be reflected in a listing —
+#: brief, but not instantaneous. Small numbers deliberately: this is defensive
+#: handling for a race, not a wait for something slow, and a reset that needs
+#: thirty seconds is a fault rather than a race.
+RESET_ATTEMPTS = 5
+RESET_PAUSE = 0.5
+
+
+def reset_staging(path: Path) -> None:
+    """Empty and recreate the fixed staging directory.
+
+    Zero-cache mounting is the real repair for a mount that disagrees with the
+    storage behind it (see :data:`weaver.lakehouse.MOUNT_OPTIONS`); this is the
+    defensive half, and measuring what Fabric actually does showed it is
+    required rather than merely prudent. Deleting a staging directory over DFS
+    and then looking at it through a zero-cache mount in the same session gives:
+
+    .. code-block:: text
+
+        exists()     still true — the directory outlives its storage
+        iterdir()    empty, but only once propagation settles; for a moment
+                     after the delete it still names the file that is gone
+
+    So the removal cannot be skipped on the strength of a listing, and it cannot
+    be trusted to succeed first time either. It is retried; the recreate that
+    follows is deliberately *not*, because it happens once removal is known to
+    have worked, and a directory that reappears after that is a fault rather
+    than something to paper over.
+
+    ``tests/fabric/test_onelake_mount_contract.py`` holds both observations.
+    """
+
+    _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
+    path.mkdir(parents=True, exist_ok=False)
+
+
+def remove_staging(path: Path) -> None:
+    """Remove staging after a load has published from it, tolerating a race."""
+
+    _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
+
+
+def _with_retry(action) -> None:
+    import time
+
+    for remaining in range(RESET_ATTEMPTS - 1, -1, -1):
+        try:
+            action()
+            return
+        except OSError:
+            if remaining == 0:
+                raise
+            time.sleep(RESET_PAUSE)
 
 
 # --- validation ----------------------------------------------------------------
 
 
-def _validate_paths(destination: str, staging: str) -> tuple[Path, Path]:
+def _validate_paths(destination: str | Path, staging: str | Path) -> tuple[Path, Path]:
     """The exact destination/staging relationship, refusing anything else.
 
     Staging must be the sibling Weaver names, because that is the only directory
@@ -394,9 +496,15 @@ def _safe_replace(source: Path, target: Path) -> None:
 __all__ = [
     "INTOLERANT_MESSAGE",
     "RESERVED_NAMES",
+    "RESET_ATTEMPTS",
+    "RESET_PAUSE",
     "TOLERATED_MESSAGE",
+    "StagingFolder",
+    "folder_is_populated",
     "load_folder",
     "managed_relative_files",
     "matches_file_key",
     "new_staging_folder",
+    "remove_staging",
+    "reset_staging",
 ]

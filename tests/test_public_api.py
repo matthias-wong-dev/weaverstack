@@ -31,6 +31,7 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "WeaverObject",
         "Folder",
         "Table",
+        "SparkSqlTable",
         "View",
         "Lakehouse",
         "default_lakehouse",

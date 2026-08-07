@@ -1,15 +1,15 @@
-"""What a load reports when it finishes, in one shape for all four primitives.
+"""What a load reports when it finishes, in one shape for every primitive.
 
-A Warehouse procedure, a Spark SQL program, a Python table and a Python folder
-run on different engines and return through different transports — a T-SQL
-result set, a Spark ``DataFrame``, a Python object. What they *mean* is the same,
-and this module is where that meaning is written down once.
+A Warehouse procedure, a Python table, a compiled Spark SQL table and a Python
+folder run on different engines and return through different transports — a
+T-SQL result set, a Spark ``DataFrame``, a Python object. What they *mean* is
+the same, and this module is where that meaning is written down once.
 
 The field names are the contract, not just the dataclass. :data:`RESULT_COLUMNS`
-names them in order, and the SQL generators build their final result row from it,
-so a column added here reaches every transport instead of three spellings
-drifting apart. That is the whole reason the names live beside the dataclass
-rather than inside each generator.
+names them in order, and the generated Warehouse procedure builds its final
+result row from it, so a column added here reaches every transport instead of
+two spellings drifting apart. That is the whole reason the names live beside the
+dataclass rather than inside the generator.
 
 **Success is not "nothing raised".** A load that rejected rows reports
 ``succeeded=False`` even when it was asked to tolerate them and did — the rows
@@ -23,9 +23,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-#: The result's columns, in order. The generated T-SQL and Spark SQL programs
-#: project exactly these names, so a transport's final row can be read straight
-#: into :class:`LoadResult` and any mismatch is a generation bug rather than a
+#: The result's columns, in order. The generated T-SQL procedure projects
+#: exactly these names, so a transport's final row can be read straight into
+#: :class:`LoadResult` and any mismatch is a generation bug rather than a
 #: silently misread column.
 RESULT_COLUMNS = (
     "succeeded",

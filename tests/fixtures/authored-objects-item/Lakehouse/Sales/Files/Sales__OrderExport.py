@@ -16,8 +16,8 @@ from weaver import Folder
 
 class Sales__OrderExport(Folder):
     def read(self):
-        # The staging directory is addressed through the Lakehouse's own root, so
-        # a fetch writes there with Hadoop-compatible access rather than ordinary
-        # file calls — the destination Lakehouse is not mounted when a load runs
-        # detached against it.
+        # Weaver issues the staging directory and resets it before read() runs,
+        # so an object fills what it was given rather than choosing where to
+        # write. `staging.path` is an ordinary Path, mounted where the resolved
+        # Lakehouse lives.
         return self.staging_folder(), []

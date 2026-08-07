@@ -78,10 +78,21 @@ this module stays importable anywhere.
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from .errors import LoadError
 from .lakehouse import Lakehouse, default_lakehouse
+
+if TYPE_CHECKING:  # pragma: no cover - for type readers only
+    from .runtime.folder_load import StagingFolder
+
+#: What Weaver names a folder's staging sibling. Repeated from
+#: :mod:`weaver.runtime.folder_load` rather than imported, because the authoring
+#: surface must stay importable without the runtime beneath it — the same reason
+#: :data:`CLASS_ID_SEPARATOR` is repeated from the parser. The two are asserted
+#: identical by ``tests/test_objects.py``.
+STAGING_SUFFIX = "_Staging"
 
 #: What separates schema from object in a class name. A module name cannot carry
 #: a dot, so a Python object spells ``Sales.Order`` as ``Sales__Order`` — the rule
@@ -186,41 +197,73 @@ class Folder(WeaverObject):
 
     ``read()`` writes into this object's staging directory and returns
     ``(staging_folder, files_to_delete)``.
+
+    **Two spellings of one location, and which you want depends on who reads
+    it.** Authored folder code is ordinary Python — it globs, opens and writes —
+    so :meth:`path` is a :class:`pathlib.Path`. An engine cannot use that:
+    ``spark.read`` wants the ``abfss://`` form, so :meth:`spark_path` is a
+    string. Neither is convertible into the other by string surgery, which is
+    why there are two methods rather than one and a rule.
     """
 
-    def path(self) -> str:
-        """This folder's materialised location, as Spark addresses it.
+    def path(self) -> Path:
+        """This folder's materialised location, as *Python* addresses it::
 
-        What one object hands another: a table reading these files does it with
-        ``spark.read``, which wants the ``abfss://`` form. Addressed by the root
-        the Lakehouse was resolved to, never by ``/lakehouse/default`` — that
-        names only whatever a notebook attached, and a load runs detached against
+            for file in Sales__Export(self).path().glob("*.json"):
+                ...
+
+        A real ``Path``, so ``/``, ``.glob()``, ``.open()``, ``.read_text()`` and
+        ``.write_text()`` all work. In OneLake it is Weaver's mount of the root
+        the Lakehouse resolved to — never ``/lakehouse/default``, which names
+        only whatever a notebook attached, and a load runs detached against
         Lakehouses it resolved by name.
         """
 
         return self.lakehouse.folder_path(*self.identity)
 
-    def local_path(self) -> str:
-        """This folder's location for code that opens files rather than reading
-        them through Spark.
+    def spark_path(self) -> str:
+        """This folder's location, as *Spark* addresses it::
 
-        The same bytes as :meth:`path`, spelled as a filesystem path. In OneLake
-        that is a mount Weaver makes of the resolved root; locally the two are
-        the same directory.
+            rows = self.spark.read.json(Sales__Export(self).spark_path())
+
+        The ``abfss://`` form on Fabric, the same directory locally. What one
+        object hands another when the reader is an engine.
         """
 
-        return self.lakehouse.folder_local_path(*self.identity)
+        return self.lakehouse.folder_spark_path(*self.identity)
 
-    def staging_folder(self) -> str:
-        """The object-local staging directory to write into.
+    def staging_folder(self) -> "StagingFolder":
+        """The staging directory Weaver issued for this load.
 
-        The destination's own path with ``_Staging`` appended — the same sibling
-        :meth:`weaver.resolution.LocalResolver.folder_staging` issues. There is no
-        shared staging area and no run identifier: staging belongs to the object,
-        so a failed load leaves exactly one directory to look at.
+        Called from ``read()``, and it hands back the *same* object every time
+        within one load — the one Weaver reset before ``read()`` began and will
+        publish from afterwards. There is no shared staging area and no run
+        identifier: staging belongs to the object, at a fixed sibling path named
+        ``<destination>_Staging``, so a failed load leaves exactly one directory
+        to look at and the next run knows where it is.
+
+        Outside a load there is nothing to issue, and asking says so rather than
+        inventing a directory nobody reset.
         """
 
-        return f"{self.local_path()}_Staging"
+        issued = getattr(self, "_issued_staging", None)
+        if issued is None:
+            raise LoadError(
+                f"{type(self).__name__}.staging_folder() is issued by load(), and "
+                "nothing has issued one — call it from read(), or call "
+                f"{type(self).__name__}(spark).load() to run the load that issues it"
+            )
+        return issued
+
+    def _staging_path(self) -> Path:
+        """Where staging goes: the destination's own path, with a suffix.
+
+        The same sibling :meth:`weaver.resolution.LocalResolver.folder_staging`
+        issues, and fixed rather than per-run — see :meth:`staging_folder`.
+        """
+
+        destination = self.path()
+        return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
     def load(self, fault_tolerant: bool = False) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
@@ -231,32 +274,67 @@ class Folder(WeaverObject):
 
         No repository, no catalogue, no bundle and no orchestrator — the module
         carries its own contract and this object carries its own destination.
+
+        The order below is the whole lifecycle, and each step is there because
+        the alternative loses something:
+
+        .. code-block:: text
+
+            reset the fixed staging directory   a run begins from nothing it
+                                                did not itself produce
+            issue one StagingFolder             read() fills what load() will
+                                                publish, and they are the same
+            run read()                          the author's work
+            check identity, not equality        a copy would mean publishing a
+                                                directory nobody reset
+            publish                             from the issued path
+            remove staging on success           nothing to mistake for evidence
+            retain staging on failure           the one directory worth looking
+                                                at when a load fails
         """
 
-        from .runtime.folder_load import load_folder, new_staging_folder
+        from .runtime.folder_load import (
+            folder_is_populated,
+            load_folder,
+            new_staging_folder,
+            remove_staging,
+        )
         from .runtime.load_contract import FolderLoadContract
+        from .runtime.load_result import LoadResult
 
         contract = FolderLoadContract.from_document(self._document())
-        # Weaver issues staging, before read() rather than after the load. A run
-        # must begin from nothing it did not itself produce, or the previous
-        # run's files are published again and a replacement concludes that
-        # nothing was retired. Clearing afterwards instead would destroy the one
-        # directory worth looking at when a load fails.
-        issued = new_staging_folder(self.local_path(), self.staging_folder())
-        staged, deletes = _load_pair(self, self.read())
-        if str(staged) != issued:
-            raise LoadError(
-                f"{type(self).__name__}.read() returned {staged!r}, which is not "
-                f"the staging folder Weaver issued ({issued!r}) — return "
-                "self.staging_folder()"
+        # Before staging and before read(), which is the whole point for a
+        # folder: a populated static folder must not create a staging directory,
+        # must not run the author's download and must not reconcile files.
+        if contract.is_a_no_op_for(
+            populated=folder_is_populated(self.path(), contract.file_keys)
+        ):
+            return LoadResult(succeeded=True)
+
+        issued = new_staging_folder(self.path(), self._staging_path())
+        self._issued_staging = issued
+        try:
+            staged, deletes = _load_pair(self, self.read())
+            if staged is not issued:
+                raise LoadError(
+                    f"{type(self).__name__}.read() must return the StagingFolder "
+                    f"self.staging_folder() issued, and returned "
+                    f"{type(staged).__name__} {staged!r} instead — return "
+                    "self.staging_folder()"
+                )
+            result = load_folder(
+                contract=contract,
+                destination=self.path(),
+                staging=issued.path,
+                deletes=deletes,
+                fault_tolerant=fault_tolerant,
             )
-        return load_folder(
-            contract=contract,
-            destination=self.local_path(),
-            staging=issued,
-            deletes=deletes,
-            fault_tolerant=fault_tolerant,
-        )
+        finally:
+            # Cleared whatever happened, so a second load cannot be handed the
+            # first one's directory — and so asking outside a load still fails.
+            self._issued_staging = None
+        remove_staging(issued.path)
+        return result
 
 
 class Table(WeaverObject):
@@ -309,9 +387,21 @@ class Table(WeaverObject):
         """
 
         from .runtime.load_contract import LoadContract
-        from .runtime.table_load import load_table
+        from .runtime.load_result import LoadResult
+        from .runtime.table_load import load_table, table_is_populated
 
         contract = LoadContract.from_document(self._document())
+        # Before read(), so a static object that is already seeded costs nothing
+        # — no query against the source, no staging table, no comparison. The
+        # primitive ran and found the work done; that is not an orchestration
+        # skip, and the successful no-op result says as much.
+        if contract.is_a_no_op_for(
+            populated=table_is_populated(
+                self.spark, contract=contract, lakehouse=self.lakehouse
+            )
+        ):
+            return LoadResult(succeeded=True)
+
         # The first value is *staging* — unvalidated, unreconciled, nothing yet
         # classified as new or changed. Naming it so is the point.
         staged, deletes = _load_pair(self, self.read())
@@ -323,6 +413,66 @@ class Table(WeaverObject):
             deletes=deletes,
             fault_tolerant=fault_tolerant,
             ignore_stability_threshold=ignore_stability_threshold,
+        )
+
+
+class SparkSqlTable(Table):
+    """A table whose ``read()`` is a Spark SQL program rather than Python.
+
+    **Generated, not authored.** A developer writes ``Sales.OrderSummary.sql``
+    and Weaver installs ``Sales__OrderSummary.py``, which is this class with the
+    authored SQL attached::
+
+        class Sales__OrderSummary(SparkSqlTable):
+            sql = SQL
+
+    That module is an ordinary deployed primitive: it imports, constructs and
+    loads exactly as a hand-written one does, and orchestration cannot tell the
+    two apart. It is public because the deployed module imports it and because
+    someone reaching for an installed primitive in a notebook meets it — not as
+    a second way to author an object. A repository ``.py`` subclassing this is
+    refused, because ``.sql`` is where a SQL table is written.
+
+    The program's shape is its contract: one query stages, a second names the
+    keys to delete. See :mod:`weaver.declaration.spark_sql_program`.
+    """
+
+    #: The authored program, addressed and embedded when the module was built.
+    sql: str = ""
+
+    def _document(self):
+        """This module's contract, read as the Spark SQL document it came from.
+
+        The docstring *is* the authored ``.sql`` header, carried over verbatim,
+        so it has to be parsed as what it was written as. Reading it as Python
+        metadata would apply Python's rules to a SQL declaration — and refuse
+        every table that leaves its schema to be inferred, which is a shape only
+        a SQL table has.
+        """
+
+        import sys
+
+        from .declaration.metadata import SPARK_SQL, parse_document
+        from .runtime.load_contract import module_metadata_text
+
+        module = sys.modules.get(type(self).__module__)
+        if module is None:  # pragma: no cover - a class with no importable module
+            raise LoadError(
+                f"{type(self).__name__} was defined outside an importable module, "
+                "so its Weaver metadata cannot be read"
+            )
+        return parse_document(module_metadata_text(module), language=SPARK_SQL)
+
+    def read(self):
+        """Run the embedded program and return ``(staging, deletes)``."""
+
+        from .runtime.load_contract import LoadContract
+        from .runtime.spark_sql_table import read_spark_sql
+
+        return read_spark_sql(
+            self.spark,
+            sql=self.sql,
+            contract=LoadContract.from_document(self._document()),
         )
 
 
@@ -388,5 +538,10 @@ def _identity(class_name: str) -> tuple[str, str]:
 
 
 #: The authoring base classes, by the metadata kind that selects them.
+#:
+#: :class:`SparkSqlTable` is deliberately absent. It is a *generated* base — the
+#: installed form of a ``.sql`` table — and admitting it here would make the same
+#: object authorable two ways, with two parsers, two dependency readings and two
+#: chances to disagree about what it declared.
 BASE_CLASSES = {"Folder": Folder, "Table": Table, "View": View}
 BASE_CLASS_NAMES = frozenset(cls.__name__ for cls in BASE_CLASSES.values())

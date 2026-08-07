@@ -30,6 +30,7 @@ than against a flag.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -39,7 +40,6 @@ from .load_plan import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
     PYTHON_TABLE,
-    SPARK_SQL_FILE,
     WAREHOUSE_PROCEDURE,
 )
 from .load_report import (
@@ -63,7 +63,6 @@ from .load_report import (
     warning,
 )
 from .load_resolution import LoadEnvironment, ResolvedLoadNode, ResolvedLoadPlan
-from .locations import Location
 from .targets import ItemRef
 
 #: Statuses an upstream node may have and still let its dependants run. Rejects
@@ -93,8 +92,17 @@ def execute_load_plan(
     test that had to stand up four engines to assert an ordering would be
     asserting the engines.
 
-    ``on_step`` receives each executed step's report as it completes, which is
-    how task evidence reaches storage without this module knowing what a file is.
+    ``on_step`` receives **every** planned node's report at the moment its final
+    status is settled — executed, invalid, skipped, blocked or pending alike —
+    which is how durable evidence reaches storage without this module knowing
+    what a file is. One record per planned node, written once, in plan order:
+    the alternative is a log that says which nodes ran and leaves a reader to
+    infer what became of the rest, exactly when inference is least safe.
+
+    **The plan is always classified in full**, even under fail-fast. Stopping
+    the loop early would leave nodes with no recorded outcome at all, and
+    "nothing was written for it" cannot be told apart from "the run died before
+    reaching it". So fail-fast stops *scheduling*, not reporting.
     """
 
     dispatch = dispatch or dispatch_load_node
@@ -102,57 +110,58 @@ def execute_load_plan(
     reports: dict[str, LoadNodeReport] = {}
     stopped = False
 
+    def record(report: LoadNodeReport, status: str | None = None) -> None:
+        reports[report.node_id] = report
+        if status is not None:
+            statuses[report.node_id] = status
+        if on_step is not None:
+            on_step(report)
+
     for resolved in plan.order:
         node = resolved.node
         blocking = _blocking(plan, node.node_id, statuses)
         if blocking:
-            reports[node.node_id] = _blocked_report(resolved, blocking)
-            statuses[node.node_id] = BLOCKED
+            record(_blocked_report(resolved, blocking), BLOCKED)
             continue
         if stopped:
             # Fail-fast: nothing new is scheduled. This node's own dependencies
             # were fine, so it is not blocked — it simply never started, and
             # saying so is more useful than inventing a failure for it.
-            reports[node.node_id] = _pending_report(resolved)
+            record(_pending_report(resolved))
             continue
         if not resolved.valid:
-            reports[node.node_id] = _invalid_report(resolved)
-            statuses[node.node_id] = FAILED
+            record(_invalid_report(resolved), FAILED)
             if not fault_tolerant:
                 stopped = True
             continue
         if resolved.unsupported:
-            reports[node.node_id] = _skipped_report(resolved)
-            statuses[node.node_id] = SKIPPED
-            if on_step is not None:
-                on_step(reports[node.node_id])
+            record(_skipped_report(resolved), SKIPPED)
             continue
 
         started = _now()
-        result, messages = _guarded(
+        outcome = _guarded(
             dispatch,
             resolved,
             fault_tolerant=fault_tolerant,
             environment=environment,
         )
-        status = _status_for(result)
-        report = LoadNodeReport(
-            node_id=node.node_id,
-            logical_id=str(node.logical_id) if node.logical_id else None,
-            physical_target=str(node.physical_target),
-            primitive_kind=node.primitive_kind,
-            dispatch_location=resolved.dispatch_location,
-            status=status,
-            executed=True,
-            messages=messages,
-            result=result,
-            started_at=started,
-            finished_at=_now(),
+        status = _status_for(outcome)
+        record(
+            LoadNodeReport(
+                node_id=node.node_id,
+                logical_id=str(node.logical_id) if node.logical_id else None,
+                physical_target=str(node.physical_target),
+                primitive_kind=node.primitive_kind,
+                dispatch_location=resolved.dispatch_location,
+                status=status,
+                executed=True,
+                messages=outcome.messages,
+                result=outcome.result,
+                started_at=started,
+                finished_at=_now(),
+            ),
+            status,
         )
-        reports[node.node_id] = report
-        statuses[node.node_id] = status
-        if on_step is not None:
-            on_step(report)
         if status == FAILED and not fault_tolerant:
             stopped = True
 
@@ -169,23 +178,53 @@ def _blocking(plan: ResolvedLoadPlan, node_id: str, statuses) -> tuple[str, ...]
     )
 
 
-def _status_for(result: LoadResult) -> str:
-    if result.succeeded:
+@dataclass(frozen=True)
+class DispatchOutcome:
+    """What one dispatch produced, and *how* it produced it.
+
+    The second part is the whole reason this exists. A primitive that refuses
+    rows raises when it was told not to tolerate them, and the exception carries
+    a result whose counts include the rejections — so a reader looking only at
+    the result cannot tell a refusal from a tolerated load. Both have
+    ``succeeded=False`` and ``rows_rejected > 0``, and they mean opposite things:
+    one wrote the valid rows, the other wrote nothing.
+
+    Keeping the exception is what lets :func:`_status_for` answer correctly
+    without inferring anything from the counts.
+    """
+
+    result: LoadResult
+    messages: tuple[LoadMessage, ...] = ()
+    exception: Exception | None = None
+
+    @property
+    def raised(self) -> bool:
+        return self.exception is not None
+
+
+def _status_for(outcome: DispatchOutcome) -> str:
+    # A dispatch that raised is a failed node whatever it was carrying. The
+    # target was not modified, so calling it "succeeded with rejects" would
+    # report rows that were never written.
+    if outcome.raised:
+        return FAILED
+    if outcome.result.succeeded:
         return SUCCEEDED
     # A primitive that refused rows and was asked to tolerate them wrote the
-    # valid ones and reported the refusal. That is not a failed step; a step that
-    # failed without refusing anything is.
-    return SUCCEEDED_WITH_REJECTS if result.rows_rejected else FAILED
+    # valid ones and *returned* the refusal. That is not a failed step; a step
+    # that failed without refusing anything is.
+    return SUCCEEDED_WITH_REJECTS if outcome.result.rows_rejected else FAILED
 
 
 def _guarded(
     dispatch, resolved: ResolvedLoadNode, *, fault_tolerant: bool, environment
-) -> tuple[LoadResult, tuple[LoadMessage, ...]]:
-    """Dispatch one node, converting anything it throws into a failed result.
+) -> DispatchOutcome:
+    """Dispatch one node, converting anything it throws into an outcome.
 
     The orchestrator's own fault tolerance, and it is unconditional: an
     unexpected exception becomes data whatever ``fault_tolerant`` says, because
     the run has to record what happened before it decides what to do about it.
+    Deciding is :func:`weaver.load.run_load`'s, once the whole plan is recorded.
     """
 
     node = resolved.node
@@ -195,38 +234,54 @@ def _guarded(
         )
     except LoadError as exc:
         carried = getattr(exc, "result", None)
-        result = (
-            carried
-            if isinstance(carried, LoadResult)
-            else LoadResult.failure(str(exc))
-        )
-        return result, (
-            error(
-                _failure_code(node.primitive_kind),
-                f"{node.node_id} failed: {exc}",
-                source=node.primitive_kind,
+        return DispatchOutcome(
+            result=(
+                carried
+                if isinstance(carried, LoadResult)
+                else LoadResult.failure(str(exc))
             ),
+            messages=(
+                error(
+                    _failure_code(node.primitive_kind),
+                    f"{node.node_id} failed: {exc}",
+                    source=node.primitive_kind,
+                ),
+            ),
+            exception=exc,
         )
     except Exception as exc:  # noqa: BLE001 - the boundary exists to catch these
-        return LoadResult.failure(f"{type(exc).__name__}: {exc}"), (
-            error(
-                DISPATCH_EXCEPTION,
-                f"{node.node_id} raised {type(exc).__name__}: {exc}",
-                source="load_execution",
+        return DispatchOutcome(
+            result=LoadResult.failure(f"{type(exc).__name__}: {exc}"),
+            messages=(
+                error(
+                    DISPATCH_EXCEPTION,
+                    f"{node.node_id} raised {type(exc).__name__}: {exc}",
+                    source="load_execution",
+                ),
             ),
+            exception=exc,
         )
     if not isinstance(result, LoadResult):
-        return LoadResult.failure(
+        invalid = LoadResult.failure(
             f"the primitive returned {type(result).__name__}, not a load result"
-        ), (
-            error(
-                RESULT_CONTRACT_INVALID,
-                f"{node.node_id} returned {type(result).__name__} rather than a "
-                "load result",
-                source=node.primitive_kind,
-            ),
         )
-    return result, _result_messages(resolved, result)
+        return DispatchOutcome(
+            result=invalid,
+            messages=(
+                error(
+                    RESULT_CONTRACT_INVALID,
+                    f"{node.node_id} returned {type(result).__name__} rather than "
+                    "a load result",
+                    source=node.primitive_kind,
+                ),
+            ),
+            # Not an exception, but not a dispatch either: nothing ran to
+            # completion, so it must never read as a tolerated rejection.
+            exception=LoadError(invalid.error_message or "invalid result"),
+        )
+    return DispatchOutcome(
+        result=result, messages=_result_messages(resolved, result)
+    )
 
 
 def _failure_code(primitive_kind: str) -> str:
@@ -332,8 +387,6 @@ def dispatch_load_node(
     kind = resolved.node.primitive_kind
     if kind == WAREHOUSE_PROCEDURE:
         return _dispatch_warehouse_procedure(resolved, fault_tolerant, environment)
-    if kind == SPARK_SQL_FILE:
-        return _dispatch_spark_sql_file(resolved, fault_tolerant, environment)
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
         return _dispatch_python(resolved, fault_tolerant, environment)
     if kind == ENDPOINT_REFRESH:
@@ -362,24 +415,6 @@ def _dispatch_warehouse_procedure(
     return LoadResult.from_row(rows[0])
 
 
-def _dispatch_spark_sql_file(
-    resolved, fault_tolerant: bool, environment: LoadEnvironment
-) -> LoadResult:
-    from .runtime.spark_load import run_load_program
-
-    if environment.store is None or environment.spark is None:
-        raise LoadError(
-            f"{resolved.node_id} needs a store and a Spark session, and this run "
-            "has neither"
-        )
-    program = environment.store.read(Location(resolved.dispatch_location))
-    return run_load_program(
-        environment.spark,
-        program.decode("utf-8"),
-        fault_tolerant=fault_tolerant,
-    )
-
-
 def _dispatch_python(
     resolved, fault_tolerant: bool, environment: LoadEnvironment
 ) -> LoadResult:
@@ -390,75 +425,41 @@ def _dispatch_python(
     orchestrated run is the Weaver control plane. Orchestration runs detached
     from every destination it writes to, so it must always say which one it
     means.
+
+    The import goes through a runtime *context* rather than through
+    ``sys.path``, because two Lakehouses may each deploy a ``lib/dates.py`` and
+    ``sys.modules`` is consulted before any path is searched — so the second
+    estate would silently receive the first one's helper. See
+    :mod:`weaver.runtime.python_context`.
     """
 
     from .lakehouse import lakehouse_for
+    from .runtime.python_context import import_deployed_module, runtime_context
 
     if environment.spark is None:
         raise LoadError(f"{resolved.node_id} needs a Spark session, and this run has none")
-    lakehouse = lakehouse_for(environment.resolver, ItemRef(resolved.node.physical_target.name))
+    target = resolved.node.physical_target
+    lakehouse = lakehouse_for(environment.resolver, ItemRef(target.name))
     runtime_root = _join(lakehouse.files_root(), *LOAD_ROOT.split("/"))
     relative = (
         f"{resolved.node.primitive_object.schema}/"
         f"{resolved.node.primitive_object.object}"
     )
     within = relative[len(LOAD_ROOT) + 1 :] if relative.startswith(LOAD_ROOT) else relative
-    module = _import_deployed(
-        runtime_root, within, expected=resolved.expected_class, node_id=resolved.node_id
+    context = runtime_context(
+        # The logical item, not the object: everything one item deployed into one
+        # target shares a tree, because that is what its author wrote against.
+        logical_item=resolved.node.logical_id.item,
+        physical_target=target,
+        runtime_root=runtime_root,
+    )
+    module = import_deployed_module(
+        context, within, expected=resolved.expected_class, node_id=resolved.node_id
     )
     cls = getattr(module, resolved.expected_class)
     return cls(environment.spark, lakehouse=lakehouse).load(
         fault_tolerant=fault_tolerant
     )
-
-
-def _import_deployed(runtime_root: str, relative: str, *, expected: str, node_id: str):
-    """One deployed module, imported from the runtime tree it was deployed into.
-
-    Loaded from its exact file, so the module a node dispatches is unambiguously
-    the one at the location the node resolved — but *named* by its position in
-    the tree, ``Files.Sales__Seed`` rather than ``Sales__Seed``, because that is
-    what other deployed modules import it as. Naming it otherwise would leave two
-    module objects for one file, one of them the object nobody imports.
-
-    The tree's root goes on ``sys.path`` first, so a module's own imports resolve
-    exactly as they did when it was authored: ``from lib.dates import parse``
-    finds ``lib`` where it was written, and ``from Files.Sales__Seed import …``
-    finds the folder module through the ordinary machinery.
-    """
-
-    import importlib.util
-    import sys
-
-    path = _join(runtime_root, *relative.split("/"))
-    # Ahead of whatever is already there: a process may hold more than one
-    # estate's runtime tree, and the one being dispatched is the one that wins.
-    if runtime_root in sys.path:
-        sys.path.remove(runtime_root)
-    sys.path.insert(0, runtime_root)
-    importlib.invalidate_caches()
-    name = relative[: -len(".py")].replace("/", ".")
-    specification = importlib.util.spec_from_file_location(name, path)
-    if specification is None or specification.loader is None:
-        raise LoadError(f"{node_id}: no deployed module at {path}")
-    module = importlib.util.module_from_spec(specification)
-    # Registered before execution so a module that imports itself by name — and a
-    # dataclass or pickle that later looks it up — finds the one being run.
-    sys.modules[name] = module
-    try:
-        specification.loader.exec_module(module)
-    except FileNotFoundError as exc:
-        raise LoadError(f"{node_id}: no deployed module at {path}") from exc
-    except Exception as exc:  # noqa: BLE001 - authored code, any failure is data
-        raise LoadError(
-            f"{node_id}: importing {path} raised {type(exc).__name__}: {exc}"
-        ) from exc
-    if not hasattr(module, expected):
-        raise LoadError(
-            f"{node_id}: {path} defines no class {expected!r} — a deployed object "
-            "module names its class for its file"
-        )
-    return module
 
 
 def _dispatch_endpoint_refresh(resolved, environment: LoadEnvironment) -> LoadResult:
@@ -478,6 +479,7 @@ def _join(root: str, *parts: str) -> str:
 
 
 __all__ = [
+    "DispatchOutcome",
     "dispatch_load_node",
     "execute_load_plan",
 ]
