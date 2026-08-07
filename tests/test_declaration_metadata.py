@@ -8,12 +8,14 @@ import pytest
 
 from weaver.errors import MetadataError
 from weaver.declaration import (
+    ASSUMPTION,
     AUDIT_COLUMNS,
     FOLDER,
     PYTHON,
     SPARK_SQL,
     SQL,
     TABLE,
+    TEST,
     VIEW,
     parse_document,
     parse_python_document,
@@ -88,8 +90,9 @@ def test_unknown_keys_are_named_not_ignored():
         parse(TABLE_YAML + "\nPrimary Key: Order id")
 
 
-def test_a_key_from_another_kind_says_so():
-    with pytest.raises(MetadataError, match="another object kind"):
+def test_a_key_from_another_kind_names_the_kinds_that_have_it():
+    """Naming them turns "unknown key" into "wrong kind of declaration"."""
+    with pytest.raises(MetadataError, match=r"Primary key belongs to Table, Test and View"):
         parse(FOLDER_YAML + "\nPrimary key: Order id")
 
 
@@ -642,3 +645,148 @@ def test_dependencies_may_not_repeat():
 def test_dependencies_must_be_a_list():
     with pytest.raises(MetadataError, match="YAML list"):
         parse(TABLE_YAML + "\nDependencies: Sales.Customer")
+
+
+# --- validation declarations -----------------------------------------------
+#
+# A Test and an Assumption are Weaver declarations that produce no data. The
+# contract is therefore mostly about what they may *not* say: everything
+# describing how data is materialised, keyed or rebuilt reads as plausible on a
+# Test until you ask what it would do, so each is refused by name.
+
+TEST_YAML = """
+Test ID: Sales.OrdersReconcile
+
+Description: Orders reconcile to the independently derived expected relation.
+
+Primary key: Order id
+"""
+
+ASSUMPTION_YAML = """
+Assumption ID: Sales.OrdersUpToDate
+
+Description: Orders contain data up to the expected business date.
+"""
+
+
+def test_a_test_parses():
+    document = parse(TEST_YAML)
+    assert document.kind == TEST
+    assert document.qualified == "Sales.OrdersReconcile"
+    assert document.primary_key == ("Order id",)
+    assert document.is_validation
+
+
+def test_an_assumption_parses():
+    document = parse(ASSUMPTION_YAML)
+    assert document.kind == ASSUMPTION
+    assert document.qualified == "Sales.OrdersUpToDate"
+    assert document.is_validation
+
+
+def test_a_validation_declares_no_lineage():
+    """It reads data and produces none, so it has no lineage of its own."""
+    assert parse(TEST_YAML).lineage is None
+    assert parse(ASSUMPTION_YAML).lineage is None
+
+
+def test_a_test_primary_key_may_be_composite():
+    document = parse(TEST_YAML.replace("Primary key: Order id", "Primary key: Order id, Line no"))
+    assert document.primary_key == ("Order id", "Line no")
+
+
+def test_a_test_may_declare_no_primary_key():
+    document = parse(TEST_YAML.replace("\nPrimary key: Order id\n", "\n"))
+    assert document.primary_key == ()
+    assert not document.has_primary_key
+
+
+def test_an_assumption_may_not_declare_a_primary_key():
+    """There is one side to pair, so a key would have nothing to correlate."""
+    with pytest.raises(MetadataError, match="must not declare a Primary key"):
+        parse(ASSUMPTION_YAML + "\nPrimary key: Order id")
+
+
+def test_a_validation_takes_the_shared_document_keys():
+    document = parse(
+        TEST_YAML
+        + "\nNotes: Slow against a full year.\n"
+        + "\nRevision notes:\n  - 2026-08-08 First cut.\n"
+        + "\nDependencies:\n  - Sales.Order\n"
+    )
+    assert document.notes == "Slow against a full year."
+    assert [str(revision) for revision in document.revision_notes] == ["2026-08-08 First cut."]
+    assert [dependency.qualified for dependency in document.dependencies] == ["Sales.Order"]
+    assert document.declares_dependencies
+
+
+def test_a_validation_description_may_reference_another_object():
+    document = parse(TEST_YAML.replace("Description: Orders reconcile to the independently derived expected relation.", "Description: $Sales.Order"))
+    assert document.description.reference.object_id.qualified == "Sales.Order"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Lineage: Sales system order export.",
+        "Static: true",
+        "Prohibit rebuild: true",
+        "Incremental: true",
+        "Comparison columns: Amount",
+        "Identity: Order key",
+        "Not null:\n  - Amount",
+        "Unique keys:\n  - Order id",
+        "Foreign keys:\n  - Customer id: Sales.Customer[Customer id]",
+        "Delete percentage threshold: 10",
+        "Warehouse alias: Sales.OrdersReconcile",
+        "Schema:\n  Order id: string",
+        "File key: \"*.csv\"",
+    ],
+)
+def test_data_object_metadata_is_refused_on_a_test(key):
+    with pytest.raises(MetadataError, match="unknown metadata key"):
+        parse(TEST_YAML + "\n" + key)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["Lineage: Sales system order export.", "Static: true", "Incremental: true"],
+)
+def test_data_object_metadata_is_refused_on_an_assumption(key):
+    with pytest.raises(MetadataError, match="unknown metadata key"):
+        parse(ASSUMPTION_YAML + "\n" + key)
+
+
+def test_refusing_a_data_key_on_a_validation_explains_why():
+    with pytest.raises(MetadataError, match="declares no data of its own"):
+        parse(TEST_YAML + "\nLineage: Sales system order export.")
+
+
+def test_a_validation_still_needs_a_description():
+    with pytest.raises(MetadataError, match="Description is required"):
+        parse("Test ID: Sales.OrdersReconcile")
+
+
+def test_a_validation_id_is_two_parts():
+    with pytest.raises(MetadataError, match="two-part"):
+        parse("Test ID: OrdersReconcile\nDescription: x")
+
+
+def test_one_id_key_only_still_holds_across_validation_and_object():
+    with pytest.raises(MetadataError, match="exactly one"):
+        parse("Test ID: A.B\nAssumption ID: A.C\nDescription: x")
+    with pytest.raises(MetadataError, match="exactly one"):
+        parse("Table ID: A.B\nTest ID: A.C\nDescription: x\nLineage: y")
+
+
+def test_a_spark_sql_validation_must_declare_dependencies():
+    """Its queries may read by path, exactly as a Spark SQL object's may."""
+    with pytest.raises(MetadataError, match="must declare Dependencies"):
+        parse(TEST_YAML, language=SPARK_SQL)
+    document = parse(TEST_YAML + "\nDependencies:\n  - Sales.Order", language=SPARK_SQL)
+    assert [dependency.qualified for dependency in document.dependencies] == ["Sales.Order"]
+
+
+def test_a_validation_may_not_depend_on_itself():
+    with pytest.raises(MetadataError, match="cannot depend on itself"):
+        parse(TEST_YAML + "\nDependencies:\n  - Sales.OrdersReconcile")
