@@ -547,11 +547,12 @@ def _read_sql(
             f"{analysis.statement_count}."
         )
 
-    if language == SPARK_SQL and document.kind == TABLE:
-        # A Spark SQL table installs as an importable primitive whose read()
-        # returns (staging, deletes), so it may produce two results rather than
-        # one — and the rule about which is the parser's, not this counter's.
-        _check_spark_sql_program(relative_path, document, body)
+    if document.kind == TABLE and language in (SPARK_SQL, SQL):
+        # A SQL table produces its rows and, at most, the keys to delete, so it
+        # may return two results rather than one — and which is which is the
+        # program parser's answer, not this counter's. Each dialect has its own
+        # parser because each has its own idea of where a statement ends.
+        _check_sql_table_program(relative_path, document, body, language)
     elif analysis.determined and analysis.result_set_count != 1:
         raise DiscoveryError(
             f"{relative_path}: a SQL object must produce exactly one result set, "
@@ -571,19 +572,34 @@ def _read_sql(
     )
 
 
-def _check_spark_sql_program(relative_path: str, document: SesDocument, body: str) -> None:
-    """Refuse an authored Spark SQL table body that cannot mean a load.
+def _check_sql_table_program(
+    relative_path: str, document: SesDocument, body: str, language: str
+) -> None:
+    """Refuse an authored SQL table body that cannot mean a load.
 
-    The same two checks the deployed primitive runs, made here so a body that
+    The same checks the generated artefact depends on, made here so a body that
     could never load is refused by a build rather than discovered by one.
+
+    Note what is *not* refused: a body whose result-set count is beyond static
+    reach because it uses dynamic SQL. The contract is about the queries Weaver
+    can see, and ``EXEC`` is setup like any other statement — so what matters is
+    whether the visible ``SELECT``s make sense, not whether the invisible ones
+    can be counted.
     """
 
-    from .spark_sql_program import parse_spark_sql_program, validate_query_contract
+    if language == SPARK_SQL:
+        from .spark_sql_program import (
+            parse_spark_sql_program as parse,
+            validate_query_contract as validate,
+        )
+    else:
+        from .tsql_program import (
+            parse_tsql_program as parse,
+            validate_query_contract as validate,
+        )
 
-    program = parse_spark_sql_program(
-        body, what=relative_path, error=DiscoveryError
-    )
-    validate_query_contract(
+    program = parse(body, what=relative_path, error=DiscoveryError)
+    validate(
         program,
         what=relative_path,
         primary_key=document.primary_key,

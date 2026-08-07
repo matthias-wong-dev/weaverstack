@@ -6,10 +6,12 @@ T-SQL result set, a Spark ``DataFrame``, a Python object. What they *mean* is
 the same, and this module is where that meaning is written down once.
 
 The field names are the contract, not just the dataclass. :data:`RESULT_COLUMNS`
-names them in order, and the generated Warehouse procedure builds its final
-result row from it, so a column added here reaches every transport instead of
-two spellings drifting apart. That is the whole reason the names live beside the
-dataclass rather than inside the generator.
+names them in order, and the generated Warehouse procedure declares its output
+parameters from the same list
+(:data:`weaver.declaration.tsql_load.RESULT_PARAMETERS`), so a field added here
+reaches every transport instead of two spellings drifting apart. That is the
+whole reason the names live beside the dataclass rather than inside the
+generator.
 
 **Success is not "nothing raised".** A load that rejected rows reports
 ``succeeded=False`` even when it was asked to tolerate them and did — the rows

@@ -224,6 +224,70 @@ def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     assert "union all\n\n    select N'CustomerKey' as column_name" in content
 
 
+# --- a body with two result queries -----------------------------------------
+
+
+TWO_QUERY = """
+    /*
+    Table ID: Reporting.CustomerReport
+    Description: A warehouse report of customers.
+    Lineage: $Sales.Customer
+    Primary key: CustomerId
+    Incremental: true
+    */
+    select CustomerId, CustomerName into #Working from [Sales_LH].[Sales].[Customer];
+
+    select CustomerId, CustomerName from #Working;
+
+    select CustomerId from [Sales_LH].[Sales].[Retirement]
+"""
+
+
+def test_the_table_is_shaped_from_the_staging_query_not_the_last_one():
+    """Which SELECT the table *is* — the first result query, and only it.
+
+    The build and the load take that answer from the same reading, so a body
+    whose last query names retired keys does not describe a one-column table.
+    """
+
+    content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
+    staging = content.index("into #weaver_shape_Reporting_CustomerReport")
+    deletes = content.index("into #weaver_delete_shape_Reporting_CustomerReport")
+
+    assert staging < deletes
+    assert "select CustomerName" not in content.split("into #weaver_delete_shape")[1]
+
+
+def test_select_into_setup_keeps_its_own_destination():
+    """Setup names where its rows go, so the build must not divert it."""
+
+    content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
+
+    assert "into #Working from [Sales_LH].[Sales].[Customer] where 1=0" in content
+
+
+def test_the_delete_query_is_shaped_and_checked_against_the_primary_key():
+    content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
+
+    assert "must produce exactly the primary key" in content
+    assert "throw 51007" in content
+    assert "collate Latin1_General_BIN2" in content
+
+
+def test_both_shape_tables_are_cleaned_up():
+    content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
+
+    assert content.count("drop table #weaver_delete_shape_Reporting_CustomerReport;") == 2
+    assert content.count("drop table #weaver_shape_Reporting_CustomerReport;") == 2
+
+
+def test_a_one_query_table_shapes_nothing_for_deletion():
+    content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
+
+    assert "delete_shape" not in content
+    assert "throw 51007" not in content
+
+
 # --- determinism ------------------------------------------------------------
 
 

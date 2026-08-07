@@ -365,3 +365,91 @@ def test_a_node_the_host_cannot_perform_is_skipped_not_failed(tmp_path):
     # And a skip clears the way rather than blocking it: the barrier was never
     # needed here, because there is no endpoint for anything to read through.
     assert statuses(reports)[SUMMARY] == SUCCEEDED
+
+
+# --- what reaches a Warehouse procedure ----------------------------------------
+
+
+class RecordingSql:
+    """A SQL capability that records how a procedure was called."""
+
+    def __init__(self, row):
+        self.row = row
+        self.calls = []
+
+    def call_procedure(self, procedure, *, inputs=(), outputs=()):
+        self.calls.append((procedure, tuple(inputs), tuple(outputs)))
+        return self.row
+
+    def query(self, statement, parameters=None):  # pragma: no cover - a trap
+        raise AssertionError(
+            "the load result is read from named outputs, never from a result set"
+        )
+
+
+def _warehouse_node(fault_tolerant: bool, row):
+    """The three attributes the Warehouse dispatcher actually reads."""
+
+    from types import SimpleNamespace
+
+    from weaver.declaration.metadata import ObjectId
+    from weaver.load_execution import dispatch_load_node
+    from weaver.load_plan import WAREHOUSE_PROCEDURE
+
+    sql = RecordingSql(row)
+    resolved = SimpleNamespace(
+        node_id="Sales.Customer",
+        node=SimpleNamespace(
+            primitive_kind=WAREHOUSE_PROCEDURE,
+            physical_target=REPORTING,
+            logical_id=SimpleNamespace(object_id=ObjectId("Sales", "Customer")),
+        ),
+    )
+    environment = SimpleNamespace(sql_for=lambda target: sql)
+    result = dispatch_load_node(
+        resolved, fault_tolerant=fault_tolerant, environment=environment
+    )
+    return result, sql
+
+
+def test_a_warehouse_load_asks_for_its_result_by_name():
+    """Never by reading a result set, which authored setup may also produce."""
+
+    from weaver.declaration.tsql_load import RESULT_PARAMETERS
+
+    row = {
+        "succeeded": True,
+        "rows_read": 4,
+        "rows_inserted": 1,
+        "rows_updated": 2,
+        "rows_deleted": 0,
+        "rows_rejected": 0,
+        "error_message": None,
+    }
+
+    result, sql = _warehouse_node(False, row)
+
+    procedure, inputs, outputs = sql.calls[0]
+    assert procedure == "[_].[Load Sales.Customer]"
+    assert inputs == (("fault_tolerant", 0),)
+    assert outputs == RESULT_PARAMETERS
+    assert result == LoadResult(
+        succeeded=True, rows_read=4, rows_inserted=1, rows_updated=2
+    )
+
+
+def test_fault_tolerance_reaches_the_procedure_as_an_input():
+    _result, sql = _warehouse_node(
+        True,
+        {
+            "succeeded": True,
+            "rows_read": 0,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "rows_deleted": 0,
+            "rows_rejected": 0,
+            "error_message": None,
+        },
+    )
+
+    assert sql.calls[0][1] == (("fault_tolerant", 1),)

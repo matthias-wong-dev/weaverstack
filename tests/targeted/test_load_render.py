@@ -123,7 +123,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (6, "9a9e2a3c8278c81ebf8b6af6327d0d1bc39ece86fd7fcf51593c839782fd40df"),
+    "tsql": (8, "aad6d1857f1c284b64377206111a59159a6b43758a2ed1e77f4626acc9ae6f51"),
     "spark": (8, "817cb4d0e2cb82d571a232ee4a73f7a956f4b255cf4378bc49af6c26cd665664"),
 }
 
@@ -210,11 +210,31 @@ def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
     assert "@fault_tolerant bit = 0" in payload
 
 
-def test_the_procedure_returns_the_result_contract():
+def test_the_procedure_returns_the_result_contract_through_its_signature():
+    """Not through a result set, which a caller could not have identified.
+
+    Authored setup may run EXEC or sp_executesql that returns rows of its own,
+    so "the result set this procedure produced" is ambiguous in exactly the
+    bodies the two-query contract now encourages. A named output is not.
+    """
+
     payload = _warehouse().create_load().payload.decode()
 
     for column in RESULT_COLUMNS:
-        assert f"as {column}" in payload
+        assert f"@{column} " in payload
+        assert f"= null output" in payload
+        assert f"set @{column} = " in payload
+    assert "as succeeded" not in payload
+
+
+def test_the_outputs_are_optional_so_the_procedure_stays_runnable_by_hand():
+    """`exec [_].[Load Sales.Customer];` must still work, undeclared."""
+
+    payload = _warehouse().create_load().payload.decode()
+
+    for column in RESULT_COLUMNS:
+        assert f"@{column} " in payload
+    assert payload.count("= null output") == len(RESULT_COLUMNS)
 
 
 def test_the_identity_column_is_excluded_by_asking_the_engine():
@@ -269,13 +289,125 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
 def test_an_incremental_load_deletes_nothing():
     """Absence from a window is not a retirement."""
 
-    source = WAREHOUSE_TABLE.replace(
-        "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
-    )
-    payload = _warehouse(source).create_load().payload.decode()
+    payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load().payload.decode()
 
     assert "delete c\n" not in payload
     assert "not a retirement" in payload
+
+
+# --- an incremental table's explicit deletes -----------------------------------
+
+
+def _incremental(source: str) -> str:
+    return source.replace(
+        "Primary key: Customer id", "Primary key: Customer id\n\nIncremental: true"
+    )
+
+
+#: Setup, the staging query, and a second query naming the keys to retire. The
+#: setup sits *between* the two queries deliberately: where an author puts it is
+#: where it has to run, or the second query reads a table that does not exist yet.
+TWO_QUERY_WAREHOUSE = _incremental(WAREHOUSE_TABLE).replace(
+    "select [Customer id], [Customer name] from [Src].[Raw]",
+    """select [Customer id], [Customer name] from [Src].[Raw];
+
+select [Customer id] into #Retired from [Src].[Retirement];
+
+select [Customer id] from #Retired""",
+)
+
+
+def _two_query_payload() -> str:
+    return _warehouse(TWO_QUERY_WAREHOUSE).create_load().payload.decode()
+
+
+def test_a_second_query_becomes_a_delete_working_table():
+    payload = _two_query_payload()
+
+    assert "create table [Sales].[Customer_Delete] as" in payload
+    assert "into #weaver_delete_claim_Sales_Customer from #Retired" in payload
+
+
+def test_the_delete_claim_is_narrowed_before_anything_is_counted():
+    """Distinct, not blank, and present in the target — all three, up front.
+
+    The stability threshold has to be checked against what will really be
+    removed. A count of the raw claim would be a count of what was asked for,
+    which is a different number whenever a key is repeated or was never there.
+    """
+
+    payload = _two_query_payload()
+
+    assert "select distinct c.[Customer id]" in payload
+    assert "inner join #weaver_delete_claim_Sales_Customer as d" in payload
+    assert "where not (nullif(trim(cast(d.[Customer id]" in payload
+
+
+def test_the_delete_claim_is_what_the_threshold_counts():
+    payload = _two_query_payload()
+
+    assert (
+        "select @weaver_prospective_deletes = count(*) from [Sales].[Customer_Delete];"
+        in payload
+    )
+    assert "not a retirement" not in payload
+
+
+def test_the_target_loses_exactly_the_claimed_keys():
+    payload = _two_query_payload()
+
+    assert "inner join [Sales].[Customer_Delete] as d" in payload
+    # Still reported from cardinality, so a key that was not there to begin with
+    # deletes nothing and inflates nothing.
+    assert "@weaver_target_before + @weaver_rows_inserted - count(*)" in payload
+
+
+def test_the_delete_table_is_cleaned_up_with_the_others():
+    payload = _two_query_payload()
+
+    assert payload.count("drop table [Sales].[Customer_Delete];") == 2
+
+
+def test_setup_runs_where_the_author_put_it():
+    """Between the two queries, because that is where it was written."""
+
+    payload = _two_query_payload()
+    staging = payload.index("create table [Sales].[Customer_Staging] as")
+    setup = payload.index("select [Customer id] into #Retired")
+    deletes = payload.index("create table [Sales].[Customer_Delete] as")
+
+    assert staging < setup < deletes
+
+
+CTE_WAREHOUSE = WAREHOUSE_TABLE.replace(
+    "select [Customer id], [Customer name] from [Src].[Raw]",
+    """with recent as (
+    select [Customer id], [Customer name] from [Src].[Raw]
+)
+select [Customer id], [Customer name] from recent""",
+)
+
+
+def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
+    """``with … select …`` is a legal statement and an illegal derived table.
+
+    So the rows cannot be reached through ``from (<query>) as s``, which is how
+    the rank would otherwise be computed over them: the Warehouse rejects the
+    procedure outright, for every body that opens with a CTE. The query runs as
+    the statement it is, into a table, and the rank is computed from that.
+    """
+
+    payload = _warehouse(CTE_WAREHOUSE).create_load().payload.decode()
+
+    assert "from (\n" not in payload
+    assert "into #weaver_staging_source_Sales_Customer from recent;" in payload
+    assert "from #weaver_staging_source_Sales_Customer as s;" in payload
+
+
+def test_a_one_query_incremental_table_has_no_delete_table():
+    payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load().payload.decode()
+
+    assert "Customer_Delete" not in payload
 
 
 # --- stability thresholds ------------------------------------------------------

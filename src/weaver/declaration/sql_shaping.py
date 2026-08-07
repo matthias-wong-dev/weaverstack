@@ -24,6 +24,7 @@ templates in ``ses/templates``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import re
 from string import Template
@@ -82,7 +83,16 @@ class _Replacement:
 
 
 @dataclass(frozen=True)
-class _QuerySpan:
+class QuerySpan:
+    """Where one top-level result-producing query sits in a body.
+
+    ``start`` and ``end`` are offsets into the original text, so the query can
+    be sliced back out byte-identical rather than reassembled from tokens.
+    ``select_index`` is where its ``SELECT`` is in the flattened token stream,
+    which is what an ``INTO`` placement needs and a caller outside this module
+    does not.
+    """
+
     start: int
     end: int
     select_index: int
@@ -107,10 +117,18 @@ def insert_where_one_eq_zero(sql_text: str) -> str:
     return result
 
 
-def insert_select_into(sql_text: str, table_name: str) -> str:
-    """Insert ``INTO <table_name>`` into the last standalone SELECT query."""
+def insert_select_into(
+    sql_text: str, table_name: str, *, span: QuerySpan | None = None
+) -> str:
+    """Insert ``INTO <table_name>`` into one standalone SELECT query.
 
-    query_span = _find_last_standalone_query(sql_text)
+    The last query by default, which is where a single-query body's result is.
+    A body that produces its rows and *then* names the keys to delete has two,
+    and the caller says which — so ``span`` is how a build diverts the staging
+    query rather than whichever query happens to come last.
+    """
+
+    query_span = span if span is not None else _find_last_standalone_query(sql_text)
     if query_span is None:
         return sql_text
 
@@ -173,16 +191,31 @@ def _collect_replacements(sql_text: str) -> list[_Replacement]:
     return replacements
 
 
-def _find_last_standalone_query(sql_text: str) -> _QuerySpan | None:
+def query_spans(sql_text: str) -> tuple[QuerySpan, ...]:
+    """Every top-level standalone query in ``sql_text``, in source order.
+
+    Standalone is the whole difficulty, and it is why this cannot be answered by
+    splitting on semicolons: T-SQL does not require them, so a ``SELECT`` that
+    begins a query and a ``SELECT`` that is the tail of an ``INSERT``, a branch
+    of a ``UNION``, the body of a ``WITH`` or a subquery inside a predicate all
+    have to be told apart from where they sit rather than from a separator. A
+    ``WITH`` leads its own span, because the query is the whole of it and an
+    ``INTO`` still belongs on the ``SELECT`` inside.
+
+    What a caller does with the spans is the caller's: the build places one
+    ``INTO``, and :mod:`weaver.declaration.tsql_program` reads the same list as
+    an authoring contract. Both get the same answer because there is only one.
+    """
+
     tokens = _flatten_with_offsets(sql_text)
-    spans: list[_QuerySpan] = []
+    spans: list[QuerySpan] = []
 
     for index, token in enumerate(tokens):
         if token.depth != 0:
             continue
 
         if _is_select(token) and _is_standalone_select_start(tokens, index):
-            spans.append(_QuerySpan(token.start, _find_query_end(tokens, index), index))
+            spans.append(QuerySpan(token.start, _find_query_end(tokens, index), index))
             continue
 
         if _keyword_head(token) == "WITH" and _is_statement_boundary_before(
@@ -191,19 +224,82 @@ def _find_last_standalone_query(sql_text: str) -> _QuerySpan | None:
             select_index = _find_cte_body_select(tokens, index)
             if select_index is not None:
                 spans.append(
-                    _QuerySpan(
+                    QuerySpan(
                         token.start, _find_query_end(tokens, select_index), select_index
                     )
                 )
 
-    if not spans:
-        return None
+    return tuple(sorted(spans, key=lambda item: item.start))
 
-    return max(spans, key=lambda item: item.start)
+
+def temp_table_name(prefix: str, qualified: str) -> str:
+    """A session temp table named after the object it is working for.
+
+    Named rather than anonymous so that two objects loading in one session
+    cannot collide, and so that a person looking at a failed run can tell which
+    object left what behind. Long names are truncated onto a digest of the
+    original, because the identifier limit is shorter than some qualified names.
+    """
+
+    normalised_prefix = prefix if prefix.startswith("#") else f"#{prefix}"
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", qualified)
+    candidate = f"{normalised_prefix}_{safe}"
+    if len(candidate) > 111:
+        digest = hashlib.sha1(qualified.encode("utf-8")).hexdigest()[:12]
+        candidate = f"{candidate[:98]}_{digest}"
+    return candidate
+
+
+def top_level_go(sql_text: str) -> int | None:
+    """Where a ``GO`` batch separator sits in ``sql_text``, if one does.
+
+    Only a bare keyword at the outermost depth: ``[go]`` and ``t.go`` tokenise
+    as a name and a member, so a column called ``go`` is not mistaken for a
+    batch boundary.
+    """
+
+    for token in _flatten_with_offsets(sql_text):
+        if token.depth == 0 and token.ttype is T.Keyword and token.normalized == "GO":
+            return token.start
+    return None
+
+
+def selects_into(sql_text: str, span: QuerySpan) -> bool:
+    """Whether this span's query diverts its result with ``SELECT … INTO``.
+
+    A query that names its own destination has stopped being a result: it is
+    working, and the rows land in the table it names rather than coming back to
+    whoever ran it. So the build cannot put its shape ``INTO`` on one, and the
+    authoring contract does not count one as a query the object produces.
+
+    ``INTO`` at the span's own depth, which is what separates
+    ``select … into #Working`` from the ``insert into`` of a nested statement or
+    an ``into`` buried in a subquery.
+    """
+
+    tokens = _flatten_with_offsets(sql_text)
+    depth = tokens[span.select_index].depth
+    for index in range(span.select_index + 1, len(tokens)):
+        token = tokens[index]
+        if token.start >= span.end:
+            break
+        if token.depth != depth:
+            continue
+        head = _keyword_head(token)
+        if head == "INTO":
+            return True
+        if head == "FROM" or _is_boundary(token):
+            return False
+    return False
+
+
+def _find_last_standalone_query(sql_text: str) -> QuerySpan | None:
+    spans = query_spans(sql_text)
+    return spans[-1] if spans else None
 
 
 def _find_select_into_insert_position(
-    tokens: list[_FlatToken], query_span: _QuerySpan
+    tokens: list[_FlatToken], query_span: QuerySpan
 ) -> int:
     select_token = tokens[query_span.select_index]
 
@@ -509,26 +605,14 @@ def _is_covered(position: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in ranges)
 
 
-def split_trailing_query(sql_text: str) -> tuple[str, str]:
-    """Split a body into everything before its final query, and that query.
-
-    A Weaver object's body is not always one statement. An author may set a
-    temporary view up first and select from it, and that shape is supported —
-    the repository's own fixtures use it. So a load cannot wrap the whole body
-    in a subquery to stage it: only the *last standalone query* produces the
-    rows, and whatever precedes it has to run first, on its own.
-
-    This is the same span the T-SQL build uses to place its ``INTO``
-    (:func:`insert_select_into`), reused rather than re-derived so build and
-    load agree about which part of a body is the query.
-
-    Returns ``(preamble, query)``. ``preamble`` is empty for the ordinary
-    single-statement body.
-    """
-
-    span = _find_last_standalone_query(sql_text)
-    if span is None:
-        return "", sql_text.strip()
-    preamble = sql_text[: span.start].strip().rstrip(";").strip()
-    query = sql_text[span.start : span.end].strip().rstrip(";").strip()
-    return preamble, query
+__all__ = [
+    "QuerySpan",
+    "get_sql_template",
+    "insert_select_into",
+    "insert_where_one_eq_zero",
+    "query_spans",
+    "render_sql_template",
+    "selects_into",
+    "temp_table_name",
+    "top_level_go",
+]

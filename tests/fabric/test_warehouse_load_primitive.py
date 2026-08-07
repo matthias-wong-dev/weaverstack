@@ -22,6 +22,7 @@ import pytest
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
+from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
 from weaver.runtime.load_contract import (
     REASON_BLANK_PK,
@@ -114,11 +115,13 @@ def _source_rows(executor, rows) -> None:
 
 
 def _load(executor, *, fault_tolerant: bool) -> LoadResult:
-    rows = executor.query(
-        f"exec [_].[Load {SCHEMA}.LoadCustomer] "
-        f"@fault_tolerant = {1 if fault_tolerant else 0};"
+    return LoadResult.from_row(
+        executor.call_procedure(
+            f"[_].[Load {SCHEMA}.LoadCustomer]",
+            inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
+            outputs=RESULT_PARAMETERS,
+        )
     )
-    return LoadResult.from_row(rows[0])
 
 
 def _contents(executor):
