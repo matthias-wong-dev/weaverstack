@@ -11,7 +11,6 @@
 # META       "environmentId": "f2346c37-1d0a-9f65-447d-0af85c370d9f",
 # META       "workspaceId": "00000000-0000-0000-0000-000000000000"
 # META     }
-# META   }
 # META }
 
 # MARKDOWN ********************
@@ -65,18 +64,10 @@ for report in wipe_result.reports:
 
 # CELL ********************
 
-from weaver.workspaces import FabricWorkspace
-
-
-workspace = FabricWorkspace(
-    workspace="Weaver Example",
-    weaver_lakehouse="Weaver",
-    environment="weaver",
-)
 
 build_result = weaver.build(
     repository,
-    workspace=workspace,    ## TODO this should just take weaver_lakehouse='Weaver'
+    weaver_lakehouse="Weaver",    
     bind=[
         "Lakehouse/Sales=Lakehouse/Sales",
         "Warehouse/Reporting=Warehouse/Reporting",

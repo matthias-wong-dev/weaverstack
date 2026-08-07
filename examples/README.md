@@ -94,8 +94,8 @@ Example:
 
 ``` bash
 weaver build \
-  "examples/Weaver Example/workspace/Sales-Estate.Notebook/Resources/builtin/repository" \
-  --workspace-config examples/Weaver\ Example/weaver_example.yml
+  "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" \
+  --workspace-config "examples/weaver_example.yml"
 ```
 
 Desktop mode parses the repository locally, computes the build plan,
