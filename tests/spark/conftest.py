@@ -54,16 +54,23 @@ def weaver_catalogue(spark, lakehouses):
 
 
 @pytest.fixture(scope="module")
-def weaver_repo_fixture(request):
-    """Which Weaver document fixture an estate is built from.
+def weaver_repo_fixture(request, tmp_path_factory):
+    """Which Weaver document fixture an estate is built from, as a copy.
 
     Indirectly parametrised by the modules that need a particular estate; the
     default serves the ones that only need *a* repository.
+
+    Always a disposable copy, never the checked-in tree. A build reads the
+    estate and some tests edit it — proving that a *changed* document really
+    does move the catalogue is the guard on every fixed-point assertion — and an
+    edit applied to `tests/fixtures` would leave the repository modified after
+    `pytest -m spark`. Handing out the copy here means no test has to remember.
     """
 
     from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
-    return getattr(request, "param", LAKEHOUSE_JOURNEY_FIXTURE)
+    fixture = getattr(request, "param", LAKEHOUSE_JOURNEY_FIXTURE)
+    return fixture.disposable(tmp_path_factory.mktemp("estate"))
 
 
 @pytest.fixture(

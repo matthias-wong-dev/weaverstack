@@ -8,11 +8,17 @@ second conftest.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+import shutil
 from typing import Mapping
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+#: What never belongs in a copied estate. Bytecode caches are the working tree's,
+#: not the fixture's, and copying them would carry one run's compilation into the
+#: next test's supposedly pristine estate.
+_NOT_COPIED = shutil.ignore_patterns("__pycache__", "*.pyc")
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,26 @@ class SesFixture:
         """Lakehouse names this fixture needs beyond the environment's default."""
 
         return tuple(sorted(set(self.lakehouse_names.values())))
+
+    def disposable(self, root: Path) -> "SesFixture":
+        """The same fixture, over a copy of its tree under ``root``.
+
+        A checked-in fixture is repository source, and a test that edits one is
+        editing the repository — which is not merely untidy here, because
+        :func:`hatch_build.compute_version` fingerprints the working tree, so a
+        suite that leaves a document modified changes the version the *next*
+        build believes it is. A test that needs to edit an estate takes a copy
+        and edits that.
+
+        Copied rather than restored afterwards: a restore is only as good as the
+        teardown that runs it, and the run that fails before teardown is exactly
+        the run whose fixture damage matters most.
+        """
+
+        destination = root / self.path.name
+        if not destination.exists():
+            shutil.copytree(self.path, destination, ignore=_NOT_COPIED)
+        return replace(self, path=destination)
 
 
 #: The declaration fixtures a build env can install. One place, so no test
