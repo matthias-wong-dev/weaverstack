@@ -234,8 +234,7 @@ def forget(context: PythonRuntimeContext) -> None:
     """
 
     _forget_modules(context.package)
-    _FINDER.contexts.pop(context.package, None)
-    _BUILTINS.pop(context.package, None)
+    _FINDER.unregister(context.package)
 
 
 def _forget_modules(package: str) -> None:
@@ -306,9 +305,9 @@ class _ContextLoader:
     dozen lines and a load that is about to touch a warehouse.
     """
 
-    def __init__(self, inner, context: PythonRuntimeContext) -> None:
+    def __init__(self, inner, builtins_mapping: dict) -> None:
         self._inner = inner
-        self._context = context
+        self._builtins = builtins_mapping
 
     def create_module(self, spec):
         return self._inner.create_module(spec)
@@ -322,7 +321,7 @@ class _ContextLoader:
     def exec_module(self, module):
         code = self.get_code(module.__name__)
         # Before execution, because the module's own imports run during it.
-        module.__dict__["__builtins__"] = _BUILTINS[self._context.package]
+        module.__dict__["__builtins__"] = self._builtins
         exec(code, module.__dict__)  # noqa: S102 - deployed Weaver source
 
     def __getattr__(self, name):
@@ -330,10 +329,18 @@ class _ContextLoader:
 
 
 class _WeaverRuntimeFinder:
-    """Resolves ``_weaver_runtime.<context>.…`` against that context's tree."""
+    """Resolves ``_weaver_runtime.<context>.…`` against that context's tree.
+
+    **Every read and write of the registry is under one lock, and no read walks
+    it.** Loads are sequential today and the design exists so they need not stay
+    that way, so the registry has to survive one thread registering while
+    another resolves. A scan would be both the slower answer and the unsafe one:
+    a module's own name already carries its context, so the entry can be looked
+    up directly.
+    """
 
     def __init__(self) -> None:
-        self.contexts: dict[str, PythonRuntimeContext] = {}
+        self._contexts: dict[str, _Bound] = {}
         self._lock = threading.Lock()
 
     def register(self, context: PythonRuntimeContext) -> None:
@@ -345,16 +352,25 @@ class _WeaverRuntimeFinder:
         """
 
         with self._lock:
-            self.contexts[context.package] = context
-            _BUILTINS.setdefault(context.package, _context_builtins(context))
+            if context.package not in self._contexts:
+                self._contexts[context.package] = _Bound(
+                    context=context, builtins=_context_builtins(context)
+                )
+
+    def unregister(self, package: str) -> None:
+        """Drop a context's binding. The counterpart of :meth:`register`."""
+
+        with self._lock:
+            self._contexts.pop(package, None)
 
     def find_spec(self, fullname, path=None, target=None):
         if fullname == ROOT_PACKAGE:
             # A namespace package holding the contexts, and nothing else.
             return ModuleSpec(fullname, None, is_package=True)
-        context = self._owner(fullname)
-        if context is None:
+        bound = self._bound(fullname)
+        if bound is None:
             return None
+        context = bound.context
         if fullname == context.package:
             spec = ModuleSpec(fullname, None, is_package=True)
             spec.submodule_search_locations = [str(context.runtime_root)]
@@ -366,20 +382,38 @@ class _WeaverRuntimeFinder:
             # A directory with no ``__init__.py`` — ``lib/``, ``Files/``. There
             # is nothing to execute, so there is nothing to give builtins to.
             return spec
-        spec.loader = _ContextLoader(spec.loader, context)
+        spec.loader = _ContextLoader(spec.loader, bound.builtins)
         return spec
 
-    def _owner(self, fullname: str) -> PythonRuntimeContext | None:
-        for package, context in self.contexts.items():
-            if fullname == package or fullname.startswith(f"{package}."):
-                return context
-        return None
+    def _bound(self, fullname: str) -> "_Bound | None":
+        """The binding this module name belongs to, by direct lookup.
+
+        ``_weaver_runtime.<context>.lib.dates`` names its own context in its
+        second component, so there is nothing to search for.
+        """
+
+        parts = fullname.split(".", 2)
+        if len(parts) < 2 or parts[0] != ROOT_PACKAGE:
+            return None
+        with self._lock:
+            return self._contexts.get(f"{parts[0]}.{parts[1]}")
+
+
+@dataclass(frozen=True)
+class _Bound:
+    """One registered context and the builtins its modules execute with.
+
+    Held together so registering is one insertion under one lock, rather than
+    two mappings that a reader could catch disagreeing.
+    """
+
+    context: PythonRuntimeContext
+    builtins: dict
 
 
 #: One finder for every context, so ``sys.meta_path`` gains a single entry
 #: however many trees a process holds.
 _FINDER = _WeaverRuntimeFinder()
-_BUILTINS: dict[str, dict] = {}
 _INSTALLED = threading.Lock()
 
 
