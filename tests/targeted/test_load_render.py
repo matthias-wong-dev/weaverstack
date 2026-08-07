@@ -123,7 +123,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (7, "4204be4e52bf11f4c8cc89e72c464bc826b2c2bf3703fed84929bd953ea5edbe"),
+    "tsql": (7, "5bd8c91bba2553c3b34b892337099c0c81037ea159871da2547af48d30ed60d8"),
     "spark": (8, "817cb4d0e2cb82d571a232ee4a73f7a956f4b255cf4378bc49af6c26cd665664"),
 }
 
@@ -305,7 +305,7 @@ def test_a_second_query_becomes_a_delete_working_table():
     payload = _two_query_payload()
 
     assert "create table [Sales].[Customer_Delete] as" in payload
-    assert "select [Customer id] from #Retired" in payload
+    assert "into #weaver_delete_claim_Sales_Customer from #Retired" in payload
 
 
 def test_the_delete_claim_is_narrowed_before_anything_is_counted():
@@ -319,7 +319,7 @@ def test_the_delete_claim_is_narrowed_before_anything_is_counted():
     payload = _two_query_payload()
 
     assert "select distinct c.[Customer id]" in payload
-    assert "inner join (" in payload
+    assert "inner join #weaver_delete_claim_Sales_Customer as d" in payload
     assert "where not (nullif(trim(cast(d.[Customer id]" in payload
 
 
@@ -357,6 +357,31 @@ def test_setup_runs_where_the_author_put_it():
     deletes = payload.index("create table [Sales].[Customer_Delete] as")
 
     assert staging < setup < deletes
+
+
+CTE_WAREHOUSE = WAREHOUSE_TABLE.replace(
+    "select [Customer id], [Customer name] from [Src].[Raw]",
+    """with recent as (
+    select [Customer id], [Customer name] from [Src].[Raw]
+)
+select [Customer id], [Customer name] from recent""",
+)
+
+
+def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
+    """``with … select …`` is a legal statement and an illegal derived table.
+
+    So the rows cannot be reached through ``from (<query>) as s``, which is how
+    the rank would otherwise be computed over them: the Warehouse rejects the
+    procedure outright, for every body that opens with a CTE. The query runs as
+    the statement it is, into a table, and the rank is computed from that.
+    """
+
+    payload = _warehouse(CTE_WAREHOUSE).create_load().payload.decode()
+
+    assert "from (\n" not in payload
+    assert "into #weaver_staging_source_Sales_Customer from recent;" in payload
+    assert "from #weaver_staging_source_Sales_Customer as s;" in payload
 
 
 def test_a_one_query_incremental_table_has_no_delete_table():

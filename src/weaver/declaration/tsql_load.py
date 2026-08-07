@@ -53,7 +53,7 @@ from .metadata import (
     AUDIT_LIVE_DELETE_DATETIME,
     SesDocument,
 )
-from .sql_shaping import render_sql_template
+from .sql_shaping import insert_select_into, render_sql_template, temp_table_name
 from .tsql_program import TsqlProgram, parse_tsql_program, validate_query_contract
 from ..runtime.load_contract import (
     REASON_BLANK_PK,
@@ -211,17 +211,50 @@ def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> s
     return "\n\n".join(pieces)
 
 
+def _hoisted(query: str, temp_table: str) -> str:
+    """The author's query, diverted into a session temp table of its own.
+
+    Because a query cannot always be a subquery. ``with … select …`` is a legal
+    statement and an illegal derived table, so ``from (<query>) as s`` — which is
+    how ranking and key-matching would otherwise reach the rows — is a syntax
+    error for every body that opens with a CTE. Running the query as the
+    statement it is, into a table, and reading *that* works whatever the query's
+    shape.
+
+    The ``INTO`` is placed by the same offset-exact transform the shape-only
+    build uses, so a CTE gets it on the body ``SELECT`` and a ``UNION`` on its
+    first branch, rather than wherever text-matching would have put it.
+    """
+
+    return (
+        f"if object_id('tempdb..{temp_table}') is not null drop table {temp_table};\n"
+        f"{insert_select_into(query, temp_table)};"
+    )
+
+
 def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
+    """Materialise the object's rows, ranking duplicate keys as it goes.
+
+    The rank is what identifies a duplicate, and it is computed here rather than
+    later because computing it later would mean reading the staged rows twice.
+    With no key there is nothing to rank, and the query becomes the staging
+    table directly.
+    """
+
     if not contract.primary_key:
         return f"create table {names['staging']} as\n{query};"
+
+    source = temp_table_name("#weaver_staging_source", names["object"])
     partition = ", ".join(f"s.{_quote(column)}" for column in contract.primary_key)
     return (
+        f"{_hoisted(query, source)}\n\n"
         f"create table {names['staging']} as\n"
         f"select\n"
         f"    s.*\n"
         f"  , row_number() over (partition by {partition} order by (select null)) "
         f"as {_quote(RANK_COLUMN)}\n"
-        f"from (\n{_indent(query, 4)}\n) as s;"
+        f"from {source} as s;\n\n"
+        f"drop table {source};"
     )
 
 
@@ -245,15 +278,18 @@ def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
     guard a decision not to start rather than an unwind.
     """
 
+    claim = temp_table_name("#weaver_delete_claim", names["object"])
     keys = ", ".join(f"c.{_quote(column)}" for column in contract.primary_key)
     join = _join("d", "c", contract.primary_key)
     return (
+        f"{_hoisted(query, claim)}\n\n"
         f"create table {names['delete']} as\n"
         f"select distinct {keys}\n"
         f"from {names['target']} as c\n"
-        f"inner join (\n{_indent(query, 4)}\n) as d\n"
+        f"inner join {claim} as d\n"
         f"    on {join}\n"
-        f"where not ({_blank_key_predicate(contract.primary_key, alias='d')});"
+        f"where not ({_blank_key_predicate(contract.primary_key, alias='d')});\n\n"
+        f"drop table {claim};"
     )
 
 
@@ -487,6 +523,7 @@ def _table_names(document: SesDocument, procedure_name: str) -> dict:
         "upsert": f"{qualified}{_quote(obj + UPSERT_SUFFIX)}",
         "reject": f"{qualified}{_quote(obj + REJECT_SUFFIX)}",
         "delete": f"{qualified}{_quote(obj + DELETE_SUFFIX)}",
+        "object": document.qualified,
         "procedure": procedure_name,
     }
 

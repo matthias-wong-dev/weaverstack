@@ -24,6 +24,7 @@ templates in ``ses/templates``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import re
 from string import Template
@@ -229,6 +230,24 @@ def query_spans(sql_text: str) -> tuple[QuerySpan, ...]:
                 )
 
     return tuple(sorted(spans, key=lambda item: item.start))
+
+
+def temp_table_name(prefix: str, qualified: str) -> str:
+    """A session temp table named after the object it is working for.
+
+    Named rather than anonymous so that two objects loading in one session
+    cannot collide, and so that a person looking at a failed run can tell which
+    object left what behind. Long names are truncated onto a digest of the
+    original, because the identifier limit is shorter than some qualified names.
+    """
+
+    normalised_prefix = prefix if prefix.startswith("#") else f"#{prefix}"
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", qualified)
+    candidate = f"{normalised_prefix}_{safe}"
+    if len(candidate) > 111:
+        digest = hashlib.sha1(qualified.encode("utf-8")).hexdigest()[:12]
+        candidate = f"{candidate[:98]}_{digest}"
+    return candidate
 
 
 def top_level_go(sql_text: str) -> int | None:
@@ -594,5 +613,6 @@ __all__ = [
     "query_spans",
     "render_sql_template",
     "selects_into",
+    "temp_table_name",
     "top_level_go",
 ]
