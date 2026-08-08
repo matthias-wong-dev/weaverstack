@@ -378,13 +378,8 @@ def _validation_edges(repository, consumer_text: str):
     )
 
 
-def test_a_declaration_supplements_inference_rather_than_replacing_it(lakehouse):
-    """The rule a validation uses, and the opposite of the one an object uses.
-
-    A validation reads what it reads: the edges exist to run it after the data
-    it inspects is ready, so naming one more adds to what was found. An object's
-    declared graph is its build order, so there a declaration replaces.
-    """
+def test_a_declaration_replaces_inference(lakehouse):
+    """The rule every kind uses, validation included."""
 
     _write(lakehouse, "Lakehouse/Sales/Sales__Customer.py", _table("Sales.Customer"))
     source = _python_test("Sales.OrdersReconcile").replace(
@@ -394,15 +389,14 @@ def test_a_declaration_supplements_inference_rather_than_replacing_it(lakehouse)
 
     repository = parse(lakehouse)
 
-    # The import was inferred; the header added the one it could not reach.
+    # The import is not an edge: the header said what this reads.
     assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
-        "Sales.Customer",
-        "Sales__Order",
+        "Sales.Customer"
     ]
 
 
-def test_declaring_nothing_leaves_the_inferred_graph_intact(lakehouse):
-    """`Dependencies: []` suppresses discovery on an object. Not here."""
+def test_declaring_none_suppresses_inference(lakehouse):
+    """`Dependencies: []` is a declaration, so it means none — here too."""
 
     source = _python_test("Sales.OrdersReconcile").replace(
         "Primary key: Id", "Primary key: Id\n\nDependencies: []"
@@ -411,24 +405,29 @@ def test_declaring_nothing_leaves_the_inferred_graph_intact(lakehouse):
 
     repository = parse(lakehouse)
 
-    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
-        "Sales__Order"
-    ]
+    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == []
 
 
-def test_declaring_what_was_already_inferred_is_still_one_edge(lakehouse):
-    """One dependency named twice, in two spellings, is one row."""
+def test_nothing_depends_on_a_validation(lakehouse):
+    """Installation puts validation last on the strength of this."""
 
-    source = _python_test("Sales.OrdersReconcile").replace(
-        "Primary key: Id", "Primary key: Id\n\nDependencies:\n  - Sales.Order"
+    _write(
+        lakehouse,
+        "Lakehouse/Sales/tests/Sales__OrdersReconcile.py",
+        _python_test("Sales.OrdersReconcile"),
     )
-    _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
+    _write(
+        lakehouse,
+        "Lakehouse/Sales/assumptions/Sales__Downstream.py",
+        _python_assumption("Sales.Downstream").replace(
+            "Description: Every row carries a customer.",
+            "Description: Every row carries a customer.\n\nDependencies:\n"
+            "  - Sales.OrdersReconcile",
+        ),
+    )
 
-    repository = parse(lakehouse)
-
-    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
-        "Sales__Order"
-    ]
+    with pytest.raises(DiscoveryError, match="nothing depends on a validation"):
+        parse(lakehouse)
 
 
 def test_a_spark_sql_validation_infers_its_references(tmp_path):

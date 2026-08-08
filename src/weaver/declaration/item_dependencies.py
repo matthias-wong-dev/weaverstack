@@ -65,21 +65,33 @@ def _inferred_references(
     return tuple(references)
 
 
-def _first_per_destination(
-    references: tuple[tuple[str, WeaverDocumentId], ...]
-) -> tuple[tuple[str, WeaverDocumentId], ...]:
-    """One reference per destination, keeping the first spelling seen.
+def _reject_validation_producer(
+    producer: WeaverDocumentId,
+    *,
+    native: Mapping[WeaverDocumentId, SourceDocument],
+    consumer: WeaverDocumentId,
+    written: str,
+) -> None:
+    """Nothing depends on a validation.
 
-    A validation that both imports ``Sales__Order`` and declares ``Sales.Order``
-    named one edge twice, in two spellings. It is one edge, so it is one row —
-    and the spelling kept is the inferred one, because that is how the same
-    dependency is recorded when nobody declared it as well.
+    A Test and an Assumption read the estate and produce nothing, so there is
+    nothing for anything else to read — and this is worth refusing rather than
+    letting resolve, because two things downstream rest on it. Installation puts
+    validation artefacts at the end, with the load artefacts, on the strength of
+    validation never being something another declaration waits for. And the
+    reason a validation need not declare its dependencies exhaustively is that
+    the objects it reads were put in place before it ran; a validation-to-
+    validation edge would make that ordering matter, silently.
     """
 
-    seen: dict[WeaverDocumentId, tuple[str, WeaverDocumentId]] = {}
-    for written, destination in references:
-        seen.setdefault(destination, (written, destination))
-    return tuple(seen.values())
+    upstream = native.get(producer)
+    if upstream is None or not upstream.is_validation:
+        return
+    raise DiscoveryError(
+        f"{consumer}: {written!r} names {upstream.document.kind} {producer}, and "
+        "nothing depends on a validation — it reads the estate and produces "
+        "nothing to read. Depend on the object it inspects instead."
+    )
 
 
 def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
@@ -95,15 +107,9 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
-        # Which of the two rules this document's kind uses is decided in one
-        # place — see :func:`weaver.declaration.repository.effective_dependencies`
-        # for why a validation supplements and an object replaces.
-        if source.is_validation:
-            inferred = _inferred_references(source, consumer, edges)
-            references = _first_per_destination(
-                inferred + _declared_references(source, consumer)
-            )
-        elif source.document.declares_dependencies:
+        # One rule for every kind — see
+        # :func:`weaver.declaration.repository.effective_dependencies`.
+        if source.document.declares_dependencies:
             references = _declared_references(source, consumer)
         else:
             references = _inferred_references(source, consumer, edges)
@@ -117,6 +123,9 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
                 folded_alias=folded_alias,
                 consumer=consumer,
                 written=written,
+            )
+            _reject_validation_producer(
+                producer, native=native, consumer=consumer, written=written
             )
             edges.append(
                 ItemDependency(

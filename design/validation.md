@@ -195,28 +195,29 @@ Dependencies are ordinary imports resolved by the ordinary AST machinery, and
 it does inside a Table. Nothing about validation dependencies is new — a second
 dependency language for validation is exactly what this design does not build.
 
-### A declaration supplements inference; it does not replace it
+### One dependency rule, and one thing a validation may not depend on
 
-This is the one place validation and objects use *opposite* rules, and the
-difference is what the two graphs are for.
+A validation uses the rule everything else uses: a declaration replaces
+inference, and `Dependencies: []` is a declaration, so an explicit none means
+none. There is deliberately no second dependency semantic to learn.
 
-An object's declared graph is its **build order**. Getting it wrong builds
-things in the wrong order, so the author needs the last word: a declaration
-replaces discovery, and `Dependencies: []` is a declaration, so an explicit none
-suppresses discovery rather than falling back to it. That is also why a Spark
-SQL *object* is required to declare — its query may read by path, and with
-replacement semantics a Spark SQL object that declared nothing would have no
-graph at all.
+What differs is only whether a kind is *required* to declare. A Spark SQL
+**object** is, because its query may read by path and a load ordered by a
+half-known graph builds things in the wrong order. A Spark SQL **validation** is
+not, and does not have to carry a `Dependencies:` header at all.
 
-A validation's graph exists to **run it after the data it inspects is ready**. It
-reads what it reads, and an author naming one more relation is adding to what
-was found rather than correcting it. So inference always runs, `Dependencies:`
-names only what inference could not reach — a relation read by path, or one a
-dynamic statement produced — and no language is required to declare anything.
+That exemption rests on two facts, and they are the reason it is safe:
 
-One dependency named twice, in two spellings, is one edge. The spelling kept is
-the inferred one, because that is how the same dependency is recorded when
-nobody declared it as well.
+- **Validation installs last**, with the load artefacts, so the objects a
+  validation reads are already in place by the time it runs.
+- **Nothing depends on a validation.** A Test reads the estate and produces
+  nothing, so there is nothing for anything else to read. A declaration naming
+  one is refused rather than resolved — if a validation could depend on another,
+  ordering among validations would start to matter, silently, and the exemption
+  above would stop holding.
+
+So an edge inference missed on a validation costs an ordering nicety, not a
+wrong estate.
 
 ## What the catalogue records
 
