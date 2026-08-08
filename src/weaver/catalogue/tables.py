@@ -53,10 +53,27 @@ CATALOGUE_SCHEMA = "_"
 OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure")
 
 #: What an object is *for*. A ``data`` object holds or shapes rows; a ``load``
-#: object does the work that fills one, and is installed by an item's load layer.
+#: object does the work that fills one, and is installed by an item's load layer;
+#: a ``test`` or ``assumption`` object is the runnable form of a validation.
+#:
+#: The role is the answer, and the physical shape is not. A file and a stored
+#: procedure used to mean "load artefact" because they were the only two things
+#: a load layer installed — and that stopped being true the moment a Test
+#: compiled to a module and a procedure of its own. So planning asks what an
+#: artefact is *for*, never what shape it has, which is what keeps a Test out of
+#: the load DAG.
 ROLE_DATA = "data"
 ROLE_LOAD = "load"
-OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD)
+ROLE_TEST = "test"
+ROLE_ASSUMPTION = "assumption"
+OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION)
+
+#: The roles a runtime artefact carries — everything installed to be *run*
+#: rather than to hold rows. Asked where a selection has to be partitioned.
+RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION)
+
+#: The roles a validation carries, by the kind that declares it.
+VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
 
 #: How a logical key is classified. Both are declared, neither is built.
 KEY_PRIMARY = "primary_key"
@@ -538,6 +555,42 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
     ),
 )
 
+TEST_DICTIONARY = CatalogueTable(
+    name="TestDictionary",
+    description=(
+        "Tests and Assumptions — the estate's declared validation. It describes "
+        "the logical authored declaration, not the procedure or module the "
+        "validation compiles to: that is a physical artefact and Registry "
+        "certifies it. One table for both kinds because a reader asks the same "
+        "questions of each, and because Tests and Assumptions share one logical "
+        "namespace within an item and so cannot both claim a key."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "test_type",
+            not_null=True,
+            description=(
+                "test compares an expected relation with an actual one; "
+                "assumption returns the rows that contradict it."
+            ),
+        ),
+        *_described(what="validation"),
+        CatalogueColumn(
+            "primary_key",
+            description=(
+                "A Test's declared key, comma-separated in declared order. It "
+                "correlates the two sides of the comparison and does not change "
+                "what is counted. Null for a Test that declares none, and always "
+                "null for an Assumption, which has one side to correlate."
+            ),
+        ),
+        _signature("the validation's source file"),
+    ),
+)
+
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
@@ -623,6 +676,7 @@ DICTIONARY_TABLES = (
     COLUMN_DICTIONARY,
     INDEX_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
+    TEST_DICTIONARY,
     DEPENDENCY,
     ALIAS,
 )

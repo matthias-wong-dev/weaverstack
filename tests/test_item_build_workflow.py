@@ -228,6 +228,7 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
                             "schema_name": "Sales",
                             "object_name": "Customer",
                             "object_type": "table",
+                            "object_role": "data",
                             "signature": "abc123",
                             "build_epoch": epoch,
                         },

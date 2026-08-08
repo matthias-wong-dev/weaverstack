@@ -115,6 +115,7 @@ def _registry_row(item: WeaverItemId, object_name: str):
         "schema_name": "DWG",
         "object_name": object_name,
         "object_type": "table",
+        "object_role": "data",
         "signature": f"sig-{object_name}",
         "build_epoch": None,
     }

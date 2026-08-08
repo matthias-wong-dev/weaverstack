@@ -498,6 +498,222 @@ class View(WeaverObject):
         return self.spark.table(self.lakehouse.qualify(*self.identity))
 
 
+class Assumption(WeaverObject):
+    """A statement about the estate that returns the rows contradicting it.
+
+    An Assumption succeeds when it returns nothing::
+
+        \"\"\"
+        Assumption ID: Sales.OrdersUpToDate
+
+        Description: Orders contain data up to the expected business date.
+        \"\"\"
+
+        from Sales__Orders import Sales__Orders
+
+        from weaver import Assumption
+
+
+        class Sales__OrdersUpToDate(Assumption):
+            def read(self):
+                orders = Sales__Orders(self).dataframe()
+                return orders.where(...)   # empty when the assumption holds
+
+    ``read()`` is authored, and what it returns *is* the evidence — there is no
+    expected relation to compare against and so nothing to correlate. That is
+    why an Assumption may not declare a primary key.
+
+    It is an ordinary Weaver object in every other way: constructed from a
+    session, or from another object with ``Sales__Orders(self)``, reaching its
+    dependencies through the same imports as a Table does.
+    """
+
+    def read(self):
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement read(), returning the rows that "
+            "contradict the assumption — no rows means it holds"
+        )
+
+
+class Test(WeaverObject):
+    """A comparison of an expected relation with an actual one.
+
+    A Test succeeds when the two are the same set::
+
+        \"\"\"
+        Test ID: Sales.OrdersReconcile
+
+        Description: Orders reconcile to the independently derived expected relation.
+
+        Primary key: Order id
+        \"\"\"
+
+        from Sales__Orders import Sales__Orders
+        from Sales__OrderSource import Sales__OrderSource
+
+        from weaver import Test
+
+
+        class Sales__OrdersReconcile(Test):
+            def expected(self):
+                return Sales__OrderSource(self).dataframe()
+
+            def actual(self):
+                return Sales__Orders(self).dataframe()
+
+    **The author writes the two sides; Weaver writes the comparison.** ``read()``
+    computes the symmetric difference and is deliberately not authorable — a Test
+    that could redefine it would still be called a Test while meaning something
+    else, and the one thing a reader must be able to assume about every Test in
+    an estate is what passing means. An override is refused here and by the
+    repository parser, so it fails whether the class is written in a notebook or
+    committed to a repository.
+
+    The declared primary key correlates diagnostic rows across the two sides. It
+    changes nothing about what is compared or counted — see
+    :mod:`weaver.runtime.test_compare`.
+    """
+
+    #: Not a pytest test class. Weaver's Test is a data validation and pytest's
+    #: collector recognises only the name, so it would warn about every module
+    #: that imports this one into a test.
+    __test__ = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "read" in cls.__dict__:
+            raise LoadError(
+                f"{cls.__name__} must not define read() — a Test's comparison is "
+                "Weaver's, so that passing means the same thing for every Test. "
+                "Write expected() and actual(); to author the returned rows "
+                "directly, declare an Assumption instead"
+            )
+
+    def expected(self):
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement expected(), returning the "
+            "relation the actual data is required to match"
+        )
+
+    def actual(self):
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement actual(), returning the "
+            "relation under test"
+        )
+
+    def _sides(self):
+        """The two relations to compare, as a pair.
+
+        The hook a compiled Test overrides. A Spark SQL Test's two sides come
+        out of one program, and running that program twice — once for each side
+        — would compare two different snapshots of anything its setup
+        materialised, then report the difference between them as failure. So the
+        pair is produced in one call, and an ordinary authored Test simply asks
+        its own two methods.
+        """
+
+        return self.expected(), self.actual()
+
+    def read(self):
+        """The rows on which expected and actual disagree.
+
+        Empty when the Test passes. Each row carries ``_weaver_side`` — which
+        side it came from — and ``_weaver_sk``, which pairs the two sides of one
+        changed entity when a primary key is declared.
+        """
+
+        from .runtime.test_compare import compare
+
+        expected, actual = self._sides()
+        return compare(
+            expected,
+            actual,
+            primary_key=self._document().primary_key,
+            what=type(self).__name__,
+        )
+
+
+class _SparkSqlValidation:
+    """What the two generated validation bases share.
+
+    **Generated, not authored.** A developer writes
+    ``Sales.OrdersReconcile.sql`` and Weaver installs
+    ``Sales__OrdersReconcile.py``, which is one of these classes with the
+    authored SQL attached. The installed module is an ordinary Weaver primitive:
+    it imports, constructs and runs exactly as a hand-written one does, and
+    orchestration cannot tell the two apart.
+
+    Public because the deployed module imports it and because someone reaching
+    for an installed primitive in a notebook meets it — not as a second way to
+    author a validation. A repository ``.py`` subclassing one is refused,
+    because ``.sql`` is where a SQL validation is written.
+    """
+
+    #: The authored program, addressed and embedded when the module was built.
+    sql: str = ""
+
+    def _document(self):
+        """This module's contract, read as the SQL document it came from.
+
+        The docstring *is* the authored ``.sql`` header, carried over verbatim,
+        so it has to be parsed as what it was written as. Reading it as Python
+        metadata would apply Python's rules to a SQL declaration.
+        """
+
+        import sys
+
+        from .declaration.metadata import SPARK_SQL, parse_document
+        from .runtime.load_contract import module_metadata_text
+
+        module = sys.modules.get(type(self).__module__)
+        if module is None:  # pragma: no cover - a class with no importable module
+            raise LoadError(
+                f"{type(self).__name__} was defined outside an importable module, "
+                "so its Weaver metadata cannot be read"
+            )
+        return parse_document(module_metadata_text(module), language=SPARK_SQL)
+
+
+class SparkSqlTest(_SparkSqlValidation, Test):
+    """A Test whose two sides are a Spark SQL program rather than Python.
+
+    The program's shape is its contract: after any setup, the first query is
+    expected and the second is actual. See
+    :mod:`weaver.declaration.validation_program`.
+    """
+
+    __test__ = False
+
+    def _sides(self):
+        """Both relations, from one execution of the program."""
+
+        from .runtime.spark_sql_validation import read_spark_sql_test
+
+        return read_spark_sql_test(
+            self.spark, sql=self.sql, what=type(self).__name__
+        )
+
+    def expected(self):
+        return self._sides()[0]
+
+    def actual(self):
+        return self._sides()[1]
+
+
+class SparkSqlAssumption(_SparkSqlValidation, Assumption):
+    """An Assumption whose violating rows are a Spark SQL program.
+
+    After any setup, one query returns the rows that contradict it.
+    """
+
+    def read(self):
+        from .runtime.spark_sql_validation import read_spark_sql_assumption
+
+        return read_spark_sql_assumption(
+            self.spark, sql=self.sql, what=type(self).__name__
+        )
+
+
 def _load_pair(obj, returned):
     """Unpack what ``read()`` returned, refusing anything else by name.
 
@@ -549,5 +765,11 @@ def _identity(class_name: str) -> tuple[str, str]:
 #: installed form of a ``.sql`` table — and admitting it here would make the same
 #: object authorable two ways, with two parsers, two dependency readings and two
 #: chances to disagree about what it declared.
-BASE_CLASSES = {"Folder": Folder, "Table": Table, "View": View}
+BASE_CLASSES = {
+    "Folder": Folder,
+    "Table": Table,
+    "View": View,
+    "Test": Test,
+    "Assumption": Assumption,
+}
 BASE_CLASS_NAMES = frozenset(cls.__name__ for cls in BASE_CLASSES.values())

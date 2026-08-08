@@ -391,5 +391,5 @@ def test_the_result_serialises_for_a_cli_without_owning_any_semantics(initialise
     assert mapping["item"] == "Lakehouse/_weaver"
     assert mapping["weaver_lakehouse"] == "Weaver"
     assert mapping["status"] == "succeeded"
-    assert len(mapping["tables"]) == 10
+    assert len(mapping["tables"]) == 11
     assert mapping["bundle_id"]

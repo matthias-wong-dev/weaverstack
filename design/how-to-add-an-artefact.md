@@ -147,7 +147,7 @@ Python and the session is hiding that.
 
 ## See also
 
-- [test-architecture-map.md](test-architecture-map.md) — what each layer claims
+- [test-architecture.md](test-architecture.md) — what each layer claims
   today, and the known gaps
 - [how-does-build-work.md](how-does-build-work.md) — §11a on declared intent,
   §11c on load artefacts as a worked example of all six steps

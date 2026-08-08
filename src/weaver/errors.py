@@ -66,6 +66,17 @@ class LoadError(WeaverError):
         self.task_log = task_log
 
 
+class ValidationError(WeaverError):
+    """Raised when a Test or Assumption cannot be evaluated.
+
+    Deliberately distinct from the validation *failing*. A Test that found
+    discrepancies did its job and its evidence is rows, not an exception; this is
+    the other outcome — a declared key that does not identify rows, two sides
+    that cannot be compared, a missing installed primitive. Collapsing the two
+    would report a Test nobody could run as a Test that passed.
+    """
+
+
 class DiscoveryError(WeaverError):
     """Raised when a repository or source file breaks a structural rule."""
 

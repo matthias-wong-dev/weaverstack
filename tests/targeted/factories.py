@@ -209,24 +209,29 @@ class FixtureCatalogue(Catalogue):
 
         if isinstance(item, str):
             item = item_id(item)
+        # A validation declares no physical object under its logical ID, so it
+        # gets no Registry row here either. What is certified is the artefact it
+        # compiles to, which has an identity of its own.
         identities = {
             identity
-            for identity in repository.source_documents
-            if identity.item == item
+            for identity, source in repository.source_documents.items()
+            if identity.item == item and not source.is_validation
         }
         types = {
             identity: _object_type_of(repository, identity) for identity in identities
         }
+        roles = {identity: "data" for identity in identities}
         for artefact in item_load_artefacts(repository, item=item):
             identities.add(artefact.identity)
             types[artefact.identity] = artefact.object_type
+            roles[artefact.identity] = "load"
         signatures = declared_signatures(repository, identities)
         return cls.from_registry_rows(
             *(
                 registry_row(
                     identity,
                     object_type=types[identity],
-                    object_role="load" if identity.is_load_artefact else "data",
+                    object_role=roles[identity],
                     signature=signatures[identity],
                 )
                 for identity in sorted(identities, key=str)

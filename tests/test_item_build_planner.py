@@ -878,7 +878,7 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind == "build_table"
     ]
-    assert len(physical) == 10
+    assert len(physical) == 11
     assert (
         bundle.plan.sequences[-1].description
         == "refresh the Weaver Lakehouse SQL endpoint after catalogue DML"

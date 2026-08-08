@@ -10,7 +10,7 @@ from .errors import (
     SqlExecutionError,
     SqlPoolClosedError,
 )
-from .execution import PooledSqlExecutor, SqlExecutor, SqlRow
+from .execution import ProcedureResult, PooledSqlExecutor, SqlExecutor, SqlRow
 from .pool import (
     DEFAULT_MAX_CONNECTIONS,
     SqlConnectionLease,
@@ -31,6 +31,7 @@ __all__ = [
     "SqlPoolClosedError",
     "SqlExecutor",
     "SqlRow",
+    "ProcedureResult",
     "PooledSqlExecutor",
     "SqlConnectionLease",
     "SqlConnectionPool",

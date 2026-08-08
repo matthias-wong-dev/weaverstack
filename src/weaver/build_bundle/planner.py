@@ -47,7 +47,7 @@ from .catalogue_actions import (
 from .endpoints import item_refresh_stage
 from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
-from ..etl import item_load_artefacts, load_artefacts, load_schemas
+from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from .physical import (
     item_build_stages,
     item_load_removals,
@@ -87,7 +87,7 @@ def generate_item_build_bundle(
             + ", ".join(sorted(map(str, unknown)))
         )
 
-    # Three kinds of node are selectable, and most of what follows needs exactly
+    # Four kinds of node are selectable, and most of what follows needs exactly
     # one of them. Documents are what prune, schemas and the physical build
     # pipelines are about; alias destinations are registered objects too — so
     # they take part in selection and certification — but they are materialised
@@ -95,10 +95,21 @@ def generate_item_build_bundle(
     # the third, and are kept out of everything that assumes a selected identity
     # maps to a parsed declaration: they are signed from their own content and
     # installed by the item's final layer.
-    selected_documents, selected_aliases, selected_loads = _selectable(
-        repository, by_item
+    #
+    # Validations are the fourth, and are the only kind that is *entirely*
+    # logical. They are selected so their catalogue rows publish, and they never
+    # reach a physical stage: nothing is materialised under a Test ID, so there
+    # is no DDL to generate and nothing to prune. What a validation compiles to
+    # is a runtime artefact with an identity of its own.
+    (
+        selected_documents,
+        selected_aliases,
+        selected_loads,
+        selected_validations,
+    ) = _selectable(repository, by_item)
+    selected_ids = (
+        selected_documents | selected_aliases | selected_loads | selected_validations
     )
-    selected_ids = selected_documents | selected_aliases | selected_loads
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -175,8 +186,8 @@ def generate_item_build_bundle(
                 target_by_item=target_by_item,
                 selected_documents=selected_documents,
                 selected_aliases=selected_aliases,
-                selected_for_drop=selected_for_drop - selected_loads,
-                selected_for_build=selected_for_build - selected_loads,
+                selected_for_drop=selected_for_drop - selected_loads - selected_validations,
+                selected_for_build=selected_for_build - selected_loads - selected_validations,
                 selected_loads=selected_for_build & selected_loads,
                 removed=removed,
                 registered=registered,
@@ -229,14 +240,16 @@ def generate_item_build_bundle(
     )
 
 
-def _selectable(repository: WeaverRepository, by_item: Mapping) -> tuple[set, set, set]:
-    """The three selectable kinds, separately — see the comment at the call site."""
+def _selectable(
+    repository: WeaverRepository, by_item: Mapping
+) -> tuple[set, set, set, set]:
+    """The four selectable kinds, separately — see the comment at the call site."""
 
     return (
         {
             identity
-            for identity in repository.source_documents
-            if identity.item in by_item
+            for identity, source in repository.source_documents.items()
+            if identity.item in by_item and not source.is_validation
         },
         {
             alias.destination
@@ -245,8 +258,13 @@ def _selectable(repository: WeaverRepository, by_item: Mapping) -> tuple[set, se
         },
         {
             artefact.identity
-            for artefact in load_artefacts(repository)
+            for artefact in runtime_artefacts(repository)
             if artefact.identity.item in by_item
+        },
+        {
+            identity
+            for identity, source in repository.source_documents.items()
+            if identity.item in by_item and source.is_validation
         },
     )
 
@@ -266,8 +284,8 @@ def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> se
     drift into disagreeing about what a build certifies.
     """
 
-    documents, aliases, loads = _selectable(repository, by_item)
-    return documents | aliases | loads
+    documents, aliases, loads, validations = _selectable(repository, by_item)
+    return documents | aliases | loads | validations
 
 
 def _item_layers(
@@ -357,7 +375,7 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_aliases,
     )
-    artefacts = item_load_artefacts(repository, item=item)
+    artefacts = item_runtime_artefacts(repository, item=item)
     stages: list[PlannedStage] = []
 
     # Prune is given every *declared* alias destination, never only the selected

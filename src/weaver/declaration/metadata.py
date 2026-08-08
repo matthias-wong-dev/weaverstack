@@ -57,6 +57,26 @@ TABLE = "Table"
 VIEW = "View"
 OBJECT_KINDS = frozenset({FOLDER, TABLE, VIEW})
 
+#: The two validation kinds. A Test compares an expected relation with an actual
+#: one and succeeds when the symmetric difference is empty; an Assumption returns
+#: violation rows directly and succeeds when there are none.
+#:
+#: Both are first-class logical Weaver declarations and neither is a physical
+#: data object: they carry a ``Schema.Object`` identity, declare dependencies and
+#: are compiled into runnable primitives, but nothing is materialised under the
+#: logical ID. Keeping them out of :data:`OBJECT_KINDS` is what stops a Test
+#: reaching table or view DDL merely because it has an object identity.
+TEST = "Test"
+ASSUMPTION = "Assumption"
+VALIDATION_KINDS = frozenset({TEST, ASSUMPTION})
+
+
+def is_validation_kind(kind: str) -> bool:
+    """Whether this kind declares a validation rather than a data object."""
+
+    return kind in VALIDATION_KINDS
+
+
 PYTHON = "python"
 SQL = "sql"
 SPARK_SQL = "spark_sql"
@@ -102,7 +122,13 @@ def target_kind_for(language: str, kind: str) -> str:
         return DELTA_TARGET
     return SQL_TARGET
 
-_ID_KEYS = {"Folder ID": FOLDER, "Table ID": TABLE, "View ID": VIEW}
+_ID_KEYS = {
+    "Folder ID": FOLDER,
+    "Table ID": TABLE,
+    "View ID": VIEW,
+    "Test ID": TEST,
+    "Assumption ID": ASSUMPTION,
+}
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
 
 # Cross-engine aliases. A Lakehouse object publishes into the Warehouse with a
@@ -134,20 +160,48 @@ DEFAULT_UPDATE_THRESHOLD = 20
 DEFAULT_STABILITY_ROWS = 1_000_000
 
 # Keys accepted per kind. Anything else is a typo and is refused by name.
-_COMMON_KEYS = {
-    "Description",
-    "Lineage",
-    "Notes",
-    "Revision notes",
-    "Dependencies",
-    "Static",
-    "Prohibit rebuild",
-    WAREHOUSE_ALIAS,
-    LAKEHOUSE_ALIAS,
-}
+#
+# The groups below are semantic rather than convenient: each says what a set of
+# keys is *about*, and each kind then composes the groups that make sense for it.
+# There is deliberately no single set that every document gets. A Test is a
+# Weaver declaration with a description, notes and dependencies, and it is not a
+# materialised object — so `Lineage`, `Static` and the aliases are not "common
+# keys it happens not to use", they are keys that could not mean anything on it.
+
+#: What any Weaver declaration says about itself.
+DOCUMENT_KEYS = frozenset({"Description", "Notes", "Revision notes"})
+
+#: What it reads. Every kind may declare dependencies explicitly where they
+#: cannot be inferred mechanically.
+DEPENDENCY_KEYS = frozenset({"Dependencies"})
+
+#: Where the *data* came from. A validation reads data but produces none, so it
+#: has no lineage of its own to declare.
+DATA_LINEAGE_KEYS = frozenset({"Lineage"})
+
+#: How a materialised object is built and rebuilt.
+BUILD_BEHAVIOUR_KEYS = frozenset({"Static", "Prohibit rebuild"})
+
+#: The cross-engine publication names. Only something materialised has one.
+ALIAS_KEYS = frozenset(_ALIAS_KEYS)
+
+#: What every materialised data object shares.
+_DATA_OBJECT_KEYS = (
+    DOCUMENT_KEYS
+    | DEPENDENCY_KEYS
+    | DATA_LINEAGE_KEYS
+    | BUILD_BEHAVIOUR_KEYS
+    | ALIAS_KEYS
+)
+
+#: What both validation kinds share. Notably absent: everything describing
+#: materialised data behaviour.
+_VALIDATION_KEYS = DOCUMENT_KEYS | DEPENDENCY_KEYS
+
 _KIND_KEYS = {
-    FOLDER: {"File key", "Incremental"},
-    TABLE: {
+    FOLDER: _DATA_OBJECT_KEYS | {"File key", "Incremental"},
+    TABLE: _DATA_OBJECT_KEYS
+    | {
         "Schema",
         "Column notes",
         "Primary key",
@@ -164,7 +218,15 @@ _KIND_KEYS = {
     # A view's keys are logical: it stores no rows, so they describe the shape of
     # the result rather than constraining storage. They are declared so the model
     # is complete and can be checked for quality; nothing physical follows.
-    VIEW: {"Column notes", "Primary key", "Unique keys", "Foreign keys"},
+    VIEW: _DATA_OBJECT_KEYS
+    | {"Column notes", "Primary key", "Unique keys", "Foreign keys"},
+    # A Test's primary key correlates diagnostic rows across the two sides of the
+    # symmetric difference. It does not change what is compared or counted, which
+    # is why it is the one key-shaped thing a validation may declare.
+    TEST: _VALIDATION_KEYS | {"Primary key"},
+    # An Assumption has no expected/actual pair to correlate, so a primary key
+    # would have nothing to pair. It is refused by name rather than ignored.
+    ASSUMPTION: _VALIDATION_KEYS,
 }
 
 # Retired keys, refused with the migration rather than as "unknown".
@@ -429,7 +491,9 @@ class WeaverDocument:
     language: str
     object_id: ObjectId
     description: MetadataText
-    lineage: MetadataText
+    #: Where the data came from. Absent on a validation kind, which produces no
+    #: data and so has no lineage of its own to declare.
+    lineage: MetadataText | None = None
     notes: str | None = None
     dependencies: tuple[ObjectId, ...] = ()
     #: True when the document wrote a ``Dependencies`` key at all, including an
@@ -460,6 +524,16 @@ class WeaverDocument:
     @property
     def qualified(self) -> str:
         return self.object_id.qualified
+
+    @property
+    def is_validation(self) -> bool:
+        """Whether this declaration is a Test or an Assumption.
+
+        Asked wherever a collection holds both, so the distinction is answered
+        from the declaration rather than by inferring it from a physical shape.
+        """
+
+        return is_validation_kind(self.kind)
 
     @property
     def has_primary_key(self) -> bool:
@@ -622,6 +696,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             raise MetadataError(message)
 
     kind, object_id = _parse_id(loaded)
+    if is_validation_kind(kind):
+        return _parse_validation(loaded, kind=kind, language=language, object_id=object_id)
     _reject_unknown_keys(loaded, kind)
 
     # A Warehouse (T-SQL) table may declare Schema or omit it: with a declaration
@@ -734,10 +810,69 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     )
 
 
+def _parse_validation(
+    raw: dict[str, Any], *, kind: str, language: str, object_id: ObjectId
+) -> WeaverDocument:
+    """Parse a Test or Assumption header.
+
+    A separate path rather than a branch through the object parser, because
+    almost nothing the object parser does applies: a validation has no schema to
+    check columns against, no lineage, no build behaviour and no alias. What it
+    shares — description, notes, revisions, dependencies — is parsed by the same
+    helpers, so the two contracts cannot drift in how they read the keys they
+    both have.
+    """
+
+    if kind == ASSUMPTION and "Primary key" in raw:
+        raise MetadataError(
+            "an Assumption must not declare a Primary key. A key correlates the two "
+            "sides of a Test's symmetric difference, and an Assumption has one side: "
+            "it returns violation rows directly and succeeds when there are none"
+        )
+
+    _reject_unknown_keys(raw, kind)
+
+    # No language is required to declare its dependencies here, including Spark
+    # SQL, which is required to on an object.
+    #
+    # What the header *means* is the same for both, and is the rule every kind
+    # uses: declared replaces inferred, and `Dependencies: []` is a declaration,
+    # so an explicit none means none. What differs is only whether declaring is
+    # compulsory. A Spark SQL object must, because its query may read by path
+    # and a load ordered by a half-known graph builds things in the wrong order;
+    # a validation need not, because it installs last and nothing depends on it,
+    # so an edge inference missed costs an ordering nicety rather than a wrong
+    # estate. See :func:`weaver.declaration.repository.effective_dependencies`.
+    declares_dependencies = "Dependencies" in raw
+    dependencies = _parse_dependencies(raw.get("Dependencies"), object_id)
+
+    description = _parse_text(raw, "Description")
+    notes = _parse_notes(raw.get("Notes"))
+    revisions, revision_format = _parse_revision_notes(raw.get("Revision notes"))
+    primary_key = _parse_column_set(raw.get("Primary key"), "Primary key")
+
+    return WeaverDocument(
+        kind=kind,
+        language=language,
+        object_id=object_id,
+        description=description,
+        lineage=None,
+        notes=notes,
+        dependencies=dependencies,
+        declares_dependencies=declares_dependencies,
+        revision_notes=revisions,
+        revision_date_format=revision_format,
+        primary_key=primary_key,
+        raw=dict(raw),
+    )
+
+
 def _parse_id(raw: dict[str, Any]) -> tuple[str, ObjectId]:
     present = [key for key in _ID_KEYS if key in raw and raw[key] is not None]
     if len(present) != 1:
-        raise MetadataError("metadata must include exactly one of Folder ID, Table ID, View ID")
+        raise MetadataError(
+            "metadata must include exactly one of " + ", ".join(_ID_KEYS)
+        )
     key = present[0]
     value = raw[key]
     if not isinstance(value, str) or not value.strip():
@@ -748,24 +883,49 @@ def _parse_id(raw: dict[str, Any]) -> tuple[str, ObjectId]:
     return _ID_KEYS[key], ObjectId(schema=parts[0], object=parts[1])
 
 
+def _listed(items: list[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c`` — a list a sentence can contain."""
+
+    if len(items) < 3:
+        return " and ".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
 def _reject_unknown_keys(raw: dict[str, Any], kind: str) -> None:
-    allowed = _COMMON_KEYS | _KIND_KEYS[kind] | set(_ID_KEYS)
+    allowed = _KIND_KEYS[kind] | set(_ID_KEYS)
     unknown = {str(key) for key in raw} - allowed
-    if unknown:
-        wrong_kind = {
-            key
-            for key in unknown
-            for other_kind, keys in _KIND_KEYS.items()
-            if key in keys and other_kind != kind
-        }
-        detail = ""
-        if wrong_kind:
-            detail = f" ({', '.join(sorted(wrong_kind))} belongs to another object kind)"
-        raise MetadataError(
-            f"unknown metadata key(s) for a {kind} object: "
-            + ", ".join(sorted(unknown))
-            + detail
+    if not unknown:
+        return
+
+    what = "validation" if is_validation_kind(kind) else "object"
+    article = "an" if kind[0].upper() in "AEIOU" else "a"
+    elsewhere = {
+        key: sorted(
+            other for other, keys in _KIND_KEYS.items() if key in keys and other != kind
         )
+        for key in unknown
+    }
+    known = {key: kinds for key, kinds in elsewhere.items() if kinds}
+    detail = ""
+    if known:
+        detail = " (" + "; ".join(
+            f"{key} belongs to {_listed(kinds)}" for key, kinds in sorted(known.items())
+        ) + ")"
+    # A validation declaration is the one place a *correctly spelled* key is
+    # commonly wrong, because everything describing materialised data behaviour
+    # reads as plausible on a Test until you ask what it would do. Say so rather
+    # than reporting a typo.
+    if is_validation_kind(kind) and known:
+        detail += (
+            f". {article.capitalize()} {kind} declares no data of its own, so "
+            "metadata describing how data is materialised, keyed or rebuilt has "
+            "nothing to apply to"
+        )
+    raise MetadataError(
+        f"unknown metadata key(s) for {article} {kind} {what}: "
+        + ", ".join(sorted(unknown))
+        + detail
+    )
 
 
 def _parse_text(raw: dict[str, Any], key: str) -> MetadataText:

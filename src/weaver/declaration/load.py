@@ -11,11 +11,11 @@ and validated body — and neither generator ever reopens a repository.
         knows the parsed contract, source body and language
         creates the executable load definition
 
-    LoadArtefact
+    RuntimeArtefact
         carries the completed payload into claiming, planning,
         installation, registration and pruning
 
-:class:`weaver.etl.LoadArtefact` remains the lifecycle object and does not
+:class:`weaver.etl.RuntimeArtefact` remains the lifecycle object and does not
 generate itself. It asks for a payload and carries what it gets, which is why
 replacing what this module returns moves exactly the artefacts whose bytes
 changed and nothing else.

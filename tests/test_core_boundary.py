@@ -101,3 +101,21 @@ def test_the_cli_builds_and_runs_with_spark_unimportable():
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("dispatched")
     assert '"pyspark"' in result.stdout
+
+
+def test_the_two_role_vocabularies_are_one():
+    """`weaver.etl` repeats the roles rather than importing them.
+
+    It has to: the catalogue package imports `etl`, so importing back would be a
+    real cycle. Repetition is the price, and this is what keeps the two copies
+    from drifting — a role added to one and not the other would put a value in
+    the Registry that reconciliation refuses.
+    """
+
+    from weaver import etl
+    from weaver.catalogue import tables
+
+    assert etl.ROLE_LOAD == tables.ROLE_LOAD
+    assert etl.ROLE_TEST == tables.ROLE_TEST
+    assert etl.ROLE_ASSUMPTION == tables.ROLE_ASSUMPTION
+    assert set(etl.VALIDATION_ROLE.values()) == set(tables.VALIDATION_ROLES)

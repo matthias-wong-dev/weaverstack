@@ -198,6 +198,17 @@ These become enforceable as the corresponding code lands:
 - **Static discovery.** Discovery never imports object modules.
 - **Objects never mutate the target.** `read()` proposes; Weaver owns mutation,
   CRUD accounting, staging and logging.
+- **A runtime artefact is known by its role, not its shape.** A file or a stored
+  procedure used to mean "load artefact" because a load layer installed the only
+  files and procedures there were. A Test compiles to a module and a procedure of
+  its own, so planning reads `object_role` from the Registry row — or asks the
+  repository what it claimed, during a build where nothing is installed yet. A
+  Test that inferred its way into the load DAG would be run by `weaver load`. See
+  [validation](design/validation.md).
+- **Validation declares; it does not materialise.** A Test and an Assumption
+  carry an item's ordinary `Schema.Object` identity and are held apart from the
+  documents an item materialises, so nothing routes one into table or view DDL on
+  the strength of it having an identity.
 - **Every target is named, not inherited.** No destination Lakehouse is assumed to
   be attached to the notebook, and that covers *names* as well as paths: a
   generated statement says which Lakehouse it means. On Fabric that is the native

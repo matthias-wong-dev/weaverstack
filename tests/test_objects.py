@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from weaver import Folder, Lakehouse, Table, View, WeaverObject
+from weaver import Assumption, Folder, Lakehouse, Table, Test, View, WeaverObject
 from weaver.errors import LoadError
 from weaver.spark import fabric_destination
 
@@ -377,11 +377,19 @@ def test_the_authoring_module_imports_without_spark():
 def test_the_base_classes_are_registered_by_kind():
     from weaver.objects import BASE_CLASSES, BASE_CLASS_NAMES
 
-    assert BASE_CLASSES == {"Folder": Folder, "Table": Table, "View": View}
-    assert BASE_CLASS_NAMES == {"Folder", "Table", "View"}
+    assert BASE_CLASSES == {
+        "Folder": Folder,
+        "Table": Table,
+        "View": View,
+        "Test": Test,
+        "Assumption": Assumption,
+    }
+    assert BASE_CLASS_NAMES == {"Folder", "Table", "View", "Test", "Assumption"}
 
 
 def test_every_authored_object_shares_one_base():
     assert issubclass(Folder, WeaverObject)
     assert issubclass(Table, WeaverObject)
     assert issubclass(View, WeaverObject)
+    assert issubclass(Test, WeaverObject)
+    assert issubclass(Assumption, WeaverObject)

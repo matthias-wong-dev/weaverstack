@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .errors import SqlError, SqlExecutionError
 from .pool import SqlConnectionPool
 
 SqlRow = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ProcedureResult:
+    """What one procedure execution produced: its rows, and its outputs.
+
+    Kept apart because they answer different questions and are transported
+    differently — the rows come back as result sets, the outputs as a projection
+    Weaver appended. A caller that wants only the numbers asks
+    :meth:`PooledSqlExecutor.call_procedure` and never materialises the rows.
+    """
+
+    outputs: "SqlRow"
+    result_sets: tuple[tuple["SqlRow", ...], ...]
 
 
 class SqlExecutor(Protocol):
@@ -24,6 +39,10 @@ class SqlExecutor(Protocol):
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]: ...
 
+    def query_result_sets(
+        self, statement: str, parameters: Sequence[object] | None = None
+    ) -> tuple[tuple[SqlRow, ...], ...]: ...
+
     def call_procedure(
         self,
         procedure: str,
@@ -31,6 +50,14 @@ class SqlExecutor(Protocol):
         inputs: Sequence[tuple[str, object]] = (),
         outputs: Sequence[tuple[str, str]] = (),
     ) -> SqlRow: ...
+
+    def call_procedure_with_results(
+        self,
+        procedure: str,
+        *,
+        inputs: Sequence[tuple[str, object]] = (),
+        outputs: Sequence[tuple[str, str]] = (),
+    ) -> ProcedureResult: ...
 
 
 class PooledSqlExecutor:
@@ -52,6 +79,28 @@ class PooledSqlExecutor:
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]:
         return self._run(statement, parameters=parameters, query=True, drain=False)
+
+    def query_result_sets(
+        self, statement: str, parameters: Sequence[object] | None = None
+    ) -> tuple[tuple[SqlRow, ...], ...]:
+        """Every result set a batch produced, in order.
+
+        :meth:`query` reads the first and stops, which is right for a statement
+        that answers one question. A batch that returns *evidence and then a
+        projection* — which is what a validation run directly from source is —
+        needs both, and reading only the first silently answers with the wrong
+        one: a diagnostic row has no count column, so the counts read as zero
+        and a failing Test reports as passed.
+        """
+
+        sets = self._run(
+            statement,
+            parameters=parameters,
+            query=True,
+            drain=False,
+            all_result_sets=True,
+        )
+        return tuple(tuple(rows) for rows in sets)
 
     def call_procedure(
         self,
@@ -92,6 +141,47 @@ class PooledSqlExecutor:
             )
         return row[0]
 
+    def call_procedure_with_results(
+        self,
+        procedure: str,
+        *,
+        inputs: Sequence[tuple[str, object]] = (),
+        outputs: Sequence[tuple[str, str]] = (),
+    ) -> "ProcedureResult":
+        """Call a procedure and keep *both* its result sets and its outputs.
+
+        :meth:`call_procedure` reads the last result set — Weaver's own output
+        projection — and passes over everything the procedure emitted on the
+        way. That is right for a load, whose evidence is entirely in its counts.
+        It is wrong for a Test: the counts say how much disagreed and the rows
+        say what, and a caller wanting both must not run the Test twice, because
+        the data could change in between and the cost could be large.
+
+        So this keeps everything, splits the last set off as the outputs, and
+        hands back the rest in the order the procedure produced them.
+        """
+
+        if not outputs:
+            raise SqlExecutionError(
+                f"{procedure} was called for its outputs and none were named"
+            )
+        sets = self._run(
+            _output_parameter_batch(procedure, inputs, outputs),
+            parameters=[value for _name, value in inputs],
+            query=True,
+            drain=False,
+            all_result_sets=True,
+        )
+        if not sets or not sets[-1]:
+            raise SqlExecutionError(
+                f"{procedure} returned no output row — it may have been altered "
+                "outside Weaver, or replaced by a version without these outputs"
+            )
+        return ProcedureResult(
+            outputs=sets[-1][0],
+            result_sets=tuple(tuple(rows) for rows in sets[:-1]),
+        )
+
     def _run(
         self,
         statement: str,
@@ -100,6 +190,7 @@ class PooledSqlExecutor:
         query: bool,
         drain: bool,
         last_result_set: bool = False,
+        all_result_sets: bool = False,
     ):
         with self.pool.lease() as lease:
             connection = lease.connection
@@ -112,9 +203,12 @@ class PooledSqlExecutor:
                     cursor.execute(statement, tuple(parameters))
 
                 if query:
-                    rows = (
-                        _final_rows(cursor) if last_result_set else _rows(cursor)
-                    )
+                    if all_result_sets:
+                        rows = _every_result_set(cursor)
+                    elif last_result_set:
+                        rows = _final_rows(cursor)
+                    else:
+                        rows = _rows(cursor)
                     connection.commit()
                     return rows
 
@@ -201,6 +295,23 @@ def _final_rows(cursor) -> list[SqlRow]:
             latest = _rows(cursor)
         if not cursor.nextset():
             return latest
+
+
+def _every_result_set(cursor) -> list[list[SqlRow]]:
+    """Every result set the batch produced, in order.
+
+    A set with no description is one a statement produced without returning
+    columns, and is skipped rather than recorded as empty — otherwise a
+    procedure's internal work would appear as result sets a caller has to know
+    to ignore.
+    """
+
+    sets: list[list[SqlRow]] = []
+    while True:
+        if cursor.description is not None:
+            sets.append(_rows(cursor))
+        if not cursor.nextset():
+            return sets
 
 
 def _drain(cursor) -> None:

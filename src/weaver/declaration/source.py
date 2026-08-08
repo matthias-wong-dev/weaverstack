@@ -43,11 +43,13 @@ from .dependencies import (
     extract_sql_references,
 )
 from .metadata import (
+    ASSUMPTION,
     FOLDER,
     PYTHON,
     SPARK_SQL,
     SQL,
     TABLE,
+    TEST,
     VIEW,
     ObjectId,
     SesDocument,
@@ -218,8 +220,21 @@ class SourceDocument:
         return self.document.kind
 
     @property
+    def is_validation(self) -> bool:
+        """Whether this declares a Test or an Assumption rather than an object."""
+
+        return self.document.is_validation
+
+    @property
     def target_kind(self) -> str:
-        """Which physical destination this object materialises into."""
+        """Which physical destination this object materialises into.
+
+        A validation materialises nothing, and this still answers, because the
+        answer it gives is the *namespace* every later reader wants: a Test in a
+        Warehouse binds its references in the Warehouse, one in a Lakehouse in
+        the Lakehouse. Nothing routes a validation to DDL on the strength of it —
+        that follows from which collection it is in, not from this.
+        """
 
         return target_kind_for(self.language, self.document.kind)
 
@@ -344,6 +359,18 @@ class SourceDocument:
 
         return generate_load(self)
 
+    def create_validation(self) -> "GeneratedValidation":
+        """The generated, installable primitive for this validation declaration.
+
+        The third sibling of :meth:`create_ddl` and :meth:`create_load`, owned
+        here for the same reason: the source alone knows its language, kind, ID
+        and validated body.
+        """
+
+        from .validation import generate_validation
+
+        return generate_validation(self)
+
 
 def read_source_document(
     relative_path: str, data: bytes, item_type: str
@@ -419,7 +446,10 @@ def _read_python(
         )
 
     _check_base_class(relative_path, declared, document.kind)
-    _check_read_method(relative_path, declared)
+    if document.is_validation:
+        _check_validation_methods(relative_path, declared, document.kind)
+    else:
+        _check_read_method(relative_path, declared)
     imports = _imported_modules(module)
     python_imports = _python_imports(module)
 
@@ -457,22 +487,61 @@ def _base_name(node: ast.expr) -> str | None:
 
 
 def _check_read_method(relative_path: str, declared: ast.ClassDef) -> None:
-    reads = [
+    _require_method(relative_path, declared, "read")
+
+
+def _check_validation_methods(
+    relative_path: str, declared: ast.ClassDef, kind: str
+) -> None:
+    """The method contract that makes a validation mean what its kind says.
+
+    A Test declares two relations and Weaver compares them; an Assumption
+    declares the violating rows directly. So a Test writes ``expected()`` and
+    ``actual()`` and must *not* write ``read()`` — an authored ``read()`` would
+    leave the class called a Test while meaning something else, and every
+    downstream reading of "the Sales tests pass" depends on it not doing that.
+
+    The runtime refuses the same override, so it fails whether the class is
+    written in a notebook or committed here. This check exists as well because a
+    repository must not need executing to be refused.
+    """
+
+    if kind == ASSUMPTION:
+        _require_method(relative_path, declared, "read")
+        return
+
+    if _methods(declared, "read"):
+        raise DiscoveryError(
+            f"{relative_path}: class {declared.name!r} declares a Test, so it must "
+            "not define read() — the comparison is Weaver's, so that passing means "
+            "the same thing for every Test. Define expected() and actual(); to "
+            "author the returned rows directly, declare an Assumption instead"
+        )
+    for name in ("expected", "actual"):
+        _require_method(relative_path, declared, name)
+
+
+def _methods(declared: ast.ClassDef, name: str) -> list[ast.stmt]:
+    return [
         node
         for node in declared.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "read"
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
     ]
-    if not reads:
+
+
+def _require_method(relative_path: str, declared: ast.ClassDef, name: str) -> None:
+    found = _methods(declared, name)
+    if not found:
         raise DiscoveryError(
-            f"{relative_path}: class {declared.name!r} must implement read()"
+            f"{relative_path}: class {declared.name!r} must implement {name}()"
         )
-    if len(reads) > 1:
+    if len(found) > 1:
         raise DiscoveryError(
-            f"{relative_path}: class {declared.name!r} defines read() "
-            f"{len(reads)} times — the later one silently replaces the earlier"
+            f"{relative_path}: class {declared.name!r} defines {name}() "
+            f"{len(found)} times — the later one silently replaces the earlier"
         )
-    if isinstance(reads[0], ast.AsyncFunctionDef):
-        raise DiscoveryError(f"{relative_path}: read() must not be async")
+    if isinstance(found[0], ast.AsyncFunctionDef):
+        raise DiscoveryError(f"{relative_path}: {name}() must not be async")
 
 
 def _imported_modules(module: ast.Module) -> tuple[str, ...]:
@@ -540,6 +609,19 @@ def _read_sql(
 
     analysis = analyse_sql(body)
 
+    if document.is_validation:
+        _check_sql_validation_program(relative_path, document, body, language)
+        return SourceDocument(
+            relative_path=relative_path,
+            language=language,
+            text=text,
+            source_hash=source_hash,
+            document=document,
+            sql_body=body,
+            sql_analysis=analysis,
+            discovered_references=extract_sql_references(body),
+        )
+
     if document.kind == VIEW and analysis.statement_count > 1:
         raise DiscoveryError(
             f"{relative_path}: a View is one query — Weaver wraps it in the CREATE "
@@ -569,6 +651,30 @@ def _read_sql(
         sql_body=body,
         sql_analysis=analysis,
         discovered_references=extract_sql_references(body),
+    )
+
+
+def _check_sql_validation_program(
+    relative_path: str, document: SesDocument, body: str, language: str
+) -> None:
+    """Refuse a SQL validation whose queries cannot be its contract.
+
+    Through the dialect's own parser, exactly as a SQL table's contract is
+    checked, because each dialect has its own idea of where a statement ends.
+    What the parser produces then meets one counting rule — see
+    :mod:`weaver.declaration.validation_program`.
+    """
+
+    from .validation_program import validate_validation_contract
+
+    if language == SPARK_SQL:
+        from .spark_sql_program import parse_spark_sql_program as parse
+    else:
+        from .tsql_program import parse_tsql_program as parse
+
+    program = parse(body, what=relative_path, error=DiscoveryError)
+    validate_validation_contract(
+        program, what=relative_path, kind=document.kind, error=DiscoveryError
     )
 
 

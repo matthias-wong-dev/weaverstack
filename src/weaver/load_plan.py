@@ -253,7 +253,11 @@ class InstalledEstate:
                 )
             else:
                 physical_owner[key] = identity
-            if identity.is_load_artefact:
+            # What an installed artefact is *for*, from the Registry row that
+            # said so — never from its physical shape. A Test compiles to a file
+            # or a procedure exactly as a load does, so shape inference would
+            # walk validation straight into the load DAG.
+            if document.is_runtime_artefact:
                 primitives[identity] = installed
             else:
                 objects[identity] = installed

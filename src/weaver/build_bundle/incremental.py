@@ -174,14 +174,14 @@ def declared_signatures(
     that rendered it (see :mod:`weaver.etl`).
     """
 
-    from ..etl import load_artefacts, load_artefacts_by_identity
+    from ..etl import artefacts_by_identity, runtime_artefacts
 
     aliases = {alias.destination: alias for alias in repository.aliases}
-    loads = load_artefacts_by_identity(load_artefacts(repository))
+    installed = artefacts_by_identity(runtime_artefacts(repository))
     signatures: dict[WeaverDocumentId, str] = {}
     for identity in selected:
         alias = aliases.get(identity)
-        artefact = loads.get(identity)
+        artefact = installed.get(identity)
         if alias is not None:
             signatures[identity] = alias.signature
         elif artefact is not None:
@@ -191,6 +191,25 @@ def declared_signatures(
                 identity
             ].effective_signature
     return signatures
+
+
+def runtime_artefact_identities(
+    repository: WeaverRepository,
+) -> frozenset[WeaverDocumentId]:
+    """Everything this repository installs to be *run* rather than to hold rows.
+
+    Derived from the repository, because during a build that is where the answer
+    is: the artefacts have been claimed from the declaration and nothing has been
+    installed yet. Reading installed state instead asks
+    :attr:`~weaver.catalogue.state.RegisteredDocument.object_role`, which is the
+    same question answered from the other side of the boundary.
+    """
+
+    from ..etl import runtime_artefacts
+
+    return frozenset(
+        artefact.identity for artefact in runtime_artefacts(repository)
+    )
 
 
 def determine_impact(
@@ -241,12 +260,18 @@ def determine_impact(
     graph = repository.dependency_graph
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
+        runtime = runtime_artefact_identities(repository)
         for root in changed:
-            # A load artefact is not a node in the authored graph, and that is
-            # the design rather than an omission: nothing depends on a deployed
-            # module, and it depends on nothing — its signature is its own
-            # content. So a changed one is the end of a walk, not the start.
-            if root.is_load_artefact:
+            # A runtime artefact is not a node in the authored graph, and that
+            # is the design rather than an omission: nothing depends on a
+            # deployed module, and it depends on nothing — its signature is its
+            # own content. So a changed one is the end of a walk, not the start.
+            #
+            # Membership is asked of the repository, not of the identity's
+            # shape. A file or a procedure used to be a load artefact by
+            # definition; it stopped being one when a Test compiled to a module
+            # and a procedure of its own.
+            if root in runtime:
                 continue
             for node in graph.descendants(str(root)):
                 descendant = by_text.get(node)

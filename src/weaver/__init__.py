@@ -9,12 +9,37 @@ optional desktop CLI.
 from __future__ import annotations
 
 from . import config as _config  # establish declaration/workspace import order
-from .errors import CommandError, ConfigError, IdentityError, WeaverError
-from .operations import BuildResult, WipeReport, WipeResult, build, wipe
+from .errors import (
+    CommandError,
+    ConfigError,
+    IdentityError,
+    ValidationError,
+    WeaverError,
+)
+from .operations import (
+    BuildResult,
+    WipeReport,
+    WipeResult,
+    build,
+    current_workspace,
+    wipe,
+)
 from .load import load
+from .test import test
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
+from .test_report import ValidationNodeReport, ValidationRunReport
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
-from .objects import Folder, SparkSqlTable, Table, View, WeaverObject
+from .objects import (
+    Assumption,
+    Folder,
+    SparkSqlAssumption,
+    SparkSqlTable,
+    SparkSqlTest,
+    Table,
+    Test,
+    View,
+    WeaverObject,
+)
 
 
 def _resolve_version() -> str:
@@ -43,18 +68,28 @@ __all__ = [
     "LoadNodeReport",
     "LoadMessage",
     "LoadResult",
+    "test",
+    "ValidationRunReport",
+    "ValidationNodeReport",
     # authored objects
     "WeaverObject",
     "Folder",
     "Table",
     "SparkSqlTable",
     "View",
+    # authored validation
+    "Test",
+    "Assumption",
+    "SparkSqlTest",
+    "SparkSqlAssumption",
     "Lakehouse",
     "default_lakehouse",
     "lakehouse_for",
+    "current_workspace",
     # common errors
     "WeaverError",
     "CommandError",
     "ConfigError",
     "IdentityError",
+    "ValidationError",
 ]

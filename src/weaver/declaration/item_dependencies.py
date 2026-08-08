@@ -19,6 +19,81 @@ from .model import (
 from .source import SourceDocument
 
 
+def _declared_references(
+    source: SourceDocument, consumer: WeaverDocumentId
+) -> tuple[tuple[str, WeaverDocumentId], ...]:
+    """What the document's ``Dependencies:`` header names."""
+
+    return tuple(
+        (dependency.qualified, WeaverDocumentId(consumer.item, dependency))
+        for dependency in source.document.dependencies
+    )
+
+
+def _inferred_references(
+    source: SourceDocument,
+    consumer: WeaverDocumentId,
+    edges: list[ItemDependency],
+) -> tuple[tuple[str, WeaverDocumentId], ...]:
+    """What the document's own source says it reads.
+
+    Python imports, or the relations a SQL body names. A fully qualified SQL
+    reference names something outside the item namespace, so it is appended to
+    ``edges`` as a physical edge here rather than returned for resolution.
+    """
+
+    if source.language == "python":
+        return tuple(_python_references(source))
+
+    references: list[tuple[str, WeaverDocumentId]] = []
+    for reference in source.discovered_references:
+        if reference.call:
+            continue
+        if reference.is_qualified:
+            edges.append(
+                ItemDependency(
+                    consumer=consumer,
+                    reference=str(reference),
+                    resolution_kind="physical",
+                    is_within_item=False,
+                )
+            )
+        elif reference.object_id is not None:
+            references.append(
+                (str(reference), WeaverDocumentId(consumer.item, reference.object_id))
+            )
+    return tuple(references)
+
+
+def _reject_validation_producer(
+    producer: WeaverDocumentId,
+    *,
+    native: Mapping[WeaverDocumentId, SourceDocument],
+    consumer: WeaverDocumentId,
+    written: str,
+) -> None:
+    """Nothing depends on a validation.
+
+    A Test and an Assumption read the estate and produce nothing, so there is
+    nothing for anything else to read — and this is worth refusing rather than
+    letting resolve, because two things downstream rest on it. Installation puts
+    validation artefacts at the end, with the load artefacts, on the strength of
+    validation never being something another declaration waits for. And the
+    reason a validation need not declare its dependencies exhaustively is that
+    the objects it reads were put in place before it ran; a validation-to-
+    validation edge would make that ordering matter, silently.
+    """
+
+    upstream = native.get(producer)
+    if upstream is None or not upstream.is_validation:
+        return
+    raise DiscoveryError(
+        f"{consumer}: {written!r} names {upstream.document.kind} {producer}, and "
+        "nothing depends on a validation — it reads the estate and produces "
+        "nothing to read. Depend on the object it inspects instead."
+    )
+
+
 def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     """Return ``repository`` with exact item-owned edges and a global DAG."""
 
@@ -32,34 +107,12 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
+        # One rule for every kind — see
+        # :func:`weaver.declaration.repository.effective_dependencies`.
         if source.document.declares_dependencies:
-            references = tuple(
-                (dependency.qualified, WeaverDocumentId(consumer.item, dependency))
-                for dependency in source.document.dependencies
-            )
-        elif source.language == "python":
-            references = _python_references(source)
+            references = _declared_references(source, consumer)
         else:
-            references = []
-            for reference in source.discovered_references:
-                if reference.call:
-                    continue
-                if reference.is_qualified:
-                    edges.append(
-                        ItemDependency(
-                            consumer=consumer,
-                            reference=str(reference),
-                            resolution_kind="physical",
-                            is_within_item=False,
-                        )
-                    )
-                elif reference.object_id is not None:
-                    references.append(
-                        (
-                            str(reference),
-                            WeaverDocumentId(consumer.item, reference.object_id),
-                        )
-                    )
+            references = _inferred_references(source, consumer, edges)
 
         for written, destination in references:
             producer, kind = _resolve_destination(
@@ -70,6 +123,9 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
                 folded_alias=folded_alias,
                 consumer=consumer,
                 written=written,
+            )
+            _reject_validation_producer(
+                producer, native=native, consumer=consumer, written=written
             )
             edges.append(
                 ItemDependency(

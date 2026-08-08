@@ -38,7 +38,7 @@ from weaver.catalogue import (
 ALL = CATALOGUE_TABLES
 
 
-def test_there_are_exactly_ten_catalogue_tables():
+def test_there_are_exactly_eleven_catalogue_tables():
     assert [each.name for each in ALL] == [
         "SchemaDictionary",
         "FolderDictionary",
@@ -46,6 +46,7 @@ def test_there_are_exactly_ten_catalogue_tables():
         "ColumnDictionary",
         "IndexDictionary",
         "ForeignKeyDictionary",
+        "TestDictionary",
         "Dependency",
         "Alias",
         "Installation",
