@@ -1,0 +1,296 @@
+"""Running installed validation primitives, and reporting what they said.
+
+The sibling of :mod:`weaver.load_execution`, and much smaller than it for a
+reason that is the whole point of the design: a validation reads and never
+writes, so there is no staging, no reconciliation, no fault tolerance and no
+rollback to think about. What is left is dispatch.
+
+.. code-block:: text
+
+    Warehouse   exec [_].[Test Sales.X] with output counts
+    Lakehouse   import the deployed module, construct it, call read()
+
+**One failure does not stop the rest.** A validation is read-only, so a Test
+that failed has told you something and the next Test can still tell you
+something else. Losing that evidence to an early exit is exactly what makes a
+validation run less useful than running the queries by hand.
+
+**Suppression is not an optimisation.** A whole-target run counts without ever
+materialising the rows — ``@suppress_result_set = 1`` on a Warehouse, a count
+that never collects on Spark — because diagnostic rows may be enormous and may
+carry sensitive business data. A targeted run asks for them, and gets them from
+the *same* execution as the counts, because running a Test twice compares data
+that could have changed in between.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Sequence
+
+from .declaration.metadata import ASSUMPTION
+from .errors import ValidationError
+from .etl import LOAD_ROOT
+from .load_plan import LAKEHOUSE_TARGET
+from .runtime.validation_result import AssumptionResult, TestResult
+from .test_plan import InstalledValidation
+from .test_report import FAILED, INVALID, PASSED, PLANNED, ValidationNodeReport
+
+#: What a node calls the thing it dispatches. A small vocabulary deliberately:
+#: it says how to reach the primitive, not what language somebody authored it
+#: in, because the second is the declaration's business and is already recorded.
+WAREHOUSE_PROCEDURE = "warehouse_procedure"
+PYTHON_VALIDATION = "python_validation"
+
+
+def execute_validations(
+    validations: Sequence[InstalledValidation],
+    *,
+    environment: Any,
+    collect_diagnostics: bool = False,
+    dry_run: bool = False,
+) -> tuple[ValidationNodeReport, ...]:
+    """Run each validation in turn, and report every one of them."""
+
+    return tuple(
+        execute_validation(
+            validation,
+            environment=environment,
+            collect_diagnostics=collect_diagnostics,
+            dry_run=dry_run,
+        )
+        for validation in validations
+    )
+
+
+def execute_validation(
+    validation: InstalledValidation,
+    *,
+    environment: Any,
+    collect_diagnostics: bool = False,
+    dry_run: bool = False,
+) -> ValidationNodeReport:
+    """One validation, dispatched and normalised into a node report."""
+
+    primitive = primitive_kind(validation)
+    started = _now()
+    common = {
+        "logical_id": str(validation.logical),
+        "kind": validation.kind,
+        "physical_target": str(validation.target),
+        "primitive_kind": primitive,
+        "dispatch_location": str(validation.artefact),
+        "started_at": started,
+    }
+
+    if dry_run:
+        return ValidationNodeReport(status=PLANNED, **common, finished_at=_now())
+
+    try:
+        validation.require_installed()
+        if primitive == WAREHOUSE_PROCEDURE:
+            result, diagnostics = _dispatch_warehouse(
+                validation, environment, collect_diagnostics
+            )
+        else:
+            result, diagnostics = _dispatch_python(
+                validation, environment, collect_diagnostics
+            )
+    except Exception as exc:  # noqa: BLE001 - any failure is the run's evidence
+        message = f"{type(exc).__name__}: {exc}"
+        failed = (
+            AssumptionResult.failed_to_run(message)
+            if validation.kind == ASSUMPTION
+            else TestResult.failed_to_run(message)
+        )
+        return ValidationNodeReport(
+            status=INVALID,
+            executed=True,
+            messages=(message,),
+            result=failed,
+            finished_at=_now(),
+            **common,
+        )
+
+    return ValidationNodeReport(
+        status=PASSED if result.succeeded else FAILED,
+        executed=True,
+        result=result,
+        diagnostics=diagnostics,
+        finished_at=_now(),
+        **common,
+    )
+
+
+def primitive_kind(validation: InstalledValidation) -> str:
+    """How this validation is reached, from where it is installed."""
+
+    if validation.target.kind == LAKEHOUSE_TARGET:
+        return PYTHON_VALIDATION
+    return WAREHOUSE_PROCEDURE
+
+
+# --- Warehouse ----------------------------------------------------------------
+
+
+def _dispatch_warehouse(
+    validation: InstalledValidation, environment: Any, collect: bool
+):
+    """Execute the installed procedure once, and read what it set.
+
+    Once, whether or not the caller wanted rows. The transport keeps the result
+    sets *and* the outputs from a single execution, so asking for evidence never
+    costs a second run over data that may have moved.
+    """
+
+    from .declaration.tsql_validation import RESULT_PARAMETERS
+
+    executor = environment.sql_for(validation.target)
+    if executor is None:
+        raise ValidationError(
+            f"{validation.logical} runs in {validation.target}, and this run has "
+            "no SQL capability for it"
+        )
+    procedure = _procedure_name(validation)
+    outputs = RESULT_PARAMETERS[validation.kind]
+    inputs = (("suppress_result_set", 0 if collect else 1),)
+
+    if collect:
+        produced = executor.call_procedure_with_results(
+            procedure, inputs=inputs, outputs=outputs
+        )
+        row = produced.outputs
+        diagnostics = produced.result_sets[0] if produced.result_sets else ()
+    else:
+        row = executor.call_procedure(procedure, inputs=inputs, outputs=outputs)
+        diagnostics = None
+
+    return _result_from(validation, row), diagnostics
+
+
+def _procedure_name(validation: InstalledValidation) -> str:
+    identity = validation.artefact.object_id
+    return f"{_quote(identity.schema)}.{_quote(identity.object)}"
+
+
+def _quote(name: str) -> str:
+    return "[" + name.replace("]", "]]") + "]"
+
+
+def _result_from(validation: InstalledValidation, row):
+    if validation.kind == ASSUMPTION:
+        return AssumptionResult(violation_count=int(row["violation_count"] or 0))
+    return TestResult(
+        missing_count=int(row["missing_count"] or 0),
+        unexpected_count=int(row["unexpected_count"] or 0),
+    )
+
+
+# --- Lakehouse ----------------------------------------------------------------
+
+
+def _dispatch_python(
+    validation: InstalledValidation, environment: Any, collect: bool
+):
+    """Import the deployed module, construct it, and read it.
+
+    The same import machinery a load uses, in the same isolated runtime context,
+    because a validation sits in the same deployed tree and imports the same
+    object modules its author wrote against.
+    """
+
+    from .lakehouse import lakehouse_for
+    from .runtime.python_context import import_deployed_module
+    from .targets import ItemRef
+
+    if environment.spark is None:
+        raise ValidationError(
+            f"{validation.logical} needs a Spark session, and this run has none"
+        )
+    lakehouse = lakehouse_for(environment.resolver, ItemRef(validation.target.name))
+    runtime_root = _join(lakehouse.files_root(), *LOAD_ROOT.split("/"))
+    identity = validation.artefact.object_id
+    relative = f"{identity.schema}/{identity.object}"
+    within = (
+        relative[len(LOAD_ROOT) + 1 :] if relative.startswith(LOAD_ROOT) else relative
+    )
+    expected = _class_name(validation)
+    context = environment.runtime_scope.context_for(
+        logical_item=validation.logical.item,
+        physical_target=validation.target,
+        runtime_root=runtime_root,
+    )
+    module = import_deployed_module(
+        context, within, expected=expected, node_id=str(validation.logical)
+    )
+    frame = getattr(module, expected)(environment.spark, lakehouse=lakehouse).read()
+
+    if validation.kind == ASSUMPTION:
+        return AssumptionResult(violation_count=_count(frame)), (
+            _collected(frame) if collect else None
+        )
+
+    # Counted once. `count()` is the whole of what a suppressed run needs and it
+    # never brings a row to the driver; a collected run reuses the rows it
+    # already has rather than asking the engine twice.
+    if collect:
+        rows = _collected(frame)
+        sides = [str(row["_weaver_side"]) for row in rows]
+        return (
+            TestResult(
+                missing_count=sum(1 for side in sides if side == "expected"),
+                unexpected_count=sum(1 for side in sides if side == "actual"),
+            ),
+            rows,
+        )
+    return (
+        TestResult(
+            missing_count=_count(frame.where("_weaver_side = 'expected'")),
+            unexpected_count=_count(frame.where("_weaver_side = 'actual'")),
+        ),
+        None,
+    )
+
+
+def _count(frame: Any) -> int:
+    return int(frame.count())
+
+
+def _collected(frame: Any) -> tuple:
+    return tuple(row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect())
+
+
+def _class_name(validation: InstalledValidation) -> str:
+    """``Sales__OrdersReconcile``, from the deployed module's own filename.
+
+    From the file rather than from the logical ID, because the file is what was
+    installed — and the two agree by construction, since one function computed
+    the path from the ID.
+    """
+
+    name = validation.artefact.object_id.object
+    return name[: -len(".py")] if name.endswith(".py") else name
+
+
+def _join(root: str, *parts: str) -> str:
+    """The same string join the load dispatcher uses.
+
+    A string, not a ``Location``: ``files_root()`` answers as Python addresses
+    it, and calling ``.join`` on that would be ``str.join`` — which silently
+    interleaves the characters instead of appending a path segment.
+    """
+
+    return "/".join([str(root).rstrip("/"), *parts])
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+__all__ = [
+    "PYTHON_VALIDATION",
+    "WAREHOUSE_PROCEDURE",
+    "execute_validation",
+    "execute_validations",
+    "primitive_kind",
+]

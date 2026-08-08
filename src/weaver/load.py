@@ -504,13 +504,20 @@ class LoadSession:
             workspace=self.workspace,
         )
 
-    def open_log(self):
+    def open_log(self, task_type: str = TASK_TYPE):
+        """A task log for this run, of whichever kind of task it is.
+
+        The session is shared by load and validation because the capabilities
+        they need are the same; what they *are* is not, and the log records
+        that.
+        """
+
         from .task_logging import log_folder, open_task_log
 
         if self.store is None:
             raise LoadError("writing a task log needs a store")
         return open_task_log(
-            task_type=TASK_TYPE,
+            task_type=task_type,
             folder=log_folder(self.resolver, ItemRef(self.workspace.weaver_lakehouse)),
             store=self.store,
         )

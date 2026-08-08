@@ -99,6 +99,35 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(load)
     load.set_defaults(handler=handle_load)
 
+    validate = subcommands.add_parser(
+        "test", help="run the installed Tests and Assumptions in named targets"
+    )
+    validate.add_argument(
+        "targets",
+        nargs="+",
+        metavar="TARGET",
+        help="Lakehouse/Name or Warehouse/Name",
+    )
+    selection = validate.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--name",
+        metavar="Schema.Object",
+        help="run one installed validation and return its diagnostic rows",
+    )
+    selection.add_argument(
+        "--file",
+        metavar="PATH",
+        help="compile and run a source file without installing it",
+    )
+    validate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would run without dispatching anything",
+    )
+    validate.add_argument("--json", action="store_true", help="emit the report as JSON")
+    _add_workspace_args(validate)
+    validate.set_defaults(handler=handle_test)
+
     unbind = subcommands.add_parser(
         "unbind", help="remove catalogue state for named physical targets"
     )
@@ -708,6 +737,176 @@ def _print_load(report) -> None:
                 print(f"      {message.severity}: {message.message}")
     if report.task_log:
         print(f"\n  evidence: {report.task_log}")
+
+
+def handle_test(args: argparse.Namespace) -> int:
+    """Adapt command-line values to :func:`weaver.test`, wherever it has to run.
+
+    The same host boundary ``load`` crosses, and for the same reason: a
+    validation reads the data, so it runs where the data is.
+
+    A failing validation exits non-zero. That is what makes ``weaver test``
+    usable in a pipeline — the report is the evidence and the exit code is the
+    verdict — and it is why the API returns a report where this returns a
+    status.
+    """
+
+    import json
+
+    from weaver.errors import ValidationError
+
+    workspace = _resolve_workspace(args)
+    try:
+        report = _run_test(
+            workspace,
+            targets=args.targets,
+            name=args.name,
+            file=args.file,
+            dry_run=args.dry_run,
+        )
+    except ValidationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    else:
+        _print_test(report)
+    return 0 if report.succeeded else 1
+
+
+def _run_test(workspace, *, targets, name, file, dry_run: bool):
+    """One validation run, run where the data is."""
+
+    from weaver.operations import _inside_fabric_session
+    from weaver.workspaces import LocalWorkspace
+
+    if isinstance(workspace, LocalWorkspace) or _inside_fabric_session(workspace):
+        return weaver.test(
+            list(targets),
+            workspace=workspace,
+            name=name,
+            file=file,
+            dry_run=dry_run,
+        )
+    _refuse_absent_targets(workspace, targets)
+    return _run_test_over_livy(
+        workspace, targets=targets, name=name, file=file, dry_run=dry_run
+    )
+
+
+_TEST_BODY = """\
+from weaver.workspaces import FabricWorkspace
+import weaver
+
+workspace = FabricWorkspace(workspace={workspace!r}, environment={environment!r},
+                            weaver_lakehouse={weaver_lakehouse!r})
+source = {source!r}
+path = None
+if source is not None:
+    import pathlib, tempfile
+
+    path = pathlib.Path(tempfile.mkdtemp()) / {filename!r}
+    path.write_text(source, encoding="utf-8")
+
+try:
+    report = weaver.test(
+        {targets!r},
+        workspace=workspace,
+        name={name!r},
+        file=None if path is None else str(path),
+        dry_run={dry_run!r},
+    )
+except Exception as exc:
+    emit({{
+        "failed": True,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+    }})
+else:
+    emit({{"failed": False, "report": report.to_mapping()}})
+"""
+
+
+def _run_test_over_livy(workspace, *, targets, name, file, dry_run: bool):
+    """Submit the run into Fabric, carrying a ``--file``'s *content*.
+
+    The path is the developer's, and the session has never heard of it — so what
+    crosses is the source, written down on the far side under the same filename.
+    The filename matters: a validation's ID and its filename must agree, and the
+    reader on the other side checks that exactly as a build does.
+    """
+
+    from pathlib import Path
+
+    from weaver.errors import CommandError, ValidationError
+    from weaver.fabric import LivySession
+    from weaver.test_report import ValidationRunReport
+
+    source = None
+    filename = ""
+    if file is not None:
+        local = Path(file)
+        if not local.exists():
+            raise CommandError(f"no validation source at {local}")
+        source = local.read_text(encoding="utf-8")
+        filename = local.name
+
+    body = _TEST_BODY.format(
+        workspace=workspace.workspace,
+        environment=workspace.environment,
+        weaver_lakehouse=workspace.weaver_lakehouse,
+        targets=list(targets),
+        name=name,
+        source=source,
+        filename=filename,
+        dry_run=dry_run,
+    )
+    with LivySession.for_workspace(workspace) as session:
+        payload = session.run(body).payload
+    if payload is None:
+        raise CommandError(
+            "the run happened in Fabric but returned nothing; see the Livy session output"
+        )
+    if payload.get("failed"):
+        raise ValidationError(f"{payload['error_type']}: {payload['message']}")
+    return ValidationRunReport.from_mapping(payload["report"])
+
+
+def _print_test(report) -> None:
+    """One renderer, for a report produced here or one that crossed Livy."""
+
+    print(f"test {report.status}\n")
+    for node in report.nodes:
+        result = node.result
+        found = ""
+        if result is not None and hasattr(result, "violation_count"):
+            found = f"  ({result.violation_count} violation(s))"
+        elif result is not None:
+            found = (
+                f"  ({result.missing_count} missing, "
+                f"{result.unexpected_count} unexpected)"
+            )
+        print(f"  {node.status:<10} {node.kind:<11} {node.logical_id}{found}")
+        for message in node.messages:
+            print(f"      {message}")
+
+    totals = report.totals()
+    print(
+        f"\n  {totals['passed']} passed, {totals['failed']} failed, "
+        f"{totals['invalid']} could not run"
+    )
+    if report.task_log:
+        print(f"  evidence: {report.task_log}")
+
+    # The rows a targeted run asked for. Printed last, because the verdict is
+    # what a reader wants first and the evidence is what they want next.
+    for node in report.nodes:
+        if not node.diagnostics:
+            continue
+        print(f"\n  {node.logical_id}:")
+        for row in node.diagnostics:
+            print(f"    {row}")
 
 
 def handle_wipe(args: argparse.Namespace) -> int:

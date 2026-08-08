@@ -18,7 +18,9 @@ from .errors import (
 )
 from .operations import BuildResult, WipeReport, WipeResult, build, wipe
 from .load import load
+from .test import test
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
+from .test_report import ValidationNodeReport, ValidationRunReport
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
 from .objects import (
     Assumption,
@@ -59,6 +61,9 @@ __all__ = [
     "LoadNodeReport",
     "LoadMessage",
     "LoadResult",
+    "test",
+    "ValidationRunReport",
+    "ValidationNodeReport",
     # authored objects
     "WeaverObject",
     "Folder",
