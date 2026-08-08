@@ -169,6 +169,29 @@ Dependencies are ordinary imports resolved by the ordinary AST machinery, and
 it does inside a Table. Nothing about validation dependencies is new — a second
 dependency language for validation is exactly what this design does not build.
 
+### A declaration supplements inference; it does not replace it
+
+This is the one place validation and objects use *opposite* rules, and the
+difference is what the two graphs are for.
+
+An object's declared graph is its **build order**. Getting it wrong builds
+things in the wrong order, so the author needs the last word: a declaration
+replaces discovery, and `Dependencies: []` is a declaration, so an explicit none
+suppresses discovery rather than falling back to it. That is also why a Spark
+SQL *object* is required to declare — its query may read by path, and with
+replacement semantics a Spark SQL object that declared nothing would have no
+graph at all.
+
+A validation's graph exists to **run it after the data it inspects is ready**. It
+reads what it reads, and an author naming one more relation is adding to what
+was found rather than correcting it. So inference always runs, `Dependencies:`
+names only what inference could not reach — a relation read by path, or one a
+dynamic statement produced — and no language is required to declare anything.
+
+One dependency named twice, in two spellings, is one edge. The spelling kept is
+the inferred one, because that is how the same dependency is recorded when
+nobody declared it as well.
+
 ## What the catalogue records
 
 Two rows, describing two different things:

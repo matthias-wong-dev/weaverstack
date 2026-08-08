@@ -779,10 +779,18 @@ def test_one_id_key_only_still_holds_across_validation_and_object():
         parse("Table ID: A.B\nTest ID: A.C\nDescription: x\nLineage: y")
 
 
-def test_a_spark_sql_validation_must_declare_dependencies():
-    """Its queries may read by path, exactly as a Spark SQL object's may."""
-    with pytest.raises(MetadataError, match="must declare Dependencies"):
-        parse(TEST_YAML, language=SPARK_SQL)
+def test_a_spark_sql_validation_need_not_declare_dependencies():
+    """Unlike a Spark SQL object, whose declaration replaces inference entirely.
+
+    A validation's supplements it, so a header naming nothing leaves the
+    inferred graph intact rather than emptying it.
+    """
+    document = parse(TEST_YAML, language=SPARK_SQL)
+    assert document.dependencies == ()
+    assert not document.declares_dependencies
+
+
+def test_a_validation_may_still_declare_what_inference_cannot_reach():
     document = parse(TEST_YAML + "\nDependencies:\n  - Sales.Order", language=SPARK_SQL)
     assert [dependency.qualified for dependency in document.dependencies] == ["Sales.Order"]
 

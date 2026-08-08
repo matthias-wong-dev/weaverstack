@@ -832,15 +832,15 @@ def _parse_validation(
 
     _reject_unknown_keys(raw, kind)
 
+    # No language is required to declare its dependencies here, including Spark
+    # SQL, which is required to on an object. The rules differ because the two
+    # headers mean different things: an object's declaration *replaces*
+    # inference, so a Spark SQL object that declared nothing would have no graph
+    # at all; a validation's *supplements* it, so inference always runs and the
+    # header names only what inference could not reach. See
+    # :func:`weaver.declaration.repository.effective_dependencies`.
     declares_dependencies = "Dependencies" in raw
     dependencies = _parse_dependencies(raw.get("Dependencies"), object_id)
-    if language == SPARK_SQL and not declares_dependencies:
-        raise MetadataError(
-            f"a Spark SQL {kind} must declare Dependencies. Its queries may read by "
-            "path, which cannot be resolved back to a managed object, so the graph "
-            "is declared rather than discovered. Write `Dependencies: []` if it "
-            "genuinely reads nothing Weaver manages."
-        )
 
     description = _parse_text(raw, "Description")
     notes = _parse_notes(raw.get("Notes"))

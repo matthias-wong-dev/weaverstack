@@ -956,17 +956,36 @@ def _canonical(qualified: str) -> str:
 
 
 def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
-    """What this object depends on: declared if declared, else discovered.
+    """What this document depends on, by the rule its kind uses.
 
-    A declaration replaces discovery rather than adding to it, so an author can
-    remove an edge as well as add one — the phantom dependency an unused import
-    creates has no other cure. ``Dependencies: []`` is such a declaration, so an
-    explicit none suppresses discovery rather than falling back to it.
+    **A data object's declaration replaces discovery**, so an author can remove
+    an edge as well as add one — the phantom dependency an unused import creates
+    has no other cure. ``Dependencies: []`` is such a declaration, so an explicit
+    none suppresses discovery rather than falling back to it.
+
+    **A validation's declaration supplements discovery.** The difference is what
+    the two are for. An object's declared graph is its build order, and getting
+    it wrong builds things in the wrong order, so an author needs the last word.
+    A validation reads what it reads; the edges are there to run it after the
+    data it inspects is ready, and an author naming one more is adding to what
+    was found rather than correcting it. So inference always runs, and
+    ``Dependencies:`` names what inference could not reach — a relation read by
+    path, or one produced by dynamic SQL.
     """
 
+    if document.is_validation:
+        return _deduplicated(
+            document.referenced_object_ids + document.declared_dependencies
+        )
     if document.document.declares_dependencies:
         return document.declared_dependencies
     return document.referenced_object_ids
+
+
+def _deduplicated(dependencies: tuple[ObjectId, ...]) -> tuple[ObjectId, ...]:
+    """The same objects, first occurrence kept, in order."""
+
+    return tuple(dict.fromkeys(dependencies))
 
 
 def _resolve(

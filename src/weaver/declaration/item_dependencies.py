@@ -19,6 +19,69 @@ from .model import (
 from .source import SourceDocument
 
 
+def _declared_references(
+    source: SourceDocument, consumer: WeaverDocumentId
+) -> tuple[tuple[str, WeaverDocumentId], ...]:
+    """What the document's ``Dependencies:`` header names."""
+
+    return tuple(
+        (dependency.qualified, WeaverDocumentId(consumer.item, dependency))
+        for dependency in source.document.dependencies
+    )
+
+
+def _inferred_references(
+    source: SourceDocument,
+    consumer: WeaverDocumentId,
+    edges: list[ItemDependency],
+) -> tuple[tuple[str, WeaverDocumentId], ...]:
+    """What the document's own source says it reads.
+
+    Python imports, or the relations a SQL body names. A fully qualified SQL
+    reference names something outside the item namespace, so it is appended to
+    ``edges`` as a physical edge here rather than returned for resolution.
+    """
+
+    if source.language == "python":
+        return tuple(_python_references(source))
+
+    references: list[tuple[str, WeaverDocumentId]] = []
+    for reference in source.discovered_references:
+        if reference.call:
+            continue
+        if reference.is_qualified:
+            edges.append(
+                ItemDependency(
+                    consumer=consumer,
+                    reference=str(reference),
+                    resolution_kind="physical",
+                    is_within_item=False,
+                )
+            )
+        elif reference.object_id is not None:
+            references.append(
+                (str(reference), WeaverDocumentId(consumer.item, reference.object_id))
+            )
+    return tuple(references)
+
+
+def _first_per_destination(
+    references: tuple[tuple[str, WeaverDocumentId], ...]
+) -> tuple[tuple[str, WeaverDocumentId], ...]:
+    """One reference per destination, keeping the first spelling seen.
+
+    A validation that both imports ``Sales__Order`` and declares ``Sales.Order``
+    named one edge twice, in two spellings. It is one edge, so it is one row —
+    and the spelling kept is the inferred one, because that is how the same
+    dependency is recorded when nobody declared it as well.
+    """
+
+    seen: dict[WeaverDocumentId, tuple[str, WeaverDocumentId]] = {}
+    for written, destination in references:
+        seen.setdefault(destination, (written, destination))
+    return tuple(seen.values())
+
+
 def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     """Return ``repository`` with exact item-owned edges and a global DAG."""
 
@@ -32,34 +95,18 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
-        if source.document.declares_dependencies:
-            references = tuple(
-                (dependency.qualified, WeaverDocumentId(consumer.item, dependency))
-                for dependency in source.document.dependencies
+        # Which of the two rules this document's kind uses is decided in one
+        # place — see :func:`weaver.declaration.repository.effective_dependencies`
+        # for why a validation supplements and an object replaces.
+        if source.is_validation:
+            inferred = _inferred_references(source, consumer, edges)
+            references = _first_per_destination(
+                inferred + _declared_references(source, consumer)
             )
-        elif source.language == "python":
-            references = _python_references(source)
+        elif source.document.declares_dependencies:
+            references = _declared_references(source, consumer)
         else:
-            references = []
-            for reference in source.discovered_references:
-                if reference.call:
-                    continue
-                if reference.is_qualified:
-                    edges.append(
-                        ItemDependency(
-                            consumer=consumer,
-                            reference=str(reference),
-                            resolution_kind="physical",
-                            is_within_item=False,
-                        )
-                    )
-                elif reference.object_id is not None:
-                    references.append(
-                        (
-                            str(reference),
-                            WeaverDocumentId(consumer.item, reference.object_id),
-                        )
-                    )
+            references = _inferred_references(source, consumer, edges)
 
         for written, destination in references:
             producer, kind = _resolve_destination(

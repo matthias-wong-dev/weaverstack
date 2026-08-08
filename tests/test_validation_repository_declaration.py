@@ -369,18 +369,92 @@ def test_a_sql_reference_is_a_validation_dependency(warehouse):
     assert producers == ["Warehouse/Reporting/Sales.Order"]
 
 
-def test_declared_dependencies_still_win(lakehouse):
+def _validation_edges(repository, consumer_text: str):
+    consumer = WeaverDocumentId.parse(consumer_text)
+    return sorted(
+        edge.reference
+        for edge in repository.dependency_edges
+        if edge.consumer == consumer
+    )
+
+
+def test_a_declaration_supplements_inference_rather_than_replacing_it(lakehouse):
+    """The rule a validation uses, and the opposite of the one an object uses.
+
+    A validation reads what it reads: the edges exist to run it after the data
+    it inspects is ready, so naming one more adds to what was found. An object's
+    declared graph is its build order, so there a declaration replaces.
+    """
+
+    _write(lakehouse, "Lakehouse/Sales/Sales__Customer.py", _table("Sales.Customer"))
+    source = _python_test("Sales.OrdersReconcile").replace(
+        "Primary key: Id", "Primary key: Id\n\nDependencies:\n  - Sales.Customer"
+    )
+    _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
+
+    repository = parse(lakehouse)
+
+    # The import was inferred; the header added the one it could not reach.
+    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
+        "Sales.Customer",
+        "Sales__Order",
+    ]
+
+
+def test_declaring_nothing_leaves_the_inferred_graph_intact(lakehouse):
+    """`Dependencies: []` suppresses discovery on an object. Not here."""
+
+    source = _python_test("Sales.OrdersReconcile").replace(
+        "Primary key: Id", "Primary key: Id\n\nDependencies: []"
+    )
+    _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
+
+    repository = parse(lakehouse)
+
+    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
+        "Sales__Order"
+    ]
+
+
+def test_declaring_what_was_already_inferred_is_still_one_edge(lakehouse):
+    """One dependency named twice, in two spellings, is one row."""
+
     source = _python_test("Sales.OrdersReconcile").replace(
         "Primary key: Id", "Primary key: Id\n\nDependencies:\n  - Sales.Order"
     )
     _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
 
     repository = parse(lakehouse)
-    consumer = WeaverDocumentId.parse("Lakehouse/Sales/Sales.OrdersReconcile")
 
-    assert [
-        edge.reference for edge in repository.dependency_edges if edge.consumer == consumer
-    ] == ["Sales.Order"]
+    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
+        "Sales__Order"
+    ]
+
+
+def test_a_spark_sql_validation_infers_its_references(tmp_path):
+    """No `Dependencies:` header, and the graph is still right."""
+
+    _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
+    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(
+        tmp_path,
+        "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql",
+        """/*
+Test ID: Sales.OrdersReconcile
+
+Description: The summary matches the independent aggregation.
+*/
+select Id from Sales.Order;
+
+select Id from Sales.Order;
+""",
+    )
+
+    repository = parse(tmp_path)
+
+    assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == [
+        "Sales.Order"
+    ]
 
 
 def test_a_changed_test_changes_its_item_signature(lakehouse):
