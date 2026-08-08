@@ -427,3 +427,52 @@ def test_the_incomplete_catalogue_error_sends_the_reader_to_a_repair():
     message = str(raised.value)
     assert "repair" in message
     assert "scoped build" in message
+
+
+def test_a_catalogue_predating_an_introduced_table_still_builds():
+    """An estate built by an older Weaver is an upgrade, not damage.
+
+    The two are indistinguishable from the physical state alone, and what tells
+    them apart is consequence. The refusal above exists so a scoped build cannot
+    recreate a table and lose rows belonging to items it was not pointed at; a
+    table that has never existed anywhere has no such rows to lose, so creating
+    it costs nothing and the unbuilt items are correctly represented by having
+    no rows in it yet.
+
+    Without this, adding a dictionary table would stop every existing estate
+    from building until somebody repaired a catalogue that was never broken —
+    which is exactly what `_.TestDictionary` did on a real Fabric workspace.
+    """
+
+    from weaver.catalogue.state import INTRODUCED_TABLES, read_catalogue_state
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+
+    as_an_older_weaver_left_it = [
+        table.name for table in CATALOGUE_TABLES if table.name not in INTRODUCED_TABLES
+    ]
+
+    state = read_catalogue_state(_shaped(*as_an_older_weaver_left_it), ())
+
+    assert state.rows == {}
+
+
+def test_an_introduced_table_does_not_excuse_a_genuinely_damaged_catalogue():
+    """The exemption is for that table alone, not for whatever else is gone."""
+
+    from weaver.catalogue.state import INTRODUCED_TABLES, read_catalogue_state
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.errors import BuildError
+
+    damaged = [
+        table.name
+        for table in CATALOGUE_TABLES
+        if table.name not in INTRODUCED_TABLES and table.name != "TableDictionary"
+    ]
+
+    with pytest.raises(BuildError, match="catalogue is incomplete") as raised:
+        read_catalogue_state(_shaped(*damaged), ())
+
+    message = str(raised.value)
+    assert "TableDictionary" in message
+    # And it does not accuse the reader of having lost the new table too.
+    assert "TestDictionary" not in message.split("missing while")[0]

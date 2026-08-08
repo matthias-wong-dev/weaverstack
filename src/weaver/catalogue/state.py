@@ -30,6 +30,7 @@ from .tables import (
     RUNTIME_ROLES,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
+    TEST_DICTIONARY,
     VALIDATION_ROLES,
 )
 
@@ -386,6 +387,21 @@ class RegisteredDocument:
         return self.object_role in VALIDATION_ROLES
 
 
+#: Catalogue tables introduced after the first release of the control plane.
+#:
+#: An estate built by an older Weaver has every other table and not these, and
+#: that is an *upgrade*, not damage — which matters because the two are
+#: indistinguishable from the physical state alone. What separates them is
+#: consequence: the partial-catalogue refusal exists so a scoped build cannot
+#: recreate a table and lose rows belonging to items it was not pointed at, and
+#: a table that has never existed has no such rows to lose.
+#:
+#: Add a name here in the same change that adds the table, and only then. A table
+#: listed here that *was* in an older release would turn a real repair case into
+#: a silent partial rebuild.
+INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name})
+
+
 def _encode_json_value(value):
     if isinstance(value, datetime):
         return {"$weaver_type": "datetime", "value": value.isoformat()}
@@ -526,10 +542,18 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             "catalogue schema is incompatible; missing required column(s): "
             + ", ".join(incompatible)
         )
-    if present and missing:
+    # A table a *later* Weaver introduced is not a damaged catalogue. It holds no
+    # rows for anyone — nothing could ever have written to it — so creating it
+    # under a scoped build loses nothing, and the items this build was not
+    # pointed at are correctly represented by having no rows in it yet. Refusing
+    # here instead would mean that adding a dictionary table stopped every
+    # existing estate from building until somebody repaired a catalogue that was
+    # never broken.
+    unexpected = missing - INTRODUCED_TABLES
+    if present and unexpected:
         raise BuildError(
             "catalogue is incomplete: "
-            + ", ".join(sorted(missing))
+            + ", ".join(sorted(unexpected))
             + " missing while "
             + ", ".join(sorted(present))
             + " remain. An ordinary build is scoped to the items it was pointed "
