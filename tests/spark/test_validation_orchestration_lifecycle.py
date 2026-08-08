@@ -388,3 +388,119 @@ def test_a_dry_run_dispatches_nothing_and_writes_nothing(validated, spark):
     assert report.status == "planned"
     assert all(not node.executed for node in report.nodes)
     assert report.task_log is None
+
+
+# --- from source, without installing ------------------------------------------
+
+
+SOURCE_TEST = """/*
+Test ID: Sales.OrdersFromSource
+
+Description: A Test run from a file that was never built.
+
+Primary key: OrderId
+*/
+select * from values (1, 100), (2, 200) as t(OrderId, Amount);
+
+select OrderId, Amount from Sales.Order;
+"""
+
+SOURCE_ASSUMPTION = """/*
+Assumption ID: Sales.SourceAmountsArePositive
+
+Description: An Assumption run from a file that was never built.
+*/
+select OrderId, Amount from Sales.Order where Amount <= 0;
+"""
+
+
+def _source(tmp_path, name: str, text: str):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_source_file_runs_without_being_installed(validated, spark, tmp_path):
+    path = _source(tmp_path, "Sales.OrdersFromSource.sql", SOURCE_TEST)
+
+    report = run(validated, spark, file=str(path))
+
+    assert report.status == "passed"
+    assert report.nodes[0].logical_id == "Sales.OrdersFromSource"
+    assert report.nodes[0].result.failure_count == 0
+
+
+def test_a_failing_source_file_reports_its_counts(validated, spark, tmp_path):
+    path = _source(
+        tmp_path,
+        "Sales.OrdersFromSource.sql",
+        SOURCE_TEST.replace("(2, 200)", "(3, 300)"),
+    )
+
+    node = run(validated, spark, file=str(path)).nodes[0]
+
+    assert node.status == "failed"
+    assert node.result.missing_count == 1
+    assert node.result.unexpected_count == 1
+
+
+def test_a_source_assumption_runs_too(validated, spark, tmp_path):
+    path = _source(
+        tmp_path, "Sales.SourceAmountsArePositive.sql", SOURCE_ASSUMPTION
+    )
+
+    node = run(validated, spark, file=str(path)).nodes[0]
+
+    assert node.status == "passed"
+    assert node.result.violation_count == 0
+
+
+def test_file_mode_publishes_nothing(validated, spark, tmp_path):
+    """No Registry row, no TestDictionary row, no change to the estate."""
+
+    from weaver.catalogue.tables import TEST_DICTIONARY
+    from weaver.test_plan import ValidationEstate
+
+    lakehouses, requested = validated
+    path = _source(tmp_path, "Sales.OrdersFromSource.sql", SOURCE_TEST)
+    run(validated, spark, file=str(path))
+
+    with LoadSession(
+        lakehouses.workspace, requested, spark=spark, store=lakehouses.store
+    ) as session:
+        estate = ValidationEstate.from_catalogue(session.read_catalogue())
+
+    assert "Sales.OrdersFromSource" not in {
+        validation.qualified for validation in estate.validations.values()
+    }
+
+
+def test_file_mode_writes_no_task_log(validated, spark, tmp_path):
+    """A run over uncommitted source is a developer's loop, not an estate event."""
+
+    path = _source(tmp_path, "Sales.OrdersFromSource.sql", SOURCE_TEST)
+
+    assert run(validated, spark, file=str(path)).task_log is None
+
+
+def test_python_source_says_to_import_the_class_instead(validated, spark, tmp_path):
+    from weaver.errors import CommandError
+
+    path = _source(
+        tmp_path,
+        "Sales__OrdersFromSource.py",
+        '"""\nTest ID: Sales.OrdersFromSource\n\nDescription: x\n"""\n'
+        "from weaver import Test\n\n\nclass Sales__OrdersFromSource(Test):\n"
+        "    def expected(self):\n        return None\n\n"
+        "    def actual(self):\n        return None\n",
+    )
+
+    with pytest.raises(CommandError, match="already directly runnable"):
+        run(validated, spark, file=str(path))
+
+
+def test_a_missing_source_file_is_refused(validated, spark, tmp_path):
+    from weaver.errors import CommandError
+
+    with pytest.raises(CommandError, match="no validation source at"):
+        run(validated, spark, file=str(tmp_path / "absent.sql"))
