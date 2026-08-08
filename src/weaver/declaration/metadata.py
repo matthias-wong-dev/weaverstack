@@ -70,13 +70,12 @@ TEST = "Test"
 ASSUMPTION = "Assumption"
 VALIDATION_KINDS = frozenset({TEST, ASSUMPTION})
 
-ALL_KINDS = OBJECT_KINDS | VALIDATION_KINDS
-
 
 def is_validation_kind(kind: str) -> bool:
     """Whether this kind declares a validation rather than a data object."""
 
     return kind in VALIDATION_KINDS
+
 
 PYTHON = "python"
 SQL = "sql"

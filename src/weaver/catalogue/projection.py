@@ -54,10 +54,8 @@ from .tables import (
     KEY_PRIMARY,
     KEY_UNIQUE,
     REGISTRY,
-    ROLE_ASSUMPTION,
     ROLE_DATA,
     ROLE_LOAD,
-    ROLE_TEST,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -77,13 +75,12 @@ WAREHOUSE_TARGET = "warehouse"
 #: a catalogue meaning rather than leaking one.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
 
-#: How a validation kind names itself in ``TestDictionary.test_type``, and the
-#: Registry role its runnable artefact carries. Two vocabularies for one kind,
-#: because the logical declaration and the physical primitive are different
-#: things — the dictionary describes the Test, the Registry certifies the
-#: procedure or module it compiled to.
+#: How a validation kind names itself in ``TestDictionary.test_type``. A
+#: separate vocabulary from the Registry's ``object_role``, because the logical
+#: declaration and the physical primitive are different things — the dictionary
+#: describes the Test, the Registry certifies the procedure or module it
+#: compiled to.
 TEST_TYPE_FOR_KIND = {TEST: "test", ASSUMPTION: "assumption"}
-ROLE_FOR_VALIDATION_KIND = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}
 
 
 @dataclass(frozen=True)

@@ -59,7 +59,6 @@ from .references import (
     validate_repository_metadata,
 )
 from .metadata import (
-    ALL_KINDS,
     ASSUMPTION,
     AUDIT_COLUMNS,
     AUDIT_DELETE,
@@ -144,7 +143,6 @@ __all__ = [
     "TEST",
     "ASSUMPTION",
     "VALIDATION_KINDS",
-    "ALL_KINDS",
     "is_validation_kind",
     "PYTHON",
     "SQL",
