@@ -178,7 +178,15 @@ Files/_/Load/tests/Sales__OrdersReconcile.py      what a build deploys
 
 The program's shape is its contract: after any setup, a Test's first query is
 expected and its second is actual; an Assumption's one query is the violating
-rows. Setup is unrestricted and may be dynamic.
+rows. Setup is unrestricted and may be dynamic — but it comes **first**, and
+nothing may follow the contract queries.
+
+That last rule is not tidiness. A Spark SQL `SELECT` is lazy: the frame is built
+where it is written and materialised later, so a setup statement running after
+the first contract query changes what that query will read by the time anyone
+reads it. T-SQL does the opposite, capturing each contract query into a temp
+table at its authored position. The same body would mean two different things on
+the two engines, so both refuse it rather than each answering its own way.
 
 **Both sides come from one execution.** `Test.read()` reaches its two relations
 through a `_sides()` hook rather than by calling `expected()` and `actual()`

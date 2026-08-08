@@ -42,11 +42,21 @@ CONTRACT = {
 }
 
 
+class Statement(Protocol):
+    """One statement, and whether it returns rows."""
+
+    @property
+    def produces_result(self) -> bool: ...
+
+
 class Program(Protocol):
     """What both dialect parsers produce, as much of it as this needs."""
 
     @property
     def queries(self) -> Sequence[object]: ...
+
+    @property
+    def statements(self) -> Sequence[Statement]: ...
 
 
 def validate_validation_contract(
@@ -62,6 +72,7 @@ def validate_validation_contract(
     required, contract = CONTRACT[kind]
     found = len(program.queries)
     if found == required:
+        _refuse_setup_after_the_contract(program, what=what, kind=kind, error=error)
         return
 
     article = "an" if kind[0].upper() in "AEIOU" else "a"
@@ -77,6 +88,54 @@ def validate_validation_contract(
         f"{'sets' if required > 1 else 'set'} — {contract} — and this body produces "
         f"{found}. Statements that return no rows are setup and may precede them "
         "freely; turn an intermediate query into a temporary view."
+    )
+
+
+def _refuse_setup_after_the_contract(
+    program: Program, *, what: str, kind: str, error: type[Exception]
+) -> None:
+    """The contract queries end the body; nothing runs after them.
+
+    Counting them is not enough, and the reason is Spark. A ``SELECT`` there is
+    lazy: the frame is built where it is written and *materialised* later, so a
+    setup statement sitting after the first contract query — replacing a
+    temporary view, say — changes what that query will read by the time anyone
+    reads it. T-SQL has the opposite behaviour, because the compiler captures
+    each contract query into a temp table at its authored position.
+
+    So the same body would mean two different things on the two engines, and
+    neither would be the one the author wrote. Requiring the contract queries to
+    come last removes the question rather than answering it per dialect.
+    """
+
+    statements = list(getattr(program, "statements", ()))
+    first = next(
+        (
+            index
+            for index, statement in enumerate(statements)
+            if statement.produces_result
+        ),
+        None,
+    )
+    if first is None:
+        return
+    trailing = [
+        index
+        for index, statement in enumerate(statements[first:], start=first)
+        if not statement.produces_result
+    ]
+    if not trailing:
+        return
+
+    article = "an" if kind[0].upper() in "AEIOU" else "a"
+    raise error(
+        f"{what}: {article} {kind} ends with its contract "
+        f"{'queries' if CONTRACT[kind][0] > 1 else 'query'}, and "
+        f"{len(trailing)} statement(s) follow. Setup belongs before them: a "
+        "Spark SQL query is lazy, so a statement that runs afterwards can change "
+        "what it reads before anyone reads it, while T-SQL captures it where it "
+        "was written — so the same body would mean two different things on the "
+        "two engines. Move the setup above the first query."
     )
 
 

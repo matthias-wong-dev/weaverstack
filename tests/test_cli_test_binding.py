@@ -313,3 +313,60 @@ def test_a_planned_installed_run_also_exits_zero(captured, capsys):
     )
 
     assert _run("Lakehouse/Sales", "--dry-run") == 0
+
+
+# --- evidence crossing the desktop-to-Fabric boundary --------------------------
+
+
+def test_diagnostics_are_reattached_after_crossing_livy():
+    """`--name` must answer the same way whichever side it was typed on.
+
+    `to_mapping()` excludes diagnostics deliberately — it is what a task log and
+    `--json` are built from — so a report reconstructed from it carries counts
+    alone. The rows travel beside it and are put back here; without that, the
+    same command printed evidence in a notebook and none from a desktop.
+    """
+
+    from weaver_cli.main import _with_diagnostics
+
+    report = ValidationRunReport(
+        status=FAILED,
+        nodes=(
+            _node(
+                "Sales.OrdersReconcile",
+                "Test",
+                FAILED,
+                TestResult(missing_count=1, unexpected_count=0),
+            ),
+            _node("Sales.NoOrphans", "Assumption", PASSED, AssumptionResult()),
+        ),
+    )
+    crossed = ValidationRunReport.from_mapping(report.to_mapping())
+    assert crossed.nodes[0].diagnostics is None
+
+    restored = _with_diagnostics(
+        crossed,
+        {
+            "Lakehouse/Sales/Sales.OrdersReconcile": [
+                {"_weaver_side": "expected", "_weaver_sk": 1, "Id": 7}
+            ]
+        },
+    )
+
+    assert restored.nodes[0].diagnostics == (
+        {"_weaver_side": "expected", "_weaver_sk": 1, "Id": 7},
+    )
+    # The node that produced none is untouched, and the counts are unchanged.
+    assert restored.nodes[1].diagnostics is None
+    assert restored.nodes[0].result.missing_count == 1
+
+
+def test_a_report_with_no_evidence_crosses_unchanged():
+    from weaver_cli.main import _with_diagnostics
+
+    report = ValidationRunReport(
+        status=PASSED,
+        nodes=(_node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),),
+    )
+
+    assert _with_diagnostics(report, {}) is report

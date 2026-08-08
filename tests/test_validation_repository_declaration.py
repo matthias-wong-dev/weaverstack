@@ -586,3 +586,97 @@ def test_data_metadata_on_a_validation_is_refused_by_the_repository(lakehouse):
 
     with pytest.raises(MetadataError, match="unknown metadata key"):
         parse(lakehouse)
+
+
+# --- the contract queries end the body ----------------------------------------
+#
+# Counting them is not enough. A Spark SQL `SELECT` is lazy — the frame is built
+# where it is written and materialised later — so a setup statement *after* the
+# first contract query changes what that query will read by the time anyone
+# reads it. T-SQL does the opposite: the compiler captures each contract query
+# into a temp table at its authored position. The same body would mean two
+# different things on the two engines, so both refuse it.
+
+
+def test_setup_after_a_test_s_contract_queries_is_refused(warehouse):
+    _write(
+        warehouse,
+        "Warehouse/Reporting/tests/Sales.OrderReconciliation.sql",
+        _tsql_test("Sales.OrderReconciliation")
+        + "\nselect Id into #afterwards from Sales.Order;\n",
+    )
+
+    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+        parse(warehouse)
+
+
+def test_setup_between_a_test_s_contract_queries_is_refused(warehouse):
+    source = _tsql_test("Sales.OrderReconciliation").replace(
+        "select Id from Sales.Order;\n\nselect Id from Sales.Order;",
+        "select Id from Sales.Order;\n\n"
+        "select Id into #between from Sales.Order;\n\n"
+        "select Id from Sales.Order;",
+    )
+    _write(
+        warehouse, "Warehouse/Reporting/tests/Sales.OrderReconciliation.sql", source
+    )
+
+    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+        parse(warehouse)
+
+
+def test_setup_after_an_assumption_s_query_is_refused(warehouse):
+    _write(
+        warehouse,
+        "Warehouse/Reporting/assumptions/Sales.OrdersHaveCustomers.sql",
+        _tsql_assumption("Sales.OrdersHaveCustomers")
+        + "\nselect Id into #afterwards from Sales.Order;\n",
+    )
+
+    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+        parse(warehouse)
+
+
+def test_the_same_rule_holds_for_spark_sql(tmp_path):
+    """Where it matters most, because a Spark query is lazy."""
+
+    _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
+    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(
+        tmp_path,
+        "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql",
+        """/*
+Test ID: Sales.OrdersReconcile
+
+Description: The summary matches the independent aggregation.
+*/
+select Id from Sales.Order;
+
+select Id from Sales.Order;
+
+create or replace temporary view sneaky as select 1 as Id;
+""",
+    )
+
+    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+        parse(tmp_path)
+
+
+def test_setup_before_the_contract_queries_is_ordinary(warehouse):
+    """Which is the whole point — setup is unrestricted, it just comes first."""
+
+    _write(
+        warehouse,
+        "Warehouse/Reporting/tests/Sales.OrderReconciliation.sql",
+        _tsql_test("Sales.OrderReconciliation").replace(
+            "select Id from Sales.Order;\n\nselect Id from Sales.Order;",
+            "select Id into #first from Sales.Order;\n\n"
+            "select Id into #second from Sales.Order;\n\n"
+            "select Id from #first;\n\n"
+            "select Id from #second;",
+        ),
+    )
+
+    reporting = item(parse(warehouse), "Reporting")
+
+    assert len(reporting.validations) == 1

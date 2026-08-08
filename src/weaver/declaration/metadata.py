@@ -833,12 +833,16 @@ def _parse_validation(
     _reject_unknown_keys(raw, kind)
 
     # No language is required to declare its dependencies here, including Spark
-    # SQL, which is required to on an object. The rules differ because the two
-    # headers mean different things: an object's declaration *replaces*
-    # inference, so a Spark SQL object that declared nothing would have no graph
-    # at all; a validation's *supplements* it, so inference always runs and the
-    # header names only what inference could not reach. See
-    # :func:`weaver.declaration.repository.effective_dependencies`.
+    # SQL, which is required to on an object.
+    #
+    # What the header *means* is the same for both, and is the rule every kind
+    # uses: declared replaces inferred, and `Dependencies: []` is a declaration,
+    # so an explicit none means none. What differs is only whether declaring is
+    # compulsory. A Spark SQL object must, because its query may read by path
+    # and a load ordered by a half-known graph builds things in the wrong order;
+    # a validation need not, because it installs last and nothing depends on it,
+    # so an edge inference missed costs an ordering nicety rather than a wrong
+    # estate. See :func:`weaver.declaration.repository.effective_dependencies`.
     declares_dependencies = "Dependencies" in raw
     dependencies = _parse_dependencies(raw.get("Dependencies"), object_id)
 

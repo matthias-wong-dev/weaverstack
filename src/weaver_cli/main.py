@@ -809,6 +809,15 @@ if source is not None:
     path = pathlib.Path(tempfile.mkdtemp()) / {filename!r}
     path.write_text(source, encoding="utf-8")
 
+def _portable(value):
+    # Diagnostic rows carry whatever the validation selected — dates, decimals,
+    # binary — and this crosses as JSON. Anything JSON cannot hold is rendered,
+    # because these rows are read by a person and never compared or persisted.
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    return str(value)
+
+
 try:
     report = weaver.test(
         {targets!r},
@@ -824,7 +833,22 @@ except Exception as exc:
         "message": str(exc),
     }})
 else:
-    emit({{"failed": False, "report": report.to_mapping()}})
+    # Beside the mapping, never inside it. `to_mapping` excludes diagnostics
+    # deliberately — it is what a task log and JSON output are built from — so
+    # interactive evidence travels as its own field, keyed by node, and is
+    # reattached on the other side.
+    emit({{
+        "failed": False,
+        "report": report.to_mapping(),
+        "diagnostics": {{
+            node.logical_id: [
+                {{key: _portable(value) for key, value in row.items()}}
+                for row in (node.diagnostics or ())
+            ]
+            for node in report.nodes
+            if node.diagnostics
+        }},
+    }})
 """
 
 
@@ -870,7 +894,33 @@ def _run_test_over_livy(workspace, *, targets, name, file, dry_run: bool):
         )
     if payload.get("failed"):
         raise ValidationError(f"{payload['error_type']}: {payload['message']}")
-    return ValidationRunReport.from_mapping(payload["report"])
+
+    report = ValidationRunReport.from_mapping(payload["report"])
+    return _with_diagnostics(report, payload.get("diagnostics") or {})
+
+
+def _with_diagnostics(report, diagnostics: dict):
+    """Reattach the evidence a targeted run produced on the other side.
+
+    A report that crossed a boundary would otherwise carry counts alone, so
+    ``--name`` would print rows when run inside Fabric and print none when run
+    from a desktop against the same estate — the same command answering two
+    different ways depending on where it happened to be typed.
+    """
+
+    from dataclasses import replace
+
+    if not diagnostics:
+        return report
+    return replace(
+        report,
+        nodes=tuple(
+            replace(node, diagnostics=tuple(diagnostics[node.logical_id]))
+            if node.logical_id in diagnostics
+            else node
+            for node in report.nodes
+        ),
+    )
 
 
 def _print_test(report) -> None:
