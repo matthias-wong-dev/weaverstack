@@ -287,6 +287,65 @@ def load_procedure_name(source: ObjectId) -> str:
     return f"{schema}.{procedure}"
 
 
+#: What a generated validation procedure is called. Read as a sentence — the
+#: kind, then the logical validation it runs — and stored exactly as the
+#: Warehouse holds it, for the same reason a load procedure's name is.
+#:
+#: The *logical* validation stays ``Sales.IncrementalCount``; this is only its
+#: installed executable form, and the two are deliberately different names for
+#: different things. ``_.TestDictionary`` describes the first; ``_.Registry``
+#: certifies the second.
+VALIDATION_PROCEDURE_PREFIX = {"Test": "Test ", "Assumption": "Assumption "}
+
+#: Where a compiled validation module lands in the deployed runtime tree. Under
+#: the existing root rather than beside it, so ``from Sales__Order import
+#: Sales__Order`` resolves from a validation exactly as it does from a load —
+#: one deployed tree per item, and the imports keep working.
+VALIDATION_FOLDER = {"Test": "tests", "Assumption": "assumptions"}
+
+
+def validation_procedure_id(
+    item: WeaverItemId, kind: str, source: ObjectId
+) -> WeaverDocumentId:
+    """The identity of the procedure that runs one Warehouse validation."""
+
+    return WeaverDocumentId(
+        item,
+        ObjectId(
+            schema=ETL_SCHEMA,
+            object=f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}",
+        ),
+        shape=PROCEDURE_SHAPE,
+    )
+
+
+def validation_procedure_name(kind: str, source: ObjectId) -> str:
+    """How the generated validation procedure spells its own name in T-SQL.
+
+    Derived from the same parts as :func:`validation_procedure_id`, so the
+    identity the catalogue registers and the name the script creates cannot
+    drift.
+    """
+
+    schema = _tsql_ident(ETL_SCHEMA)
+    procedure = _tsql_ident(
+        f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}"
+    )
+    return f"{schema}.{procedure}"
+
+
+def validation_module_path(kind: str, source: ObjectId) -> str:
+    """Where a compiled Lakehouse validation module lands, under the runtime root.
+
+    ``_/Load/tests/Sales__OrdersReconcile.py``. The subdirectory keeps validation
+    legible in a deployed tree without moving it out of the import root.
+    """
+
+    from .declaration.spark_sql_module import deployed_module_name
+
+    return f"{VALIDATION_FOLDER[kind]}/{deployed_module_name(source)}"
+
+
 def _salted(signature: str, version: int) -> str:
     """A generated artefact's signature: what it is rendered from, and by what.
 

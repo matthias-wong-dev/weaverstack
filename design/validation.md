@@ -190,6 +190,46 @@ There is no installed `.sql` validation program and nothing that runs one. The
 comparison, key validation, correlation and diagnostics stay in
 `test_compare` rather than being emitted a second time in SQL.
 
+### Compiled to a Warehouse procedure
+
+A T-SQL validation compiles to an installed procedure, and — unlike a load — the
+payload *is* the procedure. A load procedure has to name its target's physical
+columns, which are not knowable while the target is a declaration, so what a
+load generates is a script that reads `sys.columns` and assembles the procedure
+server-side. A validation names no target: its columns are whatever its own
+queries return, materialised into temp tables, and `EXCEPT` and `d.*` are
+column-agnostic.
+
+```sql
+create or alter procedure [_].[Test Sales.OrdersReconcile]
+    @missing_count       bigint = null output
+  , @unexpected_count    bigint = null output
+  , @suppress_result_set bit = 0
+```
+
+The counts are in the signature, not in a result set, for the reason a load's
+are: authored setup may run `EXEC` and return rows of its own, so "the result
+set this produced" is a question with no answer. They are optional so
+`exec [_].[Test Sales.OrdersReconcile];` still works typed by hand.
+
+**Only the contract queries are rewritten.** A single offset-exact pass over the
+authored body diverts each into a temp table with the same transform the
+shape-only build uses — so a CTE gets its `INTO` on the body `SELECT` — and
+everything else the author wrote travels verbatim and in place.
+
+**`_weaver_sk` ranks keys, not rows.** The distinct declared-key values across
+both sides are ranked once into a table of their own and joined back. Ranking
+over a union of the *rows* is the obvious shape and does not work: the rows are
+projected with `*`, since Weaver does not know a Test's columns, so a
+`_weaver_side` added to the union would appear in the output twice. Without a
+key, each side is numbered within itself and the actual side is offset past
+`@missing_count`.
+
+**One body, two wrappers.** The installed procedure and the direct `--file`
+batch share the rendered body exactly — the batch declares the same locals and
+projects them at the end. Two renderers would be two contracts, and the promise
+of `--file` is that it runs what an install would have run.
+
 Dependencies are ordinary imports resolved by the ordinary AST machinery, and
 `Sales__Orders(self)` inherits the session and the resolved Lakehouse exactly as
 it does inside a Table. Nothing about validation dependencies is new — a second
