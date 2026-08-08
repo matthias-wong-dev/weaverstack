@@ -301,6 +301,25 @@ def _operation_workspace(*, workspace, workspace_config) -> Workspace:
     return resolve_workspace(workspace=workspace, workspace_config=workspace_config)
 
 
+def current_workspace() -> Workspace:
+    """The workspace this code is running in, discovered rather than named.
+
+    Inside a Fabric notebook there is exactly one right answer and the session
+    already knows it, so making a caller repeat it is asking them to restate a
+    fact that cannot differ. This is the discovery every operation already does
+    for ``workspace=None``, made reachable on its own for the case that needs a
+    *resolver* rather than an operation — reaching a Lakehouse the notebook is
+    not attached to, for instance.
+
+    Outside a session there is nothing to discover, and this says so rather than
+    guessing: a desktop caller names its workspace or its configuration file.
+    """
+
+    return _with_inferred_control_lakehouse(
+        _operation_workspace(workspace=None, workspace_config=None)
+    )
+
+
 def _current_fabric_workspace() -> FabricWorkspace:
     try:
         from notebookutils import runtime

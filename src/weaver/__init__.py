@@ -16,7 +16,14 @@ from .errors import (
     ValidationError,
     WeaverError,
 )
-from .operations import BuildResult, WipeReport, WipeResult, build, wipe
+from .operations import (
+    BuildResult,
+    WipeReport,
+    WipeResult,
+    build,
+    current_workspace,
+    wipe,
+)
 from .load import load
 from .test import test
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
@@ -78,6 +85,7 @@ __all__ = [
     "Lakehouse",
     "default_lakehouse",
     "lakehouse_for",
+    "current_workspace",
     # common errors
     "WeaverError",
     "CommandError",

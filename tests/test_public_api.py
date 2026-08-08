@@ -43,6 +43,7 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "Lakehouse",
         "default_lakehouse",
         "lakehouse_for",
+        "current_workspace",
         "WeaverError",
         "CommandError",
         "ConfigError",

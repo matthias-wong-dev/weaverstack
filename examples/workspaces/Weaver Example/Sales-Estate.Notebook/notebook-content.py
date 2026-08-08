@@ -109,7 +109,6 @@ load_result = weaver.load(
         "Lakehouse/Sales",
         "Warehouse/Reporting",
     ],
-    workspace=workspace,
 )
 
 print(f"Load {load_result.status}")
@@ -119,6 +118,92 @@ for node in load_result.nodes:
     print(f"{node.status:<24} {node.node_id}{rows}")
 
 print(f"Evidence: {load_result.task_log}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## Validate the estate
+#
+# A build creates structure and a load puts rows in it; neither says whether
+# the rows that landed are the rows the estate declared they would be. A Test
+# compares an expected relation with an actual one and passes when the
+# symmetric difference is empty; an Assumption returns the rows that
+# contradict it and passes when there are none.
+#
+# One call runs both kinds, across both engines — the Spark SQL Test and the
+# Python Assumption in the Lakehouse, and the T-SQL Assumption compiled into a
+# stored procedure in the Warehouse.
+#
+# A whole-target run reports **counts only**. Diagnostic rows may be large and
+# may carry sensitive business data, so they are never transferred and never
+# written to the task log.
+
+# CELL ********************
+
+test_result = weaver.test(
+    [
+        "Lakehouse/Sales",
+        "Warehouse/Reporting",
+    ],
+)
+
+print(f"Test {test_result.status}\n")
+
+for node in test_result.nodes:
+    result = node.result
+    if hasattr(result, "violation_count"):
+        found = f"{result.violation_count} violation(s)"
+    else:
+        found = f"{result.missing_count} missing, {result.unexpected_count} unexpected"
+    print(f"{node.status:<10} {node.kind:<11} {node.logical_id}  ({found})")
+
+totals = test_result.totals()
+print(
+    f"\n{totals['passed']} passed, {totals['failed']} failed, "
+    f"{totals['invalid']} could not run"
+)
+print(f"Evidence: {test_result.task_log}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## Name one, and see the rows
+#
+# Naming a single validation returns its diagnostic rows *as well as* its
+# counts, from the same execution — a Test run twice would compare data that
+# could have changed in between.
+#
+# Each row says which side it came from and carries `_weaver_sk`, which is the
+# same for both sides of one changed entity when the Test declares a primary
+# key. So a reader can tell *missing* from *unexpected* from *different*
+# without Weaver having to decide which it was.
+
+# CELL ********************
+
+named = weaver.test(
+    "Lakehouse/Sales",
+    name="Sales.OrderSummaryReconciliation",
+)
+
+node = named.nodes[0]
+print(f"{node.status}: {node.result.failure_count} discrepancy row(s)\n")
+
+if node.diagnostics:
+    display(spark.createDataFrame(list(node.diagnostics)))
+else:
+    print("The summary reconciles: nothing to show.")
 
 # METADATA ********************
 
@@ -139,16 +224,47 @@ print(f"Evidence: {load_result.task_log}")
 
 import sys
 
-from weaver import lakehouse_for
+from weaver import current_workspace, lakehouse_for
 from weaver.resolution import resolver_for
 from weaver.targets import ItemRef
 
-destination = lakehouse_for(resolver_for(workspace), ItemRef("Sales"))
+# Nothing names the workspace: a session already knows which one it is, and
+# `current_workspace()` is that discovery. What *is* named is the Lakehouse —
+# a destination is never inherited, even when there is only one.
+destination = lakehouse_for(resolver_for(current_workspace()), ItemRef("Sales"))
 sys.path.insert(0, f"{destination.files_root()}/_/Load")
 
 from Sales__OrderSummary import Sales__OrderSummary
 
 print(Sales__OrderSummary(spark, lakehouse=destination).load().as_row())
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# MARKDOWN ********************
+
+# ## And one validation on its own
+#
+# The same property, for validation. This opens no catalogue, invokes no
+# orchestrator and writes no task log — it imports the class and calls it, and
+# what comes back is a DataFrame you can look at.
+#
+# It is the loop a developer is actually in: write an Assumption, run it, fix
+# it. `weaver.test(..., file=...)` does the same for a SQL validation that has
+# not been built yet.
+
+# CELL ********************
+
+from assumptions.Sales__OrderCustomerExists import Sales__OrderCustomerExists
+
+violations = Sales__OrderCustomerExists(spark, lakehouse=destination).read()
+
+print(f"{violations.count()} order(s) name a customer that is not there")
+display(violations)
 
 # METADATA ********************
 
