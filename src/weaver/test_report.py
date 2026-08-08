@@ -125,7 +125,15 @@ class ValidationRunReport:
 
     @property
     def succeeded(self) -> bool:
-        return self.status == PASSED
+        """Nothing failed and nothing was unrunnable.
+
+        ``PLANNED`` counts, and has to: a dry run dispatched nothing, so there
+        is nothing for it to have got wrong, and a non-zero exit would tell a
+        pipeline that asking what *would* run had failed. The node property
+        agrees, which it did not before — and the CLI reads this one.
+        """
+
+        return self.status in (PASSED, PLANNED)
 
     @property
     def failed_nodes(self) -> tuple[ValidationNodeReport, ...]:

@@ -234,30 +234,73 @@ def test_a_targeted_run_executes_the_procedure_exactly_once():
     assert len(executor.calls) == 1
 
 
+class _CountingFrame:
+    """A frame that answers an aggregation and refuses to hand over rows.
+
+    Two claims in one object, and both are about what the code must *not* do.
+    ``collect`` on the frame itself raises, so a suppressed run that
+    materialised diagnostic rows fails loudly rather than quietly pulling a
+    million of them to the driver. And every action is counted, so a run that
+    evaluated the comparison twice — once per side — fails too: two actions can
+    observe different data if the tables move between them, and the two halves
+    of one Test's answer would then describe different estates.
+    """
+
+    def __init__(self, by_side):
+        self.by_side = dict(by_side)
+        self.actions = 0
+
+    def groupBy(self, column):  # noqa: N802 - Spark's own spelling
+        assert column == "_weaver_side"
+        return _Grouped(self)
+
+    def count(self):
+        self.actions += 1
+        return sum(self.by_side.values())
+
+    def where(self, _predicate):
+        raise AssertionError(
+            "a suppressed run must aggregate by side, not count each side"
+        )
+
+    def collect(self):
+        raise AssertionError("a suppressed run must not collect diagnostic rows")
+
+
+class _Grouped:
+    def __init__(self, frame):
+        self.frame = frame
+
+    def count(self):
+        return _Aggregated(self.frame)
+
+
+class _Aggregated:
+    def __init__(self, frame):
+        self.frame = frame
+
+    def collect(self):
+        self.frame.actions += 1
+        return [
+            {"_weaver_side": side, "count": n}
+            for side, n in self.frame.by_side.items()
+        ]
+
+
 def test_a_suppressed_spark_run_never_materialises_a_row():
     """The claim is about what is *not* done, so the frame refuses to be collected."""
 
     from weaver.test_execution import _dispatch_python
 
-    class _Frame:
-        def __init__(self, n):
-            self.n = n
-
-        def count(self):
-            return self.n
-
-        def where(self, _predicate):
-            return _Frame(1)
-
-        def collect(self):
-            raise AssertionError("a suppressed run must not collect diagnostic rows")
+    _Frame = _CountingFrame
+    frame = _CountingFrame({"expected": 1, "actual": 1})
 
     class _Class:
         def __init__(self, spark, lakehouse=None):
             pass
 
         def read(self):
-            return _Frame(2)
+            return frame
 
     class _Module:
         Sales__OrdersReconcile = _Class
@@ -292,8 +335,11 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
         lakehouse_module.lakehouse_for = real_lakehouse_for
         context_module.import_deployed_module = real_import
 
-    assert result.failure_count == 2
+    assert result.missing_count == 1
+    assert result.unexpected_count == 1
     assert diagnostics is None
+    # One action for the whole comparison, not one per side.
+    assert frame.actions == 1
 
 
 # --- dry run ------------------------------------------------------------------
@@ -406,3 +452,129 @@ def test_a_report_survives_a_transport_round_trip_without_its_rows():
     assert back.nodes[0].kind == "Assumption"
     assert back.nodes[0].result.violation_count == 3
     assert back.nodes[0].diagnostics is None
+
+
+# --- running a source file, without installing it ------------------------------
+
+
+class _BatchExecutor:
+    """A Warehouse batch that returns evidence *and then* its projection.
+
+    Which is what the generated validation batch does, and the shape that made
+    the first implementation wrong: it read the first result set, found a
+    diagnostic row with no count column on it, and reported a failing Test as
+    passing.
+    """
+
+    def __init__(self, result_sets):
+        self.result_sets = tuple(result_sets)
+        self.statements: list[str] = []
+
+    def query(self, statement, parameters=None):
+        raise AssertionError(
+            "a batch returning evidence and counts must not be read one set at a time"
+        )
+
+    def query_result_sets(self, statement, parameters=None):
+        self.statements.append(statement)
+        return self.result_sets
+
+
+class _FileSession:
+    def __init__(self, executor):
+        self._executor = executor
+        self.spark = None
+        self.resolver = None
+
+    def _warehouse_sql(self, _name):
+        return self._executor
+
+
+def _source(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+FILE_TEST = """/*
+Test ID: Sales.OrdersReconcile
+
+Description: A Test run from source.
+
+Primary key: OrderId
+*/
+select OrderId from Sales.Expected;
+
+select OrderId from Sales.Orders;
+"""
+
+
+def _file_node(tmp_path, executor, **kwargs):
+    from datetime import datetime, timezone
+
+    from weaver.test_file import source_file_node
+
+    return source_file_node(
+        _FileSession(executor),
+        requested=[WAREHOUSE_TARGET],
+        path=_source(tmp_path, "Sales.OrdersReconcile.sql", FILE_TEST),
+        started=datetime.now(timezone.utc),
+        **kwargs,
+    )
+
+
+def test_a_failing_source_test_reports_its_counts_not_a_diagnostic_row(tmp_path):
+    """The regression: counts come from the projection, never the evidence."""
+
+    executor = _BatchExecutor(
+        (
+            # The diagnostics the batch emits first...
+            (
+                {"_weaver_side": "expected", "_weaver_sk": 1, "OrderId": 7},
+                {"_weaver_side": "actual", "_weaver_sk": 2, "OrderId": 9},
+            ),
+            # ...and the projection of its locals, last.
+            ({"missing_count": 1, "unexpected_count": 1},),
+        )
+    )
+
+    node = _file_node(tmp_path, executor)
+
+    assert node.status == FAILED
+    assert node.result.missing_count == 1
+    assert node.result.unexpected_count == 1
+
+
+def test_a_source_run_returns_the_evidence_it_produced(tmp_path):
+    executor = _BatchExecutor(
+        (
+            ({"_weaver_side": "expected", "_weaver_sk": 1, "OrderId": 7},),
+            ({"missing_count": 1, "unexpected_count": 0},),
+        )
+    )
+
+    node = _file_node(tmp_path, executor)
+
+    assert [row["OrderId"] for row in node.diagnostics] == [7]
+
+
+def test_a_passing_source_test_has_only_its_projection(tmp_path):
+    executor = _BatchExecutor((({"missing_count": 0, "unexpected_count": 0},),))
+
+    node = _file_node(tmp_path, executor)
+
+    assert node.status == PASSED
+    assert node.diagnostics == ()
+
+
+def test_a_source_dry_run_compiles_and_dispatches_nothing(tmp_path):
+    """What *would* run — so the file is still compiled, and nothing executed."""
+
+    executor = _BatchExecutor(())
+
+    node = _file_node(tmp_path, executor, dry_run=True)
+
+    assert node.status == PLANNED
+    assert not node.executed
+    assert node.logical_id == "Sales.OrdersReconcile"
+    assert executor.statements == []

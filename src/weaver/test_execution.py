@@ -32,6 +32,7 @@ from .declaration.metadata import ASSUMPTION
 from .errors import ValidationError
 from .etl import LOAD_ROOT
 from .load_plan import LAKEHOUSE_TARGET
+from .runtime.test_compare import ACTUAL, EXPECTED, SIDE_COLUMN
 from .runtime.validation_result import AssumptionResult, TestResult
 from .test_plan import InstalledValidation
 from .test_report import FAILED, INVALID, PASSED, PLANNED, ValidationNodeReport
@@ -230,9 +231,11 @@ def _dispatch_python(
             _collected(frame) if collect else None
         )
 
-    # Counted once. `count()` is the whole of what a suppressed run needs and it
-    # never brings a row to the driver; a collected run reuses the rows it
-    # already has rather than asking the engine twice.
+    # Evaluated once, either way. A collected run counts the rows it already
+    # has; a suppressed run aggregates *by side* in one action rather than
+    # counting each side separately — two counts are two evaluations of the
+    # whole comparison, and between them the tables can move, so the two halves
+    # of one Test's answer could describe different data.
     if collect:
         rows = _collected(frame)
         sides = [str(row["_weaver_side"]) for row in rows]
@@ -243,10 +246,16 @@ def _dispatch_python(
             ),
             rows,
         )
+
+    # One row per side at most, so this collects counts and never evidence.
+    by_side = {
+        str(row[SIDE_COLUMN]): int(row["count"])
+        for row in frame.groupBy(SIDE_COLUMN).count().collect()
+    }
     return (
         TestResult(
-            missing_count=_count(frame.where("_weaver_side = 'expected'")),
-            unexpected_count=_count(frame.where("_weaver_side = 'actual'")),
+            missing_count=by_side.get(EXPECTED, 0),
+            unexpected_count=by_side.get(ACTUAL, 0),
         ),
         None,
     )

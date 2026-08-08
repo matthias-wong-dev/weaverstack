@@ -38,17 +38,31 @@ from .errors import CommandError, ValidationError
 from .load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
 from .runtime.validation_result import AssumptionResult, TestResult
 from .test_execution import PYTHON_VALIDATION, WAREHOUSE_PROCEDURE
-from .test_report import FAILED, INVALID, PASSED, ValidationNodeReport, ValidationRunReport
+from .test_report import (
+    FAILED,
+    INVALID,
+    PASSED,
+    PLANNED,
+    ValidationNodeReport,
+)
 
 
-def run_source_file(
+def source_file_node(
     session: Any,
     *,
     requested: Sequence[PhysicalTargetRef],
     path: Path,
     started: datetime,
-) -> ValidationRunReport:
-    """Compile one source file and run it against the requested target."""
+    dry_run: bool = False,
+) -> ValidationNodeReport:
+    """Compile one source file and run it against the requested target.
+
+    Returns the node rather than a report: assembling the report, deciding the
+    run's status and raising for ``strict`` belong to the caller, which does
+    them identically for an installed run. Two copies of that would be two
+    chances for ``--dry-run`` to mean different things depending on how the
+    validation was named.
+    """
 
     if len(requested) != 1:
         raise CommandError(
@@ -59,13 +73,24 @@ def run_source_file(
     if not path.exists():
         raise CommandError(f"no validation source at {path}")
 
+    # Compiled even for a dry run, and deliberately: what a dry run reports is
+    # what *would* be executed, and a file that cannot compile would not be.
     document = _read(path, target)
-    node = _execute(session, document=document, target=target, path=path, started=started)
-    return ValidationRunReport(
-        status=node.status,
-        nodes=(node,),
-        started_at=started.isoformat(),
-        finished_at=datetime.now(timezone.utc).isoformat(),
+    if dry_run:
+        return ValidationNodeReport(
+            logical_id=document.object_id.qualified,
+            kind=document.document.kind,
+            physical_target=str(target),
+            primitive_kind=PYTHON_VALIDATION
+            if target.kind == LAKEHOUSE_TARGET
+            else WAREHOUSE_PROCEDURE,
+            dispatch_location=str(path),
+            status=PLANNED,
+            started_at=started.isoformat(),
+            finished_at=datetime.now(timezone.utc).isoformat(),
+        )
+    return _execute(
+        session, document=document, target=target, path=path, started=started
     )
 
 
@@ -163,16 +188,27 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
             "has none"
         )
     batch = generate_tsql_validation_batch(document.document, document.sql_body or "")
-    produced = executor.query(batch)
-    row = produced[-1] if produced else {}
+
+    # Every result set, and the *last* is the counts. The batch returns the
+    # diagnostic rows first and then projects its locals, exactly as the
+    # installed procedure does through `call_procedure_with_results` — so
+    # reading only the first set would read a diagnostic row, find no count
+    # column on it, and report a failing Test as passing.
+    produced = executor.query_result_sets(batch)
+    row = produced[-1][0] if produced and produced[-1] else {}
+    diagnostics = produced[0] if len(produced) > 1 else ()
+
     if document.document.kind == ASSUMPTION:
-        return AssumptionResult(violation_count=int(row.get("violation_count") or 0)), ()
+        return (
+            AssumptionResult(violation_count=int(row.get("violation_count") or 0)),
+            diagnostics,
+        )
     return (
         TestResult(
             missing_count=int(row.get("missing_count") or 0),
             unexpected_count=int(row.get("unexpected_count") or 0),
         ),
-        (),
+        diagnostics,
     )
 
 
@@ -229,4 +265,4 @@ def _addressed(body: str) -> str:
     return addressed(body)
 
 
-__all__ = ["run_source_file"]
+__all__ = ["source_file_node"]

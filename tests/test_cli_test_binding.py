@@ -262,3 +262,54 @@ def test_the_task_log_is_pointed_at(captured, capsys):
     _run("Lakehouse/Sales")
 
     assert "evidence:" in capsys.readouterr().out
+
+
+# --- dry run and strict reach file mode too ------------------------------------
+
+
+def test_dry_run_is_passed_through_with_file(captured, capsys):
+    """`--file --dry-run` must mean what `--dry-run` means everywhere else."""
+
+    _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run")
+
+    assert captured["dry_run"] is True
+    assert captured["file"] == "tests/Sales.X.sql"
+
+
+def test_a_planned_file_run_exits_zero(captured, capsys):
+    captured["report"] = ValidationRunReport(
+        status=PLANNED,
+        nodes=(_node("Sales.OrdersReconcile", "Test", PLANNED),),
+    )
+
+    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run") == 0
+
+
+def test_a_failing_file_run_exits_non_zero(captured, capsys):
+    captured["report"] = ValidationRunReport(
+        status=FAILED,
+        nodes=(
+            _node(
+                "Sales.OrdersReconcile",
+                "Test",
+                FAILED,
+                TestResult(missing_count=1, unexpected_count=1),
+            ),
+        ),
+    )
+
+    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 1
+
+
+def test_a_planned_installed_run_also_exits_zero(captured, capsys):
+    """A dry run dispatched nothing, so there is nothing it can have got wrong."""
+
+    captured["report"] = ValidationRunReport(
+        status=PLANNED,
+        nodes=(
+            _node("Sales.OrdersReconcile", "Test", PLANNED),
+            _node("Sales.NoOrphans", "Assumption", PLANNED),
+        ),
+    )
+
+    assert _run("Lakehouse/Sales", "--dry-run") == 0

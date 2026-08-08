@@ -119,10 +119,29 @@ def run_test(
     started = datetime.now(timezone.utc)
 
     if file is not None:
-        from .test_file import run_source_file
+        from .test_file import source_file_node
 
-        return run_source_file(
-            session, requested=requested, path=Path(file), started=started
+        node = source_file_node(
+            session,
+            requested=requested,
+            path=Path(file),
+            started=started,
+            dry_run=dry_run,
+        )
+        # Through the same reporting as an installed run, so `--dry-run` means
+        # the same thing and `strict` raises on the same outcomes. What differs
+        # is only that a file run publishes nothing, which `_reported` handles
+        # by writing no task log when there is nothing installed to record
+        # against.
+        return _reported(
+            session,
+            nodes=(node,),
+            requested=requested,
+            started=started,
+            dry_run=dry_run,
+            strict=strict,
+            selection=str(file),
+            durable=False,
         )
 
     estate = ValidationEstate.from_catalogue(session.read_catalogue())
@@ -164,11 +183,18 @@ def _reported(
     dry_run: bool,
     strict: bool,
     selection: str | None,
+    durable: bool = True,
 ) -> ValidationRunReport:
-    """Write the evidence, assemble the report, and raise only if asked."""
+    """Write the evidence, assemble the report, and raise only if asked.
+
+    ``durable`` is false for a run over source that was never installed. Such a
+    run is a developer's loop rather than an estate event, and a task log
+    claiming otherwise would put a record of something the estate does not have
+    into the estate's own evidence.
+    """
 
     status = run_status(nodes)
-    log = None if dry_run else session.open_log(TASK_TYPE)
+    log = None if dry_run or not durable else session.open_log(TASK_TYPE)
     if log is not None:
         log.write_plan(
             {

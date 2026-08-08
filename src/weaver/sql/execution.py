@@ -39,6 +39,10 @@ class SqlExecutor(Protocol):
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]: ...
 
+    def query_result_sets(
+        self, statement: str, parameters: Sequence[object] | None = None
+    ) -> tuple[tuple[SqlRow, ...], ...]: ...
+
     def call_procedure(
         self,
         procedure: str,
@@ -75,6 +79,28 @@ class PooledSqlExecutor:
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]:
         return self._run(statement, parameters=parameters, query=True, drain=False)
+
+    def query_result_sets(
+        self, statement: str, parameters: Sequence[object] | None = None
+    ) -> tuple[tuple[SqlRow, ...], ...]:
+        """Every result set a batch produced, in order.
+
+        :meth:`query` reads the first and stops, which is right for a statement
+        that answers one question. A batch that returns *evidence and then a
+        projection* — which is what a validation run directly from source is —
+        needs both, and reading only the first silently answers with the wrong
+        one: a diagnostic row has no count column, so the counts read as zero
+        and a failing Test reports as passed.
+        """
+
+        sets = self._run(
+            statement,
+            parameters=parameters,
+            query=True,
+            drain=False,
+            all_result_sets=True,
+        )
+        return tuple(tuple(rows) for rows in sets)
 
     def call_procedure(
         self,
