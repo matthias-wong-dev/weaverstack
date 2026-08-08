@@ -253,6 +253,36 @@ def _assert_installed(env, step) -> None:
     assert when("DWG.Customer") < when("DWG.Order")
     assert when("DWG.Customer") < when("DWG.NamedCustomer")
 
+    _assert_validation_installed(env)
+
+
+def _assert_validation_installed(env) -> None:
+    """The estate's Tests and Assumptions are installed, and are not objects.
+
+    Two claims in one place, because they are two halves of the same design. The
+    *runnable* things are where a build put them, under the item's own runtime
+    root so their imports resolve; and nothing was materialised under a logical
+    validation ID, because a Test is a declaration and not a data object.
+    """
+
+    root = env.resolver.files_root(env.target)
+    for relative in (
+        ("_", "Load", "tests", "DWG__OrderAmounts.py"),
+        ("_", "Load", "assumptions", "DWG__OrderHasCustomer.py"),
+    ):
+        module = root
+        for part in relative:
+            module = module.join(part)
+        assert env.store.exists(module), f"no validation module at {module}"
+
+    # A compiled Spark SQL Assumption is a deployed Python module carrying the
+    # authored SQL — the same arrangement a Spark SQL table gets.
+    compiled = env.store.read(
+        root.join("_").join("Load").join("assumptions").join("DWG__OrderHasCustomer.py")
+    )
+    assert b"SparkSqlAssumption" in compiled
+    assert b"Assumption ID: DWG.OrderHasCustomer" in compiled
+
 
 def _assert_authored_objects_reach_the_build(env) -> None:
     """A developer's own classes, resolving to what the build just made."""
@@ -568,6 +598,89 @@ def _corrupt(env, bundle):
     )
 
 
+#: Validation, over the estate the load has just filled. Run through `run_test`
+#: over a prepared `LoadSession` for the reason the load body is: the public
+#: entry acquires its own Spark session and the local twin shares one.
+VALIDATED = '''
+from weaver.load import LoadSession
+from weaver.load_plan import PhysicalTargetRef
+from weaver.locations import Location
+from weaver.test import run_test
+
+requested = (PhysicalTargetRef("lakehouse", target.name),)
+
+
+def validate(**kwargs):
+    with LoadSession(workspace, requested, spark=spark, store=store) as session:
+        return run_test(session, requested=requested, **kwargs).to_mapping()
+
+
+everything = validate()
+named = validate(name="DWG.OrderAmounts")
+
+emit({
+    "everything": everything,
+    "named": named,
+    "log": sorted(
+        entry.location.value.rsplit("/", 1)[-1]
+        for entry in store.list(Location(everything["task_log"]))
+        if not entry.is_directory
+    ),
+})
+'''
+
+
+def _assert_validated(env, seen) -> None:
+    """The loaded estate satisfies what the repository says about it.
+
+    This is the claim the journey was missing: a build that installs and a load
+    that fills are both provable on their own, and neither says whether the rows
+    that landed are the rows the estate declared they would be. A Test does, and
+    it runs here — against real loaded data, through the installed catalogue,
+    with the repository playing no part in deciding what runs.
+    """
+
+    everything = seen["everything"]
+    assert everything["status"] == "passed", everything
+
+    ran = {node["logical_id"].rsplit("/", 1)[-1]: node for node in everything["nodes"]}
+    assert set(ran) == {"DWG.OrderAmounts", "DWG.OrderHasCustomer"}
+
+    # One authored in Python and one compiled from Spark SQL, reaching the same
+    # comparison and reporting in the same vocabulary.
+    assert ran["DWG.OrderAmounts"]["kind"] == "test"
+    assert ran["DWG.OrderAmounts"]["failure_count"] == 0
+    assert ran["DWG.OrderHasCustomer"]["kind"] == "assumption"
+    assert ran["DWG.OrderHasCustomer"]["violation_count"] == 0
+    assert all(node["executed"] for node in everything["nodes"])
+
+    totals = everything["totals"]
+    assert totals == {
+        "planned": 2,
+        "executed": 2,
+        "passed": 2,
+        "failed": 0,
+        "invalid": 0,
+        "missing_count": 0,
+        "unexpected_count": 0,
+        "violation_count": 0,
+    }
+
+    # Naming one runs only it.
+    named = seen["named"]
+    assert [node["logical_id"].rsplit("/", 1)[-1] for node in named["nodes"]] == [
+        "DWG.OrderAmounts"
+    ]
+
+    # A validation task log of its own, beside the load's, recording counts.
+    written = seen["log"]
+    assert "plan.json" in written
+    assert sum("_test_" in name for name in written) == 1
+    assert sum("_assumption_" in name for name in written) == 1
+    assert sum("_complete_" in name for name in written) == 1
+    assert not any("_weaver_sk" in name for name in written)
+
+
 def _assert_failed(journey, step) -> None:
     """A payload that cannot run stops its barrier rather than being skipped past."""
 
@@ -617,6 +730,13 @@ def drive(journey):
     _assert_loaded(env, loaded)
     _assert_load_materialised(env, journey)
     _assert_task_log(env, loaded)
+
+    # And now the question the estate exists to answer: does the data the load
+    # just wrote satisfy what the repository says about it? Here rather than
+    # anywhere earlier, because a validation over an unloaded estate would be
+    # comparing two empty relations and passing for the wrong reason.
+    validated = env.run_python(VALIDATED, label="validate the loaded estate")
+    _assert_validated(env, validated)
 
     _assert_failed(
         journey,

@@ -346,6 +346,49 @@ nothing:
 `WeaverDocumentId.is_load_artefact` is gone. This matters because a Test
 procedure that inferred its way into the load DAG would be run by `weaver load`.
 
+## Running it
+
+Four modes, and they mean the same thing:
+
+| | what it runs | evidence |
+|---|---|---|
+| `weaver.test(target)` | every installed validation in the target | counts |
+| `weaver.test(target, name=…)` | one installed validation | counts **and** rows |
+| `weaver.test(target, file=…)` | a source file, installing nothing | counts and rows |
+| `Sales__X(spark).read()` | one authored class, directly | rows |
+
+The first three read the **installed catalogue** and never reopen the
+repository, except `file=`, which is the point of it. The fourth opens no
+catalogue, invokes no orchestrator and writes no task log — it is the notebook
+loop, and it stays deliberately outside all of this.
+
+### One failure does not stop the rest
+
+A validation is read-only, so a Test that failed has told you something and the
+next can still tell you something else. An early exit would throw that away for
+no safety in return, which is why a run reports every node and takes the worst
+status.
+
+### Suppression is about size, not speed
+
+A whole-target run never materialises a diagnostic row —
+`@suppress_result_set = 1` on a Warehouse, a count that never collects on Spark.
+A targeted run asks for the rows and gets them **from the same execution** as
+the counts, because running a Test twice compares data that could have moved and
+may cost a great deal.
+
+### What is persisted
+
+Counts and execution metadata. Never a discrepancy row, a violation row, a
+`_weaver_sk` value or a serialized key: those are interactive evidence, and a
+node's mapping — which is what a task log and a transported report are built
+from — simply has no field for them.
+
+A run's completion document aggregates planned, executed, passed, failed and
+invalid counts, plus total `missing_count`, `unexpected_count` and
+`violation_count`. There is no manufactured "changed row" count, which would
+need a key a Test is not required to have.
+
 ## Not in scope
 
 Severity levels, warning-only Tests, tolerances, per-Test scheduling, a separate
@@ -356,3 +399,10 @@ rejection of dynamic T-SQL.
 
 Diagnostic rows are interactive evidence, not task-log metadata: they may be
 large and may carry sensitive business data. Task logs persist counts.
+
+`weaver load --include-test` is designed but not built. Embedding validation in
+the load DAG touches working load orchestration, and the requirement is
+emphatically not "run all tests at the end" — validation nodes have to sit in
+the real physical graph behind their dependencies, including alias and
+endpoint-refresh barriers. It is deferred so that everything above it can land
+without risk to `weaver load`.

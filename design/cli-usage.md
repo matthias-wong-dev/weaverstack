@@ -118,6 +118,65 @@ the emulator. Warehouses remain Fabric-only.
 Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 `--bundle <name>` to choose its name.
 
+## Test
+
+Run the installed Tests and Assumptions in one or more physical targets:
+
+```bash
+weaver test Lakehouse/Sales --workspace-config examples/env.yml
+```
+
+The exit code is the verdict — non-zero when anything failed or could not be
+evaluated — and the output is the evidence, which is what makes the command
+usable in a pipeline. `--json` emits the whole report.
+
+A whole-target run reports **counts only**. Diagnostic rows may be large and may
+carry sensitive business data, so they are never transferred and never logged;
+Warehouse procedures are called with `@suppress_result_set = 1` and Spark
+validations are counted without collecting.
+
+Name one to see the rows:
+
+```bash
+weaver test Lakehouse/Sales --name Sales.OrderSummaryReconciliation
+```
+
+The counts and the rows come from **one** execution. A Test run twice would
+compare data that could have changed in between, and could be expensive twice
+over.
+
+Run a validation that has not been built:
+
+```bash
+weaver test Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
+```
+
+`--file` compiles the source with the same compiler a build uses and executes
+the result without installing it — no Registry row, no `TestDictionary` row, no
+task log. From a desktop the file's *content* crosses into the session, not its
+path. `--name` and `--file` are mutually exclusive.
+
+Python validation is not run through `--file`, deliberately: it is already
+directly runnable in a notebook.
+
+```python
+from tests.Sales__OrderCustomerExists import Sales__OrderCustomerExists
+
+Sales__OrderCustomerExists(spark).read()
+```
+
+Everything is available from Python as well, with the same meaning:
+
+```python
+weaver.test("Lakehouse/Sales")
+weaver.test("Lakehouse/Sales", name="Sales.OrderSummaryReconciliation")
+weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql")
+```
+
+There is deliberately no `weaver assumption` command. One operation runs both
+kinds, because a caller asking whether an estate holds up is not asking two
+questions. See [validation](validation.md).
+
 ## Unbind
 
 Unbind removes catalogue state for explicitly named physical targets without
