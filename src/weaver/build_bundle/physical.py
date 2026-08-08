@@ -16,7 +16,7 @@ from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..spark.tokens import object_token
-from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_load_artefacts
+from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
 from .changes import (
     FILE as FILE_KIND,
     FOLDER as FOLDER_KIND,
@@ -120,7 +120,8 @@ def item_prune_stage(
             if alias.destination.item == item
         ],
         load_identities=[
-            artefact.identity for artefact in item_load_artefacts(repository, item=item)
+            artefact.identity
+            for artefact in item_runtime_artefacts(repository, item=item)
         ],
     )
 

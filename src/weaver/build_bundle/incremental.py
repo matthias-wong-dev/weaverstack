@@ -174,14 +174,14 @@ def declared_signatures(
     that rendered it (see :mod:`weaver.etl`).
     """
 
-    from ..etl import load_artefacts, load_artefacts_by_identity
+    from ..etl import artefacts_by_identity, runtime_artefacts
 
     aliases = {alias.destination: alias for alias in repository.aliases}
-    loads = load_artefacts_by_identity(load_artefacts(repository))
+    installed = artefacts_by_identity(runtime_artefacts(repository))
     signatures: dict[WeaverDocumentId, str] = {}
     for identity in selected:
         alias = aliases.get(identity)
-        artefact = loads.get(identity)
+        artefact = installed.get(identity)
         if alias is not None:
             signatures[identity] = alias.signature
         elif artefact is not None:
@@ -205,9 +205,11 @@ def runtime_artefact_identities(
     same question answered from the other side of the boundary.
     """
 
-    from ..etl import load_artefacts
+    from ..etl import runtime_artefacts
 
-    return frozenset(artefact.identity for artefact in load_artefacts(repository))
+    return frozenset(
+        artefact.identity for artefact in runtime_artefacts(repository)
+    )
 
 
 def determine_impact(

@@ -434,8 +434,12 @@ def parse_item_repository(
     for item in sorted(item_ids):
         item_files = generated_item_files(
             item,
+            # Validations too: an item that only validates still owns the
+            # runtime tree or the generated schema its primitive lands in.
             documents=[
-                source_documents[identity] for identity in documents_by_item[item]
+                source_documents[identity]
+                for identity in documents_by_item[item]
+                + validations_by_item.get(item, [])
             ],
             support_paths=support_files,
         )

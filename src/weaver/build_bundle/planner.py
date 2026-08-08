@@ -47,7 +47,7 @@ from .catalogue_actions import (
 from .endpoints import item_refresh_stage
 from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
-from ..etl import item_load_artefacts, load_artefacts, load_schemas
+from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from .physical import (
     item_build_stages,
     item_load_removals,
@@ -258,7 +258,7 @@ def _selectable(
         },
         {
             artefact.identity
-            for artefact in load_artefacts(repository)
+            for artefact in runtime_artefacts(repository)
             if artefact.identity.item in by_item
         },
         {
@@ -375,7 +375,7 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_aliases,
     )
-    artefacts = item_load_artefacts(repository, item=item)
+    artefacts = item_runtime_artefacts(repository, item=item)
     stages: list[PlannedStage] = []
 
     # Prune is given every *declared* alias destination, never only the selected

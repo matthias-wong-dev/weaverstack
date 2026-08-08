@@ -39,7 +39,7 @@ from ..declaration.metadata import (
 )
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
 from ..declaration.references import declared_column_notes, resolve_text
-from ..etl import PROCEDURE_TYPE, item_load_artefacts, load_artefacts_by_identity
+from ..etl import PROCEDURE_TYPE, artefacts_by_identity, item_runtime_artefacts
 from .claims import catalogue_schema
 from .render import InstallationScope, Row, column_set
 from .tables import (
@@ -55,7 +55,6 @@ from .tables import (
     KEY_UNIQUE,
     REGISTRY,
     ROLE_DATA,
-    ROLE_LOAD,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -142,9 +141,9 @@ def project_item_catalogue(
         for identity in retained
         if identity in alias_by_destination
     )
-    loads = load_artefacts_by_identity(item_load_artefacts(repository, item=item))
-    retained_loads = tuple(
-        loads[identity] for identity in retained if identity in loads
+    installed = artefacts_by_identity(item_runtime_artefacts(repository, item=item))
+    retained_artefacts = tuple(
+        installed[identity] for identity in retained if identity in installed
     )
     # A validation carries the item's ordinary logical identity and is not a data
     # object, so it is separated here for the same reason an alias is: what
@@ -153,7 +152,7 @@ def project_item_catalogue(
         identity
         for identity in retained
         if identity not in alias_by_destination
-        and identity not in loads
+        and identity not in installed
         and repository.source_documents[identity].is_validation
     )
     validation_set = set(retained_validations)
@@ -161,7 +160,7 @@ def project_item_catalogue(
         identity
         for identity in retained
         if identity not in alias_by_destination
-        and identity not in loads
+        and identity not in installed
         and identity not in validation_set
     )
     documents = [repository.source_documents[identity] for identity in retained]
@@ -267,16 +266,21 @@ def project_item_catalogue(
             }
         )
 
-    # A load artefact claims the Registry and nothing else. It has no columns to
-    # describe, no keys to record and no dependencies to keep — it is a deployed
-    # module or a generated statement, and what the catalogue knows about it is
-    # that Weaver installed it and at what signature.
-    for artefact in retained_loads:
+    # A runtime artefact claims the Registry and nothing else. It has no columns
+    # to describe, no keys to record and no dependencies to keep — it is a
+    # deployed module or a generated statement, and what the catalogue knows
+    # about it is that Weaver installed it, what it is for, and at what
+    # signature.
+    #
+    # The role is the artefact's own. A Test module and a load module are the
+    # same shape, so this row is the only place the difference survives, and
+    # everything downstream that must not run a Test as a load reads it here.
+    for artefact in retained_artefacts:
         rows[REGISTRY.name].append(
             {
                 **_identity(scope, artefact.identity),
                 "object_type": artefact.object_type,
-                "object_role": ROLE_LOAD,
+                "object_role": artefact.role,
                 "signature": artefact.signature,
             }
         )
@@ -332,7 +336,7 @@ def project_item_catalogue(
         # is described by the folder document that owns the tree.
         | {
             (artefact.identity.object_id.schema, artefact.identity.object_id.schema)
-            for artefact in retained_loads
+            for artefact in retained_artefacts
             if artefact.object_type == PROCEDURE_TYPE
         }
     )

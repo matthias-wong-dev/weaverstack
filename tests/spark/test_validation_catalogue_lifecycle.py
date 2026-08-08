@@ -197,7 +197,9 @@ def test_the_installed_roles_are_read_back_as_they_were_written(built, lakehouse
     }
 
     assert roles["Order"] == "data"
-    assert all(role in {"data", "load"} for role in roles.values())
+    assert roles["Sales__OrdersReconcile.py"] == "test"
+    assert roles["Sales__OrdersHaveCustomers.py"] == "assumption"
+    assert roles["Sales__Order.py"] == "load"
 
 
 def test_a_deleted_test_loses_its_dictionary_row(tmp_path, lakehouses, spark, weaver_catalogue):
@@ -223,5 +225,94 @@ def test_a_deleted_test_loses_its_dictionary_row(tmp_path, lakehouses, spark, we
         assert ("OrdersReconcile", "Sales__Order") not in set(
             _rows(weaver_catalogue, DEPENDENCY, "object_name, dependency_name")
         )
+    finally:
+        spark.sql(f"DROP SCHEMA IF EXISTS {target.qualified_schema('Sales')} CASCADE")
+
+
+# --- the artefacts a build installs -------------------------------------------
+
+
+def test_the_runtime_artefacts_are_certified_with_their_roles(built):
+    """The physical primitives, under names of their own and roles of their own."""
+
+    rows = {
+        (name, role)
+        for name, role in _rows(built, REGISTRY, "object_name, object_role")
+    }
+
+    assert ("Sales__OrdersReconcile.py", "test") in rows
+    assert ("Sales__OrdersHaveCustomers.py", "assumption") in rows
+    assert ("Sales__Order.py", "load") in rows
+    assert ("Order", "data") in rows
+
+
+def test_a_validation_module_lands_under_the_runtime_root(built, lakehouses):
+    """Beneath the import root, so its dependency imports still resolve."""
+
+    schemas = {
+        schema
+        for (schema,) in _rows(built, REGISTRY, "schema_name")
+        if schema.startswith("_/Load")
+    }
+
+    assert "_/Load/tests" in schemas
+    assert "_/Load/assumptions" in schemas
+
+
+def test_the_module_is_actually_written_where_it_was_certified(built, lakehouses):
+    root = lakehouses.resolver.files_root(lakehouses.target)
+    module = root / "_" / "Load" / "tests" / "Sales__OrdersReconcile.py"
+
+    assert lakehouses.store.exists(module)
+    assert b"class Sales__OrdersReconcile(Test)" in lakehouses.store.read(module)
+
+
+def test_a_deleted_validation_is_pruned_from_the_estate(
+    tmp_path, lakehouses, spark, weaver_catalogue
+):
+    """The ordinary prune, because it is the ordinary lifecycle."""
+
+    target = SparkCatalogue(
+        spark, lakehouses.resolver.spark_destination(lakehouses.target)
+    )
+    root = lakehouses.resolver.files_root(lakehouses.target)
+    module = root / "_" / "Load" / "tests" / "Sales__OrdersReconcile.py"
+    try:
+        estate = _estate(tmp_path)
+        _build(estate, lakehouses, spark)
+        assert lakehouses.store.exists(module)
+
+        (estate / "Lakehouse/Sales/tests/Sales__OrdersReconcile.py").unlink()
+        _build(estate, lakehouses, spark)
+
+        assert not lakehouses.store.exists(module)
+        assert "Sales__OrdersReconcile.py" not in {
+            name for (name,) in _rows(weaver_catalogue, REGISTRY, "object_name")
+        }
+    finally:
+        spark.sql(f"DROP SCHEMA IF EXISTS {target.qualified_schema('Sales')} CASCADE")
+
+
+def test_an_unchanged_validation_is_not_reinstalled(
+    tmp_path, lakehouses, spark, weaver_catalogue
+):
+    """Incremental selection reads the signature, and it did not change."""
+
+    target = SparkCatalogue(
+        spark, lakehouses.resolver.spark_destination(lakehouses.target)
+    )
+    try:
+        estate = _estate(tmp_path)
+        _build(estate, lakehouses, spark)
+        second = _build(estate, lakehouses, spark)
+
+        installed = [
+            action.action_id
+            for sequence in second.report.sequences
+            for action in sequence.actions
+            if "OrdersReconcile" in action.action_id
+        ]
+
+        assert installed == []
     finally:
         spark.sql(f"DROP SCHEMA IF EXISTS {target.qualified_schema('Sales')} CASCADE")

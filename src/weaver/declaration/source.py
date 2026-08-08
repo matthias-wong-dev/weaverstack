@@ -359,6 +359,18 @@ class SourceDocument:
 
         return generate_load(self)
 
+    def create_validation(self) -> "GeneratedValidation":
+        """The generated, installable primitive for this validation declaration.
+
+        The third sibling of :meth:`create_ddl` and :meth:`create_load`, owned
+        here for the same reason: the source alone knows its language, kind, ID
+        and validated body.
+        """
+
+        from .validation import generate_validation
+
+        return generate_validation(self)
+
 
 def read_source_document(
     relative_path: str, data: bytes, item_type: str

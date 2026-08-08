@@ -76,20 +76,42 @@ LOAD_PROCEDURE_PREFIX = "Load "
 FILE_TYPE = "file"
 PROCEDURE_TYPE = "stored_procedure"
 
+#: What a runtime artefact is *for*. Repeated from
+#: :mod:`weaver.catalogue.tables` rather than imported, because the catalogue
+#: package imports this one and the cycle would be real; the two are asserted
+#: identical by ``tests/test_core_boundary.py``.
+#:
+#: The role is what a build carries and what the Registry keeps, and it is the
+#: answer nothing may infer from a physical shape. A load module and a Test
+#: module are both files; a load procedure and a Test procedure are both
+#: procedures.
+ROLE_LOAD = "load"
+ROLE_TEST = "test"
+ROLE_ASSUMPTION = "assumption"
+
+#: Which role a validation kind's artefact carries.
+VALIDATION_ROLE = {"Test": ROLE_TEST, "Assumption": ROLE_ASSUMPTION}
+
 PYTHON_SUFFIX = ".py"
 
 
 @dataclass(frozen=True)
-class LoadArtefact:
-    """One load target, complete: what it is, where it goes, what it contains.
+class RuntimeArtefact:
+    """One installed runnable target: what it is, where it goes, what it holds.
 
-    Everything a build needs about a load artefact and nothing about how it was
+    Everything a build needs about an artefact and nothing about how it was
     reached. The identity is the catalogue key; the signature is what incremental
     selection compares; the payload is the frozen bytes the installer is *given*
     — deployed source for a Python object, and for a generated load an installer
     script or an instruction the executor completes against the built target. An
     artefact carries its own content either way, so the installer is never sent
     back to a repository it must never reopen.
+
+    ``role`` is what it is *for*, and it is carried rather than inferred. A load
+    module and a Test module are both files; a load procedure and a Test
+    procedure are both procedures. One lifecycle serves all of them — claimed,
+    signed, selected, installed, registered, pruned — and the role is what keeps
+    a Test out of the load DAG at the other end.
 
     ``origin`` is the declaration this artefact was derived from, where there was
     one. A deployed helper module under ``lib/`` has none: it is authored source
@@ -101,7 +123,12 @@ class LoadArtefact:
     object_type: str
     signature: str
     payload: bytes
+    role: str = ROLE_LOAD
     origin: WeaverDocumentId | None = None
+
+    @property
+    def is_validation(self) -> bool:
+        return self.role in (ROLE_TEST, ROLE_ASSUMPTION)
 
     @property
     def is_file(self) -> bool:
@@ -116,18 +143,127 @@ class LoadArtefact:
         return f"{self.identity.object_id.schema}/{self.identity.object_id.object}"
 
 
-def load_artefacts(repository: WeaverRepository) -> tuple[LoadArtefact, ...]:
+def runtime_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ...]:
+    """Everything this repository installs to be *run*, in identity order.
+
+    Loads and validations together, because from here on they have one
+    lifecycle: the same claiming, signing, incremental selection, installation,
+    registration and pruning. The producers below stay focused — what a load is
+    and what a validation is are different questions — and only the answers are
+    pooled.
+    """
+
+    artefacts: list[RuntimeArtefact] = []
+    for model in repository.items:
+        artefacts.extend(item_runtime_artefacts(repository, item=model.identity))
+    return tuple(sorted(artefacts, key=lambda artefact: str(artefact.identity)))
+
+
+def item_runtime_artefacts(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """One item's runnable artefacts, loads and validations alike."""
+
+    return item_load_artefacts(repository, item=item) + item_validation_artefacts(
+        repository, item=item
+    )
+
+
+def load_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ...]:
     """Every load artefact the whole repository claims, in identity order."""
 
-    artefacts: list[LoadArtefact] = []
+    artefacts: list[RuntimeArtefact] = []
     for model in repository.items:
         artefacts.extend(item_load_artefacts(repository, item=model.identity))
     return tuple(sorted(artefacts, key=lambda artefact: str(artefact.identity)))
 
 
+def validation_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ...]:
+    """Every validation artefact the whole repository claims, in identity order."""
+
+    artefacts: list[RuntimeArtefact] = []
+    for model in repository.items:
+        artefacts.extend(item_validation_artefacts(repository, item=model.identity))
+    return tuple(sorted(artefacts, key=lambda artefact: str(artefact.identity)))
+
+
+def item_validation_artefacts(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """One item's validation artefacts, derived from what it declares.
+
+    A Warehouse validation is a procedure in the generated ``_`` schema; a
+    Lakehouse one is a module under the *existing* deployed runtime tree, in a
+    ``tests/`` or ``assumptions/`` subdirectory of it. Under the same root
+    rather than beside it, deliberately: that root is the item's Python import
+    root, so ``from Sales__Order import Sales__Order`` resolves from a
+    validation exactly as it does from a load, with no second import root and no
+    duplicated object modules.
+    """
+
+    if _is_builtin(item):
+        return ()
+    model = next(
+        (each for each in repository.items if each.identity == item), None
+    )
+    if model is None:
+        return ()
+
+    artefacts = []
+    for identity in sorted(model.validations, key=str):
+        source = repository.source_documents[identity]
+        kind = source.document.kind
+        role = VALIDATION_ROLE[kind]
+        if source.language == PYTHON:
+            # Authored source *is* the primitive, exactly as a Python table's
+            # module is — so it is deployed rather than generated, and signed by
+            # its own bytes.
+            payload = source.text.encode("utf-8")
+            artefacts.append(
+                _file_artefact(
+                    item,
+                    validation_module_path(kind, identity.object_id),
+                    payload=payload,
+                    signature=content_hash(payload),
+                    role=role,
+                    origin=identity,
+                )
+            )
+            continue
+
+        generated = source.create_validation()
+        if generated.object_type == PROCEDURE_TYPE:
+            artefacts.append(
+                RuntimeArtefact(
+                    identity=validation_procedure_id(item, kind, identity.object_id),
+                    object_type=generated.object_type,
+                    signature=_salted(
+                        source.effective_signature, generated.template_version
+                    ),
+                    payload=generated.payload,
+                    role=role,
+                    origin=identity,
+                )
+            )
+        else:
+            artefacts.append(
+                _file_artefact(
+                    item,
+                    validation_module_path(kind, identity.object_id),
+                    payload=generated.payload,
+                    signature=_salted(
+                        source.effective_signature, generated.template_version
+                    ),
+                    role=role,
+                    origin=identity,
+                )
+            )
+    return tuple(artefacts)
+
+
 def item_load_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[LoadArtefact, ...]:
+) -> tuple[RuntimeArtefact, ...]:
     """One item's load artefacts, derived from what it declares.
 
     The built-in ``Lakehouse/_weaver`` owns none, and is excluded here rather
@@ -146,7 +282,7 @@ def item_load_artefacts(
 
 def _warehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[LoadArtefact, ...]:
+) -> tuple[RuntimeArtefact, ...]:
     """One generated load procedure per Warehouse table."""
 
     artefacts = []
@@ -155,7 +291,7 @@ def _warehouse_artefacts(
             continue
         generated = source.create_load()
         artefacts.append(
-            LoadArtefact(
+            RuntimeArtefact(
                 identity=load_procedure_id(item, identity.object_id),
                 object_type=generated.object_type,
                 signature=_salted(
@@ -170,12 +306,17 @@ def _warehouse_artefacts(
 
 def _lakehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[LoadArtefact, ...]:
+) -> tuple[RuntimeArtefact, ...]:
     """The deployed Python tree, plus one generated file per Spark SQL table."""
 
     artefacts = []
     for identity, source in sorted(repository.source_documents.items(), key=_by_text):
         if identity.item != item or source.relative_path in repository.generated_files:
+            continue
+        # A validation is deployed too, and by its own producer — which decides
+        # where it lands and what role it carries. Claiming it here as well
+        # would deploy one module twice, the second time calling a Test a load.
+        if source.is_validation:
             continue
         relative = _within_item(source.relative_path, item)
         if source.language == PYTHON:
@@ -235,8 +376,9 @@ def _file_artefact(
     *,
     payload: bytes,
     signature: str,
+    role: str = ROLE_LOAD,
     origin: WeaverDocumentId | None = None,
-) -> LoadArtefact:
+) -> RuntimeArtefact:
     """One deployed file, at the item-relative path reproduced under the root.
 
     The authored path is preserved whole, ``Files/`` segment included. That
@@ -247,13 +389,14 @@ def _file_artefact(
 
     path = f"{LOAD_ROOT}/{relative}"
     directory, _, name = path.rpartition("/")
-    return LoadArtefact(
+    return RuntimeArtefact(
         identity=WeaverDocumentId(
             item, ObjectId(schema=directory, object=name), shape=FILE_SHAPE
         ),
         object_type=FILE_TYPE,
         signature=signature,
         payload=payload,
+        role=role,
         origin=origin,
     )
 
@@ -479,11 +622,16 @@ def generated_item_files(
         return {}
     schema = {f"{item}/{SCHEMA_DOCUMENT}": render_schema_document().encode("utf-8")}
     if item.item_type == WAREHOUSE:
-        # A Warehouse needs the schema its generated load procedures live in and
+        # A Warehouse needs the schema its generated procedures live in and
         # nothing else — there is no Files area, so no runtime tree and no folder
-        # to own one.
+        # to own one. A validation puts a procedure there too, so an item that
+        # only validates still needs the schema.
         documents = tuple(documents)
-        return schema if any(source.kind == TABLE for source in documents) else {}
+        return (
+            schema
+            if any(source.kind == TABLE or source.is_validation for source in documents)
+            else {}
+        )
     if not has_deployable_source(item, documents=documents, support_paths=support_paths):
         return {}
     return {
@@ -502,11 +650,16 @@ def has_deployable_source(
             return True
         if source.language == SPARK_SQL and source.kind == TABLE:
             return True
+        # A validation is deployed into the same tree whatever it was authored
+        # in, so an item that only validates still owns a runtime tree to put it
+        # in — otherwise the folder its module lands in would not exist.
+        if source.is_validation:
+            return True
     prefix = f"{item}/lib/"
     return any(relative.startswith(prefix) for relative in support_paths)
 
 
-def load_schemas(artefacts: Iterable[LoadArtefact]) -> tuple[str, ...]:
+def load_schemas(artefacts: Iterable[RuntimeArtefact]) -> tuple[str, ...]:
     """The Warehouse schemas these artefacts need, which is ``_`` or nothing.
 
     Derived rather than assumed, so an item with no procedures asks for no schema
@@ -524,9 +677,9 @@ def load_schemas(artefacts: Iterable[LoadArtefact]) -> tuple[str, ...]:
     )
 
 
-def load_artefacts_by_identity(
-    artefacts: Iterable[LoadArtefact],
-) -> Mapping[WeaverDocumentId, LoadArtefact]:
+def artefacts_by_identity(
+    artefacts: Iterable[RuntimeArtefact],
+) -> Mapping[WeaverDocumentId, RuntimeArtefact]:
     return {artefact.identity: artefact for artefact in artefacts}
 
 
@@ -536,11 +689,18 @@ __all__ = [
     "LOAD_FOLDER",
     "LOAD_PROCEDURE_PREFIX",
     "LOAD_ROOT",
-    "LoadArtefact",
+    "RuntimeArtefact",
     "PROCEDURE_TYPE",
     "item_load_artefacts",
     "load_artefacts",
-    "load_artefacts_by_identity",
+    "artefacts_by_identity",
+    "item_runtime_artefacts",
+    "item_validation_artefacts",
+    "runtime_artefacts",
+    "validation_artefacts",
+    "validation_module_path",
+    "validation_procedure_id",
+    "validation_procedure_name",
     "load_schemas",
     "load_procedure_id",
     "load_procedure_name",

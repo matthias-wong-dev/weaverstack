@@ -290,6 +290,45 @@ hold for validation, so catalogue reading derives logical validations from
 `TestDictionary` and associates their `Dependency` rows with those IDs. A fake
 logical Registry row to reuse the load helper is not an option.
 
+## The runtime artefact
+
+`LoadArtefact` became `RuntimeArtefact` with a `role`, rather than acquiring a
+parallel class. Loads and validations have one lifecycle — claimed from source,
+signed, selected incrementally, installed, registered, pruned — and only the
+producers differ, because what a load *is* and what a validation *is* are
+different questions:
+
+```text
+load_artefacts(repository)        validation_artefacts(repository)
+              \                  /
+            runtime_artefacts(repository)
+```
+
+Identity is deterministic from the owning item, the kind and the logical ID:
+
+```text
+Warehouse/Reporting/procedure:_/Test Sales.IncrementalCount
+Warehouse/Reporting/procedure:_/Assumption Sales.OrdersUpToDate
+
+Lakehouse/Sales/file:_/Load/tests/Sales__IncrementalCount.py
+Lakehouse/Sales/file:_/Load/assumptions/Sales__OrdersUpToDate.py
+```
+
+**Under the existing runtime root, not beside it.** That root is the item's
+Python import root, so `from Sales__Order import Sales__Order` resolves from a
+validation exactly as it does from a load — no second import root, no duplicated
+object modules. The folder is named `_/Load`; renaming it to `_/Runtime` is a
+cosmetic change outside this work.
+
+A generated validation's signature is salted with its generator version
+(`SPARK_VALIDATION_VERSION`, `TSQL_VALIDATION_VERSION`), so an edit to a
+renderer rebuilds exactly the artefacts it changed. A Python validation is
+deployed verbatim and signed by its own bytes, because nothing generated it.
+
+**An item that only validates still gets its infrastructure** — the generated
+`_` schema in a Warehouse, the runtime tree in a Lakehouse — or its primitive
+would have nowhere to land.
+
 ## Role, not shape
 
 Registry roles are `data`, `load`, `test` and `assumption`.
