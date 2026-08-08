@@ -63,6 +63,23 @@ def _folder(env, schema, name):
     return env.resolver.folder_object(FolderTarget(lakehouse=env.target), schema, name)
 
 
+def _raise_if_the_transition_broke(step) -> None:
+    """Surface a transition's own exception instead of what it left behind.
+
+    A `Journey` records a failed move on the step rather than raising, so the
+    run can report once and name the move. But an assertion that reaches
+    straight for `step.bundle` then fails with `NoneType has no attribute
+    'plan'` — which names neither the move nor the cause, and sends the reader
+    to the assertion instead of to the build.
+    """
+
+    if step.error is not None:
+        raise AssertionError(
+            f"journey step {step.name!r} failed: "
+            f"{type(step.error).__name__}: {step.error}"
+        ) from step.error
+
+
 def _observe(env, step):
     """One round trip, and everything any assertion about this moment needs.
 
@@ -197,6 +214,7 @@ emit({
 def _assert_installed(env, step) -> None:
     """The first build: everything declared exists, and nothing landed elsewhere."""
 
+    _raise_if_the_transition_broke(step)
     plan = step.bundle.plan
     assert plan.format_version == 1
     assert plan.repository_name == env.repository_root.name
@@ -315,6 +333,8 @@ def _assert_authored_objects_reach_the_build(env) -> None:
 def _assert_unchanged(env, step) -> None:
     """Building an already-correct estate must cost nothing and break nothing."""
 
+    _raise_if_the_transition_broke(step)
+
     assert step.outcome.status == "succeeded", step.outcome.action_error
 
     physical = step.kinds() - BOOKKEEPING
@@ -330,6 +350,8 @@ def _assert_unchanged(env, step) -> None:
 
 def _assert_pruned(env, step) -> None:
     """What the item no longer declares goes; what it declares stays."""
+
+    _raise_if_the_transition_broke(step)
 
     assert step.outcome.status == "succeeded", step.outcome.action_error
 
