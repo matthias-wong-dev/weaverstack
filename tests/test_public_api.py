@@ -35,6 +35,8 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "View",
         "Test",
         "Assumption",
+        "SparkSqlTest",
+        "SparkSqlAssumption",
         "Lakehouse",
         "default_lakehouse",
         "lakehouse_for",

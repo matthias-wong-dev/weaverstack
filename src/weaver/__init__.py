@@ -23,7 +23,9 @@ from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
 from .objects import (
     Assumption,
     Folder,
+    SparkSqlAssumption,
     SparkSqlTable,
+    SparkSqlTest,
     Table,
     Test,
     View,
@@ -66,6 +68,8 @@ __all__ = [
     # authored validation
     "Test",
     "Assumption",
+    "SparkSqlTest",
+    "SparkSqlAssumption",
     "Lakehouse",
     "default_lakehouse",
     "lakehouse_for",

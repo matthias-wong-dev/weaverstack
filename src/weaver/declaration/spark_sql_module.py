@@ -39,11 +39,16 @@ from __future__ import annotations
 from ..objects import CLASS_ID_SEPARATOR
 from ..spark.tokens import object_token
 from .dependencies import rewrite_sql_references
-from .metadata import ObjectId, SesDocument
+from .metadata import ASSUMPTION, TABLE, TEST, ObjectId, SesDocument
 
 #: The first line of every generated module. A comment, so it sits above the
 #: docstring without displacing it as the module's ``__doc__``.
-GENERATED_MODULE_MARKER = "# Weaver generated load"
+#:
+#: A prefix rather than the whole line: what follows says which *kind* of
+#: primitive was generated, and the installer only needs to know that one was —
+#: a generated module carries object tokens for it to resolve, and an authored
+#: one does not.
+GENERATED_MODULE_MARKER = "# Weaver generated"
 
 #: What the module calls its program. Public because the generated class refers
 #: to it and a reader opening the file should find the SQL under an obvious name.
@@ -67,10 +72,25 @@ def class_name(object_id: ObjectId) -> str:
     return f"{object_id.schema}{CLASS_ID_SEPARATOR}{object_id.object}"
 
 
+#: Which generated base carries which authored kind, and what the marker line
+#: calls it. One mapping, so a new kind cannot acquire a module shape without
+#: acquiring a name for it.
+GENERATED_BASE = {
+    TABLE: ("SparkSqlTable", "load"),
+    TEST: ("SparkSqlTest", "test"),
+    ASSUMPTION: ("SparkSqlAssumption", "assumption"),
+}
+
+
 def render_spark_sql_module(
     document: SesDocument, *, header: str, body: str, source_name: str
 ) -> str:
-    """The complete deployed module for one authored Spark SQL table.
+    """The complete deployed module for one authored Spark SQL declaration.
+
+    A table, a Test and an Assumption differ in exactly two characters of this
+    file — the base class, and the word on the marker line — because the three
+    are one arrangement: authored SQL, carried verbatim, under a docstring that
+    is the contract, with a Weaver base supplying everything else.
 
     ``header`` is the authored metadata block verbatim and ``body`` the authored
     SQL with its object references already addressed as tokens — the installer
@@ -79,17 +99,19 @@ def render_spark_sql_module(
     """
 
     name = class_name(document.object_id)
+    base, what = GENERATED_BASE[document.kind]
     return (
-        f"{GENERATED_MODULE_MARKER} — {document.qualified}, from {source_name}\n"
+        f"{GENERATED_MODULE_MARKER} {what} — {document.qualified}, "
+        f"from {source_name}\n"
         f"{python_string(header)}\n"
         "\n"
-        "from weaver import SparkSqlTable\n"
+        f"from weaver import {base}\n"
         "\n"
         "\n"
         f"{SQL_ATTRIBUTE} = {python_string(body)}\n"
         "\n"
         "\n"
-        f"class {name}(SparkSqlTable):\n"
+        f"class {name}({base}):\n"
         f"    sql = {SQL_ATTRIBUTE}\n"
     )
 
@@ -141,6 +163,7 @@ def python_string(text: str) -> str:
 
 
 __all__ = [
+    "GENERATED_BASE",
     "GENERATED_MODULE_MARKER",
     "SQL_ATTRIBUTE",
     "addressed",

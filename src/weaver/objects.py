@@ -601,6 +601,19 @@ class Test(WeaverObject):
             "relation under test"
         )
 
+    def _sides(self):
+        """The two relations to compare, as a pair.
+
+        The hook a compiled Test overrides. A Spark SQL Test's two sides come
+        out of one program, and running that program twice — once for each side
+        — would compare two different snapshots of anything its setup
+        materialised, then report the difference between them as failure. So the
+        pair is produced in one call, and an ordinary authored Test simply asks
+        its own two methods.
+        """
+
+        return self.expected(), self.actual()
+
     def read(self):
         """The rows on which expected and actual disagree.
 
@@ -611,11 +624,93 @@ class Test(WeaverObject):
 
         from .runtime.test_compare import compare
 
+        expected, actual = self._sides()
         return compare(
-            self.expected(),
-            self.actual(),
+            expected,
+            actual,
             primary_key=self._document().primary_key,
             what=type(self).__name__,
+        )
+
+
+class _SparkSqlValidation:
+    """What the two generated validation bases share.
+
+    **Generated, not authored.** A developer writes
+    ``Sales.OrdersReconcile.sql`` and Weaver installs
+    ``Sales__OrdersReconcile.py``, which is one of these classes with the
+    authored SQL attached. The installed module is an ordinary Weaver primitive:
+    it imports, constructs and runs exactly as a hand-written one does, and
+    orchestration cannot tell the two apart.
+
+    Public because the deployed module imports it and because someone reaching
+    for an installed primitive in a notebook meets it — not as a second way to
+    author a validation. A repository ``.py`` subclassing one is refused,
+    because ``.sql`` is where a SQL validation is written.
+    """
+
+    #: The authored program, addressed and embedded when the module was built.
+    sql: str = ""
+
+    def _document(self):
+        """This module's contract, read as the SQL document it came from.
+
+        The docstring *is* the authored ``.sql`` header, carried over verbatim,
+        so it has to be parsed as what it was written as. Reading it as Python
+        metadata would apply Python's rules to a SQL declaration.
+        """
+
+        import sys
+
+        from .declaration.metadata import SPARK_SQL, parse_document
+        from .runtime.load_contract import module_metadata_text
+
+        module = sys.modules.get(type(self).__module__)
+        if module is None:  # pragma: no cover - a class with no importable module
+            raise LoadError(
+                f"{type(self).__name__} was defined outside an importable module, "
+                "so its Weaver metadata cannot be read"
+            )
+        return parse_document(module_metadata_text(module), language=SPARK_SQL)
+
+
+class SparkSqlTest(_SparkSqlValidation, Test):
+    """A Test whose two sides are a Spark SQL program rather than Python.
+
+    The program's shape is its contract: after any setup, the first query is
+    expected and the second is actual. See
+    :mod:`weaver.declaration.validation_program`.
+    """
+
+    __test__ = False
+
+    def _sides(self):
+        """Both relations, from one execution of the program."""
+
+        from .runtime.spark_sql_validation import read_spark_sql_test
+
+        return read_spark_sql_test(
+            self.spark, sql=self.sql, what=type(self).__name__
+        )
+
+    def expected(self):
+        return self._sides()[0]
+
+    def actual(self):
+        return self._sides()[1]
+
+
+class SparkSqlAssumption(_SparkSqlValidation, Assumption):
+    """An Assumption whose violating rows are a Spark SQL program.
+
+    After any setup, one query returns the rows that contradict it.
+    """
+
+    def read(self):
+        from .runtime.spark_sql_validation import read_spark_sql_assumption
+
+        return read_spark_sql_assumption(
+            self.spark, sql=self.sql, what=type(self).__name__
         )
 
 

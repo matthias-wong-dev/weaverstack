@@ -598,7 +598,7 @@ def _read_sql(
     analysis = analyse_sql(body)
 
     if document.is_validation:
-        _check_sql_validation_program(relative_path, document, analysis)
+        _check_sql_validation_program(relative_path, document, body, language)
         return SourceDocument(
             relative_path=relative_path,
             language=language,
@@ -642,40 +642,27 @@ def _read_sql(
     )
 
 
-#: How many result-producing queries each validation kind's contract is.
-VALIDATION_RESULT_SETS = {TEST: 2, ASSUMPTION: 1}
-
-
 def _check_sql_validation_program(
-    relative_path: str, document: SesDocument, analysis: "SqlAnalysis"
+    relative_path: str, document: SesDocument, body: str, language: str
 ) -> None:
-    """Refuse a SQL validation whose visible queries cannot be its contract.
+    """Refuse a SQL validation whose queries cannot be its contract.
 
-    A Test is expected then actual, in that order; an Assumption is the
-    violations. Setup statements precede them and are unrestricted.
-
-    An undetermined count is not a refusal, for the reason it is not one for a
-    table: dynamic SQL puts the count beyond static reach, and a validation
-    whose *setup* builds something dynamically is ordinary. What the compiler
-    then requires is that the final one or two queries are capturable, which is
-    a rendering question and is answered there.
+    Through the dialect's own parser, exactly as a SQL table's contract is
+    checked, because each dialect has its own idea of where a statement ends.
+    What the parser produces then meets one counting rule — see
+    :mod:`weaver.declaration.validation_program`.
     """
 
-    if not analysis.determined:
-        return
+    from .validation_program import validate_validation_contract
 
-    required = VALIDATION_RESULT_SETS[document.kind]
-    if analysis.result_set_count == required:
-        return
+    if language == SPARK_SQL:
+        from .spark_sql_program import parse_spark_sql_program as parse
+    else:
+        from .tsql_program import parse_tsql_program as parse
 
-    contract = (
-        "expected then actual" if document.kind == TEST else "the violating rows"
-    )
-    raise DiscoveryError(
-        f"{relative_path}: {document.kind} {document.qualified} must produce exactly "
-        f"{required} result set(s) — {contract} — and produces "
-        f"{analysis.result_set_count}. Statements that return no rows are setup and "
-        "may precede them freely."
+    program = parse(body, what=relative_path, error=DiscoveryError)
+    validate_validation_contract(
+        program, what=relative_path, kind=document.kind, error=DiscoveryError
     )
 
 

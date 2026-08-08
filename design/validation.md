@@ -164,6 +164,32 @@ parser, so it fails whether the class is written in a notebook or committed.
 
 An Assumption authors `read()` directly, and what it returns is the evidence.
 
+### Compiled from SQL
+
+A Spark SQL validation compiles to a Python module carrying the authored SQL,
+exactly as a Spark SQL table does — the authored header becomes the docstring
+that is the contract, the SQL becomes `SQL`, and a Weaver base supplies the
+rest:
+
+```text
+Lakehouse/Sales/tests/Sales.OrdersReconcile.sql   what the developer writes
+Files/_/Load/tests/Sales__OrdersReconcile.py      what a build deploys
+```
+
+The program's shape is its contract: after any setup, a Test's first query is
+expected and its second is actual; an Assumption's one query is the violating
+rows. Setup is unrestricted and may be dynamic.
+
+**Both sides come from one execution.** `Test.read()` reaches its two relations
+through a `_sides()` hook rather than by calling `expected()` and `actual()`
+separately, so a compiled Test runs its program once. Running it twice would
+compare two different snapshots of anything the setup materialised, and report
+the difference between them as failure.
+
+There is no installed `.sql` validation program and nothing that runs one. The
+comparison, key validation, correlation and diagnostics stay in
+`test_compare` rather than being emitted a second time in SQL.
+
 Dependencies are ordinary imports resolved by the ordinary AST machinery, and
 `Sales__Orders(self)` inherits the session and the resolved Lakehouse exactly as
 it does inside a Table. Nothing about validation dependencies is new — a second
