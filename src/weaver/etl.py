@@ -220,11 +220,11 @@ def item_validation_artefacts(
             # its own bytes.
             payload = source.text.encode("utf-8")
             artefacts.append(
-                _file_artefact(
-                    item,
-                    validation_module_path(kind, identity.object_id),
-                    payload=payload,
+                RuntimeArtefact(
+                    identity=validation_artefact_id(item, kind, identity.object_id),
+                    object_type=FILE_TYPE,
                     signature=content_hash(payload),
+                    payload=payload,
                     role=role,
                     origin=identity,
                 )
@@ -232,32 +232,18 @@ def item_validation_artefacts(
             continue
 
         generated = source.create_validation()
-        if generated.object_type == PROCEDURE_TYPE:
-            artefacts.append(
-                RuntimeArtefact(
-                    identity=validation_procedure_id(item, kind, identity.object_id),
-                    object_type=generated.object_type,
-                    signature=_salted(
-                        source.effective_signature, generated.template_version
-                    ),
-                    payload=generated.payload,
-                    role=role,
-                    origin=identity,
-                )
+        artefacts.append(
+            RuntimeArtefact(
+                identity=validation_artefact_id(item, kind, identity.object_id),
+                object_type=generated.object_type,
+                signature=_salted(
+                    source.effective_signature, generated.template_version
+                ),
+                payload=generated.payload,
+                role=role,
+                origin=identity,
             )
-        else:
-            artefacts.append(
-                _file_artefact(
-                    item,
-                    validation_module_path(kind, identity.object_id),
-                    payload=generated.payload,
-                    signature=_salted(
-                        source.effective_signature, generated.template_version
-                    ),
-                    role=role,
-                    origin=identity,
-                )
-            )
+        )
     return tuple(artefacts)
 
 
@@ -475,6 +461,31 @@ def validation_procedure_name(kind: str, source: ObjectId) -> str:
         f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}"
     )
     return f"{schema}.{procedure}"
+
+
+def validation_artefact_id(
+    item: WeaverItemId, kind: str, source: ObjectId
+) -> WeaverDocumentId:
+    """The runtime artefact one logical validation compiles to.
+
+    **The function that connects `_.TestDictionary` to `_.Registry.`** A
+    validation has no Registry row of its own — nothing is materialised under
+    its logical ID — so orchestration finds its installed primitive by computing
+    the identity rather than by looking the logical ID up. That only works while
+    exactly one function computes it, which is why the build claims its
+    artefacts through this too.
+
+    Which physical form follows from the owning item, and nothing else: a
+    Warehouse installs a procedure, a Lakehouse a module in its runtime tree.
+    """
+
+    if item.item_type == WAREHOUSE:
+        return validation_procedure_id(item, kind, source)
+    path = f"{LOAD_ROOT}/{validation_module_path(kind, source)}"
+    directory, _, name = path.rpartition("/")
+    return WeaverDocumentId(
+        item, ObjectId(schema=directory, object=name), shape=FILE_SHAPE
+    )
 
 
 def validation_module_path(kind: str, source: ObjectId) -> str:
@@ -699,6 +710,7 @@ __all__ = [
     "runtime_artefacts",
     "validation_artefacts",
     "validation_module_path",
+    "validation_artefact_id",
     "validation_procedure_id",
     "validation_procedure_name",
     "load_schemas",
