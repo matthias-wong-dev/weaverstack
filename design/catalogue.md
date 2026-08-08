@@ -36,8 +36,9 @@ Warehouse | Reporting | Sales       | Customer
 Those are three rows and all are real. The first two share one Lakehouse item but
 remain distinct because `Files/` is part of the Folder's schema.
 
-A load artefact is keyed the same way, with the two halves spelled as the target
-itself spells them — a containing path and a complete filename, or a schema and a
+A runtime artefact — a deployed load module, a generated load procedure, or the
+procedure or module a validation compiles to — is keyed the same way, with the
+two halves spelled as the target itself spells them — a containing path and a complete filename, or a schema and a
 procedure named for what it loads:
 
 ```text
@@ -67,13 +68,14 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | Table | One row per | Notes |
 |---|---|---|
 | `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
-| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows and `load` for something that does the work of filling one. `build_epoch` dates the build that published the row. |
+| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows, `load` for something that does the work of filling one, and `test` or `assumption` for the runnable form of a validation. `build_epoch` dates the build that published the row. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
 | `_.FolderDictionary` | managed folder | Keeps the folder's two-part identity, and its file key — the scope of what Weaver manages inside it. |
 | `_.ColumnDictionary` | described column | Purely descriptive: the columns an author wrote a note about, plus Weaver's surrogate. Not every column. |
 | `_.IndexDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
+| `_.TestDictionary` | Test or Assumption | The **logical** authored validation — `test_type`, description and the declared `primary_key`. The procedure or module it compiles to is a physical artefact and is certified in `_.Registry`; there is no Registry row under the logical validation ID. See [validation](validation.md). |
 | `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
 | `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from the consuming item's `alias.yml`. |
 

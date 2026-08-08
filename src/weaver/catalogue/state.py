@@ -23,10 +23,14 @@ from .tables import (
     BUILD_EPOCH,
     CATALOGUE_TABLES,
     INSTALLATION,
+    OBJECT_ROLES,
     OBJECT_TYPES,
     REGISTRY,
+    ROLE_DATA,
+    RUNTIME_ROLES,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
+    VALIDATION_ROLES,
 )
 
 #: What a Folder's stored schema carries, so a table and a folder of the same
@@ -358,9 +362,28 @@ class RegisteredDocument:
     identity: WeaverDocumentId
     object_type: str
     signature: str
+    #: What the installed object is *for* — data, load, test or assumption.
+    #:
+    #: Kept rather than dropped after parsing, because it is the only place the
+    #: answer survives. A physical shape used to imply it: a file or a procedure
+    #: could only be a load artefact, because a load layer installed the only
+    #: files and procedures there were. A Test compiles to a module and a
+    #: procedure too, so the shape now answers nothing and planning has to read
+    #: what the row says.
+    object_role: str = ROLE_DATA
     #: When the build that last certified this object published it. ``None`` for
     #: a row written before epochs existed, which orders as older than any epoch.
     build_epoch: object = None
+
+    @property
+    def is_runtime_artefact(self) -> bool:
+        """Whether this is something installed to be run rather than to hold rows."""
+
+        return self.object_role in RUNTIME_ROLES
+
+    @property
+    def is_validation(self) -> bool:
+        return self.object_role in VALIDATION_ROLES
 
 
 def _encode_json_value(value):
@@ -400,8 +423,19 @@ def _registered_documents(
             signature = str(row.get("signature") or "")
             if not signature:
                 raise BuildError(f"Registry row for {identity} has no signature")
+            object_role = str(row.get("object_role") or "")
+            if object_role not in OBJECT_ROLES:
+                expected = ", ".join(OBJECT_ROLES)
+                raise BuildError(
+                    f"Registry row for {identity} has unsupported object_role "
+                    f"{object_role!r}; expected one of {expected}"
+                )
             document = RegisteredDocument(
-                identity, object_type, signature, row.get(BUILD_EPOCH)
+                identity,
+                object_type,
+                signature,
+                object_role,
+                row.get(BUILD_EPOCH),
             )
             prior = registered.get(identity)
             if prior is not None and prior != document:

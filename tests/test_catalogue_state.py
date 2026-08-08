@@ -28,6 +28,7 @@ def _row(name: str, *, object_type: str = "table"):
         "schema_name": "Sales",
         "object_name": name,
         "object_type": object_type,
+        "object_role": "data",
         "signature": f"signature-{name}-{object_type}",
     }
 

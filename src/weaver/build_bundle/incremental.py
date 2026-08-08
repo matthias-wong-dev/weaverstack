@@ -193,6 +193,23 @@ def declared_signatures(
     return signatures
 
 
+def runtime_artefact_identities(
+    repository: WeaverRepository,
+) -> frozenset[WeaverDocumentId]:
+    """Everything this repository installs to be *run* rather than to hold rows.
+
+    Derived from the repository, because during a build that is where the answer
+    is: the artefacts have been claimed from the declaration and nothing has been
+    installed yet. Reading installed state instead asks
+    :attr:`~weaver.catalogue.state.RegisteredDocument.object_role`, which is the
+    same question answered from the other side of the boundary.
+    """
+
+    from ..etl import load_artefacts
+
+    return frozenset(artefact.identity for artefact in load_artefacts(repository))
+
+
 def determine_impact(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
@@ -241,12 +258,18 @@ def determine_impact(
     graph = repository.dependency_graph
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
+        runtime = runtime_artefact_identities(repository)
         for root in changed:
-            # A load artefact is not a node in the authored graph, and that is
-            # the design rather than an omission: nothing depends on a deployed
-            # module, and it depends on nothing — its signature is its own
-            # content. So a changed one is the end of a walk, not the start.
-            if root.is_load_artefact:
+            # A runtime artefact is not a node in the authored graph, and that
+            # is the design rather than an omission: nothing depends on a
+            # deployed module, and it depends on nothing — its signature is its
+            # own content. So a changed one is the end of a walk, not the start.
+            #
+            # Membership is asked of the repository, not of the identity's
+            # shape. A file or a procedure used to be a load artefact by
+            # definition; it stopped being one when a Test compiled to a module
+            # and a procedure of its own.
+            if root in runtime:
                 continue
             for node in graph.descendants(str(root)):
                 descendant = by_text.get(node)

@@ -28,7 +28,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from ..declaration.metadata import FOLDER, TABLE, VIEW, ObjectId, Reference
+from ..declaration.metadata import (
+    ASSUMPTION,
+    FOLDER,
+    TABLE,
+    TEST,
+    VIEW,
+    ObjectId,
+    Reference,
+)
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
 from ..declaration.references import declared_column_notes, resolve_text
 from ..etl import PROCEDURE_TYPE, item_load_artefacts, load_artefacts_by_identity
@@ -46,10 +54,13 @@ from .tables import (
     KEY_PRIMARY,
     KEY_UNIQUE,
     REGISTRY,
+    ROLE_ASSUMPTION,
     ROLE_DATA,
     ROLE_LOAD,
+    ROLE_TEST,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
+    TEST_DICTIONARY,
     CatalogueTable,
 )
 
@@ -65,6 +76,14 @@ WAREHOUSE_TARGET = "warehouse"
 #: is lower case, and pinning the mapping here means a new Weaver document kind must be given
 #: a catalogue meaning rather than leaking one.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
+
+#: How a validation kind names itself in ``TestDictionary.test_type``, and the
+#: Registry role its runnable artefact carries. Two vocabularies for one kind,
+#: because the logical declaration and the physical primitive are different
+#: things — the dictionary describes the Test, the Registry certifies the
+#: procedure or module it compiled to.
+TEST_TYPE_FOR_KIND = {TEST: "test", ASSUMPTION: "assumption"}
+ROLE_FOR_VALIDATION_KIND = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}
 
 
 @dataclass(frozen=True)
@@ -130,10 +149,23 @@ def project_item_catalogue(
     retained_loads = tuple(
         loads[identity] for identity in retained if identity in loads
     )
+    # A validation carries the item's ordinary logical identity and is not a data
+    # object, so it is separated here for the same reason an alias is: what
+    # follows projects tables, columns and keys, and a Test has none of them.
+    retained_validations = tuple(
+        identity
+        for identity in retained
+        if identity not in alias_by_destination
+        and identity not in loads
+        and repository.source_documents[identity].is_validation
+    )
+    validation_set = set(retained_validations)
     retained = tuple(
         identity
         for identity in retained
-        if identity not in alias_by_destination and identity not in loads
+        if identity not in alias_by_destination
+        and identity not in loads
+        and identity not in validation_set
     )
     documents = [repository.source_documents[identity] for identity in retained]
     all_documents = tuple(repository.source_documents.values())
@@ -218,6 +250,26 @@ def project_item_catalogue(
             _foreign_keys(source, identity, common, signature)
         )
 
+    # A validation claims TestDictionary and its dependencies, and nothing else.
+    # In particular it claims no Registry row: Registry certifies a physical
+    # object that exists, and nothing is materialised under the logical Test ID.
+    # What *is* certified is the procedure or module the validation compiles to,
+    # and that artefact has an identity of its own.
+    for identity in retained_validations:
+        source = repository.source_documents[identity]
+        document = source.document
+        rows[TEST_DICTIONARY.name].append(
+            {
+                **_identity(scope, identity),
+                "test_type": TEST_TYPE_FOR_KIND[document.kind],
+                **_described(source, all_documents, repository),
+                # Correlation information about a Test, and structurally absent
+                # from an Assumption, which has one side to correlate.
+                "primary_key": column_set(document.primary_key) or None,
+                "signature": source.effective_signature,
+            }
+        )
+
     # A load artefact claims the Registry and nothing else. It has no columns to
     # describe, no keys to record and no dependencies to keep — it is a deployed
     # module or a generated statement, and what the catalogue knows about it is
@@ -232,9 +284,12 @@ def project_item_catalogue(
             }
         )
 
-    retained_set = set(retained)
+    # A validation's dependencies belong to its logical identity, exactly as an
+    # object's do. That is what lets the graph say Sales.Orders precedes
+    # Sales.OrdersUpToDate without a Registry row standing in for the Test.
+    consumers = set(retained) | validation_set
     for edge in repository.dependency_edges:
-        if edge.consumer not in retained_set:
+        if edge.consumer not in consumers:
             continue
         source = repository.source_documents[edge.consumer]
         rows[DEPENDENCY.name].append(
@@ -265,7 +320,9 @@ def project_item_catalogue(
     used_schemas = sorted(
         {
             (_catalogue_schema(identity), identity.object_id.schema)
-            for identity in retained
+            # A validation names a schema the item declares, and putting one to
+            # use is what makes it a schema the installation uses.
+            for identity in retained + retained_validations
         }
         | {
             (_catalogue_schema(alias.destination), alias.destination.object_id.schema)

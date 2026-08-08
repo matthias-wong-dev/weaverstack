@@ -302,17 +302,6 @@ class WeaverDocumentId:
         prefix = f"{FILES}/" if self.is_files else ""
         return f"{prefix}{self.object_id.qualified}"
 
-    @property
-    def is_load_artefact(self) -> bool:
-        """Whether this identity names something a load layer produces.
-
-        The two load shapes against the one structural shape. Asked wherever a
-        selection has to be partitioned, so that the question is answered from
-        the identity rather than by each caller keeping its own set.
-        """
-
-        return self.shape in (FILE_SHAPE, PROCEDURE_SHAPE)
-
     def __str__(self) -> str:
         return f"{self.item}/{self.relative}"
 
