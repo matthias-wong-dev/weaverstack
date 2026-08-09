@@ -250,9 +250,7 @@ RETIRING = {
         tests/fabric/test_warehouse_inventory_binding.py
         tests/targeted/test_load_artefacts_binding.py
         tests/targeted/test_load_dag_binding.py
-        tests/targeted/test_load_execution_binding.py
         tests/targeted/test_load_plan_binding.py
-        tests/targeted/test_load_resolution_binding.py
         tests/targeted/test_python_runtime_isolation_binding.py
         tests/targeted/test_validation_artefacts_binding.py
         tests/test_build_context_binding.py

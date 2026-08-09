@@ -27,11 +27,12 @@ else's module:
     parse targets            weaver.targets
     resolve workspace        weaver.operations
     read the catalogue       weaver.catalogue.state
+    observe every target     weaver.run.observe
     reverse the bindings     weaver.load_plan
-    build the physical DAG   weaver.load_plan
-    resolve every node       weaver.load_resolution
+    build the physical DAG   weaver.run.graph
+    resolve every node       weaver.run.resolution
     ── dry run stops here ──
-    execute sequentially     weaver.load_execution
+    dispatch each primitive  weaver.run.runner
     write task evidence      weaver.task_logging
 
 Nothing executes while catalogue state is still being discovered: the whole plan
@@ -45,7 +46,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .errors import CommandError, LoadError
-from .load_execution import execute_load_plan
 from .load_plan import (
     ENDPOINT_REFRESH,
     LAKEHOUSE_TARGET,
@@ -65,7 +65,7 @@ from .load_report import (
     SUCCEEDED_WITH_REJECTS,
     final_status,
 )
-from .load_resolution import LoadEnvironment, dry_run_reports, resolve_load_plan
+from .load_resolution import LoadEnvironment
 from .targets import (
     DeltaTarget,
     ItemRef,

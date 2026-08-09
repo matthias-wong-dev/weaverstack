@@ -24,12 +24,7 @@ from weaver.load_report import (
     TARGET_MISSING,
     VALIDATED,
 )
-from weaver.load_resolution import (
-    LoadEnvironment,
-    REFRESH_UNSUPPORTED,
-    dry_run_reports,
-    resolve_load_plan,
-)
+from weaver.run import RunRequest, RunState, Runner
 from weaver.resolution import LocalResolver
 from weaver.workspaces import LocalWorkspace
 
@@ -56,6 +51,19 @@ def local_resolver() -> LocalResolver:
     )
 
 
+class Resolutions:
+    """Every node of the graph, resolved against one observed estate."""
+
+    def __init__(self, runner) -> None:
+        self.runner = runner
+        self.by_id = {
+            node.node_id: runner.resolve(node) for node in runner.graph.order()
+        }
+
+    def dry_run(self):
+        return self.runner.run(dispatch=None)
+
+
 @pytest.fixture
 def estate(tmp_path):
     """The canonical estate, its catalogue and its physical inventories."""
@@ -68,16 +76,22 @@ def estate(tmp_path):
     )
 
 
-def resolve(estate, *, inventories=None, resolver=None):
+def _runner(estate, *, inventories=None, can_refresh=True, dry_run=False):
     catalogue, observed = estate
-    dag = LoadDag.from_catalogue(catalogue, targets=(RAW, REPORTING))
-    return resolve_load_plan(
-        dag,
-        environment=LoadEnvironment(
-            resolver=local_resolver() if resolver is None else resolver,
-            inventories=observed if inventories is None else inventories,
+    return Runner(
+        RunState(
+            catalogue=catalogue,
+            target_inventories=observed if inventories is None else inventories,
         ),
+        RunRequest.load((RAW, REPORTING), dry_run=dry_run),
+        can_refresh=can_refresh,
     )
+
+
+def resolve(estate, *, inventories=None, can_refresh=True):
+    """Resolution, asked of the snapshot and of nothing else."""
+
+    return Resolutions(_runner(estate, inventories=inventories, can_refresh=can_refresh))
 
 
 def without(inventories, target: str, **fields):
@@ -93,7 +107,7 @@ def test_load_resolution_finds_a_warehouse_procedure(estate):
     assert resolved.dispatch_location == (
         "Warehouse/Reporting_WH/[_].[Load Sales.Summary]"
     )
-    assert resolved.primitive_exists
+    assert resolved.primitive_present
     assert resolved.valid
 
 
@@ -107,15 +121,15 @@ def test_load_resolution_finds_a_sql_authored_tables_deployed_module(estate):
 
     resolved = resolve(estate).by_id[DAILY]
 
-    assert resolved.dispatch_location == ".local/Raw_LH/Files/_/Load/Sales__Daily.py"
-    assert resolved.primitive_exists
+    assert resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Sales__Daily.py"
+    assert resolved.primitive_present
     assert resolved.expected_class == "Sales__Daily"
 
 
 def test_load_resolution_finds_a_python_table_module_and_class(estate):
     resolved = resolve(estate).by_id[ORDER]
 
-    assert resolved.dispatch_location == ".local/Raw_LH/Files/_/Load/Sales__Order.py"
+    assert resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Sales__Order.py"
     assert resolved.expected_class == "Sales__Order"
 
 
@@ -123,37 +137,32 @@ def test_load_resolution_finds_a_python_folder_module_and_class(estate):
     resolved = resolve(estate).by_id[EXPORT]
 
     assert resolved.dispatch_location == (
-        ".local/Raw_LH/Files/_/Load/Files/Sales__Export.py"
+        "Lakehouse/Raw_LH/_/Load/Files/Sales__Export.py"
     )
     assert resolved.expected_class == "Sales__Export"
 
 
 def test_load_resolution_resolves_an_endpoint_refresh_target(estate):
-    class Refreshing(LocalResolver):
-        def refresh_sql_endpoint(self, item):
-            return {"lakehouse": item.name}
+    """A host that has an endpoint. Whether it does is the host's answer, not
+    something resolution discovers by reaching for one."""
 
-    resolved = resolve(
-        estate,
-        resolver=Refreshing(
-            LocalWorkspace(workspace=".local", weaver_lakehouse="Weaver_LH")
-        ),
-    ).by_id[REFRESH]
+    resolved = resolve(estate, can_refresh=True).by_id[REFRESH]
 
     assert resolved.dispatch_location == "Lakehouse/Raw_LH/sql_endpoint"
-    assert resolved.primitive_exists
+    assert resolved.primitive_present
     assert not resolved.unsupported
 
 
 def test_load_resolution_reports_a_refresh_the_host_cannot_perform(estate):
     """An emulator has no endpoint. That is an absence, not a fault."""
 
-    resolved = resolve(estate).by_id[REFRESH]
+    resolved = resolve(estate, can_refresh=False).by_id[REFRESH]
 
     assert resolved.unsupported
-    assert resolved.valid
-    assert [message.message for message in resolved.validation_messages] == [
-        f"{REFRESH_UNSUPPORTED}; {REFRESH} will be skipped"
+    assert resolved.valid, "a warning, not an error: nothing here is wrong"
+    assert [message.message for message in resolved.messages] == [
+        "SQL endpoint refresh is unsupported in this environment; "
+        f"{REFRESH} will be skipped"
     ]
 
 
@@ -166,9 +175,9 @@ def test_load_resolution_reports_a_missing_procedure(estate):
         (catalogue, without(inventories, "Warehouse/Reporting_WH", procedures=())),
     ).by_id[SUMMARY]
 
-    assert not resolved.primitive_exists
+    assert not resolved.primitive_present
     assert not resolved.valid
-    assert [message.code for message in resolved.validation_messages] == [
+    assert [message.code for message in resolved.messages] == [
         DISPATCH_LOCATION_MISSING
     ]
 
@@ -186,8 +195,8 @@ def test_load_resolution_reports_a_missing_file(estate):
     )
     resolved = resolve((catalogue, trimmed)).by_id[DAILY]
 
-    assert not resolved.primitive_exists
-    assert [message.code for message in resolved.validation_messages] == [
+    assert not resolved.primitive_present
+    assert [message.code for message in resolved.messages] == [
         DISPATCH_LOCATION_MISSING
     ]
 
@@ -205,8 +214,8 @@ def test_load_resolution_reports_a_missing_module(estate):
     )
     resolved = resolve((catalogue, trimmed)).by_id[ORDER]
 
-    assert not resolved.primitive_exists
-    assert resolved.dispatch_location == ".local/Raw_LH/Files/_/Load/Sales__Order.py"
+    assert not resolved.primitive_present
+    assert resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Sales__Order.py"
 
 
 def test_load_resolution_reports_a_missing_target_table(estate):
@@ -214,7 +223,7 @@ def test_load_resolution_reports_a_missing_target_table(estate):
     trimmed = without(inventories, "Warehouse/Reporting_WH", tables=())
     resolved = resolve((catalogue, trimmed)).by_id[SUMMARY]
 
-    assert [message.code for message in resolved.validation_messages] == [
+    assert [message.code for message in resolved.messages] == [
         TARGET_MISSING
     ]
 
@@ -228,8 +237,8 @@ def test_load_resolution_reports_a_missing_target(estate):
     }
     resolved = resolve((catalogue, without_warehouse)).by_id[SUMMARY]
 
-    assert not resolved.target_exists
-    assert [message.code for message in resolved.validation_messages] == [
+    assert not resolved.target_present
+    assert [message.code for message in resolved.messages] == [
         TARGET_MISSING
     ]
 
@@ -248,8 +257,8 @@ def test_load_resolution_blocks_descendants_of_invalid_nodes(estate):
             if not name.endswith("Sales__Order.py")
         ),
     )
-    plan = resolve((catalogue, trimmed))
-    reports = {report.node_id: report for report in dry_run_reports(plan)}
+    result = _runner((catalogue, trimmed), dry_run=True).run()
+    reports = result.by_node
 
     assert reports[ORDER].status == INVALID
     # Everything that reads what Sales.Order fills, directly or through the
