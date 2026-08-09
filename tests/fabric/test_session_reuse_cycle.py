@@ -101,20 +101,20 @@ def test_a_failed_statement_leaves_the_connection_healthy(
 
     from weaver.sql import SqlError
 
-    with pytest.raises((SqlError, Exception)):
-        weaver_session.execute_tsql(
+    with pytest.raises(SqlError):
+        weaver_session.query_tsql(
             "SELECT * FROM dbo.a_table_that_is_not_there",
             target=disposable_warehouse.target,
             workspace=fabric_workspace,
         )
 
-    rows = weaver_session.execute_tsql(
+    rows = weaver_session.query_tsql(
         "SELECT 1 AS one",
         target=disposable_warehouse.target,
         workspace=fabric_workspace,
     )
 
-    assert rows
+    assert list(rows) == [{"one": 1}]
     scope = weaver_session.scope(fabric_workspace)
     assert scope._sql[disposable_warehouse.target.warehouse.name].state is (
         ResourceState.READY

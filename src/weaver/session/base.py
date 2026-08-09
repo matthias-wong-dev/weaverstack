@@ -238,8 +238,26 @@ class Session(ABC):
         target: Any,
         workspace: Workspace | None = None,
         parameters: Sequence[Any] | None = None,
+    ) -> None:
+        """Run one T-SQL statement against a named Warehouse, over TDS.
+
+        A statement, not a question: nothing comes back. Asking is
+        :meth:`query_tsql`, and the two are separate because the SQL layer
+        separates them — reading a result set from a statement that produces
+        several answers with whichever came first, which is how a failing check
+        reports as passing.
+        """
+
+    @abstractmethod
+    def query_tsql(
+        self,
+        statement: str,
+        *,
+        target: Any,
+        workspace: Workspace | None = None,
+        parameters: Sequence[Any] | None = None,
     ) -> Any:
-        """Run one T-SQL statement against a named Warehouse, over TDS."""
+        """Ask one T-SQL question of a named Warehouse, and return its rows."""
 
     # --- reporting context --------------------------------------------------
     #
