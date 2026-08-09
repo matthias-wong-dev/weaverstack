@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..errors import LoadError
+from ..errors import LoadError, ValidationError
 from ..load_report import (
     DISPATCH_EXCEPTION,
     ENDPOINT_REFRESH_FAILURE,
@@ -46,6 +46,11 @@ class Outcome:
     status: str
     result: LoadResult
     messages: tuple = ()
+    #: Whether the dispatch threw rather than returning. A failed node that
+    #: *raised* produced no judgement at all — which is a different thing from
+    #: one that ran and reported failure, and the difference is what tells "the
+    #: check could not be evaluated" from "the check found something wrong".
+    raised: bool = False
 
 
 def settle(node, *, returned=None, raised: BaseException | None = None) -> Outcome:
@@ -71,33 +76,35 @@ def _raised(node, exc: BaseException) -> Outcome:
 
     The target was not modified, so calling it "succeeded with rejects" would
     report rows that were never written.
+
+    Whatever result the failure carried is kept, from whichever error type
+    carried it. A load failure carries a load result and a validation failure
+    carries a validation result, and substituting one for the other would hand a
+    reader counts that do not exist on the thing they asked about.
     """
 
-    if isinstance(exc, LoadError):
-        carried = getattr(exc, "result", None)
-        return Outcome(
-            status=FAILED,
-            result=(
-                carried
-                if isinstance(carried, LoadResult)
-                else LoadResult.failure(str(exc))
-            ),
-            messages=(
-                error(
-                    _failure_code(node),
-                    f"{node.node_id} failed: {exc}",
-                    source=node.primitive_kind,
-                ),
-            ),
-        )
+    carried = getattr(exc, "result", None)
+    if hasattr(carried, "succeeded"):
+        result = carried
+    else:
+        result = LoadResult.failure(f"{type(exc).__name__}: {exc}")
+
+    # A failure the runtime named is reported against the primitive that named
+    # it; anything else is the dispatch itself coming apart.
+    named = isinstance(exc, (LoadError, ValidationError))
     return Outcome(
         status=FAILED,
-        result=LoadResult.failure(f"{type(exc).__name__}: {exc}"),
+        raised=True,
+        result=result,
         messages=(
             error(
-                DISPATCH_EXCEPTION,
-                f"{node.node_id} raised {type(exc).__name__}: {exc}",
-                source="run.dispatch",
+                _failure_code(node) if named else DISPATCH_EXCEPTION,
+                (
+                    f"{node.node_id} failed: {exc}"
+                    if named
+                    else f"{node.node_id} raised {type(exc).__name__}: {exc}"
+                ),
+                source=node.primitive_kind if named else "run.dispatch",
             ),
         ),
     )
@@ -111,6 +118,8 @@ def _malformed(node, returned) -> Outcome:
 
     return Outcome(
         status=FAILED,
+        # Not an exception, but nothing ran to completion either.
+        raised=True,
         result=LoadResult.failure(
             f"the primitive returned {type(returned).__name__}, not a load result"
         ),

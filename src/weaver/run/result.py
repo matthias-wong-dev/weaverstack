@@ -79,6 +79,10 @@ class RunNodeResult:
     #: What this node was for, where one graph carries more than one kind — a
     #: Test and an Assumption are both validations and are reported apart.
     role: str | None = None
+    #: Whether the dispatch threw rather than producing a result. A node that
+    #: raised was never evaluated, which a reader asking "did this check run?"
+    #: needs to know.
+    raised: bool = False
     executed: bool = False
     messages: tuple = ()
     result: Any = None

@@ -212,7 +212,11 @@ def _as_validation_node(node) -> ValidationNodeReport:
         status = PLANNED
     elif node.status == SUCCEEDED:
         status = PASSED
-    elif node.status == RUN_INVALID:
+    elif node.status == RUN_INVALID or getattr(node, "raised", False):
+        # A check that could not be *evaluated* is invalid, not failed. A Test
+        # that was never installed, or whose procedure threw, found nothing —
+        # and reading that as "found no discrepancies" is the one answer a
+        # validation must never give.
         status = INVALID
     else:
         status = FAILED

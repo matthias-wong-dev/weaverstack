@@ -74,7 +74,17 @@ class ValidationError(WeaverError):
     the other outcome — a declared key that does not identify rows, two sides
     that cannot be compared, a missing installed primitive. Collapsing the two
     would report a Test nobody could run as a Test that passed.
+
+    ``result`` carries the validation's own failed-to-run result where there is
+    one, for the reason :class:`LoadError` carries a load's: a reader handed
+    only an exception has to go and ask the estate what the counts were, and the
+    counts are what they came for. Optional, so the many places that raise this
+    before anything has run stay unchanged.
     """
+
+    def __init__(self, message: str, *, result: object | None = None) -> None:
+        super().__init__(message)
+        self.result = result
 
 
 class DiscoveryError(WeaverError):

@@ -23,8 +23,6 @@ from weaver.runtime.validation_result import AssumptionResult, TestResult
 from weaver.test_execution import (
     PYTHON_VALIDATION,
     WAREHOUSE_PROCEDURE,
-    execute_validation,
-    execute_validations,
     primitive_kind,
 )
 from weaver.test_plan import InstalledValidation
@@ -81,14 +79,96 @@ class _Executor:
         return ProcedureResult(outputs=dict(self.outputs), result_sets=self.result_sets)
 
 
-class _Environment:
+class _Session:
+    """The Session capabilities a validation reaches its engine through."""
+
     def __init__(self, executor=None):
         self._executor = executor
-        self.spark = None
-        self.resolver = None
 
-    def sql_for(self, target):
+    def sql_executor(self, target, workspace=None):
         return self._executor
+
+    def resolver(self, workspace=None):
+        return None
+
+    def spark(self, workspace=None):
+        return None
+
+
+def _run(validation, executor=None, *, collect=False):
+    """One installed validation, run the way the Runner dispatches one.
+
+    What comes back is the judgement the validation made. Turning that into a
+    status is the Runner's, and turning *that* into `passed` or `failed` is the
+    test operation's projection — three steps that used to be one function.
+    """
+
+    from weaver.test_execution import run_installed_validation
+
+    return run_installed_validation(
+        validation, session=_Session(executor), collect_diagnostics=collect
+    )
+
+
+def _graph_of(validation):
+    """A one-node graph over an installed validation, as selection would build."""
+
+    from weaver.run.graph import RunGraph, RunNode
+
+    return RunGraph(
+        nodes=(
+            RunNode(
+                node_id=str(validation.logical),
+                physical_target=validation.target,
+                primitive_kind=primitive_kind(validation),
+                logical_id=validation.logical,
+                role=validation.kind,
+                installed=validation,
+            ),
+        ),
+        requested=(validation.target,),
+    )
+
+
+def _ran(validation, executor=None, *, collect=False):
+    """The same run, rendered as a validation node — status vocabulary and all."""
+
+    from types import SimpleNamespace
+
+    from weaver.run.outcome import settle
+    from weaver.test import _as_validation_node
+
+    node = SimpleNamespace(
+        node_id=str(validation.logical),
+        primitive_kind=primitive_kind(validation),
+        physical_target=validation.target,
+        logical_id=validation.logical,
+        role=validation.kind,
+        installed=validation,
+    )
+    try:
+        returned = _run(validation, executor, collect=collect)
+    except Exception as exc:  # noqa: BLE001 - a failed validation is a result
+        outcome = settle(node, raised=exc)
+    else:
+        outcome = settle(node, returned=returned)
+    return _as_validation_node(
+        SimpleNamespace(
+            node_id=node.node_id,
+            logical_id=str(validation.logical),
+            physical_target=str(validation.target),
+            primitive_kind=node.primitive_kind,
+            dispatch_location=str(validation.artefact),
+            role=validation.kind,
+            status=outcome.status,
+            raised=outcome.raised,
+            executed=True,
+            messages=outcome.messages,
+            result=outcome.result,
+            started_at=None,
+            finished_at=None,
+        )
+    )
 
 
 # --- which primitive ----------------------------------------------------------
@@ -110,7 +190,8 @@ def test_a_lakehouse_validation_is_reached_as_a_module():
 def test_a_test_with_no_discrepancies_passes():
     executor = _Executor({"missing_count": 0, "unexpected_count": 0})
 
-    node = execute_validation(_validation(), environment=_Environment(executor))
+    node = _ran(
+_validation(), executor)
 
     assert node.status == PASSED
     assert node.result.failure_count == 0
@@ -119,7 +200,8 @@ def test_a_test_with_no_discrepancies_passes():
 def test_a_test_with_discrepancies_fails_and_carries_both_counts():
     executor = _Executor({"missing_count": 2, "unexpected_count": 3})
 
-    node = execute_validation(_validation(), environment=_Environment(executor))
+    node = _ran(
+_validation(), executor)
 
     assert node.status == FAILED
     assert (node.result.missing_count, node.result.unexpected_count) == (2, 3)
@@ -129,8 +211,8 @@ def test_a_test_with_discrepancies_fails_and_carries_both_counts():
 def test_an_assumption_reads_its_own_count():
     executor = _Executor({"violation_count": 4})
 
-    node = execute_validation(
-        _validation("Assumption"), environment=_Environment(executor)
+    node = _ran(
+        _validation("Assumption"), executor
     )
 
     assert node.status == FAILED
@@ -143,8 +225,8 @@ def test_an_assumption_reads_its_own_count():
 def test_a_missing_primitive_is_invalid_rather_than_passing():
     """A Test that was never installed must not read as a Test that found nothing."""
 
-    node = execute_validation(
-        _validation(installed=False), environment=_Environment(_Executor({}))
+    node = _ran(
+        _validation(installed=False), _Executor({})
     )
 
     assert node.status == INVALID
@@ -158,7 +240,8 @@ def test_an_execution_failure_is_invalid_and_says_why():
         def call_procedure(self, procedure, *, inputs=(), outputs=()):
             raise RuntimeError("the declared Primary key repeats")
 
-    node = execute_validation(_validation(), environment=_Environment(_Broken({})))
+    node = _ran(
+_validation(), _Broken({}))
 
     assert node.status == INVALID
     assert "repeats" in node.result.error_message
@@ -166,7 +249,8 @@ def test_an_execution_failure_is_invalid_and_says_why():
 
 
 def test_no_sql_capability_is_reported_against_the_validation():
-    node = execute_validation(_validation(), environment=_Environment(None))
+    node = _ran(
+_validation(), None)
 
     assert node.status == INVALID
     assert "no SQL capability" in node.result.error_message
@@ -187,8 +271,10 @@ def test_every_validation_reports_even_after_one_fails():
                 raise RuntimeError("nope")
             return {"missing_count": 0, "unexpected_count": 0}
 
-    nodes = execute_validations(
-        (_validation(), _validation()), environment=_Environment(_Alternating())
+    alternating = _Alternating()
+    nodes = tuple(
+        _ran(
+_validation(), alternating) for _ in range(2)
     )
 
     assert [node.status for node in nodes] == [INVALID, PASSED]
@@ -200,7 +286,8 @@ def test_every_validation_reports_even_after_one_fails():
 def test_a_whole_target_run_asks_the_procedure_to_stay_quiet():
     executor = _Executor({"missing_count": 0, "unexpected_count": 0})
 
-    execute_validation(_validation(), environment=_Environment(executor))
+    _ran(
+_validation(), executor)
 
     assert executor.calls[0][1] == (("suppress_result_set", 1),)
 
@@ -211,8 +298,8 @@ def test_a_targeted_run_asks_for_the_rows():
         result_sets=(({"_weaver_side": "expected", "OrderId": 1},),),
     )
 
-    node = execute_validation(
-        _validation(), environment=_Environment(executor), collect_diagnostics=True
+    node = _ran(
+        _validation(), executor, collect=True
     )
 
     assert executor.calls[0][1] == (("suppress_result_set", 0),)
@@ -227,8 +314,8 @@ def test_a_targeted_run_executes_the_procedure_exactly_once():
         result_sets=(({"_weaver_side": "expected", "OrderId": 1},),),
     )
 
-    execute_validation(
-        _validation(), environment=_Environment(executor), collect_diagnostics=True
+    _ran(
+        _validation(), executor, collect=True
     )
 
     assert len(executor.calls) == 1
@@ -308,14 +395,18 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
     import weaver.test_execution as execution
 
     validation = _validation(item=LAKEHOUSE, target=LAKEHOUSE_TARGET)
-    environment = _Environment()
-    environment.spark = object()
 
     class _Scope:
         def context_for(self, **_kwargs):
             return object()
 
-    environment.runtime_scope = _Scope()
+    from types import SimpleNamespace
+
+    # The capabilities a Python validation reaches through, as the Session
+    # supplies them: this run's Spark, and this run's runtime scope.
+    environment = SimpleNamespace(
+        spark=object(), resolver=None, runtime_scope=_Scope()
+    )
 
     class _Lakehouse:
         def files_root(self):
@@ -348,13 +439,24 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
 def test_a_dry_run_dispatches_nothing():
     executor = _Executor({"missing_count": 9, "unexpected_count": 9})
 
-    node = execute_validation(
-        _validation(), environment=_Environment(executor), dry_run=True
+    from weaver.run import RunRequest, RunState, Runner
+    from weaver.catalogue.state import Catalogue
+
+    validation = _validation()
+    runner = Runner(
+        RunState(catalogue=Catalogue(rows={})),
+        RunRequest.test((validation.target,), dry_run=True),
     )
+    runner._graph = _graph_of(validation)
+
+    from weaver.test import _as_validation_node
+
+    result = runner.run()
+    node = _as_validation_node(result.nodes[0])
 
     assert node.status == PLANNED
     assert not node.executed
-    assert executor.calls == []
+    assert executor.calls == [], "a dry run asks the engine nothing"
 
 
 # --- the run's own status -----------------------------------------------------

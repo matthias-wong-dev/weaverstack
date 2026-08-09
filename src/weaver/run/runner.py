@@ -365,6 +365,7 @@ class Runner:
             result=outcome.result,
             messages=outcome.messages,
             started_at=started,
+            raised=outcome.raised,
         )
 
     #: An upstream in one of these did not stop the work downstream of it.
@@ -392,6 +393,7 @@ class Runner:
         result: object = None,
         started_at: str | None = None,
         location: str | None = None,
+        raised: bool = False,
     ) -> RunNodeResult:
         return RunNodeResult(
             node_id=node.node_id,
@@ -399,6 +401,7 @@ class Runner:
             primitive_kind=node.primitive_kind,
             dispatch_location=location,
             role=node.role,
+            raised=raised,
             logical_id=str(node.logical_id) if node.logical_id else None,
             status=status,
             executed=executed,

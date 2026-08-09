@@ -257,7 +257,6 @@ RETIRING = {
         tests/test_cli_load_binding.py
         tests/test_cli_test_binding.py
         tests/test_validation_estate_binding.py
-        tests/test_validation_orchestration_binding.py
         """,
     ),
     **_classified(

@@ -44,85 +44,6 @@ WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_VALIDATION = "python_validation"
 
 
-def execute_validations(
-    validations: Sequence[InstalledValidation],
-    *,
-    environment: Any,
-    collect_diagnostics: bool = False,
-    dry_run: bool = False,
-) -> tuple[ValidationNodeReport, ...]:
-    """Run each validation in turn, and report every one of them."""
-
-    return tuple(
-        execute_validation(
-            validation,
-            environment=environment,
-            collect_diagnostics=collect_diagnostics,
-            dry_run=dry_run,
-        )
-        for validation in validations
-    )
-
-
-def execute_validation(
-    validation: InstalledValidation,
-    *,
-    environment: Any,
-    collect_diagnostics: bool = False,
-    dry_run: bool = False,
-) -> ValidationNodeReport:
-    """One validation, dispatched and normalised into a node report."""
-
-    primitive = primitive_kind(validation)
-    started = _now()
-    common = {
-        "logical_id": str(validation.logical),
-        "kind": validation.kind,
-        "physical_target": str(validation.target),
-        "primitive_kind": primitive,
-        "dispatch_location": str(validation.artefact),
-        "started_at": started,
-    }
-
-    if dry_run:
-        return ValidationNodeReport(status=PLANNED, **common, finished_at=_now())
-
-    try:
-        validation.require_installed()
-        if primitive == WAREHOUSE_PROCEDURE:
-            result, diagnostics = _dispatch_warehouse(
-                validation, environment, collect_diagnostics
-            )
-        else:
-            result, diagnostics = _dispatch_python(
-                validation, environment, collect_diagnostics
-            )
-    except Exception as exc:  # noqa: BLE001 - any failure is the run's evidence
-        message = f"{type(exc).__name__}: {exc}"
-        failed = (
-            AssumptionResult.failed_to_run(message)
-            if validation.kind == ASSUMPTION
-            else TestResult.failed_to_run(message)
-        )
-        return ValidationNodeReport(
-            status=INVALID,
-            executed=True,
-            messages=(message,),
-            result=failed,
-            finished_at=_now(),
-            **common,
-        )
-
-    return ValidationNodeReport(
-        status=PASSED if result.succeeded else FAILED,
-        executed=True,
-        result=result,
-        diagnostics=diagnostics,
-        finished_at=_now(),
-        **common,
-    )
-
-
 def run_installed_validation(
     validation: InstalledValidation,
     *,
@@ -139,16 +60,28 @@ def run_installed_validation(
     validation made, not an opinion about what that means for the run.
     """
 
-    validation.require_installed()
     environment = _capabilities(session, workspace, runtime_scope)
-    if primitive_kind(validation) == WAREHOUSE_PROCEDURE:
-        result, diagnostics = _dispatch_warehouse(
-            validation, environment, collect_diagnostics
+    try:
+        validation.require_installed()
+        if primitive_kind(validation) == WAREHOUSE_PROCEDURE:
+            result, diagnostics = _dispatch_warehouse(
+                validation, environment, collect_diagnostics
+            )
+        else:
+            result, diagnostics = _dispatch_python(
+                validation, environment, collect_diagnostics
+            )
+    except Exception as exc:  # noqa: BLE001 - a check that could not run is evidence
+        # Raised so the run knows nothing was evaluated, and carrying a result
+        # of the *validation's* own kind so its reader gets the counts that
+        # belong to it — a load result here would offer counts it does not have.
+        message = f"{type(exc).__name__}: {exc}"
+        failed = (
+            AssumptionResult.failed_to_run(message)
+            if validation.kind == ASSUMPTION
+            else TestResult.failed_to_run(message)
         )
-    else:
-        result, diagnostics = _dispatch_python(
-            validation, environment, collect_diagnostics
-        )
+        raise ValidationError(message, result=failed) from exc
     # Beside the result rather than inside it: diagnostic rows carry whatever a
     # check selected, and a durable record of them would put data into the
     # estate's own evidence.
@@ -371,7 +304,6 @@ def _now() -> str:
 __all__ = [
     "PYTHON_VALIDATION",
     "WAREHOUSE_PROCEDURE",
-    "execute_validation",
-    "execute_validations",
+    "run_installed_validation",
     "primitive_kind",
 ]
