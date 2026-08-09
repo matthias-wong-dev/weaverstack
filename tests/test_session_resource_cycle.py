@@ -106,6 +106,41 @@ def test_recovery_is_bounded_rather_than_endless(executor):
         resource.reacquire()
 
 
+def test_a_warm_up_nobody_asked_for_does_not_fail_the_next_command(executor):
+    attempts = []
+
+    def acquire():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("the capacity was busy")
+        return "livy"
+
+    resource = Resource("livy", acquire, executor=executor)
+
+    # The prompt's speculative warm-up, which fails for a passing reason.
+    with pytest.raises(RuntimeError):
+        resource.start(speculative=True).result(5)
+
+    assert resource.state is ResourceState.NOT_STARTED
+
+    # The command that genuinely needs Spark tries again, rather than inheriting
+    # a failure from something it never asked for.
+    assert resource.get() == "livy"
+    assert resource.attempts == 1
+
+
+def test_a_failed_warm_up_still_reports_through_the_command_that_needed_it(executor):
+    def acquire():
+        raise RuntimeError("this workspace names no environment")
+
+    resource = Resource("livy", acquire, executor=executor)
+    with pytest.raises(RuntimeError):
+        resource.start(speculative=True).result(5)
+
+    with pytest.raises(RuntimeError, match="names no environment"):
+        resource.get()
+
+
 def test_an_acquisition_that_fails_reports_its_own_cause(executor):
     def acquire():
         raise RuntimeError("no capacity")

@@ -17,6 +17,12 @@ from __future__ import annotations
 
 from .base import ReportingFrame, Session, WorkspaceScope, workspace_context
 from .console import ConsoleScope, ConsoleSession
+from .host import (
+    active_spark,
+    inside_fabric_session,
+    session_for,
+    use_or_create_session,
+)
 from .notebook import NotebookScope, NotebookSession
 from .program import RemoteProgram
 from .protocol import PROTOCOL_VERSION
@@ -38,5 +44,9 @@ __all__ = [
     "Session",
     "SessionTelemetry",
     "WorkspaceScope",
+    "active_spark",
+    "inside_fabric_session",
+    "session_for",
+    "use_or_create_session",
     "workspace_context",
 ]

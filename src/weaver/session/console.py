@@ -218,10 +218,25 @@ class ConsoleScope(WorkspaceScope):
         return self.local_spark is not None
 
     def warm(self) -> None:
+        """Start acquiring what the next command will probably want.
+
+        Speculative throughout: a warm-up nobody asked for must not fail the
+        command that follows, so a failure here leaves the resource unstarted
+        and the real attempt reports in its own terms.
+
+        Livy is warmed only where it *can* start. A workspace naming no
+        Environment cannot have a session created against it, and warming one
+        would replace that command's clear message with a stale warm-up failure.
+        """
+
         if self.auth is not None:
-            self.auth.start()
-        if self.livy is not None:
-            self.livy.start()
+            self.auth.start(speculative=True)
+        if self.livy is not None and getattr(self.workspace, "environment", None):
+            self.livy.start(speculative=True)
+        if self.local_spark is not None:
+            # The JVM is the largest fixed cost of every local command, so the
+            # emulator gets the same treatment as Livy.
+            self.local_spark.start(speculative=True)
 
     # --- resolution ---------------------------------------------------------
 

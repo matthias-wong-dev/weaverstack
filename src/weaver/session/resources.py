@@ -109,12 +109,19 @@ class Resource(Generic[T]):
 
     # --- acquisition --------------------------------------------------------
 
-    def start(self) -> Future:
+    def start(self, *, speculative: bool = False) -> Future:
         """Begin acquiring without waiting, returning the one acquisition.
 
         Called again while an acquisition is in flight, this returns *that*
         acquisition rather than starting another — which is what makes a
         background warm-up and a foreground caller share one Livy session.
+
+        ``speculative`` marks an acquisition nobody asked for: a warm-up started
+        at the prompt on the chance that the next command needs Spark. Those
+        must not fail work that follows. A speculative acquisition that fails
+        leaves the resource unstarted rather than failed, so the first caller
+        that genuinely needs it tries again and is told what went wrong by the
+        command that wanted it, in that command's own terms.
         """
 
         with self._lock:
@@ -128,7 +135,9 @@ class Resource(Generic[T]):
             if self._future is None:
                 self._attempts += 1
                 self._state = ResourceState.STARTING
-                self._future = self._executor.submit(self._acquire_once)
+                self._future = self._executor.submit(
+                    self._acquire_once, speculative=speculative
+                )
             return self._future
 
     def get(self, *, timeout: float | None = None) -> T:
@@ -136,7 +145,7 @@ class Resource(Generic[T]):
 
         return self.start().result(timeout)
 
-    def _acquire_once(self) -> T:
+    def _acquire_once(self, *, speculative: bool = False) -> T:
         try:
             if self._telemetry is not None:
                 with self._telemetry.timing(f"{self.name}.acquire"):
@@ -145,7 +154,12 @@ class Resource(Generic[T]):
                 value = self._acquire()
         except BaseException as exc:
             with self._lock:
-                self._state = ResourceState.FAILED
+                if speculative and self._state is not ResourceState.CLOSED:
+                    self._state = ResourceState.NOT_STARTED
+                    self._future = None
+                    self._attempts -= 1
+                else:
+                    self._state = ResourceState.FAILED
                 self._error = exc
             raise
         with self._lock:
