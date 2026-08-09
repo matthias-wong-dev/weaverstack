@@ -136,6 +136,7 @@ def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, s
 
     from support.sessions import given_installer
 
+    from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext
 
     installer = given_installer(workspace=workspace, store=store, resolver=resolver)

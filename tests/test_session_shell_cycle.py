@@ -49,12 +49,12 @@ def recorded(monkeypatch):
     return seen, parser_factory
 
 
-def _run(script: str, factory, workspace=None) -> int:
+def _run(script: str, factory, workspace=None, environment="weaver") -> int:
     args = argparse.Namespace(
         workspace=workspace,
         workspace_config=None,
         workspace_type=None,
-        environment=None,
+        environment=environment,
         weaver_lakehouse=None,
     )
     return run_shell(args, parser_factory=factory, stdin=io.StringIO(script))
@@ -133,6 +133,45 @@ def test_blank_lines_and_comments_are_not_commands(recorded):
     _run("\n   \n# a note\nbuild .\nexit\n", factory)
 
     assert len(seen) == 1
+
+
+# --- what the banner claims --------------------------------------------------
+
+
+def _banner_for(workspace, recorded, capsys, environment="weaver") -> str:
+    _, factory = recorded
+    _run("exit\n", factory, workspace=workspace, environment=environment)
+    return capsys.readouterr().out
+
+
+def test_the_banner_names_what_is_actually_starting(recorded, capsys):
+    printed = _banner_for("A_Workspace", recorded, capsys)
+
+    assert "Fabric credential" in printed
+    assert "Spark session (Livy)" in printed
+
+
+def test_a_workspace_with_no_environment_is_told_why_livy_is_not_starting(
+    recorded, capsys
+):
+    """The rule is right; announcing work it then declines is not.
+
+    Livy genuinely cannot start against a workspace that names no Environment,
+    and warming it would replace the first command's clear message with a stale
+    warm-up failure. What the prompt owes the reader is the reason.
+    """
+
+    printed = _banner_for("A_Workspace", recorded, capsys, environment=None)
+
+    assert "Not starting: Spark session (Livy)" in printed
+    assert "--environment" in printed
+
+
+def test_a_session_with_no_workspace_claims_to_start_nothing(recorded, capsys):
+    printed = _banner_for(None, recorded, capsys)
+
+    assert "no default workspace" in printed
+    assert "Starting in the background" not in printed
 
 
 # --- the prompt is a prompt --------------------------------------------------

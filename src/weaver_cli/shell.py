@@ -88,7 +88,7 @@ def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> i
             # while the credential and the Spark session are still being
             # acquired, and the first command that needs either waits on the
             # acquisition already running rather than starting a second one.
-            session.warm()
+            _report_warm_up(session.warm())
         try:
             return _loop(session, parser, stdin=stdin or sys.stdin)
         finally:
@@ -243,10 +243,28 @@ def _default_workspace(args: argparse.Namespace):
 
 
 def _banner(workspace) -> None:
-    print(f"Weaver · {workspace.workspace if workspace else 'no default workspace'}")
-    if workspace is not None:
-        print("Starting resources in the background...")
-    print("Commands are the ordinary CLI commands. `exit` to leave.\n")
+    if workspace is None:
+        print("Weaver · no default workspace")
+        print("Name one per command with --workspace.")
+        print("\nCommands are the ordinary CLI commands. `exit` to leave.\n")
+        return
+    print(f"Weaver · {workspace.workspace}")
+
+
+def _report_warm_up(warm) -> None:
+    """Say what is being acquired, and what is not being acquired and why.
+
+    The second half is the point. A prompt that announced "starting resources"
+    and then silently declined to start the expensive one — because the
+    workspace named no Environment — told a reader nothing they could act on,
+    and left them to discover it from the first command that needed Spark.
+    """
+
+    if warm.started:
+        print(f"Starting in the background: {', '.join(warm.started)}")
+    for resource, reason in warm.skipped:
+        print(f"Not starting: {resource} — {reason}")
+    print("\nCommands are the ordinary CLI commands. `exit` to leave.\n")
 
 
 __all__ = ["run_shell"]

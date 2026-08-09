@@ -29,6 +29,7 @@ work will need, not the work itself.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 from ..errors import CommandError
@@ -38,6 +39,23 @@ from .base import Session, WorkspaceScope
 from .program import RemoteProgram
 from .protocol import check, guarded
 from .resources import Resource
+
+
+@dataclass(frozen=True)
+class WarmUp:
+    """What a warm-up started, and what it declined to start and why.
+
+    The reason is the useful half. "Starting resources in the background" while
+    silently skipping the expensive one tells a reader nothing they can act on;
+    naming the Environment they did not pass tells them exactly what to do.
+    """
+
+    started: tuple[str, ...] = ()
+    skipped: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def anything(self) -> bool:
+        return bool(self.started or self.skipped)
 
 
 class ConsoleSession(Session):
@@ -78,7 +96,7 @@ class ConsoleSession(Session):
 
     # --- readiness ----------------------------------------------------------
 
-    def warm(self, workspace: Workspace | None = None) -> None:
+    def warm(self, workspace: Workspace | None = None) -> "WarmUp":
         """Begin acquiring this context's expensive resources, without waiting.
 
         The console prompt returns immediately and the first command that needs
@@ -87,7 +105,7 @@ class ConsoleSession(Session):
         reported by whichever command actually needs the resource.
         """
 
-        self.scope(workspace).warm()
+        return self.scope(workspace).warm()
 
     def executes_here(self, workspace: Workspace | None = None) -> bool:
         """Whether this process is already where the data engineering happens."""
@@ -274,26 +292,46 @@ class ConsoleScope(WorkspaceScope):
 
         return self.local_spark is not None
 
-    def warm(self) -> None:
-        """Start acquiring what the next command will probably want.
+    def warm(self) -> "WarmUp":
+        """Start acquiring what the next command will probably want, and say what.
 
         Speculative throughout: a warm-up nobody asked for must not fail the
         command that follows, so a failure here leaves the resource unstarted
         and the real attempt reports in its own terms.
 
-        Livy is warmed only where it *can* start. A workspace naming no
-        Environment cannot have a session created against it, and warming one
-        would replace that command's clear message with a stale warm-up failure.
+        What it returns matters as much as what it starts. Livy is warmed only
+        where it *can* start — a workspace naming no Environment cannot have a
+        session created against it — and a prompt that announced "starting
+        resources" and then quietly declined would be worse than one that says
+        nothing. So a skipped resource comes back with the reason it was
+        skipped, for the caller to show.
         """
+
+        started: list[str] = []
+        skipped: list[tuple[str, str]] = []
 
         if self.auth is not None:
             self.auth.start(speculative=True)
-        if self.livy is not None and getattr(self.workspace, "environment", None):
-            self.livy.start(speculative=True)
+            started.append("Fabric credential")
+        if self.livy is not None:
+            if getattr(self.workspace, "environment", None):
+                self.livy.start(speculative=True)
+                started.append("Spark session (Livy)")
+            else:
+                skipped.append(
+                    (
+                        "Spark session (Livy)",
+                        "this workspace names no Environment — pass "
+                        "--environment, or set one in workspace configuration",
+                    )
+                )
         if self.local_spark is not None:
             # The JVM is the largest fixed cost of every local command, so the
             # emulator gets the same treatment as Livy.
             self.local_spark.start(speculative=True)
+            started.append("local Spark session")
+
+        return WarmUp(started=tuple(started), skipped=tuple(skipped))
 
     # --- resolution ---------------------------------------------------------
 
@@ -317,13 +355,19 @@ class ConsoleScope(WorkspaceScope):
     def store(self):
         """The store a console reaches this workspace with.
 
-        For the emulator that is the filesystem, which is both the
+        A store the Session was *given* wins outright: the caller owns it, is
+        holding it open, and handing back a different one would silently ignore
+        what it asked for.
+
+        Otherwise: for the emulator that is the filesystem, which is both the
         within-workspace store and the way in. A console addressing Fabric has
         no within-workspace store at all — ``FabricStore`` is NotebookUtils, and
         NotebookUtils exists only inside a session — so its store is the DFS
         transport, and the two are the same object here.
         """
 
+        if self._store is not None:
+            return self._store
         if self.executes_here:
             return super().store
         return self.transport_store
@@ -462,4 +506,4 @@ class ConsoleScope(WorkspaceScope):
         )
 
 
-__all__ = ["ConsoleScope", "ConsoleSession"]
+__all__ = ["ConsoleScope", "ConsoleSession", "WarmUp"]
