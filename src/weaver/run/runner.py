@@ -90,6 +90,7 @@ class Runner:
         self.can_refresh = can_refresh
         self._graph: RunGraph | None = None
         self._events: list[dict] = []
+        self._runtime_scope = None
 
     # --- planning -----------------------------------------------------------
 
@@ -125,6 +126,31 @@ class Runner:
         from .resolution import resolve
 
         return resolve(node, self.state, can_refresh=self.can_refresh)
+
+    # --- the run's own runtime ----------------------------------------------
+
+    @property
+    def runtime_scope(self):
+        """Where this run's deployed Python modules live, and how long they live.
+
+        One scope per run, because a Fabric session outlives a build and a build
+        rewrites deployed Python in place — so a module kept past the run that
+        imported it is a module the next load would use instead of the one now
+        on disk.
+        """
+
+        if self._runtime_scope is None:
+            from ..runtime.python_context import RuntimeScope
+
+            self._runtime_scope = RuntimeScope.new()
+        return self._runtime_scope
+
+    def _close_runtime(self) -> None:
+        """Every module this run imported goes with it."""
+
+        scope, self._runtime_scope = self._runtime_scope, None
+        if scope is not None:
+            scope.close()
 
     # --- execution ----------------------------------------------------------
 
@@ -219,6 +245,7 @@ class Runner:
                 stopped = True
 
         nodes = tuple(results[node.node_id] for node in ordered)
+        self._close_runtime()
         return self._result(nodes, started=started)
 
     def _dispatched(self, node, *, dispatch, session, resolved=None) -> RunNodeResult:
@@ -232,6 +259,8 @@ class Runner:
                 state=self.state,
                 resolved=resolved,
                 fault_tolerant=self.request.fault_tolerant,
+                runtime_scope=self.runtime_scope,
+                workspace=self.workspace,
             )
         except Exception as exc:  # noqa: BLE001 - a failed node is a result
             return self._settled(

@@ -13,8 +13,9 @@ a run behaves.
 
 from __future__ import annotations
 
-from .dispatch import dispatch_primitive
+from .dispatch import can_refresh, dispatch_primitive
 from .graph import RunGraph, RunNode, graph_for
+from .observe import read_run_state
 from .request import LOAD, TEST, RunRequest
 from .result import RunNodeResult, RunResult, run_status
 from .runner import Runner
@@ -30,7 +31,9 @@ __all__ = [
     "RunResult",
     "RunState",
     "Runner",
+    "can_refresh",
     "dispatch_primitive",
     "graph_for",
+    "read_run_state",
     "run_status",
 ]
