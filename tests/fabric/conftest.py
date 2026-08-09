@@ -405,6 +405,46 @@ def livy_session(fabric_workspace, fabric_client):
         session.close()
 
 
+@pytest.fixture(scope="session")
+def weaver_session(fabric_workspace, livy_session):
+    """The suite's one :class:`~weaver.session.console.ConsoleSession`.
+
+    The canonical Fabric fixture: one credential, one REST client, one resolver
+    with one item cache, one Livy session and one TDS connection per Warehouse,
+    for the whole run. Everything that used to acquire its own gets this
+    instead, which is where the suite's Fabric time goes back.
+
+    The Livy session is **given**, not acquired. The suite already starts one —
+    with the preflight and the skip semantics that belong to a harness rather
+    than to the product — and a capacity commonly permits exactly one, so a
+    Session that started its own would queue behind the fixture's forever. A
+    given resource is not closed by the Session that borrowed it.
+    """
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(
+        workspace=fabric_workspace, livy=livy_session, require_weaver=False
+    ) as session:
+        yield session
+        print(f"\n{session.telemetry.report()}")
+
+
+@pytest.fixture
+def fresh_weaver_session(fabric_workspace):
+    """A Session of its own, for a test whose claim *is* runtime isolation.
+
+    Explicit because it is expensive and rarely what a test means. Estate
+    isolation is a different question and is answered by a different fixture: a
+    test needing a clean target and nothing more should keep this Session.
+    """
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(workspace=fabric_workspace, require_weaver=False) as session:
+        yield session
+
+
 # --- disposable Warehouse ----------------------------------------------------
 
 

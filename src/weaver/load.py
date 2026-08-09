@@ -87,6 +87,7 @@ def load(
     workspace_config: str | Path | None = None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
+    session=None,
 ) -> LoadRunReport:
     """Load every installed loadable object in the requested physical targets.
 
@@ -122,7 +123,7 @@ def load(
     from .operations import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved_workspace = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config
+        workspace=workspace, workspace_config=workspace_config, session=session
     )
     if weaver_lakehouse is not None:
         # An explicit argument outranks a configured or already-resolved value,
@@ -146,9 +147,15 @@ def load(
             "Warehouse targets require a Fabric Workspace; the local emulator has no SQL"
         )
 
-    with _load_session(resolved_workspace, requested) as session:
+    from .session.host import use_or_create_session
+
+    with use_or_create_session(
+        session, workspace=resolved_workspace
+    ) as opened, _load_session(
+        resolved_workspace, requested, session=opened
+    ) as prepared:
         return run_load(
-            session,
+            prepared,
             requested=tuple(_physical_ref(target) for target in requested),
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
@@ -431,11 +438,16 @@ class LoadSession:
     per Warehouse — and nothing it was given.
     """
 
-    def __init__(self, workspace: Workspace, requested, *, spark=None, store=None) -> None:
+    def __init__(
+        self, workspace: Workspace, requested, *, spark=None, store=None, session=None
+    ) -> None:
         self.workspace = workspace
         self.requested = tuple(requested)
         self.spark = spark
         self.store = store
+        #: The Session this run borrows its resolver, item cache and Warehouse
+        #: connections from. What it borrows, it does not close.
+        self.session = session
         self._sql: dict[str, Any] = {}
         self._opened: list[Any] = []
 
@@ -456,6 +468,15 @@ class LoadSession:
 
     @property
     def resolver(self):
+        """The Session's resolver — one per Session, not one per access.
+
+        This used to build a new resolver every time it was read, which meant
+        its item cache was always empty and every access re-asked the workspace
+        what the same names meant.
+        """
+
+        if self.session is not None:
+            return self.session.resolver(self.workspace)
         from .resolution import resolver_for
 
         return resolver_for(self.workspace)
@@ -574,12 +595,22 @@ class LoadSession:
         return executor
 
     def _open_warehouse_sql(self, name: str):
-        from .operations import _inside_fabric_session
+        """This Warehouse's connection, from the Session that owns it.
 
-        target = WarehouseTarget(ItemRef(name))
+        Owned by the Session and closed with it, not with this run: a load and
+        the test that follows it reach the same Warehouse, and reconnecting
+        between them was pure cost.
+        """
+
         if not isinstance(self.workspace, FabricWorkspace):
             return None
-        if _inside_fabric_session(self.workspace):
+        target = WarehouseTarget(ItemRef(name))
+        if self.session is not None:
+            return self.session.sql_executor(target, workspace=self.workspace)
+
+        from .session.host import inside_fabric_session
+
+        if inside_fabric_session(self.workspace):
             from .fabric.sql import fabric_sql_executor
 
             executor = fabric_sql_executor(target, self.workspace)
@@ -591,40 +622,26 @@ class LoadSession:
         return executor
 
 
-def _load_session(workspace: Workspace, requested) -> LoadSession:
-    """A session with this host's Spark and store already acquired."""
+def _load_session(workspace: Workspace, requested, *, session) -> LoadSession:
+    """A run's capabilities, taken from the Session that already holds them.
 
-    from .operations import _active_spark, _inside_fabric_session, _operation_store
+    Nothing is acquired here any more. The Spark session, the store, the
+    resolver and every Warehouse connection belong to the Session, which is what
+    makes a wipe, a build, a load and a test in one console cost one of each.
+    """
 
-    if isinstance(workspace, LocalWorkspace):
-        from .spark import local_delta_session
-        from .store import FilesystemStore
-
-        session = local_delta_session(workspace)
-        spark = session.__enter__()
-        opened = LoadSession(workspace, requested, spark=spark, store=FilesystemStore())
-        opened._opened.append(_Closing(lambda: session.__exit__(None, None, None)))
-        return opened
-    if not _inside_fabric_session(workspace):
+    if not session.executes_here(workspace):
         raise CommandError(
             "load runs where the data is: call it from a Fabric notebook, or "
             "against a local Workspace"
         )
-    from .resolution import store_for
-
     return LoadSession(
-        workspace, requested, spark=_active_spark(), store=store_for(workspace)
+        workspace,
+        requested,
+        spark=session.spark(workspace),
+        store=session.store(workspace),
+        session=session,
     )
-
-
-class _Closing:
-    """Adapts an arbitrary teardown into the ``close()`` the session expects."""
-
-    def __init__(self, teardown) -> None:
-        self._teardown = teardown
-
-    def close(self) -> None:
-        self._teardown()
 
 
 __all__ = ["LoadSession", "TASK_TYPE", "load", "run_load"]

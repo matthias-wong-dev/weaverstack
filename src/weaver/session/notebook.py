@@ -120,9 +120,9 @@ class NotebookScope(WorkspaceScope):
 
     def spark(self):
         if self._spark is None:
-            from ..operations import _active_spark
+            from .host import active_spark
 
-            self._spark = _active_spark()
+            self._spark = active_spark()
         return self._spark
 
     def sql_for(self, target: Any):

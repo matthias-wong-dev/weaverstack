@@ -173,8 +173,9 @@ def test_public_wipe_rejects_partial_lakehouse_targets(value):
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     operations = __import__("weaver.operations", fromlist=["operations"])
     workspace = LocalWorkspace(workspace="/tmp/local")
-    monkeypatch.setattr(operations, "_operation_store", lambda _workspace: object())
-    monkeypatch.setattr(operations, "_drop_local_catalogue", lambda *_args: None)
+    monkeypatch.setattr(
+        operations, "_drop_local_catalogue", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         operations,
         "_wipe_one",
@@ -201,8 +202,9 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     operations = __import__("weaver.operations", fromlist=["operations"])
     workspace = LocalWorkspace(workspace="/tmp/local", weaver_lakehouse="Control")
     calls = []
-    monkeypatch.setattr(operations, "_operation_store", lambda _workspace: object())
-    monkeypatch.setattr(operations, "_drop_local_catalogue", lambda *_args: None)
+    monkeypatch.setattr(
+        operations, "_drop_local_catalogue", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         operations,
         "_wipe_one",

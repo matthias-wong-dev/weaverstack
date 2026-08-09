@@ -159,17 +159,37 @@ def _remove_shortcuts(
     return tuple(f"shortcut:{shortcut.qualified}" for shortcut in shortcuts)
 
 
+def _store_for(workspace: Workspace, session):
+    """The store, from the Session that owns one, or acquired for this call."""
+
+    return session.store(workspace) if session is not None else store_for(workspace)
+
+
+def _resolver_for(workspace: Workspace, session):
+    """The resolver, from the Session that owns one, or built for this call.
+
+    A Session's resolver carries the item cache the operations before this one
+    filled; one built here starts empty and re-asks the workspace what the same
+    names mean.
+    """
+
+    return (
+        session.resolver(workspace) if session is not None else resolver_for(workspace)
+    )
+
+
 def wipe_folder_target(
     target: FolderTarget,
     workspace: Workspace,
     *,
     store: Store | None = None,
     dry_run: bool = False,
+    session=None,
 ) -> WipeReport:
     """Empty a folder target, keeping the Files area itself."""
 
-    store = store or store_for(workspace)
-    resolver = resolver_for(workspace)
+    store = store or _store_for(workspace, session)
+    resolver = _resolver_for(workspace, session)
     location = resolver.folder_root(target)
     shortcuts = _remove_shortcuts(
         resolver, target.lakehouse, prefix=FILES_AREA, dry_run=dry_run
@@ -188,6 +208,7 @@ def wipe_delta_target(
     *,
     store: Store | None = None,
     dry_run: bool = False,
+    session=None,
 ) -> WipeReport:
     """Remove every Delta table in a Lakehouse, keeping the Tables area.
 
@@ -197,8 +218,8 @@ def wipe_delta_target(
     belong to another item.
     """
 
-    store = store or store_for(workspace)
-    resolver = resolver_for(workspace)
+    store = store or _store_for(workspace, session)
+    resolver = _resolver_for(workspace, session)
     location = resolver.tables_root(target.lakehouse)
     shortcuts = _remove_shortcuts(
         resolver, target.lakehouse, prefix=TABLES_AREA, dry_run=dry_run
@@ -292,26 +313,39 @@ def wipe_lakehouse(
     *,
     store: Store | None = None,
     dry_run: bool = False,
+    session=None,
 ) -> tuple[WipeReport, ...]:
     """Clear both areas of a Lakehouse — its Files and its Tables.
 
     The item is resolved *as a Lakehouse*, so there is no untyped "what is this
     name?" discovery: a Warehouse of the same name resolves elsewhere and is not
     reached here. A destructive operation must not depend on name inference.
+
+    ``session`` supplies the store and the resolver where the caller has one, so
+    the name this wipe resolves is the name the build before it already
+    resolved.
     """
 
-    store = store or store_for(workspace)
-    resolver = resolver_for(workspace)
+    store = store or _store_for(workspace, session)
+    resolver = _resolver_for(workspace, session)
     if not _lakehouse_exists(resolver, lakehouse):
         raise CommandError(
             f"no Lakehouse named {lakehouse.name!r} on this workspace — nothing to wipe"
         )
     return (
         wipe_folder_target(
-            FolderTarget(lakehouse=lakehouse), workspace, store=store, dry_run=dry_run
+            FolderTarget(lakehouse=lakehouse),
+            workspace,
+            store=store,
+            dry_run=dry_run,
+            session=session,
         ),
         wipe_delta_target(
-            DeltaTarget(lakehouse=lakehouse), workspace, store=store, dry_run=dry_run
+            DeltaTarget(lakehouse=lakehouse),
+            workspace,
+            store=store,
+            dry_run=dry_run,
+            session=session,
         ),
     )
 

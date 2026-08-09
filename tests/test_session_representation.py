@@ -72,6 +72,31 @@ def test_a_default_workspace_is_a_default_and_not_an_identity():
         assert session.scope(_local("./other")).workspace == _local("./other")
 
 
+def test_the_default_is_what_the_session_started_with_and_never_accumulates():
+    """A command naming a workspace does not make it the session's default.
+
+    Inheritance is only ever from what ``weaver session`` was started with.
+    Learning a default from whichever command ran last would mean the *next*
+    command silently inherited another workspace's Environment and control
+    Lakehouse — a plausible-looking build into the wrong place.
+    """
+
+    with ConsoleSession(workspace=_local("./default")) as session:
+        session.scope(_local("./elsewhere"))
+
+        assert session.workspace == _local("./default")
+        assert session.scope(None).workspace == _local("./default")
+
+
+def test_a_session_started_without_a_workspace_never_gains_one():
+    with ConsoleSession() as session:
+        session.scope(_local("./named-by-a-command"))
+
+        assert session.workspace is None
+        with pytest.raises(CommandError, match="needs a workspace"):
+            session.scope(None)
+
+
 def test_context_identity_ignores_which_targets_were_declared():
     plain = _fabric()
     with_targets = FabricWorkspace(

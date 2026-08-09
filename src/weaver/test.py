@@ -63,6 +63,7 @@ def test(
     workspace_config: str | Path | None = None,
     dry_run: bool = False,
     strict: bool = False,
+    session=None,
 ) -> ValidationRunReport:
     """Run the installed validation in the requested physical targets.
 
@@ -85,12 +86,17 @@ def test(
         weaver_lakehouse=weaver_lakehouse,
         workspace_config=workspace_config,
         requested=requested,
+        session=session,
     )
     refs = tuple(_physical_ref(target) for target in requested)
 
-    with _load_session(resolved, requested) as session:
+    from .session.host import use_or_create_session
+
+    with use_or_create_session(session, workspace=resolved) as opened, _load_session(
+        resolved, requested, session=opened
+    ) as prepared:
         return run_test(
-            session,
+            prepared,
             requested=refs,
             name=name,
             file=file,
@@ -277,13 +283,14 @@ def _resolve_workspace(
     weaver_lakehouse: str | None,
     workspace_config: str | Path | None,
     requested,
+    session=None,
 ) -> Workspace:
     from dataclasses import replace
 
     from .operations import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config
+        workspace=workspace, workspace_config=workspace_config, session=session
     )
     if weaver_lakehouse is not None:
         resolved = replace(

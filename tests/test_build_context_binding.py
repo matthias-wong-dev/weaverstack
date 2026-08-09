@@ -65,8 +65,10 @@ def captured(monkeypatch):
 
         return _stop
 
-    monkeypatch.setattr(weaver.operations, "_build_local", capture("local"))
-    monkeypatch.setattr(weaver.operations, "_build_native_fabric", capture("native"))
+    # Two seams rather than three: the emulator and a Fabric notebook are both
+    # "this process is already where the data is", and the Session is what makes
+    # them one path.
+    monkeypatch.setattr(weaver.operations, "_build_in_process", capture("in_process"))
     monkeypatch.setattr(weaver.operations, "_build_desktop_fabric", capture("desktop"))
     return seen
 

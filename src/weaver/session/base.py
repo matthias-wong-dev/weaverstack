@@ -171,6 +171,17 @@ class Session(ABC):
 
         return self.scope(workspace).store
 
+    def transport_store(self, workspace: Workspace | None = None):
+        """The store this host writes *across* the boundary with.
+
+        The same thing as :meth:`store` wherever Weaver is already inside the
+        workspace. A console reaching into Fabric has no within-workspace store
+        at all, so this is where a bundle archive crosses — which is a Session
+        concern, not something a Builder should know how to do.
+        """
+
+        return self.scope(workspace).transport_store
+
     def resolve_workspace(self, workspace: Workspace | None = None):
         """The physical workspace this context names."""
 
@@ -349,6 +360,12 @@ class WorkspaceScope:
 
                 self._store = store_for(self.workspace)
             return self._store
+
+    @property
+    def transport_store(self):
+        """Where Weaver is already inside the workspace, its own store."""
+
+        return self.store
 
     def resolve_workspace(self):
         resolver = self.resolver

@@ -88,7 +88,12 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     assert calls == [
         (
             ("Lakehouse/Sales",),
-            {"workspace": workspace, "unbind_from": None, "dry_run": True},
+            {
+                "workspace": workspace,
+                "unbind_from": None,
+                "dry_run": True,
+                "session": None,
+            },
         )
     ]
     assert "Nothing was changed" in capsys.readouterr().out
@@ -119,11 +124,16 @@ def test_confirmed_wipe_previews_then_executes_same_public_operation(monkeypatch
     assert calls == [
         (
             ("Lakehouse/Sales/Tables",),
-            {"workspace": workspace, "unbind_from": "Control", "dry_run": True},
+            {
+                "workspace": workspace,
+                "unbind_from": "Control",
+                "dry_run": True,
+                "session": None,
+            },
         ),
         (
             ("Lakehouse/Sales/Tables",),
-            {"workspace": workspace, "unbind_from": "Control"},
+            {"workspace": workspace, "unbind_from": "Control", "session": None},
         ),
     ]
 

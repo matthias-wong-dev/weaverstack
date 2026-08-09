@@ -49,6 +49,54 @@ warehouses:
 
 See [`examples/env.yml`](../examples/env.yml) for the expanded form.
 
+## Session
+
+A one-shot command pays for a credential, item resolution and — for anything
+touching Spark — a Livy session, and then throws all three away. Four commands
+pay four times. `weaver session` pays once:
+
+```bash
+weaver session --workspace "Weaver Example" --environment weaver
+```
+
+```text
+Weaver · Weaver Example
+Starting resources in the background...
+Commands are the ordinary CLI commands. `exit` to leave.
+
+weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
+weaver> build . --bind Lakehouse/Sales=Lakehouse/Sales
+weaver> load --targets Lakehouse/Sales Warehouse/Reporting
+weaver> test Lakehouse/Sales
+weaver> exit
+```
+
+The commands are the ordinary CLI commands, parsed by the same parser — there
+is no second grammar to learn or to keep correct.
+
+**A workspace is not required to start.** `weaver session` on its own is valid;
+each command then names its own workspace, and the session keeps one set of
+resources per workspace it is asked about.
+
+**A workspace given at startup is inherited** by commands that name none, which
+is why the example above repeats no `--workspace`. Flags a command *does* give
+are applied on top, so `build --weaver-lakehouse Other` overrides the control
+Lakehouse without restating the workspace. Naming a different `--workspace`
+addresses that one instead, with its own resources.
+
+Inheritance is only ever from what the session was started with. A default
+picked up from whichever command ran last would mean the next command silently
+borrowing another workspace's Environment.
+
+**The prompt does not wait for Fabric.** Where a workspace is known at startup,
+the credential and the Livy session are acquired in the background; the first
+command that needs Spark waits on that startup rather than beginning a second
+one, which matters on a capacity that permits exactly one. A local workspace
+warms its JVM the same way.
+
+**An ordinary failure keeps the session.** A build that fails, a Spark error, a
+typo: the command reports and the prompt returns with the resources still up.
+
 ## Install and control-plane bootstrap
 
 Install Weaver into a Fabric Environment:

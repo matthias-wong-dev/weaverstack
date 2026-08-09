@@ -47,9 +47,18 @@ class ConsoleSession(Session):
     starts without one, and every command may name its own.
     """
 
-    def __init__(self, *, require_weaver: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        require_weaver: bool = True,
+        livy: Any = None,
+        spark: Any = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.require_weaver = require_weaver
+        self._given_livy = livy
+        self._given_spark = spark
 
     def _new_scope(self, workspace: Workspace) -> "ConsoleScope":
         return ConsoleScope(
@@ -57,6 +66,8 @@ class ConsoleSession(Session):
             telemetry=self.telemetry,
             executor=self._executor,
             require_weaver=self.require_weaver,
+            livy=self._given_livy,
+            spark=self._given_spark,
         )
 
     # --- readiness ----------------------------------------------------------
@@ -162,12 +173,21 @@ class ConsoleSession(Session):
 class ConsoleScope(WorkspaceScope):
     """One workspace's resources, held for the life of a console session."""
 
-    def __init__(self, workspace: Workspace, *, require_weaver: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        workspace: Workspace,
+        *,
+        require_weaver: bool = True,
+        livy: Any = None,
+        spark: Any = None,
+        **kwargs,
+    ) -> None:
         super().__init__(workspace, **kwargs)
         self.require_weaver = require_weaver
         self.name = str(getattr(workspace, "workspace", workspace))
         self._sql: dict[str, Resource] = {}
         self._credential = None
+        self._transport_store = None
 
         if isinstance(workspace, FabricWorkspace):
             self.auth: Resource | None = self.track(
@@ -179,11 +199,10 @@ class ConsoleScope(WorkspaceScope):
                 )
             )
             self.livy: Resource | None = self.track(
-                Resource(
+                self._given_or_acquired(
                     "livy",
+                    livy,
                     self._acquire_livy,
-                    executor=self.executor,
-                    telemetry=self.telemetry,
                     release=lambda session: session.close(),
                 )
             )
@@ -192,11 +211,10 @@ class ConsoleScope(WorkspaceScope):
             self.auth = None
             self.livy = None
             self.local_spark = self.track(
-                Resource(
+                self._given_or_acquired(
                     "spark",
+                    None if spark is None else (spark, lambda *exc: None),
                     self._acquire_local_spark,
-                    executor=self.executor,
-                    telemetry=self.telemetry,
                     release=lambda opened: opened[1](None, None, None),
                 )
             )
@@ -204,6 +222,28 @@ class ConsoleScope(WorkspaceScope):
             raise CommandError(
                 f"a console session cannot address a {type(workspace).__name__}"
             )
+
+    def _given_or_acquired(self, name, given, acquire, *, release) -> Resource:
+        """A resource this scope acquires, or one it was handed and must not close.
+
+        A Session closes what it opened and nothing it was given. That is what
+        lets a pytest suite start one Livy session with its own preflight and
+        skip semantics and then hand it to a Session, on a capacity that permits
+        exactly one — and it is the same rule that lets a notebook hand in the
+        Spark session it is already running inside.
+        """
+
+        if given is None:
+            return Resource(
+                name,
+                acquire,
+                executor=self.executor,
+                telemetry=self.telemetry,
+                release=release,
+            )
+        return Resource(
+            name, lambda: given, executor=self.executor, telemetry=self.telemetry
+        )
 
     # --- position -----------------------------------------------------------
 
@@ -255,6 +295,34 @@ class ConsoleScope(WorkspaceScope):
 
                     self._resolver = resolver_for(self.workspace)
             return self._resolver
+
+    @property
+    def store(self):
+        """The store a console reaches this workspace with.
+
+        For the emulator that is the filesystem, which is both the
+        within-workspace store and the way in. A console addressing Fabric has
+        no within-workspace store at all — ``FabricStore`` is NotebookUtils, and
+        NotebookUtils exists only inside a session — so its store is the DFS
+        transport, and the two are the same object here.
+        """
+
+        if self.executes_here:
+            return super().store
+        return self.transport_store
+
+    @property
+    def transport_store(self):
+        """How a console writes into a workspace it is not running inside."""
+
+        if self.executes_here:
+            return super().store
+        with self._lock:
+            if self._transport_store is None:
+                from ..fabric import OneLakeDfsClient
+
+                self._transport_store = OneLakeDfsClient()
+            return self._transport_store
 
     def _fabric_client(self):
         from ..fabric.client import FabricClient
