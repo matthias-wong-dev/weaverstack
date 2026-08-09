@@ -16,7 +16,6 @@ import pytest
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.session import ConsoleSession, workspace_context
-from weaver.session.protocol import PROTOCOL_ERROR, PROTOCOL_VERSION, check, guarded
 from weaver.workspaces import FabricWorkspace, LocalWorkspace, TargetDeclaration
 
 
@@ -174,46 +173,6 @@ def test_completing_a_task_unwinds_the_steps_beneath_it(console):
     assert console.frames == ()
 
 
-# --- remote protocol --------------------------------------------------------
-
-
-def test_a_guarded_program_refuses_a_weaver_that_speaks_another_protocol():
-    source = guarded("emit({'ran': True})", version=PROTOCOL_VERSION)
-    emitted = []
-    namespace = {"emit": emitted.append}
-
-    # Stand in for a stale Fabric Environment: one whose Weaver has no protocol.
-    exec(  # noqa: S102 - the program is the thing under test
-        source.replace(
-            "from weaver.session.protocol import PROTOCOL_VERSION as _weaver_protocol",
-            "raise ImportError('no such module')",
-        ),
-        namespace,
-    )
-
-    assert emitted == [{PROTOCOL_ERROR: {"remote": 0, "local": PROTOCOL_VERSION}}]
-
-
-def test_a_guarded_program_runs_against_a_current_weaver():
-    emitted = []
-    exec(  # noqa: S102 - the program is the thing under test
-        guarded("emit({'ran': True})"), {"emit": emitted.append}
-    )
-
-    assert emitted == [{"ran": True}]
-
-
-def test_a_protocol_refusal_becomes_a_sentence_about_publishing():
-    payload = {PROTOCOL_ERROR: {"remote": 0, "local": 4}}
-
-    with pytest.raises(CommandError, match="weaver install"):
-        check(payload, workspace="A_Workspace")
-
-
-def test_an_ordinary_payload_passes_through_untouched():
-    assert check({"status": "succeeded"}) == {"status": "succeeded"}
-
-
 # --- lifetime ---------------------------------------------------------------
 
 
@@ -271,3 +230,66 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
 
         assert scope.livy.get() is built
         assert built.started, "the resource handed out a session that was never started"
+
+
+# --- the published wheel and this checkout -----------------------------------
+
+
+def test_a_version_difference_warns_and_names_the_fix(monkeypatch):
+    """A difference is worth saying; it is not worth refusing over.
+
+    The console prepares work locally and runs it against the published wheel,
+    so the two drift the moment either moves. During rapid development that is
+    usually harmless — putting a publish in front of every experiment is not.
+    """
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: "9.9.9-elsewhere")
+
+        scope.check_published_version(session.warn)
+
+        assert session.warnings
+        assert "9.9.9-elsewhere" in session.warnings[0]
+        assert "weaver install" in session.warnings[0]
+
+
+def test_a_matching_version_says_nothing(monkeypatch):
+    from weaver import __version__
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: __version__)
+
+        scope.check_published_version(session.warn)
+
+        assert session.warnings == []
+
+
+def test_the_check_is_asked_once_per_workspace_not_once_per_command(monkeypatch):
+    asked = []
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(
+            scope, "livy_run", lambda *a, **k: asked.append(1) or "9.9.9"
+        )
+
+        for _ in range(3):
+            scope.check_published_version(session.warn)
+
+        assert asked == [1], "one statement, and a warning nobody has to reread"
+        assert len(session.warnings) == 1
+
+
+def test_a_check_that_cannot_run_never_fails_the_work(monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("the probe itself failed")
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", broken)
+
+        scope.check_published_version(session.warn)  # does not raise
+
+        assert session.warnings == []

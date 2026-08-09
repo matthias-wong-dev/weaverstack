@@ -104,6 +104,8 @@ class Session(ABC):
         self._scopes: dict[tuple, "WorkspaceScope"] = {}
         self._scope_lock = threading.Lock()
         self._frames: list[ReportingFrame] = []
+        #: Everything this Session has warned about, in order.
+        self.warnings: list[str] = []
         self._closed = False
 
     # --- context ------------------------------------------------------------
@@ -313,6 +315,20 @@ class Session(ABC):
         self, frame: ReportingFrame, event: str, error: BaseException | None = None
     ) -> None:
         """Show one reporting event. Silent by default; hosts specialise it."""
+
+    def warn(self, message: str) -> None:
+        """Tell the operator something they should know but need not act on now.
+
+        Overridable, so a notebook can render it and a test can collect it. The
+        default reaches stderr because the alternative — a library that notices a
+        problem and says nothing — is how a mismatched deployment stays invisible
+        until it produces a confusing failure somewhere else.
+        """
+
+        import sys
+
+        self.warnings.append(message)
+        print(f"warning: {message}", file=sys.stderr)
 
     # --- teardown -----------------------------------------------------------
 

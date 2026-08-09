@@ -37,7 +37,6 @@ from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import FabricWorkspace, LocalWorkspace, Workspace
 from .base import Session, WorkspaceScope
 from .program import RemoteProgram
-from .protocol import check, guarded
 from .resources import Resource
 
 
@@ -138,12 +137,12 @@ class ConsoleSession(Session):
                 with self.telemetry.timing(f"python.{program.name}"):
                     payload = program.call()
             else:
+                scope.check_published_version(self.warn)
                 payload = scope.livy_run(
-                    guarded(program.source),
+                    program.source,
                     name=program.name,
                     timeout=timeout if timeout is not None else program.timeout,
                 )
-                payload = check(payload, workspace=scope.name)
         except BaseException as exc:
             self.substep_failed(program.name, exc)
             raise
@@ -166,8 +165,7 @@ class ConsoleSession(Session):
             f"_statement = {statement!r}\n"
             "emit([row.asDict() for row in spark.sql(_statement).collect()])\n"
         )
-        payload = scope.livy_run(guarded(source), name="spark_sql", timeout=timeout)
-        return check(payload, workspace=scope.name)
+        return scope.livy_run(source, name="spark_sql", timeout=timeout)
 
     def execute_tsql(
         self,
@@ -223,6 +221,7 @@ class ConsoleScope(WorkspaceScope):
         self._sql: dict[str, Resource] = {}
         self._credential = None
         self._transport_store = None
+        self._version_checked = False
 
         if isinstance(workspace, FabricWorkspace):
             self.auth: Resource | None = self.track(
@@ -451,6 +450,41 @@ class ConsoleScope(WorkspaceScope):
         )
         session.start()
         return session
+
+    def check_published_version(self, warn) -> None:
+        """Compare this checkout's Weaver with the one published in the workspace.
+
+        A console prepares work locally and runs it against the *published*
+        wheel, so the two are independently versioned halves of one deployment
+        and they drift the moment either moves. When they differ the useful
+        thing is to say so and name the fix — not to refuse, because a version
+        difference is usually harmless and refusing would put a publish in front
+        of every experiment during rapid development.
+
+        Asked once per workspace context, on the first crossing, and never
+        again: it costs one statement, and a warning repeated per command is a
+        warning nobody reads.
+        """
+
+        with self._lock:
+            if self._version_checked:
+                return
+            self._version_checked = True
+
+        from .. import __version__ as local
+
+        try:
+            published = self.livy_run(
+                "import weaver\nemit(weaver.__version__)\n", name="version"
+            )
+        except Exception:  # noqa: BLE001 - a version check must never fail work
+            return
+        if published and published != local:
+            warn(
+                f"this console runs weaverstack {local}; {self.name} has "
+                f"{published} published — run `weaver install` if the difference "
+                "matters"
+            )
 
     def livy_run(self, source: str, *, name: str, timeout: float | None = None):
         """Submit one statement to this scope's Livy session and return its payload.

@@ -35,7 +35,6 @@ PLACEHOLDER = "_interpolated"
 #: skip exactly the defects this exists to catch.
 BUILDERS = {
     "src/weaver/fabric/livy.py",
-    "src/weaver/session/protocol.py",
     "src/weaver_cli/main.py",
 }
 

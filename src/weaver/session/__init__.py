@@ -25,12 +25,10 @@ from .host import (
 )
 from .notebook import NotebookScope, NotebookSession
 from .program import RemoteProgram
-from .protocol import PROTOCOL_VERSION
 from .resources import Resource, ResourceError, ResourceState
 from .telemetry import Measure, SessionTelemetry
 
 __all__ = [
-    "PROTOCOL_VERSION",
     "ConsoleScope",
     "ConsoleSession",
     "Measure",
