@@ -135,6 +135,73 @@ def test_blank_lines_and_comments_are_not_commands(recorded):
     assert len(seen) == 1
 
 
+# --- the prompt is a prompt --------------------------------------------------
+
+
+def test_the_prompt_has_line_editing_and_history(monkeypatch, tmp_path, recorded):
+    """``input()`` is line-edited only if readline has been imported.
+
+    The import *is* the mechanism, and nothing else in Weaver imports it — which
+    is why the up arrow answered with an escape sequence instead of the last
+    command.
+    """
+
+    import sys
+
+    from weaver_cli import shell
+
+    monkeypatch.setenv(shell.HISTORY_ENV, str(tmp_path / "history"))
+    _, factory = recorded
+
+    _run("build .\nexit\n", factory)
+
+    assert "readline" in sys.modules
+
+
+def test_history_is_kept_where_the_environment_says(monkeypatch, tmp_path, recorded):
+    from weaver_cli import shell
+
+    wanted = tmp_path / "elsewhere" / "history"
+    monkeypatch.setenv(shell.HISTORY_ENV, str(wanted))
+    _, factory = recorded
+
+    _run("build .\nexit\n", factory)
+
+    assert wanted.exists(), "the session wrote its history where it was told"
+
+
+def test_a_platform_without_readline_still_gets_a_session(monkeypatch, recorded):
+    """Every part of line editing is best-effort; none of it gates a session."""
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == "readline":
+            raise ImportError("no readline here")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    seen, factory = recorded
+
+    assert _run("build .\nexit\n", factory) == 0
+    assert len(seen) == 1
+
+
+def test_an_unwritable_history_location_does_not_fail_the_session(
+    monkeypatch, tmp_path, recorded
+):
+    from weaver_cli import shell
+
+    blocked = tmp_path / "a-file"
+    blocked.write_text("not a directory")
+    monkeypatch.setenv(shell.HISTORY_ENV, str(blocked / "history"))
+    _, factory = recorded
+
+    assert _run("build .\nexit\n", factory) == 0
+
+
 # --- workspace inheritance ---------------------------------------------------
 
 

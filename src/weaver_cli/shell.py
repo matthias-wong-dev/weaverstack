@@ -50,6 +50,12 @@ from weaver.errors import WeaverError
 
 PROMPT = "weaver> "
 
+#: Where the prompt remembers what was typed. Overridable, because a shared or
+#: read-only home is somebody's real setup and a session that refused to start
+#: over its history file would be worse than one that forgets.
+HISTORY_ENV = "WEAVER_SESSION_HISTORY"
+HISTORY_LIMIT = 1000
+
 #: Commands the shell does not run, and why. ``session`` would nest a console
 #: inside a console; the rest are one-shot machine-level operations whose whole
 #: point is a fresh process.
@@ -74,6 +80,7 @@ def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> i
     parser = parser_factory()
 
     workspace = _default_workspace(args)
+    history = _enable_line_editing()
     with ConsoleSession(workspace=workspace) as session:
         _banner(workspace)
         if workspace is not None:
@@ -82,7 +89,10 @@ def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> i
             # acquired, and the first command that needs either waits on the
             # acquisition already running rather than starting a second one.
             session.warm()
-        return _loop(session, parser, stdin=stdin or sys.stdin)
+        try:
+            return _loop(session, parser, stdin=stdin or sys.stdin)
+        finally:
+            _save_history(history)
 
 
 def _loop(session, parser, *, stdin) -> int:
@@ -140,6 +150,59 @@ def _run_one(session, parser, words: list[str]) -> None:
         print("\ninterrupted", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - the prompt outlives a defect too
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _enable_line_editing():
+    """Give the prompt arrow keys, editing and history, and return where to save.
+
+    ``input()`` is line-edited only if :mod:`readline` has been imported — the
+    import is the whole mechanism, which is why a prompt without it answers the
+    up arrow with ``^[[A`` instead of the last command. Nothing else in Weaver
+    imports it, so nothing else was enabling it.
+
+    Every part of this is best-effort. A platform without readline, a home
+    directory that is read-only, a corrupt history file: none of them is a
+    reason to refuse to start a session.
+    """
+
+    try:
+        import readline
+    except ImportError:  # a platform without it still gets a working prompt
+        return None
+
+    path = _history_path()
+    if path is not None:
+        try:
+            readline.read_history_file(str(path))
+        except (OSError, ValueError):
+            pass  # no history yet, or none that can be read
+    readline.set_history_length(HISTORY_LIMIT)
+    return path
+
+
+def _history_path():
+    import os
+    from pathlib import Path
+
+    override = os.environ.get(HISTORY_ENV)
+    if override:
+        return Path(override).expanduser()
+    try:
+        return Path.home() / ".weaver" / "session_history"
+    except (OSError, RuntimeError):  # a home that cannot be resolved
+        return None
+
+
+def _save_history(path) -> None:
+    if path is None:
+        return
+    try:
+        import readline
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        readline.write_history_file(str(path))
+    except (ImportError, OSError, ValueError):
+        pass  # the session is over; failing to remember it is not a failure
 
 
 def _read(stdin) -> str | None:
