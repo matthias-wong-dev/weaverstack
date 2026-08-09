@@ -18,9 +18,9 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.sessions import given_session
 
 from weaver.build_bundle import (
-    InstallationEnvironment,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
@@ -179,11 +179,11 @@ def validated(tmp_path, lakehouses, spark, weaver_catalogue):
             bindings=effective_item_bindings(
                 selected, weaver_lakehouse=lakehouses.weaver.name
             ),
-            environment=InstallationEnvironment(
+            session=given_session(
+                workspace=lakehouses.workspace,
                 store=lakehouses.store,
                 resolver=lakehouses.resolver,
                 spark=spark,
-                workspace=lakehouses.workspace,
             ),
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )

@@ -134,14 +134,13 @@ def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, s
     made once in `test_published_weaver.py`.
     """
 
-    from weaver.build_bundle import InstallationEnvironment, execute_install_action
+    from support.sessions import given_installer
+
     from weaver.build_bundle.executors.base import InstallationContext
 
-    environment = InstallationEnvironment(
-        store=store, resolver=resolver, spark=None, workspace=workspace, sql=sql
-    )
+    installer = given_installer(workspace=workspace, store=store, resolver=resolver)
     resolved = {
-        target.id: environment.resolve_target(target) for target in bundle.plan.targets
+        target.id: installer.resolve_target(target) for target in bundle.plan.targets
     }
     payload = None
     if action.payload is not None:

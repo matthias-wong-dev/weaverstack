@@ -10,9 +10,9 @@ because nothing is materialised there.
 from __future__ import annotations
 
 import pytest
+from support.sessions import given_session
 
 from weaver.build_bundle import (
-    InstallationEnvironment,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
@@ -113,12 +113,12 @@ def _build(root, lakehouses, spark):
         bindings=effective_item_bindings(
             selected, weaver_lakehouse=lakehouses.weaver.name
         ),
-        environment=InstallationEnvironment(
-            store=lakehouses.store,
-            resolver=lakehouses.resolver,
-            spark=spark,
-            workspace=lakehouses.workspace,
-        ),
+        session=given_session(
+                workspace=lakehouses.workspace,
+                store=lakehouses.store,
+                resolver=lakehouses.resolver,
+                spark=spark,
+            ),
         control_lakehouse=LakehouseBinding(lakehouses.weaver),
     )
     assert result.report.status == "succeeded", _failures(result.report)

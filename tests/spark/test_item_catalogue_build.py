@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from support.sessions import given_session
 
 from weaver.targets import ItemRef
 from weaver.locations import Location
 from weaver.build_bundle import (
-    InstallationEnvironment,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
@@ -88,11 +88,11 @@ def test_public_workflow_materialises_then_installs_from_driver_local_files(
             bindings=effective_item_bindings(
                 selected, weaver_lakehouse=lakehouses.weaver.name
             ),
-            environment=InstallationEnvironment(
+            session=given_session(
+                workspace=lakehouses.workspace,
                 store=lakehouses.store,
                 resolver=lakehouses.resolver,
                 spark=spark,
-                workspace=lakehouses.workspace,
             ),
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )
@@ -135,11 +135,11 @@ def test_item_build_prunes_tables_and_files_then_lakehouse_wipe_clears_both(
         result = build_uploaded_item_repository(
             repository_root,
             bindings=bindings,
-            environment=InstallationEnvironment(
+            session=given_session(
+                workspace=lakehouses.workspace,
                 store=lakehouses.store,
                 resolver=lakehouses.resolver,
                 spark=spark,
-                workspace=lakehouses.workspace,
             ),
             control_lakehouse=LakehouseBinding(lakehouses.weaver),
         )

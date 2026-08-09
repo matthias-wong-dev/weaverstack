@@ -17,6 +17,7 @@ reached and reported is.
 from __future__ import annotations
 
 import pytest
+from support.sessions import given_session
 from factories import (
     Catalogue,
     item_bindings,
@@ -31,12 +32,12 @@ from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
-    InstallationEnvironment,
     LakehouseBinding,
     build_item_repository,
     effective_item_bindings,
 )
-from weaver.catalogue.state import Catalogue as RealCatalogue, Reconciliation
+from weaver.build_bundle.workflow import BuildState
+from weaver.catalogue.state import Catalogue as RealCatalogue
 
 
 class RecordingExecutor:
@@ -93,30 +94,42 @@ def estate(tmp_path):
         "store": store,
         "resolver": resolver,
         "executors": executors,
-        "environment": InstallationEnvironment(
-            store=store, resolver=resolver, spark=None, workspace=workspace,
-            executors=executors,
+        "session": given_session(
+            workspace=workspace, store=store, resolver=resolver
         ),
     }
 
 
-def build(estate, **overrides):
-    bindings = effective_item_bindings(
+def _bindings():
+    return effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
         weaver_lakehouse="Weaver",
     )
-    inventories = {
+
+
+def _inventories(**observed):
+    """What each bound target physically holds. Empty unless a test says otherwise."""
+
+    return {
         binding.item: target_inventory(
             target_id=binding.to_bound_target().id,
             target_name=binding.to_bound_target().name,
+            **observed,
         )
-        for binding in bindings.entries
+        for binding in _bindings().entries
     }
+
+
+def build(estate, **overrides):
+    bindings = _bindings()
+    inventories = _inventories()
     arguments = {
         "bindings": bindings,
-        "target_inventories": inventories,
-        "reconciliation": Reconciliation(RealCatalogue(rows={}), stale_claims=()),
-        "environment": estate["environment"],
+        "state": BuildState(
+            catalogue=RealCatalogue(rows={}), target_inventories=inventories
+        ),
+        "session": estate["session"],
+        "executors": estate["executors"],
         "source_store": estate["store"],
         "control_lakehouse": LakehouseBinding(lakehouse=ItemRef("Weaver")),
     }
@@ -192,7 +205,13 @@ def test_an_inventory_that_already_holds_the_schema_plans_no_create(estate):
         for binding in bindings.entries
     }
 
-    result = build(estate, bindings=bindings, target_inventories=inventories)
+    result = build(
+        estate,
+        bindings=bindings,
+        state=BuildState(
+            catalogue=RealCatalogue(rows={}), target_inventories=inventories
+        ),
+    )
 
     # Scoped to this item's batch: a repository always carries Weaver's own
     # builtin catalogue item, whose `_` schema this inventory says nothing about,
@@ -217,9 +236,14 @@ def test_a_catalogue_that_certifies_the_document_plans_no_rebuild(estate):
     certified = FixtureCatalogue.from_repository(
         estate["repository"], item="Lakehouse/Sales"
     )
+    # And the table is physically there. A catalogue certifying an object the
+    # target does not hold is a *stale* claim, and reconciling it away so the
+    # object rebuilds is correct — which this test would otherwise trip over,
+    # because it used to hand the build a reconciliation already made for it.
+    present = _inventories(tables=("DWG.Customer",))
     result = build(
         estate,
-        reconciliation=Reconciliation(certified, stale_claims=()),
+        state=BuildState(catalogue=certified, target_inventories=present),
     )
 
     # Again scoped: the builtin catalogue item is not certified by this
@@ -259,7 +283,6 @@ def test_a_failing_action_is_reported_not_raised(estate):
     """
 
     estate["executors"]["spark_sql"] = RecordingExecutor("spark_sql", failing=True)
-    estate["environment"].executors = estate["executors"]
 
     result = build(estate)
 
@@ -277,7 +300,6 @@ def test_a_failure_stops_the_rest_of_its_sequence(estate):
     """
 
     estate["executors"]["spark_sql"] = RecordingExecutor("spark_sql", failing=True)
-    estate["environment"].executors = estate["executors"]
 
     result = build(estate)
 

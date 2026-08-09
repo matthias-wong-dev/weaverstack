@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.sessions import given_session
 from factories import (
     item_bindings,
     lakehouse_table,
@@ -28,12 +29,12 @@ from factories import (
 )
 
 from weaver.build_bundle import (
-    InstallationEnvironment,
     LakehouseBinding,
     build_item_repository,
     effective_item_bindings,
 )
-from weaver.catalogue.state import Catalogue, Reconciliation
+from weaver.build_bundle.workflow import BuildState
+from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.model import WeaverItemId
 from weaver.resolution import LocalResolver
@@ -91,12 +92,8 @@ def estate(tmp_path):
         "repository": repository,
         "store": store,
         "executors": executors,
-        "environment": InstallationEnvironment(
-            store=store,
-            resolver=resolver,
-            spark=None,
-            workspace=workspace,
-            executors=executors,
+        "session": given_session(
+            workspace=workspace, store=store, resolver=resolver
         ),
     }
 
@@ -118,11 +115,13 @@ def _build(estate):
     result = build_item_repository(
         estate["repository"],
         bindings=bindings,
-        target_inventories=inventories,
         # Nothing persisted, nothing present: the bootstrap state, stated as
         # state rather than arranged by a privileged step.
-        reconciliation=Reconciliation(Catalogue(rows={}), stale_claims=()),
-        environment=estate["environment"],
+        state=BuildState(
+            catalogue=Catalogue(rows={}), target_inventories=inventories
+        ),
+        session=estate["session"],
+        executors=estate["executors"],
         source_store=estate["store"],
         control_lakehouse=LakehouseBinding(lakehouse=ItemRef("Weaver")),
     )
@@ -235,7 +234,7 @@ def test_the_initialisation_wrapper_owns_no_catalogue_ddl_or_publication():
         "MERGE INTO",
         "DELETE FROM",
         "generate_item_build_bundle",
-        "install_bundle",
+        "Installer(",
         "read_reconciled_catalogue",
         "read_target_inventories",
     ):

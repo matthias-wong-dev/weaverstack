@@ -42,7 +42,6 @@ import tempfile
 from typing import Any
 
 from .build_bundle.models import BuildPlan
-from .build_bundle.installer import InstallationEnvironment
 from .build_bundle.report import InstallationReport
 from .build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
 from .build_bundle.workflow import build_item_repository_source
@@ -144,6 +143,20 @@ def prepare_weaver_lakehouse(
     raise CommandError(f"unsupported Workspace type: {type(workspace).__name__}")
 
 
+def _session_around(workspace, *, spark, store):
+    """A Session wrapped around resources the caller already holds.
+
+    Both are *given*, so the Session closes neither. This is how a caller that
+    is already inside its own Spark session — a notebook, or a test holding one
+    open for a module — reaches the build path without the build acquiring a
+    second one.
+    """
+
+    from .session import ConsoleSession
+
+    return ConsoleSession(workspace=workspace, spark=spark, store=store)
+
+
 def initialise_weaver_lakehouse(
     *,
     weaver_lakehouse: ItemRef,
@@ -151,6 +164,7 @@ def initialise_weaver_lakehouse(
     store: Store,
     spark: Any = None,
     output: Location | None = None,
+    session=None,
 ) -> InitialiseResult:
     """Build the built-in Weaver item alone, through the ordinary build path.
 
@@ -178,23 +192,29 @@ def initialise_weaver_lakehouse(
             ),
         )
     )
-    environment = InstallationEnvironment(
-        store=store,
-        resolver=resolver_for(workspace),
-        spark=spark,
-        workspace=workspace,
+    from .session.host import use_or_create_session
+
+    # A Session built around what this caller already holds: the Spark it is
+    # running in and the store it reads through are given, so nothing here
+    # acquires — or closes — a resource it did not open.
+    owned = (
+        None
+        if session is not None
+        else _session_around(workspace, spark=spark, store=store)
     )
-    with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
-        repository_root = Path(temporary) / "repository"
-        repository_root.mkdir()
-        result = build_item_repository_source(
-            Location(repository_root.as_posix()),
-            source_store=FilesystemStore(),
-            bindings=bindings,
-            environment=environment,
-            control_lakehouse=control,
-            output=output,
-        )
+    with use_or_create_session(session or owned, workspace=workspace) as opened:
+        with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
+            repository_root = Path(temporary) / "repository"
+            repository_root.mkdir()
+            result = build_item_repository_source(
+                Location(repository_root.as_posix()),
+                source_store=FilesystemStore(),
+                bindings=bindings,
+                session=opened,
+                workspace=workspace,
+                control_lakehouse=control,
+                output=output,
+            )
 
     return InitialiseResult(
         item="Lakehouse/_weaver",

@@ -496,50 +496,29 @@ def _build_in_process(
             )
 
     from .build_bundle import (
-        InstallationEnvironment,
         build_item_repository,
         catalogue_items_for_build,
         read_build_state,
     )
-    from .catalogue.state import reconcile_catalogue_state
 
     resolver = session.resolver(workspace)
-    environment = _installation_environment(workspace, session=session)
     state = read_build_state(
         bindings,
         required_catalogue_items=catalogue_items_for_build(repository, bindings),
-        environment=environment,
+        session=session,
+        workspace=workspace,
     )
     result = build_item_repository(
         repository,
         bindings=bindings,
-        target_inventories=state.target_inventories,
-        reconciliation=reconcile_catalogue_state(
-            state.catalogue, inventories=state.target_inventories
-        ),
-        environment=environment,
+        state=state,
+        session=session,
+        workspace=workspace,
         source_store=source_store,
         control_lakehouse=control_lakehouse,
         archive=_archive_location(resolver, bundle_name),
     )
     return _result_from_item_build(source, bindings, result)
-
-
-def _installation_environment(workspace, *, session):
-    """The installer's runtime services, taken from the Session that owns them.
-
-    A migration seam: ``InstallationEnvironment`` is what ``Installer(session)``
-    replaces, and this is the one place that still constructs one.
-    """
-
-    from .build_bundle import InstallationEnvironment
-
-    return InstallationEnvironment(
-        store=session.store(workspace),
-        resolver=session.resolver(workspace),
-        spark=session.spark(workspace),
-        workspace=workspace,
-    )
 
 
 def _read_build_state_here(workspace, *, session, bindings, repository) -> dict:
@@ -550,7 +529,8 @@ def _read_build_state_here(workspace, *, session, bindings, repository) -> dict:
     return read_build_state(
         bindings,
         required_catalogue_items=catalogue_items_for_build(repository, bindings),
-        environment=_installation_environment(workspace, session=session),
+        session=session,
+        workspace=workspace,
     ).to_mapping()
 
 
@@ -562,7 +542,8 @@ def _install_archive_here(workspace, *, session, archive) -> dict:
     return install_bundle_archive(
         archive,
         archive_store=session.store(workspace),
-        environment=_installation_environment(workspace, session=session),
+        session=session,
+        workspace=workspace,
     ).to_mapping()
 
 
@@ -627,21 +608,21 @@ def _build_desktop_fabric(
         f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
         f"environment={workspace.environment!r})"
     )
+    # What runs on the far side is Weaver's own Session, constructed there: the
+    # notebook host, which is where a Fabric session already is. Nothing about
+    # the read differs between here and there except which Session answers.
     state_body = (
         "from weaver.workspaces import FabricWorkspace\n"
         "from weaver.declaration.model import WeaverItemId\n"
-        "from weaver.build_bundle import (InstallationEnvironment, ItemBindings, "
-        "parse_item_binding, read_build_state)\n"
-        "from weaver.resolution import resolver_for, store_for\n"
+        "from weaver.build_bundle import (ItemBindings, parse_item_binding, "
+        "read_build_state)\n"
+        "from weaver.session import NotebookSession\n"
         f"workspace = {workspace_literal}\n"
-        "store = store_for(workspace)\n"
-        "resolver = resolver_for(workspace)\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
         f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
-        "environment = InstallationEnvironment("
-        "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
         f"items = tuple(WeaverItemId.parse(value) for value in {required_items!r})\n"
         "emit(read_build_state(bindings, required_catalogue_items=items, "
-        "environment=environment).to_mapping())\n"
+        "session=session).to_mapping())\n"
     )
     execution_id = uuid.uuid4().hex
     execution = resolver.cli_execution(execution_id)
@@ -687,17 +668,15 @@ def _build_desktop_fabric(
             transport_store.write(remote_archive, archive_bytes)
             install_body = (
                 "from weaver.workspaces import FabricWorkspace\n"
-                "from weaver.build_bundle import InstallationEnvironment, "
-                "install_bundle_archive\n"
-                "from weaver.resolution import resolver_for, store_for\n"
+                "from weaver.build_bundle import install_bundle_archive\n"
+                "from weaver.session import NotebookSession\n"
                 f"workspace = {workspace_literal}\n"
-                "store = store_for(workspace)\n"
-                "resolver = resolver_for(workspace)\n"
-                "environment = InstallationEnvironment("
-                "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
+                "session = NotebookSession(workspace=workspace, spark=spark)\n"
+                "store = session.store(workspace)\n"
+                "resolver = session.resolver(workspace)\n"
                 f"archive = resolver.cli_bundle({execution_id!r})\n"
                 "report = install_bundle_archive(archive, archive_store=store, "
-                "environment=environment)\n"
+                "session=session)\n"
                 "emit(report.to_mapping())\n"
             )
             report = session.execute_python(

@@ -17,13 +17,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.sessions import given_session
 
 from weaver.targets import DeltaTarget, ItemRef
 from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
 from weaver.build_bundle import (
-    InstallationEnvironment,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
@@ -136,9 +136,12 @@ def built(estate, spark):
     result = build_uploaded_item_repository(
         resolver.weaver_items_root,
         bindings=effective_item_bindings(selected, weaver_lakehouse=WEAVER),
-        environment=InstallationEnvironment(
-            store=store, resolver=resolver, spark=spark, workspace=workspace
-        ),
+        session=given_session(
+                workspace=workspace,
+                store=store,
+                resolver=resolver,
+                spark=spark,
+            ),
         control_lakehouse=LakehouseBinding(lakehouse=ItemRef(WEAVER)),
     )
     assert result.report.status == "succeeded", [
@@ -214,9 +217,12 @@ def test_rebuilding_re_points_the_alias_rather_than_failing_on_it(estate, built,
     again = build_uploaded_item_repository(
         resolver.weaver_items_root,
         bindings=effective_item_bindings(selected, weaver_lakehouse=WEAVER),
-        environment=InstallationEnvironment(
-            store=store, resolver=resolver, spark=spark, workspace=workspace
-        ),
+        session=given_session(
+                workspace=workspace,
+                store=store,
+                resolver=resolver,
+                spark=spark,
+            ),
         control_lakehouse=LakehouseBinding(lakehouse=ItemRef(WEAVER)),
     )
 

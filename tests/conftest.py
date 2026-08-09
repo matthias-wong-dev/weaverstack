@@ -183,14 +183,22 @@ def installed_repository(lakehouses: LocalLakehouses) -> Location:
 
 
 @pytest.fixture
-def installation_environment(spark, lakehouses: LocalLakehouses):
-    """A local installer environment: shared Spark, local resolver and store."""
+def installer_session(spark, lakehouses: LocalLakehouses):
+    """A Session around the shared Spark, local resolver and store.
 
-    from weaver.build_bundle import InstallationEnvironment
+    Given all three rather than acquiring any, so the suite's one JVM is reused
+    and nothing here closes what the fixture above it owns.
+    """
 
-    return InstallationEnvironment(
-        store=lakehouses.store, resolver=lakehouses.resolver, spark=spark
-    )
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(
+        workspace=lakehouses.workspace,
+        spark=spark,
+        store=lakehouses.store,
+        resolver=lakehouses.resolver,
+    ) as session:
+        yield session
 
 
 # --- spark -------------------------------------------------------------------

@@ -28,7 +28,12 @@ parsed back into.
 from __future__ import annotations
 
 #: The remote-execution contract this checkout speaks.
-PROTOCOL_VERSION = 1
+#:
+#: 2 — the far side constructs a ``NotebookSession``; ``read_build_state`` and
+#:     ``install_bundle_archive`` take that Session rather than an
+#:     ``InstallationEnvironment``, which no longer exists.
+#: 1 — the first versioned contract.
+PROTOCOL_VERSION = 2
 
 #: The key a guarded program emits when the far side speaks a different one.
 PROTOCOL_ERROR = "weaver_protocol_error"

@@ -20,6 +20,8 @@ to change produces no statement at all.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from factories import (
     FixtureCatalogue,
@@ -251,11 +253,19 @@ def test_no_build_module_reaches_the_unconditional_renderer():
         )
     )
 
+    # The *function*, imported or called — not any name that starts with it.
+    # `reconcile_catalogue_state` decides what is stale, which is exactly what a
+    # build is for, and `from ..catalogue.reconcile import publish` imports the
+    # diff-based renderer this test is defending. Matching the substring caught
+    # both, which made the invariant about spelling rather than about the
+    # renderer it names.
+    imported = re.compile(r"import\s+[^\n]*\breconcile\b")
+    called = re.compile(r"(?<![\w.])reconcile\s*\(")
     offenders = [
         module.name
         for module in build_modules
-        if "import reconcile" in module.read_text(encoding="utf-8")
-        or "reconcile(" in module.read_text(encoding="utf-8")
+        if imported.search(module.read_text(encoding="utf-8"))
+        or called.search(module.read_text(encoding="utf-8"))
     ]
 
     assert not offenders, (

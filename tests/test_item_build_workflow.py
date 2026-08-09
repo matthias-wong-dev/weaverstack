@@ -8,12 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from support.sessions import given_session
 
 from weaver.targets import ItemRef
 from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
-    InstallationEnvironment,
     BuildState,
     ItemBinding,
     ItemBindings,
@@ -123,13 +123,18 @@ def _inventories(bindings=None):
 
 @pytest.fixture
 def prepared_state(monkeypatch):
+    """The one boundary read, stubbed — these tests are about stores, not state.
+
+    One patch rather than two, because the build now takes a single Python
+    handover: catalogue and inventories arrive together as a BuildState, and the
+    Builder reconciles them itself.
+    """
+
     monkeypatch.setattr(
-        "weaver.build_bundle.workflow.read_target_inventories",
-        lambda bindings, **_kwargs: _inventories(bindings),
-    )
-    monkeypatch.setattr(
-        "weaver.build_bundle.workflow.read_reconciled_catalogue",
-        lambda *_args, **_kwargs: Reconciliation(Catalogue({}), stale_claims=()),
+        "weaver.build_bundle.workflow.read_build_state",
+        lambda bindings, **_kwargs: BuildState(
+            catalogue=Catalogue({}), target_inventories=_inventories(bindings)
+        ),
     )
 
 
@@ -143,17 +148,12 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
         for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    environment = InstallationEnvironment(
-        store=remote,
-        resolver=None,
-        executors=_executors(),
-    )
-
     result = build_uploaded_item_repository(
         root,
         bindings=_bindings(),
-        environment=environment,
+        session=given_session(store=remote),
         control_lakehouse=_control(),
+        executors=_executors(),
     )
 
     assert result.report.status == "succeeded"
@@ -173,12 +173,9 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
         root,
         source_store=FilesystemStore(),
         bindings=_bindings(),
-        environment=InstallationEnvironment(
-            store=target_store,
-            resolver=None,
-            executors=_executors(),
-        ),
+        session=given_session(store=target_store),
         control_lakehouse=_control(),
+        executors=_executors(),
     )
 
     assert result.report.status == "succeeded"
@@ -207,10 +204,9 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
             Location(str(_estate(tmp_path))),
             source_store=FilesystemStore(),
             bindings=unknown,
-            environment=InstallationEnvironment(
-                store=FilesystemStore(), resolver=None, executors=_executors()
-            ),
+            session=given_session(store=FilesystemStore()),
             control_lakehouse=_control(),
+            executors=_executors(),
         )
 
 
@@ -292,13 +288,10 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     result = build_uploaded_item_repository(
         root,
         bindings=_bindings(),
-        environment=InstallationEnvironment(
-            store=remote,
-            resolver=None,
-            executors=_executors(),
-        ),
+        session=given_session(store=remote),
         control_lakehouse=_control(),
         archive=archive,
+        executors=_executors(),
     )
 
     assert result.report.status == "succeeded"
@@ -359,11 +352,8 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
     report = install_bundle_archive(
         archive,
         archive_store=store,
-        environment=InstallationEnvironment(
-            store=target,
-            resolver=None,
-            executors=_executors(),
-        ),
+        session=given_session(store=target),
+        executors=_executors(),
     )
 
     assert report.status == "succeeded"

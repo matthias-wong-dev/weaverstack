@@ -6,18 +6,17 @@ import json
 import shutil
 
 import pytest
+from support.sessions import given_installer
 
 from weaver.targets import ItemRef
 from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
-    InstallationEnvironment,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
     WarehouseBinding,
     generate_item_build_bundle as _generate_item_build_bundle,
-    install_bundle,
     load_bundle,
 )
 from weaver.errors import BuildError
@@ -428,7 +427,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
     shutil.rmtree(root)
     reloaded = load_bundle(bundle.location, store=store)
     noop = _NoopExecutor()
-    environment = InstallationEnvironment(
+    installer = given_installer(
         store=store,
         resolver=_Resolver(),
         executors={
@@ -443,7 +442,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
                 "load_file": noop,
         },
     )
-    report = install_bundle(reloaded, environment=environment)
+    report = installer.install(reloaded)
     assert report.status == "succeeded"
 
 

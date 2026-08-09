@@ -27,7 +27,8 @@ from .models import (
     BuildSequence,
     OmittedNode,
 )
-from .installer import InstallationEnvironment, execute_install_action, install_bundle
+from .builder import Builder
+from .installer import Installer, execute_install_action
 from .incremental import BuildSelection, Impact, determine_impact
 from .physical import RenderedAction, render_document_build_action
 from .planner import PlannedItem, generate_item_build_bundle, plan_item_build
@@ -89,8 +90,8 @@ __all__ = [
     "plan_to_yaml",
     "plan_from_yaml",
     "generate_item_build_bundle",
-    "InstallationEnvironment",
-    "install_bundle",
+    "Builder",
+    "Installer",
     "InstallationReport",
     "ItemBuildResult",
     "BuildState",

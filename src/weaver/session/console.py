@@ -53,12 +53,16 @@ class ConsoleSession(Session):
         require_weaver: bool = True,
         livy: Any = None,
         spark: Any = None,
+        store: Any = None,
+        resolver: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.require_weaver = require_weaver
         self._given_livy = livy
         self._given_spark = spark
+        self._given_store = store
+        self._given_resolver = resolver
 
     def _new_scope(self, workspace: Workspace) -> "ConsoleScope":
         return ConsoleScope(
@@ -68,6 +72,8 @@ class ConsoleSession(Session):
             require_weaver=self.require_weaver,
             livy=self._given_livy,
             spark=self._given_spark,
+            store=self._given_store,
+            resolver=self._given_resolver,
         )
 
     # --- readiness ----------------------------------------------------------
