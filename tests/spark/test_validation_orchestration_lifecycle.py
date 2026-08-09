@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.sessions import load_session
 from support.sessions import given_session
 
 from weaver.build_bundle import (
@@ -192,7 +193,7 @@ def validated(tmp_path, lakehouses, spark, weaver_catalogue):
         requested = (PhysicalTargetRef("lakehouse", lakehouses.target.name),)
         from weaver.load import run_load
 
-        with LoadSession(
+        with load_session(
             lakehouses.workspace, requested, spark=spark, store=lakehouses.store
         ) as session:
             loaded = run_load(session, requested=requested)
@@ -205,7 +206,7 @@ def validated(tmp_path, lakehouses, spark, weaver_catalogue):
 
 def _test(validated, **kwargs):
     lakehouses, requested = validated
-    with LoadSession(
+    with load_session(
         lakehouses.workspace, requested, spark=lakehouses.spark, store=lakehouses.store
     ) as session:
         return run_test(session, requested=requested, **kwargs)
@@ -219,7 +220,7 @@ def lakehouses_with_spark(lakehouses, spark):
 
 def run(validated, spark, **kwargs):
     lakehouses, requested = validated
-    with LoadSession(
+    with load_session(
         lakehouses.workspace, requested, spark=spark, store=lakehouses.store
     ) as session:
         return run_test(session, requested=requested, **kwargs)
@@ -465,7 +466,7 @@ def test_file_mode_publishes_nothing(validated, spark, tmp_path):
     path = _source(tmp_path, "Sales.OrdersFromSource.sql", SOURCE_TEST)
     run(validated, spark, file=str(path))
 
-    with LoadSession(
+    with load_session(
         lakehouses.workspace, requested, spark=spark, store=lakehouses.store
     ) as session:
         estate = ValidationEstate.from_catalogue(session.read_catalogue())

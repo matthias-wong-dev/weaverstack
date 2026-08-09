@@ -24,6 +24,7 @@ from weaver.run.result import (
     RUN_FAILED,
     RUN_PARTIALLY_SUCCEEDED,
     RUN_SUCCEEDED,
+    INVALID,
     RUN_SUCCEEDED_WITH_REJECTS,
     SKIPPED,
     SUCCEEDED,
@@ -46,16 +47,33 @@ class Target:
 SALES = Target("Sales_LH")
 
 
-class Outcome:
-    """What a controlled dispatch hands back, shaped like a real result."""
+def Outcome(status: str = SUCCEEDED, rows=None, rejected: int = 0, message=None):
+    """What a controlled dispatch hands back — a real result, not a stand-in.
 
-    def __init__(self, status: str = SUCCEEDED, messages=(), rows=None) -> None:
-        self.status = status
-        self.messages = messages
-        self.rows = rows or {}
+    The result contract is part of what the Runner enforces, so a fixture that
+    handed back a convenient shape would be asserting against a check that never
+    fired. These are the outcomes the plan asks a controlled dispatch to be able
+    to produce; ``Malformed`` is the one that deliberately is not.
+    """
 
-    def as_row(self) -> dict:
-        return dict(self.rows)
+    from weaver.runtime.load_result import LoadResult
+
+    if status == FAILED:
+        return LoadResult.failure(message or "the primitive reported failure")
+    if status == SUCCEEDED_WITH_REJECTS:
+        return LoadResult(
+            succeeded=False,
+            rows_rejected=rejected or 1,
+            error_message=message or "some rows were refused",
+        )
+    return LoadResult(succeeded=True, **(rows or {}))
+
+
+class Malformed:
+    """A primitive that returned something that is not a load result at all."""
+
+    def __repr__(self) -> str:
+        return "Malformed()"
 
 
 def node(node_id: str, **kwargs) -> RunNode:
@@ -181,11 +199,11 @@ def test_a_run_with_no_session_still_runs_with_its_own_dispatch():
 
 
 def test_row_counts_come_back_on_the_node_that_produced_them():
-    dispatch = controlled({"a": Outcome(rows={"inserted": 3})})
+    dispatch = controlled({"a": Outcome(rows={"rows_inserted": 3})})
 
     result = runner(nodes=[node("a")]).run(dispatch=dispatch)
 
-    assert result.by_node["a"].result.as_row() == {"inserted": 3}
+    assert result.by_node["a"].result.rows_inserted == 3
 
 
 # --- failure ------------------------------------------------------------------
@@ -209,7 +227,8 @@ def test_an_exception_from_dispatch_is_a_failed_node_not_a_crash():
     result = runner(nodes=[node("a")]).run(dispatch=dispatch)
 
     assert result.by_node["a"].status == FAILED
-    assert "the engine said no" in result.by_node["a"].messages[0]
+    assert "the engine said no" in result.by_node["a"].messages[0].message
+    assert result.by_node["a"].messages[0].code == "dispatch_exception"
 
 
 def test_fail_fast_stops_scheduling_but_still_reports_every_node():
@@ -258,8 +277,8 @@ def test_a_target_that_is_not_there_fails_the_node_it_would_have_run():
 
     result = made.run(dispatch=controlled({}))
 
-    assert result.by_node["a"].status == FAILED
-    assert "not present" in result.by_node["a"].messages[0]
+    assert result.by_node["a"].status == INVALID, "nothing ran, so nothing failed"
+    assert result.by_node["a"].messages[0].code == "target_missing"
     assert not result.by_node["a"].executed
 
 
@@ -270,8 +289,8 @@ def test_an_artefact_that_was_never_installed_fails_before_it_is_dispatched():
 
     result = runner(nodes=[node("a")], installed=False).run(dispatch=dispatch)
 
-    assert result.by_node["a"].status == FAILED
-    assert "not installed in" in " ".join(result.by_node["a"].messages)
+    assert result.by_node["a"].status == INVALID
+    assert result.by_node["a"].messages[0].code == "dispatch_location_missing"
     assert dispatch.seen == [], "nothing was dispatched at a missing artefact"
 
 
@@ -409,7 +428,65 @@ def test_a_dry_run_still_says_what_could_not_run():
 
     result = made.run(dispatch=controlled({}))
 
-    assert result.by_node["a"].status == FAILED
+    assert result.by_node["a"].status == INVALID
     assert result.by_node["b"].status == BLOCKED
-    assert "did not validate" in result.by_node["b"].messages[0]
+    assert result.by_node["b"].messages[0].code == "dependency_blocked"
+    assert "did not validate" in result.by_node["b"].messages[0].message
     assert not any(one.executed for one in result.nodes)
+
+
+def test_a_primitive_that_returned_the_wrong_shape_is_a_failed_node():
+    """Not an exception, but not a dispatch either.
+
+    Nothing ran to completion, so it must never read as a tolerated rejection —
+    which is what inferring the status from the counts would produce.
+    """
+
+    dispatch = controlled({"a": Malformed()})
+
+    result = runner(nodes=[node("a")]).run(dispatch=dispatch)
+
+    assert result.by_node["a"].status == FAILED
+    assert result.by_node["a"].messages[0].code == "result_contract_invalid"
+
+
+def test_a_tolerated_rejection_is_not_a_failure_and_a_raised_one_is():
+    """The distinction the whole outcome layer exists for.
+
+    Both carry rejected rows and neither "succeeded", but one wrote the valid
+    rows and the other wrote nothing.
+    """
+
+    from weaver.errors import LoadError
+    from weaver.runtime.load_result import LoadResult
+
+    tolerated = runner(nodes=[node("a")], fault_tolerant=True).run(
+        dispatch=controlled({"a": Outcome(SUCCEEDED_WITH_REJECTS, rejected=2)})
+    )
+    refused = LoadError("the load refused 2 rows")
+    refused.result = LoadResult(succeeded=False, rows_rejected=2)
+    raised = runner(nodes=[node("a")], fault_tolerant=True).run(
+        dispatch=controlled({"a": refused})
+    )
+
+    assert tolerated.by_node["a"].status == SUCCEEDED_WITH_REJECTS
+    assert raised.by_node["a"].status == FAILED
+    assert raised.by_node["a"].result.rows_rejected == 2, "the counts survive"
+
+
+def test_rejects_do_not_block_what_comes_after_them():
+    """The valid rows were written, so what a consumer reads is there.
+
+    Blocking on a rejection would stop a run that partially succeeded from
+    finishing the parts that were fine.
+    """
+
+    dispatch = controlled({"a": Outcome(SUCCEEDED_WITH_REJECTS, rejected=2)})
+
+    result = runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
+        dispatch=dispatch
+    )
+
+    assert dispatch.seen == ["a", "b"]
+    assert result.by_node["b"].status == SUCCEEDED
+    assert result.status == RUN_SUCCEEDED_WITH_REJECTS

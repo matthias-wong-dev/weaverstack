@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.sessions import load_session
 from support.build_envs import LOAD_ORCHESTRATION_FIXTURE
 
 from weaver.catalogue.builtin import LOG_FOLDER
@@ -65,7 +66,7 @@ def estate(local_lakehouse_estate):
 
 def session(estate) -> LoadSession:
     env = estate.env
-    return LoadSession(
+    return load_session(
         env.workspace, (TARGET,), spark=env.generate_spark, store=env.store
     )
 
@@ -102,10 +103,13 @@ def test_a_complete_load_plan_locates_every_primitive_without_executing_it(dry, 
         CUSTOMER: PYTHON_TABLE,
         NAMED: PYTHON_TABLE,
     }
+    # The primitive each node would reach, named the way the estate names it.
+    # A dry run is planned against a snapshot and asks no workspace anything, so
+    # turning this into a host path is the resolver's business at dispatch.
     assert {node.node_id: node.dispatch_location for node in dry.nodes} == {
-        SEED: f"{files_root}/_/Load/Files/Sales__Seed.py",
-        CUSTOMER: f"{files_root}/_/Load/Sales__Customer.py",
-        NAMED: f"{files_root}/_/Load/Sales__Named.py",
+        SEED: "Lakehouse/Sales_LH/_/Load/Files/Sales__Seed.py",
+        CUSTOMER: "Lakehouse/Sales_LH/_/Load/Sales__Customer.py",
+        NAMED: "Lakehouse/Sales_LH/_/Load/Sales__Named.py",
     }
     assert all(node.status == VALIDATED for node in dry.nodes)
     assert all(not node.executed for node in dry.nodes)

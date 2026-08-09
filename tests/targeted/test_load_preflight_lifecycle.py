@@ -37,6 +37,7 @@ import pytest
 
 from weaver.errors import CommandError, LoadError
 from weaver.load import run_load
+from weaver.run import RunState
 from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED
 from weaver.load_resolution import LoadEnvironment
@@ -111,7 +112,13 @@ def session(tmp_path):
 
 def _run(session, *targets, dry_run=False):
     return run_load(
-        session, requested=targets, fault_tolerant=False, dry_run=dry_run
+        session,
+        state=RunState(
+            catalogue=session.catalogue, target_inventories=session.inventories
+        ),
+        requested=targets,
+        fault_tolerant=False,
+        dry_run=dry_run,
     )
 
 
@@ -230,7 +237,14 @@ def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
     """Installed, and nothing to do. That is a success."""
 
     report = run_load(
-        empty_estate, requested=(VIEWS_LH,), fault_tolerant=False, dry_run=False
+        empty_estate,
+        state=RunState(
+            catalogue=empty_estate.catalogue,
+            target_inventories=empty_estate.inventories,
+        ),
+        requested=(VIEWS_LH,),
+        fault_tolerant=False,
+        dry_run=False,
     )
 
     assert report.status == TASK_SUCCEEDED

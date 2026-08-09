@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import pytest
 
 from weaver.errors import LoadError
+from weaver.run import RunState
 from weaver.load import run_load
 from weaver.load_report import (
     BLOCKED,
@@ -92,6 +93,10 @@ class PreparedSession:
     log_root: Location
     store: object
 
+    #: This host can refresh an endpoint. The Runner asks rather than assumes,
+    #: because the emulator genuinely cannot and skips rather than fails.
+    can_refresh: bool = True
+
     def read_catalogue(self):
         return self.catalogue
 
@@ -139,20 +144,21 @@ def session(tmp_path):
 def dispatched(monkeypatch):
     """Answer each node by id: a result to return, or an exception to raise."""
 
-    import weaver.load_execution as module
+    import weaver.run as module
 
     answers: dict = {}
     calls: list[str] = []
 
-    def dispatch(resolved, *, fault_tolerant, environment):
-        node_id = resolved.node_id
-        calls.append(node_id)
-        answer = answers.get(node_id, OK)
+    def dispatch(node, **asked):
+        calls.append(node.node_id)
+        answer = answers.get(node.node_id, OK)
         if isinstance(answer, BaseException):
             raise answer
         return answer
 
-    monkeypatch.setattr(module, "dispatch_load_node", dispatch)
+    # The one seam a run crosses. `run_load` reads it from the package at call
+    # time, so patching the name here is what a controlled dispatch does.
+    monkeypatch.setattr(module, "dispatch_primitive", dispatch)
     dispatch.answers = answers
     dispatch.calls = calls
     return dispatch
@@ -160,7 +166,14 @@ def dispatched(monkeypatch):
 
 def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
     return run_load(
-        session, requested=targets, fault_tolerant=fault_tolerant, dry_run=False
+        session,
+        state=RunState(
+            catalogue=session.catalogue,
+            target_inventories=session.inventories,
+        ),
+        requested=targets,
+        fault_tolerant=fault_tolerant,
+        dry_run=False,
     )
 
 

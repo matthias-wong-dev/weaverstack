@@ -59,4 +59,26 @@ def given_installer(
     )
 
 
-__all__ = ["NOWHERE", "given_installer", "given_session"]
+
+
+def load_session(workspace, requested, *, spark, store):
+    """A ``LoadSession`` holding a real Session, around resources a test owns.
+
+    The load path reaches its engines through a Session — that is the one
+    crossing a run makes — so a prepared session without one has no way to
+    dispatch. Both are given here, so nothing is acquired and nothing is closed
+    that the fixture above still needs.
+    """
+
+    from weaver.load import LoadSession
+
+    return LoadSession(
+        workspace,
+        requested,
+        spark=spark,
+        store=store,
+        session=given_session(workspace=workspace, spark=spark, store=store),
+    )
+
+
+__all__ = ["NOWHERE", "given_installer", "given_session", "load_session"]

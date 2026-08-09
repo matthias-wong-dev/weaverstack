@@ -166,101 +166,118 @@ def run_load(
     session: "LoadSession",
     *,
     requested: Sequence[PhysicalTargetRef],
+    state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
 ) -> LoadRunReport:
     """The whole orchestration path, over a prepared session.
 
-    Separated from :func:`load` so the composition can be driven without the
-    workspace resolution and capability acquisition in front of it — which is
-    what the desktop, the emulator and a Fabric session each do differently and
-    none of them changes about the orchestration itself.
+    Reads the estate once, at a boundary, and hands the Runner a snapshot:
+
+    .. code-block:: text
+
+        physical catalogue + targets  →  RunState  →  Runner  →  RunResult
+
+    Nothing about *when* a node runs lives here any more. What is left is the
+    load operation's own business — reading the estate, writing the evidence,
+    and rendering the result in the shape a load's readers expect.
+
+    ``state`` is the handover, and a caller that already has one supplies it:
+    the estate is a Python representation, so a caller holding an observed
+    snapshot should not have to arrange for it to be re-observed. Omitted, this
+    reads one — which is what the operation does in production.
     """
 
+    from .run import RunRequest, Runner, RunState, can_refresh, dispatch_primitive
+
     started = datetime.now(timezone.utc)
-    estate = InstalledEstate.from_catalogue(session.read_catalogue())
+    catalogue = state.catalogue if state is not None else session.read_catalogue()
+    estate = InstalledEstate.from_catalogue(catalogue)
     _refuse_uninstalled_targets(estate, requested)
-    dag = load_dag(estate, targets=requested)
-    environment = session.environment(dag)
-    try:
-        return _run(
-            session,
-            dag=dag,
-            environment=environment,
-            requested=requested,
-            fault_tolerant=fault_tolerant,
-            dry_run=dry_run,
-            started=started,
+
+    if state is None:
+        # Only the targets the graph touches: the rest have nothing to be looked
+        # up in them. Planning the graph first is what makes that knowable, and
+        # the reading happens once, here, so everything below decides against a
+        # snapshot rather than against state that is still moving.
+        planned = load_dag(estate, targets=requested)
+        state = RunState(
+            catalogue=catalogue,
+            target_inventories=session.observe(
+                tuple(node.physical_target for node in planned.nodes)
+            ),
         )
-    finally:
-        # Every deployed module this run imported goes with it. A Fabric session
-        # outlives a build, and a build rewrites deployed Python in place — so a
-        # module kept past the run that imported it is a module the next load
-        # would use instead of the one now on disk.
-        environment.runtime_scope.close()
+    runner = Runner(
+        state,
+        RunRequest.load(
+            requested, fault_tolerant=fault_tolerant, dry_run=dry_run
+        ),
+        workspace=session.workspace,
+        can_refresh=getattr(session, "can_refresh", None)
+        if getattr(session, "can_refresh", None) is not None
+        else can_refresh(getattr(session, "session", None), session.workspace),
+    )
 
-
-def _run(
-    session: "LoadSession",
-    *,
-    dag: LoadDag,
-    environment: LoadEnvironment,
-    requested: Sequence[PhysicalTargetRef],
-    fault_tolerant: bool,
-    dry_run: bool,
-    started: datetime,
-) -> LoadRunReport:
-    """One run, between the scope opening and closing around it."""
-
-    plan = resolve_load_plan(dag, environment=environment)
-
-    common = {
-        "requested": tuple(str(target) for target in requested),
-        "dry_run": dry_run,
-        "fault_tolerant": fault_tolerant,
-        "edges": dag.edges,
-        "order": tuple(node.node_id for node in dag.order()),
-        "messages": dag.messages,
-        "workspace": str(session.workspace.workspace),
-        "started_at": started.isoformat(),
-    }
-
-    if dry_run:
-        nodes = dry_run_reports(plan)
-        return LoadRunReport(
-            **common,
-            nodes=nodes,
-            status=final_status(nodes, dry_run=True),
-            finished_at=datetime.now(timezone.utc).isoformat(),
-        )
-
-    log = session.open_log()
+    log = None if dry_run else session.open_log()
     if log is not None:
-        log.write_plan(_plan_document(plan, common))
-    nodes = execute_load_plan(
-        plan,
-        fault_tolerant=fault_tolerant,
-        environment=environment,
-        on_step=(
+        log.write_plan(_plan_document(runner.graph, state, requested, dry_run))
+    result = runner.run(
+        session=getattr(session, "session", None),
+        dispatch=dispatch_primitive,
+        on_node=(
             None
             if log is None
-            else lambda report: log.write_step(_step_type(report), report.to_mapping())
+            else lambda node: log.write_step(_step_type(node), node.to_mapping())
         ),
     )
-    status = final_status(nodes, dry_run=False)
-    report = LoadRunReport(
-        **common,
-        nodes=nodes,
-        status=status,
-        task_id=None if log is None else log.task_id,
-        task_log=None if log is None else log.root.value,
-        finished_at=datetime.now(timezone.utc).isoformat(),
-    )
+
+    report = _as_load_report(result, started=started, task_log=log)
     if log is not None:
         log.write_completion(_completion_document(report))
-    if not fault_tolerant:
+    if not fault_tolerant and not dry_run:
         _raise_for_failure(report)
     return report
+
+
+def _as_load_report(result, *, started, task_log) -> LoadRunReport:
+    """One RunResult, rendered as the shape a load's readers expect.
+
+    The internal model is one; the public shapes are not. A load reader wants
+    rows moved and a task log to point at, and gets exactly the report they got
+    before — which is why the CLI, the notebook and the task log did not have to
+    learn a new one.
+    """
+
+    return LoadRunReport(
+        requested=result.requested,
+        status=result.status,
+        dry_run=result.dry_run,
+        fault_tolerant=result.fault_tolerant,
+        nodes=tuple(
+            LoadNodeReport(
+                node_id=node.node_id,
+                logical_id=node.logical_id,
+                physical_target=node.physical_target,
+                primitive_kind=node.primitive_kind,
+                dispatch_location=node.dispatch_location,
+                status=node.status,
+                executed=node.executed,
+                messages=tuple(node.messages),
+                result=node.result,
+                started_at=node.started_at,
+                finished_at=node.finished_at,
+            )
+            for node in result.nodes
+        ),
+        edges=result.edges,
+        order=result.order,
+        messages=tuple(result.messages),
+        workspace=result.workspace,
+        task_id=None if task_log is None else task_log.task_id,
+        task_log=None if task_log is None else task_log.root.value,
+        started_at=started.isoformat(),
+        finished_at=result.finished_at,
+    )
 
 
 def _raise_for_failure(report: LoadRunReport) -> None:
@@ -343,43 +360,43 @@ def _step_type(report: LoadNodeReport) -> str:
     return "refresh" if report.primitive_kind == ENDPOINT_REFRESH else "load"
 
 
-def _plan_document(plan, common: Mapping[str, Any]) -> dict:
+def _plan_document(graph, state, requested, dry_run: bool) -> dict:
     """The complete intended task, written once before anything runs.
 
     Enough on its own to answer what was requested, what Weaver intended to run,
     in what order, against which physical targets and through which installed
-    primitives — which is the whole point of writing it before rather than after.
+    primitives — which is the whole point of writing it before rather than
+    after. Every existence answer comes from the snapshot the run was planned
+    against, so the record and the decision cannot disagree.
     """
 
     from . import __version__
+    from .run.resolution import resolve
 
+    ordered = graph.order()
+    resolutions = {node.node_id: resolve(node, state) for node in ordered}
     return {
         "weaver_version": __version__,
-        "requested": list(common["requested"]),
-        "mode": "dry_run" if common["dry_run"] else "execute",
-        "fault_tolerant": common["fault_tolerant"],
-        "workspace": common["workspace"],
-        "started_at": common["started_at"],
-        "order": list(common["order"]),
-        "edges": [list(edge) for edge in common["edges"]],
+        "requested": [str(target) for target in requested],
+        "mode": "dry_run" if dry_run else "execute",
+        "order": [node.node_id for node in ordered],
+        "edges": [list(edge) for edge in graph.edges],
         "nodes": [
             {
-                "node_id": resolved.node.node_id,
-                "logical_id": str(resolved.node.logical_id)
-                if resolved.node.logical_id
+                "node_id": node.node_id,
+                "logical_id": str(node.logical_id) if node.logical_id else None,
+                "physical_target": str(node.physical_target),
+                "physical_object": str(node.physical_object)
+                if node.physical_object
                 else None,
-                "physical_target": str(resolved.node.physical_target),
-                "physical_object": str(resolved.node.physical_object)
-                if resolved.node.physical_object
-                else None,
-                "primitive_kind": resolved.node.primitive_kind,
-                "dispatch_location": resolved.dispatch_location,
-                "target_exists": resolved.target_exists,
-                "primitive_exists": resolved.primitive_exists,
+                "primitive_kind": node.primitive_kind,
+                "dispatch_location": resolutions[node.node_id].dispatch_location,
+                "target_exists": resolutions[node.node_id].target_present,
+                "primitive_exists": resolutions[node.node_id].primitive_present,
             }
-            for resolved in plan.order
+            for node in ordered
         ],
-        "messages": [message.to_mapping() for message in common["messages"]],
+        "messages": [message.to_mapping() for message in graph.messages],
     }
 
 
@@ -497,6 +514,25 @@ class LoadSession:
                 self.resolver.spark_destination(ItemRef(self.workspace.weaver_lakehouse)),
             )
         )
+
+    def observe(self, targets) -> dict:
+        """What each target physically holds, read once, keyed as a caller wrote it.
+
+        The boundary between the estate and the Runner: the reading happens
+        here, so everything above it decides against a snapshot rather than
+        against state that is still moving.
+
+        A target that cannot be read at all is absent from the result rather
+        than guessed at — and resolution then says so, on the node that would
+        have run against it.
+        """
+
+        observed = {}
+        for target in dict.fromkeys(targets):
+            inventory = self._inventory(target)
+            if inventory is not None:
+                observed[str(target)] = inventory
+        return observed
 
     def environment(self, dag: LoadDag) -> LoadEnvironment:
         """Runtime services plus the physical state every planned target is in.

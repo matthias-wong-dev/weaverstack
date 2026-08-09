@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from weaver.run import RunState
 from weaver.load import run_load
 from weaver.load_plan import ENDPOINT_REFRESH, PhysicalTargetRef
 from weaver.load_report import (
@@ -127,6 +128,10 @@ def session(tmp_path):
 def dry_run(session, *targets, fault_tolerant=False):
     return run_load(
         session,
+        state=RunState(
+            catalogue=session.catalogue,
+            target_inventories=session.inventories,
+        ),
         requested=targets or (RAW, REPORTING),
         fault_tolerant=fault_tolerant,
         dry_run=True,
@@ -163,16 +168,21 @@ def test_load_dry_run_validates_every_primitive_without_executing_it(session):
     assert all(node.result is None for node in report.nodes)
 
 
-def test_load_dry_run_resolves_the_exact_dispatch_location_of_every_node(
-    session, tmp_path
-):
-    root = str(tmp_path / "estate")
+def test_load_dry_run_names_the_primitive_every_node_would_reach(session):
+    """Which installed thing, not where it happens to sit on this host.
+
+    A dry run is planned against a snapshot and asks no workspace anything, so
+    it names the procedure or the deployed module the way the estate names it.
+    Turning that into an absolute path is the resolver's business, and it
+    happens at dispatch — where the run is already talking to the host anyway.
+    """
+
     report = dry_run(session)
 
     assert {node.node_id: node.dispatch_location for node in report.nodes} == {
-        EXPORT: f"{root}/Raw_LH/Files/_/Load/Files/Sales__Export.py",
-        ORDER: f"{root}/Raw_LH/Files/_/Load/Sales__Order.py",
-        DAILY: f"{root}/Raw_LH/Files/_/Load/Sales__Daily.py",
+        EXPORT: "Lakehouse/Raw_LH/_/Load/Files/Sales__Export.py",
+        ORDER: "Lakehouse/Raw_LH/_/Load/Sales__Order.py",
+        DAILY: "Lakehouse/Raw_LH/_/Load/Sales__Daily.py",
         REFRESH: "Lakehouse/Raw_LH/sql_endpoint",
         SUMMARY: "Warehouse/Reporting_WH/[_].[Load Sales.Summary]",
     }

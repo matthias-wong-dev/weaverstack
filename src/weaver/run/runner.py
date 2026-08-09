@@ -54,7 +54,9 @@ from .graph import RunGraph, graph_for
 from .request import RunRequest
 from .result import (
     BLOCKED,
+    SUCCEEDED_WITH_REJECTS,
     FAILED,
+    INVALID,
     PENDING,
     SKIPPED,
     SUCCEEDED,
@@ -68,6 +70,19 @@ from .state import RunState
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _blocked_by(node, upstream, *, validated: bool = False):
+    """Why this node may not run, said with the code a reader can filter on."""
+
+    from ..load_report import DEPENDENCY_BLOCKED, error
+
+    what = "did not validate" if validated else "did not succeed"
+    return error(
+        DEPENDENCY_BLOCKED,
+        f"{node.node_id} cannot run: " + ", ".join(sorted(upstream)) + f" {what}",
+        source="run.runner",
+    )
 
 
 class Runner:
@@ -199,13 +214,7 @@ class Runner:
             blocking = self._blocking(node, statuses)
             if blocking:
                 settle(
-                    self._settled(
-                        node,
-                        BLOCKED,
-                        messages=tuple(
-                            f"blocked by {upstream}" for upstream in blocking
-                        ),
-                    ),
+                    self._settled(node, BLOCKED, messages=(_blocked_by(node, blocking),)),
                     BLOCKED,
                 )
                 continue
@@ -218,8 +227,17 @@ class Runner:
 
             resolved = self.resolve(node)
             if not resolved.valid:
+                # Invalid, not failed: nothing ran. A reader distinguishing "the
+                # primitive reported failure" from "there was nothing to run" is
+                # asking a question the status should answer.
                 settle(
-                    self._settled(node, FAILED, messages=resolved.messages), FAILED
+                    self._settled(
+                        node,
+                        INVALID,
+                        messages=resolved.messages,
+                        location=resolved.dispatch_location,
+                    ),
+                    FAILED,
                 )
                 if not self.request.fault_tolerant:
                     stopped = True
@@ -227,7 +245,15 @@ class Runner:
             if resolved.unsupported:
                 # A capability this host does not have. The node is omitted
                 # rather than failed, exactly as the build's own executor skips.
-                settle(self._settled(node, SKIPPED, messages=resolved.messages), SKIPPED)
+                settle(
+                    self._settled(
+                        node,
+                        SKIPPED,
+                        messages=resolved.messages,
+                        location=resolved.dispatch_location,
+                    ),
+                    SKIPPED,
+                )
                 continue
 
             settle(
@@ -273,33 +299,47 @@ class Runner:
                     self._settled(
                         node,
                         BLOCKED,
-                        messages=(
-                            f"{node.node_id} cannot run: "
-                            + ", ".join(causes)
-                            + " did not validate",
-                        ),
+                        messages=(_blocked_by(node, causes, validated=True),),
+                        location=resolved.dispatch_location,
                     )
                 )
             elif resolved.valid:
+                # Validated even where the host cannot perform it: a dry run
+                # says what *would* happen, and "this host would skip it" is a
+                # warning on a node that resolved, not an outcome of its own.
                 settled.append(
                     self._settled(
                         node,
-                        SKIPPED if resolved.unsupported else VALIDATED,
+                        VALIDATED,
                         messages=resolved.messages,
+                        location=resolved.dispatch_location,
                     )
                 )
             else:
                 settled.append(
-                    self._settled(node, FAILED, messages=resolved.messages)
+                    self._settled(
+                        node,
+                        INVALID,
+                        messages=resolved.messages,
+                        location=resolved.dispatch_location,
+                    )
                 )
         return tuple(settled)
 
     def _dispatched(self, node, *, dispatch, session, resolved=None) -> RunNodeResult:
-        """One node, run. A failure is data here, not an exception."""
+        """One node, run. A failure is data here, not an exception.
+
+        Unconditionally so, whatever fault tolerance says: the run records what
+        happened before it decides what to do about it, and deciding belongs to
+        the operation once the whole graph is recorded.
+        """
+
+        from .outcome import settle
 
         started = _now()
+        location = getattr(resolved, "dispatch_location", None)
         try:
-            outcome = dispatch(
+            returned = dispatch(
                 node,
                 session=session,
                 state=self.state,
@@ -308,30 +348,32 @@ class Runner:
                 runtime_scope=self.runtime_scope,
                 workspace=self.workspace,
             )
-        except Exception as exc:  # noqa: BLE001 - a failed node is a result
-            return self._settled(
-                node,
-                FAILED,
-                executed=True,
-                messages=(f"{type(exc).__name__}: {exc}",),
-                started_at=started,
-            )
-        status = getattr(outcome, "status", None) or SUCCEEDED
+        except BaseException as exc:  # noqa: BLE001 - a failed node is a result
+            outcome = settle(node, raised=exc)
+        else:
+            outcome = settle(node, returned=returned)
         return self._settled(
             node,
-            status,
+            outcome.status,
             executed=True,
-            result=outcome,
-            messages=tuple(getattr(outcome, "messages", ()) or ()),
+            location=location,
+            result=outcome.result,
+            messages=outcome.messages,
             started_at=started,
         )
+
+    #: An upstream in one of these did not stop the work downstream of it.
+    #: Rejects belong here: the primitive wrote the valid rows and reported the
+    #: refusal, so what a consumer reads is there — blocking on it would stop a
+    #: run that partially succeeded from finishing the parts that were fine.
+    _SATISFIED = (SUCCEEDED, SUCCEEDED_WITH_REJECTS, SKIPPED, VALIDATED)
 
     def _blocking(self, node, statuses) -> tuple[str, ...]:
         return tuple(
             sorted(
                 upstream
                 for upstream in self.graph.upstream(node.node_id)
-                if statuses.get(upstream) not in (SUCCEEDED, SKIPPED, VALIDATED)
+                if statuses.get(upstream) not in self._SATISFIED
             )
         )
 
@@ -344,11 +386,13 @@ class Runner:
         messages: tuple = (),
         result: object = None,
         started_at: str | None = None,
+        location: str | None = None,
     ) -> RunNodeResult:
         return RunNodeResult(
             node_id=node.node_id,
             physical_target=str(node.physical_target),
             primitive_kind=node.primitive_kind,
+            dispatch_location=location,
             logical_id=str(node.logical_id) if node.logical_id else None,
             status=status,
             executed=executed,

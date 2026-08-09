@@ -22,6 +22,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..load_report import (
+    DISPATCH_LOCATION_MISSING,
+    MODULE_IMPORT_FAILURE,
+    TARGET_MISSING,
+    error,
+    warning,
+)
+
+#: Who noticed, for a reader following a node's messages across layers.
+SOURCE = "run.resolution"
+
 #: Primitive kinds this module knows how to reason about. A kind not named here
 #: resolves as unaddressable rather than being assumed to work.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
@@ -30,6 +41,11 @@ PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
 
 PYTHON_KINDS = (PYTHON_TABLE, PYTHON_FOLDER)
+
+#: What a refresh resolves to. Not a physical object — a Lakehouse's SQL
+#: analytics endpoint is a capability of the item, so the address names the item
+#: and the capability rather than a path.
+ENDPOINT_SUFFIX = "sql_endpoint"
 
 
 @dataclass(frozen=True)
@@ -47,14 +63,26 @@ class Resolved:
     primitive_present: bool = False
     #: The class a deployed Python module must define, for the two Python kinds.
     expected_class: str | None = None
-    messages: tuple[str, ...] = ()
+    #: What this node would reach for, named the way the estate names it. A
+    #: *logical* address, not a path: the path is the resolver's business and is
+    #: needed only at dispatch, but a reader of a dry run still wants to know
+    #: which procedure or which module a node means.
+    dispatch_location: str | None = None
+    #: Typed findings, not sentences. A reader — and a task log — asks what
+    #: *kind* of thing went wrong, and "target_missing" survives rewording in a
+    #: way that a message does not.
+    messages: tuple = ()
     #: A capability this host does not have, so the node is omitted rather than
     #: failed. Only an endpoint refresh where there is no endpoint.
     unsupported: bool = False
 
     @property
     def valid(self) -> bool:
-        return not self.messages
+        """No *error* stops this node. A warning is a finding, not a refusal."""
+
+        from ..load_report import SEVERITY_ERROR
+
+        return not any(one.severity == SEVERITY_ERROR for one in self.messages)
 
 
 def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
@@ -70,11 +98,15 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
     if node.primitive_kind == ENDPOINT_REFRESH:
         return _refresh(node, inventory, can_refresh=can_refresh)
 
-    messages: list[str] = []
+    messages: list = []
     if inventory is None:
         messages.append(
-            f"{node.physical_target} is not present, so {node.node_id} has "
-            "nowhere to run"
+            error(
+                TARGET_MISSING,
+                f"{node.physical_target} is not present, so {node.node_id} has "
+                "nowhere to run",
+                source=SOURCE,
+            )
         )
 
     expected_class = None
@@ -82,13 +114,21 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
         expected_class = _module_class(node)
         if expected_class is None:
             messages.append(
-                f"{node.node_id} names a deployed module whose expected class "
-                "cannot be derived from its filename"
+                error(
+                    MODULE_IMPORT_FAILURE,
+                    f"{node.node_id} names a deployed module whose expected "
+                    "class cannot be derived from its filename",
+                    source=SOURCE,
+                )
             )
     elif node.primitive_kind not in (WAREHOUSE_PROCEDURE,):
         messages.append(
-            f"{node.node_id} names primitive kind {node.primitive_kind!r}, "
-            "which no runtime can address"
+            error(
+                DISPATCH_LOCATION_MISSING,
+                f"{node.node_id} names primitive kind {node.primitive_kind!r}, "
+                "which no runtime can address",
+                source=SOURCE,
+            )
         )
 
     # A node that names a primitive must have it installed; a node that names
@@ -107,8 +147,12 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
         and not primitive_present
     ):
         messages.append(
-            f"{node.node_id} would dispatch {node.primitive_object}, which is "
-            f"not installed in {node.physical_target}"
+            error(
+                DISPATCH_LOCATION_MISSING,
+                f"{node.node_id} would dispatch {node.primitive_object}, which "
+                f"is not installed in {node.physical_target}",
+                source=SOURCE,
+            )
         )
     if (
         inventory is not None
@@ -116,8 +160,12 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
         and not _holds(inventory, node.physical_object)
     ):
         messages.append(
-            f"{node.physical_target} does not hold {node.physical_object}, "
-            "which this node loads into"
+            error(
+                TARGET_MISSING,
+                f"{node.physical_target} does not hold {node.physical_object}, "
+                "which this node loads into",
+                source=SOURCE,
+            )
         )
 
     return Resolved(
@@ -125,6 +173,7 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
         target_present=inventory is not None,
         primitive_present=primitive_present,
         expected_class=expected_class,
+        dispatch_location=_where(node),
         messages=tuple(messages),
     )
 
@@ -132,19 +181,56 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
 def _refresh(node, inventory, *, can_refresh: bool) -> Resolved:
     """A barrier resolves to a capability, and its absence is not a failure."""
 
-    messages: list[str] = []
+    messages: list = []
     if inventory is None:
         messages.append(
-            f"{node.physical_target} is not present, so its SQL endpoint "
-            "cannot be refreshed"
+            error(
+                TARGET_MISSING,
+                f"{node.physical_target} is not present, so its SQL endpoint "
+                "cannot be refreshed",
+                source=SOURCE,
+            )
+        )
+    if not can_refresh:
+        messages.append(
+            warning(
+                DISPATCH_LOCATION_MISSING,
+                "SQL endpoint refresh is unsupported in this environment; "
+                f"{node.node_id} will be skipped",
+                source=SOURCE,
+            )
         )
     return Resolved(
         node=node,
         target_present=inventory is not None,
         primitive_present=can_refresh,
+        dispatch_location=f"{node.physical_target}/{ENDPOINT_SUFFIX}",
         messages=tuple(messages),
         unsupported=not can_refresh,
     )
+
+
+def _where(node) -> str | None:
+    """The installed thing this node would reach for, named logically.
+
+    A Warehouse node means a procedure; a Python node means a deployed module.
+    Both are addressable from the node alone — the absolute path is the
+    resolver's business, and a dry run that had to resolve one would have to
+    reach a workspace to say what it intends.
+    """
+
+    if node.primitive_kind == WAREHOUSE_PROCEDURE:
+        from ..etl import load_procedure_name
+
+        if node.logical_id is None:
+            return None
+        return f"{node.physical_target}/{load_procedure_name(node.logical_id.object_id)}"
+    if node.primitive_kind in PYTHON_KINDS and node.primitive_object is not None:
+        return (
+            f"{node.physical_target}/{node.primitive_object.schema}/"
+            f"{node.primitive_object.object}"
+        )
+    return None
 
 
 def _holds(inventory, reference) -> bool:

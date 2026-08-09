@@ -396,13 +396,21 @@ LOADED = '''
 from weaver.load import LoadSession, run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
+from weaver.session import ConsoleSession
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
 
 def orchestrate(dry_run):
-    with LoadSession(workspace, requested, spark=spark, store=store) as session:
-        return run_load(session, requested=requested, dry_run=dry_run).to_mapping()
+    # The Session around the Spark and store this body already has: a run
+    # reaches its engines through one, and nothing here should acquire a second.
+    with ConsoleSession(workspace=workspace, spark=spark, store=store) as scope:
+        with LoadSession(
+            workspace, requested, spark=spark, store=store, session=scope
+        ) as session:
+            return run_load(
+                session, requested=requested, dry_run=dry_run
+            ).to_mapping()
 
 
 dry = orchestrate(True)
@@ -627,14 +635,18 @@ VALIDATED = '''
 from weaver.load import LoadSession
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
+from weaver.session import ConsoleSession
 from weaver.test import run_test
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
 
 def validate(**kwargs):
-    with LoadSession(workspace, requested, spark=spark, store=store) as session:
-        return run_test(session, requested=requested, **kwargs).to_mapping()
+    with ConsoleSession(workspace=workspace, spark=spark, store=store) as scope:
+        with LoadSession(
+            workspace, requested, spark=spark, store=store, session=scope
+        ) as session:
+            return run_test(session, requested=requested, **kwargs).to_mapping()
 
 
 everything = validate()

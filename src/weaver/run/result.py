@@ -42,6 +42,9 @@ FAILED = "failed"
 BLOCKED = "blocked"
 SKIPPED = "skipped"
 PENDING = "pending"
+#: The node could not be resolved, so nothing ran. Not the same as a primitive
+#: that ran and reported failure, and a reader asking which is asking this.
+INVALID = "invalid"
 #: A dry run's outcome: resolved and ready, having executed nothing.
 VALIDATED = "validated"
 
@@ -51,6 +54,10 @@ RUN_SUCCEEDED = "succeeded"
 RUN_SUCCEEDED_WITH_REJECTS = "succeeded_with_rejects"
 RUN_PARTIALLY_SUCCEEDED = "partially_succeeded"
 RUN_FAILED = "failed"
+#: A dry run in which something could not be resolved. A dry run has no
+#: successes to be partial about — it either proved the run could happen or it
+#: found a reason it could not.
+RUN_INVALID = "invalid"
 
 
 @dataclass(frozen=True)
@@ -173,9 +180,20 @@ def run_status(nodes, *, dry_run: bool = False) -> str:
     """
 
     statuses = {node.status for node in nodes}
+    if dry_run:
+        # Nothing ran, so "partially succeeded" would be a claim about work that
+        # did not happen. A dry run either proved the run could happen or found
+        # a reason it could not.
+        if not statuses:
+            return RUN_INVALID
+        return (
+            RUN_INVALID
+            if statuses & {INVALID, BLOCKED}
+            else RUN_SUCCEEDED
+        )
     if not statuses:
         return RUN_SUCCEEDED
-    if FAILED in statuses or BLOCKED in statuses:
+    if FAILED in statuses or BLOCKED in statuses or INVALID in statuses:
         succeeded = {SUCCEEDED, SUCCEEDED_WITH_REJECTS, VALIDATED, SKIPPED}
         return (
             RUN_PARTIALLY_SUCCEEDED
@@ -190,8 +208,10 @@ def run_status(nodes, *, dry_run: bool = False) -> str:
 __all__ = [
     "BLOCKED",
     "FAILED",
+    "INVALID",
     "PENDING",
     "RUN_FAILED",
+    "RUN_INVALID",
     "RUN_PARTIALLY_SUCCEEDED",
     "RUN_SUCCEEDED",
     "RUN_SUCCEEDED_WITH_REJECTS",
