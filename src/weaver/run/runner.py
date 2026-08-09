@@ -79,10 +79,15 @@ class Runner:
         request: RunRequest,
         *,
         workspace: object | None = None,
+        can_refresh: bool = True,
     ) -> None:
         self.state = state
         self.request = request
         self.workspace = workspace
+        #: Whether this host has a SQL analytics endpoint to refresh at all. The
+        #: emulator has none, which is an honest absence rather than a fault, so
+        #: a refresh node is skipped there rather than failed.
+        self.can_refresh = can_refresh
         self._graph: RunGraph | None = None
         self._events: list[dict] = []
 
@@ -107,27 +112,19 @@ class Runner:
 
     # --- resolution ---------------------------------------------------------
 
-    def resolve(self, node) -> tuple[bool, tuple, str | None]:
+    def resolve(self, node):
         """Whether this node's target and primitive are actually there.
 
         Kept ahead of dispatch because the two fail for entirely different
         reasons and a reader deserves to be told which: a wrong graph is a
         planning fault, and a right graph pointing at an estate that is not
-        there is a missing installation. Answered from the observed inventory,
+        there is a missing installation. Answered from the observed snapshot,
         never from a live connection — the reading happened once, above.
         """
 
-        inventory = self.state.inventory(node.physical_target)
-        if inventory is None:
-            return (
-                False,
-                (
-                    f"{node.physical_target} is not present, so {node.node_id} "
-                    "has nothing to run against",
-                ),
-                None,
-            )
-        return True, (), None
+        from .resolution import resolve
+
+        return resolve(node, self.state, can_refresh=self.can_refresh)
 
     # --- execution ----------------------------------------------------------
 
@@ -196,15 +193,24 @@ class Runner:
                 settle(self._settled(node, PENDING))
                 continue
 
-            resolved, messages, location = self.resolve(node)
-            if not resolved:
-                settle(self._settled(node, FAILED, messages=messages), FAILED)
+            resolved = self.resolve(node)
+            if not resolved.valid:
+                settle(
+                    self._settled(node, FAILED, messages=resolved.messages), FAILED
+                )
                 if not self.request.fault_tolerant:
                     stopped = True
                 continue
+            if resolved.unsupported:
+                # A capability this host does not have. The node is omitted
+                # rather than failed, exactly as the build's own executor skips.
+                settle(self._settled(node, SKIPPED, messages=resolved.messages), SKIPPED)
+                continue
 
             settle(
-                self._dispatched(node, dispatch=dispatch, session=session),
+                self._dispatched(
+                    node, dispatch=dispatch, session=session, resolved=resolved
+                ),
                 None,
             )
             status = results[node.node_id].status
@@ -215,12 +221,18 @@ class Runner:
         nodes = tuple(results[node.node_id] for node in ordered)
         return self._result(nodes, started=started)
 
-    def _dispatched(self, node, *, dispatch, session) -> RunNodeResult:
+    def _dispatched(self, node, *, dispatch, session, resolved=None) -> RunNodeResult:
         """One node, run. A failure is data here, not an exception."""
 
         started = _now()
         try:
-            outcome = dispatch(node, session=session, state=self.state)
+            outcome = dispatch(
+                node,
+                session=session,
+                state=self.state,
+                resolved=resolved,
+                fault_tolerant=self.request.fault_tolerant,
+            )
         except Exception as exc:  # noqa: BLE001 - a failed node is a result
             return self._settled(
                 node,
