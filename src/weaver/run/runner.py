@@ -176,10 +176,7 @@ class Runner:
         ordered = graph.order()
 
         if self.request.dry_run:
-            nodes = tuple(
-                self._settled(node, VALIDATED, executed=False) for node in ordered
-            )
-            return self._result(nodes, started=started)
+            return self._result(self._dry_run(ordered), started=started)
 
         if dispatch is None:
             from .dispatch import dispatch_primitive
@@ -247,6 +244,55 @@ class Runner:
         nodes = tuple(results[node.node_id] for node in ordered)
         self._close_runtime()
         return self._result(nodes, started=started)
+
+    def _dry_run(self, ordered) -> tuple:
+        """The whole run, resolved and classified, with nothing executed.
+
+        A validation status is never an execution status: a node that resolved
+        is ``validated``, not ``succeeded``. And a dry run still says what could
+        not run — a node whose upstream did not resolve is reported blocked,
+        because "everything validated except the four things that depend on the
+        one that did not" is the answer a dry run exists to give.
+        """
+
+        resolutions = {node.node_id: self.resolve(node) for node in ordered}
+        invalid = {
+            node_id for node_id, one in resolutions.items() if not one.valid
+        }
+        blocked: dict[str, set[str]] = {}
+        for node_id in invalid:
+            for downstream in self.graph.descendants(node_id):
+                blocked.setdefault(downstream, set()).add(node_id)
+
+        settled = []
+        for node in ordered:
+            resolved = resolutions[node.node_id]
+            causes = sorted(blocked.get(node.node_id, ()))
+            if resolved.valid and causes:
+                settled.append(
+                    self._settled(
+                        node,
+                        BLOCKED,
+                        messages=(
+                            f"{node.node_id} cannot run: "
+                            + ", ".join(causes)
+                            + " did not validate",
+                        ),
+                    )
+                )
+            elif resolved.valid:
+                settled.append(
+                    self._settled(
+                        node,
+                        SKIPPED if resolved.unsupported else VALIDATED,
+                        messages=resolved.messages,
+                    )
+                )
+            else:
+                settled.append(
+                    self._settled(node, FAILED, messages=resolved.messages)
+                )
+        return tuple(settled)
 
     def _dispatched(self, node, *, dispatch, session, resolved=None) -> RunNodeResult:
         """One node, run. A failure is data here, not an exception."""

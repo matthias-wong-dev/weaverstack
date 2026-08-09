@@ -392,3 +392,24 @@ def test_a_run_needs_no_storage_to_be_correct():
 
     assert result.task_log is None
     assert result.succeeded
+
+
+def test_a_dry_run_still_says_what_could_not_run():
+    """"Everything validated except what depends on the one thing that did not."
+
+    A dry run that reported only "validated" for a node whose upstream is
+    missing would answer the question a dry run exists to ask incorrectly.
+    """
+
+    made = runner(
+        nodes=[node("a", target=Target("Gone_LH")), node("b")],
+        edges=[("a", "b")],
+        dry_run=True,
+    )
+
+    result = made.run(dispatch=controlled({}))
+
+    assert result.by_node["a"].status == FAILED
+    assert result.by_node["b"].status == BLOCKED
+    assert "did not validate" in result.by_node["b"].messages[0]
+    assert not any(one.executed for one in result.nodes)
