@@ -293,3 +293,107 @@ def test_a_check_that_cannot_run_never_fails_the_work(monkeypatch):
         scope.check_published_version(session.warn)  # does not raise
 
         assert session.warnings == []
+
+
+# --- a statement that failed is not a session that died ----------------------
+
+
+class _Livy:
+    """Stands in for a Fabric Spark session that is up and stays up."""
+
+    def __init__(self, raises=None) -> None:
+        self.raises = raises
+        self.runs = 0
+
+    def start(self) -> None:
+        pass
+
+    def run(self, source, **kwargs):
+        self.runs += 1
+        if self.raises is not None:
+            raise self.raises
+        from weaver.fabric.livy import StatementResult
+
+        return StatementResult(text="", payload={"ran": True})
+
+    def close(self) -> None:
+        pass
+
+
+def _scope_with(livy):
+    session = ConsoleSession(workspace=_fabric(), livy=livy)
+    return session, session.scope()
+
+
+def test_a_failed_statement_leaves_the_spark_session_up():
+    """One bad command must not cost the next one a minute of startup."""
+
+    from weaver.fabric import LivyStatementError
+    from weaver.session.resources import ResourceState
+
+    livy = _Livy(raises=LivyStatementError("boom", ename="ValueError", evalue="boom"))
+    session, scope = _scope_with(livy)
+
+    with pytest.raises(Exception):
+        scope.livy_run("emit(1)", name="work")
+
+    assert scope.livy.state is ResourceState.READY
+    session.close()
+
+
+def test_a_session_that_died_is_marked_failed():
+    from weaver.fabric import LivyError
+    from weaver.session.resources import ResourceState
+
+    session, scope = _scope_with(_Livy(raises=LivyError("the session is dead")))
+
+    with pytest.raises(LivyError):
+        scope.livy_run("emit(1)", name="work")
+
+    assert scope.livy.state is ResourceState.FAILED
+    session.close()
+
+
+def test_a_wheel_too_old_to_import_weaver_says_to_publish():
+    """The raw ModuleNotFoundError sends a reader to look for a missing package.
+
+    What is actually true is that the published wheel predates the console that
+    submitted the program, and the fix is a publish.
+    """
+
+    from weaver.fabric import LivyStatementError
+
+    livy = _Livy(
+        raises=LivyStatementError(
+            "ModuleNotFoundError: No module named 'weaver.session'",
+            ename="ModuleNotFoundError",
+            evalue="No module named 'weaver.session'",
+        )
+    )
+    session, scope = _scope_with(livy)
+
+    with pytest.raises(CommandError, match="weaver install") as raised:
+        scope.livy_run("emit(1)", name="read_build_state")
+
+    assert "older than this console" in str(raised.value)
+    session.close()
+
+
+def test_an_ordinary_remote_failure_is_passed_through_as_it_came():
+    """Guessing at causes would bury the real ones."""
+
+    from weaver.fabric import LivyStatementError
+
+    livy = _Livy(
+        raises=LivyStatementError(
+            "ValueError: that column is not there",
+            ename="ValueError",
+            evalue="that column is not there",
+        )
+    )
+    session, scope = _scope_with(livy)
+
+    with pytest.raises(LivyStatementError, match="that column is not there"):
+        scope.livy_run("emit(1)", name="work")
+
+    session.close()

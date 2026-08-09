@@ -489,13 +489,14 @@ class ConsoleScope(WorkspaceScope):
     def livy_run(self, source: str, *, name: str, timeout: float | None = None):
         """Submit one statement to this scope's Livy session and return its payload.
 
-        A statement that fails is the caller's failure, not the session's: the
-        resource is left healthy, because a Spark error is what Weaver is here
-        to report and throwing away the session would turn one failed command
-        into a minute of startup for the next one.
+        A statement that fails is the caller's failure, not the session's. The
+        Spark session is still up, still costs a minute to replace, and is what
+        the next command is relying on — so a remote exception is re-raised and
+        the resource is left exactly as it was. Only a session that has actually
+        died is marked failed.
         """
 
-        from ..fabric import LivyError
+        from ..fabric import LivyError, LivyStatementError
 
         if self.livy is None:
             raise CommandError("this workspace has no Livy session")
@@ -504,9 +505,10 @@ class ConsoleScope(WorkspaceScope):
             kwargs = {} if timeout is None else {"timeout": timeout}
             try:
                 result = session.run(source, **kwargs)
+            except LivyStatementError as exc:
+                raise self._statement_failure(exc, name) from exc
             except LivyError:
-                # The session itself is gone — a statement error would have come
-                # back as a result, not an exception.
+                # The session itself is gone, not the statement.
                 self.livy.fail()
                 raise
         if not result.returned:
@@ -515,6 +517,29 @@ class ConsoleScope(WorkspaceScope):
                 "session output"
             )
         return result.payload
+
+    def _statement_failure(self, exc, name: str):
+        """The remote failure, said in terms the reader can act on.
+
+        A program that could not import Weaver at all is almost always a wheel
+        older than the console that submitted it, and the raw
+        ``ModuleNotFoundError`` sends the reader to look for a missing package
+        rather than to publish. Everything else is passed through as it came:
+        guessing at causes would bury the real ones.
+        """
+
+        missing = (exc.ename or "") in ("ModuleNotFoundError", "ImportError")
+        if missing and "weaver" in (exc.evalue or ""):
+            from .. import __version__
+
+            return CommandError(
+                f"{name} could not run: the Weaver published in {self.name} is "
+                f"older than this console ({__version__}) and does not carry "
+                f"{exc.evalue}. Publish the current wheel with `weaver install "
+                f"--workspace \"{self.name}\" --environment "
+                f"{getattr(self.workspace, 'environment', '<environment>')}`"
+            )
+        return exc
 
     # --- SQL ----------------------------------------------------------------
 
