@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .errors import CommandError, ValidationError
-from .load import LoadSession, _load_session
 from .load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
 from .targets import ItemRef, WarehouseTarget, parse_physical_target
 from .test_plan import InstalledValidation, ValidationEstate, validation_order
@@ -91,11 +90,15 @@ def test(
 
     from .session.host import use_or_create_session
 
-    with use_or_create_session(session, workspace=resolved) as opened, _load_session(
-        resolved, requested, session=opened
-    ) as prepared:
+    with use_or_create_session(session, workspace=resolved) as opened:
+        if not opened.executes_here(resolved):
+            raise CommandError(
+                "test runs where the data is: call it from a Fabric notebook, "
+                "or against a local Workspace"
+            )
         return run_test(
-            prepared,
+            opened,
+            workspace=resolved,
             requested=refs,
             name=name,
             file=file,
@@ -105,8 +108,9 @@ def test(
 
 
 def run_test(
-    session: LoadSession,
+    session,
     *,
+    workspace,
     requested: Sequence[PhysicalTargetRef],
     name: str | None = None,
     file: str | Path | None = None,
@@ -140,6 +144,7 @@ def run_test(
         # against.
         return _reported(
             session,
+            workspace=workspace,
             nodes=(node,),
             requested=requested,
             started=started,
@@ -151,7 +156,9 @@ def run_test(
 
     from .run import RunRequest, Runner, RunState
 
-    catalogue = session.read_catalogue()
+    from .run.observe import read_installed_catalogue
+
+    catalogue = read_installed_catalogue(session=session, workspace=workspace)
     runner = Runner(
         RunState(catalogue=catalogue),
         RunRequest.test(
@@ -165,10 +172,10 @@ def run_test(
             # that was asked what is wrong with an estate could give.
             fault_tolerant=True,
         ),
-        workspace=session.workspace,
+        workspace=workspace,
     )
     result = runner.run(
-        session=getattr(session, "session", None),
+        session=session,
         # Evidence for a caller who asked about one validation; counts alone for
         # a whole-target run, which must not transfer diagnostic rows.
         dispatch=_dispatch_collecting(collect=name is not None),
@@ -176,6 +183,7 @@ def run_test(
 
     return _reported(
         session,
+        workspace=workspace,
         nodes=tuple(_as_validation_node(node) for node in result.nodes),
         requested=requested,
         started=started,
@@ -241,8 +249,9 @@ def _as_validation_node(node) -> ValidationNodeReport:
 
 
 def _reported(
-    session: LoadSession,
+    session,
     *,
+    workspace,
     nodes: Sequence[ValidationNodeReport],
     requested: Sequence[PhysicalTargetRef],
     started: datetime,
@@ -260,7 +269,13 @@ def _reported(
     """
 
     status = run_status(nodes)
-    log = None if dry_run or not durable else session.open_log(TASK_TYPE)
+    from .run import open_run_log
+
+    log = (
+        None
+        if dry_run or not durable
+        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
+    )
     if log is not None:
         log.write_plan(
             {

@@ -24,8 +24,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..errors import LoadError, ValidationError
-from ..load_report import (
+from ..errors import WeaverError
+from .contract import RunFailure, reports_outcome
+from .messages import (
     DISPATCH_EXCEPTION,
     ENDPOINT_REFRESH_FAILURE,
     PRIMITIVE_FAILURE,
@@ -34,7 +35,6 @@ from ..load_report import (
     error,
     warning,
 )
-from ..runtime.load_result import LoadResult
 from .resolution import ENDPOINT_REFRESH
 from .result import FAILED, SUCCEEDED, SUCCEEDED_WITH_REJECTS
 
@@ -44,7 +44,9 @@ class Outcome:
     """One dispatch, normalised: a status, a result and what to say about it."""
 
     status: str
-    result: LoadResult
+    #: Whatever the primitive reported. Anything that says whether it succeeded
+    #: — a load's counts, a validation's judgement, a future operation's own.
+    result: object
     messages: tuple = ()
     #: Whether the dispatch threw rather than returning. A failed node that
     #: *raised* produced no judgement at all — which is a different thing from
@@ -62,7 +64,7 @@ def settle(node, *, returned=None, raised: BaseException | None = None) -> Outco
     # A validation returns a judgement about data rather than a count of work,
     # and both are results a run can settle — what is refused is a primitive
     # that returned something which answers neither.
-    if not hasattr(returned, "succeeded"):
+    if not reports_outcome(returned):
         return _malformed(node, returned)
     return Outcome(
         status=_status(returned),
@@ -84,14 +86,16 @@ def _raised(node, exc: BaseException) -> Outcome:
     """
 
     carried = getattr(exc, "result", None)
-    if hasattr(carried, "succeeded"):
-        result = carried
-    else:
-        result = LoadResult.failure(f"{type(exc).__name__}: {exc}")
+    result = (
+        carried
+        if reports_outcome(carried)
+        else RunFailure(f"{type(exc).__name__}: {exc}")
+    )
 
-    # A failure the runtime named is reported against the primitive that named
-    # it; anything else is the dispatch itself coming apart.
-    named = isinstance(exc, (LoadError, ValidationError))
+    # A failure Weaver named is reported against the primitive that named it;
+    # anything else is the dispatch itself coming apart, and saying so is the
+    # difference between "the load refused these rows" and "something threw".
+    named = isinstance(exc, WeaverError)
     return Outcome(
         status=FAILED,
         raised=True,
@@ -120,14 +124,15 @@ def _malformed(node, returned) -> Outcome:
         status=FAILED,
         # Not an exception, but nothing ran to completion either.
         raised=True,
-        result=LoadResult.failure(
-            f"the primitive returned {type(returned).__name__}, not a load result"
+        result=RunFailure(
+            f"the primitive returned {type(returned).__name__}, which does not "
+            "report whether it succeeded"
         ),
         messages=(
             error(
                 RESULT_CONTRACT_INVALID,
-                f"{node.node_id} returned {type(returned).__name__} rather than "
-                "a load result",
+                f"{node.node_id} returned {type(returned).__name__}, which does "
+                "not report whether it succeeded",
                 source=node.primitive_kind,
             ),
         ),

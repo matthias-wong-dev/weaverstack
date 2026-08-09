@@ -105,7 +105,11 @@ class RunNodeResult:
             "primitive_kind": self.primitive_kind,
             "dispatch_location": self.dispatch_location,
             "status": self.status,
+            "role": self.role,
             "executed": self.executed,
+            # Whether anything was evaluated at all. Without it a reader cannot
+            # tell a check that could not run from one that ran and failed.
+            "raised": self.raised,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "rows": None if self.result is None else self.result.as_row(),
@@ -121,9 +125,13 @@ class RunResult:
     """One Runner execution, whole.
 
     The same shape whether or not anything ran, which is what lets a dry run be
-    inspected exactly as a real run is. ``task_log`` is absent for a dry run,
-    and its absence is the result saying so — dry runs write no evidence, so
-    there is none to point at.
+    inspected exactly as a real run is.
+
+    **Where the evidence was written is not here.** A run is correct without a
+    log — that is what lets a whole Runner execute in a test with no storage at
+    all — so the location of a physical record belongs to the sink that wrote
+    it and to the public report that points at it, not to the canonical
+    in-memory result. Production still writes one.
     """
 
     kind: str
@@ -136,8 +144,6 @@ class RunResult:
     order: tuple[str, ...] = ()
     messages: tuple = ()
     selection: str | None = None
-    task_id: str | None = None
-    task_log: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     workspace: str | None = None
@@ -163,8 +169,6 @@ class RunResult:
             "fault_tolerant": self.fault_tolerant,
             "selection": self.selection,
             "workspace": self.workspace,
-            "task_id": self.task_id,
-            "task_log": self.task_log,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "order": list(self.order),

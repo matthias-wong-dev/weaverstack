@@ -98,7 +98,7 @@ def test_fault_tolerance_reaches_the_procedure_as_an_input():
 def test_a_run_with_no_session_says_what_it_needed():
     """The one crossing a run makes is through a Session. There is no other."""
 
-    from weaver.errors import LoadError
+    from weaver.run.contract import RunError
 
     node = SimpleNamespace(
         node_id="Sales.Customer",
@@ -106,7 +106,7 @@ def test_a_run_with_no_session_says_what_it_needed():
         physical_target=REPORTING,
     )
 
-    with pytest.raises(LoadError, match="needs a Session"):
+    with pytest.raises(RunError, match="needs a Session"):
         dispatch_primitive(node, session=None)
 
 
@@ -117,7 +117,7 @@ def test_an_unknown_primitive_kind_is_refused_rather_than_guessed_at():
         physical_target=REPORTING,
     )
 
-    from weaver.errors import LoadError
+    from weaver.run.contract import RunError
 
-    with pytest.raises(LoadError, match="unknown primitive kind"):
+    with pytest.raises(RunError, match="unknown primitive kind"):
         dispatch_primitive(node, session=SimpleNamespace())

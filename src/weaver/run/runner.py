@@ -75,7 +75,7 @@ def _now() -> str:
 def _blocked_by(node, upstream, *, validated: bool = False):
     """Why this node may not run, said with the code a reader can filter on."""
 
-    from ..load_report import DEPENDENCY_BLOCKED, error
+    from .messages import DEPENDENCY_BLOCKED, error
 
     what = "did not validate" if validated else "did not succeed"
     return error(

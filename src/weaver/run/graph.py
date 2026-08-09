@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from ..errors import LoadError
+from .contract import RunError
 
 
 @dataclass(frozen=True)
@@ -126,7 +126,7 @@ class RunGraph:
             )
             if not ready:
                 cycle = ", ".join(sorted(pending))
-                raise LoadError(f"the run graph contains a cycle among: {cycle}")
+                raise RunError(f"the run graph contains a cycle among: {cycle}")
             for node in ready:
                 ordered.append(node)
                 del pending[node.node_id]
@@ -149,7 +149,7 @@ def graph_for(request, state) -> RunGraph:
         return _load_graph(request, state)
     if request.kind == TEST:
         return _test_graph(request, state)
-    raise LoadError(f"no selection rule for a {request.kind!r} run")
+    raise RunError(f"no selection rule for a {request.kind!r} run")
 
 
 def _load_graph(request, state) -> RunGraph:

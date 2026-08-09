@@ -148,13 +148,15 @@ def load(
 
     from .session.host import use_or_create_session
 
-    with use_or_create_session(
-        session, workspace=resolved_workspace
-    ) as opened, _load_session(
-        resolved_workspace, requested, session=opened
-    ) as prepared:
+    with use_or_create_session(session, workspace=resolved_workspace) as opened:
+        if not opened.executes_here(resolved_workspace):
+            raise CommandError(
+                "load runs where the data is: call it from a Fabric notebook, "
+                "or against a local Workspace"
+            )
         return run_load(
-            prepared,
+            opened,
+            workspace=resolved_workspace,
             requested=tuple(_physical_ref(target) for target in requested),
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
@@ -162,14 +164,15 @@ def load(
 
 
 def run_load(
-    session: "LoadSession",
+    session,
     *,
+    workspace,
     requested: Sequence[PhysicalTargetRef],
     state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
 ) -> LoadRunReport:
-    """The whole orchestration path, over a prepared session.
+    """The whole orchestration path, over a Session.
 
     Reads the estate once, at a boundary, and hands the Runner a snapshot:
 
@@ -187,10 +190,22 @@ def run_load(
     reads one — which is what the operation does in production.
     """
 
-    from .run import RunRequest, Runner, RunState, can_refresh, dispatch_primitive
+    from .run import (
+        RunRequest,
+        Runner,
+        RunState,
+        can_refresh,
+        dispatch_primitive,
+        open_run_log,
+    )
+    from .run.observe import read_installed_catalogue, read_target_inventories
 
     started = datetime.now(timezone.utc)
-    catalogue = state.catalogue if state is not None else session.read_catalogue()
+    catalogue = (
+        state.catalogue
+        if state is not None
+        else read_installed_catalogue(session=session, workspace=workspace)
+    )
     estate = InstalledEstate.from_catalogue(catalogue)
     _refuse_uninstalled_targets(estate, requested)
 
@@ -202,8 +217,10 @@ def run_load(
         planned = load_dag(estate, targets=requested)
         state = RunState(
             catalogue=catalogue,
-            target_inventories=session.observe(
-                tuple(node.physical_target for node in planned.nodes)
+            target_inventories=read_target_inventories(
+                tuple(node.physical_target for node in planned.nodes),
+                session=session,
+                workspace=workspace,
             ),
         )
     runner = Runner(
@@ -211,17 +228,19 @@ def run_load(
         RunRequest.load(
             requested, fault_tolerant=fault_tolerant, dry_run=dry_run
         ),
-        workspace=session.workspace,
-        can_refresh=getattr(session, "can_refresh", None)
-        if getattr(session, "can_refresh", None) is not None
-        else can_refresh(getattr(session, "session", None), session.workspace),
+        workspace=workspace,
+        can_refresh=can_refresh(session, workspace),
     )
 
-    log = None if dry_run else session.open_log()
+    log = (
+        None
+        if dry_run
+        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
+    )
     if log is not None:
         log.write_plan(_plan_document(runner.graph, state, requested, dry_run))
     result = runner.run(
-        session=getattr(session, "session", None),
+        session=session,
         dispatch=dispatch_primitive,
         on_node=(
             None
@@ -419,8 +438,11 @@ def _completion_document(report: LoadRunReport) -> dict:
         counted["failed"] += 1 if node.status == "failed" else 0
         counted["blocked"] += 1 if node.status == "blocked" else 0
         if node.result is not None:
+            # What the result actually measured. A node that failed without
+            # reaching its primitive reports no counts at all, and it
+            # contributes none — which is true, because nothing was written.
             for name in rows:
-                rows[name] += getattr(node.result, name)
+                rows[name] += getattr(node.result, name, 0)
     return {
         "mode": "execute",
         "final_status": report.status,
@@ -447,209 +469,4 @@ def _physical_ref(target) -> PhysicalTargetRef:
 # session. Everything above this line is the same code in all three.
 
 
-class LoadSession:
-    """The capabilities one load run needs, acquired for its host.
-
-    Owns what it opened and closes it — a Spark session locally, a TDS connection
-    per Warehouse — and nothing it was given.
-    """
-
-    def __init__(
-        self, workspace: Workspace, requested, *, spark=None, store=None, session=None
-    ) -> None:
-        self.workspace = workspace
-        self.requested = tuple(requested)
-        self.spark = spark
-        self.store = store
-        #: The Session this run borrows its resolver, item cache and Warehouse
-        #: connections from. What it borrows, it does not close.
-        self.session = session
-        self._sql: dict[str, Any] = {}
-        self._opened: list[Any] = []
-
-    # --- context ------------------------------------------------------------
-
-    def __enter__(self) -> "LoadSession":
-        return self
-
-    def __exit__(self, *exc) -> bool:
-        for opened in reversed(self._opened):
-            close = getattr(opened, "close", None)
-            if close is not None:
-                close()
-        self._opened.clear()
-        return False
-
-    # --- what orchestration asks for ----------------------------------------
-
-    @property
-    def resolver(self):
-        """The Session's resolver — one per Session, not one per access.
-
-        This used to build a new resolver every time it was read, which meant
-        its item cache was always empty and every access re-asked the workspace
-        what the same names meant.
-        """
-
-        if self.session is not None:
-            return self.session.resolver(self.workspace)
-        from .resolution import resolver_for
-
-        return resolver_for(self.workspace)
-
-    def read_catalogue(self):
-        """The installed catalogue, read from the Weaver control Lakehouse."""
-
-        from .catalogue.state import read_installed_catalogue
-        from .spark import SparkCatalogue
-
-        if self.spark is None:
-            raise LoadError(
-                "reading the installed catalogue needs a Spark session"
-            )
-        return read_installed_catalogue(
-            SparkCatalogue(
-                self.spark,
-                self.resolver.spark_destination(ItemRef(self.workspace.weaver_lakehouse)),
-            )
-        )
-
-    def observe(self, targets) -> dict:
-        """What each target physically holds, read once, keyed as a caller wrote it.
-
-        The boundary between the estate and the Runner: the reading happens
-        here, so everything above it decides against a snapshot rather than
-        against state that is still moving.
-
-        A target that cannot be read at all is absent from the result rather
-        than guessed at — and resolution then says so, on the node that would
-        have run against it.
-        """
-
-        observed = {}
-        for target in dict.fromkeys(targets):
-            inventory = self._inventory(target)
-            if inventory is not None:
-                observed[str(target)] = inventory
-        return observed
-
-    def open_log(self, task_type: str = TASK_TYPE):
-        """A task log for this run, of whichever kind of task it is.
-
-        The session is shared by load and validation because the capabilities
-        they need are the same; what they *are* is not, and the log records
-        that.
-        """
-
-        from .task_logging import log_folder, open_task_log
-
-        if self.store is None:
-            raise LoadError("writing a task log needs a store")
-        return open_task_log(
-            task_type=task_type,
-            folder=log_folder(self.resolver, ItemRef(self.workspace.weaver_lakehouse)),
-            store=self.store,
-        )
-
-    # --- reading physical state ---------------------------------------------
-
-    def _inventory(self, target: PhysicalTargetRef):
-        """This target's inventory, or a failure that says what went wrong.
-
-        The cause is carried rather than flattened. A deleted item, an expired
-        credential, an unavailable SQL endpoint and a defect in the reader are
-        four different problems with four different fixes, and a reader who is
-        told only "missing" is sent to check the one thing that may be fine.
-        """
-
-        from .build_bundle.prune import (
-            read_lakehouse_inventory,
-            read_warehouse_inventory,
-        )
-        from .build_bundle.targets import LakehouseBinding, WarehouseBinding
-
-        if target.kind == LAKEHOUSE_TARGET:
-            bound = LakehouseBinding(ItemRef(target.name)).to_bound_target()
-            try:
-                return read_lakehouse_inventory(
-                    bound, resolver=self.resolver, store=self.store, spark=self.spark
-                )
-            except Exception as exc:  # noqa: BLE001 - re-raised with its cause
-                raise LoadError(
-                    f"{target}: the catalogue says it is installed, but its "
-                    f"inventory could not be read: {type(exc).__name__}: {exc}"
-                ) from exc
-        bound = WarehouseBinding(ItemRef(target.name)).to_bound_target()
-        sql = self._warehouse_sql(target.name)
-        if sql is None:
-            raise LoadError(
-                f"{target} needs a SQL capability to read its inventory, and "
-                "this run has none"
-            )
-        try:
-            return read_warehouse_inventory(bound, sql=sql)
-        except Exception as exc:  # noqa: BLE001 - re-raised with its cause
-            raise LoadError(
-                f"{target}: the catalogue says it is installed, but its inventory "
-                f"could not be read: {type(exc).__name__}: {exc}"
-            ) from exc
-
-    def _warehouse_sql(self, name: str):
-        if name in self._sql:
-            return self._sql[name]
-        executor = self._open_warehouse_sql(name)
-        if executor is not None:
-            self._sql[name] = executor
-        return executor
-
-    def _open_warehouse_sql(self, name: str):
-        """This Warehouse's connection, from the Session that owns it.
-
-        Owned by the Session and closed with it, not with this run: a load and
-        the test that follows it reach the same Warehouse, and reconnecting
-        between them was pure cost.
-        """
-
-        if not isinstance(self.workspace, FabricWorkspace):
-            return None
-        target = WarehouseTarget(ItemRef(name))
-        if self.session is not None:
-            return self.session.sql_executor(target, workspace=self.workspace)
-
-        from .session.host import inside_fabric_session
-
-        if inside_fabric_session(self.workspace):
-            from .fabric.sql import fabric_sql_executor
-
-            executor = fabric_sql_executor(target, self.workspace)
-        else:
-            from .fabric import desktop_sql_executor
-
-            executor = desktop_sql_executor(target, self.workspace)
-        self._opened.append(executor)
-        return executor
-
-
-def _load_session(workspace: Workspace, requested, *, session) -> LoadSession:
-    """A run's capabilities, taken from the Session that already holds them.
-
-    Nothing is acquired here any more. The Spark session, the store, the
-    resolver and every Warehouse connection belong to the Session, which is what
-    makes a wipe, a build, a load and a test in one console cost one of each.
-    """
-
-    if not session.executes_here(workspace):
-        raise CommandError(
-            "load runs where the data is: call it from a Fabric notebook, or "
-            "against a local Workspace"
-        )
-    return LoadSession(
-        workspace,
-        requested,
-        spark=session.spark(workspace),
-        store=session.store(workspace),
-        session=session,
-    )
-
-
-__all__ = ["LoadSession", "TASK_TYPE", "load", "run_load"]
+__all__ = ["TASK_TYPE", "load", "run_load"]

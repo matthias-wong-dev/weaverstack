@@ -387,13 +387,14 @@ def _assert_pruned(env, step) -> None:
 # orchestration test and the targeted seams; what this asks is whether the whole
 # thing composes over an estate that a real build actually made.
 #
-# Run through `run_load` over a prepared `LoadSession` rather than through
-# `weaver.load(...)` for one reason, and it is a harness reason: the public entry
-# acquires its own Spark session, and the local twin of this journey shares one.
-# Everything below that line is the same code the public entry runs.
+# Run through `run_load` over a Session this body already holds rather than
+# through `weaver.load(...)` for one reason, and it is a harness reason: the
+# public entry acquires its own Spark session, and the local twin of this
+# journey shares one. Everything below that line is the same code the public
+# entry runs.
 
 LOADED = '''
-from weaver.load import LoadSession, run_load
+from weaver.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
 from weaver.session import ConsoleSession
@@ -404,13 +405,10 @@ requested = (PhysicalTargetRef("lakehouse", target.name),)
 def orchestrate(dry_run):
     # The Session around the Spark and store this body already has: a run
     # reaches its engines through one, and nothing here should acquire a second.
-    with ConsoleSession(workspace=workspace, spark=spark, store=store) as scope:
-        with LoadSession(
-            workspace, requested, spark=spark, store=store, session=scope
-        ) as session:
-            return run_load(
-                session, requested=requested, dry_run=dry_run
-            ).to_mapping()
+    with ConsoleSession(workspace=workspace, spark=spark, store=store) as session:
+        return run_load(
+            session, workspace=workspace, requested=requested, dry_run=dry_run
+        ).to_mapping()
 
 
 dry = orchestrate(True)
@@ -629,10 +627,9 @@ def _corrupt(env, bundle):
 
 
 #: Validation, over the estate the load has just filled. Run through `run_test`
-#: over a prepared `LoadSession` for the reason the load body is: the public
+#: over a Session this body holds, for the reason the load body is: the public
 #: entry acquires its own Spark session and the local twin shares one.
 VALIDATED = '''
-from weaver.load import LoadSession
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
 from weaver.session import ConsoleSession
@@ -642,11 +639,10 @@ requested = (PhysicalTargetRef("lakehouse", target.name),)
 
 
 def validate(**kwargs):
-    with ConsoleSession(workspace=workspace, spark=spark, store=store) as scope:
-        with LoadSession(
-            workspace, requested, spark=spark, store=store, session=scope
-        ) as session:
-            return run_test(session, requested=requested, **kwargs).to_mapping()
+    with ConsoleSession(workspace=workspace, spark=spark, store=store) as session:
+        return run_test(
+            session, workspace=workspace, requested=requested, **kwargs
+        ).to_mapping()
 
 
 everything = validate()

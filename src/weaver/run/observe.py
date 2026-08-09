@@ -24,7 +24,7 @@ be fine.
 
 from __future__ import annotations
 
-from ..errors import LoadError
+from .contract import RunError
 from .state import RunState
 
 
@@ -49,7 +49,7 @@ def read_installed_catalogue(*, session, workspace=None):
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.weaver_lakehouse:
-        raise LoadError("a run needs a Workspace with a Weaver Lakehouse")
+        raise RunError("a run needs a Workspace with a Weaver Lakehouse")
     return read(
         SparkCatalogue(
             session.spark(workspace),
@@ -89,7 +89,7 @@ def read_target_inventories(targets, *, session, workspace=None) -> dict:
                     ),
                 )
         except Exception as exc:  # noqa: BLE001 - re-raised with its cause
-            raise LoadError(
+            raise RunError(
                 f"{target}: the catalogue says it is installed, but its "
                 f"inventory could not be read: {type(exc).__name__}: {exc}"
             ) from exc
@@ -97,4 +97,34 @@ def read_target_inventories(targets, *, session, workspace=None) -> dict:
     return inventories
 
 
-__all__ = ["read_installed_catalogue", "read_run_state", "read_target_inventories"]
+def open_run_log(session, *, workspace=None, task_type: str):
+    """Where this run's evidence goes — the sink, opened at the boundary.
+
+    Downstream of the Runner by construction: a run is correct without one, and
+    this is called by the operation that wants a durable record rather than by
+    the thing doing the work. ``task_type`` is what the record says it was,
+    because a load and a validation need the same capabilities and are not the
+    same event.
+    """
+
+    from ..targets import ItemRef
+    from ..task_logging import log_folder, open_task_log
+
+    workspace = workspace if workspace is not None else session.workspace
+    if workspace is None or not workspace.weaver_lakehouse:
+        raise RunError("writing a task log needs a Workspace with a Weaver Lakehouse")
+    return open_task_log(
+        task_type=task_type,
+        folder=log_folder(
+            session.resolver(workspace), ItemRef(workspace.weaver_lakehouse)
+        ),
+        store=session.store(workspace),
+    )
+
+
+__all__ = [
+    "open_run_log",
+    "read_installed_catalogue",
+    "read_run_state",
+    "read_target_inventories",
+]

@@ -126,3 +126,53 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
     ]
 
     assert not offenders, "\n".join(offenders)
+
+
+# --- the runtime speaks its own vocabulary -----------------------------------
+
+
+def test_the_runner_needs_no_load_vocabulary_to_orchestrate():
+    """Adding a runtime operation must not mean importing another one's types.
+
+    The Runner decides what runs, in what order, and what became of it. None of
+    that is a load's business — so its planning, resolution, outcome and result
+    modules must not reach for a load's result type, a load's error or a load's
+    report to say so. `run/dispatch.py` is the exception and the reason: it is
+    where a *load* primitive is reached, and a load primitive returns a load
+    result.
+    """
+
+    generic = ("graph.py", "messages.py", "outcome.py", "request.py",
+               "resolution.py", "result.py", "runner.py", "state.py")
+    forbidden = ("LoadResult", "LoadError", "load_report", "LoadRunReport")
+    offenders = [
+        f"{name}: {word}"
+        for name in generic
+        for word in forbidden
+        if word in (ROOT / "src" / "weaver" / "run" / name).read_text(encoding="utf-8")
+        # A comment naming the thing it does *not* depend on is the point.
+        and not _only_in_prose(
+            (ROOT / "src" / "weaver" / "run" / name).read_text(encoding="utf-8"), word
+        )
+    ]
+
+    assert not offenders, offenders
+
+
+def _only_in_prose(source: str, word: str) -> bool:
+    """Whether every mention sits in a comment or docstring rather than in code."""
+
+    import ast
+
+    tree = ast.parse(source)
+    quoted = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    stripped = "\n".join(
+        line.split("#")[0] for line in source.splitlines()
+    )
+    for text in quoted:
+        stripped = stripped.replace(text, "")
+    return word not in stripped

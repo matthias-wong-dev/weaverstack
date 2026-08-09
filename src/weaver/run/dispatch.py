@@ -24,7 +24,7 @@ estate says, and a trivial artefact is simply an installed one that does little.
 
 from __future__ import annotations
 
-from ..errors import LoadError
+from .contract import RunError
 from .resolution import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
@@ -48,7 +48,7 @@ def dispatch_primitive(
     """Run one installed primitive and return what it reported."""
 
     if session is None:
-        raise LoadError(
+        raise RunError(
             f"{node.node_id} needs a Session to reach {node.physical_target}; "
             "a run with no Session must be given a dispatch of its own"
         )
@@ -64,7 +64,7 @@ def dispatch_primitive(
         return _python(node, session, workspace, resolved, fault_tolerant, runtime_scope)
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
-    raise LoadError(f"{node.node_id} names unknown primitive kind {kind!r}")
+    raise RunError(f"{node.node_id} names unknown primitive kind {kind!r}")
 
 
 def _validation(node, session, workspace, runtime_scope, collect: bool):
@@ -132,10 +132,10 @@ def _python(node, session, workspace, resolved, fault_tolerant: bool, runtime_sc
     from ..runtime.python_context import import_deployed_module
 
     if runtime_scope is None:
-        raise LoadError(f"{node.node_id} needs a runtime scope, and this run has none")
+        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
     expected = getattr(resolved, "expected_class", None)
     if expected is None:
-        raise LoadError(
+        raise RunError(
             f"{node.node_id} names a deployed module whose expected class is unknown"
         )
 
@@ -173,7 +173,7 @@ def _endpoint_refresh(node, session, workspace):
     resolver = session.resolver(workspace)
     refresh = getattr(resolver, "refresh_sql_endpoint", None)
     if refresh is None:
-        raise LoadError(f"{node.node_id}: this host cannot refresh a SQL endpoint")
+        raise RunError(f"{node.node_id}: this host cannot refresh a SQL endpoint")
     refresh(ItemRef(node.physical_target.name))
     return LoadResult(succeeded=True)
 

@@ -90,6 +90,10 @@ class RunRequest:
             "file": self.file,
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,
+            # Behaviourally significant, so it is in the handover. A request
+            # that crossed a boundary without it would arrive meaning something
+            # else — preflighting an estate the caller said not to.
+            "verifies_estate": self.verifies_estate,
         }
 
 

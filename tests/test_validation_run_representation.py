@@ -583,13 +583,19 @@ class _BatchExecutor:
 
 
 class _FileSession:
+    """The Session capabilities a source-file run reaches its engine through."""
+
     def __init__(self, executor):
         self._executor = executor
-        self.spark = None
-        self.resolver = None
 
-    def _warehouse_sql(self, _name):
+    def sql_executor(self, target, workspace=None):
         return self._executor
+
+    def spark(self, workspace=None):
+        return None
+
+    def resolver(self, workspace=None):
+        return None
 
 
 def _source(tmp_path, name, text):

@@ -63,11 +63,11 @@ class RunState:
 
     @classmethod
     def from_mapping(cls, mapping) -> "RunState":
-        from ..errors import LoadError
+        from .contract import RunError
 
         version = mapping.get("format_version")
         if version != 1:
-            raise LoadError(
+            raise RunError(
                 f"unsupported run state format_version {version!r}; expected 1"
             )
         return cls(

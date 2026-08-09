@@ -35,8 +35,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from weaver.errors import CommandError, LoadError
+from weaver.errors import CommandError
+from weaver.run.contract import RunError
 from weaver.load import run_load
+from weaver.run.observe import read_target_inventories
 from weaver.run import RunState
 from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED
@@ -66,18 +68,18 @@ class Unreached:
 
 
 @dataclass
-class PreparedSession:
+class Prepared:
+    """State a test already has, and the Session a run reaches engines through.
+
+    Not an architectural object: the state is the handover a caller supplies,
+    and the Session is the real one. Bundled only because every test here wants
+    both.
+    """
+
     catalogue: object
     inventories: dict
     workspace: object
-    resolver: object
-
-    def read_catalogue(self):
-        return self.catalogue
-
-
-    def open_log(self):
-        raise AssertionError("preflight should have refused before opening a log")
+    session: object
 
 
 class Refreshing(LocalResolver):
@@ -92,19 +94,24 @@ def session(tmp_path):
     workspace = LocalWorkspace(
         workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
     )
-    return PreparedSession(
+    from support.sessions import given_session
+
+    return Prepared(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        resolver=Refreshing(workspace),
+        session=given_session(workspace=workspace, resolver=Refreshing(workspace)),
     )
 
 
-def _run(session, *targets, dry_run=False):
+def _run(prepared, *targets, dry_run=False):
+    session = prepared.session
     return run_load(
         session,
+        workspace=prepared.workspace,
         state=RunState(
-            catalogue=session.catalogue, target_inventories=session.inventories
+            catalogue=prepared.catalogue,
+            target_inventories=prepared.inventories,
         ),
         requested=targets,
         fault_tolerant=False,
@@ -199,12 +206,15 @@ def empty_estate(tmp_path):
     workspace = LocalWorkspace(
         workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
     )
-    return Logged(
+    from support.sessions import given_session
+
+    # A real Session over a real estate root, so the run writes its evidence
+    # where the boundary derives — there is nothing left to stand in for.
+    return Prepared(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        resolver=Refreshing(workspace),
-        log_root=_log_root(tmp_path),
+        session=given_session(workspace=workspace, resolver=Refreshing(workspace)),
     )
 
 
@@ -227,7 +237,8 @@ def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
     """Installed, and nothing to do. That is a success."""
 
     report = run_load(
-        empty_estate,
+        empty_estate.session,
+        workspace=empty_estate.workspace,
         state=RunState(
             catalogue=empty_estate.catalogue,
             target_inventories=empty_estate.inventories,
@@ -239,30 +250,6 @@ def test_an_installed_target_holding_no_loadable_objects_is_a_successful_no_op(
 
     assert report.status == TASK_SUCCEEDED
     assert report.nodes == ()
-
-
-def _log_root(tmp_path):
-    from weaver.locations import Location
-    from weaver.store import FilesystemStore
-
-    root = Location(str(tmp_path / "log"))
-    FilesystemStore().make_directory(root)
-    return root
-
-
-@dataclass
-class Logged(PreparedSession):
-    """The same prepared session, with somewhere real to write evidence."""
-
-    log_root: object = None
-
-    def open_log(self):
-        from weaver.store import FilesystemStore
-        from weaver.task_logging import open_task_log
-
-        return open_task_log(
-            task_type="load", folder=self.log_root, store=FilesystemStore()
-        )
 
 
 # --- an installed target the workspace cannot answer for ----------------------
@@ -286,14 +273,14 @@ class _Dag:
 
 @pytest.fixture
 def real_session(tmp_path):
-    """An actual LoadSession, because the diagnosis is built inside one."""
+    """A real Session, because the diagnosis is built at the boundary read."""
 
-    from weaver.load import LoadSession
+    from support.sessions import given_session
 
     workspace = LocalWorkspace(
         workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
     )
-    return LoadSession(workspace, ())
+    return given_session(workspace=workspace)
 
 
 def _failing_reader(monkeypatch, exc):
@@ -310,8 +297,8 @@ def test_an_inventory_that_cannot_be_read_fails_the_run(monkeypatch, real_sessio
 
     _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
 
-    with pytest.raises(LoadError):
-        real_session.observe((RAW,))
+    with pytest.raises(RunError):
+        read_target_inventories((RAW,), session=real_session)
 
 
 def test_the_failure_names_the_target_it_was_reading(monkeypatch, real_session):
@@ -319,8 +306,8 @@ def test_the_failure_names_the_target_it_was_reading(monkeypatch, real_session):
 
     _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
 
-    with pytest.raises(LoadError) as raised:
-        real_session.observe((RAW,))
+    with pytest.raises(RunError) as raised:
+        read_target_inventories((RAW,), session=real_session)
 
     assert "Lakehouse/Raw_LH" in str(raised.value)
 
@@ -332,8 +319,8 @@ def test_a_deleted_item_is_diagnosed_as_a_deleted_item(monkeypatch, real_session
 
     _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
 
-    with pytest.raises(LoadError) as raised:
-        real_session.observe((RAW,))
+    with pytest.raises(RunError) as raised:
+        read_target_inventories((RAW,), session=real_session)
 
     assert "ItemNotFoundError" in str(raised.value)
     assert "no Lakehouse named 'Raw_LH'" in str(raised.value)
@@ -351,8 +338,8 @@ def test_a_credential_failure_is_not_reported_as_a_deleted_item(
 
     _failing_reader(monkeypatch, PermissionError("token expired"))
 
-    with pytest.raises(LoadError) as raised:
-        real_session.observe((RAW,))
+    with pytest.raises(RunError) as raised:
+        read_target_inventories((RAW,), session=real_session)
 
     assert "PermissionError" in str(raised.value)
     assert "token expired" in str(raised.value)
@@ -365,7 +352,7 @@ def test_the_original_exception_is_kept_as_the_cause(monkeypatch, real_session):
     original = PermissionError("token expired")
     _failing_reader(monkeypatch, original)
 
-    with pytest.raises(LoadError) as raised:
-        real_session.observe((RAW,))
+    with pytest.raises(RunError) as raised:
+        read_target_inventories((RAW,), session=real_session)
 
     assert raised.value.__cause__ is original

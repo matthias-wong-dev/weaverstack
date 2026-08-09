@@ -23,7 +23,7 @@ procedure need a Fabric Lakehouse and Warehouse, so they are proven in
 The public ``weaver.load(...)`` is not called here, and only for a harness
 reason: it opens and stops its own Spark session, and this suite shares one. The
 composition beneath it — :func:`weaver.load.run_load` over a
-:class:`weaver.load.LoadSession` — is entered at the same point, with the
+the reusable Session — is entered at the same point, with the
 session's Spark and store supplied rather than acquired.
 """
 
@@ -32,11 +32,11 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.sessions import load_session
+from support.sessions import given_session
 from support.build_envs import LOAD_ORCHESTRATION_FIXTURE
 
 from weaver.catalogue.builtin import LOG_FOLDER
-from weaver.load import LoadSession, run_load
+from weaver.load import run_load
 from weaver.load_plan import PYTHON_FOLDER, PYTHON_TABLE, PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED, VALIDATED
 from weaver.store import FilesystemStore
@@ -64,10 +64,10 @@ def estate(local_lakehouse_estate):
     return local_lakehouse_estate
 
 
-def session(estate) -> LoadSession:
+def session(estate):
     env = estate.env
-    return load_session(
-        env.workspace, (TARGET,), spark=env.generate_spark, store=env.store
+    return given_session(
+        workspace=env.workspace, spark=env.generate_spark, store=env.store
     )
 
 
@@ -87,7 +87,12 @@ def rows(estate, table: str) -> list[dict]:
 
 @pytest.fixture(scope="module")
 def dry(estate):
-    return run_load(session(estate), requested=(TARGET,), dry_run=True)
+    return run_load(
+        session(estate),
+        workspace=estate.env.workspace,
+        requested=(TARGET,),
+        dry_run=True,
+    )
 
 
 def test_a_complete_load_plan_locates_every_primitive_without_executing_it(dry, estate):
@@ -135,7 +140,12 @@ def test_the_dry_run_changes_no_data_and_writes_no_task_log(dry, estate):
 def real(estate, dry):
     """The same target scope, executed. Ordered after the dry run deliberately."""
 
-    return run_load(session(estate), requested=(TARGET,), dry_run=False)
+    return run_load(
+        session(estate),
+        workspace=estate.env.workspace,
+        requested=(TARGET,),
+        dry_run=False,
+    )
 
 
 def test_the_executed_graph_is_the_one_the_dry_run_planned(real, dry):

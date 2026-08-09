@@ -169,11 +169,11 @@ def test_the_order_is_deterministic_rather_than_incidental():
 
 
 def test_a_cycle_is_refused_rather_than_ordered():
-    from weaver.errors import LoadError
+    from weaver.run.contract import RunError
 
     made = runner(nodes=[node("a"), node("b")], edges=[("a", "b"), ("b", "a")])
 
-    with pytest.raises(LoadError, match="cycle"):
+    with pytest.raises(RunError, match="cycle"):
         made.graph.order()
 
 
@@ -405,11 +405,10 @@ def test_the_order_does_not_depend_on_how_the_graph_was_built():
 
 
 def test_a_run_needs_no_storage_to_be_correct():
-    """Nothing here has a store, a log or a task id, and the run is still whole."""
+    """Nothing here has a store or a log, and the run is still whole."""
 
     result = runner(nodes=[node("a")]).run(dispatch=controlled({}))
 
-    assert result.task_log is None
     assert result.succeeded
 
 
@@ -490,3 +489,59 @@ def test_rejects_do_not_block_what_comes_after_them():
     assert dispatch.seen == ["a", "b"]
     assert result.by_node["b"].status == SUCCEEDED
     assert result.status == RUN_SUCCEEDED_WITH_REJECTS
+
+
+# --- what a representation hands over ----------------------------------------
+
+
+def test_a_request_hands_over_every_field_that_changes_behaviour():
+    """A partial mapping arrives meaning something else than it left as."""
+
+    from dataclasses import fields
+
+    request = RunRequest.test([SALES], name="One", dry_run=True)
+    handed = request.to_mapping()
+
+    assert set(handed) == {field.name for field in fields(RunRequest)}
+    assert handed["verifies_estate"] is False
+
+
+def test_a_node_result_hands_over_what_a_reader_needs_to_tell_outcomes_apart():
+    dispatch = controlled({"a": RuntimeError("the engine said no")})
+
+    result = runner(nodes=[node("a")]).run(dispatch=dispatch)
+    handed = result.by_node["a"].to_mapping()
+
+    # Nothing was evaluated, and the mapping has to say so — otherwise this
+    # reads as a primitive that ran and reported failure.
+    assert handed["raised"] is True
+    assert handed["role"] == "load"
+
+
+def test_a_result_does_not_claim_to_know_where_evidence_was_written():
+    """A run is correct without a log; where one went belongs to the sink."""
+
+    result = runner(nodes=[node("a")]).run(dispatch=controlled({}))
+
+    assert "task_log" not in result.to_mapping()
+    assert not hasattr(result, "task_log")
+
+
+def test_a_run_state_round_trips_through_its_mapping():
+    from weaver.build_bundle.prune import TargetInventory
+    from weaver.catalogue.state import Catalogue
+
+    state = RunState(
+        catalogue=Catalogue(rows={}),
+        target_inventories={
+            str(SALES): TargetInventory(
+                target_id="t", kind="lakehouse", target_name="Sales_LH",
+                files=("_/Load/a.py",),
+            )
+        },
+    )
+
+    returned = RunState.from_mapping(state.to_mapping())
+
+    assert returned.target_inventories[str(SALES)].files == ("_/Load/a.py",)
+    assert returned.inventory(SALES) is not None

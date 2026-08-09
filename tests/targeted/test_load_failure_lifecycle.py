@@ -82,28 +82,19 @@ class Unused:
 
 
 @dataclass
-class PreparedSession:
-    """A load session whose state is prepared and whose log is a real one."""
+class Prepared:
+    """State a test already has, plus the Session the run reaches engines through.
+
+    Not an architectural object. The state is the handover a caller supplies and
+    the Session is the real one; ``log_root`` is where the boundary will write,
+    derived the same way the boundary derives it rather than chosen here.
+    """
 
     catalogue: object
     inventories: dict
     workspace: object
-    resolver: object
+    session: object
     log_root: Location
-    store: object
-
-    #: This host can refresh an endpoint. The Runner asks rather than assumes,
-    #: because the emulator genuinely cannot and skips rather than fails.
-    can_refresh: bool = True
-
-    def read_catalogue(self):
-        return self.catalogue
-
-
-    def open_log(self):
-        return open_task_log(
-            task_type="load", folder=self.log_root, store=self.store
-        )
 
 
 class Refreshing(LocalResolver):
@@ -118,15 +109,20 @@ def session(tmp_path):
     workspace = LocalWorkspace(
         workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
     )
-    root = Location(str(tmp_path / "log"))
-    FilesystemStore().make_directory(root)
-    return PreparedSession(
+    from support.sessions import given_session
+    from weaver.targets import ItemRef
+    from weaver.task_logging import log_folder
+
+    resolver = Refreshing(workspace)
+    store = FilesystemStore()
+    root = log_folder(resolver, ItemRef(workspace.weaver_lakehouse))
+    store.make_directory(root)
+    return Prepared(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        resolver=Refreshing(workspace),
+        session=given_session(workspace=workspace, resolver=resolver, store=store),
         log_root=root,
-        store=FilesystemStore(),
     )
 
 
@@ -156,7 +152,8 @@ def dispatched(monkeypatch):
 
 def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
     return run_load(
-        session,
+        session.session,
+        workspace=session.workspace,
         state=RunState(
             catalogue=session.catalogue,
             target_inventories=session.inventories,

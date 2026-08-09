@@ -70,26 +70,18 @@ class Forbidden:
 
 
 @dataclass
-class PreparedSession:
-    """A load session whose state is prepared rather than acquired."""
+class Prepared:
+    """State a test already has, and the Session a run reaches engines through.
+
+    Not an architectural object. The Session's store refuses every write, so a
+    dry run that opened a task log is caught by the thing it tried to write
+    through — a stronger claim than a flag nobody checks.
+    """
 
     catalogue: object
     inventories: dict
     workspace: object
-    resolver: object
-    log_opened: list = None
-
-    def __post_init__(self):
-        if self.log_opened is None:
-            self.log_opened = []
-
-    def read_catalogue(self):
-        return self.catalogue
-
-
-    def open_log(self):
-        self.log_opened.append(True)
-        raise AssertionError("a dry run must not open a task log")
+    session: object
 
 
 class Refreshing(LocalResolver):
@@ -101,23 +93,36 @@ class Refreshing(LocalResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    return PreparedSession(
+    from support.sessions import given_session
+
+    workspace = LocalWorkspace(
+        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
+    )
+
+    class Refuses:
+        """Any write here is a dry run that wrote something."""
+
+        def __getattr__(self, name):
+            def refuse(*args, **kwargs):
+                raise AssertionError(f"a dry run must not {name}")
+
+            return refuse
+
+    return Prepared(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
-        workspace=LocalWorkspace(
-            workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-        ),
-        resolver=Refreshing(
-            LocalWorkspace(
-                workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-            )
+        workspace=workspace,
+        session=given_session(
+            workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
         ),
     )
 
 
+
 def dry_run(session, *targets, fault_tolerant=False):
     return run_load(
-        session,
+        session.session,
+        workspace=session.workspace,
         state=RunState(
             catalogue=session.catalogue,
             target_inventories=session.inventories,
@@ -242,9 +247,11 @@ def test_load_dry_run_does_not_refresh_endpoints(session):
 
 
 def test_load_dry_run_writes_no_task_log(session):
+    """Proven by the store, not by a flag: every write through it refuses."""
+
     report = dry_run(session)
 
-    assert session.log_opened == []
+    assert report.task_log is None
     assert report.task_log is None
 
 
