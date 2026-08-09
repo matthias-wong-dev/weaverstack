@@ -17,7 +17,7 @@ from typing import Any
 
 from ...errors import InstallError
 from ...targets import FolderTarget
-from ..models import BUILD_FOLDER, DROP_FOLDER, PRUNE_FOLDER, BuildAction
+from ..models import BUILD_FOLDER, DROP_FOLDER, PRUNE_FOLDER, InstallAction
 from .base import InstallationContext
 
 
@@ -26,7 +26,7 @@ class FolderExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:

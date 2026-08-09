@@ -71,7 +71,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         "from weaver.workspaces import FabricWorkspace\n"
         "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
-        "from weaver.build_bundle import (InstallationEnvironment, execute_action, "
+        "from weaver.build_bundle import (InstallationEnvironment, execute_install_action, "
         "load_bundle)\n"
         "from weaver.build_bundle.executors.base import InstallationContext\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
@@ -107,7 +107,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         "    payload = store.read(bundle.location.join(*alias.payload.split('/')))\n"
         "context = InstallationContext(spark=spark, resolver=resolver, store=store,\n"
         f"    target=resolved[{batch.target_id!r}], targets=resolved)\n"
-        "result = execute_action(alias, payload, context=context)\n"
+        "result = execute_install_action(alias, payload, context=context)\n"
         "emit({'status': result.status, 'error': result.error_message,\n"
         "      'details': result.details})\n",
         label="alias with the discovery wait",

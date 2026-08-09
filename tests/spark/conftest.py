@@ -13,7 +13,7 @@ from factories import bound_target, item_id, registered_document, target_invento
 from support.local_build import _local_build_context
 
 from weaver.targets import ItemRef
-from weaver.build_bundle import execute_action, plan_item_build
+from weaver.build_bundle import execute_install_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.locations import Location
 from weaver.spark import SparkCatalogue

@@ -13,7 +13,7 @@ import pytest
 from factories import bound_target, item_id, registered_document, target_inventory
 
 from weaver.targets import ItemRef
-from weaver.build_bundle import execute_action, plan_item_build
+from weaver.build_bundle import execute_install_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.etl import item_load_artefacts
 
@@ -157,7 +157,7 @@ def build_item(lakehouses, spark):
             for batch in stage.batches:
                 for action in batch.actions:
                     results.append(
-                        execute_action(
+                        execute_install_action(
                             action,
                             stage.payloads.get(action.payload)
                             if action.payload

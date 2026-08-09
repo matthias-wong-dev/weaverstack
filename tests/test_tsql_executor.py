@@ -12,7 +12,7 @@ import pytest
 
 from weaver.build_bundle.executors.base import InstallationContext
 from weaver.build_bundle.executors.tsql import TSqlExecutor
-from weaver.build_bundle.models import BuildAction
+from weaver.build_bundle.models import InstallAction
 from weaver.errors import InstallError
 
 
@@ -24,7 +24,7 @@ class _FakeSql:
         self.scripts.append(script)
 
 
-ACTION = BuildAction(
+ACTION = InstallAction(
     id="build-table-Wh.CustomerReport",
     kind="build_table",
     resource_node_id="sql:Wh.CustomerReport",

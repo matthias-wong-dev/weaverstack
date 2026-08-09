@@ -130,7 +130,7 @@ class OmittedNode:
 
 
 @dataclass(frozen=True)
-class BuildAction:
+class InstallAction:
     """One independently executable unit.
 
     ``payload`` is a bundle-relative path to the generated definition, or None
@@ -156,7 +156,7 @@ class BuildAction:
         }
 
     @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildAction":
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> "InstallAction":
         return cls(
             id=mapping["id"],
             kind=mapping["kind"],
@@ -173,7 +173,7 @@ class BuildBatch:
 
     id: str
     target_id: str
-    actions: tuple[BuildAction, ...]
+    actions: tuple[InstallAction, ...]
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -187,7 +187,7 @@ class BuildBatch:
         return cls(
             id=mapping["id"],
             target_id=mapping["target_id"],
-            actions=tuple(BuildAction.from_mapping(a) for a in mapping.get("actions", ())),
+            actions=tuple(InstallAction.from_mapping(a) for a in mapping.get("actions", ())),
         )
 
 

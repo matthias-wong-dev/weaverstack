@@ -128,13 +128,13 @@ def action_of(plan, kind: str):
 def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, sql=None):
     """Execute one real action against real Fabric, from this process.
 
-    The same `execute_action` an installation calls, with its frozen payload,
+    The same `execute_install_action` an installation calls, with its frozen payload,
     given the capabilities a desktop caller injects rather than the ones a
     session acquires. That the session can acquire its own is a separate claim,
     made once in `test_published_weaver.py`.
     """
 
-    from weaver.build_bundle import InstallationEnvironment, execute_action
+    from weaver.build_bundle import InstallationEnvironment, execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext
 
     environment = InstallationEnvironment(
@@ -146,7 +146,7 @@ def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, s
     payload = None
     if action.payload is not None:
         payload = store.read(bundle.location.join(*action.payload.split("/")))
-    return execute_action(
+    return execute_install_action(
         action,
         payload,
         context=InstallationContext(

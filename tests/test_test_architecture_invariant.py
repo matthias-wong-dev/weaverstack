@@ -176,7 +176,6 @@ LEGACY_NESTED_CLAIMS = {
         tests/spark/boundary/test_catalogue_fidelity.py
         tests/spark/boundary/test_inventory_fidelity.py
         tests/spark/test_cross_item_alias_incremental.py
-        tests/targeted/test_action_execution.py
         tests/targeted/test_alias_planning.py
         tests/targeted/test_incremental_impact.py
         tests/targeted/test_item_plan.py
@@ -223,7 +222,6 @@ LEGACY_NESTED_CLAIMS = {
         tests/fabric/test_onelake_mount_contract.py
         tests/support/test_livy_telemetry.py
         tests/support/test_observation.py
-        tests/targeted/test_action_checklist.py
         tests/targeted/test_build_intent.py
         tests/targeted/test_executor_parity.py
         """,

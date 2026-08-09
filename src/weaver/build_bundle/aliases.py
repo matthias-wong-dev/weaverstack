@@ -36,7 +36,7 @@ from ..declaration.model import WeaverDocumentId, WeaverItemId
 from .models import (
     CREATE_ALIAS,
     OMIT_ALIAS_UNSUPPORTED,
-    BuildAction,
+    InstallAction,
     BuildBatch,
     OmittedNode,
 )
@@ -215,7 +215,7 @@ def _alias_action(
     item: WeaverItemId,
     target: BoundTarget,
     payloads: dict[str, bytes],
-) -> BuildAction:
+) -> InstallAction:
     """One action for all of this item's aliases.
 
     One rather than one-per-alias, because materialising an alias is not
@@ -249,7 +249,7 @@ def _alias_action(
         filename = f"aliases-{item_slug}.alias.json"
         executor = "alias"
     payloads[filename] = content
-    return BuildAction(
+    return InstallAction(
         id=f"aliases-{item_slug}",
         kind=CREATE_ALIAS,
         # No single resource: this action stands for every alias the item

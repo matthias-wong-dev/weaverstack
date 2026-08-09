@@ -36,7 +36,7 @@ from .executors.base import (
     ResolvedTarget,
     SkippedExecution,
 )
-from .models import BuildAction, BuildBatch, BuildPlan, BuildSequence
+from .models import InstallAction, BuildBatch, BuildPlan, BuildSequence
 from .report import (
     FAILED,
     SKIPPED,
@@ -243,8 +243,8 @@ def _run_sequence(
     )
 
 
-def execute_action(
-    action: BuildAction,
+def execute_install_action(
+    action: InstallAction,
     payload: bytes | None = None,
     *,
     context: InstallationContext,
@@ -278,7 +278,7 @@ def execute_action(
 
 
 def _run_action(
-    action: BuildAction,
+    action: InstallAction,
     batch: BuildBatch,
     context: InstallationContext,
     bundle: BuildBundle,
@@ -301,7 +301,7 @@ def _run_action(
 
 
 def _execute(
-    action: BuildAction,
+    action: InstallAction,
     load_payload,
     *,
     context: InstallationContext,
@@ -343,7 +343,7 @@ def _execute(
 
 
 def _failed(
-    action: BuildAction, target_id: str, started: datetime, exc: Exception
+    action: InstallAction, target_id: str, started: datetime, exc: Exception
 ) -> ActionResult:
     finished = _now()
     return ActionResult(
@@ -360,7 +360,7 @@ def _failed(
     )
 
 
-def _skipped_action(action: BuildAction, batch: BuildBatch) -> ActionResult:
+def _skipped_action(action: InstallAction, batch: BuildBatch) -> ActionResult:
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,

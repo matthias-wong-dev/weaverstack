@@ -24,7 +24,7 @@ from weaver.targets import ItemRef
 from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
-    BuildAction,
+    InstallAction,
     BuildBatch,
     BuildPlan,
     ItemBinding,
@@ -887,8 +887,8 @@ def build_action(
     executor: str = "spark_sql",
     payload: str | None = None,
     payload_sha256: str | None = None,
-) -> BuildAction:
-    return BuildAction(
+) -> InstallAction:
+    return InstallAction(
         id=id,
         kind=kind,
         resource_node_id=resource_node_id,
@@ -902,7 +902,7 @@ def single_action_bundle(
     location: Location,
     *,
     store: FilesystemStore,
-    action: BuildAction,
+    action: InstallAction,
     payload: bytes | None = None,
     target: BoundTarget | None = None,
     description: str = "one action",
@@ -935,7 +935,7 @@ def single_action_bundle(
     )
 
 
-def _sequence(*, description: str, target_id: str, action: BuildAction):
+def _sequence(*, description: str, target_id: str, action: InstallAction):
     from weaver.build_bundle.models import BuildSequence
 
     return BuildSequence(

@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from ..declaration.model import WeaverItemId
-from .models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, BuildAction, BuildBatch
+from .models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, InstallAction, BuildBatch
 from .physical import DELTA_MUTATING_KINDS
 from .stages import REFRESH, PlannedStage
 from .targets import BoundTarget, WAREHOUSE_TARGET
@@ -69,7 +69,7 @@ def item_refresh_stage(
                 id=f"refresh-endpoint-{slug}",
                 target_id=target.id,
                 actions=(
-                    BuildAction(
+                    InstallAction(
                         id=f"refresh-sql-endpoint-{slug}",
                         kind=REFRESH_SQL_ENDPOINT,
                         resource_node_id=None,

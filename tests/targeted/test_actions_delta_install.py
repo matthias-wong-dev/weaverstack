@@ -12,7 +12,7 @@ accept this T-SQL, does the object appear in inventory — and answering it no
 longer requires parsing a repository, reading a catalogue and installing a bundle
 to reach the one statement in question.
 
-`execute_action` and the installer share one execution path, so the semantics
+`execute_install_action` and the installer share one execution path, so the semantics
 asserted here are the semantics an installation gets.
 """
 
@@ -31,7 +31,7 @@ from factories import (
 )
 
 from weaver.locations import Location
-from weaver.build_bundle import execute_action
+from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.executors import default_executors
 
 VIEW_SQL = b"CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS SELECT 1\n"
@@ -44,7 +44,7 @@ def test_a_successful_action_reports_succeeded_against_its_target():
     spark = FakeSpark()
     action = build_action(payload="p.sql", payload_sha256="unused")
 
-    result = execute_action(
+    result = execute_install_action(
         action, VIEW_SQL, context=installation_context(spark=spark)
     )
 
@@ -67,7 +67,7 @@ def test_a_failing_action_is_recorded_rather_than_raised():
         def sql(self, statement):
             raise RuntimeError("no such column")
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(payload="p.sql"),
         VIEW_SQL,
         context=installation_context(spark=Exploding()),
@@ -79,7 +79,7 @@ def test_a_failing_action_is_recorded_rather_than_raised():
 
 
 def test_an_unknown_executor_is_a_failed_result_naming_it():
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="no_such_executor"),
         b"",
         context=installation_context(spark=FakeSpark()),
@@ -92,7 +92,7 @@ def test_an_unknown_executor_is_a_failed_result_naming_it():
 def test_an_action_is_timed_even_when_it_fails():
     """The report's durations must cover failures too, or a slow failure hides."""
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="missing"), b"", context=installation_context()
     )
 
@@ -112,7 +112,7 @@ def test_a_skipped_execution_reports_skipped_with_its_details():
         def execute(self, action, payload, context):
             return SkippedExecution(details={"reason": "unsupported host"})
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="skipping"),
         None,
         context=installation_context(),
@@ -126,7 +126,7 @@ def test_a_skipped_execution_reports_skipped_with_its_details():
 def test_supplied_executors_replace_the_registry_entirely():
     """A test naming its own executors must not silently inherit the real ones."""
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="spark_sql"),
         VIEW_SQL,
         context=installation_context(spark=FakeSpark()),
@@ -140,7 +140,7 @@ def test_supplied_executors_replace_the_registry_entirely():
 def test_the_default_registry_is_used_when_none_is_named():
     assert "spark_sql" in default_executors()
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(payload="p.sql"),
         VIEW_SQL,
         context=installation_context(spark=FakeSpark()),
@@ -163,7 +163,7 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
 
     spark = FakeSpark()
 
-    execute_action(
+    execute_install_action(
         build_action(payload="p.sql"),
         VIEW_SQL,
         context=installation_context(spark=spark),
@@ -175,7 +175,7 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
 
 
 def test_a_spark_action_without_a_session_fails_saying_so():
-    result = execute_action(
+    result = execute_install_action(
         build_action(payload="p.sql"), VIEW_SQL, context=installation_context()
     )
 
@@ -186,7 +186,7 @@ def test_a_spark_action_without_a_session_fails_saying_so():
 def test_a_spark_action_with_no_destination_refuses_rather_than_guessing():
     """An action with nowhere to go must stop, not land somewhere plausible."""
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(payload="p.sql"),
         VIEW_SQL,
         context=installation_context(
@@ -199,7 +199,7 @@ def test_a_spark_action_with_no_destination_refuses_rather_than_guessing():
 
 
 def test_a_spark_action_without_a_payload_fails_saying_so():
-    result = execute_action(
+    result = execute_install_action(
         build_action(payload=None),
         None,
         context=installation_context(spark=FakeSpark()),
@@ -218,7 +218,7 @@ def test_tsql_sends_the_script_through_unchanged():
     sql = FakeSql()
     script = b"CREATE TABLE [DWG].[Customer] ([CustomerId] int NOT NULL);\n"
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="tsql", payload="p.sql"),
         script,
         context=warehouse_context(sql=sql),
@@ -229,7 +229,7 @@ def test_tsql_sends_the_script_through_unchanged():
 
 
 def test_a_tsql_action_without_a_sql_executor_fails_saying_so():
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="tsql", payload="p.sql"),
         b"SELECT 1",
         context=installation_context(sql=None),
@@ -242,7 +242,7 @@ def test_a_tsql_action_without_a_sql_executor_fails_saying_so():
 def test_a_failing_warehouse_script_is_recorded_as_a_failed_action():
     sql = FakeSql(error=RuntimeError("Invalid column name 'NoSuchColumn'"))
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="tsql", payload="p.sql"),
         b"CREATE VIEW x AS SELECT NoSuchColumn FROM y",
         context=warehouse_context(sql=sql),
@@ -260,7 +260,7 @@ def test_a_tsql_batch_submits_each_statement_separately():
         ["CREATE OR ALTER VIEW a AS SELECT 1", "CREATE OR ALTER VIEW b AS SELECT 2"]
     ).encode("utf-8")
 
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="tsql_batch", payload="p.json"),
         payload,
         context=warehouse_context(sql=sql),
@@ -274,7 +274,7 @@ def test_a_tsql_batch_submits_each_statement_separately():
 
 
 def test_a_tsql_batch_payload_that_is_not_an_array_is_rejected():
-    result = execute_action(
+    result = execute_install_action(
         build_action(executor="tsql_batch", payload="p.json"),
         b'"CREATE VIEW a AS SELECT 1"',
         context=warehouse_context(),
@@ -344,7 +344,7 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     context = _load_context(tmp_path)
     action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
 
-    result = execute_action(action, b"def parse(value):\n", context=context)
+    result = execute_install_action(action, b"def parse(value):\n", context=context)
 
     assert result.status == "succeeded"
     written = result.details["written"]
@@ -383,7 +383,7 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
         kind="write_file", relative="Sales__OrderSummary.py", payload="p.payload"
     )
 
-    result = execute_action(action, payload, context=context)
+    result = execute_install_action(action, payload, context=context)
     written = context.store.read(Location(result.details["written"])).decode()
 
     assert b"{{object:" in payload, "the bundle payload is destination-free"
@@ -406,7 +406,7 @@ def test_a_deployed_python_module_is_left_exactly_as_authored(tmp_path):
     )
     source = b'"""Table ID: Sales.Customer"""\nBRACES = "{{not a token}}"\n'
 
-    result = execute_action(action, source, context=context)
+    result = execute_install_action(action, source, context=context)
 
     assert context.store.read(Location(result.details["written"])) == source
 
@@ -440,7 +440,7 @@ def test_a_write_creates_the_directories_beneath_it(tmp_path):
         kind="write_file", relative="lib/nested/deep/dates.py", payload="p.payload"
     )
 
-    assert execute_action(action, b"x = 1\n", context=context).status == "succeeded"
+    assert execute_install_action(action, b"x = 1\n", context=context).status == "succeeded"
 
 
 def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
@@ -449,7 +449,7 @@ def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
     context = _load_context(tmp_path)
     action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
 
-    result = execute_action(action, None, context=context)
+    result = execute_install_action(action, None, context=context)
 
     assert result.status == "failed"
     assert "no payload" in result.error_message
@@ -466,7 +466,7 @@ def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
     context = _load_context(tmp_path)
     action = _load_action(kind="delete_file", relative="lib/dates.py", payload=None)
 
-    result = execute_action(action, None, context=context)
+    result = execute_install_action(action, None, context=context)
 
     assert result.status == "succeeded"
     assert "absent" in result.details
@@ -475,10 +475,10 @@ def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
 def test_a_deployed_file_is_removed_where_it_was_written(tmp_path):
     context = _load_context(tmp_path)
     write = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
-    execute_action(write, b"x = 1\n", context=context)
+    execute_install_action(write, b"x = 1\n", context=context)
 
     delete = _load_action(kind="delete_file", relative="lib/dates.py", payload=None)
-    result = execute_action(delete, None, context=context)
+    result = execute_install_action(delete, None, context=context)
 
     assert result.status == "succeeded"
     assert not context.store.exists(Location(result.details["deleted"]))

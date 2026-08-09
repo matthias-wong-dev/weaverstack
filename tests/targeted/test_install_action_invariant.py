@@ -1,12 +1,12 @@
-"""Every action kind has a test that executes it, or is deliberately deferred.
+"""Every InstallAction kind has a test that executes it, or is deliberately deferred.
 
 The list below *is* the checklist, and it is legible from the terminal:
 
 ```text
-pytest --collect-only -q tests/targeted/test_action_checklist.py
+pytest --collect-only -q tests/targeted/test_install_action_invariant.py
 ```
 
-Each parametrised case reads ``[<kind>-<the test that executes it>]``. Each action kind names the test that runs it
+Each parametrised case reads ``[<kind>-<the test that executes it>]``. Each InstallAction kind names the test that runs it
 against a real engine and inspects what it made — and adding a kind without
 adding that test fails here, naming what is missing rather than leaving it to be
 noticed.
@@ -38,8 +38,8 @@ TESTS = REPOSITORY / "tests"
 #: Why a kind has no execution test yet. A deferral is a claim about the future,
 #: so it carries a reason and is as visible as a covered kind.
 DEFERRED = {
-    "write_file": "load semantics land in a later branch; the executor is covered by test_action_execution.py",
-    "delete_file": "load semantics land in a later branch; the executor is covered by test_action_execution.py",
+    "write_file": "load semantics land in a later branch; the executor is covered by test_actions_delta_install.py",
+    "delete_file": "load semantics land in a later branch; the executor is covered by test_actions_delta_install.py",
     "build_procedure": "generated load procedures land in a later branch",
     "drop_procedure": "generated load procedures land in a later branch",
 }

@@ -39,7 +39,7 @@ from .models import (
     DROP_FOLDER,
     DROP_TABLE,
     DROP_VIEW,
-    BuildAction,
+    InstallAction,
     BuildBatch,
 )
 from .payloads import sha256_hex
@@ -156,7 +156,7 @@ def item_prune_stage(
     )
 
 
-def _prefixed(action: BuildAction, item_slug: str) -> BuildAction:
+def _prefixed(action: InstallAction, item_slug: str) -> InstallAction:
     return replace(
         action,
         id=f"{item_slug}-{action.id}",
@@ -216,7 +216,7 @@ def item_drop_stages(
     return tuple(stages)
 
 
-def _drop_action(identity, installed_type, target, payloads) -> BuildAction:
+def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
     try:
         installed_kind = _DECLARATION_KIND[installed_type]
     except KeyError as exc:
@@ -226,7 +226,7 @@ def _drop_action(identity, installed_type, target, payloads) -> BuildAction:
     kind = _DROP_KIND[installed_kind]
     action_slug = _slug(identity)
     if installed_kind == FOLDER:
-        return BuildAction(
+        return InstallAction(
             id=f"managed-drop-{action_slug}",
             kind=kind,
             resource_node_id=str(identity),
@@ -248,7 +248,7 @@ def _drop_action(identity, installed_type, target, payloads) -> BuildAction:
     content = statement.encode("utf-8")
     filename = f"drop-{action_slug}{extension}"
     payloads[filename] = content
-    return BuildAction(
+    return InstallAction(
         id=f"managed-drop-{action_slug}",
         kind=kind,
         resource_node_id=str(identity),
@@ -305,7 +305,7 @@ def item_schema_stage(
         payloads[filename] = content
         action_id = f"schema-{item_slug}-{schema}"
         actions.append(
-            BuildAction(
+            InstallAction(
                 id=action_id,
                 kind=CREATE_SCHEMA,
                 resource_node_id=None,
@@ -340,12 +340,12 @@ class RenderedAction:
     ``payloads`` is empty for a folder, which is created rather than executed.
     """
 
-    action: BuildAction
+    action: InstallAction
     payloads: Mapping[str, bytes]
 
 
 def render_document_build_action(identity, source) -> RenderedAction:
-    """The build action and payload one declared document renders to.
+    """The InstallAction and payload one declared document renders to.
 
     This is where ``source.create_ddl()`` becomes something a bundle can carry:
     the DDL says *what statement*, and this says what action runs it, under what
@@ -358,7 +358,7 @@ def render_document_build_action(identity, source) -> RenderedAction:
         # A folder has no statement to run: it is a directory the installer
         # creates, so there is nothing to freeze and nothing to hash.
         return RenderedAction(
-            action=BuildAction(
+            action=InstallAction(
                 id=f"folder-{action_slug}",
                 kind=BUILD_FOLDER,
                 resource_node_id=str(identity),
@@ -372,7 +372,7 @@ def render_document_build_action(identity, source) -> RenderedAction:
     filename = f"{action_slug}{ddl.extension}"
     content = ddl.content.encode("utf-8")
     return RenderedAction(
-        action=BuildAction(
+        action=InstallAction(
             id=f"object-{action_slug}",
             kind=_OBJECT_KIND[source.kind],
             resource_node_id=str(identity),
@@ -401,7 +401,7 @@ def render_load_build_action(artefact) -> RenderedAction:
         filename = f"{action_slug}.sql"
         executor, kind = "tsql", BUILD_PROCEDURE
     return RenderedAction(
-        action=BuildAction(
+        action=InstallAction(
             id=f"load-{action_slug}",
             kind=kind,
             resource_node_id=str(artefact.identity),
@@ -511,7 +511,7 @@ def item_load_removals(
         action_slug = _slug(identity)
         if object_type == FILE_TYPE:
             actions.append(
-                BuildAction(
+                InstallAction(
                     id=f"load-remove-{action_slug}",
                     kind=DELETE_FILE,
                     resource_node_id=str(identity),
@@ -537,7 +537,7 @@ def item_load_removals(
         filename = f"drop-{action_slug}.sql"
         payloads[filename] = content
         actions.append(
-            BuildAction(
+            InstallAction(
                 id=f"load-remove-{action_slug}",
                 kind=DROP_PROCEDURE,
                 resource_node_id=str(identity),

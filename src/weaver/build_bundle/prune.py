@@ -30,7 +30,7 @@ from .models import (
     PRUNE_SCHEMA,
     PRUNE_TABLE,
     PRUNE_VIEW,
-    BuildAction,
+    InstallAction,
 )
 from .changes import (
     FOLDER as FOLDER_KIND,
@@ -372,7 +372,7 @@ def render_inventory_prune(
     inventory: TargetInventory,
     managed: _Managed,
     payloads: dict[str, bytes],
-) -> tuple[tuple[BuildAction, ...], tuple[TargetChange, ...]]:
+) -> tuple[tuple[InstallAction, ...], tuple[TargetChange, ...]]:
     """Purely render prune actions from one already-read inventory.
 
     ``payloads`` is filled with the frozen drops, keyed by bare filename: the
@@ -386,7 +386,7 @@ def render_inventory_prune(
     reach without parsing SQL.
     """
 
-    actions: list[BuildAction] = []
+    actions: list[InstallAction] = []
     changes: list[TargetChange] = []
     if target.kind == "warehouse":
         for qualified in inventory.views:
@@ -565,11 +565,11 @@ def _drop_action(
     *,
     executor: str = "spark_sql",
     extension: str = ".spark.sql",
-) -> BuildAction:
+) -> InstallAction:
     content = (statement + "\n").encode("utf-8")
     filename = f"{slug}-{name}{extension}"
     payloads[filename] = content
-    return BuildAction(
+    return InstallAction(
         id=f"prune-{slug}-{name}",
         kind=kind,
         resource_node_id=None,
@@ -579,8 +579,8 @@ def _drop_action(
     )
 
 
-def _prune_folder_action(target, resource: str) -> BuildAction:
-    return BuildAction(
+def _prune_folder_action(target, resource: str) -> InstallAction:
+    return InstallAction(
         id=f"prune-{resource}",
         kind=PRUNE_FOLDER,
         resource_node_id=resource,

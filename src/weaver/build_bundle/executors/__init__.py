@@ -1,4 +1,4 @@
-"""Executor dispatch for build actions.
+"""Executor dispatch for InstallActions.
 
 ``spark_sql`` runs one create or frozen ``DROP``; ``spark_sql_batch`` runs an
 ordered catalogue payload as one reported action. ``spark_schema`` makes one

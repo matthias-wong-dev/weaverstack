@@ -15,7 +15,7 @@ from weaver.build_bundle.models import (
     BUILD_FOLDER,
     DROP_FOLDER,
     PRUNE_FOLDER,
-    BuildAction,
+    InstallAction,
 )
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
@@ -39,8 +39,8 @@ def _context(tmp_path):
     )
 
 
-def _action(kind: str) -> BuildAction:
-    return BuildAction(
+def _action(kind: str) -> InstallAction:
+    return InstallAction(
         id=f"{kind}-sales-export",
         kind=kind,
         resource_node_id="Lakehouse/Raw/Files/Sales.Export",

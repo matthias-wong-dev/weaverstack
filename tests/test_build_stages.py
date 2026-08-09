@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.build_bundle.models import BuildAction, BuildBatch
+from weaver.build_bundle.models import InstallAction, BuildBatch
 from weaver.build_bundle.stages import (
     ALIAS,
     BUILD,
@@ -17,7 +17,7 @@ from weaver.errors import BuildError
 
 
 def _action(name, payload=None):
-    return BuildAction(
+    return InstallAction(
         id=name,
         kind="build_table",
         resource_node_id=None,

@@ -10,7 +10,7 @@ catalogue, no bundle, no installer.
 
 **The names are the checklist.** One `test_<kind>_action_<what it proves>` per
 action kind, so `pytest --collect-only -q -k _action_` lists what is actually
-checked rather than what someone remembers checking. `test_action_checklist.py`
+checked rather than what someone remembers checking. `test_install_action_invariant.py`
 holds this file to that list — add an action kind and it names the test that does
 not exist yet.
 

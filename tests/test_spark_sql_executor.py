@@ -7,7 +7,7 @@ import pytest
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.spark_sql import SparkSqlExecutor
 from weaver.build_bundle.executors.spark_sql_batch import SparkSqlBatchExecutor
-from weaver.build_bundle.models import BuildAction
+from weaver.build_bundle.models import InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.spark import fabric_destination, local_destination
@@ -42,7 +42,7 @@ class _Spark:
 
 
 def _run(spark, destination):
-    action = BuildAction(
+    action = InstallAction(
         id="view-Sales.ActiveCustomer",
         kind="build_view",
         resource_node_id="delta:Sales.ActiveCustomer",
@@ -108,7 +108,7 @@ def test_local_view_uses_the_emulator_session_policy_without_mutating_it():
 def test_catalogue_batch_executes_each_statement_in_payload_order():
     spark = _Spark()
     destination = fabric_destination(workspace="Analytics", lakehouse="Control")
-    action = BuildAction(
+    action = InstallAction(
         id="publish-catalogue",
         kind="publish_catalogue",
         resource_node_id=None,
@@ -155,7 +155,7 @@ def _batch_context(spark, *, epoch=None):
 
 
 def _batch_action():
-    return BuildAction(
+    return InstallAction(
         id="publish-registry",
         kind="publish_registry",
         resource_node_id=None,

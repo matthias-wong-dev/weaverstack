@@ -22,7 +22,7 @@ import json
 import pytest
 
 from weaver.targets import ItemRef
-from weaver.build_bundle import execute_action
+from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.catalogue_actions import render_catalogue_after_build
 from weaver.catalogue.state import Catalogue, read_catalogue_state
 from weaver.catalogue.tables import REGISTRY
@@ -171,7 +171,7 @@ def test_rendered_publication_dml_writes_rows_a_read_can_see(
     for stage in stages:
         for batch in stage.batches:
             for action in batch.actions:
-                result = execute_action(
+                result = execute_install_action(
                     action,
                     stage.payloads.get(action.payload) if action.payload else None,
                     context=context,
@@ -224,7 +224,7 @@ def test_a_published_signature_survives_the_round_trip(
     for stage in stages:
         for batch in stage.batches:
             for action in batch.actions:
-                execute_action(
+                execute_install_action(
                     action,
                     stage.payloads.get(action.payload) if action.payload else None,
                     context=context,
@@ -328,7 +328,7 @@ def test_load_artefacts_publish_and_read_back_as_first_class_objects(
     for stage in stages:
         for batch in stage.batches:
             for action in batch.actions:
-                result = execute_action(
+                result = execute_install_action(
                     action,
                     stage.payloads.get(action.payload) if action.payload else None,
                     context=context,

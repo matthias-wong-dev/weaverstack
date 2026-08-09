@@ -15,7 +15,7 @@ import pytest
 
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.spark_table import SparkTableExecutor
-from weaver.build_bundle.models import BuildAction
+from weaver.build_bundle.models import InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import BuildError, InstallError
 from weaver.spark import fabric_destination, local_destination
@@ -149,7 +149,7 @@ def _payload(**overrides) -> bytes:
 
 
 def _run(spark, payload: bytes, *, destination=DESTINATION):
-    action = BuildAction(
+    action = InstallAction(
         id="build-delta-Sales.Customer",
         kind="build_table",
         resource_node_id="delta:Sales.Customer",

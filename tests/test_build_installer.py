@@ -18,7 +18,7 @@ from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    BuildAction,
+    InstallAction,
     BuildBatch,
     BuildPlan,
     BuildSequence,
@@ -52,9 +52,9 @@ class Recorder:
         return {"ran": action.id}
 
 
-def _action(name: str) -> BuildAction:
+def _action(name: str) -> InstallAction:
     payload = f"payload/{name}/stmt.spark.sql"
-    return BuildAction(
+    return InstallAction(
         id=name,
         kind="materialise",
         resource_node_id=None,
@@ -185,7 +185,7 @@ def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
 
 
 def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path):
-    action = BuildAction(
+    action = InstallAction(
         id="refresh-application-sql-endpoint",
         kind="refresh_sql_endpoint",
         resource_node_id=None,
