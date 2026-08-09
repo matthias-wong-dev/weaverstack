@@ -39,6 +39,8 @@ WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
+#: How a validation is reached, from where it is installed.
+PYTHON_VALIDATION = "python_validation"
 
 PYTHON_KINDS = (PYTHON_TABLE, PYTHON_FOLDER)
 
@@ -121,7 +123,7 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
                     source=SOURCE,
                 )
             )
-    elif node.primitive_kind not in (WAREHOUSE_PROCEDURE,):
+    elif node.primitive_kind not in (WAREHOUSE_PROCEDURE, PYTHON_VALIDATION):
         messages.append(
             error(
                 DISPATCH_LOCATION_MISSING,
@@ -267,6 +269,7 @@ __all__ = [
     "PYTHON_FOLDER",
     "PYTHON_KINDS",
     "PYTHON_TABLE",
+    "PYTHON_VALIDATION",
     "WAREHOUSE_PROCEDURE",
     "Resolved",
     "resolve",

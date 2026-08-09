@@ -39,7 +39,6 @@ from .errors import CommandError, ValidationError
 from .load import LoadSession, _load_session
 from .load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
 from .targets import ItemRef, WarehouseTarget, parse_physical_target
-from .test_execution import execute_validations
 from .test_plan import InstalledValidation, ValidationEstate, validation_order
 from .test_report import (
     FAILED,
@@ -150,33 +149,90 @@ def run_test(
             durable=False,
         )
 
-    estate = ValidationEstate.from_catalogue(session.read_catalogue())
-    if name is not None:
-        selected: tuple[InstalledValidation, ...] = (estate.named(name, requested),)
-    else:
-        selected = validation_order(estate.for_targets(requested))
+    from .run import RunRequest, Runner, RunState
 
-    environment = _environment(session, selected)
-    try:
-        nodes = execute_validations(
-            selected,
-            environment=environment,
-            # Evidence for a caller who asked about one validation; counts alone
-            # for a whole-target run, which must not transfer diagnostic rows.
-            collect_diagnostics=name is not None,
+    catalogue = session.read_catalogue()
+    runner = Runner(
+        RunState(catalogue=catalogue),
+        RunRequest.test(
+            requested,
+            name=name,
             dry_run=dry_run,
-        )
-    finally:
-        environment.runtime_scope.close()
+            # Validations are independent by construction: each reads the estate
+            # and reports, and none produces what another consumes. One that
+            # fails is a finding, not a reason to stop asking the others — and
+            # "everything I did not get to" is the least useful answer a run
+            # that was asked what is wrong with an estate could give.
+            fault_tolerant=True,
+        ),
+        workspace=session.workspace,
+    )
+    result = runner.run(
+        session=getattr(session, "session", None),
+        # Evidence for a caller who asked about one validation; counts alone for
+        # a whole-target run, which must not transfer diagnostic rows.
+        dispatch=_dispatch_collecting(collect=name is not None),
+    )
 
     return _reported(
         session,
-        nodes=nodes,
+        nodes=tuple(_as_validation_node(node) for node in result.nodes),
         requested=requested,
         started=started,
         dry_run=dry_run,
         strict=strict,
         selection=name,
+    )
+
+
+def _dispatch_collecting(*, collect: bool):
+    """The one crossing, told whether this run was asked to show its evidence."""
+
+    from .run import dispatch_primitive
+
+    def dispatch(node, **asked):
+        return dispatch_primitive(node, collect=collect, **asked)
+
+    return dispatch
+
+
+def _as_validation_node(node) -> ValidationNodeReport:
+    """One run node, in the vocabulary a validation's readers use.
+
+    A validation does not "succeed" — it passes or fails, which is a judgement
+    about data rather than about work. One internal model does not mean one
+    public shape, and this is where the two meet.
+    """
+
+    from .run.result import INVALID as RUN_INVALID
+    from .run.result import SUCCEEDED, VALIDATED
+    from .test_report import PASSED, PLANNED
+
+    if node.status == VALIDATED:
+        status = PLANNED
+    elif node.status == SUCCEEDED:
+        status = PASSED
+    elif node.status == RUN_INVALID:
+        status = INVALID
+    else:
+        status = FAILED
+    result = getattr(node.result, "result", node.result)
+    return ValidationNodeReport(
+        logical_id=node.logical_id,
+        kind=node.role or "Test",
+        physical_target=node.physical_target,
+        primitive_kind=node.primitive_kind,
+        dispatch_location=str(getattr(node, "dispatch_location", None) or ""),
+        status=status,
+        executed=node.executed,
+        messages=tuple(
+            message.message if hasattr(message, "message") else str(message)
+            for message in node.messages
+        ),
+        result=result,
+        diagnostics=getattr(node.result, "diagnostics", None),
+        started_at=node.started_at,
+        finished_at=node.finished_at,
     )
 
 
@@ -242,29 +298,6 @@ def _failure_message(report: ValidationRunReport) -> str:
         )
         parts.append(f"{node.logical_id} found {found}")
     return "; ".join(parts)
-
-
-def _environment(session: LoadSession, selected: Sequence[InstalledValidation]):
-    """Runtime services for the targets these validations actually live in.
-
-    No inventories are read. A load asks what physically exists because it is
-    about to write; a validation reads what is there, and a target that is not
-    there fails its own dispatch with a message about the thing that was
-    missing.
-    """
-
-    from .load_resolution import LoadEnvironment
-
-    for validation in selected:
-        if validation.target.kind == WAREHOUSE_TARGET:
-            session._warehouse_sql(validation.target.name)  # noqa: SLF001 - one seam
-    return LoadEnvironment(
-        resolver=session.resolver,
-        store=session.store,
-        spark=session.spark,
-        sql=session._sql,  # noqa: SLF001 - the session owns what it opened
-        workspace=session.workspace,
-    )
 
 
 def _requested(targets: str | Sequence[str]):

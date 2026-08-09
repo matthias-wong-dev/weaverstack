@@ -123,6 +123,78 @@ def execute_validation(
     )
 
 
+def run_installed_validation(
+    validation: InstalledValidation,
+    *,
+    session,
+    workspace=None,
+    runtime_scope=None,
+    collect_diagnostics: bool = False,
+):
+    """One installed validation, run through the Session that owns the engines.
+
+    Returns the result the validation produced, with any diagnostic rows
+    attached to it — a run's *status* is the Runner's to decide, from a result,
+    exactly as it is for a load. What this owes the caller is the judgement the
+    validation made, not an opinion about what that means for the run.
+    """
+
+    validation.require_installed()
+    environment = _capabilities(session, workspace, runtime_scope)
+    if primitive_kind(validation) == WAREHOUSE_PROCEDURE:
+        result, diagnostics = _dispatch_warehouse(
+            validation, environment, collect_diagnostics
+        )
+    else:
+        result, diagnostics = _dispatch_python(
+            validation, environment, collect_diagnostics
+        )
+    # Beside the result rather than inside it: diagnostic rows carry whatever a
+    # check selected, and a durable record of them would put data into the
+    # estate's own evidence.
+    return _WithDiagnostics(result, diagnostics)
+
+
+class _WithDiagnostics:
+    """A validation result, carrying the rows a caller asked to see.
+
+    A wrapper rather than a field on the result: the result types are the
+    validation runtime's, shared with the primitives that produce them, and
+    diagnostics are a property of *this run* having been asked for them.
+    """
+
+    def __init__(self, result, diagnostics) -> None:
+        self.result = result
+        self.diagnostics = diagnostics
+
+    @property
+    def succeeded(self) -> bool:
+        return self.result.succeeded
+
+    def as_row(self) -> dict:
+        return self.result.as_row()
+
+    def __getattr__(self, name):
+        return getattr(self.result, name)
+
+
+def _capabilities(session, workspace, runtime_scope):
+    """What the validation dispatchers read, taken from the Session that owns it."""
+
+    from types import SimpleNamespace
+
+    from .targets import ItemRef, WarehouseTarget
+
+    return SimpleNamespace(
+        resolver=session.resolver(workspace),
+        spark=session.spark(workspace),
+        runtime_scope=runtime_scope,
+        sql_for=lambda target: session.sql_executor(
+            WarehouseTarget(ItemRef(target.name)), workspace=workspace
+        ),
+    )
+
+
 def primitive_kind(validation: InstalledValidation) -> str:
     """How this validation is reached, from where it is installed."""
 

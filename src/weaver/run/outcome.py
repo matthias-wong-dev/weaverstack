@@ -53,7 +53,11 @@ def settle(node, *, returned=None, raised: BaseException | None = None) -> Outco
 
     if raised is not None:
         return _raised(node, raised)
-    if not isinstance(returned, LoadResult):
+    # The contract is "it says whether it succeeded", not "it is a LoadResult".
+    # A validation returns a judgement about data rather than a count of work,
+    # and both are results a run can settle — what is refused is a primitive
+    # that returned something which answers neither.
+    if not hasattr(returned, "succeeded"):
         return _malformed(node, returned)
     return Outcome(
         status=_status(returned),
@@ -121,19 +125,20 @@ def _malformed(node, returned) -> Outcome:
     )
 
 
-def _status(result: LoadResult) -> str:
+def _status(result) -> str:
     if result.succeeded:
         return SUCCEEDED
     # A primitive that refused rows and was asked to tolerate them wrote the
     # valid ones and *returned* the refusal. That is not a failed step; a step
-    # that failed without refusing anything is.
-    return SUCCEEDED_WITH_REJECTS if result.rows_rejected else FAILED
+    # that failed without refusing anything is. A result with no notion of
+    # rejected rows — a validation's judgement — simply failed.
+    return SUCCEEDED_WITH_REJECTS if getattr(result, "rows_rejected", 0) else FAILED
 
 
-def _messages(node, result: LoadResult) -> tuple:
+def _messages(node, result) -> tuple:
     if result.succeeded:
         return ()
-    if result.rows_rejected:
+    if getattr(result, "rows_rejected", 0):
         return (
             warning(
                 PRIMITIVE_REJECTS,

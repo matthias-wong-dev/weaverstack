@@ -46,6 +46,15 @@ class RunRequest:
     fault_tolerant: bool = False
     #: Plan, resolve and report without dispatching anything.
     dry_run: bool = False
+    #: Whether resolution should require the estate to be there before running.
+    #:
+    #: A load is about to *write*, so a missing target or an uninstalled
+    #: artefact is a reason not to start — and saying which of the two it was is
+    #: the point of resolving ahead of dispatching. A validation *reads*: if
+    #: what it reads is not there, its own dispatch fails with a message about
+    #: the thing that was missing, which is more precise than anything an
+    #: inventory could say ahead of time.
+    verifies_estate: bool = True
 
     def __post_init__(self) -> None:
         from ..errors import CommandError
@@ -64,6 +73,7 @@ class RunRequest:
 
     @classmethod
     def test(cls, targets: Sequence, **policy) -> "RunRequest":
+        policy.setdefault("verifies_estate", False)
         return cls(kind=TEST, targets=tuple(targets), **policy)
 
     @property

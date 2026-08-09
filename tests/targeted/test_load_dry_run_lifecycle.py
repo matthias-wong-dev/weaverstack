@@ -31,7 +31,6 @@ from weaver.load_report import (
     TASK_SUCCEEDED,
     VALIDATED,
 )
-from weaver.load_resolution import LoadEnvironment
 from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.workspaces import LocalWorkspace
@@ -87,15 +86,6 @@ class PreparedSession:
     def read_catalogue(self):
         return self.catalogue
 
-    def environment(self, dag):
-        return LoadEnvironment(
-            resolver=self.resolver,
-            inventories=self.inventories,
-            store=Forbidden("read or write a target"),
-            spark=Forbidden("run Spark SQL"),
-            sql={"Reporting_WH": Forbidden("execute a Warehouse procedure")},
-            workspace=self.workspace,
-        )
 
     def open_log(self):
         self.log_opened.append(True)

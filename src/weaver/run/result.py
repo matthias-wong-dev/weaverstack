@@ -76,6 +76,9 @@ class RunNodeResult:
     status: str
     logical_id: str | None = None
     dispatch_location: str | None = None
+    #: What this node was for, where one graph carries more than one kind — a
+    #: Test and an Assumption are both validations and are reported apart.
+    role: str | None = None
     executed: bool = False
     messages: tuple = ()
     result: Any = None

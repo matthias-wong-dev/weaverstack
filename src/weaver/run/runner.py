@@ -138,8 +138,13 @@ class Runner:
         never from a live connection — the reading happened once, above.
         """
 
-        from .resolution import resolve
+        from .resolution import Resolved, resolve
 
+        if not self.request.verifies_estate:
+            # This run reads rather than writes, so an absent thing is its own
+            # dispatch's answer to give. Claiming absence from an inventory
+            # nobody read would be inventing a finding.
+            return Resolved(node=node, target_present=True, primitive_present=True)
         return resolve(node, self.state, can_refresh=self.can_refresh)
 
     # --- the run's own runtime ----------------------------------------------
@@ -393,6 +398,7 @@ class Runner:
             physical_target=str(node.physical_target),
             primitive_kind=node.primitive_kind,
             dispatch_location=location,
+            role=node.role,
             logical_id=str(node.logical_id) if node.logical_id else None,
             status=status,
             executed=executed,

@@ -41,6 +41,10 @@ class RunNode:
     primitive_object: object | None = None
     #: What this node is for, where one graph carries more than one kind.
     role: str | None = None
+    #: The installed thing this node runs, as the estate describes it. Opaque
+    #: to the Runner — which is the point: the Runner decides *when* a node
+    #: runs, and only dispatch needs to know what it is.
+    installed: object | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
@@ -192,6 +196,7 @@ def _test_graph(request, state) -> RunGraph:
                 logical_id=validation.logical,
                 primitive_id=validation.artefact,
                 role=validation.kind,
+                installed=validation,
             )
             for validation in selected
         ),

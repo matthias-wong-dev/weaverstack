@@ -29,6 +29,7 @@ from .resolution import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
     PYTHON_TABLE,
+    PYTHON_VALIDATION,
     WAREHOUSE_PROCEDURE,
 )
 
@@ -42,6 +43,7 @@ def dispatch_primitive(
     fault_tolerant: bool = False,
     runtime_scope=None,
     workspace=None,
+    collect=False,
 ):
     """Run one installed primitive and return what it reported."""
 
@@ -52,6 +54,10 @@ def dispatch_primitive(
         )
 
     kind = node.primitive_kind
+    if getattr(node, "installed", None) is not None:
+        # A validation reads the estate and reports a judgement about it. The
+        # Runner treats it as any other node; only the engine differs.
+        return _validation(node, session, workspace, runtime_scope, collect)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(node, session, workspace, fault_tolerant)
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
@@ -59,6 +65,27 @@ def dispatch_primitive(
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
     raise LoadError(f"{node.node_id} names unknown primitive kind {kind!r}")
+
+
+def _validation(node, session, workspace, runtime_scope, collect: bool):
+    """One installed Test or Assumption, run where it is installed.
+
+    Delegated rather than reimplemented: what a validation *means* — comparing
+    two sides, counting violations, deciding what a discrepancy is — belongs to
+    the validation runtime and is proven against real engines. What belongs here
+    is the same thing that belongs here for a load: reaching the engine through
+    the Session that owns it.
+    """
+
+    from ..test_execution import run_installed_validation
+
+    return run_installed_validation(
+        node.installed,
+        session=session,
+        workspace=workspace,
+        runtime_scope=runtime_scope,
+        collect_diagnostics=collect,
+    )
 
 
 def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):

@@ -40,7 +40,6 @@ from weaver.load import run_load
 from weaver.run import RunState
 from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED
-from weaver.load_resolution import LoadEnvironment
 from weaver.resolution import LocalResolver
 from weaver.workspaces import LocalWorkspace
 
@@ -76,15 +75,6 @@ class PreparedSession:
     def read_catalogue(self):
         return self.catalogue
 
-    def environment(self, dag):
-        return LoadEnvironment(
-            resolver=self.resolver,
-            inventories=self.inventories,
-            store=Unreached(),
-            spark=Unreached(),
-            sql={"Reporting_WH": Unreached()},
-            workspace=self.workspace,
-        )
 
     def open_log(self):
         raise AssertionError("preflight should have refused before opening a log")
@@ -321,7 +311,7 @@ def test_an_inventory_that_cannot_be_read_fails_the_run(monkeypatch, real_sessio
     _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
 
     with pytest.raises(LoadError):
-        real_session.environment(_Dag(RAW))
+        real_session.observe((RAW,))
 
 
 def test_the_failure_names_the_target_it_was_reading(monkeypatch, real_session):
@@ -330,7 +320,7 @@ def test_the_failure_names_the_target_it_was_reading(monkeypatch, real_session):
     _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
 
     with pytest.raises(LoadError) as raised:
-        real_session.environment(_Dag(RAW))
+        real_session.observe((RAW,))
 
     assert "Lakehouse/Raw_LH" in str(raised.value)
 
@@ -343,7 +333,7 @@ def test_a_deleted_item_is_diagnosed_as_a_deleted_item(monkeypatch, real_session
     _failing_reader(monkeypatch, ItemNotFoundError("no Lakehouse named 'Raw_LH'"))
 
     with pytest.raises(LoadError) as raised:
-        real_session.environment(_Dag(RAW))
+        real_session.observe((RAW,))
 
     assert "ItemNotFoundError" in str(raised.value)
     assert "no Lakehouse named 'Raw_LH'" in str(raised.value)
@@ -362,7 +352,7 @@ def test_a_credential_failure_is_not_reported_as_a_deleted_item(
     _failing_reader(monkeypatch, PermissionError("token expired"))
 
     with pytest.raises(LoadError) as raised:
-        real_session.environment(_Dag(RAW))
+        real_session.observe((RAW,))
 
     assert "PermissionError" in str(raised.value)
     assert "token expired" in str(raised.value)
@@ -376,6 +366,6 @@ def test_the_original_exception_is_kept_as_the_cause(monkeypatch, real_session):
     _failing_reader(monkeypatch, original)
 
     with pytest.raises(LoadError) as raised:
-        real_session.environment(_Dag(RAW))
+        real_session.observe((RAW,))
 
     assert raised.value.__cause__ is original

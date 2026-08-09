@@ -65,7 +65,6 @@ from .load_report import (
     SUCCEEDED_WITH_REJECTS,
     final_status,
 )
-from .load_resolution import LoadEnvironment
 from .targets import (
     DeltaTarget,
     ItemRef,
@@ -533,33 +532,6 @@ class LoadSession:
             if inventory is not None:
                 observed[str(target)] = inventory
         return observed
-
-    def environment(self, dag: LoadDag) -> LoadEnvironment:
-        """Runtime services plus the physical state every planned target is in.
-
-        The reading happens once, here, and the whole of resolution then runs
-        against frozen state — the same discipline a build follows, and for the
-        same reason: a decision made against state that is still moving is a
-        decision nobody can reproduce.
-
-        Only the targets the *graph* touches, because only they have anything to
-        be looked up in them.
-        """
-
-        targets = tuple(dict.fromkeys(node.physical_target for node in dag.nodes))
-        inventories = {}
-        for target in targets:
-            observed = self._inventory(target)
-            if observed is not None:
-                inventories[str(target)] = observed
-        return LoadEnvironment(
-            resolver=self.resolver,
-            inventories=inventories,
-            store=self.store,
-            spark=self.spark,
-            sql=self._sql,
-            workspace=self.workspace,
-        )
 
     def open_log(self, task_type: str = TASK_TYPE):
         """A task log for this run, of whichever kind of task it is.

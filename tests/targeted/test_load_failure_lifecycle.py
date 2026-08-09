@@ -46,7 +46,6 @@ from weaver.load_report import (
     LoadResult,
 )
 from weaver.load_plan import PhysicalTargetRef
-from weaver.load_resolution import LoadEnvironment
 from weaver.locations import Location
 from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
@@ -100,15 +99,6 @@ class PreparedSession:
     def read_catalogue(self):
         return self.catalogue
 
-    def environment(self, dag):
-        return LoadEnvironment(
-            resolver=self.resolver,
-            inventories=self.inventories,
-            store=self.store,
-            spark=Unused(),
-            sql={"Reporting_WH": Unused()},
-            workspace=self.workspace,
-        )
 
     def open_log(self):
         return open_task_log(
