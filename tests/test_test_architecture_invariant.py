@@ -13,15 +13,36 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 CLAIMS = frozenset(
-    {"declaration", "render", "binding", "primitive", "lifecycle", "invariant"}
+    {
+        "declaration",
+        "representation",
+        "boundary",
+        "install",
+        "primitive",
+        "cycle",
+        "invariant",
+        "journey",
+    }
 )
+
+#: The claims this taxonomy replaces, permitted only for the closed list of
+#: modules that already carried them. ``lifecycle`` became ``cycle`` because it
+#: was used for everything from a state machine to an end-to-end run; ``render``
+#: and ``binding`` are both ``representation`` unless physical access is the
+#: claim, in which case they are ``boundary``. Nothing new may use these, and the
+#: refactor that introduced the replacements is not finished while any remain.
+RETIRING_CLAIMS = frozenset({"render", "binding", "lifecycle"})
+
 MODULE_NAME = re.compile(
-    rf"^test_.+_(?P<claim>{'|'.join(sorted(CLAIMS))})\.py$"
+    rf"^test_.+_(?P<claim>{'|'.join(sorted(CLAIMS | RETIRING_CLAIMS))})\.py$"
+)
+RETIRING_NAME = re.compile(
+    rf"^test_.+_(?P<claim>{'|'.join(sorted(RETIRING_CLAIMS))})\.py$"
 )
 
 
 def _classified(claim: str, paths: str) -> dict[str, str]:
-    assert claim in CLAIMS
+    assert claim in CLAIMS | RETIRING_CLAIMS
     return {path: claim for path in paths.split()}
 
 
@@ -108,7 +129,6 @@ LEGACY_ROOT_CLAIMS = {
     **_classified(
         "lifecycle",
         """
-        tests/test_environment_install.py
         tests/test_item_build_workflow.py
         tests/test_push.py
         tests/test_unbind.py
@@ -118,7 +138,6 @@ LEGACY_ROOT_CLAIMS = {
     **_classified(
         "invariant",
         """
-        tests/test_core_boundary.py
         tests/test_neutrality.py
         tests/test_public_api.py
         """,
@@ -189,13 +208,10 @@ LEGACY_NESTED_CLAIMS = {
     **_classified(
         "lifecycle",
         """
-        tests/fabric/test_bundle_can_install.py
         tests/fabric/test_fabric_resources.py
-        tests/fabric/test_lakehouse_journey.py
         tests/spark/test_catalogue_builtin_build.py
         tests/spark/test_catalogue_initialise.py
         tests/spark/test_item_catalogue_build.py
-        tests/spark/test_local_lakehouse_journey.py
         tests/spark/test_mixed_estate.py
         tests/spark/test_multi_destination.py
         tests/targeted/test_build_workflow.py
@@ -215,6 +231,60 @@ LEGACY_NESTED_CLAIMS = {
 }
 
 GRANDFATHERED = LEGACY_ROOT_CLAIMS | LEGACY_NESTED_CLAIMS
+
+# Modules already named for a claim the taxonomy is retiring. Closed, so a new
+# module cannot join them, and shrinking: each rename removes an entry, and the
+# refactor is finished when this is empty.
+RETIRING = {
+    **_classified(
+        "render",
+        """
+        tests/targeted/test_load_render.py
+        tests/targeted/test_spark_sql_module_render.py
+        tests/targeted/test_spark_sql_validation_render.py
+        tests/targeted/test_tsql_validation_render.py
+        tests/test_catalogue_render.py
+        """,
+    ),
+    **_classified(
+        "binding",
+        """
+        tests/fabric/test_warehouse_inventory_binding.py
+        tests/targeted/test_load_artefacts_binding.py
+        tests/targeted/test_load_dag_binding.py
+        tests/targeted/test_load_execution_binding.py
+        tests/targeted/test_load_plan_binding.py
+        tests/targeted/test_load_resolution_binding.py
+        tests/targeted/test_python_runtime_isolation_binding.py
+        tests/targeted/test_validation_artefacts_binding.py
+        tests/test_build_context_binding.py
+        tests/test_cli_load_binding.py
+        tests/test_cli_test_binding.py
+        tests/test_validation_estate_binding.py
+        tests/test_validation_orchestration_binding.py
+        """,
+    ),
+    **_classified(
+        "lifecycle",
+        """
+        tests/fabric/test_cli_load_transport_lifecycle.py
+        tests/fabric/test_load_orchestration_lifecycle.py
+        tests/spark/test_fixed_point_lifecycle.py
+        tests/spark/test_local_lifecycle.py
+        tests/spark/test_local_load_orchestration_lifecycle.py
+        tests/spark/test_validation_catalogue_lifecycle.py
+        tests/spark/test_validation_orchestration_lifecycle.py
+        tests/targeted/test_artefact_lifecycle.py
+        tests/targeted/test_build_fixed_point_lifecycle.py
+        tests/targeted/test_builtin_catalogue_lifecycle.py
+        tests/targeted/test_load_dry_run_lifecycle.py
+        tests/targeted/test_load_failure_lifecycle.py
+        tests/targeted/test_load_preflight_lifecycle.py
+        tests/targeted/test_task_logging_lifecycle.py
+        tests/test_folder_staging_lifecycle.py
+        """,
+    ),
+}
 
 
 def _test_modules() -> set[str]:
@@ -252,6 +322,21 @@ def test_every_grandfathered_module_exists_and_still_needs_its_exception():
         "these modules now name their claim; remove their grandfather entries: "
         f"{sorted(renamed_but_not_removed)}"
     )
+
+
+def test_no_new_module_takes_a_claim_the_taxonomy_is_retiring():
+    named = {
+        path for path in _test_modules() if RETIRING_NAME.fullmatch(Path(path).name)
+    }
+    joined = named - set(RETIRING)
+    renamed = set(RETIRING) - named
+
+    assert not joined, (
+        "these claims are being retired — lifecycle is now cycle, and render "
+        "and binding are representation or boundary depending on whether the "
+        f"claim involves physical access: {sorted(joined)}"
+    )
+    assert not renamed, f"remove stale retiring entries: {sorted(renamed)}"
 
 
 def test_every_legacy_root_module_has_a_decided_claim():
