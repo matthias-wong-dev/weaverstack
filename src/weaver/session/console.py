@@ -426,16 +426,31 @@ class ConsoleScope(WorkspaceScope):
     # --- Livy ---------------------------------------------------------------
 
     def _acquire_livy(self):
+        """A Livy session that is *running*, not merely constructed.
+
+        ``for_workspace`` builds the object; ``start`` is what asks Fabric for
+        the session, waits for it to reach idle and runs the bootstrap. A
+        resource that returned the unstarted object would look acquired to
+        everything above it — the state would say ready, a second caller would
+        share it, and the first statement would fail with "the Livy session has
+        not been started" while no session ever appeared in the workspace.
+
+        Acquiring means the expensive part is over. That is the whole contract a
+        waiting caller is relying on.
+        """
+
         from ..fabric import LivySession
 
         if self.auth is not None:
             self.auth.get()
-        return LivySession.for_workspace(
+        session = LivySession.for_workspace(
             self.workspace,
             resolver=self.resolver,
             require_weaver=self.require_weaver,
             token=self.token_provider(),
         )
+        session.start()
+        return session
 
     def livy_run(self, source: str, *, name: str, timeout: float | None = None):
         """Submit one statement to this scope's Livy session and return its payload.

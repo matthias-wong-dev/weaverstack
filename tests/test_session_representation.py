@@ -230,3 +230,44 @@ def test_closing_twice_is_not_an_error():
     session = ConsoleSession()
     session.close()
     session.close()
+
+
+# --- an acquired resource is a running one -----------------------------------
+
+
+def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
+    """Acquiring means the expensive part is over.
+
+    ``for_workspace`` builds the object; ``start`` is what asks Fabric for the
+    session. A resource that returned the unstarted object looked acquired to
+    everything above it — ready state, shared by the next caller — and the first
+    statement failed with "the Livy session has not been started" while no
+    session had ever appeared in the workspace.
+    """
+
+    class FakeLivy:
+        def __init__(self) -> None:
+            self.started = False
+
+        def start(self) -> None:
+            self.started = True
+
+        def run(self, source, **kwargs):
+            assert self.started, "a statement reached an unstarted session"
+
+        def close(self) -> None:
+            pass
+
+    built = FakeLivy()
+    monkeypatch.setattr(
+        "weaver.fabric.LivySession.for_workspace",
+        classmethod(lambda cls, *args, **kwargs: built),
+    )
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "_acquire_token_provider", lambda: (lambda: "t"))
+        monkeypatch.setattr(type(scope), "resolver", property(lambda self: object()))
+
+        assert scope.livy.get() is built
+        assert built.started, "the resource handed out a session that was never started"

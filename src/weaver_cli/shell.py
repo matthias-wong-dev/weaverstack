@@ -246,7 +246,7 @@ def _banner(workspace) -> None:
     if workspace is None:
         print("Weaver · no default workspace")
         print("Name one per command with --workspace.")
-        print("\nCommands are the ordinary CLI commands. `exit` to leave.\n")
+        print("\nEnter commands: wipe, build, load, test to operate. `exit` to leave.\n")
         return
     print(f"Weaver · {workspace.workspace}")
 
@@ -264,7 +264,7 @@ def _report_warm_up(warm) -> None:
         print(f"Starting in the background: {', '.join(warm.started)}")
     for resource, reason in warm.skipped:
         print(f"Not starting: {resource} — {reason}")
-    print("\nCommands are the ordinary CLI commands. `exit` to leave.\n")
+    print("\nEnter commands: wipe, build, load, test to operate. `exit` to leave.\n")
 
 
 __all__ = ["run_shell"]
