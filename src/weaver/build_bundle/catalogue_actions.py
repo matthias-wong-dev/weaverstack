@@ -23,7 +23,7 @@ from .models import (
     PUBLISH_CATALOGUE,
     PUBLISH_REGISTRY,
     REFRESH_SQL_ENDPOINT,
-    BuildAction,
+    InstallAction,
     BuildBatch,
 )
 from .payloads import sha256_hex
@@ -122,7 +122,7 @@ def _stage(
         return None
     content = _batch_payload(statements)
     filename = f"{slug}.spark-sql-batch.json"
-    action = BuildAction(
+    action = InstallAction(
         id=slug,
         kind=kind,
         resource_node_id=None,
@@ -303,7 +303,7 @@ def _control_refresh_stage(control_target) -> PlannedStage:
                 id="refresh-control-endpoint",
                 target_id=control_target.id,
                 actions=(
-                    BuildAction(
+                    InstallAction(
                         id="refresh-sql-endpoint-control",
                         kind=REFRESH_SQL_ENDPOINT,
                         resource_node_id=None,

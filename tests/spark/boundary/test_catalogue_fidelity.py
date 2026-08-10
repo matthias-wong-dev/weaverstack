@@ -22,7 +22,7 @@ import json
 import pytest
 
 from weaver.targets import ItemRef
-from weaver.build_bundle import execute_action
+from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.catalogue_actions import render_catalogue_after_build
 from weaver.catalogue.state import Catalogue, read_catalogue_state
 from weaver.catalogue.tables import REGISTRY
@@ -35,8 +35,7 @@ pytestmark = pytest.mark.spark
 CONTROL = WeaverItemId.parse("Lakehouse/_weaver")
 
 
-@pytest.fixture
-def catalogue(lakehouses, spark):
+def _initialised(lakehouses, spark):
     """A real catalogue, installed through the ordinary build path.
 
     Not hand-built tables: the point is to read back what an *installation*
@@ -53,6 +52,27 @@ def catalogue(lakehouses, spark):
     return SparkCatalogue(
         spark, lakehouses.resolver.spark_destination(lakehouses.weaver)
     )
+
+
+@pytest.fixture(scope="module")
+def catalogue(shared_lakehouses, spark, shared_weaver_catalogue):
+    """One freshly initialised catalogue, for the claims that only read it.
+
+    Takes ``shared_weaver_catalogue`` for its *teardown*. A local Lakehouse gets
+    a new directory per module but keeps its Spark schema name, and the
+    metastore is one namespace for the whole session — so a module that
+    initialises a catalogue and drops nothing leaves tables standing that the
+    next module's build tries to create.
+    """
+
+    return _initialised(shared_lakehouses, spark)
+
+
+@pytest.fixture
+def writable(lakehouses, spark):
+    """A catalogue of its own, for the claims that publish rows into one."""
+
+    return _initialised(lakehouses, spark)
 
 
 def read(catalogue, *items) -> Catalogue:
@@ -129,7 +149,7 @@ def test_reading_an_item_with_no_rows_gives_an_empty_scope(catalogue):
 
 
 def test_rendered_publication_dml_writes_rows_a_read_can_see(
-    catalogue, lakehouses, spark, tmp_path
+    writable, lakehouses, spark, tmp_path
 ):
     """The other half: pure tests render these statements, so they must run.
 
@@ -171,21 +191,21 @@ def test_rendered_publication_dml_writes_rows_a_read_can_see(
     for stage in stages:
         for batch in stage.batches:
             for action in batch.actions:
-                result = execute_action(
+                result = execute_install_action(
                     action,
                     stage.payloads.get(action.payload) if action.payload else None,
                     context=context,
                 )
                 assert result.status in {"succeeded", "skipped"}, result.error_message
 
-    seen = read(catalogue, item)
+    seen = read(writable, item)
 
     assert document_id("DWG.Customer") in seen.registered
     assert seen.registered[document_id("DWG.Customer")].object_type == "table"
 
 
 def test_a_published_signature_survives_the_round_trip(
-    catalogue, lakehouses, spark, tmp_path
+    writable, lakehouses, spark, tmp_path
 ):
     """The one field incremental selection compares, end to end.
 
@@ -224,20 +244,20 @@ def test_a_published_signature_survives_the_round_trip(
     for stage in stages:
         for batch in stage.batches:
             for action in batch.actions:
-                execute_action(
+                execute_install_action(
                     action,
                     stage.payloads.get(action.payload) if action.payload else None,
                     context=context,
                 )
 
-    seen = read(catalogue, item)
+    seen = read(writable, item)
     declared = declared_signatures(repository, {identity})[identity]
 
     assert seen.registered[identity].signature == declared
 
 
 def test_an_epoch_token_is_resolved_before_it_reaches_the_engine(
-    catalogue, lakehouses, spark, tmp_path
+    writable, lakehouses, spark, tmp_path
 ):
     """`{{epoch}}` is substituted by the installer, not left for Spark.
 
@@ -276,7 +296,7 @@ def test_an_epoch_token_is_resolved_before_it_reaches_the_engine(
 
 
 def test_load_artefacts_publish_and_read_back_as_first_class_objects(
-    catalogue, lakehouses, spark, tmp_path
+    writable, lakehouses, spark, tmp_path
 ):
     """A load artefact is a Registry row like any other, all the way through.
 
@@ -328,14 +348,14 @@ def test_load_artefacts_publish_and_read_back_as_first_class_objects(
     for stage in stages:
         for batch in stage.batches:
             for action in batch.actions:
-                result = execute_action(
+                result = execute_install_action(
                     action,
                     stage.payloads.get(action.payload) if action.payload else None,
                     context=context,
                 )
                 assert result.status in {"succeeded", "skipped"}, result.error_message
 
-    seen = read(catalogue, item)
+    seen = read(writable, item)
 
     for artefact in artefacts:
         assert artefact.identity in seen.registered, artefact.identity

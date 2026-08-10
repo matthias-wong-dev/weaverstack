@@ -7,7 +7,7 @@ from typing import Any
 
 from ...errors import InstallError
 from ...spark.tokens import substitute_epoch
-from ..models import BuildAction
+from ..models import InstallAction
 from .base import InstallationContext
 from .spark_case import exact_identifier_case
 
@@ -17,7 +17,7 @@ class SparkSqlBatchExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any]:

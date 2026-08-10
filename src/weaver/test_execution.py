@@ -44,52 +44,26 @@ WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_VALIDATION = "python_validation"
 
 
-def execute_validations(
-    validations: Sequence[InstalledValidation],
-    *,
-    environment: Any,
-    collect_diagnostics: bool = False,
-    dry_run: bool = False,
-) -> tuple[ValidationNodeReport, ...]:
-    """Run each validation in turn, and report every one of them."""
-
-    return tuple(
-        execute_validation(
-            validation,
-            environment=environment,
-            collect_diagnostics=collect_diagnostics,
-            dry_run=dry_run,
-        )
-        for validation in validations
-    )
-
-
-def execute_validation(
+def run_installed_validation(
     validation: InstalledValidation,
     *,
-    environment: Any,
+    session,
+    workspace=None,
+    runtime_scope=None,
     collect_diagnostics: bool = False,
-    dry_run: bool = False,
-) -> ValidationNodeReport:
-    """One validation, dispatched and normalised into a node report."""
+):
+    """One installed validation, run through the Session that owns the engines.
 
-    primitive = primitive_kind(validation)
-    started = _now()
-    common = {
-        "logical_id": str(validation.logical),
-        "kind": validation.kind,
-        "physical_target": str(validation.target),
-        "primitive_kind": primitive,
-        "dispatch_location": str(validation.artefact),
-        "started_at": started,
-    }
+    Returns the result the validation produced, with any diagnostic rows
+    attached to it — a run's *status* is the Runner's to decide, from a result,
+    exactly as it is for a load. What this owes the caller is the judgement the
+    validation made, not an opinion about what that means for the run.
+    """
 
-    if dry_run:
-        return ValidationNodeReport(status=PLANNED, **common, finished_at=_now())
-
+    environment = _capabilities(session, workspace, runtime_scope)
     try:
         validation.require_installed()
-        if primitive == WAREHOUSE_PROCEDURE:
+        if primitive_kind(validation) == WAREHOUSE_PROCEDURE:
             result, diagnostics = _dispatch_warehouse(
                 validation, environment, collect_diagnostics
             )
@@ -97,29 +71,60 @@ def execute_validation(
             result, diagnostics = _dispatch_python(
                 validation, environment, collect_diagnostics
             )
-    except Exception as exc:  # noqa: BLE001 - any failure is the run's evidence
+    except Exception as exc:  # noqa: BLE001 - a check that could not run is evidence
+        # Raised so the run knows nothing was evaluated, and carrying a result
+        # of the *validation's* own kind so its reader gets the counts that
+        # belong to it — a load result here would offer counts it does not have.
         message = f"{type(exc).__name__}: {exc}"
         failed = (
             AssumptionResult.failed_to_run(message)
             if validation.kind == ASSUMPTION
             else TestResult.failed_to_run(message)
         )
-        return ValidationNodeReport(
-            status=INVALID,
-            executed=True,
-            messages=(message,),
-            result=failed,
-            finished_at=_now(),
-            **common,
-        )
+        raise ValidationError(message, result=failed) from exc
+    # Beside the result rather than inside it: diagnostic rows carry whatever a
+    # check selected, and a durable record of them would put data into the
+    # estate's own evidence.
+    return _WithDiagnostics(result, diagnostics)
 
-    return ValidationNodeReport(
-        status=PASSED if result.succeeded else FAILED,
-        executed=True,
-        result=result,
-        diagnostics=diagnostics,
-        finished_at=_now(),
-        **common,
+
+class _WithDiagnostics:
+    """A validation result, carrying the rows a caller asked to see.
+
+    A wrapper rather than a field on the result: the result types are the
+    validation runtime's, shared with the primitives that produce them, and
+    diagnostics are a property of *this run* having been asked for them.
+    """
+
+    def __init__(self, result, diagnostics) -> None:
+        self.result = result
+        self.diagnostics = diagnostics
+
+    @property
+    def succeeded(self) -> bool:
+        return self.result.succeeded
+
+    def as_row(self) -> dict:
+        return self.result.as_row()
+
+    def __getattr__(self, name):
+        return getattr(self.result, name)
+
+
+def _capabilities(session, workspace, runtime_scope):
+    """What the validation dispatchers read, taken from the Session that owns it."""
+
+    from types import SimpleNamespace
+
+    from .targets import ItemRef, WarehouseTarget
+
+    return SimpleNamespace(
+        resolver=session.resolver(workspace),
+        spark=session.spark(workspace),
+        runtime_scope=runtime_scope,
+        sql_for=lambda target: session.sql_executor(
+            WarehouseTarget(ItemRef(target.name)), workspace=workspace
+        ),
     )
 
 
@@ -299,7 +304,6 @@ def _now() -> str:
 __all__ = [
     "PYTHON_VALIDATION",
     "WAREHOUSE_PROCEDURE",
-    "execute_validation",
-    "execute_validations",
+    "run_installed_validation",
     "primitive_kind",
 ]

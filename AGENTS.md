@@ -237,6 +237,34 @@ These become enforceable as the corresponding code lands:
 - **Certification is per object.** Before a rebuild, the selected objects and
   their descendants stop being certified; each returns only after it builds.
 
+## Replacing an abstraction removes the one it replaces
+
+When a refactor introduces a first-class Weaver abstraction, the abstraction it
+supersedes is absorbed or deleted **in the same refactor**. Do not leave parallel
+environments, plans, runners, coordinators or execution paths standing beside
+their replacements unless an explicit, temporary migration boundary requires it —
+and then only until that migration lands.
+
+The refactor that establishes the four doers — `Session`, `Builder`, `Installer`,
+`Runner` — is bound by this rule for:
+
+```text
+InstallationEnvironment
+LoadEnvironment
+LoadPlan as the runtime owner
+ResolvedLoadPlan
+execute_load_plan orchestration
+separate load/test orchestration engines
+old/new action terminology
+operation-local resolver/resource ownership
+```
+
+Temporary compatibility while intermediate commits land is fine. Obsolete
+architecture left layered underneath the new architecture is not.
+
+See [the runtime architecture and test-factor
+plan](design/todo/runtime-architecture-and-test-refactor-plan.md).
+
 ## Environment neutrality
 
 Weaverstack must contain no defaults for product, workspace, Lakehouse,

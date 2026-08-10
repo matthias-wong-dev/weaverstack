@@ -49,10 +49,9 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     function-scoped fixture and the module-scoped estate."""
 
     from weaver.build_bundle import (
-        InstallationEnvironment,
+        Installer,
         LakehouseBinding,
         effective_item_bindings,
-        install_bundle,
         load_bundle,
     )
     from weaver.build_bundle.workflow import (
@@ -62,8 +61,16 @@ def _local_build_context(root, spark, weaver_repo_fixture):
     from weaver.build_bundle.planner import generate_item_build_bundle
     from weaver.declaration import parse_item_repository
 
+    from weaver.session import ConsoleSession
+
     workspace, weaver, target, resolver, store = _local_lakehouse_setup(
         root, extra=weaver_repo_fixture.extra_lakehouses
+    )
+    # One Session around the resources this context already holds: the module's
+    # Spark, its resolver and its store are given, so nothing is acquired here
+    # and nothing here closes them.
+    session = ConsoleSession(
+        workspace=workspace, spark=spark, store=store, resolver=resolver
     )
     destination = resolver.spark_destination(target)
     weaver_destination = resolver.spark_destination(weaver)
@@ -94,17 +101,11 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             ),
             weaver_lakehouse=weaver.name,
         )
-        environment = InstallationEnvironment(
-            store=store,
-            resolver=resolver,
-            spark=spark,
-            workspace=workspace,
-        )
-        inventories = read_target_inventories(bindings, environment=environment)
+        inventories = read_target_inventories(bindings, session=session)
         reconciled = read_reconciled_catalogue(
             bindings,
             inventories=inventories,
-            environment=environment,
+            session=session,
             repository=repository,
         )
         return generate_item_build_bundle(
@@ -119,10 +120,7 @@ def _local_build_context(root, spark, weaver_repo_fixture):
         )
 
     def install(bundle) -> InstallOutcome:
-        report = install_bundle(
-            load_bundle(bundle.location, store=store),
-            environment=InstallationEnvironment(store=store, resolver=resolver, spark=spark),
-        )
+        report = Installer(session).install(load_bundle(bundle.location, store=store))
         return _outcome_from_report(report)
 
     def query(sql: str) -> list:
@@ -191,6 +189,9 @@ def _local_build_context(root, spark, weaver_repo_fixture):
             destinations=named_destinations,
         )
     finally:
+        # The Session closes only what it opened, which here is nothing — the
+        # Spark session belongs to the module fixture above and outlives this.
+        session.close()
         for schema in _LOCAL_SCHEMAS:
             for place in (destination, weaver_destination, *named_destinations.values()):
                 spark.sql(

@@ -20,7 +20,6 @@ without changing bundle semantics.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -36,7 +35,7 @@ from .executors.base import (
     ResolvedTarget,
     SkippedExecution,
 )
-from .models import BuildAction, BuildBatch, BuildPlan, BuildSequence
+from .models import BuildBatch, BuildSequence, InstallAction
 from .report import (
     FAILED,
     SKIPPED,
@@ -50,26 +49,64 @@ from .targets import WAREHOUSE_TARGET, BoundTarget
 REPORT_FILENAME = "install-report.yml"
 
 
-@dataclass
-class InstallationEnvironment:
-    """Runtime services the installer executes against — no planning inputs.
+class Installer:
+    """Execute an already-decided bundle against a Session.
 
-    ``spark`` is optional so a Folder-only bundle needs no session; a bundle
-    with Spark work supplies one. ``sql`` is likewise optional: a Warehouse
-    install acquires it **Fabric-natively** from the session identity, and only a
-    desktop caller crossing into Fabric injects ``desktop_sql_executor``
-    explicitly (``workspace`` is then unnecessary). ``executors`` defaults to the
-    built-in registry.
+    One of Weaver's four doers, and the one with no opinions. It validates the
+    bundle, resolves its targets, walks the sequences as barriers and records one
+    result per action. It never reopens the repository, resolves a dependency,
+    chooses a target, inspects the estate to check whether the Builder was right,
+    or replans anything: every such decision is already in the bundle, and an
+    installer that could second-guess it would make "who decided?" unanswerable.
+
+    Its runtime services come from the Session — the Spark it runs in, the store
+    it reads payloads from, the resolver that turns a target into paths, the
+    connection each Warehouse is reached over. It closes none of them, because it
+    opened none of them.
+
+    .. code-block:: python
+
+        report = Installer(session).install(bundle)
+
+    This runs where the data is. A console addressing Fabric crosses first, once,
+    with the whole bundle; the Installer on the far side is this same object.
     """
 
-    store: Store
-    resolver: Any
-    spark: Any = None
-    sql: Any = None
-    workspace: Any = None
-    executors: dict[str, ActionExecutor] = field(default_factory=default_executors)
-    #: Set when this environment opened its own Fabric-native SQL, so it closes it.
-    _owned_sql: Any = field(default=None, init=False, repr=False)
+    def __init__(
+        self,
+        session,
+        *,
+        workspace: Any = None,
+        executors: dict[str, ActionExecutor] | None = None,
+    ) -> None:
+        self.session = session
+        self.workspace = workspace if workspace is not None else session.workspace
+        self.executors = default_executors() if executors is None else executors
+
+    # --- what an executor is given -----------------------------------------
+
+    @property
+    def store(self) -> Store:
+        return self.session.store(self.workspace)
+
+    @property
+    def resolver(self) -> Any:
+        return self.session.resolver(self.workspace)
+
+    @property
+    def spark(self) -> Any:
+        return self.session.spark(self.workspace)
+
+    def sql_for(self, bound: BoundTarget) -> Any:
+        """The Warehouse connection for a batch, from the Session that owns it."""
+
+        if bound.kind != WAREHOUSE_TARGET:
+            return None
+        from ..targets import WarehouseTarget
+
+        return self.session.sql_executor(
+            WarehouseTarget(ItemRef(bound.item_id)), workspace=self.workspace
+        )
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
         # The resolver, store and Spark already define the environment the
@@ -101,31 +138,54 @@ class InstallationEnvironment:
             return None
         return resolve(item)
 
-    def sql_for(self, bound: BoundTarget) -> Any:
-        """The SQL capability for a Warehouse batch — injected, or Fabric-native.
+    # --- installation -------------------------------------------------------
 
-        Weaver runs in Fabric, so an install against a Warehouse authenticates
-        through the session's own identity rather than a desktop connection. The
-        executor is opened once per installation and closed with it.
-        """
+    def install(self, bundle: BuildBundle | Location) -> InstallationReport:
+        """Validate and run a bundle, returning a complete report."""
 
-        if self.sql is not None:
-            return self.sql
-        if bound.kind != WAREHOUSE_TARGET:
-            return None
-        if self._owned_sql is None:
-            from ..fabric.sql import fabric_sql_executor
-            from ..targets import WarehouseTarget
-
-            self._owned_sql = fabric_sql_executor(
-                WarehouseTarget(warehouse=ItemRef(bound.item_id)), self.workspace
+        if isinstance(bundle, Location):
+            bundle = load_bundle(bundle, store=self.store)
+        else:
+            # Preflight even a pre-loaded bundle: the installer trusts nothing
+            # it has not just checked.
+            validate_bundle(
+                bundle.location, bundle.plan, store=bundle.store or self.store
             )
-        return self._owned_sql
 
-    def close(self) -> None:
-        if self._owned_sql is not None and hasattr(self._owned_sql, "close"):
-            self._owned_sql.close()
-            self._owned_sql = None
+        plan = bundle.plan
+        resolved = {target.id: self.resolve_target(target) for target in plan.targets}
+
+        started = _now()
+        # One instant for the whole installation, taken once and handed to every
+        # batch. Registry rows are published across several statements — one pair
+        # per item — and rows written by one build have to be indistinguishable in
+        # age, or an alias and the source it points at could order against each
+        # other merely for having been written a few milliseconds apart.
+        epoch = _epoch(started)
+        sequence_results: list[SequenceResult] = []
+        stop = False
+
+        for sequence in plan.sequences:
+            if stop:
+                sequence_results.append(_skipped_sequence(sequence))
+                continue
+            result = _run_sequence(sequence, resolved, bundle, self, epoch=epoch)
+            sequence_results.append(result)
+            if result.status == FAILED:
+                stop = True
+
+        finished = _now()
+        report = InstallationReport(
+            bundle_id=plan.bundle_id,
+            status=FAILED if stop else SUCCEEDED,
+            started_at=started,
+            finished_at=finished,
+            sequences=tuple(sequence_results),
+        )
+        (bundle.store or self.store).write(
+            bundle.location.join(REPORT_FILENAME), report.to_yaml().encode("utf-8")
+        )
+        return report
 
 
 def _now() -> datetime:
@@ -143,69 +203,11 @@ def _epoch(started: datetime) -> str:
     return started.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
-def install_bundle(
-    bundle: BuildBundle | Location,
-    *,
-    environment: InstallationEnvironment,
-) -> InstallationReport:
-    """Validate and run a bundle, returning a complete report."""
-
-    if isinstance(bundle, Location):
-        bundle = load_bundle(bundle, store=environment.store)
-    else:
-        # Preflight even a pre-loaded bundle: the installer trusts nothing it has
-        # not just checked.
-        validate_bundle(
-            bundle.location,
-            bundle.plan,
-            store=bundle.store or environment.store,
-        )
-
-    plan = bundle.plan
-    resolved = {target.id: environment.resolve_target(target) for target in plan.targets}
-
-    started = _now()
-    # One instant for the whole installation, taken once and handed to every
-    # batch. Registry rows are published across several statements — one pair per
-    # item — and rows written by one build have to be indistinguishable in age,
-    # or an alias and the source it points at could order against each other
-    # merely for having been written a few milliseconds apart.
-    epoch = _epoch(started)
-    sequence_results: list[SequenceResult] = []
-    stop = False
-
-    try:
-        for sequence in plan.sequences:
-            if stop:
-                sequence_results.append(_skipped_sequence(sequence))
-                continue
-            result = _run_sequence(sequence, resolved, bundle, environment, epoch=epoch)
-            sequence_results.append(result)
-            if result.status == FAILED:
-                stop = True
-    finally:
-        # Release any SQL connection this installation opened for itself.
-        environment.close()
-
-    finished = _now()
-    report = InstallationReport(
-        bundle_id=plan.bundle_id,
-        status=FAILED if stop else SUCCEEDED,
-        started_at=started,
-        finished_at=finished,
-        sequences=tuple(sequence_results),
-    )
-    (bundle.store or environment.store).write(
-        bundle.location.join(REPORT_FILENAME), report.to_yaml().encode("utf-8")
-    )
-    return report
-
-
 def _run_sequence(
     sequence: BuildSequence,
     resolved: dict[str, ResolvedTarget],
     bundle: BuildBundle,
-    environment: InstallationEnvironment,
+    installer: "Installer",
     *,
     epoch: str | None = None,
 ) -> SequenceResult:
@@ -215,11 +217,11 @@ def _run_sequence(
     for batch in sequence.batches:
         target = resolved[batch.target_id]
         context = InstallationContext(
-            spark=environment.spark,
-            resolver=environment.resolver,
-            store=environment.store,
+            spark=installer.spark,
+            resolver=installer.resolver,
+            store=installer.store,
             target=target,
-            sql=environment.sql_for(target.bound),
+            sql=installer.sql_for(target.bound),
             targets=resolved,
             epoch=epoch,
         )
@@ -227,7 +229,7 @@ def _run_sequence(
             if failed:
                 action_results.append(_skipped_action(action, batch))
                 continue
-            result = _run_action(action, batch, context, bundle, environment)
+            result = _run_action(action, batch, context, bundle, installer)
             action_results.append(result)
             if result.status == FAILED:
                 failed = True
@@ -243,8 +245,8 @@ def _run_sequence(
     )
 
 
-def execute_action(
-    action: BuildAction,
+def execute_install_action(
+    action: InstallAction,
     payload: bytes | None = None,
     *,
     context: InstallationContext,
@@ -278,16 +280,16 @@ def execute_action(
 
 
 def _run_action(
-    action: BuildAction,
+    action: InstallAction,
     batch: BuildBatch,
     context: InstallationContext,
     bundle: BuildBundle,
-    environment: InstallationEnvironment,
+    installer: "Installer",
 ) -> ActionResult:
     def load_payload() -> bytes | None:
         if action.payload is None:
             return None
-        return (bundle.store or environment.store).read(
+        return (bundle.store or installer.store).read(
             bundle.location.join(*action.payload.split("/"))
         )
 
@@ -296,12 +298,12 @@ def _run_action(
         load_payload,
         context=context,
         target_id=batch.target_id,
-        executors=environment.executors,
+        executors=installer.executors,
     )
 
 
 def _execute(
-    action: BuildAction,
+    action: InstallAction,
     load_payload,
     *,
     context: InstallationContext,
@@ -343,7 +345,7 @@ def _execute(
 
 
 def _failed(
-    action: BuildAction, target_id: str, started: datetime, exc: Exception
+    action: InstallAction, target_id: str, started: datetime, exc: Exception
 ) -> ActionResult:
     finished = _now()
     return ActionResult(
@@ -360,7 +362,7 @@ def _failed(
     )
 
 
-def _skipped_action(action: BuildAction, batch: BuildBatch) -> ActionResult:
+def _skipped_action(action: InstallAction, batch: BuildBatch) -> ActionResult:
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,

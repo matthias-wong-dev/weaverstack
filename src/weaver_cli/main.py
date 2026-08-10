@@ -38,6 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
     doctor.set_defaults(handler=handle_doctor)
 
+    shell = subcommands.add_parser(
+        "session",
+        help="one persistent console session running many commands",
+    )
+    _add_workspace_args(shell)
+    shell.set_defaults(handler=handle_session)
+
     build = subcommands.add_parser(
         "build", help="build bound logical items from an explicit repository"
     )
@@ -429,20 +436,78 @@ def _desktop_store(workspace):
 
 
 def _resolve_workspace(args: argparse.Namespace):
+    """The workspace this command line means.
+
+    Inside ``weaver session`` a command that names no workspace inherits the one
+    the session was started with, and flags it *does* give are applied on top —
+    so ``build --weaver-lakehouse Other`` overrides the control Lakehouse
+    without having to restate the workspace. A command naming its own
+    ``--workspace`` addresses that one instead, in its own scope.
+
+    Inheritance is only ever from the session's *starting* workspace. A default
+    accumulated from whichever command ran last would mean the next command
+    silently borrowed another workspace's Environment.
+    """
+
     from weaver.config import resolve_workspace
     from weaver.workspaces import LocalWorkspace
 
-    workspace = resolve_workspace(
-        workspace=args.workspace,
-        workspace_type=args.workspace_type,
-        environment=args.environment,
-        weaver_lakehouse=getattr(args, "weaver_lakehouse", None),
-        workspace_config=args.workspace_config,
-    )
+    inherited = getattr(getattr(args, "session", None), "workspace", None)
+    if inherited is not None and args.workspace is None and args.workspace_config is None:
+        workspace = _with_command_overrides(inherited, args)
+    else:
+        workspace = resolve_workspace(
+            workspace=args.workspace,
+            workspace_type=args.workspace_type,
+            environment=args.environment,
+            weaver_lakehouse=getattr(args, "weaver_lakehouse", None),
+            workspace_config=args.workspace_config,
+        )
 
     if not isinstance(workspace, LocalWorkspace):
         _prefer_desktop_credential()
     return workspace
+
+
+def _with_command_overrides(workspace, args: argparse.Namespace):
+    """The session's workspace, with whatever this command line said on top."""
+
+    from dataclasses import replace
+
+    from weaver.errors import CommandError
+    from weaver.targets import ItemRef
+
+    wanted_type = getattr(args, "workspace_type", None)
+    if wanted_type is not None and wanted_type != workspace.workspace_type:
+        raise CommandError(
+            f"this session addresses a {workspace.workspace_type} workspace; "
+            f"name a --workspace to use a {wanted_type} one"
+        )
+
+    overrides = {}
+    if getattr(args, "environment", None) is not None:
+        overrides["environment"] = args.environment
+    if getattr(args, "weaver_lakehouse", None) is not None:
+        overrides["weaver_lakehouse"] = ItemRef.parse(str(args.weaver_lakehouse)).name
+    return replace(workspace, **overrides) if overrides else workspace
+
+
+def _session(args: argparse.Namespace):
+    """The Session this command runs in, where there is one.
+
+    ``weaver session`` attaches one to every line it parses. A one-shot
+    invocation has none, and each operation opens and closes its own.
+    """
+
+    return getattr(args, "session", None)
+
+
+def handle_session(args: argparse.Namespace) -> int:
+    """Hold one console session open and run commands in it."""
+
+    from .shell import run_shell
+
+    return run_shell(args)
 
 
 def handle_push(args: argparse.Namespace) -> int:
@@ -560,6 +625,7 @@ def handle_load(args: argparse.Namespace) -> int:
             targets=args.targets,
             fault_tolerant=args.fault_tolerant,
             dry_run=args.dry_run,
+            session=_session(args),
         )
     except LoadError as exc:
         # An intolerant failure. The report is the useful half of the answer and
@@ -578,7 +644,7 @@ def handle_load(args: argparse.Namespace) -> int:
     return 0 if report.succeeded else 1
 
 
-def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool):
+def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool, session=None):
     """One load, run where the data is.
 
     Local and in-session are the same call; a desktop reaching into Fabric is
@@ -587,15 +653,16 @@ def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool):
     cannot tell which happened.
     """
 
-    from weaver.operations import _inside_fabric_session
+    from weaver.session.host import inside_fabric_session
     from weaver.workspaces import LocalWorkspace
 
-    if isinstance(workspace, LocalWorkspace) or _inside_fabric_session(workspace):
+    if isinstance(workspace, LocalWorkspace) or inside_fabric_session(workspace):
         return weaver.load(
             list(targets),
             workspace=workspace,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
+            session=session,
         )
     _refuse_absent_targets(workspace, targets)
     return _run_load_over_livy(
@@ -763,6 +830,7 @@ def handle_test(args: argparse.Namespace) -> int:
             name=args.name,
             file=args.file,
             dry_run=args.dry_run,
+            session=_session(args),
         )
     except ValidationError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -775,19 +843,20 @@ def handle_test(args: argparse.Namespace) -> int:
     return 0 if report.succeeded else 1
 
 
-def _run_test(workspace, *, targets, name, file, dry_run: bool):
+def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
     """One validation run, run where the data is."""
 
-    from weaver.operations import _inside_fabric_session
+    from weaver.session.host import inside_fabric_session
     from weaver.workspaces import LocalWorkspace
 
-    if isinstance(workspace, LocalWorkspace) or _inside_fabric_session(workspace):
+    if isinstance(workspace, LocalWorkspace) or inside_fabric_session(workspace):
         return weaver.test(
             list(targets),
             workspace=workspace,
             name=name,
             file=file,
             dry_run=dry_run,
+            session=session,
         )
     _refuse_absent_targets(workspace, targets)
     return _run_test_over_livy(
@@ -970,6 +1039,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
         workspace=workspace,
         unbind_from=args.unbind_from,
         dry_run=True,
+        session=_session(args),
     )
     print(f"wipe on {workspace.workspace}\n")
     for report in planned.reports:
@@ -1006,6 +1076,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
         args.targets,
         workspace=workspace,
         unbind_from=args.unbind_from,
+        session=_session(args),
     )
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
@@ -1028,6 +1099,7 @@ def handle_build(args: argparse.Namespace) -> int:
         bind=args.item_bindings,
         workspace=workspace,
         bundle=args.bundle,
+        session=_session(args),
     )
     payload = result.to_mapping()
     if args.json:

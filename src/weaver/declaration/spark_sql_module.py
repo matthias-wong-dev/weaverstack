@@ -24,7 +24,7 @@ no built table, no columns and no Spark session to render.
 triple quotes and anything else, so the text is encoded by one deterministic
 rule rather than by choosing a quoting style per body and hoping. What comes out
 the other side is byte-identical, which
-``tests/test_spark_sql_module_render.py`` asserts against text designed to break
+``tests/test_spark_sql_module_representation.py`` asserts against text designed to break
 it.
 
 **The marker is a fact about the file, not about its name.** A generated module

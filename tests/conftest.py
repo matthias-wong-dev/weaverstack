@@ -45,6 +45,9 @@ from weaver.locations import Location
 
 WEAVER_LAKEHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
+#: The module-scoped pair, named apart so it can coexist with the per-test one.
+SHARED_WEAVER_LAKEHOUSE = "Weaver_Shared"
+SHARED_TARGET_LAKEHOUSE = "Sales_Shared_LH"
 LAKEHOUSE_SQL = Path(__file__).parent / "fixtures" / "local-lakehouse"
 
 
@@ -70,6 +73,36 @@ def pytest_collection_modifyitems(items):
 
     if errors:
         raise pytest.UsageError("invalid Fabric test markers:\n" + "\n".join(errors))
+
+
+@pytest.fixture(autouse=True)
+def no_credentials_outside_fabric(request, monkeypatch):
+    """Nothing but a Fabric test may ask for a real credential.
+
+    ``DefaultAzureCredential`` is a network call that, on a build agent with no
+    identity, hangs and then fails — and the test it fails is whichever one
+    happened to construct a Fabric-shaped Session, which says nothing about the
+    cause. It is not enough to mock it in the tests that reach it today: a
+    ``Resource`` binds its acquisition when the scope is *constructed*, so a
+    patch applied to a scope afterwards leaves the original in place and the
+    call happens anyway. That is exactly how this escaped once.
+
+    So the default is refusal, and a Fabric test opts out by carrying the
+    marker that says it needs a workspace.
+    """
+
+    if request.node.get_closest_marker("fabric"):
+        return
+
+    def refuse():
+        raise AssertionError(
+            "a test outside `-m fabric` asked for an Azure credential. Replace "
+            "`weaver.fabric.auth.credential` before the Session is constructed "
+            "— a Resource binds its acquisition at construction, so patching "
+            "the scope afterwards is too late."
+        )
+
+    monkeypatch.setattr("weaver.fabric.auth.credential", refuse)
 
 
 def _sql_statements(name: str, tables_root: str) -> tuple[str, ...]:
@@ -127,14 +160,16 @@ class LocalLakehouses:
     resolver: LocalResolver
     store: FilesystemStore
     root: Path
+    weaver_name: str = WEAVER_LAKEHOUSE
+    target_name: str = TARGET_LAKEHOUSE
 
     @property
     def weaver(self) -> ItemRef:
-        return ItemRef(WEAVER_LAKEHOUSE)
+        return ItemRef(self.weaver_name)
 
     @property
     def target(self) -> ItemRef:
-        return ItemRef(TARGET_LAKEHOUSE)
+        return ItemRef(self.target_name)
 
     def location(self, *parts: str) -> Location:
         return Location(str(self.root)).join(*parts)
@@ -148,24 +183,66 @@ class LocalLakehouses:
         )
 
 
+def _lakehouses(root: Path, *, weaver: str, target: str) -> LocalLakehouses:
+    workspace = LocalWorkspace(workspace=root, weaver_lakehouse=weaver)
+    store = FilesystemStore()
+    resolver = LocalResolver(workspace)
+
+    for item in (weaver, target):
+        store.make_directory(resolver.files_root(ItemRef(item)))
+        store.make_directory(resolver.tables_root(ItemRef(item)))
+    store.make_directory(resolver.weaver_items_root)
+
+    return LocalLakehouses(
+        workspace=workspace,
+        resolver=resolver,
+        store=store,
+        root=root,
+        weaver_name=weaver,
+        target_name=target,
+    )
+
+
 @pytest.fixture
 def lakehouses(tmp_path: Path) -> LocalLakehouses:
     """A Weaver Lakehouse and one target Lakehouse, empty and disposable.
 
     Both carry the ``Files/`` and ``Tables/`` areas a Fabric Lakehouse presents,
     so the same resolution serves local and Fabric.
+
+    Per test, so a module whose claims *mutate* an estate gets a clean one each
+    time. A module whose claims only read should take
+    :func:`shared_lakehouses` instead — see there for why.
     """
 
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER_LAKEHOUSE)
-    store = FilesystemStore()
-    resolver = LocalResolver(workspace)
+    return _lakehouses(tmp_path, weaver=WEAVER_LAKEHOUSE, target=TARGET_LAKEHOUSE)
 
-    for item in (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE):
-        store.make_directory(resolver.files_root(ItemRef(item)))
-        store.make_directory(resolver.tables_root(ItemRef(item)))
-    store.make_directory(resolver.weaver_items_root)
 
-    return LocalLakehouses(workspace=workspace, resolver=resolver, store=store, root=tmp_path)
+@pytest.fixture(scope="module")
+def shared_lakehouses(tmp_path_factory) -> LocalLakehouses:
+    """The same pair of Lakehouses for a whole module.
+
+    Building and loading an estate costs seconds; asking it a question costs
+    milliseconds. A module that asks twenty read-only questions of one estate
+    and rebuilds it twenty times is paying for isolation it does not use, and
+    the arithmetic is not close — in this suite that pattern was a quarter of
+    the whole Spark run.
+
+    So the rule is the other way round from the usual instinct: share the
+    estate, and take a fresh one only where *isolation itself* is the claim —
+    where a test mutates the estate, or where what a build leaves behind is the
+    thing being asserted.
+    """
+
+    # Named apart from the per-test pair on purpose. A local Lakehouse folds to
+    # a Spark schema by name, and one session holds one namespace — so a module
+    # mixing a shared estate with a fresh one would have the two writing into
+    # each other. Distinct names are what make the two fixtures composable.
+    return _lakehouses(
+        tmp_path_factory.mktemp("estate"),
+        weaver=SHARED_WEAVER_LAKEHOUSE,
+        target=SHARED_TARGET_LAKEHOUSE,
+    )
 
 
 @pytest.fixture
@@ -183,14 +260,22 @@ def installed_repository(lakehouses: LocalLakehouses) -> Location:
 
 
 @pytest.fixture
-def installation_environment(spark, lakehouses: LocalLakehouses):
-    """A local installer environment: shared Spark, local resolver and store."""
+def installer_session(spark, lakehouses: LocalLakehouses):
+    """A Session around the shared Spark, local resolver and store.
 
-    from weaver.build_bundle import InstallationEnvironment
+    Given all three rather than acquiring any, so the suite's one JVM is reused
+    and nothing here closes what the fixture above it owns.
+    """
 
-    return InstallationEnvironment(
-        store=lakehouses.store, resolver=lakehouses.resolver, spark=spark
-    )
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(
+        workspace=lakehouses.workspace,
+        spark=spark,
+        store=lakehouses.store,
+        resolver=lakehouses.resolver,
+    ) as session:
+        yield session
 
 
 # --- spark -------------------------------------------------------------------

@@ -405,6 +405,46 @@ def livy_session(fabric_workspace, fabric_client):
         session.close()
 
 
+@pytest.fixture(scope="session")
+def weaver_session(fabric_workspace, livy_session):
+    """The suite's one :class:`~weaver.session.console.ConsoleSession`.
+
+    The canonical Fabric fixture: one credential, one REST client, one resolver
+    with one item cache, one Livy session and one TDS connection per Warehouse,
+    for the whole run. Everything that used to acquire its own gets this
+    instead, which is where the suite's Fabric time goes back.
+
+    The Livy session is **given**, not acquired. The suite already starts one —
+    with the preflight and the skip semantics that belong to a harness rather
+    than to the product — and a capacity commonly permits exactly one, so a
+    Session that started its own would queue behind the fixture's forever. A
+    given resource is not closed by the Session that borrowed it.
+    """
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(
+        workspace=fabric_workspace, livy=livy_session, require_weaver=False
+    ) as session:
+        yield session
+        print(f"\n{session.telemetry.report()}")
+
+
+@pytest.fixture
+def fresh_weaver_session(fabric_workspace):
+    """A Session of its own, for a test whose claim *is* runtime isolation.
+
+    Explicit because it is expensive and rarely what a test means. Estate
+    isolation is a different question and is answered by a different fixture: a
+    test needing a clean target and nothing more should keep this Session.
+    """
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(workspace=fabric_workspace, require_weaver=False) as session:
+        yield session
+
+
 # --- disposable Warehouse ----------------------------------------------------
 
 
@@ -630,7 +670,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
 
     from weaver.targets import ItemRef
     from weaver.physical_wipe import wipe_sql_target
-    from weaver.build_bundle import execute_action, plan_item_build
+    from weaver.build_bundle import execute_install_action, plan_item_build
     from weaver.build_bundle.executors.base import (
         InstallationContext,
         ResolvedTarget,
@@ -696,7 +736,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
             for batch in stage.batches:
                 for action in batch.actions:
                     results.append(
-                        execute_action(
+                        execute_install_action(
                             action,
                             (
                                 stage.payloads.get(action.payload)
@@ -947,8 +987,8 @@ def _fabric_build_context(
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
-            "LakehouseBinding, WarehouseBinding, InstallationEnvironment, "
-            "effective_item_bindings\n"
+            "LakehouseBinding, WarehouseBinding, effective_item_bindings\n"
+            "from weaver.session import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
@@ -962,11 +1002,10 @@ def _fabric_build_context(
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
             "selected, weaver_lakehouse=workspace.weaver_lakehouse)\n"
-            "environment = InstallationEnvironment("
-            "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
-            "inventories = read_target_inventories(bindings, environment=environment)\n"
+            "session = NotebookSession(workspace=workspace, spark=spark)\n"
+            "inventories = read_target_inventories(bindings, session=session)\n"
             "reconciled = read_reconciled_catalogue("
-            "bindings, inventories=inventories, environment=environment, "
+            "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
@@ -994,17 +1033,16 @@ def _fabric_build_context(
         body = (
             "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.build_bundle import install_bundle, load_bundle, "
-            "InstallationEnvironment\n"
+            "from weaver.build_bundle import Installer, load_bundle\n"
+            "from weaver.session import NotebookSession\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
             # The workspace is what lets a Warehouse batch acquire SQL on the
             # session's own identity. A Lakehouse-only bundle never asks.
-            "env = InstallationEnvironment(store=store, resolver=resolver, "
-            "spark=spark, workspace=workspace)\n"
+            "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
             f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
-            "report = install_bundle(bundle, environment=env)\n"
+            "report = installer.install(bundle)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
             "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
             "'actions': [{'id': a.action_id, 'status': a.status, "
@@ -1245,8 +1283,8 @@ def _warehouse_build_env(
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
-            "WarehouseBinding, LakehouseBinding, InstallationEnvironment, "
-            "effective_item_bindings\n"
+            "WarehouseBinding, LakehouseBinding, effective_item_bindings\n"
+            "from weaver.session import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
@@ -1260,11 +1298,10 @@ def _warehouse_build_env(
             "bindings = effective_item_bindings("
             "selected, weaver_lakehouse=workspace.weaver_lakehouse)\n"
             "control = LakehouseBinding(ItemRef(workspace.weaver_lakehouse))\n"
-            "environment = InstallationEnvironment("
-            "store=store, resolver=resolver, spark=spark, workspace=workspace)\n"
-            "inventories = read_target_inventories(bindings, environment=environment)\n"
+            "session = NotebookSession(workspace=workspace, spark=spark)\n"
+            "inventories = read_target_inventories(bindings, session=session)\n"
             "reconciled = read_reconciled_catalogue("
-            "bindings, inventories=inventories, environment=environment, "
+            "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
@@ -1289,15 +1326,14 @@ def _warehouse_build_env(
         body = (
             "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.build_bundle import install_bundle, load_bundle, "
-            "InstallationEnvironment\n"
+            "from weaver.build_bundle import Installer, load_bundle\n"
+            "from weaver.session import NotebookSession\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            "env = InstallationEnvironment(store=store, resolver=resolver, "
-            "spark=spark, workspace=workspace)\n"
+            "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
             f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
-            "report = install_bundle(bundle, environment=env)\n"
+            "report = installer.install(bundle)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
             "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
             "'actions': [{'id': a.action_id, 'status': a.status, "

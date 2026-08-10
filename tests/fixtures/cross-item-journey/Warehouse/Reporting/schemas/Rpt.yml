@@ -1,0 +1,5 @@
+Schema ID: Rpt
+
+Description: |
+  This item's own namespace, including the names it aliases from the Lakehouse
+  that produces them.

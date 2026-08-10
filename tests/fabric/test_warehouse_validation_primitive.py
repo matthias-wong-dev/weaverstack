@@ -10,7 +10,7 @@ the renderer cannot: whether the engine accepts ``select … into #temp`` inside
 procedure, whether ``tempdb.sys.columns`` answers for a session temp table,
 whether ``throw`` surfaces as an error a caller can read, and whether one
 execution can return both a diagnostic result set and its output counts. The
-pure renderer tests in ``tests/targeted/test_tsql_validation_render.py`` cover
+pure renderer tests in ``tests/targeted/test_tsql_validation_representation.py`` cover
 the SQL's *shape*; this covers the engine's *answer*.
 
 The outcomes match ``tests/spark/test_validation_comparison_primitive.py``

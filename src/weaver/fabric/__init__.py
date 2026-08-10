@@ -11,6 +11,7 @@ from .client import FabricClient, FabricError
 from .livy import (
     LivyError,
     LivySession,
+    LivyStatementError,
     LivySessionInfo,
     StatementResult,
     WorkspaceLivySession,
@@ -75,6 +76,7 @@ __all__ = [
     "LivySessionInfo",
     "WorkspaceLivySession",
     "LivyError",
+    "LivyStatementError",
     "StatementResult",
     "emit_source",
     "list_livy_sessions",

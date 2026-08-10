@@ -9,7 +9,7 @@ import pytest
 from weaver.build_bundle.executors import alias as alias_module
 from weaver.build_bundle.executors import AliasExecutor
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, BuildAction
+from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.resolution import LocalResolver
@@ -46,8 +46,8 @@ def _target(target_id: str, item: str) -> ResolvedTarget:
     )
 
 
-def _action() -> BuildAction:
-    return BuildAction(
+def _action() -> InstallAction:
+    return InstallAction(
         id="aliases-Lakehouse--Curated",
         kind=CREATE_ALIAS,
         resource_node_id=None,
@@ -354,7 +354,7 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
             "create or alter view [Rpt].[B] as select 1 as x;",
         ]
     ).encode("utf-8")
-    action = BuildAction(
+    action = InstallAction(
         id="aliases-Warehouse--Reporting",
         kind=CREATE_ALIAS,
         resource_node_id=None,

@@ -60,6 +60,11 @@ class FabricResolver:
         self.base_url = base_url.rstrip("/")
         self._workspace: Workspace | None = None
         self._items: dict[str, Item] = {}
+        #: Answers this resolver gave without asking the workspace. A Session
+        #: owns one resolver for its lifetime, so this is what a reused item
+        #: cache is *worth* — and a hit is the absence of a call, which nothing
+        #: above the cache can observe for itself.
+        self.cache_hits = 0
 
     # --- level four -------------------------------------------------------
 
@@ -89,7 +94,9 @@ class FabricResolver:
         """
 
         key = f"{item.name}:{item_type}"
-        if key not in self._items:
+        if key in self._items:
+            self.cache_hits += 1
+        else:
             self._items[key] = find_item(
                 self.workspace, item.name, item_type=item_type, client=self.client
             )

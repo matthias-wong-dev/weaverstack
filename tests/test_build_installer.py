@@ -18,18 +18,18 @@ from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    BuildAction,
+    InstallAction,
     BuildBatch,
     BuildPlan,
     BuildSequence,
     BuildSelection,
     Impact,
-    InstallationEnvironment,
     compute_bundle_id,
-    install_bundle,
     load_bundle,
     write_bundle,
 )
+from support.sessions import given_installer
+
 from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
 from weaver.errors import BuildError
 
@@ -52,9 +52,9 @@ class Recorder:
         return {"ran": action.id}
 
 
-def _action(name: str) -> BuildAction:
+def _action(name: str) -> InstallAction:
     payload = f"payload/{name}/stmt.spark.sql"
-    return BuildAction(
+    return InstallAction(
         id=name,
         kind="materialise",
         resource_node_id=None,
@@ -105,9 +105,9 @@ def _bundle(tmp_path):
 def test_successful_install_reports_every_action(tmp_path):
     location, store = _bundle(tmp_path)
     recorder = Recorder()
-    env = InstallationEnvironment(store=store, resolver=None, executors={"spark_sql": recorder})
+    installer = given_installer(store=store, executors={"spark_sql": recorder})
 
-    report = install_bundle(load_bundle(location, store=store), environment=env)
+    report = installer.install(load_bundle(location, store=store))
 
     assert report.status == SUCCEEDED
     assert recorder.calls == ["a1", "a2", "a3"]
@@ -121,9 +121,9 @@ def test_successful_install_reports_every_action(tmp_path):
 def test_a_failure_stops_later_sequences_and_is_reported(tmp_path):
     location, store = _bundle(tmp_path)
     recorder = Recorder(fail_on={"a2"})
-    env = InstallationEnvironment(store=store, resolver=None, executors={"spark_sql": recorder})
+    installer = given_installer(store=store, executors={"spark_sql": recorder})
 
-    report = install_bundle(load_bundle(location, store=store), environment=env)
+    report = installer.install(load_bundle(location, store=store))
 
     assert report.status == FAILED
     # a3 never ran: its sequence was never started.
@@ -138,9 +138,9 @@ def test_a_failure_stops_later_sequences_and_is_reported(tmp_path):
 
 def test_report_is_persisted_beside_the_plan(tmp_path):
     location, store = _bundle(tmp_path)
-    env = InstallationEnvironment(store=store, resolver=None, executors={"spark_sql": Recorder()})
+    installer = given_installer(store=store, executors={"spark_sql": Recorder()})
 
-    report = install_bundle(load_bundle(location, store=store), environment=env)
+    report = installer.install(load_bundle(location, store=store))
 
     report_location = location.join("install-report.yml")
     assert store.exists(report_location)
@@ -153,10 +153,10 @@ def test_preflight_rejects_a_corrupt_bundle_before_running(tmp_path):
     # Corrupt a payload after loading; install must refuse on its own preflight.
     store.write(location.join("payload", "a2", "stmt.spark.sql"), b"tampered\n")
     recorder = Recorder()
-    env = InstallationEnvironment(store=store, resolver=None, executors={"spark_sql": recorder})
+    installer = given_installer(store=store, executors={"spark_sql": recorder})
 
     with pytest.raises(BuildError, match="hash mismatch"):
-        install_bundle(bundle, environment=env)
+        installer.install(bundle)
     assert recorder.calls == []  # nothing ran
 
 
@@ -172,20 +172,15 @@ def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
             pytest.fail("the installer must not infer an endpoint refresh")
 
     location, store = _bundle(tmp_path)
-    report = install_bundle(
-        load_bundle(location, store=store),
-        environment=InstallationEnvironment(
-            store=store,
-            resolver=Resolver(),
-            executors={"spark_sql": Recorder()},
-        ),
-    )
+    report = given_installer(
+        store=store, resolver=Resolver(), executors={"spark_sql": Recorder()}
+    ).install(load_bundle(location, store=store))
 
     assert report.status == SUCCEEDED
 
 
 def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path):
-    action = BuildAction(
+    action = InstallAction(
         id="refresh-application-sql-endpoint",
         kind="refresh_sql_endpoint",
         resource_node_id=None,
@@ -217,14 +212,9 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
         workspace=tmp_path / "local", weaver_lakehouse="Weaver"
     )
 
-    report = install_bundle(
-        bundle,
-        environment=InstallationEnvironment(
-            store=store,
-            resolver=LocalResolver(workspace),
-            workspace=workspace,
-        ),
-    )
+    report = given_installer(
+        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+    ).install(bundle)
 
     assert report.status == SUCCEEDED
     assert report.sequences[0].status == SKIPPED

@@ -9,6 +9,11 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+# ...but not a source package that happens to be called that. `build/` matches
+# at any depth, so a package named `src/weaver/build/` would be silently absent
+# from every commit — which is why the build package is called `build_bundle`.
+# Re-included explicitly so the name stops being a trap.
+!/src/weaver/build/
 develop-eggs/
 dist/
 downloads/

@@ -13,10 +13,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 CLAIMS = frozenset(
-    {"declaration", "render", "binding", "primitive", "lifecycle", "invariant"}
+    {
+        "declaration",
+        "representation",
+        "boundary",
+        "install",
+        "primitive",
+        "cycle",
+        "invariant",
+        "journey",
+    }
 )
-MODULE_NAME = re.compile(
-    rf"^test_.+_(?P<claim>{'|'.join(sorted(CLAIMS))})\.py$"
+
+#: The claims this taxonomy replaced. No module carries one any more, and the
+#: rule below is what keeps it that way: ``lifecycle`` became ``cycle``, because
+#: it was used for everything from a state machine to an end-to-end run;
+#: ``render`` and ``binding`` are both ``representation``, unless physical access
+#: is the claim, in which case they are ``boundary``.
+RETIRED_CLAIMS = frozenset({"render", "binding", "lifecycle"})
+
+MODULE_NAME = re.compile(rf"^test_.+_(?P<claim>{'|'.join(sorted(CLAIMS))})\.py$")
+RETIRED_NAME = re.compile(
+    rf"^test_.+_(?P<claim>{'|'.join(sorted(RETIRED_CLAIMS))})\.py$"
 )
 
 
@@ -69,7 +87,7 @@ LEGACY_ROOT_CLAIMS = {
         """,
     ),
     **_classified(
-        "render",
+        "representation",
         """
         tests/test_build_bundle_model.py
         tests/test_build_stages.py
@@ -81,18 +99,12 @@ LEGACY_ROOT_CLAIMS = {
         """,
     ),
     **_classified(
-        "binding",
+        "boundary",
         """
         tests/test_alias_execution.py
         tests/test_build_installer.py
-        tests/test_catalogue_state.py
-        tests/test_cli_build.py
-        tests/test_cli_wipe.py
         tests/test_fabric_alias_transport.py
         tests/test_folder_executor.py
-        tests/test_incremental_build.py
-        tests/test_item_build_planner.py
-        tests/test_item_catalogue.py
         tests/test_lakehouse_spark_location.py
         tests/test_livy_plumbing.py
         tests/test_onelake_pagination.py
@@ -106,9 +118,24 @@ LEGACY_ROOT_CLAIMS = {
         """,
     ),
     **_classified(
-        "lifecycle",
+        "representation",
         """
-        tests/test_environment_install.py
+        tests/test_catalogue_state.py
+        tests/test_cli_build.py
+        tests/test_cli_wipe.py
+        tests/test_item_catalogue.py
+        """,
+    ),
+    **_classified(
+        "install",
+        """
+        tests/test_incremental_build.py
+        tests/test_item_build_planner.py
+        """,
+    ),
+    **_classified(
+        "cycle",
+        """
         tests/test_item_build_workflow.py
         tests/test_push.py
         tests/test_unbind.py
@@ -118,7 +145,6 @@ LEGACY_ROOT_CLAIMS = {
     **_classified(
         "invariant",
         """
-        tests/test_core_boundary.py
         tests/test_neutrality.py
         tests/test_public_api.py
         """,
@@ -140,7 +166,7 @@ LEGACY_NESTED_CLAIMS = {
         """,
     ),
     **_classified(
-        "render",
+        "representation",
         """
         tests/targeted/test_catalogue_diff.py
         tests/targeted/test_catalogue_projection.py
@@ -150,14 +176,18 @@ LEGACY_NESTED_CLAIMS = {
         """,
     ),
     **_classified(
-        "binding",
+        "boundary",
         """
         tests/fabric/test_alias_discovery.py
         tests/fabric/test_item_catalogue_fabric.py
         tests/spark/boundary/test_catalogue_fidelity.py
         tests/spark/boundary/test_inventory_fidelity.py
         tests/spark/test_cross_item_alias_incremental.py
-        tests/targeted/test_action_execution.py
+        """,
+    ),
+    **_classified(
+        "install",
+        """
         tests/targeted/test_alias_planning.py
         tests/targeted/test_incremental_impact.py
         tests/targeted/test_item_plan.py
@@ -187,15 +217,12 @@ LEGACY_NESTED_CLAIMS = {
         """,
     ),
     **_classified(
-        "lifecycle",
+        "cycle",
         """
-        tests/fabric/test_bundle_can_install.py
         tests/fabric/test_fabric_resources.py
-        tests/fabric/test_lakehouse_journey.py
         tests/spark/test_catalogue_builtin_build.py
         tests/spark/test_catalogue_initialise.py
         tests/spark/test_item_catalogue_build.py
-        tests/spark/test_local_lakehouse_journey.py
         tests/spark/test_mixed_estate.py
         tests/spark/test_multi_destination.py
         tests/targeted/test_build_workflow.py
@@ -207,7 +234,6 @@ LEGACY_NESTED_CLAIMS = {
         tests/fabric/test_onelake_mount_contract.py
         tests/support/test_livy_telemetry.py
         tests/support/test_observation.py
-        tests/targeted/test_action_checklist.py
         tests/targeted/test_build_intent.py
         tests/targeted/test_executor_parity.py
         """,
@@ -215,7 +241,6 @@ LEGACY_NESTED_CLAIMS = {
 }
 
 GRANDFATHERED = LEGACY_ROOT_CLAIMS | LEGACY_NESTED_CLAIMS
-
 
 def _test_modules() -> set[str]:
     return {
@@ -251,6 +276,26 @@ def test_every_grandfathered_module_exists_and_still_needs_its_exception():
     assert not renamed_but_not_removed, (
         "these modules now name their claim; remove their grandfather entries: "
         f"{sorted(renamed_but_not_removed)}"
+    )
+
+
+def test_no_module_takes_a_claim_the_taxonomy_retired():
+    """The migration is finished, and finished is a thing a test can hold.
+
+    Without this the old words come back one module at a time, and a suite with
+    two taxonomies is a suite with none — a reader cannot tell whether
+    ``binding`` means the old undifferentiated sense or somebody's shorthand for
+    one of the two words that replaced it.
+    """
+
+    named = sorted(
+        path for path in _test_modules() if RETIRED_NAME.fullmatch(Path(path).name)
+    )
+
+    assert not named, (
+        "these claims were retired — lifecycle is now cycle, and render and "
+        "binding are representation or boundary depending on whether the claim "
+        f"involves physical access: {named}"
     )
 
 

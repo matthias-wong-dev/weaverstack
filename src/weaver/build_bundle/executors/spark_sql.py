@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...errors import InstallError
-from ..models import BuildAction
+from ..models import InstallAction
 from .base import InstallationContext
 from .spark_case import exact_identifier_case
 
@@ -33,7 +33,7 @@ class SparkSqlExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:

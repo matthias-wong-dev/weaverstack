@@ -30,7 +30,7 @@ import json
 from typing import Any
 
 from ...errors import InstallError
-from ..models import BuildAction
+from ..models import InstallAction
 from .base import InstallationContext
 
 
@@ -39,7 +39,7 @@ class SparkSchemaExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:

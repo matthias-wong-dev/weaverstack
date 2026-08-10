@@ -36,10 +36,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .errors import CommandError, ValidationError
-from .load import LoadSession, _load_session
 from .load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
 from .targets import ItemRef, WarehouseTarget, parse_physical_target
-from .test_execution import execute_validations
 from .test_plan import InstalledValidation, ValidationEstate, validation_order
 from .test_report import (
     FAILED,
@@ -63,6 +61,7 @@ def test(
     workspace_config: str | Path | None = None,
     dry_run: bool = False,
     strict: bool = False,
+    session=None,
 ) -> ValidationRunReport:
     """Run the installed validation in the requested physical targets.
 
@@ -85,12 +84,21 @@ def test(
         weaver_lakehouse=weaver_lakehouse,
         workspace_config=workspace_config,
         requested=requested,
+        session=session,
     )
     refs = tuple(_physical_ref(target) for target in requested)
 
-    with _load_session(resolved, requested) as session:
+    from .session.host import use_or_create_session
+
+    with use_or_create_session(session, workspace=resolved) as opened:
+        if not opened.executes_here(resolved):
+            raise CommandError(
+                "test runs where the data is: call it from a Fabric notebook, "
+                "or against a local Workspace"
+            )
         return run_test(
-            session,
+            opened,
+            workspace=resolved,
             requested=refs,
             name=name,
             file=file,
@@ -100,11 +108,13 @@ def test(
 
 
 def run_test(
-    session: LoadSession,
+    session,
     *,
+    workspace,
     requested: Sequence[PhysicalTargetRef],
     name: str | None = None,
     file: str | Path | None = None,
+    state=None,
     dry_run: bool = False,
     strict: bool = False,
 ) -> ValidationRunReport:
@@ -114,6 +124,11 @@ def run_test(
     workspace resolution and capability acquisition differ between the desktop,
     the emulator and a Fabric session, and none of them changes the
     orchestration itself.
+
+    ``state`` is the same preflight snapshot :func:`weaver.load.run_load` takes,
+    for the same reason: reading the estate is a boundary act, and a caller who
+    has already read it — or who is describing one deliberately — should not
+    have the run read it again behind them.
     """
 
     started = datetime.now(timezone.utc)
@@ -135,6 +150,7 @@ def run_test(
         # against.
         return _reported(
             session,
+            workspace=workspace,
             nodes=(node,),
             requested=requested,
             started=started,
@@ -144,28 +160,40 @@ def run_test(
             durable=False,
         )
 
-    estate = ValidationEstate.from_catalogue(session.read_catalogue())
-    if name is not None:
-        selected: tuple[InstalledValidation, ...] = (estate.named(name, requested),)
-    else:
-        selected = validation_order(estate.for_targets(requested))
+    from .run import RunRequest, Runner, RunState
 
-    environment = _environment(session, selected)
-    try:
-        nodes = execute_validations(
-            selected,
-            environment=environment,
-            # Evidence for a caller who asked about one validation; counts alone
-            # for a whole-target run, which must not transfer diagnostic rows.
-            collect_diagnostics=name is not None,
-            dry_run=dry_run,
+    from .run.state import read_installed_catalogue
+
+    if state is None:
+        state = RunState(
+            catalogue=read_installed_catalogue(session=session, workspace=workspace)
         )
-    finally:
-        environment.runtime_scope.close()
+    runner = Runner(
+        state,
+        RunRequest.test(
+            requested,
+            name=name,
+            dry_run=dry_run,
+            # Validations are independent by construction: each reads the estate
+            # and reports, and none produces what another consumes. One that
+            # fails is a finding, not a reason to stop asking the others — and
+            # "everything I did not get to" is the least useful answer a run
+            # that was asked what is wrong with an estate could give.
+            fault_tolerant=True,
+        ),
+        workspace=workspace,
+    )
+    result = runner.run(
+        session=session,
+        # Evidence for a caller who asked about one validation; counts alone for
+        # a whole-target run, which must not transfer diagnostic rows.
+        dispatch=_dispatch_collecting(collect=name is not None),
+    )
 
     return _reported(
         session,
-        nodes=nodes,
+        workspace=workspace,
+        nodes=tuple(_as_validation_node(node) for node in result.nodes),
         requested=requested,
         started=started,
         dry_run=dry_run,
@@ -174,9 +202,65 @@ def run_test(
     )
 
 
+def _dispatch_collecting(*, collect: bool):
+    """The one crossing, told whether this run was asked to show its evidence."""
+
+    from .run import dispatch_primitive
+
+    def dispatch(node, **asked):
+        return dispatch_primitive(node, collect=collect, **asked)
+
+    return dispatch
+
+
+def _as_validation_node(node) -> ValidationNodeReport:
+    """One run node, in the vocabulary a validation's readers use.
+
+    A validation does not "succeed" — it passes or fails, which is a judgement
+    about data rather than about work. One internal model does not mean one
+    public shape, and this is where the two meet.
+    """
+
+    from .run.result import INVALID as RUN_INVALID
+    from .run.result import SUCCEEDED, VALIDATED
+    from .test_report import PASSED, PLANNED
+
+    if node.status == VALIDATED:
+        status = PLANNED
+    elif node.status == SUCCEEDED:
+        status = PASSED
+    elif node.status == RUN_INVALID or getattr(node, "raised", False):
+        # A check that could not be *evaluated* is invalid, not failed. A Test
+        # that was never installed, or whose procedure threw, found nothing —
+        # and reading that as "found no discrepancies" is the one answer a
+        # validation must never give.
+        status = INVALID
+    else:
+        status = FAILED
+    result = getattr(node.result, "result", node.result)
+    return ValidationNodeReport(
+        logical_id=node.logical_id,
+        kind=node.role or "Test",
+        physical_target=node.physical_target,
+        primitive_kind=node.primitive_kind,
+        dispatch_location=str(getattr(node, "dispatch_location", None) or ""),
+        status=status,
+        executed=node.executed,
+        messages=tuple(
+            message.message if hasattr(message, "message") else str(message)
+            for message in node.messages
+        ),
+        result=result,
+        diagnostics=getattr(node.result, "diagnostics", None),
+        started_at=node.started_at,
+        finished_at=node.finished_at,
+    )
+
+
 def _reported(
-    session: LoadSession,
+    session,
     *,
+    workspace,
     nodes: Sequence[ValidationNodeReport],
     requested: Sequence[PhysicalTargetRef],
     started: datetime,
@@ -194,7 +278,13 @@ def _reported(
     """
 
     status = run_status(nodes)
-    log = None if dry_run or not durable else session.open_log(TASK_TYPE)
+    from .run import open_run_log
+
+    log = (
+        None
+        if dry_run or not durable
+        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
+    )
     if log is not None:
         log.write_plan(
             {
@@ -238,29 +328,6 @@ def _failure_message(report: ValidationRunReport) -> str:
     return "; ".join(parts)
 
 
-def _environment(session: LoadSession, selected: Sequence[InstalledValidation]):
-    """Runtime services for the targets these validations actually live in.
-
-    No inventories are read. A load asks what physically exists because it is
-    about to write; a validation reads what is there, and a target that is not
-    there fails its own dispatch with a message about the thing that was
-    missing.
-    """
-
-    from .load_resolution import LoadEnvironment
-
-    for validation in selected:
-        if validation.target.kind == WAREHOUSE_TARGET:
-            session._warehouse_sql(validation.target.name)  # noqa: SLF001 - one seam
-    return LoadEnvironment(
-        resolver=session.resolver,
-        store=session.store,
-        spark=session.spark,
-        sql=session._sql,  # noqa: SLF001 - the session owns what it opened
-        workspace=session.workspace,
-    )
-
-
 def _requested(targets: str | Sequence[str]):
     values = (targets,) if isinstance(targets, str) else tuple(targets)
     if not values:
@@ -277,13 +344,14 @@ def _resolve_workspace(
     weaver_lakehouse: str | None,
     workspace_config: str | Path | None,
     requested,
+    session=None,
 ) -> Workspace:
     from dataclasses import replace
 
     from .operations import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config
+        workspace=workspace, workspace_config=workspace_config, session=session
     )
     if weaver_lakehouse is not None:
         resolved = replace(

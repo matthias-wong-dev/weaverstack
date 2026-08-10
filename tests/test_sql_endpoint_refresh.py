@@ -12,7 +12,7 @@ from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarg
 from weaver.build_bundle.executors.sql_endpoint_refresh import (
     SqlEndpointRefreshExecutor,
 )
-from weaver.build_bundle.models import BuildAction
+from weaver.build_bundle.models import InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.fabric.client import FabricClient
 from weaver.fabric.resolution import FabricResolver
@@ -20,7 +20,7 @@ from weaver.fabric.resources import Item, SQL_ENDPOINT, refresh_sql_endpoint_met
 
 
 def _action():
-    return BuildAction(
+    return InstallAction(
         id="refresh-application-sql-endpoint-Sales",
         kind="refresh_sql_endpoint",
         resource_node_id=None,

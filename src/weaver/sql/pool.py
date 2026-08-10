@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator
@@ -12,6 +13,14 @@ from .connection import SqlEndpoint, connect
 from .errors import SqlPoolClosedError
 
 DEFAULT_MAX_CONNECTIONS = 4
+
+#: How long a connection may sit idle before it is checked rather than trusted.
+#: A Fabric SQL endpoint drops connections it considers abandoned, and it does
+#: so silently — the next statement fails with "Communication link failure",
+#: which reads as though the statement was at fault. Under this threshold the
+#: check is skipped, so a burst of work pays nothing.
+IDLE_VALIDATION_SECONDS = 60.0
+
 ConnectionFactory = Callable[[SqlEndpoint, SqlAuthentication], Any]
 
 
@@ -46,7 +55,9 @@ class SqlConnectionPool:
         self.max_connections = max_connections
         self._connection_factory = connection_factory
         self._condition = threading.Condition()
-        self._idle: list[Any] = []
+        #: ``(connection, returned_at)``, so how long one has been idle is known
+        #: without asking it.
+        self._idle: list[tuple[Any, float]] = []
         self._physical_count = 0
         self._closed = False
 
@@ -62,29 +73,59 @@ class SqlConnectionPool:
             self._release(lease)
 
     def _acquire(self):
-        create = False
-        with self._condition:
-            while True:
-                if self._closed:
-                    raise SqlPoolClosedError(f"SQL pool for {self.endpoint} is closed")
-                if self._idle:
-                    return self._idle.pop()
-                if self._physical_count < self.max_connections:
-                    # Reserve the slot before opening outside the lock.
-                    self._physical_count += 1
-                    create = True
-                    break
-                self._condition.wait()
+        """A connection that is believed to work, not merely one that exists.
 
-        if create:
-            try:
-                return self._connection_factory(self.endpoint, self.authentication)
-            except Exception:
-                with self._condition:
-                    self._physical_count -= 1
-                    self._condition.notify()
-                raise
-        raise AssertionError("unreachable")
+        A pooled connection can be dropped by the server while it sits idle, and
+        the drop is not announced — the next statement fails with a
+        communication link failure, which looks like the statement's fault and
+        is not. Retrying the statement would be the obvious fix and the wrong
+        one: a link can also drop *after* the server received a write, so a
+        retry can apply it twice. Checking before handing the connection out
+        cannot, because nothing has been sent.
+
+        Only connections that have been idle a while are checked. A caller
+        running statements back to back pays nothing.
+        """
+
+        while True:
+            create = False
+            with self._condition:
+                while True:
+                    if self._closed:
+                        raise SqlPoolClosedError(
+                            f"SQL pool for {self.endpoint} is closed"
+                        )
+                    if self._idle:
+                        connection, returned_at = self._idle.pop()
+                        break
+                    if self._physical_count < self.max_connections:
+                        # Reserve the slot before opening outside the lock.
+                        self._physical_count += 1
+                        create = True
+                        connection = None
+                        break
+                    self._condition.wait()
+
+            if create:
+                try:
+                    return self._connection_factory(self.endpoint, self.authentication)
+                except Exception:
+                    with self._condition:
+                        self._physical_count -= 1
+                        self._condition.notify()
+                    raise
+
+            if time.monotonic() - returned_at < IDLE_VALIDATION_SECONDS:
+                return connection
+            if _alive(connection):
+                return connection
+
+            # Dead, and this pool's to replace: give the slot back and go round,
+            # which either finds another idle connection or opens a new one.
+            _close(connection)
+            with self._condition:
+                self._physical_count -= 1
+                self._condition.notify()
 
     def _release(self, lease: SqlConnectionLease) -> None:
         close = False
@@ -93,7 +134,7 @@ class SqlConnectionPool:
                 self._physical_count -= 1
                 close = True
             else:
-                self._idle.append(lease.connection)
+                self._idle.append((lease.connection, time.monotonic()))
             self._condition.notify()
         if close:
             _close(lease.connection)
@@ -108,7 +149,7 @@ class SqlConnectionPool:
             idle, self._idle = self._idle, []
             self._physical_count -= len(idle)
             self._condition.notify_all()
-        for connection in idle:
+        for connection, _returned_at in idle:
             _close(connection)
 
     def __enter__(self) -> "SqlConnectionPool":
@@ -164,6 +205,21 @@ class SqlPoolRegistry:
 
     def __exit__(self, *exc) -> bool:
         self.close()
+        return False
+
+
+def _alive(connection: Any) -> bool:
+    """Whether this connection still answers — asked as cheaply as possible."""
+
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute("select 1")
+            cursor.fetchall()
+        finally:
+            cursor.close()
+        return True
+    except Exception:
         return False
 
 

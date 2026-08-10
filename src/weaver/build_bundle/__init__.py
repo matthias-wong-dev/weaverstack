@@ -21,13 +21,14 @@ from .bundle import (
     write_bundle,
 )
 from .models import (
-    BuildAction,
+    InstallAction,
     BuildBatch,
     BuildPlan,
     BuildSequence,
     OmittedNode,
 )
-from .installer import InstallationEnvironment, execute_action, install_bundle
+from .builder import Builder
+from .installer import Installer, execute_install_action
 from .incremental import BuildSelection, Impact, determine_impact
 from .physical import RenderedAction, render_document_build_action
 from .planner import PlannedItem, generate_item_build_bundle, plan_item_build
@@ -67,7 +68,7 @@ __all__ = [
     "effective_item_bindings",
     "WarehouseBinding",
     "OmittedNode",
-    "BuildAction",
+    "InstallAction",
     "BuildBatch",
     "BuildSequence",
     "BuildPlan",
@@ -82,15 +83,15 @@ __all__ = [
     "render_document_build_action",
     "PlannedItem",
     "plan_item_build",
-    "execute_action",
+    "execute_install_action",
     "compute_bundle_id",
     "load_bundle",
     "write_bundle",
     "plan_to_yaml",
     "plan_from_yaml",
     "generate_item_build_bundle",
-    "InstallationEnvironment",
-    "install_bundle",
+    "Builder",
+    "Installer",
     "InstallationReport",
     "ItemBuildResult",
     "BuildState",

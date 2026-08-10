@@ -20,7 +20,7 @@ from ...locations import LakehouseSparkLocation
 from ...spark import SparkCatalogue, SparkDestination
 from ...store import Store
 from ...targets import ItemRef
-from ..models import BuildAction
+from ..models import InstallAction
 from ..targets import BoundTarget
 
 
@@ -126,7 +126,7 @@ class ActionExecutor(Protocol):
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | SkippedExecution | None: ...

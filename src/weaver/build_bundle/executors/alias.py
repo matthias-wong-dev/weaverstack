@@ -39,7 +39,7 @@ from typing import Any
 
 from ...errors import InstallError
 from ...targets import DeltaTarget, FolderTarget
-from ..models import BuildAction
+from ..models import InstallAction
 from .base import InstallationContext, ResolvedTarget
 from .spark_case import exact_identifier_case
 
@@ -58,7 +58,7 @@ class AliasExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:

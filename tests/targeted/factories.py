@@ -24,7 +24,7 @@ from weaver.targets import ItemRef
 from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
-    BuildAction,
+    InstallAction,
     BuildBatch,
     BuildPlan,
     ItemBinding,
@@ -45,7 +45,7 @@ from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
-    item_load_artefacts,
+    item_runtime_artefacts,
     load_schemas,
 )
 
@@ -221,10 +221,13 @@ class FixtureCatalogue(Catalogue):
             identity: _object_type_of(repository, identity) for identity in identities
         }
         roles = {identity: "data" for identity in identities}
-        for artefact in item_load_artefacts(repository, item=item):
+        # Loads and validations alike: a catalogue certifying only the loads
+        # would describe an estate whose Tests were never installed, and every
+        # validation run against it would report them missing.
+        for artefact in item_runtime_artefacts(repository, item=item):
             identities.add(artefact.identity)
             types[artefact.identity] = artefact.object_type
-            roles[artefact.identity] = "load"
+            roles[artefact.identity] = artefact.role
         signatures = declared_signatures(repository, identities)
         return cls.from_registry_rows(
             *(
@@ -279,7 +282,8 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
             if identity.item == item
         )
         identities.update(
-            artefact.identity for artefact in item_load_artefacts(repository, item=item)
+            artefact.identity
+            for artefact in item_runtime_artefacts(repository, item=item)
         )
         # An alias destination is certified by the build that made it, and it has
         # to be here: it is the name the consuming item reads through, so an
@@ -427,7 +431,7 @@ class FixtureInventory(TargetInventory):
         tables = qualified(of_kind="Table", files=False)
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
-        artefacts = item_load_artefacts(repository, item=item)
+        artefacts = item_runtime_artefacts(repository, item=item)
         return cls(
             target_id=target_id,
             kind=kind,
@@ -536,6 +540,27 @@ from weaver import Table
 class {class_name}(Table):
     def read(self):
         return [], []
+'''
+
+
+def lakehouse_test(object_id: str, *, primary_key: str = "CustomerId") -> str:
+    """A declared Python Test — two sides, both empty, so it declares and no more."""
+
+    class_name = object_id.replace(".", "__")
+    return f'''\
+"""
+Test ID: {object_id}
+Description: A declared test.
+Primary key: {primary_key}
+"""
+from weaver import Test
+
+class {class_name}(Test):
+    def expected(self):
+        return None
+
+    def actual(self):
+        return None
 '''
 
 
@@ -887,8 +912,8 @@ def build_action(
     executor: str = "spark_sql",
     payload: str | None = None,
     payload_sha256: str | None = None,
-) -> BuildAction:
-    return BuildAction(
+) -> InstallAction:
+    return InstallAction(
         id=id,
         kind=kind,
         resource_node_id=resource_node_id,
@@ -902,7 +927,7 @@ def single_action_bundle(
     location: Location,
     *,
     store: FilesystemStore,
-    action: BuildAction,
+    action: InstallAction,
     payload: bytes | None = None,
     target: BoundTarget | None = None,
     description: str = "one action",
@@ -935,7 +960,7 @@ def single_action_bundle(
     )
 
 
-def _sequence(*, description: str, target_id: str, action: BuildAction):
+def _sequence(*, description: str, target_id: str, action: InstallAction):
     from weaver.build_bundle.models import BuildSequence
 
     return BuildSequence(

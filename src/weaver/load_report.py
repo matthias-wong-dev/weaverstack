@@ -79,87 +79,35 @@ TASK_FAILED = "failed"
 #: A dry run could not resolve a valid executable plan.
 TASK_INVALID = "invalid"
 
-# --- message codes ------------------------------------------------------------
+# --- messages -----------------------------------------------------------------
+#
+# Owned by the run package, because they are runtime vocabulary rather than load
+# vocabulary: a load, a validation and whatever runtime work comes next all
+# report through them. Re-exported here under the name this module's public
+# report has always used, so a reader of a LoadRunReport sees one message type.
 
-SEVERITY_ERROR = "error"
-SEVERITY_WARNING = "warning"
-SEVERITY_INFO = "info"
-
-#: The primitive ran and refused rows.
-PRIMITIVE_REJECTS = "primitive_rejects"
-#: The primitive ran and reported failure in its own result.
-PRIMITIVE_FAILURE = "primitive_failure"
-#: Dispatch raised something the primitive did not normalise.
-DISPATCH_EXCEPTION = "dispatch_exception"
-#: The installed primitive could not be located.
-DISPATCH_LOCATION_MISSING = "dispatch_location_missing"
-#: The physical target the node loads into is not there.
-TARGET_MISSING = "target_missing"
-#: A deployed Python module could not be imported, or carries no expected class.
-MODULE_IMPORT_FAILURE = "module_import_failure"
-#: A primitive returned something that is not a load result.
-RESULT_CONTRACT_INVALID = "result_contract_invalid"
-#: The endpoint refresh could not be performed.
-ENDPOINT_REFRESH_FAILURE = "endpoint_refresh_failure"
-#: An upstream node failed or was invalid, so this one may not run.
-DEPENDENCY_BLOCKED = "dependency_blocked"
-#: The catalogue's physical binding is missing, ambiguous or malformed.
-CATALOGUE_BINDING_INVALID = "catalogue_binding_invalid"
-#: The planned graph contains a cycle.
-DAG_CYCLE = "dag_cycle"
-#: A dependency named in the catalogue could not be resolved to anything.
-DEPENDENCY_UNRESOLVED = "dependency_unresolved"
-#: A reference Weaver deliberately does not follow — a fully qualified physical
-#: read that names something outside the estate's own logical graph.
-DEPENDENCY_EXTERNAL = "dependency_external"
-
-
-@dataclass(frozen=True)
-class LoadMessage:
-    """One finding about one node, or about the run as a whole.
-
-    ``source`` says who noticed: the primitive that ran, or the orchestrator
-    around it. Both enter the same stream deliberately — a caller reading a
-    node's messages should not have to know which layer wrote each one to see
-    everything that was wrong with it.
-    """
-
-    severity: str
-    code: str
-    message: str
-    detail: str | None = None
-    source: str | None = None
-
-    def to_mapping(self) -> dict[str, Any]:
-        return {
-            "severity": self.severity,
-            "code": self.code,
-            "message": self.message,
-            "detail": self.detail,
-            "source": self.source,
-        }
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadMessage":
-        return cls(
-            severity=payload["severity"],
-            code=payload["code"],
-            message=payload["message"],
-            detail=payload.get("detail"),
-            source=payload.get("source"),
-        )
-
-
-def error(code: str, message: str, **extra: str | None) -> LoadMessage:
-    return LoadMessage(SEVERITY_ERROR, code, message, **extra)
-
-
-def warning(code: str, message: str, **extra: str | None) -> LoadMessage:
-    return LoadMessage(SEVERITY_WARNING, code, message, **extra)
-
-
-def info(code: str, message: str, **extra: str | None) -> LoadMessage:
-    return LoadMessage(SEVERITY_INFO, code, message, **extra)
+from .run.result import (  # noqa: E402 - the vocabulary this report projects
+    CATALOGUE_BINDING_INVALID,
+    DAG_CYCLE,
+    DEPENDENCY_BLOCKED,
+    DEPENDENCY_EXTERNAL,
+    DEPENDENCY_UNRESOLVED,
+    DISPATCH_EXCEPTION,
+    DISPATCH_LOCATION_MISSING,
+    ENDPOINT_REFRESH_FAILURE,
+    MODULE_IMPORT_FAILURE,
+    PRIMITIVE_FAILURE,
+    PRIMITIVE_REJECTS,
+    RESULT_CONTRACT_INVALID,
+    SEVERITY_ERROR,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+    TARGET_MISSING,
+    RunMessage as LoadMessage,
+    error,
+    info,
+    warning,
+)
 
 
 @dataclass(frozen=True)

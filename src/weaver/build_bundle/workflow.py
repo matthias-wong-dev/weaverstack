@@ -24,7 +24,8 @@ from ..declaration.model import WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..store import FilesystemStore, Store
 from .bundle import BuildBundle, load_bundle
-from .installer import InstallationEnvironment, install_bundle
+from .builder import Builder
+from .installer import Installer
 from .planner import generate_item_build_bundle
 from .models import BuildPlan
 from .report import InstallationReport
@@ -174,25 +175,32 @@ def read_build_state(
     bindings: ItemBindings,
     *,
     required_catalogue_items,
-    environment: InstallationEnvironment,
+    session,
+    workspace=None,
     sql_by_item=None,
 ) -> BuildState:
-    """Read only the authoritative state a source-independent planner needs."""
+    """Read only the authoritative state a source-independent planner needs.
 
+    The boundary between the physical estate and the Builder: two reads — the
+    catalogue and every selected target — assembled into one Python handover
+    that a Builder can be given directly, and that a test can construct without
+    an estate at all.
+    """
+
+    workspace = workspace if workspace is not None else session.workspace
     inventories = read_target_inventories(
-        bindings, environment=environment, sql_by_item=sql_by_item
+        bindings, session=session, workspace=workspace, sql_by_item=sql_by_item
     )
-    if environment.spark is None:
-        raise BuildError("every build needs Spark to read and publish the catalogue")
-    workspace = environment.workspace
     if workspace is None or not workspace.weaver_lakehouse:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
     from ..spark import SparkCatalogue
     from ..targets import ItemRef
 
     catalogue = SparkCatalogue(
-        environment.spark,
-        environment.resolver.spark_destination(ItemRef(workspace.weaver_lakehouse)),
+        session.spark(workspace),
+        session.resolver(workspace).spark_destination(
+            ItemRef(workspace.weaver_lakehouse)
+        ),
     )
     return BuildState(
         catalogue=read_catalogue_state(catalogue, required_catalogue_items),
@@ -350,59 +358,67 @@ def install_bundle_archive(
     archive: Location,
     *,
     archive_store: Store,
-    environment: InstallationEnvironment,
+    session,
+    workspace=None,
+    executors=None,
 ) -> InstallationReport:
     """Install a handover archive entirely from its temporary local extraction."""
 
     with materialise_bundle_archive(archive, store=archive_store) as bundle:
-        return install_bundle(bundle, environment=environment)
+        return Installer(session, workspace=workspace, executors=executors).install(
+            bundle
+        )
 
 
 def build_item_repository(
     repository: WeaverRepository,
     *,
     bindings: ItemBindings,
-    target_inventories: Mapping[WeaverItemId, TargetInventory],
-    reconciliation: Reconciliation,
-    environment: InstallationEnvironment,
+    state: BuildState,
+    session,
+    workspace=None,
     source_store: Store,
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
     output: Location | None = None,
+    executors=None,
 ) -> ItemBuildResult:
-    """Generate and install from already parsed source and already read state.
+    """Decide, then install — a convenience over the two doers, not a third one.
 
-    This is the planner/executor seam.  It deliberately cannot materialise or
-    parse authored files, inspect a Workspace, or discover target state.
+    .. code-block:: text
+
+        Repository + BuildState → Builder → BuildBundle → Installer
+
+    Both halves are separately callable and separately testable; this exists so
+    the common case reads as one call. It adds no decisions of its own, which is
+    what stops it becoming a hidden third architecture.
 
     ``output`` places the generated bundle tree somewhere durable instead of the
     temporary directory this otherwise uses. Only a caller that wants the bundle
     afterwards passes it; the build itself does not care where it sat.
     """
 
-    validate_build_request(
-        repository, bindings, control_lakehouse=control_lakehouse
+    builder = Builder(
+        repository=repository,
+        state=state,
+        bindings=bindings,
+        control_lakehouse=control_lakehouse,
+        source_store=source_store,
     )
+    installer = Installer(session, workspace=workspace, executors=executors)
 
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
-        bundle = generate_item_build_bundle(
-            repository,
-            bindings=bindings,
-            output=output or Location((Path(temporary) / "bundle").as_posix()),
-            store=source_store,
-            target_inventories=target_inventories,
-            catalogue=reconciliation.catalogue,
-            stale_claims=reconciliation.stale_claims,
-            control_lakehouse=control_lakehouse,
+        bundle = builder.build(
+            output=output or Location((Path(temporary) / "bundle").as_posix())
         )
-        report = install_bundle(bundle, environment=environment)
+        report = installer.install(bundle)
         persisted = None
         if archive is not None:
             persisted = persist_bundle_archive(
                 bundle,
                 archive,
-                store=archive_store or environment.store,
+                store=archive_store or installer.store,
             )
         return ItemBuildResult(
             plan=bundle.plan,
@@ -417,23 +433,27 @@ def build_uploaded_item_repository(
     repository_root: Location,
     *,
     bindings: ItemBindings,
-    environment: InstallationEnvironment,
+    session,
+    workspace=None,
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
     sql_by_item=None,
+    executors=None,
 ) -> ItemBuildResult:
     """Compatibility wrapper for a repository stored with the target estate."""
 
     return build_item_repository_source(
         repository_root,
-        source_store=environment.store,
+        source_store=session.store(workspace or session.workspace),
         bindings=bindings,
-        environment=environment,
+        session=session,
+        workspace=workspace,
         control_lakehouse=control_lakehouse,
         archive=archive,
         archive_store=archive_store,
         sql_by_item=sql_by_item,
+        executors=executors,
     )
 
 
@@ -442,12 +462,14 @@ def build_item_repository_source(
     *,
     source_store: Store,
     bindings: ItemBindings,
-    environment: InstallationEnvironment,
+    session,
+    workspace=None,
     control_lakehouse: LakehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
     output: Location | None = None,
     sql_by_item=None,
+    executors=None,
 ) -> ItemBuildResult:
     """Prepare an explicit source independently from the target, then build it."""
 
@@ -456,26 +478,29 @@ def build_item_repository_source(
         validate_build_request(
             repository, bindings, control_lakehouse=control_lakehouse
         )
-        inventories = read_target_inventories(
-            bindings, environment=environment, sql_by_item=sql_by_item
-        )
-        reconciled = read_reconciled_catalogue(
+        # The *unreconciled* catalogue, deliberately. Reconciliation is a
+        # decision and belongs to the Builder; handing it an already-reconciled
+        # catalogue would hand it one whose stale claims had already been
+        # removed, so the bundle would never be told to prune them.
+        state = read_build_state(
             bindings,
-            inventories=inventories,
-            environment=environment,
-            repository=repository,
+            required_catalogue_items=catalogue_items_for_build(repository, bindings),
+            session=session,
+            workspace=workspace,
+            sql_by_item=sql_by_item,
         )
         return build_item_repository(
             repository,
             bindings=bindings,
-            target_inventories=inventories,
-            reconciliation=reconciled,
-            environment=environment,
+            state=state,
+            session=session,
+            workspace=workspace,
             source_store=prepared.store,
             control_lakehouse=control_lakehouse,
             archive=archive,
             archive_store=archive_store,
             output=output,
+            executors=executors,
         )
 
 
@@ -483,7 +508,8 @@ def read_reconciled_catalogue(
     bindings: ItemBindings,
     *,
     inventories,
-    environment: InstallationEnvironment,
+    session,
+    workspace=None,
     repository=None,
 ) -> Reconciliation:
     """Read the Weaver Lakehouse catalogue and prove selected claims physically.
@@ -508,17 +534,17 @@ def read_reconciled_catalogue(
             if alias.destination.item in items and alias.source.item not in items
         }
 
-    if environment.spark is None:
-        raise BuildError("every build needs Spark to read and publish the catalogue")
-    workspace = environment.workspace
+    workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.weaver_lakehouse:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
     from ..spark import SparkCatalogue
     from ..targets import ItemRef
 
     catalogue = SparkCatalogue(
-        environment.spark,
-        environment.resolver.spark_destination(ItemRef(workspace.weaver_lakehouse)),
+        session.spark(workspace),
+        session.resolver(workspace).spark_destination(
+            ItemRef(workspace.weaver_lakehouse)
+        ),
     )
     state = read_catalogue_state(catalogue, sorted(items, key=str))
     return reconcile_catalogue_state(state, inventories=inventories)
@@ -527,44 +553,45 @@ def read_reconciled_catalogue(
 def read_target_inventories(
     bindings: ItemBindings,
     *,
-    environment: InstallationEnvironment,
+    session,
+    workspace=None,
     sql_by_item=None,
 ) -> dict:
-    """Read every selected physical target before planning begins."""
+    """Read every selected physical target before planning begins.
+
+    A boundary read: physical target to :class:`TargetInventory`, once, so that
+    everything above it decides against a snapshot rather than against state
+    that is still moving. Its capabilities come from the Session, which owns
+    them and closes them — this used to open a TDS connection per Warehouse and
+    close it again, which a build following a wipe paid for twice.
+    """
 
     supplied_sql = sql_by_item or {}
+    workspace = workspace if workspace is not None else session.workspace
     inventories = {}
-    owned = []
-    try:
-        for binding in bindings.entries:
-            target = binding.to_bound_target()
-            if target.kind == WAREHOUSE_TARGET:
-                sql = supplied_sql.get(binding.item)
-                if sql is None:
-                    if environment.workspace is None:
-                        raise BuildError(
-                            f"reading Warehouse inventory for {binding.item} needs a Workspace"
-                        )
-                    from ..fabric.sql import fabric_sql_executor
-                    from ..targets import WarehouseTarget
-
-                    sql = fabric_sql_executor(
-                        WarehouseTarget.parse(target.item_id), environment.workspace
+    for binding in bindings.entries:
+        target = binding.to_bound_target()
+        if target.kind == WAREHOUSE_TARGET:
+            sql = supplied_sql.get(binding.item)
+            if sql is None:
+                if workspace is None:
+                    raise BuildError(
+                        f"reading Warehouse inventory for {binding.item} needs a Workspace"
                     )
-                    owned.append(sql)
-                inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
-            else:
-                inventories[binding.item] = read_lakehouse_inventory(
-                    target,
-                    resolver=environment.resolver,
-                    store=environment.store,
-                    spark=environment.spark,
+                from ..targets import WarehouseTarget
+
+                sql = session.sql_executor(
+                    WarehouseTarget.parse(target.item_id), workspace=workspace
                 )
-        return inventories
-    finally:
-        for sql in owned:
-            if hasattr(sql, "close"):
-                sql.close()
+            inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
+        else:
+            inventories[binding.item] = read_lakehouse_inventory(
+                target,
+                resolver=session.resolver(workspace),
+                store=session.store(workspace),
+                spark=session.spark(workspace),
+            )
+    return inventories
 
 
 @contextmanager

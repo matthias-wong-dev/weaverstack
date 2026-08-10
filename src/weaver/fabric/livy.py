@@ -33,7 +33,27 @@ RESULT_PREFIX = "__weaver_result__"
 
 
 class LivyError(WeaverError):
-    """Raised when a Livy session or statement fails."""
+    """Raised when a Livy session fails: it would not start, or it has died."""
+
+
+class LivyStatementError(LivyError):
+    """Raised when a *statement* failed. The session that ran it is fine.
+
+    The distinction is the whole difference between a mistake and an outage. A
+    remote ``ModuleNotFoundError`` says the submitted program was wrong; it says
+    nothing about the Spark session, which is still up and still costs a minute
+    to replace. Treating the two alike is how one bad command ends a console.
+
+    A subclass so that every existing ``except LivyError`` still catches it —
+    what changes is that a caller which *cares* can now ask.
+    """
+
+    def __init__(self, message: str, *, ename=None, evalue=None) -> None:
+        super().__init__(message)
+        #: The remote exception's class name, where Livy reported one.
+        self.ename = ename
+        #: Its message, likewise.
+        self.evalue = evalue
 
 
 @dataclass(frozen=True)
@@ -413,9 +433,11 @@ def _result(statement: dict) -> StatementResult:
     output = statement.get("output") or {}
     if output.get("status") and output["status"] != "ok":
         traceback = "\n".join(output.get("traceback") or [])
-        raise LivyError(
+        raise LivyStatementError(
             f"{output.get('ename')}: {output.get('evalue')}"
-            + (f"\n{traceback}" if traceback else "")
+            + (f"\n{traceback}" if traceback else ""),
+            ename=output.get("ename"),
+            evalue=output.get("evalue"),
         )
     text = (output.get("data") or {}).get("text/plain", "")
     return StatementResult(text=text, payload=_payload(text))

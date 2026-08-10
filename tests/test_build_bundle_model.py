@@ -20,7 +20,7 @@ from weaver.store import FilesystemStore
 from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    BuildAction,
+    InstallAction,
     BuildBatch,
     BuildPlan,
     BuildSequence,
@@ -41,8 +41,8 @@ VIEW_PAYLOAD = b"CREATE OR REPLACE VIEW DWG.ActiveCustomer AS\nselect 1\n"
 VIEW_PATH = "payload/040-build-view/view-DWG.ActiveCustomer.spark.sql"
 
 
-def _view_action() -> BuildAction:
-    return BuildAction(
+def _view_action() -> InstallAction:
+    return InstallAction(
         id="view-DWG.ActiveCustomer",
         kind="build_view",
         resource_node_id="delta:DWG.ActiveCustomer",
@@ -52,9 +52,9 @@ def _view_action() -> BuildAction:
     )
 
 
-def _folder_action() -> BuildAction:
+def _folder_action() -> InstallAction:
     # A folder action reconciles a directory; it carries no payload.
-    return BuildAction(
+    return InstallAction(
         id="folder-Raw.CustomerCsv",
         kind="build_folder",
         resource_node_id="folder:Raw.CustomerCsv",

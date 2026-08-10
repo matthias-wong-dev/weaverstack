@@ -13,7 +13,7 @@ from factories import bound_target, item_id, registered_document, target_invento
 from support.local_build import _local_build_context
 
 from weaver.targets import ItemRef
-from weaver.build_bundle import execute_action, plan_item_build
+from weaver.build_bundle import execute_install_action, plan_item_build
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.locations import Location
 from weaver.spark import SparkCatalogue
@@ -43,6 +43,17 @@ def weaver_catalogue(spark, lakehouses):
     land in the first test's directory.
     """
 
+    yield from _weaver_catalogue(spark, lakehouses)
+
+
+@pytest.fixture(scope="module")
+def shared_weaver_catalogue(spark, shared_lakehouses):
+    """The same, for the module-scoped estate — see :func:`shared_lakehouses`."""
+
+    yield from _weaver_catalogue(spark, shared_lakehouses)
+
+
+def _weaver_catalogue(spark, lakehouses):
     catalogue = SparkCatalogue(
         spark, lakehouses.resolver.spark_destination(lakehouses.weaver)
     )

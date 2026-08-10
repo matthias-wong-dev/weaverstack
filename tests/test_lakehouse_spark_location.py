@@ -132,12 +132,13 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
     target.
     """
 
-    from weaver.build_bundle.installer import InstallationEnvironment
+    from support.sessions import given_installer
+
     from weaver.build_bundle.targets import BoundTarget
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
-    environment = InstallationEnvironment(store=None, resolver=LocalResolver(workspace))
-    resolved = environment.resolve_target(
+    installer = given_installer(workspace=workspace, resolver=LocalResolver(workspace))
+    resolved = installer.resolve_target(
         BoundTarget(
             id="lakehouse-Sales_LH",
             kind="lakehouse",
@@ -151,12 +152,13 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
 
 
 def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
-    from weaver.build_bundle.installer import InstallationEnvironment
+    from support.sessions import given_installer
+
     from weaver.build_bundle.targets import BoundTarget
 
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
-    environment = InstallationEnvironment(store=None, resolver=LocalResolver(workspace))
-    resolved = environment.resolve_target(
+    installer = given_installer(workspace=workspace, resolver=LocalResolver(workspace))
+    resolved = installer.resolve_target(
         BoundTarget(id="warehouse-Sales_WH", kind="warehouse", item_id="Sales_WH")
     )
     assert resolved.location is None
@@ -165,14 +167,15 @@ def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
 def test_a_resolver_without_the_method_is_not_a_failure(tmp_path):
     """The actions that need roots fail explicitly; resolution does not pre-empt them."""
 
-    from weaver.build_bundle.installer import InstallationEnvironment
+    from support.sessions import given_installer
+
     from weaver.build_bundle.targets import BoundTarget
 
     class Minimal:
         pass
 
-    environment = InstallationEnvironment(store=None, resolver=Minimal())
-    resolved = environment.resolve_target(
+    installer = given_installer(resolver=Minimal())
+    resolved = installer.resolve_target(
         BoundTarget(id="lakehouse-X", kind="lakehouse", item_id="X")
     )
     assert resolved.location is None

@@ -181,7 +181,10 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
 
     from .declaration.tsql_validation import generate_tsql_validation_batch
 
-    executor = session._warehouse_sql(target.name)  # noqa: SLF001 - one seam
+    from .targets import ItemRef as _ItemRef
+    from .targets import WarehouseTarget as _WarehouseTarget
+
+    executor = session.sql_executor(_WarehouseTarget(_ItemRef(target.name)))
     if executor is None:
         raise ValidationError(
             f"{target} needs a SQL capability to run a validation, and this run "
@@ -224,14 +227,14 @@ def _run_spark(session, document, target: PhysicalTargetRef):
     from .spark import tokens
     from .targets import ItemRef
 
-    if session.spark is None:
+    if session.spark() is None:
         raise ValidationError("running a Spark SQL validation needs a Spark session")
     if document.language != SPARK_SQL:
         raise CommandError(
             f"a {document.language} validation cannot run against {target}"
         )
 
-    lakehouse = lakehouse_for(session.resolver, ItemRef(target.name))
+    lakehouse = lakehouse_for(session.resolver(), ItemRef(target.name))
     # Addressed exactly as an installed module's program is, so a file run reads
     # the same tables the installed one would.
     sql = tokens.expand(
@@ -240,11 +243,11 @@ def _run_spark(session, document, target: PhysicalTargetRef):
     what = document.object_id.qualified
 
     if document.document.kind == ASSUMPTION:
-        frame = read_spark_sql_assumption(session.spark, sql=sql, what=what)
+        frame = read_spark_sql_assumption(session.spark(), sql=sql, what=what)
         rows = tuple(row.asDict() for row in frame.collect())
         return AssumptionResult(violation_count=len(rows)), rows
 
-    expected, actual = read_spark_sql_test(session.spark, sql=sql, what=what)
+    expected, actual = read_spark_sql_test(session.spark(), sql=sql, what=what)
     frame = compare(
         expected, actual, primary_key=document.document.primary_key, what=what
     )

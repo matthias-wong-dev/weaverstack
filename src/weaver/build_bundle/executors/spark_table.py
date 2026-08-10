@@ -32,7 +32,7 @@ from typing import Any
 from ...errors import InstallError
 from ...declaration.columns import validate_build_columns
 from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
-from ..models import BuildAction
+from ..models import InstallAction
 from .base import InstallationContext
 from .spark_case import exact_identifier_case
 
@@ -45,7 +45,7 @@ class SparkTableExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:

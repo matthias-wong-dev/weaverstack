@@ -43,7 +43,7 @@ from ...declaration.spark_sql_module import GENERATED_MODULE_MARKER
 from ...errors import InstallError
 from ...spark import tokens
 from ...targets import FolderTarget
-from ..models import DELETE_FILE, WRITE_FILE, BuildAction
+from ..models import DELETE_FILE, WRITE_FILE, InstallAction
 from .base import InstallationContext
 
 
@@ -52,7 +52,7 @@ class LoadFileExecutor:
 
     def execute(
         self,
-        action: BuildAction,
+        action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:
