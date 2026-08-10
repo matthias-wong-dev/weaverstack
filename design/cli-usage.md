@@ -97,6 +97,56 @@ warms its JVM the same way.
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
 
+## Compose
+
+The development loop is the same four commands every time, each carrying the
+bindings and targets the last one had. `compose.yml` writes the sequence down:
+
+```yaml
+compose:
+  dev:
+    - weaver wipe Lakehouse/Sales Warehouse/Reporting
+    - weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    - weaver load Warehouse/Reporting
+    - weaver test Warehouse/Reporting
+```
+
+```bash
+weaver compose dev
+weaver compose dev --file path/to/compose.yml
+```
+
+The sequence is displayed and confirmed before anything runs:
+
+```text
+Compose: dev  (compose.yml)
+
+1. weaver wipe Lakehouse/Sales Warehouse/Reporting
+2. weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+3. weaver load Warehouse/Reporting
+4. weaver test Warehouse/Reporting
+
+Execute this sequence? [y/N]
+```
+
+The default is no, and only `y`/`yes` proceeds. **That one answer authorises the
+whole sequence** — a `wipe` inside it does not stop to ask again, because having
+agreed to four commands, being asked about the first of them is not a second
+safeguard. Without a terminal to ask, nothing runs.
+
+**Entries are ordinary Weaver command lines**, parsed by the same parser and run
+by the same handlers, so an option means here what it means at a prompt. Nothing
+shell-shaped is accepted — no pipes, no redirection, no `&&`, no variables, no
+other executables — and neither is `session`, `doctor` or a nested `compose`.
+
+**One Session runs the whole sequence**, which is the point: authentication,
+item resolution and Livy are paid for once rather than four times. Run inside
+`weaver session`, the composition joins the Session already open.
+
+It is not a workflow engine, and is not meant to become one: no conditionals,
+no parallelism, no variables, no retries, no project-root discovery. Commands
+run in order and stop at the first failure.
+
 ## Install and control-plane bootstrap
 
 Install Weaver into a Fabric Environment:

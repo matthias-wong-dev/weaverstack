@@ -19,6 +19,10 @@ from weaver.errors import WeaverError
 #: CLI-only install without the [fabric] extra must still build its parser.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
+#: Named in help text. Spelled out here rather than imported at module scope so
+#: building the parser stays free of everything ``compose`` pulls in.
+COMPOSE_DEFAULT_FILE = "compose.yml"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -44,6 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_workspace_args(shell)
     shell.set_defaults(handler=handle_session)
+
+    compose = subcommands.add_parser(
+        "compose",
+        help="run a named sequence of Weaver commands in one session",
+    )
+    compose.add_argument("name", help="the composition to run, from compose.yml")
+    compose.add_argument(
+        "--file",
+        metavar="PATH",
+        help=f"composition file; defaults to ./{COMPOSE_DEFAULT_FILE}",
+    )
+    _add_workspace_args(compose)
+    compose.set_defaults(handler=handle_compose)
 
     build = subcommands.add_parser(
         "build", help="build bound logical items from an explicit repository"
@@ -507,6 +524,27 @@ def handle_session(args: argparse.Namespace) -> int:
     from .shell import run_shell
 
     return run_shell(args)
+
+
+def handle_compose(args: argparse.Namespace) -> int:
+    """Show a named sequence, ask once, then run it in one Session."""
+
+    from .compose import run_composition
+
+    return run_composition(args)
+
+
+def _authorised(args: argparse.Namespace) -> bool:
+    """Whether this invocation already carries the operator's go-ahead.
+
+    Two spellings of one fact. ``--yes`` is what somebody types to skip the
+    question for a single command; ``authorised`` is what ``compose`` sets
+    after showing the whole sequence and being told yes — because having agreed
+    to four commands, being asked again about the first of them is not a second
+    safeguard, it is the first one repeated.
+    """
+
+    return bool(getattr(args, "yes", False) or getattr(args, "authorised", False))
 
 
 def handle_push(args: argparse.Namespace) -> int:
@@ -1151,7 +1189,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
             print(f"{total} item(s) would be removed. Nothing was changed.")
         return 0
 
-    if total and not args.yes:
+    if total and not _authorised(args):
         if not sys.stdin.isatty():
             print(
                 f"Refusing to remove {total} item(s) without confirmation. "
