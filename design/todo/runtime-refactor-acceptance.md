@@ -11,21 +11,41 @@ pytest -m "fabric and remote" -q --durations=25
 
 ## Totals
 
-| suite  | baseline        | final           | change  | %      |
-| ------ | --------------- | --------------- | ------- | ------ |
-| pure   | 2059 in 85s     | 2155 in 97s     | +12s    | +14.1% |
-| spark  | 247 in 715s     | 245 in 432s     | −283s   | −39.6% |
-| fabric | 82 in 1270s     | _pending_       |         |        |
+| suite  | baseline    | final        | change | %      |
+| ------ | ----------- | ------------ | ------ | ------ |
+| pure   | 2059 in 85s | 2155 in 97s  | +12s   | +14.1% |
+| spark  | 247 in 715s | 245 in 432s  | −283s  | −39.6% |
+| fabric | 82 in 1270s | 94 in 1186s  | −84s   | −6.6%  |
 
-The pure suite is slower and that is the trade being made. It absorbed 96 tests
-— the whole mock run cycle, the thin run boundary, the Session resource cycle —
-and each one replaced something that previously needed a JVM or a workspace. Per
-test it went from 41.3ms to 45.0ms; the rest of the increase is the two new
-packages being imported at collection.
+Two of the three moved the right way, and the third is the trade.
 
-The Spark suite is 39.6% faster with two fewer tests, and neither of the two was
-lost: run aggregation and fail-isolation moved to the mock cycle, which proves
-them over every combination rather than the one an estate happens to produce.
+**Pure** is slower because it absorbed 96 tests — the mock run cycle, the thin
+run boundary, the Session resource cycle — and every one of them replaced
+something that previously needed a JVM or a workspace. Per test it went from
+41.3ms to 45.0ms; the rest is two new packages imported at collection.
+
+**Spark** is 39.6% faster with two fewer tests, and neither was lost: run
+aggregation and fail-isolation moved to the mock cycle, which proves them over
+every combination rather than over the one an estate happens to produce.
+
+**Fabric** is 6.6% faster while running twelve more tests — 15.5s to 12.6s per
+test, −18.7%. Almost none of that is this branch's doing directly, and the
+number should be read for what it is: Fabric time is Warehouse round trips and
+Livy startup, and this branch changed neither. What it did change is that a
+Session is acquired once per workspace context instead of per operation.
+
+## Where the Fabric time still goes
+
+```text
+89.6s  setup  test_cross_item_alias         one estate, built once, for the module
+63.9s  call   test_warehouse_load_primitive  ×8 in the 30–64s band
+36.7s  call   test_warehouse_sql_program_primitive
+```
+
+Every one is a real Warehouse round trip. The `~30s` band the baseline noted as
+"a function-scoped baseline that installs and first-loads the same object per
+case" is still there, and is the obvious next target — but it is Warehouse
+work, not orchestration, so nothing in this branch could move it.
 
 ## Where the Spark time went
 
