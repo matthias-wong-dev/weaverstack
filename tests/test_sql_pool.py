@@ -112,3 +112,116 @@ def test_a_registry_keeps_separate_pools_per_stable_endpoint():
     assert registry.pool(one, AUTH) is registry.pool(one, AUTH)
     assert registry.pool(one, AUTH) is not registry.pool(two, AUTH)
     registry.close()
+
+
+# --- a connection dropped while it was idle ----------------------------------
+
+
+class Droppable(Connection):
+    """A connection that can be killed the way a server kills an idle one.
+
+    Silently: nothing announces the drop, and the connection only reveals it
+    when something is asked of it. That silence is the whole problem — a caller
+    handed one of these fails on its own statement and reads the failure as
+    being about the statement.
+    """
+
+    def __init__(self, number):
+        super().__init__(number)
+        self.alive = True
+        self.statements = []
+
+    def drop(self):
+        self.alive = False
+
+    def cursor(self):
+        return Cursor(self)
+
+
+class Cursor:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, statement, *parameters):
+        if not self.connection.alive:
+            raise OSError("Communication link failure")
+        self.connection.statements.append(statement)
+
+    def fetchall(self):
+        return []
+
+    def close(self):
+        pass
+
+
+def _droppable_pool(created, **kwargs):
+    def factory(endpoint, authentication):
+        connection = Droppable(len(created))
+        created.append(connection)
+        return connection
+
+    return SqlConnectionPool(
+        SqlEndpoint("one.example", "Reporting"),
+        AUTH,
+        connection_factory=factory,
+        **kwargs,
+    )
+
+
+def test_a_connection_dropped_while_idle_is_replaced_rather_than_handed_out(
+    monkeypatch,
+):
+    """The failure this prevents arrives as somebody else's fault.
+
+    A Fabric SQL endpoint drops connections it considers abandoned and says
+    nothing. Handed one, the next caller fails with a communication link
+    failure — in a suite, that was one wipe failing and thirteen tests erroring
+    behind it, none of which had anything wrong with them.
+    """
+
+    monkeypatch.setattr("weaver.sql.pool.IDLE_VALIDATION_SECONDS", 0.0)
+    created = []
+    pool = _droppable_pool(created)
+
+    with pool.lease() as first:
+        first.connection.execute = None  # unused; the lease is what matters
+    created[0].drop()
+
+    with pool.lease() as second:
+        assert second.connection is not created[0], "a dead connection was reused"
+        assert second.connection.alive
+
+    assert created[0].closed, "the dead one was closed rather than leaked"
+
+
+def test_a_connection_reused_promptly_is_not_checked(monkeypatch):
+    """The check costs a round trip, so back-to-back work must not pay it."""
+
+    monkeypatch.setattr("weaver.sql.pool.IDLE_VALIDATION_SECONDS", 3600.0)
+    created = []
+    pool = _droppable_pool(created)
+
+    with pool.lease():
+        pass
+    with pool.lease() as second:
+        assert second.connection is created[0]
+
+    assert created[0].statements == [], "a healthy connection was interrogated"
+
+
+def test_the_pool_does_not_shrink_when_it_replaces_a_dead_connection(monkeypatch):
+    """Otherwise every drop would permanently cost the pool a slot."""
+
+    monkeypatch.setattr("weaver.sql.pool.IDLE_VALIDATION_SECONDS", 0.0)
+    created = []
+    pool = _droppable_pool(created, max_connections=1)
+
+    with pool.lease():
+        pass
+    created[0].drop()
+
+    with pool.lease() as replacement:
+        assert replacement.connection.alive
+    # And the slot is still usable afterwards, which a leaked count would deny.
+    with pool.lease() as again:
+        assert again.connection.alive
