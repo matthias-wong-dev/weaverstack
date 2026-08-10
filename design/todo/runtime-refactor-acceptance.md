@@ -15,7 +15,7 @@ pytest -m "fabric and remote" -q --durations=25
 | ------ | ----------- | ------------ | ------ | ------ |
 | pure   | 2059 in 85s | 2155 in 97s  | +12s   | +14.1% |
 | spark  | 247 in 715s | 245 in 432s  | −283s  | −39.6% |
-| fabric | 82 in 1270s | 94 in 1186s  | −84s   | −6.6%  |
+| fabric | 82 in 1270s | 94 in 829s   | −441s  | −34.7% |
 
 Two of the three moved the right way, and the third is the trade.
 
@@ -28,24 +28,54 @@ something that previously needed a JVM or a workspace. Per test it went from
 aggregation and fail-isolation moved to the mock cycle, which proves them over
 every combination rather than over the one an estate happens to produce.
 
-**Fabric** is 6.6% faster while running twelve more tests — 15.5s to 12.6s per
-test, −18.7%. Almost none of that is this branch's doing directly, and the
-number should be read for what it is: Fabric time is Warehouse round trips and
-Livy startup, and this branch changed neither. What it did change is that a
-Session is acquired once per workspace context instead of per operation.
+**Fabric** is 34.7% faster while running twelve more tests — 15.5s to 8.8s per
+test, −43%. None of that is anything running faster. Fabric time is Warehouse
+round trips, and what changed is how many of them the suite asks for.
+
+## Where the Fabric time went
+
+The baseline named the target precisely: "a function-scoped baseline that
+installs and first-loads the same object per case", and "two assertions about
+one expensive second run, paid for twice". Both are gone.
+
+```text
+test_warehouse_load_primitive         ~500s → 211s
+test_warehouse_sql_program_primitive  ~420s → 307s
+```
+
+Three changes, in order of what they were worth:
+
+**A table and its procedure are installed once per module, not once per test.**
+Installing them is not a claim any of those tests makes — it is the premise they
+share — and a two-phase procedure install was the most expensive statement in
+the file. Sequences reset by deleting rows instead, which is the same starting
+state for every claim there.
+
+**A sequence runs once, however many claims are about it.** "A second run
+updates only what changed" and "an unchanged row keeps its original update time"
+are two questions about one load-then-load-again. Each sequence now captures
+what its claims need at the moment it finishes and hands back a snapshot —
+capturing rather than querying later is what makes sharing one table safe, since
+a query afterwards would describe whichever sequence ran last.
+
+**The ordinary path runs as a chain**: seed, update, shrink, where each step is
+the next one's starting state. Separately, the update case had to re-seed and
+the shrink case had to re-seed and update again — three loads bought to reach
+states two earlier loads had already produced. Rejection keeps its own
+sequences, because refusing and tolerating are a different subject.
 
 ## Where the Fabric time still goes
 
 ```text
-89.6s  setup  test_cross_item_alias         one estate, built once, for the module
-63.9s  call   test_warehouse_load_primitive  ×8 in the 30–64s band
-36.7s  call   test_warehouse_sql_program_primitive
+86.1s  setup  test_warehouse_load_primitive        two estates, six sequences
+78.0s  setup  test_cross_item_alias                one estate, already built once
+62.6s  setup  test_warehouse_sql_program_primitive ×3 — each a distinct retirement
 ```
 
-Every one is a real Warehouse round trip. The `~30s` band the baseline noted as
-"a function-scoped baseline that installs and first-loads the same object per
-case" is still there, and is the obvious next target — but it is Warehouse
-work, not orchestration, so nothing in this branch could move it.
+Every one is now a sequence some claim genuinely needs. The three retirement
+setups are the clearest remaining case, and they resist folding: each is a
+*different* second load, and re-establishing the base is what makes each claim
+read the same however the module is ordered.
 
 ## Where the Spark time went
 
