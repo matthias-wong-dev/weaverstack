@@ -149,11 +149,6 @@ def load(
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        if not opened.executes_here(resolved_workspace):
-            raise CommandError(
-                "load runs where the data is: call it from a Fabric notebook, "
-                "or against a local Workspace"
-            )
         with opened.task(
             "Load (dry run)" if dry_run else "Load", ", ".join(map(str, requested))
         ):

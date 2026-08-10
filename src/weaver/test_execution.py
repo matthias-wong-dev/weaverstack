@@ -111,21 +111,36 @@ class _WithDiagnostics:
         return getattr(self.result, name)
 
 
+class _Capabilities:
+    """What the validation dispatchers read, taken from the Session that owns it.
+
+    ``spark`` is a property rather than a value, and that is the whole of why
+    this is a class. Asked for eagerly, a Warehouse validation — a stored
+    procedure reached over TDS, needing no Spark at all — could not run from a
+    desktop, because assembling the bundle of capabilities failed before
+    anything looked at which capability the validation actually wanted.
+    """
+
+    def __init__(self, session, workspace, runtime_scope) -> None:
+        self._session = session
+        self._workspace = workspace
+        self.resolver = session.resolver(workspace)
+        self.runtime_scope = runtime_scope
+
+    @property
+    def spark(self):
+        return self._session.spark(self._workspace)
+
+    def sql_for(self, target):
+        from .targets import ItemRef, WarehouseTarget
+
+        return self._session.sql_executor(
+            WarehouseTarget(ItemRef(target.name)), workspace=self._workspace
+        )
+
+
 def _capabilities(session, workspace, runtime_scope):
-    """What the validation dispatchers read, taken from the Session that owns it."""
-
-    from types import SimpleNamespace
-
-    from .targets import ItemRef, WarehouseTarget
-
-    return SimpleNamespace(
-        resolver=session.resolver(workspace),
-        spark=session.spark(workspace),
-        runtime_scope=runtime_scope,
-        sql_for=lambda target: session.sql_executor(
-            WarehouseTarget(ItemRef(target.name)), workspace=workspace
-        ),
-    )
+    return _Capabilities(session, workspace, runtime_scope)
 
 
 def primitive_kind(validation: InstalledValidation) -> str:

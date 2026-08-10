@@ -91,11 +91,6 @@ def test(
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
-        if not opened.executes_here(resolved):
-            raise CommandError(
-                "test runs where the data is: call it from a Fabric notebook, "
-                "or against a local Workspace"
-            )
         with opened.task(
             "Test (dry run)" if dry_run else "Test", ", ".join(map(str, refs))
         ):

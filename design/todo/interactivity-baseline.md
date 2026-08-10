@@ -87,3 +87,72 @@ acquisition it was the first command to need.
 The same commands, and `--timings`. Compare Task totals for shape and the
 transport ledger for cause; a decomposition that moves seconds from
 `livy.<operation>` into many smaller calls has to show the total did not grow.
+
+---
+
+# After Run decomposition — 2026-08-11
+
+The same journey, with `load` and `test` decomposed: the estate is read across,
+the graph is built on the desktop, and each node dispatches to whatever can run
+it — TDS for the Warehouse procedure, the run's remote scope for a deployed
+Python module.
+
+```text
+Load                                                   4m08s
+  Read catalogue                                       1m30s
+  Build run graph                                       7.6s
+  Execute                                              2m27s
+    load:Lakehouse/Sales/Sales.OrderExport              5.9s
+    load:Lakehouse/Sales/Sales.Customer                34.2s
+    load:Lakehouse/Sales/Sales.Order                   30.3s
+    load:Lakehouse/Sales/Sales.OrderSummary            27.0s
+    refresh:Lakehouse/Sales                             1.1s
+    load:Warehouse/Reporting/Reporting.CustomerRevenue 41.9s
+
+Test                                                   27.7s
+  Read catalogue                                       10.6s
+  Execute                                              13.1s
+    Lakehouse/Sales/Sales.OrderCustomerExists           4.5s
+    Lakehouse/Sales/Sales.OrderSummaryReconciliation    7.2s
+    Warehouse/Reporting/Reporting.CustomerRevenuePresent 0.7s
+```
+
+```text
+  livy.dispatch_python        4 calls     95.5s
+  livy.read_catalogue         2 calls     61.3s
+  livy.acquire                1 calls     39.9s
+  livy.dispatch_validation    2 calls     11.1s
+  livy.read_inventories       1 calls      4.1s
+  livy.begin_run              2 calls      2.6s
+  livy.end_run                2 calls      1.4s
+```
+
+## The comparison
+
+**Per-node timing exists now.** The baseline's `load` was one 167.6s Livy call
+with nothing visible inside it. The same work is now six timed Sub-steps, and
+`Sales.Order` taking 30s is a fact somebody can act on rather than a share of an
+opaque total.
+
+**One scope per run, and it closes.** `begin_run` and `end_run` are one call
+each per run — two runs, two of each — with four `dispatch_python` between them.
+That is the guarantee the decomposition most had to preserve, measured rather
+than asserted.
+
+**Transport overhead is not material.** The six nodes account for ~140s of the
+147s `Execute` step, so dispatching each node separately costs roughly a second
+apiece including `begin_run`/`end_run`. The plan's question — whether per-node
+Livy submit overhead is worth batching away — is answered *no* for an estate of
+this shape. Do not batch.
+
+**The first crossing is cold, and this run paid for it.** `read_catalogue` cost
+90s here and 10.6s in the `test` that followed, against the same session and the
+same catalogue. The Environment had just been republished, so the first
+statement bore the interpreter's warm-up. Read the 10.6s as the steady-state
+figure and the 90s as a one-off; the honest reading of `Load 4m08s` against the
+baseline's `livy.load 167.6s` is that execution is comparable and the difference
+is warm-up, not decomposition.
+
+**Caveat.** One run of each. The read_catalogue spread (90s against 10.6s) is
+itself the evidence that single-run Fabric timings carry real variance, so treat
+these as a shape rather than a benchmark.

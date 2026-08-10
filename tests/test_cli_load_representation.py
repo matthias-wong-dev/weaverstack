@@ -426,60 +426,6 @@ def _fabric(*args: str) -> list[str]:
     ]
 
 
-def test_a_desktop_asking_for_fabric_submits_the_load_into_a_session(livy, capsys):
-    """Load runs where the data is, so the desktop reaches in rather than out."""
-
-    exit_code = main(_fabric())
-    (submitted,) = livy.submitted
-
-    assert exit_code == 0
-    assert "import weaver" in submitted
-    assert "weaver.load(" in submitted
-    assert "'Lakehouse/Sales'" in submitted
-    assert "My Workspace" in submitted
-    assert "weaver_lakehouse='Weaver'" in submitted
-
-
-def test_the_submitted_program_carries_the_run_s_own_choices(livy):
-    main(_fabric("--fault-tolerant", "--dry-run"))
-    (submitted,) = livy.submitted
-
-    assert "fault_tolerant=True" in submitted
-    assert "dry_run=True" in submitted
-
-
-def test_a_remote_report_is_reconstructed_and_rendered_like_a_local_one(livy, capsys):
-    main(_fabric())
-    captured = capsys.readouterr()
-
-    assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
-    assert "read 5" in captured.out
-
-
-def test_a_remote_failure_arrives_as_diagnosis_rather_than_an_exception(livy, capsys):
-    """An exception raised in Fabric cannot be re-raised on a desktop that has
-    never heard of its class, so what crosses is what it knew."""
-
-    livy.answer = {
-        "failed": True,
-        "error_type": "LoadError",
-        "message": "load:Lakehouse/Sales/Sales.Customer failed: rows were rejected",
-        "result": LoadResult(
-            succeeded=False, rows_read=9, rows_rejected=2
-        ).as_row(),
-        "report": _report(status=TASK_FAILED, node_status=FAILED).to_mapping(),
-        "task_log": "Files/_/Log/task_date=2026-08-07/x",
-    }
-
-    exit_code = main(_fabric())
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "rows were rejected" in captured.err
-    assert "Files/_/Log/task_date=2026-08-07/x" in captured.err
-    assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
-
-
 def test_a_session_that_returns_nothing_is_an_error_rather_than_a_success(livy, capsys):
     livy.answer = None
 

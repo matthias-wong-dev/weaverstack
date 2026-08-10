@@ -77,14 +77,42 @@ def _validation(node, session, workspace, runtime_scope, collect: bool):
     the Session that owns it.
     """
 
-    from ..test_execution import run_installed_validation
+    from ..test_execution import primitive_kind, run_installed_validation
+
+    installed = node.installed
+    if (
+        hasattr(runtime_scope, "dispatch_validation")
+        and primitive_kind(installed) == PYTHON_VALIDATION
+    ):
+        # A Lakehouse validation *is* a deployed module, so it belongs where the
+        # imports are, exactly as a load primitive does. A Warehouse one is a
+        # procedure, and TDS reaches it from here.
+        return _carried(
+            runtime_scope.dispatch_validation(
+                installed=installed.to_mapping(), collect=collect
+            ),
+            installed,
+        )
 
     return run_installed_validation(
-        node.installed,
+        installed,
         session=session,
         workspace=workspace,
         runtime_scope=runtime_scope,
         collect_diagnostics=collect,
+    )
+
+
+def _carried(payload, installed):
+    """A remote validation's judgement, rebuilt as the value a run settles on."""
+
+    from ..declaration.metadata import ASSUMPTION
+    from ..runtime.validation_result import AssumptionResult, TestResult
+    from ..test_execution import _WithDiagnostics
+
+    shape = AssumptionResult if installed.kind == ASSUMPTION else TestResult
+    return _WithDiagnostics(
+        shape.from_mapping(payload["result"]), tuple(payload.get("diagnostics") or ())
     )
 
 
@@ -113,7 +141,74 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
 
 
 def _python(node, session, workspace, resolved, fault_tolerant: bool, runtime_scope):
+    """One deployed Python primitive, run where its module can be imported.
+
+    A deployed module is imported inside the session that owns the Spark it will
+    use, so on a desktop this crosses. What crosses is the handful of strings
+    the import and the construction need — not a serialisation of the Runner's
+    node, which carries typed identities the far side has no use for and would
+    then have to be kept in step with.
+
+    Which of the two happens is the scope's to answer, not this function's: a
+    remote scope knows how to dispatch into the interpreter holding it.
+    """
+
+    if runtime_scope is None:
+        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
+    expected = getattr(resolved, "expected_class", None)
+    if expected is None:
+        raise RunError(
+            f"{node.node_id} names a deployed module whose expected class is unknown"
+        )
+
+    if hasattr(runtime_scope, "dispatch_python"):
+        from ..runtime.load_result import LoadResult
+
+        return LoadResult.from_row(
+            runtime_scope.dispatch_python(
+                node_id=node.node_id,
+                item=str(node.logical_id.item),
+                target=node.physical_target.name,
+                schema=node.primitive_object.schema,
+                object=node.primitive_object.object,
+                expected_class=expected,
+                fault_tolerant=fault_tolerant,
+            )
+        )
+
+    return python_primitive(
+        node_id=node.node_id,
+        logical_item=node.logical_id.item,
+        physical_target=node.physical_target,
+        schema=node.primitive_object.schema,
+        object=node.primitive_object.object,
+        expected_class=expected,
+        fault_tolerant=fault_tolerant,
+        runtime_scope=runtime_scope,
+        session=session,
+        workspace=workspace,
+    )
+
+
+def python_primitive(
+    *,
+    node_id: str,
+    logical_item,
+    physical_target,
+    schema: str,
+    object: str,
+    expected_class: str,
+    fault_tolerant: bool,
+    runtime_scope,
+    session,
+    workspace=None,
+):
     """Import the deployed module, construct its object, and load it.
+
+    Host-neutral: everything that differs between a notebook and a Livy
+    interpreter is already answered by the Session it is given. Both sides of a
+    decomposed run call this, which keeps *what a primitive does* one
+    implementation while *where it is decided from* became two.
 
     The destination is resolved *here* and handed in, never inferred: an authored
     object with no Lakehouse falls back to the session's attachment, which in an
@@ -130,35 +225,26 @@ def _python(node, session, workspace, resolved, fault_tolerant: bool, runtime_sc
     from ..etl import LOAD_ROOT
     from ..lakehouse import lakehouse_for
     from ..runtime.python_context import import_deployed_module
-
-    if runtime_scope is None:
-        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
-    expected = getattr(resolved, "expected_class", None)
-    if expected is None:
-        raise RunError(
-            f"{node.node_id} names a deployed module whose expected class is unknown"
-        )
-
     from ..targets import ItemRef
 
     resolver = session.resolver(workspace)
-    lakehouse = lakehouse_for(resolver, ItemRef(node.physical_target.name))
+    lakehouse = lakehouse_for(resolver, ItemRef(physical_target.name))
     runtime_root = _join(lakehouse.files_root(), *LOAD_ROOT.split("/"))
-    relative = f"{node.primitive_object.schema}/{node.primitive_object.object}"
+    relative = f"{schema}/{object}"
     within = (
         relative[len(LOAD_ROOT) + 1 :] if relative.startswith(LOAD_ROOT) else relative
     )
     context = runtime_scope.context_for(
         # The logical item, not the object: everything one item deployed into one
         # target shares a tree, because that is what its author wrote against.
-        logical_item=node.logical_id.item,
-        physical_target=node.physical_target,
+        logical_item=logical_item,
+        physical_target=physical_target,
         runtime_root=runtime_root,
     )
     module = import_deployed_module(
-        context, within, expected=expected, node_id=node.node_id
+        context, within, expected=expected_class, node_id=node_id
     )
-    cls = getattr(module, expected)
+    cls = getattr(module, expected_class)
     return cls(session.spark(workspace), lakehouse=lakehouse).load(
         fault_tolerant=fault_tolerant
     )
@@ -195,4 +281,4 @@ def can_refresh(session, workspace=None) -> bool:
     return callable(getattr(session.resolver(workspace), "refresh_sql_endpoint", None))
 
 
-__all__ = ["can_refresh", "dispatch_primitive"]
+__all__ = ["can_refresh", "dispatch_primitive", "python_primitive"]

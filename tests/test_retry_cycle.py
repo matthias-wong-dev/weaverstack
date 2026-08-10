@@ -10,7 +10,7 @@ The interaction this exists for:
 
     Incorrect syntax near 'from'.
 
-    Fix the file and press Enter to retry, Esc to exit.
+    Enter to retry, Esc to exit.
 
 Two claims, and the second is the one that makes it worth having:
 
@@ -28,6 +28,7 @@ would cost a minute per fix and defeat the point.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import pytest
@@ -52,8 +53,8 @@ def _cli():
     return sys.modules["weaver_cli.main"]
 
 
-def _until_fixed(args, attempt, *prompt):
-    return _cli()._until_fixed(args, attempt, *prompt)
+def _until_fixed(args, attempt):
+    return _cli()._until_fixed(args, attempt)
 
 
 ENTER = "\r"
@@ -144,6 +145,9 @@ def test_the_prompt_says_how_to_leave(args, monkeypatch, capsys):
     printed = capsys.readouterr().err
     assert "Enter to retry" in printed
     assert "Esc to exit" in printed
+    # It offers; it does not instruct. The error above it has already said what
+    # went wrong, and a build failure has already named the file to open.
+    assert "Fix" not in printed
 
 
 @pytest.mark.parametrize("key", [ESC, "\x03", "\x04"])
@@ -339,45 +343,31 @@ def test_a_raised_weaver_error_is_not_swallowed_by_the_loop(args, monkeypatch):
         _until_fixed(args, attempt)
 
 
-# --- the prompt is per Task, not one wording for all of them -------------------
+# --- one prompt, for every Task that offers a retry ---------------------------
 
 
-def test_build_says_file_because_a_build_failure_names_one(args, monkeypatch, capsys):
-    """Build carries provenance from the repository parse, so it can say
-    *file* and mean it."""
-
-    _Terminal(monkeypatch, keys=[ESC])
-
-    _until_fixed(args, attempts(1), _cli().RETRY_SOURCE)
-
-    assert "Fix the file" in capsys.readouterr().err
-
-
-def test_load_and_test_say_problem_because_they_often_cannot_name_a_file(
-    args, monkeypatch, capsys
-):
-    """A load or test failure is frequently the estate rather than the source —
-    an empty upstream, a validation that found real rows. Sending somebody to
-    fix a file would send them to the wrong place."""
+def test_the_prompt_instructs_nothing(args, monkeypatch, capsys):
+    """A build failure has already printed `Source: …`; telling somebody who
+    just read it to fix the file is telling them the obvious. And a load whose
+    upstream is empty would be told to edit a file that is not the problem."""
 
     _Terminal(monkeypatch, keys=[ESC])
 
     _until_fixed(args, attempts(1))
 
-    assert "Fix the problem" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip().endswith("Enter to retry, Esc to exit.")
 
 
-def test_the_three_retryable_commands_take_the_wording_that_fits_them():
-    """Read off the wiring, so a fourth command cannot quietly inherit the
-    wrong one."""
+def test_every_retryable_command_offers_the_same_prompt():
+    """Read off the wiring, so a fourth command cannot acquire wording of its
+    own without somebody deciding to give it one."""
 
     import inspect
 
     source = inspect.getsource(_cli())
 
-    assert "_until_fixed(args, lambda: _build_once(args), RETRY_SOURCE)" in source
-    assert "_until_fixed(args, lambda: _load_once(args))" in source
-    assert "_until_fixed(args, lambda: _test_once(args))" in source
+    for command in ("_build_once", "_load_once", "_test_once"):
+        assert f"_until_fixed(args, lambda: {command}(args))" in source
 
 
 # --- the keyboard itself ------------------------------------------------------
@@ -390,7 +380,7 @@ def test_the_three_retryable_commands_take_the_wording_that_fits_them():
 # every arrow key mean exit.
 
 
-@pytest.mark.skipif(not hasattr(__import__("os"), "fork"), reason="needs POSIX pty")
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs a POSIX pty")
 @pytest.mark.parametrize(
     "sent, expected",
     [
@@ -405,7 +395,6 @@ def test_the_three_retryable_commands_take_the_wording_that_fits_them():
     ],
 )
 def test_one_keypress_is_read_as_itself(sent, expected):
-    import os
     import pty
     import sys
     import time
@@ -425,8 +414,8 @@ def test_one_keypress_is_read_as_itself(sent, expected):
         # Between fork and exec the child is a copy of this pytest process, so
         # an exec that failed would leave a second pytest running the rest of
         # the suite concurrently — against the same temporary directories, and
-        # failing tests with nothing to do with this one. `os._exit` skips
-        # every handler and cannot be caught.
+        # failing tests with nothing to do with this one. `os._exit` skips every
+        # handler and cannot be caught.
         try:
             os.execv(sys.executable, [sys.executable, "-c", probe])
         finally:
@@ -447,7 +436,8 @@ def test_one_keypress_is_read_as_itself(sent, expected):
     os.waitpid(pid, 0)
 
     answer = [
-        line.strip() for line in received.decode(errors="replace").splitlines()
+        line.strip()
+        for line in received.decode(errors="replace").splitlines()
         if "GOT:" in line
     ]
     assert answer == [f"GOT:{expected}"]

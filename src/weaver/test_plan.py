@@ -97,6 +97,41 @@ class InstalledValidation:
             "item before running its validation"
         )
 
+    def to_mapping(self) -> dict:
+        """Everything a dispatcher needs, as plain data.
+
+        A validation crosses the host boundary as the description the estate
+        gave of it — which is what it *is* here: a Registry row saying where the
+        primitive lives and what it compares. Nothing is derived on the far side
+        that was not derived here.
+        """
+
+        return {
+            "logical": str(self.logical),
+            "kind": self.kind,
+            "target": {"kind": self.target.kind, "name": self.target.name},
+            "artefact": str(self.artefact),
+            "object_type": self.object_type,
+            "primary_key": list(self.primary_key),
+            "description": self.description,
+            "dependencies": list(self.dependencies),
+        }
+
+    @classmethod
+    def from_mapping(cls, mapping) -> "InstalledValidation":
+        return cls(
+            logical=WeaverDocumentId.parse(mapping["logical"]),
+            kind=mapping["kind"],
+            target=PhysicalTargetRef(
+                kind=mapping["target"]["kind"], name=mapping["target"]["name"]
+            ),
+            artefact=WeaverDocumentId.parse(mapping["artefact"]),
+            object_type=mapping.get("object_type"),
+            primary_key=tuple(mapping.get("primary_key", ())),
+            description=_text(mapping.get("description")),
+            dependencies=tuple(mapping.get("dependencies", ())),
+        )
+
 
 @dataclass(frozen=True)
 class ValidationEstate:

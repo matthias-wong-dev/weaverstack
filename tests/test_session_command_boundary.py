@@ -30,6 +30,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from weaver.errors import WeaverError
 from weaver.session.console import ConsoleScope, ConsoleSession
 from weaver.workspaces import FabricWorkspace
 from weaver_cli.main import build_parser
@@ -58,13 +59,13 @@ class _CountingLivy:
         pass
 
     def run(self, code, **kwargs):
-        type(self).submitted.append(code)
         if "weaver.__version__" in code:
             from weaver import __version__
 
             answer = __version__
         else:
-            answer = _CountingLivy.answers.pop(0)
+            type(self).submitted.append(code)
+            answer = _answer_for(code)
 
         class Result:
             returned = True
@@ -94,7 +95,6 @@ def transport(monkeypatch):
 
     _CountingLivy.acquired = 0
     _CountingLivy.submitted = []
-    _CountingLivy.answers = []
     monkeypatch.setattr("weaver.fabric.auth.credential", _FakeCredential)
     monkeypatch.setattr(
         "weaver.fabric.LivySession.for_workspace",
@@ -106,6 +106,37 @@ def transport(monkeypatch):
     return _CountingLivy
 
 
+def _answer_for(code: str):
+    """What the far side would emit for each program a run submits.
+
+    An empty catalogue, deliberately: these tests are about which resources a
+    run of commands acquires, not about what it finds. A load against an estate
+    that claims nothing stops early and still crosses exactly once, which is the
+    whole of what is being counted.
+    """
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.unbind import UnbindResult
+
+    if "_catalogue_here" in code:
+        return Catalogue({}).to_mapping()
+    if "unbind_targets" in code:
+        return UnbindResult(targets=("Lakehouse/Sales",), logical_items=(), statements=()).to_mapping()
+    return {}
+
+
+def _programs(session):
+    """Which crossings happened, by the function each submitted program calls."""
+
+    names = []
+    for code in session.submitted:
+        for name in ("_catalogue_here", "unbind_targets", "_lakehouse_inventories_here"):
+            if name in code:
+                names.append(name)
+                break
+    return names
+
+
 def _workspace() -> FabricWorkspace:
     return FabricWorkspace(
         workspace="My Workspace", weaver_lakehouse="Weaver", environment="weaver"
@@ -113,49 +144,25 @@ def _workspace() -> FabricWorkspace:
 
 
 def _run(session, parser, words: list[str]) -> None:
-    """One command line, through the parser and handler the shell uses."""
+    """One command line, through the parser and handler the shell uses.
+
+    Failures are swallowed exactly as the prompt swallows them: an empty estate
+    is a perfectly ordinary answer here, and what these tests count is which
+    resources were acquired on the way to it — a session that a failed command
+    tore down would be the bug, not the failure.
+    """
 
     parsed = parser.parse_args(words)
     parsed.session = session
-    parsed.handler(parsed)
-
-
-def _load_report() -> dict:
-    from weaver.load_report import LoadRunReport
-
-    return {
-        "failed": False,
-        "report": LoadRunReport(
-            requested=("Lakehouse/Sales",),
-            status="succeeded",
-            dry_run=True,
-            fault_tolerant=False,
-        ).to_mapping(),
-    }
-
-
-def _unbind_result() -> dict:
-    from weaver.unbind import UnbindResult
-
-    return UnbindResult(
-        targets=("Lakehouse/Sales",), logical_items=(), statements=()
-    ).to_mapping()
-
-
-def _test_report() -> dict:
-    from weaver.test_report import ValidationRunReport
-
-    return {
-        "failed": False,
-        "report": ValidationRunReport(status="planned").to_mapping(),
-        "diagnostics": {},
-    }
+    try:
+        parsed.handler(parsed)
+    except WeaverError:
+        pass
 
 
 def test_a_run_of_commands_in_one_session_starts_one_livy(transport, capsys):
     """The claim the console's banner makes, asserted rather than assumed."""
 
-    transport.answers = [_load_report(), _test_report(), _unbind_result()]
     parser = build_parser()
 
     with ConsoleSession(workspace=_workspace()) as session:
@@ -173,7 +180,6 @@ def test_each_command_still_did_its_own_work(transport, capsys):
     command that silently stopped crossing would also acquire no second Livy.
     """
 
-    transport.answers = [_load_report(), _test_report(), _unbind_result()]
     parser = build_parser()
 
     with ConsoleSession(workspace=_workspace()) as session:
@@ -181,19 +187,36 @@ def test_each_command_still_did_its_own_work(transport, capsys):
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["unbind", "Lakehouse/Sales"])
 
-    crossings = [
-        code for code in transport.submitted if "weaver.__version__" not in code
+    # A run reads the estate first and decides locally from what it finds, so
+    # what crosses is the read — not the run.
+    assert _programs(transport) == [
+        "_catalogue_here",
+        "_catalogue_here",
+        "unbind_targets",
     ]
-    assert len(crossings) == 3
-    assert "weaver.load(" in crossings[0]
-    assert "weaver.test(" in crossings[1]
-    assert "unbind_targets(" in crossings[2]
+
+
+def test_no_command_ships_its_whole_run_across(transport):
+    """What the decomposition removed, asserted so it cannot come back.
+
+    A desktop load once submitted one program that called `weaver.load` on the
+    far side and ran the entire graph there. Now the estate is read across and
+    every decision is made here.
+    """
+
+    parser = build_parser()
+
+    with ConsoleSession(workspace=_workspace()) as session:
+        _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
+
+    assert not any("weaver.load(" in code for code in transport.submitted)
+    assert not any("weaver.test(" in code for code in transport.submitted)
 
 
 def test_a_command_given_no_session_still_works_on_its_own(transport):
     """A one-shot invocation owns the Session it opens, and closes it."""
 
-    transport.answers = [_load_report()]
     parser = build_parser()
     parsed = parser.parse_args(
         [
@@ -208,7 +231,10 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
             "weaver",
         ]
     )
-    parsed.handler(parsed)
+    try:
+        parsed.handler(parsed)
+    except WeaverError:
+        pass
 
     assert transport.acquired == 1
 

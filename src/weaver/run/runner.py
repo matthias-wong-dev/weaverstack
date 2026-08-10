@@ -243,20 +243,24 @@ class Runner:
 
     # --- the run's own runtime ----------------------------------------------
 
-    @property
-    def runtime_scope(self):
+    def runtime_scope(self, session=None):
         """Where this run's deployed Python modules live, and how long they live.
 
         One scope per run, because a Fabric session outlives a build and a build
         rewrites deployed Python in place — so a module kept past the run that
         imported it is a module the next load would use instead of the one now
         on disk.
+
+        *Where* it lives depends on the host: in this process where this process
+        is where the data is, and otherwise in the Fabric session that can
+        perform the imports, named from here. The Runner is told neither — one
+        scope per run, closed at the end of it, is one rule in both cases.
         """
 
         if self._runtime_scope is None:
-            from ..runtime.python_context import RuntimeScope
+            from .runtime_boundary import open_runtime_scope
 
-            self._runtime_scope = RuntimeScope.new()
+            self._runtime_scope = open_runtime_scope(session, workspace=self.workspace)
         return self._runtime_scope
 
     def _close_runtime(self) -> None:
@@ -449,7 +453,7 @@ class Runner:
                     state=self.state,
                     resolved=resolved,
                     fault_tolerant=self.request.fault_tolerant,
-                    runtime_scope=self.runtime_scope,
+                    runtime_scope=self.runtime_scope(session),
                     workspace=self.workspace,
                 )
             except Exception as exc:  # noqa: BLE001 - a failed node is a result

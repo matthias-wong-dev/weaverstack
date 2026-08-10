@@ -544,15 +544,16 @@ def handle_compose(args: argparse.Namespace) -> int:
     return run_composition(args)
 
 
-#: What a developer is told when a Task they can fix has failed. Deliberately
-#: says how to leave: an interaction that only offers "try again" is a trap.
+#: What a developer is offered when a Task they can fix has failed. It names the
+#: two keys and instructs nothing: the error above it has already said what went
+#: wrong, and a build failure has already named the authored file to open. A
+#: prompt that added "fix the file" would be telling somebody who just read
+#: `Source: …` to do the obvious, and telling a load whose upstream is empty to
+#: edit a file that is not the problem.
 #:
-#: A build failure names the authored file it came from, so it can say *file*.
-#: A load or a test failure often cannot — the estate is wrong, an upstream is
-#: empty, a validation found real rows — and telling somebody to fix a file
-#: when the problem is data would send them to the wrong place.
-RETRY_SOURCE = "Fix the file and press Enter to retry, Esc to exit."
-RETRY_PROBLEM = "Fix the problem and press Enter to retry, Esc to exit."
+#: It still says how to *leave*, because an interaction offering only "try
+#: again" is a trap.
+RETRY_PROMPT = "Enter to retry, Esc to exit."
 
 ESC = "\x1b"
 INTERRUPT = "\x03"
@@ -560,7 +561,7 @@ END_OF_FILE = "\x04"
 ENTER = ("\r", "\n")
 
 
-def _until_fixed(args: argparse.Namespace, attempt, prompt: str = RETRY_PROBLEM) -> int:
+def _until_fixed(args: argparse.Namespace, attempt) -> int:
     """Run one Task, and offer to run it again from fresh inputs when it fails.
 
     **Retry is the whole Task from the beginning.** The repository is re-read,
@@ -594,11 +595,11 @@ def _until_fixed(args: argparse.Namespace, attempt, prompt: str = RETRY_PROBLEM)
             status = attempt()
             if not status:
                 return status
-            if not _retry_wanted(prompt):
+            if not _retry_wanted():
                 return status
 
 
-def _retry_wanted(prompt: str) -> bool:
+def _retry_wanted() -> bool:
     """Ask, and wait for one key. Enter retries; Esc leaves.
 
     One keypress rather than a typed word, because the answer is binary and the
@@ -607,7 +608,7 @@ def _retry_wanted(prompt: str) -> bool:
     the terminal and hits an arrow key has not decided anything.
     """
 
-    print(f"\n{prompt} ", end="", file=sys.stderr, flush=True)
+    print(f"\n{RETRY_PROMPT} ", end="", file=sys.stderr, flush=True)
     try:
         while True:
             key = _read_key()
@@ -800,40 +801,32 @@ def _load_once(args: argparse.Namespace) -> int:
 
 
 def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool, session=None):
-    """One load, run where the data is.
+    """One load, decided here and dispatched where each primitive lives.
 
-    Local and in-session are the same call; a desktop reaching into Fabric is
-    the same call submitted through the Session's Spark capability. What comes
-    back is a real :class:`~weaver.load_report.LoadRunReport` either way, so the
-    renderer below cannot tell which happened.
+    There is one call now. `weaver.load` reads the estate through Session
+    capabilities, builds the graph locally and dispatches each node to whatever
+    can run it — TDS for a Warehouse procedure, the run's remote scope for a
+    deployed Python module — so the desktop, a notebook and the emulator differ
+    only in what the Session answers.
 
-    **The crossing goes through the Session**, exactly as ``build`` and
-    ``unbind`` do. It once opened a :class:`~weaver.fabric.LivySession` of its
-    own, which quietly made ``weaver session`` a half-truth: a console that
-    promised one warm Spark session started a second one the moment anybody ran
-    a load, waited a minute for it, and threw it away afterwards. Which
-    capability a load needs is the Session's question, not this module's.
+    What this module still owns is the *preflight*: rejecting a mistyped target
+    over one REST call, before anything expensive is acquired.
     """
 
-    from weaver.session.host import inside_fabric_session, use_or_create_session
+    from weaver.session.host import use_or_create_session
     from weaver.workspaces import LocalWorkspace
 
-    if isinstance(workspace, LocalWorkspace) or inside_fabric_session(workspace):
+    with use_or_create_session(session, workspace=workspace) as opened:
+        if not isinstance(workspace, LocalWorkspace) and not opened.executes_here(
+            workspace
+        ):
+            _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.load(
             list(targets),
             workspace=workspace,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
-            session=session,
-        )
-    with use_or_create_session(session, workspace=workspace) as opened:
-        _refuse_absent_targets(workspace, targets, session=opened)
-        return _run_load_over_session(
-            workspace,
             session=opened,
-            targets=targets,
-            fault_tolerant=fault_tolerant,
-            dry_run=dry_run,
         )
 
 
@@ -892,121 +885,6 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
             + ", ".join(absent)
             + " — check the name, or build into it first"
         )
-
-
-#: What the submitted program sends back. A failure is *data* on the way across:
-#: an exception raised inside a Fabric session cannot be re-raised on a desktop
-#: that has never heard of its class, so what travels is the diagnosis rather
-#: than the exception, and the desktop raises its own.
-_LOAD_BODY = """\
-from weaver.workspaces import FabricWorkspace
-import weaver
-
-workspace = FabricWorkspace(workspace={workspace!r}, environment={environment!r},
-                            weaver_lakehouse={weaver_lakehouse!r})
-try:
-    report = weaver.load(
-        {targets!r},
-        workspace=workspace,
-        fault_tolerant={fault_tolerant!r},
-        dry_run={dry_run!r},
-    )
-except Exception as exc:
-    carried = getattr(exc, "report", None)
-    result = getattr(exc, "result", None)
-    emit({{
-        "failed": True,
-        "error_type": type(exc).__name__,
-        "message": str(exc),
-        "result": None if result is None else result.as_row(),
-        "report": None if carried is None else carried.to_mapping(),
-        "task_log": getattr(exc, "task_log", None),
-    }})
-else:
-    emit({{"failed": False, "report": report.to_mapping()}})
-"""
-
-
-def _run_load_over_session(
-    workspace, *, session, targets, fault_tolerant: bool, dry_run: bool
-):
-    """Submit the load into Fabric through the Session's Python capability.
-
-    An empty answer is the Session's error to raise, not this module's: a
-    program that returned nothing means the same thing whichever command
-    submitted it.
-    """
-
-    from weaver.errors import LoadError
-    from weaver.load_report import LoadRunReport
-    from weaver.runtime.load_result import LoadResult
-    from weaver.session.program import RemoteProgram
-
-    body = _LOAD_BODY.format(
-        workspace=workspace.workspace,
-        environment=workspace.environment,
-        weaver_lakehouse=workspace.weaver_lakehouse,
-        targets=list(targets),
-        fault_tolerant=fault_tolerant,
-        dry_run=dry_run,
-    )
-    payload = session.execute_python(
-        RemoteProgram(
-            name="load",
-            call=lambda: _load_payload_here(
-                workspace,
-                session=session,
-                targets=targets,
-                fault_tolerant=fault_tolerant,
-                dry_run=dry_run,
-            ),
-            source=body,
-            detail=", ".join(targets),
-        ),
-        workspace=workspace,
-    )
-    if not payload.get("failed"):
-        return LoadRunReport.from_mapping(payload["report"])
-
-    carried = payload.get("report")
-    counts = payload.get("result")
-    raise LoadError(
-        f"{payload['error_type']}: {payload['message']}",
-        result=None if counts is None else LoadResult.from_row(counts),
-        report=None if carried is None else LoadRunReport.from_mapping(carried),
-        task_log=payload.get("task_log"),
-    )
-
-
-def _load_payload_here(workspace, *, session, targets, fault_tolerant, dry_run):
-    """The same envelope, computed in this process rather than submitted.
-
-    The second spelling a :class:`~weaver.session.program.RemoteProgram` owes
-    its remote one, and it must produce what the remote body produces —
-    including the failure-as-data envelope, because whoever reads the payload
-    cannot be made to care which side computed it.
-    """
-
-    try:
-        report = weaver.load(
-            list(targets),
-            workspace=workspace,
-            fault_tolerant=fault_tolerant,
-            dry_run=dry_run,
-            session=session,
-        )
-    except Exception as exc:  # noqa: BLE001 - carried across as data, not raised
-        carried = getattr(exc, "report", None)
-        result = getattr(exc, "result", None)
-        return {
-            "failed": True,
-            "error_type": type(exc).__name__,
-            "message": str(exc),
-            "result": None if result is None else result.as_row(),
-            "report": None if carried is None else carried.to_mapping(),
-            "task_log": getattr(exc, "task_log", None),
-        }
-    return {"failed": False, "report": report.to_mapping()}
 
 
 def _print_load(report) -> None:
@@ -1074,202 +952,31 @@ def _test_once(args: argparse.Namespace) -> int:
 
 
 def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
-    """One validation run, run where the data is.
+    """One validation run, decided here and dispatched where each check lives.
 
-    The crossing is ``load``'s, for the reason it is ``load``'s: a validation
-    reads the data, so it runs where the data is, and which capability reaches
-    there is the Session's question.
+    The crossing is ``load``'s, for the reason it is ``load``'s: a Warehouse
+    validation is a stored procedure TDS reaches from anywhere, and a Lakehouse
+    one is a deployed module that belongs where the imports happen.
     """
 
-    from weaver.session.host import inside_fabric_session, use_or_create_session
+    from weaver.session.host import use_or_create_session
     from weaver.workspaces import LocalWorkspace
 
-    if isinstance(workspace, LocalWorkspace) or inside_fabric_session(workspace):
+    with use_or_create_session(session, workspace=workspace) as opened:
+        if not isinstance(workspace, LocalWorkspace) and not opened.executes_here(
+            workspace
+        ):
+            _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.test(
             list(targets),
             workspace=workspace,
             name=name,
             file=file,
             dry_run=dry_run,
-            session=session,
-        )
-    with use_or_create_session(session, workspace=workspace) as opened:
-        _refuse_absent_targets(workspace, targets, session=opened)
-        return _run_test_over_session(
-            workspace,
             session=opened,
-            targets=targets,
-            name=name,
-            file=file,
-            dry_run=dry_run,
         )
 
 
-_TEST_BODY = """\
-from weaver.workspaces import FabricWorkspace
-import weaver
-
-workspace = FabricWorkspace(workspace={workspace!r}, environment={environment!r},
-                            weaver_lakehouse={weaver_lakehouse!r})
-source = {source!r}
-path = None
-if source is not None:
-    import pathlib, tempfile
-
-    path = pathlib.Path(tempfile.mkdtemp()) / {filename!r}
-    path.write_text(source, encoding="utf-8")
-
-def _portable(value):
-    # Diagnostic rows carry whatever the validation selected — dates, decimals,
-    # binary — and this crosses as JSON. Anything JSON cannot hold is rendered,
-    # because these rows are read by a person and never compared or persisted.
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    return str(value)
-
-
-try:
-    report = weaver.test(
-        {targets!r},
-        workspace=workspace,
-        name={name!r},
-        file=None if path is None else str(path),
-        dry_run={dry_run!r},
-    )
-except Exception as exc:
-    emit({{
-        "failed": True,
-        "error_type": type(exc).__name__,
-        "message": str(exc),
-    }})
-else:
-    # Beside the mapping, never inside it. `to_mapping` excludes diagnostics
-    # deliberately — it is what a task log and JSON output are built from — so
-    # interactive evidence travels as its own field, keyed by node, and is
-    # reattached on the other side.
-    emit({{
-        "failed": False,
-        "report": report.to_mapping(),
-        "diagnostics": {{
-            node.logical_id: [
-                {{key: _portable(value) for key, value in row.items()}}
-                for row in (node.diagnostics or ())
-            ]
-            for node in report.nodes
-            if node.diagnostics
-        }},
-    }})
-"""
-
-
-def _run_test_over_session(workspace, *, session, targets, name, file, dry_run: bool):
-    """Submit the run into Fabric, carrying a ``--file``'s *content*.
-
-    The path is the developer's, and the session has never heard of it — so what
-    crosses is the source, written down on the far side under the same filename.
-    The filename matters: a validation's ID and its filename must agree, and the
-    reader on the other side checks that exactly as a build does.
-    """
-
-    from pathlib import Path
-
-    from weaver.errors import CommandError, ValidationError
-    from weaver.session.program import RemoteProgram
-    from weaver.test_report import ValidationRunReport
-
-    source = None
-    filename = ""
-    if file is not None:
-        local = Path(file)
-        if not local.exists():
-            raise CommandError(f"no validation source at {local}")
-        source = local.read_text(encoding="utf-8")
-        filename = local.name
-
-    body = _TEST_BODY.format(
-        workspace=workspace.workspace,
-        environment=workspace.environment,
-        weaver_lakehouse=workspace.weaver_lakehouse,
-        targets=list(targets),
-        name=name,
-        source=source,
-        filename=filename,
-        dry_run=dry_run,
-    )
-    payload = session.execute_python(
-        RemoteProgram(
-            name="test",
-            call=lambda: _test_payload_here(
-                workspace,
-                session=session,
-                targets=targets,
-                name=name,
-                file=file,
-                dry_run=dry_run,
-            ),
-            source=body,
-            detail=", ".join(targets),
-        ),
-        workspace=workspace,
-    )
-    if payload.get("failed"):
-        raise ValidationError(f"{payload['error_type']}: {payload['message']}")
-
-    report = ValidationRunReport.from_mapping(payload["report"])
-    return _with_diagnostics(report, payload.get("diagnostics") or {})
-
-
-def _test_payload_here(workspace, *, session, targets, name, file, dry_run):
-    """The envelope the submitted body produces, computed in this process."""
-
-    try:
-        report = weaver.test(
-            list(targets),
-            workspace=workspace,
-            name=name,
-            file=file,
-            dry_run=dry_run,
-            session=session,
-        )
-    except Exception as exc:  # noqa: BLE001 - carried across as data, not raised
-        return {
-            "failed": True,
-            "error_type": type(exc).__name__,
-            "message": str(exc),
-        }
-    return {
-        "failed": False,
-        "report": report.to_mapping(),
-        "diagnostics": {
-            node.logical_id: list(node.diagnostics)
-            for node in report.nodes
-            if node.diagnostics
-        },
-    }
-
-
-def _with_diagnostics(report, diagnostics: dict):
-    """Reattach the evidence a targeted run produced on the other side.
-
-    A report that crossed a boundary would otherwise carry counts alone, so
-    ``--name`` would print rows when run inside Fabric and print none when run
-    from a desktop against the same estate — the same command answering two
-    different ways depending on where it happened to be typed.
-    """
-
-    from dataclasses import replace
-
-    if not diagnostics:
-        return report
-    return replace(
-        report,
-        nodes=tuple(
-            replace(node, diagnostics=tuple(diagnostics[node.logical_id]))
-            if node.logical_id in diagnostics
-            else node
-            for node in report.nodes
-        ),
-    )
 
 
 def _print_test(report) -> None:
@@ -1369,9 +1076,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_build(args: argparse.Namespace) -> int:
-    # Build is the one Task whose failures name an authored file, because
-    # provenance is carried all the way from the repository parse.
-    return _until_fixed(args, lambda: _build_once(args), RETRY_SOURCE)
+    return _until_fixed(args, lambda: _build_once(args))
 
 
 def _build_once(args: argparse.Namespace) -> int:
