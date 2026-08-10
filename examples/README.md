@@ -75,9 +75,9 @@ The CLI simply points at the exported notebook resources.
 
 ``` text
 examples/
-└── Weaver Example/
-    ├── weaver_example.yml
-    └── workspace/
+├── weaver_example.yml
+└── workspaces/
+    └── Weaver Example/
         └── Sales-Estate.Notebook/
             └── Resources/
                 └── builtin/
@@ -132,8 +132,8 @@ and one authored in Python cannot come to behave differently.
 Or orchestrate the lot, in dependency order, from either mode:
 
 ``` bash
-weaver load --targets Lakehouse/Sales Warehouse/Reporting \
-  --workspace-config examples/Weaver\ Example/weaver_example.yml
+weaver load Lakehouse/Sales Warehouse/Reporting \
+  --workspace-config "examples/weaver_example.yml"
 ```
 
 ------------------------------------------------------------------------

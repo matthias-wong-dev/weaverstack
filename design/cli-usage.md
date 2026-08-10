@@ -66,7 +66,7 @@ Commands are the ordinary CLI commands. `exit` to leave.
 
 weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
 weaver> build . --bind Lakehouse/Sales=Lakehouse/Sales
-weaver> load --targets Lakehouse/Sales Warehouse/Reporting
+weaver> load Lakehouse/Sales Warehouse/Reporting
 weaver> test Lakehouse/Sales
 weaver> exit
 ```

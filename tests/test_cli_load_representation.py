@@ -94,7 +94,6 @@ def _report(
 def _local(tmp_path, *args: str) -> list[str]:
     return [
         "load",
-        "--targets",
         "Lakehouse/Sales",
         "--workspace-type",
         "local",
@@ -112,7 +111,6 @@ def test_the_command_exposes_every_option_the_contract_names():
     load = parser.parse_args(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "--workspace",
             "My Workspace",
@@ -137,7 +135,7 @@ def test_more_than_one_target_is_one_request():
     parser = build_parser()
 
     load = parser.parse_args(
-        ["load", "--targets", "Lakehouse/Sales", "Warehouse/Reporting"]
+        ["load", "Lakehouse/Sales", "Warehouse/Reporting"]
     )
 
     assert load.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
@@ -191,7 +189,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
         encoding="utf-8",
     )
 
-    main(["load", "--targets", "Lakehouse/Sales", "--workspace-config", str(config)])
+    main(["load", "Lakehouse/Sales", "--workspace-config", str(config)])
 
     assert recorded[0]["workspace"].weaver_lakehouse == "Configured"
 
@@ -206,7 +204,6 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
     main(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "--workspace-config",
             str(config),
@@ -219,7 +216,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
 
 
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
-    exit_code = main(["load", "--targets", "Lakehouse/Sales"])
+    exit_code = main(["load", "Lakehouse/Sales"])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -374,7 +371,6 @@ def livy(monkeypatch):
 def _fabric(*args: str) -> list[str]:
     return [
         "load",
-        "--targets",
         "Lakehouse/Sales",
         "--workspace",
         "My Workspace",
@@ -514,7 +510,6 @@ def test_every_requested_target_is_checked_not_only_the_first(livy, capsys):
     exit_code = main(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "Warehouse/Reporting",
             "--workspace",
@@ -540,7 +535,6 @@ def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
     main(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "Warehouse/Reporting",
             "--workspace",

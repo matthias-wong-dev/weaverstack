@@ -86,9 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
         "load", help="load every installed object in named physical targets"
     )
     load.add_argument(
-        "--targets",
+        "targets",
         nargs="+",
-        required=True,
         metavar="TARGET",
         help="Lakehouse/Name or Warehouse/Name",
     )
