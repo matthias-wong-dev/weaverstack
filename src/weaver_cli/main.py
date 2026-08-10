@@ -545,12 +545,22 @@ def handle_compose(args: argparse.Namespace) -> int:
 
 
 #: What a developer is told when a Task they can fix has failed. Deliberately
-#: says how to decline: an interaction that only offers "try again" is a trap.
-RETRY_PROMPT = "Fix the file and press Enter to retry, or 'q' to give up. "
-DECLINED = {"q", "quit", "n", "no", "exit"}
+#: says how to leave: an interaction that only offers "try again" is a trap.
+#:
+#: A build failure names the authored file it came from, so it can say *file*.
+#: A load or a test failure often cannot — the estate is wrong, an upstream is
+#: empty, a validation found real rows — and telling somebody to fix a file
+#: when the problem is data would send them to the wrong place.
+RETRY_SOURCE = "Fix the file and press Enter to retry, Esc to exit."
+RETRY_PROBLEM = "Fix the problem and press Enter to retry, Esc to exit."
+
+ESC = "\x1b"
+INTERRUPT = "\x03"
+END_OF_FILE = "\x04"
+ENTER = ("\r", "\n")
 
 
-def _until_fixed(args: argparse.Namespace, attempt) -> int:
+def _until_fixed(args: argparse.Namespace, attempt, prompt: str = RETRY_PROBLEM) -> int:
     """Run one Task, and offer to run it again from fresh inputs when it fails.
 
     **Retry is the whole Task from the beginning.** The repository is re-read,
@@ -584,15 +594,80 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
             status = attempt()
             if not status:
                 return status
-            try:
-                answer = input(f"\n{RETRY_PROMPT}")
-            except (EOFError, KeyboardInterrupt):
-                # Ctrl-C and Ctrl-D at a prompt are the operator declining, not
-                # a failure of their own.
+            if not _retry_wanted(prompt):
+                return status
+
+
+def _retry_wanted(prompt: str) -> bool:
+    """Ask, and wait for one key. Enter retries; Esc leaves.
+
+    One keypress rather than a typed word, because the answer is binary and the
+    hands are already on the keyboard having just saved a file. Stray keys are
+    ignored rather than treated as either answer — a developer who tabs back to
+    the terminal and hits an arrow key has not decided anything.
+    """
+
+    print(f"\n{prompt} ", end="", file=sys.stderr, flush=True)
+    try:
+        while True:
+            key = _read_key()
+            if key in ENTER:
                 print(file=sys.stderr)
-                return status
-            if answer.strip().lower() in DECLINED:
-                return status
+                return True
+            if key in (ESC, INTERRUPT, END_OF_FILE, ""):
+                # Esc leaves; Ctrl-C and Ctrl-D are the operator declining, not
+                # failures of their own.
+                print(file=sys.stderr)
+                return False
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return False
+
+
+def _read_key() -> str:
+    """One keypress, unbuffered, without waiting for a line.
+
+    ``input()`` cannot see Esc — it waits for Enter, which is the very key Esc
+    is meant to be an alternative to. So the terminal is put into cbreak mode
+    for exactly as long as it takes to read one character, and restored
+    afterwards whatever happens.
+
+    A bare Esc and the start of an arrow key are the same first byte. What tells
+    them apart is whether anything follows immediately: a real escape sequence
+    arrives in one burst, a person pressing Esc does not. So the rest of a
+    sequence is read and *returned with it* — an arrow key comes back as
+    ``"\\x1b[A"``, which is not Esc and is therefore ignored as a stray key.
+    Draining it and returning the bare Esc would make every arrow key mean exit.
+    """
+
+    try:
+        import termios
+        import tty
+    except ImportError:  # a platform without POSIX terminal control
+        return sys.stdin.readline()[:1]
+
+    descriptor = sys.stdin.fileno()
+    try:
+        saved = termios.tcgetattr(descriptor)
+    except termios.error:  # not a terminal after all
+        return sys.stdin.readline()[:1]
+
+    import os
+    import select
+
+    try:
+        tty.setcbreak(descriptor)
+        # The file descriptor, not ``sys.stdin``: a text stream reads a whole
+        # chunk into its own buffer, so the rest of an escape sequence would sit
+        # in Python where ``select`` cannot see it, and every arrow key would
+        # look exactly like a bare Esc.
+        key = os.read(descriptor, 1).decode(errors="replace")
+        if key == ESC:
+            while select.select([descriptor], [], [], 0.05)[0]:
+                key += os.read(descriptor, 1).decode(errors="replace")
+        return key
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
 
 
 def _can_ask() -> bool:
@@ -1294,7 +1369,9 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_build(args: argparse.Namespace) -> int:
-    return _until_fixed(args, lambda: _build_once(args))
+    # Build is the one Task whose failures name an authored file, because
+    # provenance is carried all the way from the repository parse.
+    return _until_fixed(args, lambda: _build_once(args), RETRY_SOURCE)
 
 
 def _build_once(args: argparse.Namespace) -> int:

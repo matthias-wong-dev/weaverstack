@@ -420,6 +420,9 @@ class Session(ABC):
     ) -> None:
         """Show one reporting event. Silent by default; hosts specialise it."""
 
+    def stop_presenting(self) -> None:
+        """Take down anything a host is drawing. Nothing to do by default."""
+
     def warn(self, message: str) -> None:
         """Tell the operator something they should know but need not act on now.
 
@@ -439,6 +442,7 @@ class Session(ABC):
     def close(self) -> None:
         """Release every resource this Session acquired, and nothing it was given."""
 
+        self.stop_presenting()
         with self._scope_lock:
             if self._closed:
                 return

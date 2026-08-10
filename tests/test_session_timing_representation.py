@@ -206,6 +206,119 @@ def test_progress_never_reaches_stdout(capsys):
     assert "Build" in captured.err
 
 
+# --- what is happening now ----------------------------------------------------
+#
+# A completed frame says what a wait cost. It cannot say a wait is *underway* —
+# and the frames that most need saying so are the slow ones, where recording
+# completions alone means a Task heading followed by two minutes of silence.
+
+
+class _Tty(io.StringIO):
+    """A stream that says it can have a line rewritten in it."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def _screen(raw: str) -> list[str]:
+    """What a terminal ends up showing, once carriage returns have overwritten."""
+
+    lines = []
+    for chunk in raw.split("\n"):
+        line = ""
+        for part in chunk.split("\r"):
+            line = part + line[len(part) :]
+        lines.append(line.rstrip())
+    return lines
+
+
+def test_an_open_frame_is_named_while_it_is_still_running():
+    """The point of the feature: a slow Step is visible during the wait."""
+
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Wipe"):
+            with session.step("Unbind catalogue claims"):
+                during = out.getvalue()
+
+    assert "⋯ Unbind catalogue claims" in during
+
+
+def test_the_live_line_reports_the_innermost_open_frame():
+    """A Task names the command, which the heading already said. The useful
+    answer to "what is it doing" is the smallest thing in flight."""
+
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Load"):
+            with session.step("Execute"):
+                with session.substep("Lakehouse/Sales/DWG.Customer"):
+                    during = out.getvalue()
+
+    latest = during.rsplit("\r", 2)[-1]
+    assert latest.startswith("⋯")
+    assert latest.split()[1] == "Lakehouse/Sales/DWG.Customer"
+
+
+def test_the_live_line_is_erased_and_leaves_no_trace_in_the_transcript():
+    """It is a thing on a screen, not a thing in a log."""
+
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Wipe"):
+            with session.step("Unbind catalogue claims"):
+                pass
+
+    assert [line for line in _screen(out.getvalue()) if line] == [
+        "Wipe",
+        "  Unbind catalogue claims                               0.0s",
+        "✓ Wipe                                                  0.0s",
+    ]
+
+
+def test_the_elapsed_figure_moves_while_nothing_else_happens():
+    """Without a ticker the line is painted only when some other frame opens or
+    closes — which, for the long waits that most need it, is never."""
+
+    import time
+
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        session.PROGRESS_TICK = 0.05
+        with session.task("Wipe"):
+            with session.step("Unbind catalogue claims"):
+                time.sleep(0.3)
+                repaints = out.getvalue().count("⋯ Unbind catalogue claims")
+
+    assert repaints > 1
+
+
+def test_a_stream_that_cannot_be_rewritten_gets_the_completed_lines_only():
+    """Piped, redirected or captured: a log file and a test transcript are
+    exactly what they were before any of this existed."""
+
+    out = io.StringIO()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Wipe"):
+            with session.step("Unbind catalogue claims"):
+                pass
+
+    printed = out.getvalue()
+    assert "⋯" not in printed
+    assert "\r" not in printed
+    assert "Unbind catalogue claims" in printed
+
+
+def test_closing_the_session_takes_the_live_line_down():
+    out = _Tty()
+    session = ConsoleSession(progress=out)
+    session.task_started("Wipe")
+    session.step_started("Unbind catalogue claims")
+    session.close()
+
+    assert _screen(out.getvalue())[-1] == ""
+
+
 # --- durable evidence ---------------------------------------------------------
 
 

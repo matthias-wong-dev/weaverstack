@@ -10,7 +10,7 @@ The interaction this exists for:
 
     Incorrect syntax near 'from'.
 
-    Fix the file and press Enter to retry, or 'q' to give up.
+    Fix the file and press Enter to retry, Esc to exit.
 
 Two claims, and the second is the one that makes it worth having:
 
@@ -28,10 +28,14 @@ would cost a minute per fix and defeat the point.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
 from weaver.errors import CommandError
+
+#: The checkout's source root, for the child process a pty test forks.
+_SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 def _cli():
@@ -48,24 +52,33 @@ def _cli():
     return sys.modules["weaver_cli.main"]
 
 
-def _until_fixed(args, attempt):
-    return _cli()._until_fixed(args, attempt)
+def _until_fixed(args, attempt, *prompt):
+    return _cli()._until_fixed(args, attempt, *prompt)
+
+
+ENTER = "\r"
+ESC = "\x1b"
 
 
 class _Terminal:
-    """Somebody at a keyboard, answering a fixed script."""
+    """Somebody at a keyboard, pressing a fixed script of keys.
 
-    def __init__(self, monkeypatch, answers=()):
-        self.answers = list(answers)
-        self.asked = []
+    Doubled at ``_read_key`` rather than at ``input``: the whole reason the
+    prompt reads one key is that ``input()`` cannot see Esc, so a test that
+    doubled ``input`` would be testing an interaction the product no longer has.
+    """
+
+    def __init__(self, monkeypatch, keys=()):
+        self.keys = list(keys)
+        self.presses = 0
         monkeypatch.setattr(_cli(), "_can_ask", lambda: True)
-        monkeypatch.setattr("builtins.input", self._input)
+        monkeypatch.setattr(_cli(), "_read_key", self._read_key)
 
-    def _input(self, prompt=""):
-        self.asked.append(prompt)
-        if not self.answers:
+    def _read_key(self):
+        self.presses += 1
+        if not self.keys:
             raise EOFError
-        return self.answers.pop(0)
+        return self.keys.pop(0)
 
 
 @pytest.fixture
@@ -99,52 +112,67 @@ def test_a_task_that_succeeds_is_never_asked_about(args, monkeypatch):
 
     assert _until_fixed(args, attempt) == 0
     assert len(attempt.calls) == 1
-    assert terminal.asked == []
+    assert terminal.presses == 0
 
 
 def test_a_failure_offers_a_retry_and_runs_the_whole_task_again(args, monkeypatch):
-    terminal = _Terminal(monkeypatch, answers=[""])
+    terminal = _Terminal(monkeypatch, keys=[ENTER])
     attempt = attempts(1, 0)
 
     assert _until_fixed(args, attempt) == 0
     assert len(attempt.calls) == 2
-    assert len(terminal.asked) == 1
+    assert terminal.presses == 1
 
 
 def test_retrying_repeatedly_is_allowed(args, monkeypatch):
     """A developer fixes one thing and finds the next. That is ordinary."""
 
-    _Terminal(monkeypatch, answers=["", "", ""])
+    _Terminal(monkeypatch, keys=[ENTER, ENTER, ENTER])
     attempt = attempts(1, 1, 1, 0)
 
     assert _until_fixed(args, attempt) == 0
     assert len(attempt.calls) == 4
 
 
-def test_the_prompt_says_how_to_decline(args, monkeypatch):
+def test_the_prompt_says_how_to_leave(args, monkeypatch, capsys):
     """An interaction that only offers "try again" is a trap."""
 
-    terminal = _Terminal(monkeypatch, answers=["q"])
+    _Terminal(monkeypatch, keys=[ESC])
 
     _until_fixed(args, attempts(1))
 
-    assert "q" in terminal.asked[0]
-    assert "retry" in terminal.asked[0]
+    printed = capsys.readouterr().err
+    assert "Enter to retry" in printed
+    assert "Esc to exit" in printed
 
 
-@pytest.mark.parametrize("answer", ["q", "quit", "n", "no", "exit", "Q", " no "])
-def test_declining_returns_the_failure(args, monkeypatch, answer):
-    _Terminal(monkeypatch, answers=[answer])
+@pytest.mark.parametrize("key", [ESC, "\x03", "\x04"])
+def test_leaving_returns_the_failure(args, monkeypatch, key):
+    """Esc leaves; Ctrl-C and Ctrl-D are the operator declining too."""
+
+    _Terminal(monkeypatch, keys=[key])
     attempt = attempts(1)
 
     assert _until_fixed(args, attempt) == 1
     assert len(attempt.calls) == 1
 
 
+def test_a_stray_key_decides_nothing(args, monkeypatch):
+    """Somebody tabbing back to the terminal and hitting a key has not
+    answered, so the prompt keeps waiting rather than guessing."""
+
+    terminal = _Terminal(monkeypatch, keys=["x", "\t", ENTER])
+    attempt = attempts(1, 0)
+
+    assert _until_fixed(args, attempt) == 0
+    assert terminal.presses == 3
+    assert len(attempt.calls) == 2
+
+
 def test_an_end_of_input_declines_rather_than_looping(args, monkeypatch):
     """Ctrl-D at the prompt is the operator declining, not a failure of its own."""
 
-    _Terminal(monkeypatch, answers=[])
+    _Terminal(monkeypatch, keys=[])
 
     assert _until_fixed(args, attempts(1)) == 1
 
@@ -154,10 +182,10 @@ def test_an_interrupt_at_the_prompt_declines(args, monkeypatch):
 
     monkeypatch.setattr(_cli(), "_can_ask", lambda: True)
 
-    def interrupted(prompt=""):
+    def interrupted():
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("builtins.input", interrupted)
+    monkeypatch.setattr(_cli(), "_read_key", interrupted)
 
     assert _until_fixed(args, attempts(1)) == 1
 
@@ -169,13 +197,13 @@ def test_without_a_terminal_nothing_is_ever_asked(args, monkeypatch):
     """A pipeline gets the first answer, not a prompt it cannot answer."""
 
     monkeypatch.setattr(_cli(), "_can_ask", lambda: False)
-    asked = []
-    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt))
+    pressed = []
+    monkeypatch.setattr(_cli(), "_read_key", lambda: pressed.append(1) or ENTER)
     attempt = attempts(1)
 
     assert _until_fixed(args, attempt) == 1
     assert len(attempt.calls) == 1
-    assert asked == []
+    assert pressed == []
 
 
 def test_a_non_interactive_run_opens_no_session_of_its_own(monkeypatch):
@@ -206,7 +234,7 @@ class _Session:
 def test_every_attempt_runs_in_one_session(args, monkeypatch):
     """The reason retry is worth having: no cold start between fixes."""
 
-    _Terminal(monkeypatch, answers=["", ""])
+    _Terminal(monkeypatch, keys=[ENTER, ENTER])
     seen = []
 
     def attempt():
@@ -225,7 +253,7 @@ def test_a_borrowed_session_is_used_and_left_open(monkeypatch):
     command that failed in it."""
 
     monkeypatch.setattr(_cli(), "_resolve_workspace", lambda args: None)
-    _Terminal(monkeypatch, answers=[""])
+    _Terminal(monkeypatch, keys=[ENTER])
     session = _Session()
     args = argparse.Namespace(session=session)
     seen = []
@@ -249,7 +277,7 @@ def test_a_task_failure_is_not_a_resource_failure(args, monkeypatch):
     test here and still cost a cold start per fix.
     """
 
-    _Terminal(monkeypatch, answers=[""])
+    _Terminal(monkeypatch, keys=[ENTER])
     opened = []
 
     from weaver.session.console import ConsoleSession
@@ -281,7 +309,7 @@ def test_a_retry_re_runs_the_task_rather_than_resuming_inside_it(args, monkeypat
     of its own between attempts.
     """
 
-    _Terminal(monkeypatch, answers=[""])
+    _Terminal(monkeypatch, keys=[ENTER])
     inputs = ["broken", "fixed"]
     read = []
 
@@ -302,10 +330,116 @@ def test_a_raised_weaver_error_is_not_swallowed_by_the_loop(args, monkeypatch):
     would put a retry in front of errors that no edit can fix.
     """
 
-    _Terminal(monkeypatch, answers=[""])
+    _Terminal(monkeypatch, keys=[ENTER])
 
     def attempt():
         raise CommandError("no such Lakehouse")
 
     with pytest.raises(CommandError):
         _until_fixed(args, attempt)
+
+
+# --- the prompt is per Task, not one wording for all of them -------------------
+
+
+def test_build_says_file_because_a_build_failure_names_one(args, monkeypatch, capsys):
+    """Build carries provenance from the repository parse, so it can say
+    *file* and mean it."""
+
+    _Terminal(monkeypatch, keys=[ESC])
+
+    _until_fixed(args, attempts(1), _cli().RETRY_SOURCE)
+
+    assert "Fix the file" in capsys.readouterr().err
+
+
+def test_load_and_test_say_problem_because_they_often_cannot_name_a_file(
+    args, monkeypatch, capsys
+):
+    """A load or test failure is frequently the estate rather than the source —
+    an empty upstream, a validation that found real rows. Sending somebody to
+    fix a file would send them to the wrong place."""
+
+    _Terminal(monkeypatch, keys=[ESC])
+
+    _until_fixed(args, attempts(1))
+
+    assert "Fix the problem" in capsys.readouterr().err
+
+
+def test_the_three_retryable_commands_take_the_wording_that_fits_them():
+    """Read off the wiring, so a fourth command cannot quietly inherit the
+    wrong one."""
+
+    import inspect
+
+    source = inspect.getsource(_cli())
+
+    assert "_until_fixed(args, lambda: _build_once(args), RETRY_SOURCE)" in source
+    assert "_until_fixed(args, lambda: _load_once(args))" in source
+    assert "_until_fixed(args, lambda: _test_once(args))" in source
+
+
+# --- the keyboard itself ------------------------------------------------------
+#
+# Everything above doubles `_read_key`, which is right for the loop's logic and
+# useless for the reading. What a terminal actually delivers is only observable
+# through a terminal, and this got written wrongly twice: once returning a bare
+# Esc for an arrow key, and once reading through `sys.stdin`, whose buffering
+# swallows the rest of an escape sequence so `select` cannot see it. Both made
+# every arrow key mean exit.
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "fork"), reason="needs POSIX pty")
+@pytest.mark.parametrize(
+    "sent, expected",
+    [
+        (b"\r", "ENTER"),
+        (b"\n", "ENTER"),
+        (b"\x1b", "ESC"),
+        (b"x", "'x'"),
+        # Sequences, which share their first byte with Esc and must not be it.
+        (b"\x1b[A", r"'\x1b[A'"),
+        (b"\x1b[D", r"'\x1b[D'"),
+        (b"\x1bOP", r"'\x1bOP'"),
+    ],
+)
+def test_one_keypress_is_read_as_itself(sent, expected):
+    import os
+    import pty
+    import sys
+    import time
+
+    probe = (
+        "import sys;"
+        f"sys.path.insert(0, {str(_SRC)!r});"
+        "from weaver_cli.main import _read_key, ESC;"
+        "key = _read_key();"
+        'name = {"\\r": "ENTER", "\\n": "ENTER", ESC: "ESC"}.get(key, repr(key));'
+        'sys.stderr.write("GOT:" + name + "\\n");'
+        "sys.stderr.flush()"
+    )
+
+    pid, descriptor = pty.fork()
+    if pid == 0:  # the child *is* the terminal session
+        os.execv(sys.executable, [sys.executable, "-c", probe])
+
+    time.sleep(0.35)
+    os.write(descriptor, sent)
+    time.sleep(0.35)
+    received = b""
+    try:
+        while b"GOT:" not in received:
+            chunk = os.read(descriptor, 1024)
+            if not chunk:
+                break
+            received += chunk
+    except OSError:
+        pass
+    os.waitpid(pid, 0)
+
+    answer = [
+        line.strip() for line in received.decode(errors="replace").splitlines()
+        if "GOT:" in line
+    ]
+    assert answer == [f"GOT:{expected}"]

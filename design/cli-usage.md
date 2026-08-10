@@ -119,6 +119,18 @@ roll-up, the way `du` reads. An error is content attached to whichever frame
 failed, not a level of its own, and a failure closes every frame it unwound so
 a stopped run still reports what it spent.
 
+**While work is in flight**, a line below the completed ones names the innermost
+open frame and how long it has been running, rewritten in place:
+
+```text
+⋯ Unbind catalogue claims                              1m47s
+```
+
+It is erased before anything permanent is written, so it never lands in the
+transcript, and it needs a terminal to rewrite — piped, redirected or captured,
+the output is exactly the completed lines. The elapsed figure ticks, which is
+the half that says a two-minute wait is alive rather than hung.
+
 That is the *logical* ledger. The transport one is separate, and neither can be
 derived from the other — "the load took forty seconds" and "thirty-eight of them
 were one Livy startup" call for opposite changes:

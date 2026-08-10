@@ -29,6 +29,7 @@ work will need, not the work itself.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -102,6 +103,12 @@ class ConsoleSession(Session):
         #: interleaved into that would make the answer unparseable. ``False``
         #: silences it.
         self._progress = progress
+        #: How many characters of transient line are currently on screen, and
+        #: the lock that keeps the ticker thread from drawing over a completion.
+        self._painted = 0
+        self._progress_lock = threading.Lock()
+        self._ticker = None
+        self._ticking = False
 
     # --- progress -----------------------------------------------------------
 
@@ -110,16 +117,20 @@ class ConsoleSession(Session):
     #: eighty-column terminal with the duration still on the same line.
     PROGRESS_WIDTH = 52
 
+    #: How often the live line redraws while work is in flight. Slow enough to
+    #: cost nothing, fast enough that the elapsed figure is visibly moving —
+    #: which is the half of it that says the wait is alive rather than hung.
+    PROGRESS_TICK = 1.0
+
     def present(self, frame, event: str, error: BaseException | None = None) -> None:
-        """Write one closed frame as a line, indented by its depth.
+        """Keep the open work visible, and record each frame as it closes.
 
-        On completion rather than on start, because the useful number is the one
-        that is only known at the end. What a reader loses is the name of the
-        thing currently running; what they gain is a column of durations that
-        can be read down. A Task, being the outermost frame and often a long
-        wait, gets both: its name when it opens and its total when it closes.
+        Two things a reader needs, and they are not the same thing.
 
-        So a frame's children appear above it, with its own total underneath:
+        **What finished, and what it cost** is written as a permanent line when
+        a frame closes, because the duration is only known then. Children appear
+        above their parent with the parent's total underneath — a roll-up, the
+        way ``du`` reads:
 
         .. code-block:: text
 
@@ -131,35 +142,145 @@ class ConsoleSession(Session):
               Install Lakehouse/Sales                    18.6s
             ✓ Build                                      40.7s
 
-        which is a roll-up rather than a plan — the same way ``du`` reads. The
-        alternative is announcing each frame as it opens, and then a long Step
-        prints its name, waits a minute, and prints it again with a number.
+        **What is happening now** is a transient line below that, rewritten in
+        place, naming the innermost frame still open and how long it has been
+        running:
+
+        .. code-block:: text
+
+            ⋯ Unbind catalogue claims                     1m47s
+
+        It is erased before anything permanent is written, so it never lands in
+        the transcript. Recording completions alone was the earlier design and
+        it was wrong for this feature: a Step that takes two minutes showed the
+        Task heading and then nothing at all, and silence is exactly what a tool
+        whose purpose is responsiveness must not answer a long wait with. The
+        thing not wanted was *duplication* — a name printed on the way in and
+        again on the way out — and a line that is overwritten rather than
+        appended avoids that without going quiet.
+
+        Live output needs a terminal to rewrite. Piped, redirected or captured,
+        this degrades to exactly the completed lines it always wrote, so a log
+        file and a test transcript are unchanged.
         """
 
         stream = self._progress_stream()
         if stream is None:
             return
-        if event == "started":
-            if frame.kind == TASK:
-                print(f"\n{frame.name}\n", file=stream)
-            return
+        with self._progress_lock:
+            self._erase(stream)
+            if event == "started":
+                if frame.kind == TASK:
+                    print(f"\n{frame.name}\n", file=stream)
+            else:
+                if event == "failed":
+                    mark = "✗"
+                elif frame.kind == TASK:
+                    mark = "✓"
+                else:
+                    mark = " "
+                print(
+                    f"{mark} {self._label(frame):<{max(self.PROGRESS_WIDTH - 2, 1)}}"
+                    f"{_duration(frame.elapsed):>8}",
+                    file=stream,
+                )
+                if frame.kind == TASK:
+                    print(file=stream)
+            self._paint(stream)
+        self._start_ticking()
 
-        if event == "failed":
-            mark = "✗"
-        elif frame.kind == TASK:
-            mark = "✓"
-        else:
-            mark = " "
-        # A Task heads its own block, so its Steps are the first indent level
-        # rather than the second.
-        label = "  " * max(frame.depth - 1, 0) + frame.name
-        width = max(self.PROGRESS_WIDTH - 2, 1)
-        print(
-            f"{mark} {label:<{width}}{_duration(frame.elapsed):>8}",
-            file=stream,
+    def _label(self, frame) -> str:
+        """A Task heads its own block, so its Steps are the first indent level."""
+
+        return "  " * max(frame.depth - 1, 0) + frame.name
+
+    # --- the live line ------------------------------------------------------
+
+    def _paint(self, stream) -> None:
+        """Draw the innermost open frame, without ending the line."""
+
+        if not self._live(stream):
+            return
+        frame = self._innermost()
+        if frame is None:
+            return
+        text = (
+            f"⋯ {self._label(frame):<{max(self.PROGRESS_WIDTH - 2, 1)}}"
+            f"{_duration(frame.age):>8}"
         )
-        if frame.kind == TASK:
-            print(file=stream)
+        stream.write("\r" + text)
+        stream.flush()
+        self._painted = len(text)
+
+    def _erase(self, stream) -> None:
+        """Take the transient line back before anything permanent is written."""
+
+        if not self._painted:
+            return
+        stream.write("\r" + " " * self._painted + "\r")
+        stream.flush()
+        self._painted = 0
+
+    def _innermost(self):
+        """The deepest frame still open — what the wait is actually for.
+
+        A Task names the command, which the heading already said; the useful
+        answer to "what is it doing" is the smallest thing currently in flight.
+        """
+
+        frames = self.frames
+        return frames[-1] if frames else None
+
+    def _live(self, stream) -> bool:
+        """Whether this stream can have a line rewritten in it."""
+
+        try:
+            return bool(stream.isatty())
+        except (AttributeError, ValueError):
+            return False
+
+    def _start_ticking(self) -> None:
+        """Keep the elapsed figure moving while a frame is open.
+
+        Without this the line is painted only when some other frame opens or
+        closes — which for the long waits that most need it is never. A daemon
+        thread, so it can never hold the process open.
+        """
+
+        stream = self._progress_stream()
+        if stream is None or not self._live(stream) or self._ticker is not None:
+            return
+        import threading
+
+        self._ticking = True
+        self._ticker = threading.Thread(
+            target=self._tick, name="weaver-progress", daemon=True
+        )
+        self._ticker.start()
+
+    def _tick(self) -> None:
+        import time
+
+        while self._ticking:
+            time.sleep(self.PROGRESS_TICK)
+            stream = self._progress_stream()
+            if stream is None:
+                return
+            with self._progress_lock:
+                if not self._ticking:
+                    return
+                self._erase(stream)
+                self._paint(stream)
+
+    def stop_presenting(self) -> None:
+        """Stop the ticker and leave no half-drawn line behind."""
+
+        self._ticking = False
+        stream = self._progress_stream()
+        if stream is not None:
+            with self._progress_lock:
+                self._erase(stream)
+        self._ticker = None
 
     def _progress_stream(self):
         if self._progress is False:
