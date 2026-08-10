@@ -221,3 +221,78 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
     result = next(report.action_results())
     assert result.status == SKIPPED
     assert "unsupported" in result.details["reason"]
+
+
+# --- capabilities are acquired by need, not by batch --------------------------
+
+
+def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
+    """A Spark session costs seconds to start and a JVM permits exactly one.
+
+    A batch is handed its capabilities up front, and building Spark eagerly
+    meant a bundle of file writes, T-SQL and an endpoint refresh still started
+    one — paying for a capability none of its actions would touch and, in a
+    process that already had a session, failing outright with *Only one
+    SparkContext should be running in this JVM*.
+    """
+
+    action = InstallAction(
+        id="refresh-application-sql-endpoint",
+        kind="refresh_sql_endpoint",
+        resource_node_id=None,
+        executor="sql_endpoint_refresh",
+        payload=None,
+        payload_sha256=None,
+    )
+    plan = BuildPlan(
+        format_version=1,
+        bundle_id="",
+        repository_name="MyRepo",
+        repository_signature="sig",
+        targets=(TARGET,),
+        sequences=(
+            BuildSequence(
+                number=8990,
+                description="refresh endpoints",
+                batches=(
+                    BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),
+                ),
+            ),
+        ),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    store = FilesystemStore()
+    bundle = write_bundle(
+        Location(str(tmp_path / "refresh-bundle")), plan=plan, payloads={}, store=store
+    )
+    workspace = LocalWorkspace(workspace=tmp_path / "local", weaver_lakehouse="Weaver")
+
+    installer = given_installer(
+        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+    )
+    asked = []
+    installer.session.spark = lambda *a, **k: asked.append(True)
+
+    report = installer.install(bundle)
+
+    assert report.status == SUCCEEDED
+    assert asked == [], "a Spark session was started for a batch that never used one"
+
+
+def test_a_host_with_no_spark_still_says_so_without_starting_anything():
+    """``None`` means *this host has no Spark*, which executors read to skip
+    Lakehouse work rather than fail it. That answer must not cost a session."""
+
+    from weaver.build_bundle.installer import Installer
+
+    class Elsewhere:
+        workspace = None
+
+        def executes_here(self, workspace=None):
+            return False
+
+        def spark(self, workspace=None):
+            raise AssertionError("a host that executes elsewhere was asked for Spark")
+
+    assert Installer(Elsewhere()).spark_when_needed() is None

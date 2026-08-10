@@ -422,7 +422,15 @@ def test_one_keypress_is_read_as_itself(sent, expected):
 
     pid, descriptor = pty.fork()
     if pid == 0:  # the child *is* the terminal session
-        os.execv(sys.executable, [sys.executable, "-c", probe])
+        # Between fork and exec the child is a copy of this pytest process, so
+        # an exec that failed would leave a second pytest running the rest of
+        # the suite concurrently — against the same temporary directories, and
+        # failing tests with nothing to do with this one. `os._exit` skips
+        # every handler and cannot be caught.
+        try:
+            os.execv(sys.executable, [sys.executable, "-c", probe])
+        finally:
+            os._exit(127)
 
     time.sleep(0.35)
     os.write(descriptor, sent)

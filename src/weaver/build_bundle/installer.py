@@ -49,6 +49,37 @@ from .targets import WAREHOUSE_TARGET, BoundTarget
 REPORT_FILENAME = "install-report.yml"
 
 
+class _DeferredSpark:
+    """A Spark session that is started by the first executor that uses it.
+
+    Deliberately not a general lazy proxy. It exists so that "this host has a
+    Spark session" and "this host has *started* one" stop being the same
+    question — the first is what a batch needs to know when it is handed its
+    capabilities, and the second costs seconds and is answerable later.
+
+    Everything is forwarded, so an executor writes ``context.spark.sql(...)``
+    exactly as before and cannot tell the difference.
+    """
+
+    __slots__ = ("_acquire", "_session")
+
+    def __init__(self, acquire) -> None:
+        object.__setattr__(self, "_acquire", acquire)
+        object.__setattr__(self, "_session", None)
+
+    def _resolved(self):
+        if object.__getattribute__(self, "_session") is None:
+            object.__setattr__(self, "_session", object.__getattribute__(self, "_acquire")())
+        return object.__getattribute__(self, "_session")
+
+    def __getattr__(self, name):
+        return getattr(self._resolved(), name)
+
+    def __repr__(self) -> str:
+        started = object.__getattribute__(self, "_session")
+        return "<Spark session, not yet started>" if started is None else repr(started)
+
+
 class Installer:
     """Execute an already-decided bundle against a Session.
 
@@ -96,6 +127,27 @@ class Installer:
     @property
     def spark(self) -> Any:
         return self.session.spark(self.workspace)
+
+    def spark_when_needed(self) -> Any:
+        """Spark for this host, acquired only if an action actually asks for it.
+
+        A batch is given its capabilities up front, and a Spark session is the
+        one that costs seconds to start and that a JVM permits exactly one of.
+        Building it eagerly meant a bundle of nothing but file writes, T-SQL and
+        an endpoint refresh still started one — paying for a capability none of
+        its actions would touch, and, in a process that already had a session,
+        failing outright with *Only one SparkContext should be running in this
+        JVM*.
+
+        ``None`` still means *this host has no Spark*, which several executors
+        read to skip Lakehouse work rather than fail it. That answer is given
+        without acquiring anything: whether a host executes here is a property
+        of the host, not of having started a session.
+        """
+
+        if not self.session.executes_here(self.workspace):
+            return None
+        return _DeferredSpark(lambda: self.session.spark(self.workspace))
 
     def sql_for(self, bound: BoundTarget) -> Any:
         """The Warehouse connection for a batch, from the Session that owns it."""
@@ -217,7 +269,7 @@ def _run_sequence(
     for batch in sequence.batches:
         target = resolved[batch.target_id]
         context = InstallationContext(
-            spark=installer.spark,
+            spark=installer.spark_when_needed(),
             resolver=installer.resolver,
             store=installer.store,
             target=target,
