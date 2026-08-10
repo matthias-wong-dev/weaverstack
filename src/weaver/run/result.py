@@ -31,6 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from .contract import represent
+
 # --- node statuses ------------------------------------------------------------
 #
 # What became of one node. Kept identical to the load statuses they replace, so
@@ -112,7 +114,9 @@ class RunNodeResult:
             "raised": self.raised,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            "rows": None if self.result is None else self.result.as_row(),
+            # As narrow as the contract that admitted it: a result describes
+            # itself if it can, and otherwise answers only what every result must.
+            "rows": represent(self.result),
             "messages": [
                 message.to_mapping() if hasattr(message, "to_mapping") else str(message)
                 for message in self.messages

@@ -42,6 +42,36 @@ def reports_outcome(result: object) -> bool:
     return hasattr(result, "succeeded")
 
 
+def represent(result: object) -> dict | None:
+    """One result, as a mapping, without assuming which kind of result it is.
+
+    The Runner's contract is that a result reports whether it succeeded. Its
+    *serialization* has to be exactly as narrow, or the contract quietly becomes
+    "reports whether it succeeded, and also happens to look like a load result"
+    — and the day a semantic-model refresh returns something else, a run that
+    executed perfectly would fail while writing itself down.
+
+    So three ways of asking, in order of how much the result has chosen to say:
+
+    .. code-block:: text
+
+        to_mapping()   the result describes itself
+        as_row()       the result is row-shaped, as Weaver's own are
+        neither        what every result must answer, and nothing more
+    """
+
+    if result is None:
+        return None
+    for name in ("to_mapping", "as_row"):
+        describe = getattr(result, name, None)
+        if callable(describe):
+            return describe()
+    return {
+        "succeeded": bool(getattr(result, "succeeded", False)),
+        "error_message": getattr(result, "error_message", None),
+    }
+
+
 @dataclass(frozen=True)
 class RunFailure:
     """A failure a primitive did not describe, in the shape a result has.

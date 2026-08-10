@@ -74,6 +74,8 @@ class NotebookSession(Session):
             with self.telemetry.timing(f"python.{program.name}"):
                 payload = program.call()
         except BaseException as exc:
+            # Reported and re-raised, whatever it was: an interrupt still ends
+            # the sub-step it interrupted, and still travels on.
             self.substep_failed(program.name, exc)
             raise
         self.substep_completed(program.name)

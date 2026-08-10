@@ -545,3 +545,71 @@ def test_a_run_state_round_trips_through_its_mapping():
 
     assert returned.target_inventories[str(SALES)].files == ("_/Load/a.py",)
     assert returned.inventory(SALES) is not None
+
+
+# --- what a run must not swallow ---------------------------------------------
+
+
+def test_an_interrupt_escapes_rather_than_becoming_a_failed_node():
+    """Ctrl-C is the operator saying stop, not a primitive reporting failure.
+
+    A run that recorded it as a node failure would swallow the interrupt at the
+    prompt and hand back a report that looks like it decided something.
+    """
+
+    def dispatch(node, **asked):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        runner(nodes=[node("a")]).run(dispatch=dispatch)
+
+
+def test_a_process_exit_escapes_too():
+    def dispatch(node, **asked):
+        raise SystemExit(2)
+
+    with pytest.raises(SystemExit):
+        runner(nodes=[node("a")]).run(dispatch=dispatch)
+
+
+def test_a_result_that_is_not_row_shaped_still_serializes():
+    """The Runner's contract is "it reports whether it succeeded" — and its
+    serialization has to be exactly as narrow, or a future runtime result would
+    execute perfectly and then fail while writing itself down."""
+
+    class SemanticModelRefresh:
+        """Something a future runtime operation might legitimately return."""
+
+        succeeded = True
+
+        def to_mapping(self) -> dict:
+            return {"succeeded": True, "model": "Sales", "refreshed": True}
+
+    result = runner(nodes=[node("a")]).run(
+        dispatch=controlled({"a": SemanticModelRefresh()})
+    )
+
+    assert result.by_node["a"].status == SUCCEEDED
+    assert result.to_mapping()["nodes"][0]["rows"] == {
+        "succeeded": True,
+        "model": "Sales",
+        "refreshed": True,
+    }
+
+
+def test_a_result_that_describes_itself_no_further_still_serializes():
+    """Neither to_mapping nor as_row: it answers what every result must."""
+
+    class BareOutcome:
+        succeeded = False
+        error_message = "the model would not refresh"
+
+    result = runner(nodes=[node("a")], fault_tolerant=True).run(
+        dispatch=controlled({"a": BareOutcome()})
+    )
+
+    assert result.by_node["a"].status == FAILED
+    assert result.to_mapping()["nodes"][0]["rows"] == {
+        "succeeded": False,
+        "error_message": "the model would not refresh",
+    }

@@ -179,3 +179,70 @@ def test_acquisition_is_timed_where_a_session_can_see_it(executor):
     resource.get()
 
     assert telemetry.measures["livy.acquire"].calls == 1
+
+
+# --- leaving while something is still starting -------------------------------
+
+
+def test_closing_mid_acquisition_waits_so_it_can_release_what_arrives(executor):
+    """The expensive thing to leak is a Spark session on a one-slot capacity.
+
+    ``weaver session`` warms Livy at the prompt; a user who exits immediately
+    would otherwise abandon a session that is still starting, and it holds the
+    only slot until Fabric reaps it — so the next run queues behind a session
+    nobody is using.
+    """
+
+    release = threading.Event()
+    released = []
+
+    def acquire():
+        release.wait(5)
+        return "livy"
+
+    resource = Resource(
+        "livy", acquire, executor=executor, release=released.append
+    )
+    resource.start(speculative=True)
+
+    closing = executor.submit(resource.close)
+    release.set()
+    closing.result(5)
+
+    assert released == ["livy"], "what arrived was released, not abandoned"
+    assert resource.state is ResourceState.CLOSED
+
+
+def test_an_acquisition_that_never_finishes_is_abandoned_rather_than_hanging(executor):
+    """Bounded on purpose: an exit that cannot complete is the worse failure."""
+
+    forever = threading.Event()
+    released = []
+
+    def acquire():
+        forever.wait(30)
+        return "livy"
+
+    resource = Resource(
+        "livy",
+        acquire,
+        executor=executor,
+        release=released.append,
+        close_timeout=0.2,
+    )
+    resource.start(speculative=True)
+
+    resource.close()
+
+    assert released == [], "nothing had arrived to release"
+    assert resource.state is ResourceState.CLOSED
+    forever.set()
+
+
+def test_closing_before_anything_started_waits_for_nothing(executor):
+    started = []
+    resource = Resource("livy", lambda: started.append(1), executor=executor)
+
+    resource.close()
+
+    assert started == [], "a resource nobody asked for is not acquired to close it"

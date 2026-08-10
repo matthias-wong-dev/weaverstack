@@ -353,7 +353,12 @@ class Runner:
                 runtime_scope=self.runtime_scope,
                 workspace=self.workspace,
             )
-        except BaseException as exc:  # noqa: BLE001 - a failed node is a result
+        except Exception as exc:  # noqa: BLE001 - a failed node is a result
+            # Deliberately not BaseException. A KeyboardInterrupt or a
+            # SystemExit is the operator or the process saying stop, not a
+            # primitive reporting failure — recording one as a failed node
+            # would swallow Ctrl-C at the prompt and leave a run that looks
+            # like it decided something.
             outcome = settle(node, raised=exc)
         else:
             outcome = settle(node, returned=returned)

@@ -144,6 +144,8 @@ class ConsoleSession(Session):
                     timeout=timeout if timeout is not None else program.timeout,
                 )
         except BaseException as exc:
+            # Reported and re-raised, whatever it was: an interrupt still ends
+            # the sub-step it interrupted, and still travels on.
             self.substep_failed(program.name, exc)
             raise
         self.substep_completed(program.name)

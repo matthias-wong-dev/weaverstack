@@ -13,6 +13,7 @@ a run behaves.
 
 from __future__ import annotations
 
+from .contract import RunError, RunFailure, reports_outcome
 from .dispatch import can_refresh, dispatch_primitive
 from .graph import RunGraph, RunNode, graph_for
 from .observe import open_run_log, read_run_state
@@ -24,6 +25,8 @@ from .state import RunState
 __all__ = [
     "LOAD",
     "TEST",
+    "RunError",
+    "RunFailure",
     "RunGraph",
     "RunNode",
     "RunNodeResult",
@@ -32,6 +35,7 @@ __all__ = [
     "RunState",
     "Runner",
     "can_refresh",
+    "reports_outcome",
     "dispatch_primitive",
     "graph_for",
     "open_run_log",

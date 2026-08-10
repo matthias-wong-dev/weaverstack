@@ -72,6 +72,7 @@ class Resource(Generic[T]):
         release: Callable[[T], None] | None = None,
         telemetry: SessionTelemetry | None = None,
         max_attempts: int = 2,
+        close_timeout: float = 120.0,
     ) -> None:
         self.name = name
         self._acquire = acquire
@@ -79,6 +80,7 @@ class Resource(Generic[T]):
         self._executor = executor
         self._telemetry = telemetry
         self._max_attempts = max_attempts
+        self._close_timeout = close_timeout
         self._lock = threading.Lock()
         self._state = ResourceState.NOT_STARTED
         self._future: Future | None = None
@@ -214,7 +216,19 @@ class Resource(Generic[T]):
     # --- teardown -----------------------------------------------------------
 
     def close(self) -> None:
-        """Release what this resource acquired, if it acquired anything."""
+        """Release what this resource acquired, if it acquired anything.
+
+        **A close that arrives mid-acquisition waits for it.** Leaving a
+        starting Livy session behind would leak the thing it is most expensive
+        to leak: a small capacity permits one Spark session, and an abandoned
+        one holds that slot until Fabric reaps it — so the next run queues
+        behind a session nobody is using. Waiting a few tens of seconds at exit
+        is the cheaper mistake, and it is deliberate rather than incidental.
+
+        The wait is bounded. A resource that never finishes starting is
+        abandoned rather than allowed to hold the process open forever, because
+        an exit that cannot complete is worse than a slot that will be reaped.
+        """
 
         with self._lock:
             if self._state is ResourceState.CLOSED:
@@ -228,7 +242,14 @@ class Resource(Generic[T]):
         if future is None:
             return
         try:
-            value = future.result()
+            value = future.result(self._close_timeout)
+        except TimeoutError:
+            # Still starting, and out of patience. Abandoned deliberately: an
+            # exit that cannot complete is worse than a resource the platform
+            # will reap on its own.
+            if self._telemetry is not None:
+                self._telemetry.count(f"{self.name}.abandoned")
+            return
         except BaseException:
             return  # never acquired, so there is nothing to release
         self._release_value(value)
