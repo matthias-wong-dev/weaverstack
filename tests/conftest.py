@@ -75,6 +75,36 @@ def pytest_collection_modifyitems(items):
         raise pytest.UsageError("invalid Fabric test markers:\n" + "\n".join(errors))
 
 
+@pytest.fixture(autouse=True)
+def no_credentials_outside_fabric(request, monkeypatch):
+    """Nothing but a Fabric test may ask for a real credential.
+
+    ``DefaultAzureCredential`` is a network call that, on a build agent with no
+    identity, hangs and then fails — and the test it fails is whichever one
+    happened to construct a Fabric-shaped Session, which says nothing about the
+    cause. It is not enough to mock it in the tests that reach it today: a
+    ``Resource`` binds its acquisition when the scope is *constructed*, so a
+    patch applied to a scope afterwards leaves the original in place and the
+    call happens anyway. That is exactly how this escaped once.
+
+    So the default is refusal, and a Fabric test opts out by carrying the
+    marker that says it needs a workspace.
+    """
+
+    if request.node.get_closest_marker("fabric"):
+        return
+
+    def refuse():
+        raise AssertionError(
+            "a test outside `-m fabric` asked for an Azure credential. Replace "
+            "`weaver.fabric.auth.credential` before the Session is constructed "
+            "— a Resource binds its acquisition at construction, so patching "
+            "the scope afterwards is too late."
+        )
+
+    monkeypatch.setattr("weaver.fabric.auth.credential", refuse)
+
+
 def _sql_statements(name: str, tables_root: str) -> tuple[str, ...]:
     """The saved Spark SQL fixture, rendered for one explicit Tables root."""
 

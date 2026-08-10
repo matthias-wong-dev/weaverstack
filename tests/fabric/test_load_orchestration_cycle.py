@@ -153,12 +153,14 @@ def test_every_node_resolves_to_its_exact_installed_primitive(orchestrated):
     assert nodes[f"load:Warehouse/{warehouse}/{REPORT}"]["dispatch_location"] == (
         f"Warehouse/{warehouse}/[_].[Load {REPORT}]"
     )
-    # The deployed modules are addressed through the Lakehouse's own OneLake
-    # root, never through a notebook's attachment.
+    # The deployed modules are addressed through the Lakehouse that owns them,
+    # never through a notebook's attachment. Named logically: a dry run says
+    # what it intends to reach without reaching a workspace to resolve it, so
+    # the Lakehouse is in the name rather than in an absolute URL.
     for node_id in (f"load:Lakehouse/{lakehouse}/{SEED}", f"load:Lakehouse/{lakehouse}/{CUSTOMER}"):
         location = nodes[node_id]["dispatch_location"]
-        assert location.startswith("abfss://")
-        assert "/Files/_/Load/" in location
+        assert location.startswith(f"Lakehouse/{lakehouse}/")
+        assert "/_/Load/" in location
     assert all(node["status"] == "validated" for node in nodes.values())
     assert not any(node["executed"] for node in nodes.values())
     assert seen["dry"]["task_log"] is None

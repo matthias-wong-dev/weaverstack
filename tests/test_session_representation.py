@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.session import ConsoleSession, workspace_context
+from weaver.session.console import ConsoleScope
 from weaver.workspaces import FabricWorkspace, LocalWorkspace, TargetDeclaration
 
 
@@ -217,16 +219,28 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
         def close(self) -> None:
             pass
 
+    class FakeCredential:
+        """Enough of a credential for a token to exist, and no network at all."""
+
+        def get_token(self, *scopes, **kwargs):
+            return SimpleNamespace(token="token", expires_on=2 ** 31 - 1)
+
     built = FakeLivy()
+    # Everything is replaced *before* the scope exists, because a Resource binds
+    # its acquisition at construction: patching a method on the scope afterwards
+    # leaves the Resource holding the original, and this test would quietly
+    # reach a real credential — which on a build agent means asking Azure.
+    monkeypatch.setattr("weaver.fabric.auth.credential", FakeCredential)
     monkeypatch.setattr(
         "weaver.fabric.LivySession.for_workspace",
         classmethod(lambda cls, *args, **kwargs: built),
     )
+    monkeypatch.setattr(
+        ConsoleScope, "resolver", property(lambda self: object())
+    )
 
     with ConsoleSession(workspace=_fabric()) as session:
         scope = session.scope()
-        monkeypatch.setattr(scope, "_acquire_token_provider", lambda: (lambda: "t"))
-        monkeypatch.setattr(type(scope), "resolver", property(lambda self: object()))
 
         assert scope.livy.get() is built
         assert built.started, "the resource handed out a session that was never started"
