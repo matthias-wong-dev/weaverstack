@@ -668,3 +668,32 @@ def test_a_runner_with_no_session_still_runs():
     result = runner(nodes=[node("a")]).run(session=None, dispatch=controlled({}))
 
     assert result.succeeded
+
+
+def test_an_interrupted_run_still_closes_its_runtime_scope():
+    """A scope that outlived its run is one the next run would inherit — along
+    with the modules a rebuild has since replaced.
+
+    A failed node is data and never raises out of the loop, so the case that
+    needs a `finally` is the one nothing else covers: an interrupt.
+    """
+
+    closed = []
+
+    class Scope:
+        def context_for(self, **_kwargs):
+            raise AssertionError("nothing should have been imported")
+
+        def close(self):
+            closed.append(True)
+
+    made = runner(nodes=[node("a"), node("b")])
+    made._runtime_scope = Scope()
+
+    def interrupted(node, **asked):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        made.run(dispatch=interrupted)
+
+    assert closed == [True]

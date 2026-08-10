@@ -304,6 +304,11 @@ class Runner:
         statuses: dict[str, str] = {node.node_id: PENDING for node in ordered}
         results: dict[str, RunNodeResult] = {}
         stopped = False
+        # In a `finally`, because a scope that outlived its run is a scope the
+        # next run would inherit — along with the modules a rebuild has since
+        # replaced. A failed node is data and never reaches here, but an
+        # interrupt does, and a leak is exactly what an interrupted run must
+        # not leave behind.
 
         def settle(result: RunNodeResult, status: str | None = None) -> None:
             results[result.node_id] = result
@@ -313,65 +318,73 @@ class Runner:
             if on_node is not None:
                 on_node(result)
 
-        for node in ordered:
-            blocking = self._blocking(node, statuses)
-            if blocking:
-                settle(
-                    self._settled(node, BLOCKED, messages=(_blocked_by(node, blocking),)),
-                    BLOCKED,
-                )
-                continue
-            if stopped:
-                # Fail-fast stops *scheduling*, not reporting. A node whose own
-                # dependencies were fine is not blocked — it simply never
-                # started, and saying so beats inventing a failure for it.
-                settle(self._settled(node, PENDING))
-                continue
+        def _execute() -> None:
+            nonlocal stopped
 
-            resolved = self.resolve(node)
-            if not resolved.valid:
-                # Invalid, not failed: nothing ran. A reader distinguishing "the
-                # primitive reported failure" from "there was nothing to run" is
-                # asking a question the status should answer.
-                settle(
-                    self._settled(
-                        node,
-                        INVALID,
-                        messages=resolved.messages,
-                        location=resolved.dispatch_location,
-                    ),
-                    FAILED,
-                )
-                if not self.request.fault_tolerant:
-                    stopped = True
-                continue
-            if resolved.unsupported:
-                # A capability this host does not have. The node is omitted
-                # rather than failed, exactly as the build's own executor skips.
-                settle(
-                    self._settled(
-                        node,
+            for node in ordered:
+                blocking = self._blocking(node, statuses)
+                if blocking:
+                    settle(
+                        self._settled(node, BLOCKED, messages=(_blocked_by(node, blocking),)),
+                        BLOCKED,
+                    )
+                    continue
+                if stopped:
+                    # Fail-fast stops *scheduling*, not reporting. A node whose own
+                    # dependencies were fine is not blocked — it simply never
+                    # started, and saying so beats inventing a failure for it.
+                    settle(self._settled(node, PENDING))
+                    continue
+
+                resolved = self.resolve(node)
+                if not resolved.valid:
+                    # Invalid, not failed: nothing ran. A reader distinguishing "the
+                    # primitive reported failure" from "there was nothing to run" is
+                    # asking a question the status should answer.
+                    settle(
+                        self._settled(
+                            node,
+                            INVALID,
+                            messages=resolved.messages,
+                            location=resolved.dispatch_location,
+                        ),
+                        FAILED,
+                    )
+                    if not self.request.fault_tolerant:
+                        stopped = True
+                    continue
+                if resolved.unsupported:
+                    # A capability this host does not have. The node is omitted
+                    # rather than failed, exactly as the build's own executor skips.
+                    settle(
+                        self._settled(
+                            node,
+                            SKIPPED,
+                            messages=resolved.messages,
+                            location=resolved.dispatch_location,
+                        ),
                         SKIPPED,
-                        messages=resolved.messages,
-                        location=resolved.dispatch_location,
-                    ),
-                    SKIPPED,
-                )
-                continue
+                    )
+                    continue
 
-            settle(
-                self._dispatched(
-                    node, dispatch=dispatch, session=session, resolved=resolved
-                ),
-                None,
-            )
-            status = results[node.node_id].status
-            statuses[node.node_id] = status
-            if status == FAILED and not self.request.fault_tolerant:
-                stopped = True
+                settle(
+                    self._dispatched(
+                        node, dispatch=dispatch, session=session, resolved=resolved
+                    ),
+                    None,
+                )
+                status = results[node.node_id].status
+                statuses[node.node_id] = status
+                if status == FAILED and not self.request.fault_tolerant:
+                    stopped = True
+
+
+        try:
+            _execute()
+        finally:
+            self._close_runtime()
 
         nodes = tuple(results[node.node_id] for node in ordered)
-        self._close_runtime()
         return self._result(nodes, started=started)
 
     def _dry_run(self, ordered) -> tuple:
