@@ -24,7 +24,7 @@ estate says, and a trivial artefact is simply an installed one that does little.
 
 from __future__ import annotations
 
-from .contract import RunError
+from .result import RunError
 from .resolution import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,

@@ -25,8 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..errors import WeaverError
-from .contract import RunFailure, reports_outcome
-from .messages import (
+from .result import RunFailure, reports_outcome
+from .result import (
     DISPATCH_EXCEPTION,
     ENDPOINT_REFRESH_FAILURE,
     PRIMITIVE_FAILURE,

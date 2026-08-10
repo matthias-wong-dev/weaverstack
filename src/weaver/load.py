@@ -27,7 +27,7 @@ else's module:
     parse targets            weaver.targets
     resolve workspace        weaver.operations
     read the catalogue       weaver.catalogue.state
-    observe every target     weaver.run.observe
+    observe every target     weaver.run.state
     reverse the bindings     weaver.load_plan
     build the physical DAG   weaver.run.graph
     resolve every node       weaver.run.resolution
@@ -198,7 +198,7 @@ def run_load(
         dispatch_primitive,
         open_run_log,
     )
-    from .run.observe import read_installed_catalogue, read_target_inventories
+    from .run.state import read_installed_catalogue, read_target_inventories
 
     started = datetime.now(timezone.utc)
     catalogue = (

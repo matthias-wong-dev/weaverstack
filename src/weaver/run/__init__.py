@@ -9,18 +9,34 @@ The runtime half of Weaver's architecture:
 One Runner for load, test and whatever runtime work comes next. The kinds differ
 in which nodes are selected and which primitive runs; they do not differ in how
 a run behaves.
+
+Seven modules, and each is a step of that line rather than a fragment of one:
+
+.. code-block:: text
+
+    state       the estate as it was, and how a caller reads one
+    graph       what the catalogue says runs, and in what order
+    runner      what runs next — and what a run was asked for
+    resolution  which installed primitive a node means
+    dispatch    the one place a run crosses into a real engine
+    outcome     what a primitive's answer means, raised or returned
+    result      what happened: the contract, the messages, the statuses
 """
 
 from __future__ import annotations
 
-from .contract import RunError, RunFailure, reports_outcome
 from .dispatch import can_refresh, dispatch_primitive
 from .graph import RunGraph, RunNode, graph_for
-from .observe import open_run_log, read_run_state
-from .request import LOAD, TEST, RunRequest
-from .result import RunNodeResult, RunResult, run_status
-from .runner import Runner
-from .state import RunState
+from .result import (
+    RunError,
+    RunFailure,
+    RunNodeResult,
+    RunResult,
+    reports_outcome,
+    run_status,
+)
+from .runner import LOAD, TEST, RunRequest, Runner
+from .state import RunState, open_run_log, read_run_state
 
 __all__ = [
     "LOAD",

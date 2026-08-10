@@ -470,7 +470,7 @@ def test_file_mode_publishes_nothing(validated, spark, tmp_path):
     path = _source(tmp_path, "Sales.OrdersFromSource.sql", SOURCE_TEST)
     run(validated, spark, file=str(path))
 
-    from weaver.run.observe import read_installed_catalogue
+    from weaver.run.state import read_installed_catalogue
 
     with given_session(
         workspace=lakehouses.workspace, spark=spark, store=lakehouses.store

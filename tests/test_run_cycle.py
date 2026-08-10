@@ -169,7 +169,7 @@ def test_the_order_is_deterministic_rather_than_incidental():
 
 
 def test_a_cycle_is_refused_rather_than_ordered():
-    from weaver.run.contract import RunError
+    from weaver.run.result import RunError
 
     made = runner(nodes=[node("a"), node("b")], edges=[("a", "b"), ("b", "a")])
 

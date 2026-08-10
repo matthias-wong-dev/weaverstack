@@ -47,11 +47,11 @@ run behaves when one of them fails.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Sequence
 
 from .graph import RunGraph, graph_for
-from .request import RunRequest
 from .result import (
     BLOCKED,
     SUCCEEDED_WITH_REJECTS,
@@ -68,6 +68,83 @@ from .result import (
 from .state import RunState
 
 
+# --- what a run was asked for -------------------------------------------------
+#
+# Here rather than in a module of its own: the Runner is what a request is
+# for, and reading one meant opening the other anyway.
+
+#: Run every loadable object installed in the requested targets.
+LOAD = "load"
+#: Run the installed Tests and Assumptions in the requested targets.
+TEST = "test"
+
+
+@dataclass(frozen=True)
+class RunRequest:
+    """The requested scope and the policy the run is executed under."""
+
+    kind: str
+    targets: tuple
+    #: One installed node by name, where the caller asked for exactly one.
+    name: str | None = None
+    #: A source file compiled and run without being installed. ``test`` only.
+    file: str | None = None
+    #: Continue independent branches after a node fails, and report.
+    fault_tolerant: bool = False
+    #: Plan, resolve and report without dispatching anything.
+    dry_run: bool = False
+    #: Whether resolution should require the estate to be there before running.
+    #:
+    #: A load is about to *write*, so a missing target or an uninstalled
+    #: artefact is a reason not to start — and saying which of the two it was is
+    #: the point of resolving ahead of dispatching. A validation *reads*: if
+    #: what it reads is not there, its own dispatch fails with a message about
+    #: the thing that was missing, which is more precise than anything an
+    #: inventory could say ahead of time.
+    verifies_estate: bool = True
+
+    def __post_init__(self) -> None:
+        from ..errors import CommandError
+
+        if not self.targets:
+            raise CommandError(f"{self.kind} needs at least one target")
+        if self.name is not None and self.file is not None:
+            raise CommandError(
+                "a run selects name= or file=, not both — one names something "
+                "the estate has and the other something it may not"
+            )
+
+    @classmethod
+    def load(cls, targets: Sequence, **policy) -> "RunRequest":
+        return cls(kind=LOAD, targets=tuple(targets), **policy)
+
+    @classmethod
+    def test(cls, targets: Sequence, **policy) -> "RunRequest":
+        policy.setdefault("verifies_estate", False)
+        return cls(kind=TEST, targets=tuple(targets), **policy)
+
+    @property
+    def selection(self) -> str | None:
+        """What was selected within the targets, for a report to record."""
+
+        return self.file if self.file is not None else self.name
+
+    def to_mapping(self) -> dict:
+        return {
+            "kind": self.kind,
+            "targets": [str(target) for target in self.targets],
+            "name": self.name,
+            "file": self.file,
+            "fault_tolerant": self.fault_tolerant,
+            "dry_run": self.dry_run,
+            # Behaviourally significant, so it is in the handover. A request
+            # that crossed a boundary without it would arrive meaning something
+            # else — preflighting an estate the caller said not to.
+            "verifies_estate": self.verifies_estate,
+        }
+
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -75,7 +152,7 @@ def _now() -> str:
 def _blocked_by(node, upstream, *, validated: bool = False):
     """Why this node may not run, said with the code a reader can filter on."""
 
-    from .messages import DEPENDENCY_BLOCKED, error
+    from .result import DEPENDENCY_BLOCKED, error
 
     what = "did not validate" if validated else "did not succeed"
     return error(

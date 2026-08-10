@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .messages import (
+from .result import (
     DISPATCH_LOCATION_MISSING,
     MODULE_IMPORT_FAILURE,
     TARGET_MISSING,
@@ -82,7 +82,7 @@ class Resolved:
     def valid(self) -> bool:
         """No *error* stops this node. A warning is a finding, not a refusal."""
 
-        from .messages import SEVERITY_ERROR
+        from .result import SEVERITY_ERROR
 
         return not any(one.severity == SEVERITY_ERROR for one in self.messages)
 

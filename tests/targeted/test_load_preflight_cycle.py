@@ -36,9 +36,9 @@ from dataclasses import dataclass
 import pytest
 
 from weaver.errors import CommandError
-from weaver.run.contract import RunError
+from weaver.run.result import RunError
 from weaver.load import run_load
-from weaver.run.observe import read_target_inventories
+from weaver.run.state import read_target_inventories
 from weaver.run import RunState
 from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED

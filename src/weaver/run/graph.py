@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from .contract import RunError
+from .result import RunError
 
 
 @dataclass(frozen=True)
@@ -143,7 +143,7 @@ def graph_for(request, state) -> RunGraph:
     do: what runs is a different question per kind, how a run behaves is not.
     """
 
-    from .request import LOAD, TEST
+    from .runner import LOAD, TEST
 
     if request.kind == LOAD:
         return _load_graph(request, state)

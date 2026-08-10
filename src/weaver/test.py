@@ -162,7 +162,7 @@ def run_test(
 
     from .run import RunRequest, Runner, RunState
 
-    from .run.observe import read_installed_catalogue
+    from .run.state import read_installed_catalogue
 
     if state is None:
         state = RunState(

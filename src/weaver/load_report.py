@@ -86,7 +86,7 @@ TASK_INVALID = "invalid"
 # report through them. Re-exported here under the name this module's public
 # report has always used, so a reader of a LoadRunReport sees one message type.
 
-from .run.messages import (  # noqa: E402 - the vocabulary this report projects
+from .run.result import (  # noqa: E402 - the vocabulary this report projects
     CATALOGUE_BINDING_INVALID,
     DAG_CYCLE,
     DEPENDENCY_BLOCKED,

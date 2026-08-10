@@ -142,8 +142,14 @@ def test_the_runner_needs_no_load_vocabulary_to_orchestrate():
     result.
     """
 
-    generic = ("graph.py", "messages.py", "outcome.py", "request.py",
-               "resolution.py", "result.py", "runner.py", "state.py")
+    # Enumerated rather than listed, so the rule covers a module somebody adds
+    # tomorrow — and so it cannot quietly stop covering one that is merged away.
+    run = ROOT / "src" / "weaver" / "run"
+    generic = sorted(
+        path.name
+        for path in run.glob("*.py")
+        if path.name not in ("__init__.py", "dispatch.py")
+    )
     forbidden = ("LoadResult", "LoadError", "load_report", "LoadRunReport")
     offenders = [
         f"{name}: {word}"

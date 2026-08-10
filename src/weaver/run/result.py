@@ -1,4 +1,4 @@
-"""RunResult — the canonical, in-memory answer to "what happened?".
+"""RunResult — the canonical answer to "what happened?", and what makes one up.
 
 One result model for every kind of run. ``weaver load`` and ``weaver test`` were
 two report models describing the same events — a node ran, a node was blocked, a
@@ -24,6 +24,31 @@ execute a whole Runner with no storage at all. Production still writes one.
 --json`` and ``weaver test --json`` render projections of this, because their
 readers are asking different questions — a load reader wants rows moved, a test
 reader wants which checks disagreed and by how much.
+
+Everything a result is made of lives here too. Split across four modules, the
+shape could not be read in one sitting: the contract was in one file, what a
+result may say in another, the statuses in a third.
+
+.. code-block:: text
+
+    the contract   a result reports whether it succeeded, and nothing more
+    the messages   what a run has to say about a node, typed by code
+    the statuses   what became of one node, and of the run
+    the results    RunNodeResult, RunResult
+
+**The contract is one sentence** — a result reports whether it succeeded — and
+that is deliberately all a Runner asks. A load returns counts of work; a
+validation returns a judgement about data; a semantic-model refresh will return
+something else again. Requiring any of them to be the others' type would mean
+that adding a runtime operation meant importing another operation's vocabulary
+into the Runner, which is the thing this package exists not to do.
+
+**Messages are typed rather than written out**, because they are read by two
+audiences. A person wants the sentence; a task log, a report renderer and
+anything filtering evidence want the *code* — and a code survives rewording in a
+way a sentence does not. ``source`` says who noticed, primitive or orchestration,
+so a caller reading a node's findings does not have to know which layer wrote
+each one in order to see everything that was wrong with it.
 """
 
 from __future__ import annotations
@@ -31,7 +56,167 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .contract import represent
+from ..errors import WeaverError
+
+
+# --- the contract a result must meet ------------------------------------------
+
+
+
+
+
+class RunError(WeaverError):
+    """A run could not proceed.
+
+    The runtime's own error, so a run raises without reaching for a load's
+    vocabulary. ``result`` carries whatever the failure was holding — a load's
+    counts, a validation's judgement — because a reader handed only an exception
+    has to go and ask the estate what it was, and that is what they came for.
+    """
+
+    def __init__(self, message: str, *, result: object | None = None) -> None:
+        super().__init__(message)
+        self.result = result
+
+
+def reports_outcome(result: object) -> bool:
+    """Whether this is something a run can settle: does it say if it succeeded?"""
+
+    return hasattr(result, "succeeded")
+
+
+def represent(result: object) -> dict | None:
+    """One result, as a mapping, without assuming which kind of result it is.
+
+    The Runner's contract is that a result reports whether it succeeded. Its
+    *serialization* has to be exactly as narrow, or the contract quietly becomes
+    "reports whether it succeeded, and also happens to look like a load result"
+    — and the day a semantic-model refresh returns something else, a run that
+    executed perfectly would fail while writing itself down.
+
+    So three ways of asking, in order of how much the result has chosen to say:
+
+    .. code-block:: text
+
+        to_mapping()   the result describes itself
+        as_row()       the result is row-shaped, as Weaver's own are
+        neither        what every result must answer, and nothing more
+    """
+
+    if result is None:
+        return None
+    for name in ("to_mapping", "as_row"):
+        describe = getattr(result, name, None)
+        if callable(describe):
+            return describe()
+    return {
+        "succeeded": bool(getattr(result, "succeeded", False)),
+        "error_message": getattr(result, "error_message", None),
+    }
+
+
+@dataclass(frozen=True)
+class RunFailure:
+    """A failure a primitive did not describe, in the shape a result has.
+
+    Used where nothing came back that could report an outcome — a dispatch that
+    threw without carrying a result, or one that returned something else
+    entirely. Deliberately minimal: inventing counts here would put numbers in a
+    report that nothing measured.
+    """
+
+    error_message: str
+    succeeded: bool = False
+
+    def as_row(self) -> dict:
+        return {"succeeded": False, "error_message": self.error_message}
+
+
+# --- what a run says about a node ---------------------------------------------
+
+
+
+# --- severity -----------------------------------------------------------------
+
+SEVERITY_ERROR = "error"
+SEVERITY_WARNING = "warning"
+SEVERITY_INFO = "info"
+
+# --- what a run can find ------------------------------------------------------
+
+#: The primitive ran and refused rows.
+PRIMITIVE_REJECTS = "primitive_rejects"
+#: The primitive ran and reported failure in its own result.
+PRIMITIVE_FAILURE = "primitive_failure"
+#: Dispatch raised something the primitive did not normalise.
+DISPATCH_EXCEPTION = "dispatch_exception"
+#: The installed primitive could not be located.
+DISPATCH_LOCATION_MISSING = "dispatch_location_missing"
+#: The physical target this node runs against is not there.
+TARGET_MISSING = "target_missing"
+#: A deployed Python module could not be imported, or carries no expected class.
+MODULE_IMPORT_FAILURE = "module_import_failure"
+#: A primitive returned something that does not report whether it succeeded.
+RESULT_CONTRACT_INVALID = "result_contract_invalid"
+#: The endpoint refresh could not be performed.
+ENDPOINT_REFRESH_FAILURE = "endpoint_refresh_failure"
+#: An upstream node failed or could not be resolved, so this one may not run.
+DEPENDENCY_BLOCKED = "dependency_blocked"
+#: The catalogue's physical binding is missing, ambiguous or malformed.
+CATALOGUE_BINDING_INVALID = "catalogue_binding_invalid"
+#: The planned graph contains a cycle.
+DAG_CYCLE = "dag_cycle"
+#: A dependency named in the catalogue could not be resolved to anything.
+DEPENDENCY_UNRESOLVED = "dependency_unresolved"
+#: A reference Weaver deliberately does not follow — a fully qualified physical
+#: read that names something outside the estate's own logical graph.
+DEPENDENCY_EXTERNAL = "dependency_external"
+
+
+@dataclass(frozen=True)
+class RunMessage:
+    """One finding about one node, or about the run as a whole."""
+
+    severity: str
+    code: str
+    message: str
+    detail: str | None = None
+    source: str | None = None
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+            "detail": self.detail,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "RunMessage":
+        return cls(
+            severity=payload["severity"],
+            code=payload["code"],
+            message=payload["message"],
+            detail=payload.get("detail"),
+            source=payload.get("source"),
+        )
+
+
+def error(code: str, message: str, **extra: str | None) -> RunMessage:
+    return RunMessage(SEVERITY_ERROR, code, message, **extra)
+
+
+def warning(code: str, message: str, **extra: str | None) -> RunMessage:
+    return RunMessage(SEVERITY_WARNING, code, message, **extra)
+
+
+def info(code: str, message: str, **extra: str | None) -> RunMessage:
+    return RunMessage(SEVERITY_INFO, code, message, **extra)
+
+
+
+
 
 # --- node statuses ------------------------------------------------------------
 #
