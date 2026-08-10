@@ -114,6 +114,7 @@ def run_test(
     requested: Sequence[PhysicalTargetRef],
     name: str | None = None,
     file: str | Path | None = None,
+    state=None,
     dry_run: bool = False,
     strict: bool = False,
 ) -> ValidationRunReport:
@@ -123,6 +124,11 @@ def run_test(
     workspace resolution and capability acquisition differ between the desktop,
     the emulator and a Fabric session, and none of them changes the
     orchestration itself.
+
+    ``state`` is the same preflight snapshot :func:`weaver.load.run_load` takes,
+    for the same reason: reading the estate is a boundary act, and a caller who
+    has already read it — or who is describing one deliberately — should not
+    have the run read it again behind them.
     """
 
     started = datetime.now(timezone.utc)
@@ -158,9 +164,12 @@ def run_test(
 
     from .run.observe import read_installed_catalogue
 
-    catalogue = read_installed_catalogue(session=session, workspace=workspace)
+    if state is None:
+        state = RunState(
+            catalogue=read_installed_catalogue(session=session, workspace=workspace)
+        )
     runner = Runner(
-        RunState(catalogue=catalogue),
+        state,
         RunRequest.test(
             requested,
             name=name,
