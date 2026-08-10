@@ -88,10 +88,16 @@ def _write(root: Path, relative: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-@pytest.fixture
-def estate(tmp_path, spark):
-    """A Weaver Lakehouse, a producer, a consumer, and one alias between them."""
+@pytest.fixture(scope="module")
+def estate(tmp_path_factory, spark):
+    """A Weaver Lakehouse, a producer, a consumer, and one alias between them.
 
+    One estate for the module. Every claim below reads what the build left, and
+    the one that builds again is asserting that rebuilding is safe — so it
+    leaves the estate exactly as it found it, by construction.
+    """
+
+    tmp_path = tmp_path_factory.mktemp("aliases")
     workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER)
     store, resolver = FilesystemStore(), LocalResolver(workspace)
     for name in (WEAVER, PRODUCER_LH, CONSUMER_LH):
@@ -124,7 +130,7 @@ def estate(tmp_path, spark):
                 )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def built(estate, spark):
     workspace, store, resolver = estate
     selected = ItemBindings(

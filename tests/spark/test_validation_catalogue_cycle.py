@@ -134,16 +134,23 @@ def _estate(tmp_path):
     return root
 
 
-@pytest.fixture
-def built(tmp_path, lakehouses, spark, weaver_catalogue):
-    """One item with a table, a Test and an Assumption, built for real."""
+@pytest.fixture(scope="module")
+def built(tmp_path_factory, shared_lakehouses, spark, shared_weaver_catalogue):
+    """One item with a table, a Test and an Assumption, built for real.
 
+    Built once: the claims that read this only read it. The three below that
+    change what is declared and build again keep an estate of their own, and
+    can, because the shared pair of Lakehouses is named apart from the per-test
+    pair.
+    """
+
+    lakehouses = shared_lakehouses
     target = SparkCatalogue(
         spark, lakehouses.resolver.spark_destination(lakehouses.target)
     )
     try:
-        _build(_estate(tmp_path), lakehouses, spark)
-        yield weaver_catalogue
+        _build(_estate(tmp_path_factory.mktemp("declared")), lakehouses, spark)
+        yield shared_weaver_catalogue
     finally:
         spark.sql(f"DROP SCHEMA IF EXISTS {target.qualified_schema('Sales')} CASCADE")
 
@@ -246,7 +253,7 @@ def test_the_runtime_artefacts_are_certified_with_their_roles(built):
     assert ("Order", "data") in rows
 
 
-def test_a_validation_module_lands_under_the_runtime_root(built, lakehouses):
+def test_a_validation_module_lands_under_the_runtime_root(built):
     """Beneath the import root, so its dependency imports still resolve."""
 
     schemas = {
@@ -259,7 +266,8 @@ def test_a_validation_module_lands_under_the_runtime_root(built, lakehouses):
     assert "_/Load/assumptions" in schemas
 
 
-def test_the_module_is_actually_written_where_it_was_certified(built, lakehouses):
+def test_the_module_is_actually_written_where_it_was_certified(built, shared_lakehouses):
+    lakehouses = shared_lakehouses
     root = lakehouses.resolver.files_root(lakehouses.target)
     module = root / "_" / "Load" / "tests" / "Sales__OrdersReconcile.py"
 
