@@ -47,6 +47,7 @@ run behaves when one of them fails.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Sequence
@@ -66,6 +67,22 @@ from .result import (
     run_status,
 )
 from .state import RunState
+
+
+@contextmanager
+def _node_substep(session, node_id: str):
+    """One node's timing frame, where there is a Session to record it on.
+
+    A run-cycle test constructs a Runner with no Session at all — that is the
+    whole point of the dispatch seam — so this yields ``None`` rather than
+    making the Runner's timing depend on having crossed anything.
+    """
+
+    if session is None or not hasattr(session, "substep"):
+        yield None
+        return
+    with session.substep(node_id) as frame:
+        yield frame
 
 
 # --- what a run was asked for -------------------------------------------------
@@ -420,25 +437,32 @@ class Runner:
 
         started = _now()
         location = getattr(resolved, "dispatch_location", None)
-        try:
-            returned = dispatch(
-                node,
-                session=session,
-                state=self.state,
-                resolved=resolved,
-                fault_tolerant=self.request.fault_tolerant,
-                runtime_scope=self.runtime_scope,
-                workspace=self.workspace,
-            )
-        except Exception as exc:  # noqa: BLE001 - a failed node is a result
-            # Deliberately not BaseException. A KeyboardInterrupt or a
-            # SystemExit is the operator or the process saying stop, not a
-            # primitive reporting failure — recording one as a failed node
-            # would swallow Ctrl-C at the prompt and leave a run that looks
-            # like it decided something.
-            outcome = settle(node, raised=exc)
-        else:
-            outcome = settle(node, returned=returned)
+        # One Sub-step per node, which is where a run's per-object timing comes
+        # from. The frame is marked failed from inside rather than by an
+        # exception, because a failed node is a *result* here — the run records
+        # what happened before it decides what to do about it.
+        with _node_substep(session, node.node_id) as frame:
+            try:
+                returned = dispatch(
+                    node,
+                    session=session,
+                    state=self.state,
+                    resolved=resolved,
+                    fault_tolerant=self.request.fault_tolerant,
+                    runtime_scope=self.runtime_scope,
+                    workspace=self.workspace,
+                )
+            except Exception as exc:  # noqa: BLE001 - a failed node is a result
+                # Deliberately not BaseException. A KeyboardInterrupt or a
+                # SystemExit is the operator or the process saying stop, not a
+                # primitive reporting failure — recording one as a failed node
+                # would swallow Ctrl-C at the prompt and leave a run that looks
+                # like it decided something.
+                outcome = settle(node, raised=exc)
+            else:
+                outcome = settle(node, returned=returned)
+            if frame is not None and outcome.status == FAILED:
+                frame.failed = True
         return self._settled(
             node,
             outcome.status,

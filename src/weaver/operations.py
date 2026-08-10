@@ -223,15 +223,16 @@ def build(
                 bundle_name=bundle,
                 source=source_location.value,
             )
-            if opened.executes_here(resolved_workspace):
-                # The emulator and a notebook alike: this process is already
-                # where the data engineering happens, so the build runs here.
-                return _build_in_process(
+            with opened.task("Build", str(resolved_workspace.workspace)):
+                if opened.executes_here(resolved_workspace):
+                    # The emulator and a notebook alike: this process is already
+                    # where the data engineering happens, so the build runs here.
+                    return _build_in_process(
+                        resolved_workspace, session=opened, **arguments
+                    )
+                return _build_desktop_fabric(
                     resolved_workspace, session=opened, **arguments
                 )
-            return _build_desktop_fabric(
-                resolved_workspace, session=opened, **arguments
-            )
 
 
 def wipe(
@@ -269,43 +270,51 @@ def wipe(
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
-        store = opened.store(resolved_workspace) if storage_targets else None
-        reports: list[WipeReport] = []
-        if not dry_run:
-            _drop_local_catalogue(resolved_workspace, storage_targets, session=opened)
-        for target in parsed:
-            reports.extend(
-                _wipe_one(
-                    target,
-                    resolved_workspace,
-                    store=store,
-                    dry_run=dry_run,
-                    session=opened,
+        # Named for what it is. A dry run reads the estate and decides, which
+        # takes real time and is worth seeing; what it must not do is present
+        # itself as the removal.
+        with opened.task("Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, parsed))):
+            storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
+            store = opened.store(resolved_workspace) if storage_targets else None
+            reports: list[WipeReport] = []
+            if not dry_run:
+                _drop_local_catalogue(
+                    resolved_workspace, storage_targets, session=opened
                 )
-            )
+            for target in parsed:
+                with opened.step(str(target)):
+                    reports.extend(
+                        _wipe_one(
+                            target,
+                            resolved_workspace,
+                            store=store,
+                            dry_run=dry_run,
+                            session=opened,
+                        )
+                    )
 
-        unbound = None
-        control = unbind_from or resolved_workspace.weaver_lakehouse
-        whole_lakehouses = {
-            target.physical_name
-            for target in parsed
-            if target.item_type == "Lakehouse"
-        }
-        if not dry_run and control and control not in whole_lakehouses:
-            catalogue_workspace = replace(
-                resolved_workspace, weaver_lakehouse=ItemRef.parse(control).name
-            )
-            unbound = _unbind_physical_targets(
-                catalogue_workspace, parsed, session=opened
-            )
+            unbound = None
+            control = unbind_from or resolved_workspace.weaver_lakehouse
+            whole_lakehouses = {
+                target.physical_name
+                for target in parsed
+                if target.item_type == "Lakehouse"
+            }
+            if not dry_run and control and control not in whole_lakehouses:
+                catalogue_workspace = replace(
+                    resolved_workspace, weaver_lakehouse=ItemRef.parse(control).name
+                )
+                with opened.step("Unbind catalogue claims"):
+                    unbound = _unbind_physical_targets(
+                        catalogue_workspace, parsed, session=opened
+                    )
 
-        return WipeResult(
-            workspace=str(resolved_workspace.workspace),
-            reports=tuple(reports),
-            unbound=unbound,
-            dry_run=dry_run,
-        )
+            return WipeResult(
+                workspace=str(resolved_workspace.workspace),
+                reports=tuple(reports),
+                unbound=unbound,
+                dry_run=dry_run,
+            )
 
 
 def _operation_workspace(*, workspace, workspace_config, session=None) -> Workspace:
@@ -504,22 +513,24 @@ def _build_in_process(
     )
 
     resolver = session.resolver(workspace)
-    state = read_build_state(
-        bindings,
-        required_catalogue_items=catalogue_items_for_build(repository, bindings),
-        session=session,
-        workspace=workspace,
-    )
-    result = build_item_repository(
-        repository,
-        bindings=bindings,
-        state=state,
-        session=session,
-        workspace=workspace,
-        source_store=source_store,
-        control_lakehouse=control_lakehouse,
-        archive=_archive_location(resolver, bundle_name),
-    )
+    with session.step("Read physical state"):
+        state = read_build_state(
+            bindings,
+            required_catalogue_items=catalogue_items_for_build(repository, bindings),
+            session=session,
+            workspace=workspace,
+        )
+    with session.step("Build and install"):
+        result = build_item_repository(
+            repository,
+            bindings=bindings,
+            state=state,
+            session=session,
+            workspace=workspace,
+            source_store=source_store,
+            control_lakehouse=control_lakehouse,
+            archive=_archive_location(resolver, bundle_name),
+        )
     return _result_from_item_build(source, bindings, result)
 
 
@@ -633,41 +644,47 @@ def _build_desktop_fabric(
     bundle = None
     report = None
 
-    state = BuildState.from_mapping(
-        session.execute_python(
-            RemoteProgram(
-                name="read_build_state",
-                call=lambda: _read_build_state_here(
-                    workspace, session=session, bindings=bindings, repository=repository
+    with session.step("Read physical state"):
+        state = BuildState.from_mapping(
+            session.execute_python(
+                RemoteProgram(
+                    name="read_build_state",
+                    call=lambda: _read_build_state_here(
+                        workspace,
+                        session=session,
+                        bindings=bindings,
+                        repository=repository,
+                    ),
+                    source=state_body,
+                    detail=str(workspace.workspace),
                 ),
-                source=state_body,
-                detail=str(workspace.workspace),
-            ),
-            workspace=workspace,
+                workspace=workspace,
+            )
         )
-    )
-    reconciliation = reconcile_catalogue_state(
-        state.catalogue, inventories=state.target_inventories
-    )
+        reconciliation = reconcile_catalogue_state(
+            state.catalogue, inventories=state.target_inventories
+        )
     try:
         with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
             root = Path(temporary)
-            bundle = generate_item_build_bundle(
-                repository,
-                bindings=bindings,
-                output=Location((root / "bundle").as_posix()),
-                store=source_store,
-                target_inventories=state.target_inventories,
-                catalogue=reconciliation.catalogue,
-                stale_claims=reconciliation.stale_claims,
-                control_lakehouse=control_lakehouse,
-            )
+            with session.step("Build bundle"):
+                bundle = generate_item_build_bundle(
+                    repository,
+                    bindings=bindings,
+                    output=Location((root / "bundle").as_posix()),
+                    store=source_store,
+                    target_inventories=state.target_inventories,
+                    catalogue=reconciliation.catalogue,
+                    stale_claims=reconciliation.stale_claims,
+                    control_lakehouse=control_lakehouse,
+                )
             local_archive = Location((root / "install.weaver.zip").as_posix())
-            persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
-            archive_bytes = FilesystemStore().read(local_archive)
-            transport_store.make_directory(resolver.cli_root)
-            transport_store.make_directory(execution)
-            transport_store.write(remote_archive, archive_bytes)
+            with session.step("Upload bundle", bundle.bundle_id):
+                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
+                archive_bytes = FilesystemStore().read(local_archive)
+                transport_store.make_directory(resolver.cli_root)
+                transport_store.make_directory(execution)
+                transport_store.write(remote_archive, archive_bytes)
             install_body = (
                 "from weaver.workspaces import FabricWorkspace\n"
                 "from weaver.build_bundle import install_bundle_archive\n"
@@ -681,17 +698,18 @@ def _build_desktop_fabric(
                 "session=session)\n"
                 "emit(report.to_mapping())\n"
             )
-            report = session.execute_python(
-                RemoteProgram(
-                    name="install_bundle",
-                    call=lambda: _install_archive_here(
-                        workspace, session=session, archive=remote_archive
+            with session.step("Install"):
+                report = session.execute_python(
+                    RemoteProgram(
+                        name="install_bundle",
+                        call=lambda: _install_archive_here(
+                            workspace, session=session, archive=remote_archive
+                        ),
+                        source=install_body,
+                        detail=bundle.bundle_id,
                     ),
-                    source=install_body,
-                    detail=bundle.bundle_id,
-                ),
-                workspace=workspace,
-            )
+                    workspace=workspace,
+                )
             if retained_archive is not None:
                 transport_store.make_directory(resolver.build_bundles_root)
                 transport_store.write(retained_archive, archive_bytes)

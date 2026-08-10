@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="one persistent console session running many commands",
     )
     _add_workspace_args(shell)
+    shell.add_argument(
+        "--timings",
+        action="store_true",
+        help="on exit, report what this session spent per transport",
+    )
     shell.set_defaults(handler=handle_session)
 
     compose = subcommands.add_parser(
@@ -58,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--file",
         metavar="PATH",
         help=f"composition file; defaults to ./{COMPOSE_DEFAULT_FILE}",
+    )
+    compose.add_argument(
+        "--timings",
+        action="store_true",
+        help="after the sequence, report what it spent per transport",
     )
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)

@@ -97,6 +97,45 @@ warms its JVM the same way.
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
 
+## Progress and timings
+
+Every command is a **Task**, made of **Steps**, and where it is useful, of
+**Sub-steps** — one per physical unit. Each frame reports what it cost as it
+closes, on stderr, so stdout stays the command's answer:
+
+```text
+Build
+
+  Read physical state                                  8.4s
+  Build bundle                                         0.3s
+    Sales.Customer                                     3.2s
+    Sales.Order                                        4.1s
+  Install                                             18.6s
+✓ Build                                               40.7s
+```
+
+Children appear above their parent with the parent's own total underneath — a
+roll-up, the way `du` reads. An error is content attached to whichever frame
+failed, not a level of its own, and a failure closes every frame it unwound so
+a stopped run still reports what it spent.
+
+That is the *logical* ledger. The transport one is separate, and neither can be
+derived from the other — "the load took forty seconds" and "thirty-eight of them
+were one Livy startup" call for opposite changes:
+
+```bash
+weaver session --timings
+weaver compose dev --timings
+```
+
+```text
+session lifetime 61.2s
+  livy.start                  1 calls     40.9s
+  livy.load                   1 calls     14.1s
+  resolve.item                6 calls      1.2s
+  resolve.item.cache_hits     4
+```
+
 ## Compose
 
 The development loop is the same four commands every time, each carrying the

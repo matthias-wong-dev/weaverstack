@@ -35,9 +35,25 @@ from typing import Any, Sequence
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import FabricWorkspace, LocalWorkspace, Workspace
-from .base import Session, WorkspaceScope
+from .base import TASK, Session, WorkspaceScope
 from .program import RemoteProgram
 from .resources import Resource
+
+
+def _duration(seconds: float | None) -> str:
+    """A duration a person reads, not one a machine parses.
+
+    Two significant figures is all anybody acts on: the difference between 8.4s
+    and 8.43s changes no decision, and the extra digit costs a column that a
+    nested name needs more.
+    """
+
+    if seconds is None:
+        return ""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, remainder = divmod(int(seconds), 60)
+    return f"{minutes}m{remainder:02d}s"
 
 
 @dataclass(frozen=True)
@@ -72,6 +88,7 @@ class ConsoleSession(Session):
         spark: Any = None,
         store: Any = None,
         resolver: Any = None,
+        progress: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -80,6 +97,78 @@ class ConsoleSession(Session):
         self._given_spark = spark
         self._given_store = store
         self._given_resolver = resolver
+        #: Where the timing tree is written. stderr by default, because stdout
+        #: is a command's answer and several commands emit JSON on it — progress
+        #: interleaved into that would make the answer unparseable. ``False``
+        #: silences it.
+        self._progress = progress
+
+    # --- progress -----------------------------------------------------------
+
+    #: How wide the name column is before the duration. Wide enough for a
+    #: qualified object name at Sub-step depth, narrow enough to sit in an
+    #: eighty-column terminal with the duration still on the same line.
+    PROGRESS_WIDTH = 52
+
+    def present(self, frame, event: str, error: BaseException | None = None) -> None:
+        """Write one closed frame as a line, indented by its depth.
+
+        On completion rather than on start, because the useful number is the one
+        that is only known at the end. What a reader loses is the name of the
+        thing currently running; what they gain is a column of durations that
+        can be read down. A Task, being the outermost frame and often a long
+        wait, gets both: its name when it opens and its total when it closes.
+
+        So a frame's children appear above it, with its own total underneath:
+
+        .. code-block:: text
+
+            Build
+
+              Read physical state                         8.4s
+                Sales.Customer                            3.2s
+                Sales.Order                               4.1s
+              Install Lakehouse/Sales                    18.6s
+            ✓ Build                                      40.7s
+
+        which is a roll-up rather than a plan — the same way ``du`` reads. The
+        alternative is announcing each frame as it opens, and then a long Step
+        prints its name, waits a minute, and prints it again with a number.
+        """
+
+        stream = self._progress_stream()
+        if stream is None:
+            return
+        if event == "started":
+            if frame.kind == TASK:
+                print(f"\n{frame.name}\n", file=stream)
+            return
+
+        if event == "failed":
+            mark = "✗"
+        elif frame.kind == TASK:
+            mark = "✓"
+        else:
+            mark = " "
+        # A Task heads its own block, so its Steps are the first indent level
+        # rather than the second.
+        label = "  " * max(frame.depth - 1, 0) + frame.name
+        width = max(self.PROGRESS_WIDTH - 2, 1)
+        print(
+            f"{mark} {label:<{width}}{_duration(frame.elapsed):>8}",
+            file=stream,
+        )
+        if frame.kind == TASK:
+            print(file=stream)
+
+    def _progress_stream(self):
+        if self._progress is False:
+            return None
+        if self._progress is not None:
+            return self._progress
+        import sys
+
+        return sys.stderr
 
     def _new_scope(self, workspace: Workspace) -> "ConsoleScope":
         return ConsoleScope(

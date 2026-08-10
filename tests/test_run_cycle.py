@@ -613,3 +613,58 @@ def test_a_result_that_describes_itself_no_further_still_serializes():
         "succeeded": False,
         "error_message": "the model would not refresh",
     }
+
+
+# --- what a run costs, per node -----------------------------------------------
+#
+# One Sub-step per dispatched node, which is where a run's per-object timing
+# comes from. Recorded on the Session, so a Runner given none still runs — that
+# is the whole point of the dispatch seam, and timing must not quietly become a
+# reason to need a Session.
+
+
+def test_each_dispatched_node_is_timed_as_a_substep():
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(progress=False) as session:
+        runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
+            session=session, dispatch=controlled({})
+        )
+
+        assert [frame.name for frame in session.timings] == ["a", "b"]
+        assert all(frame.kind == "substep" for frame in session.timings)
+        assert all(frame.elapsed is not None for frame in session.timings)
+
+
+def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
+    """A failed node is a *result* here — the run records what happened before
+    it decides what to do about it — and the timing has to agree."""
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(progress=False) as session:
+        runner(nodes=[node("a"), node("b")], fault_tolerant=True).run(
+            session=session, dispatch=controlled({"a": Outcome(status=FAILED)})
+        )
+
+        failed = {frame.name: frame.failed for frame in session.timings}
+        assert failed == {"a": True, "b": False}
+
+
+def test_a_node_that_was_never_dispatched_is_never_timed():
+    """Blocked, skipped and pending nodes waited on nothing of their own."""
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(progress=False) as session:
+        runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
+            session=session, dispatch=controlled({"a": Outcome(status=FAILED)})
+        )
+
+        assert [frame.name for frame in session.timings] == ["a"]
+
+
+def test_a_runner_with_no_session_still_runs():
+    result = runner(nodes=[node("a")]).run(session=None, dispatch=controlled({}))
+
+    assert result.succeeded

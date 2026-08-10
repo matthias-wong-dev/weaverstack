@@ -40,10 +40,12 @@ Weaver stops being able to run anywhere else.
 from __future__ import annotations
 
 import threading
+import time
 from abc import ABC, abstractmethod
 from concurrent.futures import Executor, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from ..errors import CommandError
 from ..targets import ItemRef
@@ -70,13 +72,52 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
+#: The execution hierarchy, outermost first. A Task is one thing a person asked
+#: for; a Step is a boundary within it worth waiting at; a Sub-step is one
+#: physical unit. There is deliberately no fourth level: an error is *content*
+#: attached to whichever of these failed, not a depth of its own.
+TASK = "task"
+STEP = "step"
+SUBSTEP = "substep"
+
+
 @dataclass
 class ReportingFrame:
-    """One Task, Step or Sub-step currently being presented."""
+    """One Task, Step or Sub-step, and what it cost.
+
+    ``elapsed`` is None while the frame is open and a duration once it closes —
+    which is the only honest way to hold it, because a frame that is still
+    running has no elapsed time, it has an age.
+    """
 
     kind: str
     name: str
     detail: str | None = None
+    #: How deep this sits in the frames open when it started, so a reader can
+    #: indent without reconstructing the stack.
+    depth: int = 0
+    started: float = field(default_factory=time.monotonic)
+    elapsed: float | None = None
+    failed: bool = False
+
+    @property
+    def age(self) -> float:
+        """Seconds since this frame opened, whether or not it has closed."""
+
+        return self.elapsed if self.elapsed is not None else time.monotonic() - self.started
+
+    def to_mapping(self) -> dict:
+        mapping: dict[str, Any] = {
+            "kind": self.kind,
+            "name": self.name,
+            "depth": self.depth,
+            "seconds": None if self.elapsed is None else round(self.elapsed, 3),
+        }
+        if self.detail is not None:
+            mapping["detail"] = self.detail
+        if self.failed:
+            mapping["failed"] = True
+        return mapping
 
 
 class Session(ABC):
@@ -104,6 +145,11 @@ class Session(ABC):
         self._scopes: dict[tuple, "WorkspaceScope"] = {}
         self._scope_lock = threading.Lock()
         self._frames: list[ReportingFrame] = []
+        #: Every frame that has closed, in the order it closed. The logical
+        #: ledger, beside :attr:`telemetry`'s transport one: this says a Step
+        #: took eight seconds, that says the eight seconds were four Livy
+        #: submissions, and neither can be derived from the other.
+        self.timings: list[ReportingFrame] = []
         #: Everything this Session has warned about, in order.
         self.warnings: list[str] = []
         self._closed = False
@@ -298,17 +344,75 @@ class Session(ABC):
     def substep_failed(self, name: str | None = None, error: BaseException | None = None) -> None:
         self._exit("substep", name, error=error)
 
-    def _enter(self, kind: str, name: str, detail: str | None) -> None:
-        frame = ReportingFrame(kind=kind, name=name, detail=detail)
+    # --- the paired form, which is the one to use ----------------------------
+    #
+    # A frame that is not closed is worse than one that was never opened: it
+    # swallows everything nested under it and reports a duration for work that
+    # stopped. So instrumentation is written as a `with`, and the explicit
+    # started/completed pairs above remain for the few callers that genuinely
+    # cannot bracket their work in one place.
+
+    @contextmanager
+    def task(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
+        """One thing a person asked for, timed whatever happens to it."""
+
+        yield from self._framed(TASK, name, detail)
+
+    @contextmanager
+    def step(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
+        """One boundary within a Task that is worth waiting at."""
+
+        yield from self._framed(STEP, name, detail)
+
+    @contextmanager
+    def substep(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
+        """One physical unit within a Step."""
+
+        yield from self._framed(SUBSTEP, name, detail)
+
+    def _framed(self, kind: str, name: str, detail: str | None):
+        frame = self._enter(kind, name, detail)
+        try:
+            yield frame
+        except BaseException as exc:
+            # An interrupt closes its frame and travels on, exactly as a failure
+            # does: the timing of work that was cancelled is still the timing of
+            # work that happened.
+            self._close(frame, error=exc)
+            raise
+        self._close(frame)
+
+    def _enter(self, kind: str, name: str, detail: str | None) -> ReportingFrame:
+        frame = ReportingFrame(
+            kind=kind, name=name, detail=detail, depth=len(self._frames)
+        )
         self._frames.append(frame)
         self.present(frame, "started")
+        return frame
+
+    def _close(self, frame: ReportingFrame, error: BaseException | None = None) -> None:
+        if frame.elapsed is not None:
+            return  # already closed, by an inner unwind or an explicit pair
+        if frame in self._frames:
+            # Everything still open beneath it goes too, closed in the order a
+            # reader would expect rather than left dangling.
+            index = self._frames.index(frame)
+            for orphan in reversed(self._frames[index + 1 :]):
+                self._close(orphan, error=error)
+            del self._frames[index:]
+        frame.elapsed = time.monotonic() - frame.started
+        # Not an overwrite: a caller may have marked the frame failed from
+        # inside it, which is how work whose failure is *data* — a run node that
+        # reports a failure rather than raising one — still reads as failed.
+        frame.failed = frame.failed or error is not None
+        self.timings.append(frame)
+        self.present(frame, "failed" if frame.failed else "completed", error)
 
     def _exit(self, kind: str, name: str | None, error: BaseException | None = None) -> None:
         for index in range(len(self._frames) - 1, -1, -1):
             frame = self._frames[index]
             if frame.kind == kind and (name is None or frame.name == name):
-                del self._frames[index:]
-                self.present(frame, "failed" if error is not None else "completed", error)
+                self._close(frame, error=error)
                 return
 
     def present(
@@ -452,6 +556,9 @@ def is_local(workspace: Workspace) -> bool:
 
 
 __all__ = [
+    "STEP",
+    "SUBSTEP",
+    "TASK",
     "ReportingFrame",
     "Session",
     "WorkspaceScope",

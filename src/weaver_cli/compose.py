@@ -189,7 +189,13 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
     with use_or_create_session(
         getattr(args, "session", None), workspace=_default_workspace(args)
     ) as session:
-        return _execute(entries, parsed_commands, session=session)
+        try:
+            return _execute(entries, parsed_commands, session=session)
+        finally:
+            if getattr(args, "timings", False):
+                from .shell import _report_spending
+
+                _report_spending(session)
 
 
 def _parse(parser: argparse.ArgumentParser, entry: str) -> argparse.Namespace:

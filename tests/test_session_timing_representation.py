@@ -1,0 +1,271 @@
+"""Task / Step / Sub-step: what was waited for, and how long.
+
+The hierarchy is fixed at three levels and an error is not a fourth:
+
+.. code-block:: text
+
+    Task
+      Step
+        Sub-step
+          diagnostic/error
+
+An error is *content* attached to whichever of the three failed. Adding a level
+for it would mean a reader had to know whether a failure was a place in the
+tree or a thing that happened at one.
+
+Two ledgers, deliberately, and neither derivable from the other. This one says
+a Step took eight seconds. :class:`~weaver.session.telemetry.SessionTelemetry`
+says the eight seconds were four Livy submissions and a token acquisition. A
+suite that spent nine minutes in Livy startup and one in execution has a
+different problem from one that spent ten in execution, and a single number
+cannot tell them apart.
+
+Durations themselves are never asserted. A test that pinned one would be a test
+that fails on a slow machine and teaches everyone to widen the bound.
+"""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+
+from weaver.session import ConsoleSession
+from weaver.session.base import STEP, SUBSTEP, TASK
+
+
+@pytest.fixture
+def session():
+    with ConsoleSession(progress=False) as opened:
+        yield opened
+
+
+def names(session):
+    return [frame.name for frame in session.timings]
+
+
+# --- the hierarchy ------------------------------------------------------------
+
+
+def test_a_frame_records_what_it_cost(session):
+    with session.task("Build"):
+        pass
+
+    (frame,) = session.timings
+    assert frame.kind == TASK
+    assert frame.elapsed is not None
+    assert frame.elapsed >= 0
+
+
+def test_an_open_frame_has_an_age_rather_than_an_elapsed_time(session):
+    """The only honest way to hold it: work that is still running has no
+    duration, it has an age."""
+
+    with session.task("Build") as frame:
+        assert frame.elapsed is None
+        assert frame.age >= 0
+
+    assert frame.elapsed is not None
+
+
+def test_frames_nest_and_carry_their_depth(session):
+    with session.task("Build"):
+        with session.step("Install"):
+            with session.substep("Sales.Customer"):
+                pass
+
+    depths = {frame.name: frame.depth for frame in session.timings}
+    kinds = {frame.name: frame.kind for frame in session.timings}
+    assert depths == {"Build": 0, "Install": 1, "Sales.Customer": 2}
+    assert kinds["Install"] == STEP
+    assert kinds["Sales.Customer"] == SUBSTEP
+
+
+def test_a_child_closes_before_its_parent(session):
+    with session.task("Build"):
+        with session.step("Install"):
+            pass
+
+    assert names(session) == ["Install", "Build"]
+
+
+def test_nothing_is_left_open_after_a_task(session):
+    with session.task("Build"):
+        with session.step("Install"):
+            pass
+
+    assert session.frames == ()
+
+
+# --- failure ------------------------------------------------------------------
+
+
+def test_a_failure_closes_every_frame_it_unwound(session):
+    """The frame that fails is not the only one that stops."""
+
+    with pytest.raises(RuntimeError):
+        with session.task("Load"):
+            with session.step("Execute"):
+                with session.substep("DWG.Customer"):
+                    raise RuntimeError("boom")
+
+    assert session.frames == ()
+    assert names(session) == ["DWG.Customer", "Execute", "Load"]
+    assert all(frame.elapsed is not None for frame in session.timings)
+    assert all(frame.failed for frame in session.timings)
+
+
+def test_an_interrupt_closes_its_frames_and_travels_on(session):
+    """Ctrl-C is the operator saying stop. The timing of cancelled work is
+    still the timing of work that happened."""
+
+    with pytest.raises(KeyboardInterrupt):
+        with session.task("Load"):
+            with session.step("Execute"):
+                raise KeyboardInterrupt
+
+    assert session.frames == ()
+    assert names(session) == ["Execute", "Load"]
+
+
+def test_a_frame_can_be_failed_from_inside_without_an_exception(session):
+    """A run node's failure is data, not an exception — and it still reads as
+    a failure in the timings."""
+
+    with session.task("Load"):
+        with session.substep("DWG.Customer") as frame:
+            frame.failed = True
+
+    failed = {frame.name: frame.failed for frame in session.timings}
+    assert failed == {"DWG.Customer": True, "Load": False}
+
+
+# --- what a reader gets -------------------------------------------------------
+
+
+def test_a_frame_serialises_for_a_log_or_a_report(session):
+    with session.task("Build", "My Workspace"):
+        pass
+
+    (mapping,) = [frame.to_mapping() for frame in session.timings]
+    assert mapping["kind"] == TASK
+    assert mapping["name"] == "Build"
+    assert mapping["detail"] == "My Workspace"
+    assert mapping["depth"] == 0
+    assert isinstance(mapping["seconds"], float)
+
+
+def test_the_console_writes_a_tree_a_person_can_read():
+    out = io.StringIO()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Build"):
+            with session.step("Install Lakehouse/Sales"):
+                with session.substep("Sales.Customer"):
+                    pass
+
+    printed = out.getvalue()
+    lines = [line for line in printed.splitlines() if line.strip()]
+    # Children above their parent, with the parent's own total underneath — a
+    # roll-up, the way `du` reads.
+    assert lines[0] == "Build"
+    assert lines[1].strip().startswith("Sales.Customer")
+    assert lines[2].strip().startswith("Install Lakehouse/Sales")
+    assert lines[3].startswith("✓ Build")
+    assert all(line.rstrip().endswith("s") for line in lines[1:])
+
+
+def test_a_failed_task_is_marked_as_one():
+    out = io.StringIO()
+    with ConsoleSession(progress=out) as session:
+        with pytest.raises(RuntimeError):
+            with session.task("Build"):
+                raise RuntimeError("boom")
+
+    assert "✗ Build" in out.getvalue()
+
+
+def test_progress_can_be_silenced_entirely():
+    """A library caller is not a console, and must not be printed at."""
+
+    with ConsoleSession(progress=False) as session:
+        with session.task("Build"):
+            pass
+
+        assert session.timings, "silencing output must not stop recording"
+
+
+def test_progress_never_reaches_stdout(capsys):
+    """stdout is the command's answer, and several commands emit JSON on it."""
+
+    with ConsoleSession() as session:
+        with session.task("Build"):
+            pass
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Build" in captured.err
+
+
+# --- durable evidence ---------------------------------------------------------
+
+
+def test_a_run_s_timings_ride_its_completion_document(session):
+    """Not a file of their own. The evidence folder already says what a task
+    intended and what each step did; how long a step took is a property of
+    that step, not a second kind of record."""
+
+    from weaver.load import _completion_document
+    from weaver.load_report import LoadRunReport
+
+    with session.task("Load"):
+        with session.step("Execute"):
+            with session.substep("Lakehouse/Sales/DWG.Customer"):
+                pass
+
+    document = _completion_document(
+        LoadRunReport(
+            requested=("Lakehouse/Sales",),
+            status="succeeded",
+            dry_run=False,
+            fault_tolerant=False,
+        ),
+        timings=session.timings,
+    )
+
+    assert [entry["name"] for entry in document["timings"]] == [
+        "Lakehouse/Sales/DWG.Customer",
+        "Execute",
+        "Load",
+    ]
+    assert all(entry["seconds"] is not None for entry in document["timings"])
+
+
+def test_a_completion_document_without_timings_still_has_the_key(session):
+    """A caller that recorded none says so, rather than omitting the field and
+    making every reader handle its absence."""
+
+    from weaver.load import _completion_document
+    from weaver.load_report import LoadRunReport
+
+    document = _completion_document(
+        LoadRunReport(
+            requested=(), status="succeeded", dry_run=True, fault_tolerant=False
+        )
+    )
+
+    assert document["timings"] == []
+
+
+# --- the two ledgers are separate ---------------------------------------------
+
+
+def test_logical_timing_and_transport_timing_are_kept_apart(session):
+    """Neither can be derived from the other, so neither is folded into it."""
+
+    with session.task("Build"):
+        with session.telemetry.timing("livy.submit"):
+            pass
+
+    assert [frame.name for frame in session.timings] == ["Build"]
+    assert "livy.submit" in session.telemetry.measures
+    assert "Build" not in session.telemetry.measures
