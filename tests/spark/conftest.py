@@ -43,6 +43,17 @@ def weaver_catalogue(spark, lakehouses):
     land in the first test's directory.
     """
 
+    yield from _weaver_catalogue(spark, lakehouses)
+
+
+@pytest.fixture(scope="module")
+def shared_weaver_catalogue(spark, shared_lakehouses):
+    """The same, for the module-scoped estate — see :func:`shared_lakehouses`."""
+
+    yield from _weaver_catalogue(spark, shared_lakehouses)
+
+
+def _weaver_catalogue(spark, lakehouses):
     catalogue = SparkCatalogue(
         spark, lakehouses.resolver.spark_destination(lakehouses.weaver)
     )

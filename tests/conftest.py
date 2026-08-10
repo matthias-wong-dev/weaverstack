@@ -148,15 +148,8 @@ class LocalLakehouses:
         )
 
 
-@pytest.fixture
-def lakehouses(tmp_path: Path) -> LocalLakehouses:
-    """A Weaver Lakehouse and one target Lakehouse, empty and disposable.
-
-    Both carry the ``Files/`` and ``Tables/`` areas a Fabric Lakehouse presents,
-    so the same resolution serves local and Fabric.
-    """
-
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse=WEAVER_LAKEHOUSE)
+def _lakehouses(root: Path) -> LocalLakehouses:
+    workspace = LocalWorkspace(workspace=root, weaver_lakehouse=WEAVER_LAKEHOUSE)
     store = FilesystemStore()
     resolver = LocalResolver(workspace)
 
@@ -165,7 +158,41 @@ def lakehouses(tmp_path: Path) -> LocalLakehouses:
         store.make_directory(resolver.tables_root(ItemRef(item)))
     store.make_directory(resolver.weaver_items_root)
 
-    return LocalLakehouses(workspace=workspace, resolver=resolver, store=store, root=tmp_path)
+    return LocalLakehouses(workspace=workspace, resolver=resolver, store=store, root=root)
+
+
+@pytest.fixture
+def lakehouses(tmp_path: Path) -> LocalLakehouses:
+    """A Weaver Lakehouse and one target Lakehouse, empty and disposable.
+
+    Both carry the ``Files/`` and ``Tables/`` areas a Fabric Lakehouse presents,
+    so the same resolution serves local and Fabric.
+
+    Per test, so a module whose claims *mutate* an estate gets a clean one each
+    time. A module whose claims only read should take
+    :func:`shared_lakehouses` instead — see there for why.
+    """
+
+    return _lakehouses(tmp_path)
+
+
+@pytest.fixture(scope="module")
+def shared_lakehouses(tmp_path_factory) -> LocalLakehouses:
+    """The same pair of Lakehouses for a whole module.
+
+    Building and loading an estate costs seconds; asking it a question costs
+    milliseconds. A module that asks twenty read-only questions of one estate
+    and rebuilds it twenty times is paying for isolation it does not use, and
+    the arithmetic is not close — in this suite that pattern was a quarter of
+    the whole Spark run.
+
+    So the rule is the other way round from the usual instinct: share the
+    estate, and take a fresh one only where *isolation itself* is the claim —
+    where a test mutates the estate, or where what a build leaves behind is the
+    thing being asserted.
+    """
+
+    return _lakehouses(tmp_path_factory.mktemp("estate"))
 
 
 @pytest.fixture

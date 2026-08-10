@@ -19,7 +19,6 @@ import json
 
 import pytest
 from support.sessions import given_session
-from support.sessions import given_session
 
 from weaver.build_bundle import (
     ItemBinding,
@@ -155,11 +154,19 @@ def _failures(report) -> str:
     )
 
 
-@pytest.fixture
-def validated(tmp_path, lakehouses, spark, weaver_catalogue):
-    """An estate built, loaded, and ready to be asked whether it holds up."""
+@pytest.fixture(scope="module")
+def validated(tmp_path_factory, shared_lakehouses, spark, shared_weaver_catalogue):
+    """An estate built, loaded, and ready to be asked whether it holds up.
 
-    root = tmp_path / "Estate"
+    Built once for the module. Every claim here runs validations, and a
+    validation reads — so no test can leave the estate different from how it
+    found it, and rebuilding between them would only buy isolation from
+    nothing. The one thing a run does write is its own task log, and each run
+    writes its own.
+    """
+
+    lakehouses = shared_lakehouses
+    root = tmp_path_factory.mktemp("validated") / "Estate"
     _write(root, "Lakehouse/Sales/schemas/Sales.yml", SCHEMA)
     _write(root, "Lakehouse/Sales/Files/Sales__Seed.py", SEED)
     _write(root, "Lakehouse/Sales/Sales__Order.py", ORDER)
@@ -203,20 +210,6 @@ def validated(tmp_path, lakehouses, spark, weaver_catalogue):
         spark.sql(f"DROP SCHEMA IF EXISTS {target.qualified_schema('Sales')} CASCADE")
 
 
-def _test(validated, **kwargs):
-    lakehouses, requested = validated
-    with given_session(
-        workspace=lakehouses.workspace, spark=lakehouses.spark, store=lakehouses.store
-    ) as session:
-        return run_test(session, workspace=lakehouses.workspace, requested=requested, **kwargs)
-
-
-@pytest.fixture
-def lakehouses_with_spark(lakehouses, spark):
-    lakehouses.spark = spark
-    return lakehouses
-
-
 def run(validated, spark, **kwargs):
     lakehouses, requested = validated
     with given_session(
@@ -225,11 +218,32 @@ def run(validated, spark, **kwargs):
         return run_test(session, workspace=lakehouses.workspace, requested=requested, **kwargs)
 
 
+@pytest.fixture(scope="module")
+def reported(validated, spark):
+    """One whole-target run, asked many questions.
+
+    Ten claims below are about *the same run* — which validations it reached,
+    what each concluded, what the run as a whole says, what it wrote down.
+    Executing it ten times would not make any of them a stronger claim; it
+    would only assert that the run is repeatable, which is a different
+    sentence, and one this module never says out loud.
+    """
+
+    return run(validated, spark)
+
+
+@pytest.fixture(scope="module")
+def named(validated, spark):
+    """One run of a single named validation, likewise shared."""
+
+    return run(validated, spark, name="Sales.OrdersMiscount")
+
+
 # --- the whole target ---------------------------------------------------------
 
 
-def test_every_installed_validation_runs(validated, spark):
-    report = run(validated, spark)
+def test_every_installed_validation_runs(reported):
+    report = reported
 
     assert sorted(node.logical_id.rsplit("/", 1)[-1] for node in report.nodes) == [
         "Sales.AmountsArePositive",
@@ -238,26 +252,25 @@ def test_every_installed_validation_runs(validated, spark):
     ]
 
 
-def test_a_test_that_agrees_with_the_load_passes(validated, spark):
+def test_a_test_that_agrees_with_the_load_passes(reported):
     """Against loaded rows, so passing means agreement rather than emptiness."""
 
-    report = run(validated, spark)
-    node = report.node("Sales.OrdersReconcile")
+    node = reported.node("Sales.OrdersReconcile")
 
     assert node.status == "passed", node.messages
     assert node.result.failure_count == 0
     assert node.executed
 
 
-def test_an_assumption_that_holds_passes(validated, spark):
-    node = run(validated, spark).node("Sales.AmountsArePositive")
+def test_an_assumption_that_holds_passes(reported):
+    node = reported.node("Sales.AmountsArePositive")
 
     assert node.status == "passed"
     assert node.result.violation_count == 0
 
 
-def test_a_test_the_data_does_not_satisfy_fails_with_its_counts(validated, spark):
-    node = run(validated, spark).node("Sales.OrdersMiscount")
+def test_a_test_the_data_does_not_satisfy_fails_with_its_counts(reported):
+    node = reported.node("Sales.OrdersMiscount")
 
     assert node.status == "failed"
     # Order 2 is unexpected, order 3 is missing; order 1 agrees.
@@ -266,23 +279,23 @@ def test_a_test_the_data_does_not_satisfy_fails_with_its_counts(validated, spark
     assert node.result.failure_count == 2
 
 
-def test_one_failure_does_not_stop_the_others(validated, spark):
+def test_one_failure_does_not_stop_the_others(reported):
     """A validation is read-only, so there is nothing to protect by stopping."""
 
-    report = run(validated, spark)
+    report = reported
 
     assert all(node.executed for node in report.nodes)
     assert {node.status for node in report.nodes} == {"passed", "failed"}
 
 
-def test_the_run_status_is_the_worst_node(validated, spark):
-    assert run(validated, spark).status == "failed"
+def test_the_run_status_is_the_worst_node(reported):
+    assert reported.status == "failed"
 
 
-def test_a_whole_target_run_transfers_no_diagnostic_rows(validated, spark):
+def test_a_whole_target_run_transfers_no_diagnostic_rows(reported):
     """Suppression is about size and sensitivity, not speed."""
 
-    report = run(validated, spark)
+    report = reported
 
     assert all(node.diagnostics is None for node in report.nodes)
 
@@ -290,18 +303,18 @@ def test_a_whole_target_run_transfers_no_diagnostic_rows(validated, spark):
 # --- one by name --------------------------------------------------------------
 
 
-def test_naming_one_runs_only_it(validated, spark):
-    report = run(validated, spark, name="Sales.OrdersMiscount")
+def test_naming_one_runs_only_it(named):
+    report = named
 
     assert [node.logical_id.rsplit("/", 1)[-1] for node in report.nodes] == [
         "Sales.OrdersMiscount"
     ]
 
 
-def test_naming_one_returns_its_evidence(validated, spark):
+def test_naming_one_returns_its_evidence(named):
     """The rows, and the counts, from the same execution."""
 
-    node = run(validated, spark, name="Sales.OrdersMiscount").nodes[0]
+    node = named.nodes[0]
 
     assert node.result.failure_count == 2
     rows = sorted(
@@ -310,8 +323,8 @@ def test_naming_one_returns_its_evidence(validated, spark):
     assert rows == [("actual", 2), ("expected", 3)]
 
 
-def test_the_diagnostic_rows_carry_the_correlation_key(validated, spark):
-    node = run(validated, spark, name="Sales.OrdersMiscount").nodes[0]
+def test_the_diagnostic_rows_carry_the_correlation_key(named):
+    node = named.nodes[0]
 
     assert {"_weaver_side", "_weaver_sk"} <= set(node.diagnostics[0])
 
@@ -326,9 +339,9 @@ def test_naming_something_absent_is_an_error(validated, spark):
 # --- what a run leaves behind -------------------------------------------------
 
 
-def test_the_run_writes_a_test_task_log(validated, spark):
+def test_the_run_writes_a_test_task_log(validated, reported):
     lakehouses, _requested = validated
-    report = run(validated, spark)
+    report = reported
 
     assert report.task_log
     written = sorted(
@@ -344,11 +357,11 @@ def test_the_run_writes_a_test_task_log(validated, spark):
     assert sum(1 for name in written if "_complete_" in name) == 1
 
 
-def test_the_task_log_records_counts_and_no_rows(validated, spark):
+def test_the_task_log_records_counts_and_no_rows(validated, named):
     """Diagnostic rows are interactive evidence, never a durable record."""
 
     lakehouses, _requested = validated
-    report = run(validated, spark, name="Sales.OrdersMiscount")
+    report = named
 
     written = [
         json.loads(lakehouses.store.read(entry.location).decode("utf-8"))
@@ -362,9 +375,9 @@ def test_the_task_log_records_counts_and_no_rows(validated, spark):
     assert "_weaver_side" not in text
 
 
-def test_the_completion_document_aggregates_the_run(validated, spark):
+def test_the_completion_document_aggregates_the_run(validated, reported):
     lakehouses, _requested = validated
-    report = run(validated, spark)
+    report = reported
 
     completion = json.loads(
         lakehouses.store.read(
