@@ -550,7 +550,10 @@ def handle_unbind(args: argparse.Namespace) -> int:
     if not workspace.weaver_lakehouse:
         raise CommandError("unbind requires a configured Weaver Lakehouse")
     result = _run_unbind(
-        workspace, lakehouses=lakehouses, warehouses=warehouses
+        workspace,
+        lakehouses=lakehouses,
+        warehouses=warehouses,
+        session=_session(args),
     )
     if args.json:
         print(json.dumps(result, indent=2))
@@ -561,45 +564,14 @@ def handle_unbind(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_unbind(workspace, *, lakehouses, warehouses) -> dict:
-    from weaver.workspaces import LocalWorkspace
+def _run_unbind(workspace, *, lakehouses, warehouses, session=None) -> dict:
+    """The core operation. The CLI's job here is the arguments, not the crossing."""
 
-    if isinstance(workspace, LocalWorkspace):
-        from weaver.targets import ItemRef
-        from weaver.unbind import unbind_targets
-        from weaver.resolution import resolver_for
-        from weaver.spark import SparkCatalogue, local_delta_session
+    from weaver.operations import unbind_catalogue_claims
 
-        resolver = resolver_for(workspace)
-        with local_delta_session(workspace) as session:
-            catalogue = SparkCatalogue(
-                session,
-                resolver.spark_destination(ItemRef(workspace.weaver_lakehouse)),
-            )
-            return unbind_targets(
-                catalogue, lakehouses=lakehouses, warehouses=warehouses
-            ).to_mapping()
-
-    from weaver.fabric import LivySession
-
-    body = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.targets import ItemRef\n"
-        "from weaver.unbind import unbind_targets\n"
-        "from weaver.resolution import resolver_for\n"
-        "from weaver.spark import SparkCatalogue\n"
-        f"workspace = FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"environment={workspace.environment!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r})\n"
-        "resolver = resolver_for(workspace)\n"
-        "catalogue = SparkCatalogue(spark, resolver.spark_destination("
-        "ItemRef(workspace.weaver_lakehouse)))\n"
-        f"result = unbind_targets(catalogue, lakehouses={tuple(lakehouses)!r}, "
-        f"warehouses={tuple(warehouses)!r})\n"
-        "emit(result.to_mapping())\n"
+    return unbind_catalogue_claims(
+        workspace, lakehouses=lakehouses, warehouses=warehouses, session=session
     )
-    with LivySession.for_workspace(workspace) as session:
-        return session.run(body).payload
 
 
 def handle_load(args: argparse.Namespace) -> int:
@@ -647,12 +619,19 @@ def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool, sessio
     """One load, run where the data is.
 
     Local and in-session are the same call; a desktop reaching into Fabric is
-    the same call submitted through Livy. What comes back is a real
-    :class:`~weaver.load_report.LoadRunReport` either way, so the renderer below
-    cannot tell which happened.
+    the same call submitted through the Session's Spark capability. What comes
+    back is a real :class:`~weaver.load_report.LoadRunReport` either way, so the
+    renderer below cannot tell which happened.
+
+    **The crossing goes through the Session**, exactly as ``build`` and
+    ``unbind`` do. It once opened a :class:`~weaver.fabric.LivySession` of its
+    own, which quietly made ``weaver session`` a half-truth: a console that
+    promised one warm Spark session started a second one the moment anybody ran
+    a load, waited a minute for it, and threw it away afterwards. Which
+    capability a load needs is the Session's question, not this module's.
     """
 
-    from weaver.session.host import inside_fabric_session
+    from weaver.session.host import inside_fabric_session, use_or_create_session
     from weaver.workspaces import LocalWorkspace
 
     if isinstance(workspace, LocalWorkspace) or inside_fabric_session(workspace):
@@ -663,20 +642,30 @@ def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool, sessio
             dry_run=dry_run,
             session=session,
         )
-    _refuse_absent_targets(workspace, targets)
-    return _run_load_over_livy(
-        workspace, targets=targets, fault_tolerant=fault_tolerant, dry_run=dry_run
-    )
+    with use_or_create_session(session, workspace=workspace) as opened:
+        _refuse_absent_targets(workspace, targets, session=opened)
+        return _run_load_over_session(
+            workspace,
+            session=opened,
+            targets=targets,
+            fault_tolerant=fault_tolerant,
+            dry_run=dry_run,
+        )
 
 
-def _refuse_absent_targets(workspace, targets) -> None:
-    """Check the requested items exist, over REST, before a session is opened.
+def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
+    """Check the requested items exist, over REST, before Spark is needed.
 
     A guard bought cheaply and spent well. Starting a Livy session costs tens of
     seconds and a capacity's only session slot; resolving a name over REST costs
     one call. So a request that can already be rejected — a mistyped
     ``Lakehouse/Rwa``, a Warehouse somebody deleted — is rejected before any of
     that is spent.
+
+    Asked through the Session where there is one, so the answer joins the item
+    cache every later command reads. Resolving these names against a resolver of
+    this function's own would authenticate again and cache into an object thrown
+    away one line later — paying the cost of the lookup and keeping none of it.
 
     Deliberately *only* that. The catalogue is not read, no graph is built, no
     upstream target is discovered and no inventory is fetched: those need the
@@ -695,13 +684,18 @@ def _refuse_absent_targets(workspace, targets) -> None:
     from weaver.fabric.resources import LAKEHOUSE, WAREHOUSE
     from weaver.targets import DeltaTarget, parse_physical_target, physical_item
 
-    resolver = FabricResolver(workspace)
+    if session is not None:
+        def resolve(item, *, item_type):
+            return session.resolve_item(item, item_type=item_type, workspace=workspace)
+    else:
+        resolve = FabricResolver(workspace).resolve
+
     absent = []
     for value in targets:
         target = parse_physical_target(value, what="load target", error=CommandError)
         item_type = LAKEHOUSE if isinstance(target, DeltaTarget) else WAREHOUSE
         try:
-            resolver.resolve(physical_item(target), item_type=item_type)
+            resolve(physical_item(target), item_type=item_type)
         except ItemNotFoundError:
             # What the user typed, not a re-spelling of it: this message exists
             # to help them see a typo, and showing them a normalised form is
@@ -749,11 +743,20 @@ else:
 """
 
 
-def _run_load_over_livy(workspace, *, targets, fault_tolerant: bool, dry_run: bool):
-    from weaver.errors import CommandError, LoadError
-    from weaver.fabric import LivySession
+def _run_load_over_session(
+    workspace, *, session, targets, fault_tolerant: bool, dry_run: bool
+):
+    """Submit the load into Fabric through the Session's Python capability.
+
+    An empty answer is the Session's error to raise, not this module's: a
+    program that returned nothing means the same thing whichever command
+    submitted it.
+    """
+
+    from weaver.errors import LoadError
     from weaver.load_report import LoadRunReport
     from weaver.runtime.load_result import LoadResult
+    from weaver.session.program import RemoteProgram
 
     body = _LOAD_BODY.format(
         workspace=workspace.workspace,
@@ -763,12 +766,21 @@ def _run_load_over_livy(workspace, *, targets, fault_tolerant: bool, dry_run: bo
         fault_tolerant=fault_tolerant,
         dry_run=dry_run,
     )
-    with LivySession.for_workspace(workspace) as session:
-        payload = session.run(body).payload
-    if payload is None:
-        raise CommandError(
-            "the load ran in Fabric but returned nothing; see the Livy session output"
-        )
+    payload = session.execute_python(
+        RemoteProgram(
+            name="load",
+            call=lambda: _load_payload_here(
+                workspace,
+                session=session,
+                targets=targets,
+                fault_tolerant=fault_tolerant,
+                dry_run=dry_run,
+            ),
+            source=body,
+            detail=", ".join(targets),
+        ),
+        workspace=workspace,
+    )
     if not payload.get("failed"):
         return LoadRunReport.from_mapping(payload["report"])
 
@@ -780,6 +792,37 @@ def _run_load_over_livy(workspace, *, targets, fault_tolerant: bool, dry_run: bo
         report=None if carried is None else LoadRunReport.from_mapping(carried),
         task_log=payload.get("task_log"),
     )
+
+
+def _load_payload_here(workspace, *, session, targets, fault_tolerant, dry_run):
+    """The same envelope, computed in this process rather than submitted.
+
+    The second spelling a :class:`~weaver.session.program.RemoteProgram` owes
+    its remote one, and it must produce what the remote body produces —
+    including the failure-as-data envelope, because whoever reads the payload
+    cannot be made to care which side computed it.
+    """
+
+    try:
+        report = weaver.load(
+            list(targets),
+            workspace=workspace,
+            fault_tolerant=fault_tolerant,
+            dry_run=dry_run,
+            session=session,
+        )
+    except Exception as exc:  # noqa: BLE001 - carried across as data, not raised
+        carried = getattr(exc, "report", None)
+        result = getattr(exc, "result", None)
+        return {
+            "failed": True,
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+            "result": None if result is None else result.as_row(),
+            "report": None if carried is None else carried.to_mapping(),
+            "task_log": getattr(exc, "task_log", None),
+        }
+    return {"failed": False, "report": report.to_mapping()}
 
 
 def _print_load(report) -> None:
@@ -843,9 +886,14 @@ def handle_test(args: argparse.Namespace) -> int:
 
 
 def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
-    """One validation run, run where the data is."""
+    """One validation run, run where the data is.
 
-    from weaver.session.host import inside_fabric_session
+    The crossing is ``load``'s, for the reason it is ``load``'s: a validation
+    reads the data, so it runs where the data is, and which capability reaches
+    there is the Session's question.
+    """
+
+    from weaver.session.host import inside_fabric_session, use_or_create_session
     from weaver.workspaces import LocalWorkspace
 
     if isinstance(workspace, LocalWorkspace) or inside_fabric_session(workspace):
@@ -857,10 +905,16 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
             dry_run=dry_run,
             session=session,
         )
-    _refuse_absent_targets(workspace, targets)
-    return _run_test_over_livy(
-        workspace, targets=targets, name=name, file=file, dry_run=dry_run
-    )
+    with use_or_create_session(session, workspace=workspace) as opened:
+        _refuse_absent_targets(workspace, targets, session=opened)
+        return _run_test_over_session(
+            workspace,
+            session=opened,
+            targets=targets,
+            name=name,
+            file=file,
+            dry_run=dry_run,
+        )
 
 
 _TEST_BODY = """\
@@ -920,7 +974,7 @@ else:
 """
 
 
-def _run_test_over_livy(workspace, *, targets, name, file, dry_run: bool):
+def _run_test_over_session(workspace, *, session, targets, name, file, dry_run: bool):
     """Submit the run into Fabric, carrying a ``--file``'s *content*.
 
     The path is the developer's, and the session has never heard of it — so what
@@ -932,7 +986,7 @@ def _run_test_over_livy(workspace, *, targets, name, file, dry_run: bool):
     from pathlib import Path
 
     from weaver.errors import CommandError, ValidationError
-    from weaver.fabric import LivySession
+    from weaver.session.program import RemoteProgram
     from weaver.test_report import ValidationRunReport
 
     source = None
@@ -954,17 +1008,56 @@ def _run_test_over_livy(workspace, *, targets, name, file, dry_run: bool):
         filename=filename,
         dry_run=dry_run,
     )
-    with LivySession.for_workspace(workspace) as session:
-        payload = session.run(body).payload
-    if payload is None:
-        raise CommandError(
-            "the run happened in Fabric but returned nothing; see the Livy session output"
-        )
+    payload = session.execute_python(
+        RemoteProgram(
+            name="test",
+            call=lambda: _test_payload_here(
+                workspace,
+                session=session,
+                targets=targets,
+                name=name,
+                file=file,
+                dry_run=dry_run,
+            ),
+            source=body,
+            detail=", ".join(targets),
+        ),
+        workspace=workspace,
+    )
     if payload.get("failed"):
         raise ValidationError(f"{payload['error_type']}: {payload['message']}")
 
     report = ValidationRunReport.from_mapping(payload["report"])
     return _with_diagnostics(report, payload.get("diagnostics") or {})
+
+
+def _test_payload_here(workspace, *, session, targets, name, file, dry_run):
+    """The envelope the submitted body produces, computed in this process."""
+
+    try:
+        report = weaver.test(
+            list(targets),
+            workspace=workspace,
+            name=name,
+            file=file,
+            dry_run=dry_run,
+            session=session,
+        )
+    except Exception as exc:  # noqa: BLE001 - carried across as data, not raised
+        return {
+            "failed": True,
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
+    return {
+        "failed": False,
+        "report": report.to_mapping(),
+        "diagnostics": {
+            node.logical_id: list(node.diagnostics)
+            for node in report.nodes
+            if node.diagnostics
+        },
+    }
 
 
 def _with_diagnostics(report, diagnostics: dict):

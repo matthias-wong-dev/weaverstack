@@ -307,31 +307,61 @@ def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
 
 
 class _FakeLivy:
-    """A Livy session that records the program and answers with a payload."""
+    """A Livy session that records the program and answers with a payload.
+
+    Reached through a real :class:`~weaver.session.console.ConsoleSession`,
+    because that is how the command reaches it: the double is the *transport*,
+    not the Session, so what these tests exercise is the crossing the product
+    performs rather than one arranged for them.
+
+    ``submitted`` holds the programs the command sent. The Session's own version
+    probe is answered but not recorded — it is the Session's business, it
+    happens once per workspace context, and a test about a load should not have
+    to know it exists.
+    """
 
     submitted: list[str] = []
     answer: dict = {}
-
-    def __init__(self, workspace) -> None:
-        self.workspace = workspace
+    started: int = 0
 
     @classmethod
     def for_workspace(cls, workspace, **kwargs):
-        return cls(workspace)
+        instance = cls()
+        instance.workspace = workspace
+        return instance
 
-    def __enter__(self):
-        return self
+    def start(self) -> None:
+        type(self).started += 1
 
-    def __exit__(self, *exc):
-        return False
+    def close(self, **kwargs) -> None:
+        pass
 
     def run(self, code, **kwargs):
-        type(self).submitted.append(code)
+        answer = type(self).answer
+        if "weaver.__version__" in code:
+            from weaver import __version__
+
+            answer = __version__
+        else:
+            type(self).submitted.append(code)
 
         class Result:
-            payload = type(self).answer
+            # ``returned`` is whether the program called ``emit`` at all, which
+            # is a different question from what it emitted — and the one the
+            # Session uses to tell "ran and said nothing" from "ran and said no".
+            returned = answer is not None
+            payload = answer
 
         return Result()
+
+
+class _FakeCredential:
+    """Enough of a credential for a token to exist, and no network at all."""
+
+    def get_token(self, *scopes, **kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(token="token", expires_on=2**31 - 1)
 
 
 class _FakeResolver:
@@ -356,14 +386,28 @@ class _FakeResolver:
 
 @pytest.fixture
 def livy(monkeypatch):
-    import weaver.fabric
+    """The transport a desktop crosses on, doubled beneath a real Session.
+
+    Everything is replaced *before* a Session is constructed: a ``Resource``
+    binds its acquisition at construction, so patching the scope afterwards
+    leaves the original in place and the credential is asked for anyway.
+    """
+
+    from weaver.session.console import ConsoleScope
 
     _FakeLivy.submitted = []
+    _FakeLivy.started = 0
     _FakeLivy.answer = {"failed": False, "report": _report().to_mapping()}
     _FakeResolver.present = {"Sales", "Reporting"}
     _FakeResolver.asked = []
-    monkeypatch.setattr(weaver.fabric, "LivySession", _FakeLivy)
-    monkeypatch.setattr(weaver.fabric, "FabricResolver", _FakeResolver)
+    monkeypatch.setattr("weaver.fabric.auth.credential", _FakeCredential)
+    monkeypatch.setattr(
+        "weaver.fabric.LivySession.for_workspace",
+        classmethod(lambda cls, *args, **kwargs: _FakeLivy.for_workspace(*args)),
+    )
+    monkeypatch.setattr(
+        ConsoleScope, "resolver", property(lambda self: _FakeResolver(self.workspace))
+    )
     monkeypatch.setattr(_cli_module(), "_prefer_desktop_credential", lambda: None)
     return _FakeLivy
 
