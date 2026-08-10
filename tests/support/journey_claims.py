@@ -392,12 +392,18 @@ def _assert_pruned(env, step) -> None:
 # public entry acquires its own Spark session, and the local twin of this
 # journey shares one. Everything below that line is the same code the public
 # entry runs.
+#
+# The Session is a `NotebookSession` because this body *is* inside Fabric. A
+# `ConsoleSession` naming a Fabric workspace means the opposite — Weaver on a
+# desktop, reaching in — and correctly refuses to hand out a Spark session of
+# its own, however many it is given. Which host a Session is, is not a detail
+# the caller may fudge; it is the whole distinction the two classes make.
 
 LOADED = '''
 from weaver.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import ConsoleSession
+from weaver.session import NotebookSession
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
@@ -405,7 +411,7 @@ requested = (PhysicalTargetRef("lakehouse", target.name),)
 def orchestrate(dry_run):
     # The Session around the Spark and store this body already has: a run
     # reaches its engines through one, and nothing here should acquire a second.
-    with ConsoleSession(workspace=workspace, spark=spark, store=store) as session:
+    with NotebookSession(workspace=workspace, spark=spark, store=store) as session:
         return run_load(
             session, workspace=workspace, requested=requested, dry_run=dry_run
         ).to_mapping()
@@ -632,14 +638,14 @@ def _corrupt(env, bundle):
 VALIDATED = '''
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import ConsoleSession
+from weaver.session import NotebookSession
 from weaver.test import run_test
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
 
 def validate(**kwargs):
-    with ConsoleSession(workspace=workspace, spark=spark, store=store) as session:
+    with NotebookSession(workspace=workspace, spark=spark, store=store) as session:
         return run_test(
             session, workspace=workspace, requested=requested, **kwargs
         ).to_mapping()

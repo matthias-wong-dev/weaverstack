@@ -32,11 +32,24 @@ from .resources import Resource
 class NotebookSession(Session):
     """A Session for Weaver running inside a Fabric notebook or Livy session."""
 
-    def __init__(self, *, spark: Any = None, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        spark: Any = None,
+        store: Any = None,
+        resolver: Any = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         if self.workspace is None:
             raise CommandError("a notebook session needs the workspace it is attached to")
+        # Given the same way a console is given them, and for the same reason: a
+        # notebook body already holds a Spark session, a store and a resolver,
+        # and a Session that acquired its own would be opening a second of each
+        # beside the ones its caller is using.
         self._spark = spark
+        self._given_store = store
+        self._given_resolver = resolver
 
     def _new_scope(self, workspace: Workspace) -> "NotebookScope":
         if workspace_context(workspace) != workspace_context(self.workspace):
@@ -49,6 +62,8 @@ class NotebookSession(Session):
             telemetry=self.telemetry,
             executor=self._executor,
             spark=self._spark,
+            store=self._given_store,
+            resolver=self._given_resolver,
         )
 
     # --- position -----------------------------------------------------------
