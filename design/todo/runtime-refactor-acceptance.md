@@ -32,6 +32,10 @@ every combination rather than over the one an estate happens to produce.
 test, −43%. None of that is anything running faster. Fabric time is Warehouse
 round trips, and what changed is how many of them the suite asks for.
 
+The hosted half is not in the table, for the reason the baseline gave: it runs
+the *published* wheel, so a number is only meaningful against a publish. The
+whole of `-m fabric` — 124 tests, both positions — is green at 32m46s.
+
 ## Where the Fabric time went
 
 The baseline named the target precisely: "a function-scoped baseline that
