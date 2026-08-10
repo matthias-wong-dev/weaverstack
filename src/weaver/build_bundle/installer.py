@@ -334,6 +334,7 @@ def _execute(
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
         target_id=target_id,
         executor=action.executor,
         status=SKIPPED if skipped else SUCCEEDED,
@@ -351,6 +352,7 @@ def _failed(
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
         target_id=target_id,
         executor=action.executor,
         status=FAILED,
@@ -366,6 +368,7 @@ def _skipped_action(action: InstallAction, batch: BuildBatch) -> ActionResult:
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
         target_id=batch.target_id,
         executor=action.executor,
         status=SKIPPED,

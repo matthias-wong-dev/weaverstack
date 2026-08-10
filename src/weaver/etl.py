@@ -117,6 +117,12 @@ class RuntimeArtefact:
     one. A deployed helper module under ``lib/`` has none: it is authored source
     that no Weaver document declares, which is exactly why it needs a claim of
     its own or nothing would ever notice it had been deleted.
+
+    ``source_path`` is the authored file this came from, relative to the
+    repository root — the path the developer has open in their editor, not the
+    deployed one. It is *carried*, never reconstructed: by the time an install
+    fails, ``_/Load/Sales__Customer.py`` is all that is left, and the mapping
+    back to ``Lakehouse/Sales/Sales__Customer.py`` is only knowable here.
     """
 
     identity: WeaverDocumentId
@@ -125,6 +131,7 @@ class RuntimeArtefact:
     payload: bytes
     role: str = ROLE_LOAD
     origin: WeaverDocumentId | None = None
+    source_path: str | None = None
 
     @property
     def is_validation(self) -> bool:
@@ -227,6 +234,7 @@ def item_validation_artefacts(
                     payload=payload,
                     role=role,
                     origin=identity,
+                    source_path=source.relative_path,
                 )
             )
             continue
@@ -242,6 +250,7 @@ def item_validation_artefacts(
                 payload=generated.payload,
                 role=role,
                 origin=identity,
+                source_path=source.relative_path,
             )
         )
     return tuple(artefacts)
@@ -285,6 +294,7 @@ def _warehouse_artefacts(
                 ),
                 payload=generated.payload,
                 origin=identity,
+                source_path=source.relative_path,
             )
         )
     return tuple(artefacts)
@@ -316,6 +326,7 @@ def _lakehouse_artefacts(
                     payload=source.text.encode("utf-8"),
                     signature=content_hash(source.text.encode("utf-8")),
                     origin=identity,
+                    source_path=source.relative_path,
                 )
             )
         elif source.language == SPARK_SQL and source.kind == TABLE:
@@ -333,6 +344,7 @@ def _lakehouse_artefacts(
                         source.effective_signature, generated.template_version
                     ),
                     origin=identity,
+                    source_path=source.relative_path,
                 )
             )
     for relative, content in sorted(repository.support_file_contents.items()):
@@ -351,6 +363,7 @@ def _lakehouse_artefacts(
                 _within_item(relative, item),
                 payload=content,
                 signature=content_hash(content),
+                source_path=relative,
             )
         )
     return tuple(artefacts)
@@ -364,6 +377,7 @@ def _file_artefact(
     signature: str,
     role: str = ROLE_LOAD,
     origin: WeaverDocumentId | None = None,
+    source_path: str | None = None,
 ) -> RuntimeArtefact:
     """One deployed file, at the item-relative path reproduced under the root.
 
@@ -384,6 +398,7 @@ def _file_artefact(
         payload=payload,
         role=role,
         origin=origin,
+        source_path=source_path,
     )
 
 

@@ -34,16 +34,45 @@ from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
 
 @dataclass(frozen=True)
 class BuildFailure:
+    """One action that failed, described the way a developer needs to read it.
+
+    ``artefact`` is the Weaver thing that failed —
+    ``Warehouse/Reporting/Sales.CustomerRevenue`` — and ``source_path`` is the
+    repository file to open. Both are carried from the build rather than
+    recovered from ``action_id``, which by this point spells a slug.
+    """
+
     action_id: str
     error_type: str | None
     message: str | None
+    artefact: str | None = None
+    source_path: str | None = None
 
     def to_mapping(self) -> dict:
         return {
             "id": self.action_id,
             "type": self.error_type,
             "message": self.message,
+            "artefact": self.artefact,
+            "source": self.source_path,
         }
+
+    def describe(self) -> str:
+        """The failure as the plan's error shape: what, where, then why.
+
+        The Weaver operation leads. A developer whose stored procedure has a
+        syntax error is not helped by being told first that TDS raised
+        something — the infrastructure is how it was found out, not what went
+        wrong, and it comes last.
+        """
+
+        subject = self.artefact or self.action_id
+        lines = [f"Error installing {subject}"]
+        if self.source_path:
+            lines.append(f"Source: {self.source_path}")
+        if self.message:
+            lines.append(str(self.message))
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -468,7 +497,11 @@ def _result_from_item_build(source, bindings, result) -> BuildResult:
         status=report.status,
         errors=tuple(
             BuildFailure(
-                action.action_id, action.error_type, action.error_message
+                action.action_id,
+                action.error_type,
+                action.error_message,
+                artefact=action.resource_node_id,
+                source_path=action.source_path,
             )
             for action in report.action_results()
             if action.status == "failed"
@@ -730,6 +763,8 @@ def _build_desktop_fabric(
                 action["action_id"],
                 action.get("error_type"),
                 action.get("error_message"),
+                artefact=action.get("resource_node_id"),
+                source_path=action.get("source_path"),
             )
             for sequence in report.get("sequences", ())
             for action in sequence.get("actions", ())

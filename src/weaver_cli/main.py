@@ -544,6 +544,63 @@ def handle_compose(args: argparse.Namespace) -> int:
     return run_composition(args)
 
 
+#: What a developer is told when a Task they can fix has failed. Deliberately
+#: says how to decline: an interaction that only offers "try again" is a trap.
+RETRY_PROMPT = "Fix the file and press Enter to retry, or 'q' to give up. "
+DECLINED = {"q", "quit", "n", "no", "exit"}
+
+
+def _until_fixed(args: argparse.Namespace, attempt) -> int:
+    """Run one Task, and offer to run it again from fresh inputs when it fails.
+
+    **Retry is the whole Task from the beginning.** The repository is re-read,
+    the physical state re-observed, the bundle or graph rebuilt. Nothing resumes
+    inside a stale BuildBundle, RunGraph or half-settled plan — those describe a
+    repository that has just been edited, which is precisely why the retry is
+    happening. The estate may of course already hold work that succeeded; the
+    fresh Task observes that and decides what is left to do.
+
+    **The Session is not part of what gets rebuilt.** Its credential, resolver,
+    item cache, Livy session and TDS connections are healthy — a SQL syntax
+    error is a Task failure, not a resource failure — so the loop holds one open
+    across attempts rather than paying for a cold start per fix. That is the
+    whole point: the developer edits a file, presses Enter, and the next attempt
+    begins immediately.
+
+    **Non-interactive execution never prompts.** With nobody to ask, the first
+    failure is the answer, and no Session is opened on retry's behalf.
+    """
+
+    if not _can_ask():
+        return attempt()
+
+    from weaver.session.host import use_or_create_session
+
+    with use_or_create_session(
+        _session(args), workspace=_resolve_workspace(args)
+    ) as session:
+        args.session = session
+        while True:
+            status = attempt()
+            if not status:
+                return status
+            try:
+                answer = input(f"\n{RETRY_PROMPT}")
+            except (EOFError, KeyboardInterrupt):
+                # Ctrl-C and Ctrl-D at a prompt are the operator declining, not
+                # a failure of their own.
+                print(file=sys.stderr)
+                return status
+            if answer.strip().lower() in DECLINED:
+                return status
+
+
+def _can_ask() -> bool:
+    """Whether there is somebody at a terminal to answer."""
+
+    return sys.stdin.isatty()
+
+
 def _authorised(args: argparse.Namespace) -> bool:
     """Whether this invocation already carries the operator's go-ahead.
 
@@ -623,6 +680,10 @@ def _run_unbind(workspace, *, lakehouses, warehouses, session=None) -> dict:
 
 
 def handle_load(args: argparse.Namespace) -> int:
+    return _until_fixed(args, lambda: _load_once(args))
+
+
+def _load_once(args: argparse.Namespace) -> int:
     """Adapt command-line values to :func:`weaver.load`, wherever it has to run.
 
     The CLI owns exactly one thing the API does not: the *host boundary*. A load
@@ -897,6 +958,10 @@ def _print_load(report) -> None:
 
 
 def handle_test(args: argparse.Namespace) -> int:
+    return _until_fixed(args, lambda: _test_once(args))
+
+
+def _test_once(args: argparse.Namespace) -> int:
     """Adapt command-line values to :func:`weaver.test`, wherever it has to run.
 
     The same host boundary ``load`` crosses, and for the same reason: a
@@ -1229,6 +1294,10 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_build(args: argparse.Namespace) -> int:
+    return _until_fixed(args, lambda: _build_once(args))
+
+
+def _build_once(args: argparse.Namespace) -> int:
     """Adapt command-line values to :func:`weaver.build`."""
 
     import json
@@ -1250,10 +1319,18 @@ def handle_build(args: argparse.Namespace) -> int:
         if result.archive:
             print(f"  record: {result.archive}")
         print(f"  items:  {', '.join(result.items)}")
-        if result.errors:
-            for error in payload["errors"]:
-                print(f"  failed: {error['id']}: {error['type']}: {error['message']}")
+        for error in result.errors:
+            # The Weaver operation, then the file to open, then why. Whatever
+            # raised it comes last or not at all: a developer whose stored
+            # procedure has a syntax error is not helped by reading first that
+            # TDS was involved.
+            print()
+            print(_indented(error.describe()), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def _indented(text: str, prefix: str = "  ") -> str:
+    return "\n".join(prefix + line if line else line for line in text.splitlines())
 
 
 def handle_doctor(args: argparse.Namespace) -> int:

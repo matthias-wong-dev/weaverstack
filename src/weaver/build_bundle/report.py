@@ -40,6 +40,9 @@ class ActionResult:
     error_type: str | None = None
     error_message: str | None = None
     details: dict[str, Any] | None = None
+    #: The authored repository file this action came from, where it has one, so
+    #: a failure can name the file to open rather than the artefact it became.
+    source_path: str | None = None
 
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {
@@ -52,6 +55,8 @@ class ActionResult:
             "finished_at": _iso(self.finished_at),
             "duration_seconds": self.duration_seconds,
         }
+        if self.source_path is not None:
+            mapping["source_path"] = self.source_path
         if self.error_type is not None:
             mapping["error_type"] = self.error_type
             mapping["error_message"] = self.error_message
