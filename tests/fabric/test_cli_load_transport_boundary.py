@@ -15,7 +15,7 @@ one of them is new:
     submit the program  the new part, and what this file runs in Fabric
     read the answer     reconstruction and the failure envelope, proved
                         against a recording double in
-                        tests/test_cli_load_binding.py
+                        tests/test_cli_load_representation.py
 
 **Why this does not open its own session.** A Fabric capacity commonly permits
 one concurrent Spark session, and the harness's ``livy_session`` fixture is

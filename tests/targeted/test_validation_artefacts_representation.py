@@ -1,6 +1,6 @@
 """What a validation claims as an installed artefact, and how it is signed.
 
-The sibling of ``test_load_artefacts_binding.py``, and the claims are the same
+The sibling of ``test_load_artefacts_representation.py``, and the claims are the same
 claims because the lifecycle is the same lifecycle: one artefact per validation,
 a deterministic identity, a signature that changes when it should and only then,
 and a role carried rather than inferred from a shape.

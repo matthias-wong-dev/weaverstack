@@ -21,7 +21,7 @@ Whether the workspace still *holds* the item is a third question, and it is not
 asked here. It is worth asking only where a wrong answer is cheap to act on —
 in the CLI, before a Livy session costs forty seconds to start — and by the
 time this code runs that session already exists. See
-``tests/test_cli_load_binding.py``, where that guard is proved to reach the
+``tests/test_cli_load_representation.py``, where that guard is proved to reach the
 answer over REST alone, without a catalogue or a graph.
 
 An item the workspace no longer holds is not thereby silent: reading its

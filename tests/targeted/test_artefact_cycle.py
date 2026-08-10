@@ -218,7 +218,7 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     Installation row is genuinely new and the tail genuinely publishes it. A
     build against a catalogue that has *everything*, Installation included,
     publishes nothing at all; that is the fixed point, and it is proven in
-    `test_build_fixed_point_lifecycle`.
+    `test_build_fixed_point_cycle`.
     """
 
     kinds = {

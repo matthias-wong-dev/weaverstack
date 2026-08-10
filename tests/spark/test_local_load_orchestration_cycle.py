@@ -17,8 +17,8 @@ Three objects and one chain:
 which is the fewest that can carry three dispatch kinds and a real dependency
 order. The alias crossing, the endpoint-refresh barrier and the Warehouse
 procedure need a Fabric Lakehouse and Warehouse, so they are proven in
-``tests/fabric/test_load_orchestration_lifecycle.py`` and, at the pure layer, in
-``tests/targeted/test_load_dag_binding.py``.
+``tests/fabric/test_load_orchestration_cycle.py`` and, at the pure layer, in
+``tests/targeted/test_load_dag_representation.py``.
 
 The public ``weaver.load(...)`` is not called here, and only for a harness
 reason: it opens and stops its own Spark session, and this suite shares one. The

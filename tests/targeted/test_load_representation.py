@@ -12,7 +12,7 @@ look like a regression.
 
 **The Warehouse procedure is the only generated load *program*.** A Spark SQL
 table is compiled into a deployed module instead, so what it generates is
-asserted in ``test_spark_sql_module_render.py`` and what it *does* is the
+asserted in ``test_spark_sql_module_representation.py`` and what it *does* is the
 ordinary ``Table.load()``, proved once for both authoring languages.
 """
 
@@ -97,7 +97,7 @@ def test_a_spark_sql_table_generates_a_deployed_module():
     """Compiled into a primitive, not into a load program.
 
     What the artefact *is* is asserted here; what it contains is
-    ``test_spark_sql_module_render.py``'s.
+    ``test_spark_sql_module_representation.py``'s.
     """
 
     load = _spark().create_load()

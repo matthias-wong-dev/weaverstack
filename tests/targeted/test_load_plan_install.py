@@ -1,6 +1,6 @@
 """The load layer as a stage: where it sits, what it installs, what it removes.
 
-`test_load_artefacts_binding.py` asks what a repository owns. This asks what a build
+`test_load_artefacts_representation.py` asks what a repository owns. This asks what a build
 *does* with it — the ordering claim that an item's runtime code goes down after
 its structure is built, the frozen actions and payloads that carry it, and the
 removals that come from the catalogue rather than from a scan.

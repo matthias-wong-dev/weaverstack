@@ -1,6 +1,6 @@
 """The fixed point where it meets a real catalogue: two builds, one estate.
 
-The planner-level proof lives in `tests/targeted/test_build_fixed_point_lifecycle`
+The planner-level proof lives in `tests/targeted/test_build_fixed_point_cycle`
 and is where this property should be iterated on — it runs in under a second and
 every input to it can be constructed. What it cannot answer is whether a *real*
 catalogue, written by an installer and read back over Spark, produces the same
