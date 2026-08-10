@@ -101,15 +101,54 @@ def read_run_state(targets, *, session, workspace=None) -> RunState:
 
 
 def read_installed_catalogue(*, session, workspace=None):
-    """What Weaver knows it installed, read from the control Lakehouse."""
+    """What Weaver knows it installed, read from the control Lakehouse.
+
+    The catalogue lives in Delta tables in the Weaver Lakehouse, so reading it
+    needs Spark — which a desktop process does not have. It asks for the read
+    as a whole instead, and what comes back is the same
+    :class:`~weaver.catalogue.state.Catalogue` either way.
+
+    That is the shape the whole decomposition turns on: **remote state is read
+    once, at a boundary, and represented locally as ordinary Python.** Above
+    here, nothing knows or cares which side of the wire the rows came from.
+    """
+
+    from ..catalogue.state import Catalogue
+    from ..session.program import RemoteProgram
+
+    workspace = workspace if workspace is not None else session.workspace
+    if workspace is None or not workspace.weaver_lakehouse:
+        raise RunError("a run needs a Workspace with a Weaver Lakehouse")
+
+    body = (
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.run.state import _catalogue_here\n"
+        "from weaver.session import NotebookSession\n"
+        f"workspace = {_workspace_literal(workspace)}\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
+        "emit(_catalogue_here(session=session, workspace=workspace).to_mapping())\n"
+    )
+    payload = session.execute_python(
+        RemoteProgram(
+            name="read_catalogue",
+            call=lambda: _catalogue_here(
+                session=session, workspace=workspace
+            ).to_mapping(),
+            source=body,
+            detail=str(workspace.weaver_lakehouse),
+        ),
+        workspace=workspace,
+    )
+    return Catalogue.from_mapping(payload)
+
+
+def _catalogue_here(*, session, workspace):
+    """The catalogue read by a host that already has Spark."""
 
     from ..catalogue.state import read_installed_catalogue as read
     from ..spark import SparkCatalogue
     from ..targets import ItemRef
 
-    workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.weaver_lakehouse:
-        raise RunError("a run needs a Workspace with a Weaver Lakehouse")
     return read(
         SparkCatalogue(
             session.spark(workspace),
@@ -120,41 +159,118 @@ def read_installed_catalogue(*, session, workspace=None):
     )
 
 
-def read_target_inventories(targets, *, session, workspace=None) -> dict:
-    """What each requested physical target actually holds, right now."""
+def _workspace_literal(workspace) -> str:
+    return (
+        f"FabricWorkspace(workspace={workspace.workspace!r}, "
+        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"environment={workspace.environment!r})"
+    )
 
-    from ..build_bundle.prune import read_lakehouse_inventory, read_warehouse_inventory
-    from ..build_bundle.targets import LakehouseBinding, WarehouseBinding
+
+def read_target_inventories(targets, *, session, workspace=None) -> dict:
+    """What each requested physical target actually holds, right now.
+
+    Split by what the reading *needs*, not by what the target is. A Warehouse
+    inventory is a T-SQL question, and TDS reaches a Warehouse from anywhere —
+    so it is asked from here whichever host is running. A Lakehouse inventory
+    needs the Spark catalogue, so on a desktop it crosses.
+
+    Every Lakehouse crosses in **one** program rather than one apiece. A
+    submission costs seconds and the statements inside it cost almost nothing,
+    so a call per target would make observing three Lakehouses three times the
+    price of observing one — and, worse, three observations of three different
+    moments presented as one snapshot.
+    """
+
+    from ..build_bundle.prune import TargetInventory, read_warehouse_inventory
+    from ..build_bundle.targets import WarehouseBinding
     from ..load_plan import LAKEHOUSE_TARGET
+    from ..session.program import RemoteProgram
     from ..targets import ItemRef, WarehouseTarget
 
     workspace = workspace if workspace is not None else session.workspace
+    ordered = list(dict.fromkeys(targets))
     inventories: dict = {}
-    for target in dict.fromkeys(targets):
+
+    for target in ordered:
+        if target.kind == LAKEHOUSE_TARGET:
+            continue
         try:
-            if target.kind == LAKEHOUSE_TARGET:
-                bound = LakehouseBinding(ItemRef(target.name)).to_bound_target()
-                observed = read_lakehouse_inventory(
-                    bound,
-                    resolver=session.resolver(workspace),
-                    store=session.store(workspace),
-                    spark=session.spark(workspace),
-                )
-            else:
-                bound = WarehouseBinding(ItemRef(target.name)).to_bound_target()
-                observed = read_warehouse_inventory(
-                    bound,
-                    sql=session.sql_executor(
-                        WarehouseTarget(ItemRef(target.name)), workspace=workspace
-                    ),
-                )
+            bound = WarehouseBinding(ItemRef(target.name)).to_bound_target()
+            inventories[str(target)] = read_warehouse_inventory(
+                bound,
+                sql=session.sql_executor(
+                    WarehouseTarget(ItemRef(target.name)), workspace=workspace
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 - re-raised with its cause
-            raise RunError(
-                f"{target}: the catalogue says it is installed, but its "
-                f"inventory could not be read: {type(exc).__name__}: {exc}"
-            ) from exc
-        inventories[str(target)] = observed
+            raise _unreadable(target, exc) from exc
+
+    delta = [target for target in ordered if target.kind == LAKEHOUSE_TARGET]
+    lakehouses = [target.name for target in delta]
+    if not lakehouses:
+        return inventories
+
+    body = (
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.run.state import _lakehouse_inventories_here\n"
+        "from weaver.session import NotebookSession\n"
+        f"workspace = {_workspace_literal(workspace)}\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
+        f"emit(_lakehouse_inventories_here({lakehouses!r}, session=session, "
+        "workspace=workspace))\n"
+    )
+    try:
+        observed = session.execute_python(
+            RemoteProgram(
+                name="read_inventories",
+                call=lambda: _lakehouse_inventories_here(
+                    lakehouses, session=session, workspace=workspace
+                ),
+                source=body,
+                detail=", ".join(lakehouses),
+            ),
+            workspace=workspace,
+        )
+    except Exception as exc:  # noqa: BLE001 - re-raised with its cause
+        # Every target the one crossing was reading. A batched read cannot say
+        # which of them the failure belongs to, and naming one would be picking
+        # a culprit rather than reporting what happened.
+        raise _unreadable(", ".join(str(target) for target in delta), exc) from exc
+
+    for target in ordered:
+        if target.kind != LAKEHOUSE_TARGET:
+            continue
+        inventories[str(target)] = TargetInventory.from_mapping(observed[target.name])
     return inventories
+
+
+def _lakehouse_inventories_here(names, *, session, workspace) -> dict:
+    """Every named Lakehouse's inventory, by a host that has Spark."""
+
+    from ..build_bundle.prune import read_lakehouse_inventory
+    from ..build_bundle.targets import LakehouseBinding
+    from ..targets import ItemRef
+
+    resolver = session.resolver(workspace)
+    store = session.store(workspace)
+    spark = session.spark(workspace)
+    return {
+        name: read_lakehouse_inventory(
+            LakehouseBinding(ItemRef(name)).to_bound_target(),
+            resolver=resolver,
+            store=store,
+            spark=spark,
+        ).to_mapping()
+        for name in names
+    }
+
+
+def _unreadable(target, exc: Exception) -> RunError:
+    return RunError(
+        f"{target}: the catalogue says it is installed, but its "
+        f"inventory could not be read: {type(exc).__name__}: {exc}"
+    )
 
 
 def open_run_log(session, *, workspace=None, task_type: str):
