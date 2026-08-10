@@ -11,6 +11,11 @@ What this proves that the layers below cannot:
   agreed with the Test rather than that both were empty
 - a run reads the *installed* catalogue and never reopens the repository
 - the task log records counts and no discrepancy row ever reaches it
+
+And what it deliberately no longer proves: how a run *aggregates* its nodes, or
+that one failure does not stop the others. Those are the Runner's own reasoning,
+they are proven exhaustively in ``tests/test_run_cycle.py`` in milliseconds, and
+asserting them again over a built estate said nothing further about either.
 """
 
 from __future__ import annotations
@@ -277,19 +282,6 @@ def test_a_test_the_data_does_not_satisfy_fails_with_its_counts(reported):
     assert node.result.missing_count == 1
     assert node.result.unexpected_count == 1
     assert node.result.failure_count == 2
-
-
-def test_one_failure_does_not_stop_the_others(reported):
-    """A validation is read-only, so there is nothing to protect by stopping."""
-
-    report = reported
-
-    assert all(node.executed for node in report.nodes)
-    assert {node.status for node in report.nodes} == {"passed", "failed"}
-
-
-def test_the_run_status_is_the_worst_node(reported):
-    assert reported.status == "failed"
 
 
 def test_a_whole_target_run_transfers_no_diagnostic_rows(reported):
