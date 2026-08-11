@@ -336,6 +336,18 @@ _WHAT_IT_INSTALLS = {
 }
 
 
+def _target_name(bound) -> str:
+    """A target as a person names it: ``Lakehouse/Sales``.
+
+    ``bound.id`` is the manifest-local identifier, and it reads like one —
+    ``Lakehouse-_weaver--lakehouse-Weaver``. It is exactly right for a batch to
+    name a target with and exactly wrong on a line someone is watching.
+    """
+
+    kind = (bound.kind or "").strip()
+    return f"{kind.title()}/{bound.name}" if kind else str(bound.name)
+
+
 def _batch_description(batch: BuildBatch) -> str:
     """A batch, described by what it installs rather than by how many actions.
 
@@ -419,7 +431,7 @@ def _run_sequence(
         # be a wall of sub-second lines, and the whole install would be one
         # opaque number.
         with installer.session.substep(
-            f"{target.bound.id}: {_batch_description(batch)}",
+            f"{_target_name(target.bound)}: {_batch_description(batch)}",
             f"{len(batch.actions)} action(s)",
         ):
             results = _run_batch(batch, context, bundle, installer)
