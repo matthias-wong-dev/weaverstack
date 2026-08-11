@@ -13,17 +13,15 @@ executes an object's code, and it has no route back to the source repository at
 all, because a bundle carries its outputs rather than a second copy of its
 inputs.
 
-**Concurrency follows the manifest rather than guessing.** Sequences stay
-serial, because a sequence is a barrier and that is what it is for. Within a
-batch the manifest already says the actions are independent units against one
-target, so T-SQL among them runs at once — a Warehouse's round trips are the
-thing worth not paying end to end, and running them together reorders nothing a
-barrier was protecting.
+**Everything here runs one at a time.** Sequences are serial because a sequence
+is a barrier and that is what it is for. The actions within a batch are serial
+too — see :data:`_WHY_SERIAL`, which records the attempt to run T-SQL
+concurrently and the deadlocks a real Warehouse answered with.
 
-Only T-SQL. A Spark statement's concurrency is the Fabric session's business
-rather than ours, and OneLake writes and REST calls are a later measurement
-rather than an assumption. The plan's instruction is to decompose one capability
-route at a time and let the timings say what to widen.
+What *is* shared is a crossing rather than a thread: the actions in a batch that
+need Spark go over to the session together in one submission, because the
+submission is the expensive part. Each still gets its own result, its own timing
+and its own status, so nothing about the report says they travelled together.
 """
 
 from __future__ import annotations
