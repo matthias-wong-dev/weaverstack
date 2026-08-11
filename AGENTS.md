@@ -262,8 +262,7 @@ operation-local resolver/resource ownership
 Temporary compatibility while intermediate commits land is fine. Obsolete
 architecture left layered underneath the new architecture is not.
 
-See [the runtime architecture and test-factor
-plan](design/todo/runtime-architecture-and-test-refactor-plan.md).
+See [the code architecture](design/code-architecture.md).
 
 ## Environment neutrality
 
