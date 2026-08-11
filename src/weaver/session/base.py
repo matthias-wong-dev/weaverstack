@@ -371,6 +371,14 @@ class Session(ABC):
         yield from self._framed(SUBSTEP, name, detail)
 
     def _framed(self, kind: str, name: str, detail: str | None):
+        if kind == TASK:
+            # The one safe moment to replace a dead resource. A Livy session
+            # that dies mid-Task takes every RuntimeScope in it with it, so a
+            # run continuing on a replacement interpreter would dispatch against
+            # scopes that no longer exist — succeeding at nothing, silently. So
+            # the failure stands, the Task fails, and the *next* Task gets a
+            # fresh acquisition.
+            self.recover()
         frame = self._enter(kind, name, detail)
         try:
             yield frame
@@ -414,6 +422,14 @@ class Session(ABC):
             if frame.kind == kind and (name is None or frame.name == name):
                 self._close(frame, error=error)
                 return
+
+    def recover(self) -> None:
+        """At a Task boundary, let anything that died be acquired once more."""
+
+        with self._scope_lock:
+            scopes = list(self._scopes.values())
+        for scope in scopes:
+            scope.recover()
 
     def present(
         self, frame: ReportingFrame, event: str, error: BaseException | None = None
@@ -536,6 +552,25 @@ class WorkspaceScope:
         return resolved
 
     # --- resources ----------------------------------------------------------
+
+    def recover(self) -> None:
+        """Permit one further acquisition of anything that failed here.
+
+        Bounded by the resource's own allowance, and deliberately quiet when
+        that allowance is spent: a resource that will not come back should say
+        so to whoever *uses* it, naming what it was for, rather than failing a
+        Task before it has begun.
+        """
+
+        from .resources import ResourceError, ResourceState
+
+        for resource in list(self._resources):
+            if resource.state is not ResourceState.FAILED:
+                continue
+            try:
+                resource.reacquire()
+            except ResourceError:
+                pass
 
     def track(self, resource: Resource) -> Resource:
         """Own a resource for this scope's lifetime, closing it with the scope."""
