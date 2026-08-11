@@ -252,11 +252,31 @@ experiences — `pip install weaverstack` in a Fabric notebook, and `weaver buil
 from a terminal — genuinely the same product rather than two implementations that
 drift.
 
-**One honest caveat.** Parity is not total. The far side of a decomposed
-operation imports the published wheel — `weaver.run.remote` for a Python
-primitive, `weaver.build_bundle.remote` for a Spark install action — so a desktop
-build or load needs `weaver install` to have been run, and the version check will
-tell you plainly if it hasn't:
+The destination is **either**, in the strong sense:
+
+```text
+in a notebook     Weaver runs in the session. Everything is local to it.
+
+from a desktop    Weaver runs on your machine. Fabric is reached only through
+                  Livy, TDS, OneLake and REST — and each crossing carries a
+                  small, clear script rather than an operation.
+```
+
+Not a fast loop and a real one. Two complete ways to work, with the same code
+underneath, and you pick whichever suits the moment.
+
+**Where we actually are.** Close, not finished, and the measure is executor
+parity: an action whose executor works in both positions is done; one that still
+has to cross whole is not. `alias` is the current example — creating a shortcut
+is a REST call that works from anywhere, but the readability wait still crosses
+with it, and the executor's own comment says why the split was reverted and what
+would prove it.
+
+**One honest caveat**, and it is the other half of the gap. The far side of a
+decomposed operation imports the published wheel — `weaver.run.remote` for a
+Python primitive, `weaver.build_bundle.remote` for a Spark install action — so a
+desktop build or load needs `weaver install` to have been run, and the version
+check will tell you plainly if it hasn't:
 
 ```text
 the Weaver published in <workspace> is older than this console ...

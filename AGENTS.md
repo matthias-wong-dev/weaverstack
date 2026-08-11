@@ -23,9 +23,8 @@ dwg-platform/
 
 `weaver` is consulted for proven algorithms, Fabric/OneLake/Spark/Warehouse edge
 cases, Weaver document fixtures and behavioural intent. Never change it as part of
-weaverstack work, and never import from it. Where the two disagree, the
-architecture in [the master CLI plan](design/weaver_master_cli_plan.md) is
-authoritative.
+weaverstack work, and never import from it. Where the two disagree,
+[design/weaver-architecture.md](design/weaver-architecture.md) is authoritative.
 
 Reference baseline: `a97ba8a0b00dd66dff1b2c5e818403694562fd30` (the plan's
 reviewed snapshot). The sibling checkout has since advanced; confirm which
@@ -33,9 +32,15 @@ revision you are reading before treating it as the baseline.
 
 ## Implementation authority
 
-[The master CLI plan](design/weaver_master_cli_plan.md) is the authoritative plan
-for the current CLI, Workspace, repository parsing and catalogue reconciliation
-work. The underlying system has run in production on SQL Server for years and
+Two documents, and they answer different questions.
+[design/weaver-architecture.md](design/weaver-architecture.md) is what Weaver
+*is* — repository structure, documents, build, bundle, installation, the Weaver
+Lakehouse, the command lifecycle. [design/code-architecture.md](design/code-architecture.md)
+is how *this repository* is arranged to deliver it — the four doers, the
+representations they hand each other, and where anything physical happens. Read
+the first for behaviour, the second before moving code between layers.
+
+The underlying system has run in production on SQL Server for years and
 the sibling `weaver` implementation proved it works on Fabric. This is
 implementation, not invention: port proven algorithms rather than re-deriving
 them, and spend design attention on the control plane, which is the genuinely
@@ -63,17 +68,32 @@ These give three useful execution paths:
 | | resources | code runs | what it is |
 |---|---|---|---|
 | 1 | local emulator | laptop | development, and most of the test suite |
-| 2 | Fabric | laptop | the desktop CLI reaching into a workspace |
-| 3 | Fabric | **in Fabric** | **the product** — `pip install weaverstack` in a notebook |
+| 2 | Fabric | laptop | **the desktop position** — Weaver here, reaching in over Livy, TDS, OneLake and REST |
+| 3 | Fabric | **in Fabric** | **the in-Fabric position** — `pip install weaverstack` in a notebook |
 
-**The foundational rule:** *Weaver core operates within the environment where it
-is executing. Only the CLI and Fabric test infrastructure cross into Fabric.*
+Rows 2 and 3 are both meant to be complete ways to work, not a fast loop and a
+real one. Row 1 is neither: it is an emulator, and it exists to make the first
+two cheap to develop against.
+
+**The foundational rule:** *an operation never works out where it is. It asks a
+Session for a capability, and the Session knows.*
 
 ```text
-core running locally        → operates against the local emulator
-core running inside Fabric   → operates within FabricWorkspace, session-native
-CLI or pytest running locally → may cross into Fabric over REST, DFS and Livy
+Session in a notebook   → call it here: native Spark, notebookutils, TDS
+Session on a desktop    → cross for it: Livy, OneLake over HTTPS, TDS, REST
+Session on the emulator → the local filesystem and an in-process Spark
 ```
+
+`use_or_create_session` in `weaver.session.host` picks the host once, per
+workspace. Above that, `build`, `load`, `test` and `wipe` are the same code in
+all three, which is the property the whole arrangement exists to keep.
+
+The older form of this rule said core must operate only within the environment
+it executes in, and that only the CLI and test infrastructure may cross. The
+intent survives — operation code still contains no `if isinstance(workspace, …)`
+— but the crossing now belongs to the Session rather than to the CLI, so an
+operation can be *given* one that reaches into Fabric without knowing that it
+does.
 
 A `FabricWorkspace` identifies the workspace the resources live in. It does **not**
 say whether access happens through desktop HTTP clients or inside a session.
@@ -138,27 +158,47 @@ convenient locally and then contort Fabric to fit — if local and Fabric disagr
 Fabric is right and local is the thing to fix.
 
 Concretely, for anything with two phases (as the build bundle has *generate* then
-*install*): **both phases run in the target environment.** Inside Fabric that
-means in the session, against the native Spark catalogue; in the emulator it
-means in-process against the local catalogue. A workflow that plans on the
-desktop and only executes in Fabric is a *different, lesser* architecture (row 2
-dressed as row 3), and it silently loses capabilities the authoritative
-catalogue provides — build bundle generation, done on the desktop with
-`spark=None`, could not see catalogue views and so could not prune them. The fix
-was to move generation into the session, not to accept the gap as inherent to
-Fabric. When a Fabric behaviour is awkward, the question is "how does local
-emulate this?", never "how does Fabric bend to what local already does?".
+*install*): **both phases decide against the target environment's real state.**
+Inside Fabric that state is right there — the native Spark catalogue, in the
+session. From a desktop it has to be *read across first*, and then planned
+against, which is what `read_build_state` does before the Builder is handed
+anything.
 
-### Row 3 is the claim, and it is the least tested
+This wording used to be stronger: both phases must *run in* the target
+environment, and anything else was row 2 dressed as row 3. That came from a real
+failure — bundle generation on the desktop with `spark=None` could not see
+catalogue views, so it could not prune them. Worth being precise about what went
+wrong there, because it was **planning blind**, not planning on a laptop. A
+planner given the real catalogue and the real inventories reaches the same bundle
+wherever its process happens to be; a planner given `None` does not. So the
+invariant is about the state, and the location was never the thing.
+
+When a Fabric behaviour is awkward, the question is still "how does local emulate
+this?", never "how does Fabric bend to what local already does?".
+
+### Two positions, both meant to be first-class
 
 A user should be able to open a Fabric notebook, `pip install weaverstack`, and
 work. That is the product, and it is what distinguishes Weaver from tools that
-demand an orchestration environment of their own. **A Fabric test that runs
-Weaver on the laptop and reaches into a workspace over HTTP tests row 2, not
-row 3.** Both are worth having, but only row 3 is the promise.
+demand an orchestration environment of their own.
 
-Row 3 is delivered by installing Weaver into a Fabric Environment: `weaver
-install --workspace <ws> --environment <env>` builds a wheel from the checkout,
+The other half is the one being built towards: **everything driveable from a
+desktop**, with Fabric reached only through Livy, TDS, OneLake and REST, each
+crossing carrying a small clear script rather than an operation. Not two products
+— one, in two positions, because the doers do not know which one they are in.
+
+We are close and not there. Executor parity is the measure: an action whose
+executor works in both positions is done, one that still has to cross whole is
+not. `alias` is the current example, and its executor says so in a comment. The
+honest statement of the gap is that the desktop position needs `weaver install`
+to have been run, because the far side of a crossing imports the published wheel.
+
+**A Fabric test that runs Weaver on the laptop tests the desktop position, not
+the in-Fabric one** — that is what the `remote` and `hosted` markers are for, and
+why a capability is not proven until both are green.
+
+Both positions are delivered by installing Weaver into a Fabric Environment:
+`weaver install --workspace <ws> --environment <env>` builds a wheel from the checkout,
 stages it and Weaver's dependencies, and publishes. A Livy session (and a Fabric
 notebook) then attaches that Environment via `environment` on the workspace and
 imports the installed package — nothing is copied into the workspace. Rerun
@@ -245,8 +285,8 @@ environments, plans, runners, coordinators or execution paths standing beside
 their replacements unless an explicit, temporary migration boundary requires it —
 and then only until that migration lands.
 
-The refactor that establishes the four doers — `Session`, `Builder`, `Installer`,
-`Runner` — is bound by this rule for:
+The refactor that established the four doers — `Session`, `Builder`, `Installer`,
+`Runner` — retired these, and they are gone rather than deprecated:
 
 ```text
 InstallationEnvironment
@@ -259,10 +299,14 @@ old/new action terminology
 operation-local resolver/resource ownership
 ```
 
+`tests/test_public_api.py` and `tests/test_remote_program_invariant.py` name each
+one and fail if it comes back — which is how a retirement stays retired once
+nobody remembers why the name was a problem.
+
 Temporary compatibility while intermediate commits land is fine. Obsolete
 architecture left layered underneath the new architecture is not.
 
-See [the code architecture](design/code-architecture.md).
+See [the code architecture](design/code-architecture.md) for what replaced them.
 
 ## Environment neutrality
 
