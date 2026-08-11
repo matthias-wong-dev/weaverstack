@@ -64,10 +64,32 @@ def warehouse_target(warehouse) -> ResolvedTarget:
     )
 
 
-def test_the_installed_package_imports_and_reports_a_version(livy_session):
-    """The precondition for every other claim in this file."""
+def test_the_installed_package_imports_and_reports_a_version(
+    livy_session, fabric_workspace
+):
+    """The precondition for every other claim in this file.
 
-    from hatch_build import compute_version
+    Checked against the wheel the Environment *has published*, not against a
+    version computed here. Those were the same thing when the version was a
+    fingerprint of the source; now that it is the build instant, recomputing it
+    yields a new number every call and could never match anything.
+
+    The published wheel is also the better question. What every other test in
+    this file depends on is that the session is running the code that was
+    published — and it is not always, because Fabric takes time to serve a newly
+    published Environment to new sessions. A publish reports Success, and a
+    session started straight after can still come up on the previous image. The
+    answer is to wait, not to publish again.
+    """
+
+    from weaver.fabric.client import FabricClient
+    from weaver.fabric.environment import (
+        ENVIRONMENT,
+        find_workspace,
+        library_wheels,
+        read_published,
+    )
+    from weaver.fabric.resources import find_item
 
     payload = livy_session.run(
         "import weaver\n"
@@ -75,12 +97,31 @@ def test_the_installed_package_imports_and_reports_a_version(livy_session):
         "emit({'attr': weaver.__version__, 'dist': version('weaverstack')})\n",
         label="parity: import",
     ).payload
-
     assert payload["attr"] == payload["dist"]
-    assert payload["dist"] == compute_version(), (
-        "the Fabric Environment contains a stale Weaver wheel; run "
-        "`weaver install` from this checkout before trusting hosted results"
+
+    client = FabricClient()
+    environment = find_item(
+        find_workspace(fabric_workspace.workspace, client=client),
+        fabric_workspace.environment,
+        item_type=ENVIRONMENT,
+        client=client,
     )
+    wheels = library_wheels(read_published(environment, client=client))
+    published = {_wheel_version(name) for name in wheels}
+
+    assert payload["dist"] in published, (
+        f"this Fabric session is running weaverstack {payload['dist']}, but the "
+        f"Environment has published {sorted(published)}. A publish reports "
+        "Success before new sessions are served the new image — wait for it "
+        "rather than publishing again, and only rerun `weaver install` if the "
+        "published set is genuinely not this checkout's."
+    )
+
+
+def _wheel_version(filename: str) -> str:
+    """``weaverstack-0.1.2.dev20260812065103-py3-none-any.whl`` -> the version."""
+
+    return filename.split("-")[1]
 
 
 def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(

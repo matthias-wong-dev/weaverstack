@@ -54,11 +54,10 @@ class SesFixture:
         """The same fixture, over a copy of its tree under ``root``.
 
         A checked-in fixture is repository source, and a test that edits one is
-        editing the repository — which is not merely untidy here, because
-        :func:`hatch_build.compute_version` fingerprints the working tree, so a
-        suite that leaves a document modified changes the version the *next*
-        build believes it is. A test that needs to edit an estate takes a copy
-        and edits that.
+        editing the repository — so the next test reads an estate the last one
+        left behind, and every later run is working from a checkout it quietly
+        modified. A test that needs to edit an estate takes a copy and edits
+        that.
 
         Copied rather than restored afterwards: a restore is only as good as the
         teardown that runs it, and the run that fails before teardown is exactly
