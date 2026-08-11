@@ -301,3 +301,81 @@ somebody can act on.
 One run of each shape, on a small estate, with `read_catalogue` varying 23.8s to
 27.2s between otherwise identical runs. Treat the differences under about ten
 seconds as noise.
+
+---
+
+# Phase 6 has a prerequisite: the markers no longer mean what they say
+
+Before any test moves from `hosted` to `remote`, the two words have to be
+settled, because the decomposition broke the distinction they were built on.
+
+`AGENTS.md` currently promises:
+
+```text
+pytest -m "fabric and remote"   # Weaver runs here; no published wheel
+| remote | Weaver runs on this machine and reaches into Fabric |
+| hosted | Weaver runs inside Fabric as the wheel in the Environment |
+```
+
+Those were the same question when an operation ran entirely on one side. They
+are not any more. A decomposed `weaver load` **orchestrates here and imports the
+published wheel there** — `weaver.run.remote` and
+`weaver.build_bundle.remote` are in the Environment's package, not in a body the
+desktop submits. So the new product path is:
+
+```text
+Weaver runs on this machine        → remote, by the table
+requires the published wheel       → hosted, by the parenthesis
+```
+
+The plan already decides which half wins. §7.2, on `await_addressable`:
+
+> The `await_addressable` test may still use Livy, but that does not make it
+> hosted: Weaver orchestration remains in the desktop test process.
+
+So **`hosted` is about where the orchestration is, not about whether the wheel is
+imported** — and the "no published wheel" gloss on `remote` is what has to go.
+That is a documentation change with teeth: it means `-m "fabric and remote"`
+starts requiring `weaver install` to have run, which is a real cost the marker
+was explicitly promising to avoid.
+
+Worth deciding deliberately rather than discovering per test, because it changes
+what a contributor can run without publishing. Two coherent answers:
+
+1. **Follow the plan.** `remote` means orchestration here; drop the "no published
+   wheel" promise and say the far-side helpers need the Environment current.
+   Simple, and matches where the product went.
+2. **Keep the promise and split the marker.** Something like `remote` for
+   genuinely wheel-free crossings (REST, OneLake, TDS, a Spark body that imports
+   no Weaver) and a third word for decomposed operations. More honest about cost,
+   but a third marker earns its keep only if somebody actually runs the subsets
+   separately.
+
+## What is ready to move, once that is settled
+
+By the plan's rule — hosted only where the claim depends on Fabric-in-process
+semantics — the current `hosted` suite divides cleanly:
+
+```text
+stays hosted      test_developer_load_primitive   the wheel's own API in a session
+                  test_authored_object_attachment reads the session's attachment
+                  test_published_weaver           about the published wheel
+                  test_livy_import                the import protocol itself
+
+becomes remote    test_bundle_can_install         a desktop Installer now does this
+                  test_lakehouse_journey          desktop-driven build lifecycle
+                  test_load_orchestration_cycle   desktop Runner, TDS + Livy
+                  test_item_catalogue_fabric      catalogue read from the desktop
+                  test_alias_discovery            §7.2 names this one explicitly
+```
+
+`test_alias_discovery`'s own docstring is already stale for a second reason: it
+says the discovery wait "is guarded by ``context.spark is not None``, so an
+action executed from a desktop — where there is no session — skips it entirely".
+The alias action now crosses whole, so the wait does run. The claim is sound; the
+reasoning under it describes a Weaver that no longer exists.
+
+Each of these is a rewrite rather than a marker change — `test_bundle_can_install`
+builds its Installer inside a submitted Livy body, and moving it means driving
+the Installer from the checkout and keeping one observation crossing. That is
+the work, and it should not start until the markers mean something.
