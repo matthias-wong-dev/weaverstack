@@ -156,3 +156,79 @@ is warm-up, not decomposition.
 **Caveat.** One run of each. The read_catalogue spread (90s against 10.6s) is
 itself the evidence that single-run Fabric timings carry real variance, so treat
 these as a shape rather than a benchmark.
+
+---
+
+# Build state observation on the desktop — 2026-08-11
+
+The first step of Build decomposition (§6.2). The state read was one opaque
+crossing returning a whole `BuildState`; it now goes through the readers, which
+ask for only what each part needs — Warehouse inventories over TDS from here,
+the catalogue and the Lakehouse inventories across, each its own Step.
+
+```text
+Build                                                  1m47s
+  Read target inventories                              57.0s
+  Read catalogue                                       43.9s
+  Build bundle                                          0.1s
+  Upload bundle                                         1.5s
+  Install                                               4.1s
+```
+
+against the baseline's
+
+```text
+Build                                                  1m14s
+  Read physical state                                  27.5s
+  Build bundle                                          0.3s
+  Upload bundle                                         1.3s
+  Install                                              44.8s
+```
+
+## What this does and does not show
+
+**The totals are not comparable.** The baseline built an estate from empty after
+a wipe; this rebuilt one already installed, so `Install 4.1s` is a build with
+nothing to do rather than a faster install. Only the *read* is like for like.
+
+**Two crossings pay the cold cost twice, and this run paid it.** The read went
+from 27.5s in one crossing to 101s in two — but the Environment had just been
+republished, so both were first statements. The `load` that followed in the same
+session read the catalogue in 17.6s and the inventories in 3.9s, against the
+same estate. Warm, the split costs about 22s against the coarse 27.5s: no worse,
+and possibly better because the Warehouse inventory no longer crosses at all.
+
+**So the split is free when warm and doubles the fixed cost when cold.** That is
+the honest statement. It buys what §6.1 asks for — catalogue and inventories
+attributed separately, which is what makes "read physical state, 27.5s"
+answerable — and if the cold case ever matters more than the attribution, the
+two reads can be combined into one crossing that returns both without changing
+anything above them.
+
+## A finding worth naming
+
+**Every symbol a submitted body imports must exist in the published wheel.**
+Both Fabric runs of this change failed first with
+
+```text
+error: read_inventories could not run: the Weaver published in Weaver Example is
+older than this console and does not carry cannot import name
+'_lakehouse_inventories_here' from 'weaver.build_bundle.workflow'.
+Publish the current wheel with `weaver install ...`
+```
+
+The diagnosis is good and names the fix, and the failure closed every open frame
+correctly. But the coupling is real and the decomposition increases it: each new
+remote entry point is another symbol the desktop and the wheel must agree on,
+and `weaver install` costs about five minutes. Nothing here is wrong — §5.6
+accepts using the installed runtime — but a development loop that needs a
+republish per new crossing is worth watching, and is an argument for keeping the
+remote surface small and stable rather than growing an entry point per action.
+
+## Still to do in this phase
+
+Install is still one crossing. Routing each action through the cheapest
+capability — files through OneLake, T-SQL through TDS in parallel by topological
+layer, Spark-only work through Livy — is the remainder, and the executors that
+need a real `DataFrame` (`spark_table` reads `frame.schema.fields`) are the part
+that needs a purpose-built remote helper rather than a statement.

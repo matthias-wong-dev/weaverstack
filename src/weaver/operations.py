@@ -546,13 +546,16 @@ def _build_in_process(
     )
 
     resolver = session.resolver(workspace)
-    with session.step("Read physical state"):
-        state = read_build_state(
-            bindings,
-            required_catalogue_items=catalogue_items_for_build(repository, bindings),
-            session=session,
-            workspace=workspace,
-        )
+    # No wrapping Step: `read_build_state` opens one per part it reads, and a
+    # Step inside a Step would make a fourth level of a hierarchy that has
+    # three. What a reader wants is the parts — the catalogue and the
+    # inventories are separately slow, and separately fixable.
+    state = read_build_state(
+        bindings,
+        required_catalogue_items=catalogue_items_for_build(repository, bindings),
+        session=session,
+        workspace=workspace,
+    )
     with session.step("Build and install"):
         result = build_item_repository(
             repository,
@@ -565,19 +568,6 @@ def _build_in_process(
             archive=_archive_location(resolver, bundle_name),
         )
     return _result_from_item_build(source, bindings, result)
-
-
-def _read_build_state_here(workspace, *, session, bindings, repository) -> dict:
-    """The build state, read in this process. The in-host spelling of a crossing."""
-
-    from .build_bundle import catalogue_items_for_build, read_build_state
-
-    return read_build_state(
-        bindings,
-        required_catalogue_items=catalogue_items_for_build(repository, bindings),
-        session=session,
-        workspace=workspace,
-    ).to_mapping()
 
 
 def _install_archive_here(workspace, *, session, archive) -> dict:
@@ -604,20 +594,24 @@ def _build_desktop_fabric(
     bundle_name,
     source,
 ) -> BuildResult:
-    """One build from a console, crossing into Fabric twice and coarsely.
-
-    The decision is made here and the physical work happens there:
+    """One build from a console: state observed here, install still coarse.
 
     .. code-block:: text
 
-        read the build state    → one crossing
+        read the build state    → through Session capabilities, per part
         plan the bundle         → locally, in Python
         upload the archive      → the Session's transport store
         install the bundle      → one crossing
 
-    Two crossings, whatever the bundle contains. Breaking the install into
-    host-driven actions is the later decomposition work, and nothing here
-    assumes it stays coarse forever — but nothing here does it either.
+    The state read used to be one opaque crossing that returned a whole
+    ``BuildState``. It now goes through the readers themselves, which ask for
+    only what each part needs — Warehouse inventories over TDS from here, the
+    catalogue and the Lakehouse inventories across, each timed as its own Step.
+    That is what makes "read physical state: 27.5s" answerable rather than
+    merely true.
+
+    The install is still one crossing. Routing each action through the cheapest
+    capability is the rest of the Build decomposition.
     """
 
     if not workspace.environment:
@@ -625,10 +619,10 @@ def _build_desktop_fabric(
             "Fabric build requires an Environment in workspace configuration"
         )
     from .build_bundle import (
-        BuildState,
         catalogue_items_for_build,
         generate_item_build_bundle,
         persist_bundle_archive,
+        read_build_state,
     )
     from .catalogue.state import reconcile_catalogue_state
     from .fabric.preflight import preflight_fabric_targets
@@ -645,30 +639,10 @@ def _build_desktop_fabric(
     )
     resolver = session.resolver(workspace)
     transport_store = session.transport_store(workspace)
-    binding_texts = [_binding_text(binding) for binding in bindings.entries]
-    required_items = [
-        str(item) for item in catalogue_items_for_build(repository, bindings)
-    ]
     workspace_literal = (
         f"FabricWorkspace(workspace={workspace.workspace!r}, "
         f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
         f"environment={workspace.environment!r})"
-    )
-    # What runs on the far side is Weaver's own Session, constructed there: the
-    # notebook host, which is where a Fabric session already is. Nothing about
-    # the read differs between here and there except which Session answers.
-    state_body = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.declaration.model import WeaverItemId\n"
-        "from weaver.build_bundle import (ItemBindings, parse_item_binding, "
-        "read_build_state)\n"
-        "from weaver.session import NotebookSession\n"
-        f"workspace = {workspace_literal}\n"
-        "session = NotebookSession(workspace=workspace, spark=spark)\n"
-        f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
-        f"items = tuple(WeaverItemId.parse(value) for value in {required_items!r})\n"
-        "emit(read_build_state(bindings, required_catalogue_items=items, "
-        "session=session).to_mapping())\n"
     )
     execution_id = uuid.uuid4().hex
     execution = resolver.cli_execution(execution_id)
@@ -677,26 +651,19 @@ def _build_desktop_fabric(
     bundle = None
     report = None
 
-    with session.step("Read physical state"):
-        state = BuildState.from_mapping(
-            session.execute_python(
-                RemoteProgram(
-                    name="read_build_state",
-                    call=lambda: _read_build_state_here(
-                        workspace,
-                        session=session,
-                        bindings=bindings,
-                        repository=repository,
-                    ),
-                    source=state_body,
-                    detail=str(workspace.workspace),
-                ),
-                workspace=workspace,
-            )
-        )
-        reconciliation = reconcile_catalogue_state(
-            state.catalogue, inventories=state.target_inventories
-        )
+    # No wrapping Step: `read_build_state` opens one per part it reads, and a
+    # Step inside a Step would make a fourth level of a hierarchy that has
+    # three. What a reader wants is the parts — the catalogue and the
+    # inventories are separately slow, and separately fixable.
+    state = read_build_state(
+        bindings,
+        required_catalogue_items=catalogue_items_for_build(repository, bindings),
+        session=session,
+        workspace=workspace,
+    )
+    reconciliation = reconcile_catalogue_state(
+        state.catalogue, inventories=state.target_inventories
+    )
     try:
         with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
             root = Path(temporary)
