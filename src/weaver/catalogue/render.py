@@ -441,8 +441,10 @@ def render_delete_obsolete(
     )
 
 
-def render_delete_scope(table: CatalogueTable, *, scope: InstallationScope) -> str:
-    """A scoped ``DELETE`` of one whole installation from one table.
+def render_delete_scope(
+    table: CatalogueTable, *, scope: InstallationScope | InstallationScopes
+) -> str:
+    """A scoped ``DELETE`` of whole installations from one table.
 
     This is installation pruning: it is what decommissioning a target does, and it
     is never what an ordinary build does. A build that did not include a target

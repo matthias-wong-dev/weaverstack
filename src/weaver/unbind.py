@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .catalogue.reader import read_table
 from .catalogue.reconcile import prune_installation
-from .catalogue.render import InstallationScope
+from .catalogue.render import InstallationScope, InstallationScopes
 from .catalogue.tables import INSTALLATION
 from .declaration.model import LAKEHOUSE, WAREHOUSE
 from .targets import ItemRef
@@ -50,10 +50,11 @@ def plan_unbind(
         },
         key=str,
     )
-    statements = tuple(
-        statement
-        for scope in scopes
-        for statement in prune_installation(scope)
+    # One pass over the tables for every selected installation, rather than one
+    # pass per installation: a DELETE costs a Delta transaction whether it
+    # removes one row or all of them, so the statement count is the cost.
+    statements = (
+        prune_installation(InstallationScopes(tuple(scopes))) if scopes else ()
     )
     targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
     return UnbindResult(

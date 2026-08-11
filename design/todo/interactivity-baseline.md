@@ -379,3 +379,49 @@ Each of these is a rewrite rather than a marker change — `test_bundle_can_inst
 builds its Installer inside a submitted Livy body, and moving it means driving
 the Installer from the checkout and keeping one observation crossing. That is
 the work, and it should not start until the markers mean something.
+
+---
+
+# The largest thing in the loop was a catalogue delete — 2026-08-11
+
+Across every measured journey the biggest single Livy call was not a build, a
+load or an install. It was `unbind`, the catalogue deletion at the tail of a
+wipe:
+
+```text
+  livy.unbind                 1 calls    106.5s
+  livy.install.spark          5 calls     48.5s
+  livy.acquire                1 calls     36.4s
+  livy.read_catalogue         1 calls     27.2s
+```
+
+`prune_installation` rendered one `DELETE` per catalogue table **per
+installation**, and a wipe of this estate covers three logical items — so
+thirty-three statements where eleven say the same thing. `InstallationScopes`
+already existed for exactly this and unbind was not using it.
+
+```text
+one scope at a time : 33 statements
+all scopes together : 11 statements
+```
+
+Measured on Fabric: **106.5s → 82.9s**, about 23 seconds.
+
+## What the number says that the statement count did not
+
+A 3× reduction in statements bought 1.3× in time, so the cost is *not* mostly
+per-statement overhead as assumed — before, thirty-three deletes averaged 3.2s
+each; after, eleven average 7.5s. Whatever dominates scales with the work a
+delete does rather than with how many are issued, which means further batching
+will not help much and the next question is a different one: what those eleven
+Delta transactions actually spend their time on, and whether an estate that is
+being wiped needs row-level deletes at all rather than dropping and recreating
+the catalogue tables.
+
+Recorded rather than pursued, because the guess that produced a 23-second win
+was wrong about *why* it won, and the next step should start from a measurement
+instead.
+
+For a developer the wipe now reads: about 40s waiting for the Livy session it is
+the first command to need, and about 83s deleting catalogue rows. The first is
+paid once per `weaver session`; the second is paid per wipe.

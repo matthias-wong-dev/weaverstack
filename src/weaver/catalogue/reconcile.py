@@ -383,8 +383,8 @@ def summarise(
 # --- the explicit prune scopes -----------------------------------------------
 
 
-def prune_installation(scope: InstallationScope) -> tuple[str, ...]:
-    """Remove one installation entirely, in dependency-safe order.
+def prune_installation(scope: InstallationScope | InstallationScopes) -> tuple[str, ...]:
+    """Remove whole installations, in dependency-safe order.
 
     This is what decommissioning a target does. It is emphatically **not** what a
     build does: a build that did not include a target type has no opinion about
@@ -393,6 +393,13 @@ def prune_installation(scope: InstallationScope) -> tuple[str, ...]:
 
     Registry goes first — uncertify before removing the descriptions, so no row is
     ever left certified while what described it is gone.
+
+    **Several installations in one statement per table**, because the cost here
+    is the statement rather than the rows. Each ``DELETE`` is a Delta
+    transaction that rewrites files, and it costs seconds whether it removes one
+    row or a thousand — so one per table per installation meant a wipe of three
+    items paying thirty transactions for what ten express. The order is still
+    the order; what changed is how many scopes each step addresses.
     """
 
     # Uncertify first, remove dependent dictionaries next, and remove the
