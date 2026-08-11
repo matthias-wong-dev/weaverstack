@@ -183,7 +183,7 @@ def run_from_here(
 @pytest.fixture(scope="module")
 def alias_estate(
     fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session,
-    tmp_path_factory,
+    weaver_session, tmp_path_factory,
 ):
     """The alias action, run from here against real Fabric."""
 
@@ -392,7 +392,7 @@ WAREHOUSE_CONSUMER = "Warehouse/AliasReporting"
 
 def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     fabric_workspace, fabric_client, fabric_alias_lakehouses,
-    clean_disposable_warehouse, livy_session, tmp_path_factory,
+    clean_disposable_warehouse, livy_session, weaver_session, tmp_path_factory,
 ):
     """The other alias form, and the one that leans hardest on the endpoint.
 
