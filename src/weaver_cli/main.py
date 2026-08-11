@@ -274,13 +274,14 @@ def build_parser() -> argparse.ArgumentParser:
         "install",
         help="build Weaver and install it into a Fabric Environment",
     )
-    _add_workspace_args(install, include_weaver_lakehouse=False)
-    install.add_argument(
-        "--no-publish",
-        action="store_true",
-        help="stage the wheel and dependencies but do not publish (development only)",
+    # Fabric only, and no way to ask for less than a publish. An Environment
+    # that is staged but not published is one a session cannot import from, so
+    # `--no-publish` only ever produced a half-installed workspace; and a
+    # `--workspace-type local` that this command rejects two lines later is a
+    # choice offered in order to refuse it.
+    _add_workspace_args(
+        install, include_weaver_lakehouse=False, include_workspace_type=False
     )
-    install.add_argument("--json", action="store_true", help="emit the result as JSON")
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
     notebook = subcommands.add_parser(
@@ -408,10 +409,18 @@ def handle_install(args: argparse.Namespace) -> int:
     The authoritative deployment path. Afterwards a notebook, Livy session or
     Fabric pytest run attached to the Environment can ``import weaver`` with no
     source shipped into a Lakehouse.
+
+    The result is always printed, and it is the JSON — a command's result is
+    what it produced, not an option. Progress goes to stderr and the result to
+    stdout, so ``weaver install | jq`` works while a person still watches the
+    publish tick over.
     """
 
-    from weaver.workspaces import FabricWorkspace
+    import json
+
     from weaver.errors import CommandError
+    from weaver.session.host import use_or_create_session
+    from weaver.workspaces import FabricWorkspace
 
     workspace = _resolve_workspace(args)
     if not isinstance(workspace, FabricWorkspace):
@@ -422,48 +431,19 @@ def handle_install(args: argparse.Namespace) -> int:
     from weaver.fabric import install as run_install
 
     started = time.perf_counter()
-    result = run_install(
-        workspace.workspace,
-        workspace.environment,
-        publish=not args.no_publish,
-    )
+    with use_or_create_session(_session(args), workspace=workspace) as session:
+        with session.task("Install", f"{workspace.workspace}/{workspace.environment}"):
+            result = run_install(
+                workspace.workspace,
+                workspace.environment,
+                session=session,
+            )
     total = time.perf_counter() - started
 
-    if args.json:
-        import json
-
-        payload = result.as_dict()
-        payload["timings"]["total"] = round(total, 2)
-        print(json.dumps(payload, indent=2))
-        return 0
-
-    _print_install(result, total)
+    payload = result.as_dict()
+    payload["timings"]["total"] = round(total, 2)
+    print(json.dumps(payload, indent=2))
     return 0
-
-
-def _print_install(result, total: float) -> None:
-    print("Installed Weaver into Microsoft Fabric\n")
-    print("Workspace")
-    print(f"  Name: {result.workspace_name}")
-    print(f"  ID:   {result.workspace_id}\n")
-    print("Environment")
-    print(f"  Name: {result.environment_name}")
-    print(f"  ID:   {result.environment_id}\n")
-    print("Package")
-    print(f"  Distribution: {result.package_name}")
-    print(f"  Version:      {result.package_version}")
-    print(f"  Wheel:        {result.wheel_filename}\n")
-    print("Changes")
-    print(f"  Environment created:  {'yes' if result.created_environment else 'no'}")
-    print(f"  Dependencies changed: {'yes' if result.dependencies_changed else 'no'}")
-    print(f"  Wheel changed:        {'yes' if result.wheel_changed else 'no'}")
-    print(f"  Published:            {result.publish_status}\n")
-    parts = ", ".join(f"{name} {secs:.1f}s" for name, secs in result.timings.items())
-    print(f"Timing  {parts + ', ' if parts else ''}total {total:.1f}s\n")
-    print("Notebook use")
-    print(f'  1. Attach the "{result.environment_name}" Environment.')
-    print("  2. Start a new session.")
-    print("  3. Run: import weaver")
 
 
 def handle_capacity(args: argparse.Namespace) -> int:
@@ -489,17 +469,34 @@ def handle_capacity(args: argparse.Namespace) -> int:
 
 
 def _add_workspace_args(
-    parser: argparse.ArgumentParser, *, include_weaver_lakehouse: bool = True
+    parser: argparse.ArgumentParser,
+    *,
+    include_weaver_lakehouse: bool = True,
+    include_workspace_type: bool = True,
 ) -> None:
-    """Add the explicit values that a Workspace configuration can abbreviate."""
+    """Add the explicit values that a Workspace configuration can abbreviate.
 
-    parser.add_argument("--workspace", help="Fabric Workspace name or local folder path")
-    parser.add_argument("--workspace-config", help="one Workspace configuration file")
+    ``include_workspace_type`` is off for commands that only mean anything
+    against Fabric. Offering a choice the handler rejects is worse than not
+    offering it: argparse accepts it, and the failure arrives later and reads
+    like a bug rather than a flag that was never applicable.
+    """
+
     parser.add_argument(
-        "--workspace-type",
-        choices=("fabric", "local"),
-        help="resource environment; defaults to fabric",
+        "--workspace",
+        help=(
+            "Fabric Workspace name or local folder path"
+            if include_workspace_type
+            else "Fabric Workspace name"
+        ),
     )
+    parser.add_argument("--workspace-config", help="one Workspace configuration file")
+    if include_workspace_type:
+        parser.add_argument(
+            "--workspace-type",
+            choices=("fabric", "local"),
+            help="resource environment; defaults to fabric",
+        )
     parser.add_argument("--environment", help="Fabric Environment name")
     if include_weaver_lakehouse:
         parser.add_argument("--weaver-lakehouse", help="control Lakehouse name")
@@ -560,7 +557,7 @@ def _resolve_workspace(args: argparse.Namespace):
     else:
         workspace = resolve_workspace(
             workspace=args.workspace,
-            workspace_type=args.workspace_type,
+            workspace_type=getattr(args, "workspace_type", None),
             environment=args.environment,
             weaver_lakehouse=getattr(args, "weaver_lakehouse", None),
             workspace_config=args.workspace_config,
