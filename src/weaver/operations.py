@@ -570,17 +570,6 @@ def _build_in_process(
     return _result_from_item_build(source, bindings, result)
 
 
-def _install_archive_here(workspace, *, session, archive) -> dict:
-    """One bundle archive installed in this process."""
-
-    from .build_bundle import install_bundle_archive
-
-    return install_bundle_archive(
-        archive,
-        archive_store=session.store(workspace),
-        session=session,
-        workspace=workspace,
-    ).to_mapping()
 
 
 def _build_desktop_fabric(
@@ -619,6 +608,7 @@ def _build_desktop_fabric(
             "Fabric build requires an Environment in workspace configuration"
         )
     from .build_bundle import (
+        Installer,
         catalogue_items_for_build,
         generate_item_build_bundle,
         persist_bundle_archive,
@@ -626,8 +616,6 @@ def _build_desktop_fabric(
     )
     from .catalogue.state import reconcile_catalogue_state
     from .fabric.preflight import preflight_fabric_targets
-    from .session.program import RemoteProgram
-
     # Above the session, deliberately. Every item this build needs is proved to
     # exist from one workspace listing, so a missing target costs a REST call
     # rather than a Livy session and a Spark traceback about a catalogue.
@@ -639,17 +627,7 @@ def _build_desktop_fabric(
     )
     resolver = session.resolver(workspace)
     transport_store = session.transport_store(workspace)
-    workspace_literal = (
-        f"FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
-        f"environment={workspace.environment!r})"
-    )
-    execution_id = uuid.uuid4().hex
-    execution = resolver.cli_execution(execution_id)
-    remote_archive = resolver.cli_bundle(execution_id)
     retained_archive = _archive_location(resolver, bundle_name)
-    bundle = None
-    report = None
 
     # No wrapping Step: `read_build_state` opens one per part it reads, and a
     # Step inside a Step would make a fourth level of a hierarchy that has
@@ -664,60 +642,40 @@ def _build_desktop_fabric(
     reconciliation = reconcile_catalogue_state(
         state.catalogue, inventories=state.target_inventories
     )
-    try:
-        with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
-            root = Path(temporary)
-            with session.step("Build bundle"):
-                bundle = generate_item_build_bundle(
-                    repository,
-                    bindings=bindings,
-                    output=Location((root / "bundle").as_posix()),
-                    store=source_store,
-                    target_inventories=state.target_inventories,
-                    catalogue=reconciliation.catalogue,
-                    stale_claims=reconciliation.stale_claims,
-                    control_lakehouse=control_lakehouse,
-                )
-            local_archive = Location((root / "install.weaver.zip").as_posix())
-            with session.step("Upload bundle", bundle.bundle_id):
-                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
-                archive_bytes = FilesystemStore().read(local_archive)
-                transport_store.make_directory(resolver.cli_root)
-                transport_store.make_directory(execution)
-                transport_store.write(remote_archive, archive_bytes)
-            install_body = (
-                "from weaver.workspaces import FabricWorkspace\n"
-                "from weaver.build_bundle import install_bundle_archive\n"
-                "from weaver.session import NotebookSession\n"
-                f"workspace = {workspace_literal}\n"
-                "session = NotebookSession(workspace=workspace, spark=spark)\n"
-                "store = session.store(workspace)\n"
-                "resolver = session.resolver(workspace)\n"
-                f"archive = resolver.cli_bundle({execution_id!r})\n"
-                "report = install_bundle_archive(archive, archive_store=store, "
-                "session=session)\n"
-                "emit(report.to_mapping())\n"
+    with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
+        root = Path(temporary)
+        with session.step("Build bundle"):
+            bundle = generate_item_build_bundle(
+                repository,
+                bindings=bindings,
+                output=Location((root / "bundle").as_posix()),
+                store=source_store,
+                target_inventories=state.target_inventories,
+                catalogue=reconciliation.catalogue,
+                stale_claims=reconciliation.stale_claims,
+                control_lakehouse=control_lakehouse,
             )
-            with session.step("Install"):
-                report = session.execute_python(
-                    RemoteProgram(
-                        name="install_bundle",
-                        call=lambda: _install_archive_here(
-                            workspace, session=session, archive=remote_archive
-                        ),
-                        source=install_body,
-                        detail=bundle.bundle_id,
-                    ),
-                    workspace=workspace,
-                )
-            if retained_archive is not None:
+        with session.step("Install"):
+            # The Installer runs *here*. Each action goes to the capability it
+            # needs — files straight to OneLake, T-SQL straight to TDS, control
+            # operations over REST — and only the actions that genuinely need
+            # Spark cross into the session.
+            #
+            # Which is why there is no archive any more. Zipping the bundle,
+            # uploading it and unpacking it on the far side existed to get the
+            # payloads to where the Installer was; with the Installer here, the
+            # deployed Python tree takes the short path to OneLake and nothing
+            # has to be packed at all.
+            report = Installer(session, workspace=workspace).install(bundle).to_mapping()
+        if retained_archive is not None:
+            with session.step("Retain bundle", bundle.bundle_id):
+                local_archive = Location((root / "install.weaver.zip").as_posix())
+                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
                 transport_store.make_directory(resolver.build_bundles_root)
-                transport_store.write(retained_archive, archive_bytes)
-    finally:
-        try:
-            transport_store.delete(execution, recursive=True)
-        except WeaverError:
-            pass
+                transport_store.write(
+                    retained_archive, FilesystemStore().read(local_archive)
+                )
+
     assert bundle is not None and report is not None
     return BuildResult(
         source=source,

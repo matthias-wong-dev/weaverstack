@@ -335,35 +335,37 @@ def _run_batch(
 
     from concurrent.futures import ThreadPoolExecutor
 
+    crossing = [action for action in batch.actions if _crosses(action, installer)]
+    answers: dict = {}
+    started = _now()
+    if crossing:
+        answers = _run_crossed(crossing, batch, context, bundle, installer)
+
+    def run(action: InstallAction) -> ActionResult:
+        if action.id in {one.id for one in crossing}:
+            return _crossed_result(action, answers.get(action.id), batch.target_id, started)
+        return _run_action(action, batch, context, bundle, installer)
+
     concurrent = [
         action
         for action in batch.actions
-        if action.executor in PARALLEL_EXECUTORS
+        if action.executor in PARALLEL_EXECUTORS and action not in crossing
     ]
     if len(concurrent) < 2:
-        return [
-            _run_action(action, batch, context, bundle, installer)
-            for action in batch.actions
-        ]
+        return [run(action) for action in batch.actions]
 
     workers = min(_parallel_workers(installer, context.target), len(concurrent))
     results: dict[str, ActionResult] = {}
     with ThreadPoolExecutor(
         max_workers=workers, thread_name_prefix="weaver-install"
     ) as pool:
-        futures = {
-            pool.submit(_run_action, action, batch, context, bundle, installer): action
-            for action in concurrent
-        }
+        futures = {pool.submit(run, action): action for action in concurrent}
         for future, action in futures.items():
             results[action.id] = future.result()
 
     ordered: list[ActionResult] = []
     for action in batch.actions:
-        if action.id in results:
-            ordered.append(results[action.id])
-        else:
-            ordered.append(_run_action(action, batch, context, bundle, installer))
+        ordered.append(results[action.id] if action.id in results else run(action))
     return ordered
 
 
@@ -461,6 +463,124 @@ def _run_action(
         context=context,
         target_id=batch.target_id,
         executors=installer.executors,
+    )
+
+
+def _crosses(action: InstallAction, installer: "Installer") -> bool:
+    """Whether this action has to run where the Spark is, rather than here."""
+
+    executor = installer.executors.get(action.executor)
+    return bool(getattr(executor, "needs_spark", False)) and not (
+        installer.session.executes_here(installer.workspace)
+    )
+
+
+def _run_crossed(
+    actions: list,
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+) -> dict:
+    """Run this batch's Spark actions in the session, in one submission.
+
+    One submission rather than one apiece, and that is a measurement rather than
+    a preference: crossing per action cost about four seconds of overhead each,
+    so six actions in a small estate paid twenty-four seconds of pure transport.
+    The manifest still models independent actions — what is batched is the
+    physical effect, not the semantic unit.
+
+    Each action still gets its own result, its own timing and its own status, so
+    a reader cannot tell from the report that they shared a trip.
+    """
+
+    import base64
+
+    from . import remote
+    from ..session.program import RemoteProgram
+
+    workspace = installer.workspace
+    store = bundle.store or installer.store
+    entries = []
+    for action in actions:
+        payload = None
+        if action.payload is not None:
+            payload = base64.b64encode(
+                store.read(bundle.location.join(*action.payload.split("/")))
+            ).decode()
+        entries.append({"action": action.to_mapping(), "payload": payload})
+
+    arguments = {
+        "actions": entries,
+        "target": context.target.bound.to_mapping(),
+        "targets": [one.bound.to_mapping() for one in context.targets.values()],
+        "epoch": context.epoch,
+    }
+    source = (
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.build_bundle.remote import install_actions\n"
+        "from weaver.session import NotebookSession\n"
+        f"workspace = {_workspace_literal(workspace)}\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
+        f"emit(install_actions(session=session, workspace=workspace, **{arguments!r}))\n"
+    )
+    answered = installer.session.execute_python(
+        RemoteProgram(
+            name="install.spark",
+            call=lambda: remote.install_actions(
+                session=installer.session, workspace=workspace, **arguments
+            ),
+            source=source,
+            detail=f"{len(actions)} action(s)",
+        ),
+        workspace=workspace,
+    )
+    return {answer["id"]: answer for answer in answered}
+
+
+def _crossed_result(
+    action: InstallAction, answer: dict | None, target_id: str, started: datetime
+) -> ActionResult:
+    """One remote answer, recorded as the local result shape."""
+
+    finished = _now()
+    common = dict(
+        action_id=action.id,
+        resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
+        target_id=target_id,
+        executor=action.executor,
+        started_at=started,
+        finished_at=finished,
+        duration_seconds=(finished - started).total_seconds(),
+    )
+    if answer is None:
+        return ActionResult(
+            status=FAILED,
+            error_type="InstallError",
+            error_message=f"{action.id} was submitted but nothing came back for it",
+            **common,
+        )
+    if answer.get("failed"):
+        return ActionResult(
+            status=FAILED,
+            error_type=answer.get("error_type"),
+            error_message=answer.get("error_message"),
+            **common,
+        )
+    skipped = answer.get("skipped")
+    return ActionResult(
+        status=SKIPPED if skipped else SUCCEEDED,
+        details=answer.get("details"),
+        **common,
+    )
+
+
+def _workspace_literal(workspace) -> str:
+    return (
+        f"FabricWorkspace(workspace={workspace.workspace!r}, "
+        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"environment={workspace.environment!r})"
     )
 
 

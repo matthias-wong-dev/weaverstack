@@ -15,7 +15,7 @@ costs an API call.
 from __future__ import annotations
 
 from ..errors import CommandError
-from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA, WEAVER_ITEMS_AREA, FabricWorkspace
+from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricWorkspace
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
 from ..spark import SparkDestination, fabric_destination
@@ -269,18 +269,6 @@ class FabricResolver:
 
     def build_bundle(self, name: str) -> Location:
         from ..targets import validate_name
-
-        return self.build_bundles_root / validate_name(name, what="bundle name")
-
-    @property
-    def cli_root(self) -> Location:
-        return self.files_root(self._weaver_lakehouse()) / CLI_AREA
-
-    def cli_execution(self, execution_id: str) -> Location:
-        return self.cli_root / validate_name(execution_id, what="execution id")
-
-    def cli_bundle(self, execution_id: str) -> Location:
-        return self.cli_execution(execution_id) / "install.weaver.zip"
 
     def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
         """One destination Lakehouse's ``abfss://`` roots, for Spark to address.

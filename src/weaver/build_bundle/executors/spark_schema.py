@@ -35,6 +35,10 @@ from .base import InstallationContext
 
 
 class SparkSchemaExecutor:
+
+    #: This executor reaches Spark, so on a host without one the action
+    #: crosses whole rather than the capability being faked underneath it.
+    needs_spark = True
     name = "spark_schema"
 
     def execute(

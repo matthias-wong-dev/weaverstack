@@ -232,3 +232,72 @@ capability — files through OneLake, T-SQL through TDS in parallel by topologic
 layer, Spark-only work through Livy — is the remainder, and the executors that
 need a real `DataFrame` (`spark_table` reads `frame.schema.fields`) are the part
 that needs a purpose-built remote helper rather than a statement.
+
+---
+
+# Desktop-driven install — 2026-08-11
+
+The Installer now runs on the desktop. Each action goes to the capability it
+needs — files straight to OneLake, T-SQL straight to TDS, control operations
+over REST — and only actions that genuinely need Spark cross. The archive is
+gone: packing, uploading and unpacking a zip existed to get payloads to where
+the Installer was, and the Installer is here.
+
+Three runs of the same from-empty build of the Weaver Example estate:
+
+```text
+                        archive      desktop,      desktop,
+                        + remote     per action    batched
+  Read target inventories   4.4s         4.1s          4.1s
+  Read catalogue           24.4s        23.8s         27.2s
+  Build bundle              0.1s         0.1s          0.1s
+  Upload bundle             1.6s            —             —
+  Install                  51.2s        78.0s         60.0s
+✓ Build                    1m22s        1m46s         1m32s
+```
+
+## What the numbers said, and what was done about it
+
+**Per-action crossing was the problem, and it was measurable.** Six Spark
+actions crossed individually and the small ones took about four seconds each —
+`spark_schema` 4.0s, `spark_sql` 3.8s and 4.3s, `spark_table` 4.0s — for
+statements that are a line of DDL. That is submission overhead, not work: six
+actions paid roughly twenty-four seconds of pure transport, which is most of the
+regression against shipping an archive.
+
+**So the physical effect is batched while the semantic unit is not.** A batch's
+Spark actions cross in one submission; each still gets its own result, timing and
+status, so nothing above can tell they shared a trip. That is §6.10's own
+prescription — *keep InstallAction as the semantic unit but allow the executor
+layer to batch compatible physical effects; do not force one InstallAction = one
+network call* — applied because the timings asked for it rather than in advance.
+
+Install fell from 78.0s to 60.0s. Five crossings remain, one per batch that
+contains Spark work, and each still carries about four seconds of fixed cost.
+Batches are target-bound and sequences are barriers, so five is the floor
+without changing what a batch means.
+
+## Does removing the unpack pay for the transport?
+
+**On this estate, not quite: 60.0s against 51.2s.** The honest answer is that
+the desktop install is about nine seconds worse here, and it is worth being
+precise about why that is not the whole story.
+
+The archive's cost scales with the *deployed tree* — pack, upload, unpack. The
+crossing count scales with the *number of batches containing Spark work*, which
+is structural and does not grow with the repository. This estate has a handful of
+small Python files, so the archive was nearly free and the fixed transport cost
+dominates. A repository with a substantial `lib/` tree pays the archive on every
+build and pays the same five crossings, so the balance should tip the other way —
+and that is a prediction, not a measurement, because the estate to test it on
+does not exist yet.
+
+What is *not* in doubt is the attribution: `Install` was one opaque number and
+is now five, each naming what it ran. The 29.2s `spark_sql_batch` is a fact
+somebody can act on.
+
+## One sample
+
+One run of each shape, on a small estate, with `read_catalogue` varying 23.8s to
+27.2s between otherwise identical runs. Treat the differences under about ten
+seconds as noise.

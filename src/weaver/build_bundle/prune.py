@@ -46,6 +46,10 @@ from .targets import BoundTarget
 
 #: Files areas a prune never touches: they are Weaver's own, not an item's
 #: materialised output.
+#: ``cli`` no longer holds anything — the desktop Installer stopped staging
+#: bundles there when it stopped shipping them — but it stays reserved so a
+#: prune against an estate built by an older Weaver removes nothing it did
+#: not put there.
 _RESERVED_FILES_AREAS = frozenset({BUILD_BUNDLES_AREA, CLI_AREA})
 
 #: *Delta* schemas a prune never touches. A schema-enabled Fabric Lakehouse has a
