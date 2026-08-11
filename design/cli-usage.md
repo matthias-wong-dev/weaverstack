@@ -179,6 +179,29 @@ and no remote runtime scope.
 warms that once, so a sequence ending in a load does not wait for Spark at the
 end of the build in front of it.
 
+## Wiping a whole estate
+
+Name the Weaver Lakehouse alongside the destinations:
+
+```bash
+weaver wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --yes
+```
+
+`wipe` removes the physical contents of what it is given, then deletes the
+catalogue claims of anything it emptied — unless the control Lakehouse is among
+them, in which case it skips that entirely, because the catalogue tables are
+going with it and deleting rows from a table about to be removed is work nobody
+needs.
+
+That is worth knowing, because the catalogue tidy is not cheap. Measured against
+a real workspace, a wipe of two destination targets spent about **two minutes**,
+almost all of it deleting rows the next build would immediately rewrite. Naming
+the control Lakehouse as well brought the same wipe to **4.4 seconds**.
+
+So for a from-scratch loop, wipe the control Lakehouse too. Keep it out only
+when you mean to preserve the catalogue — decommissioning one target out of an
+estate that carries on.
+
 ## Compose
 
 The development loop is the same four commands every time, each carrying the
