@@ -41,11 +41,19 @@ def dispatch_primitive(
     state=None,
     resolved=None,
     fault_tolerant: bool = False,
-    runtime_scope=None,
+    open_runtime=None,
     workspace=None,
     collect=False,
 ):
-    """Run one installed primitive and return what it reported."""
+    """Run one installed primitive and return what it reported.
+
+    ``open_runtime`` is a *callable*, not a scope, and that is the whole of what
+    keeps a Warehouse-only run away from Spark. A scope handed in would have to
+    exist before anybody knew whether a node wanted one — and on a desktop
+    creating it means a Livy session and a ``begin_run`` crossing. Only the two
+    branches below that import a deployed module ask for it, so a run of nothing
+    but stored procedures never opens one.
+    """
 
     if session is None:
         raise RunError(
@@ -57,17 +65,17 @@ def dispatch_primitive(
     if getattr(node, "installed", None) is not None:
         # A validation reads the estate and reports a judgement about it. The
         # Runner treats it as any other node; only the engine differs.
-        return _validation(node, session, workspace, runtime_scope, collect)
+        return _validation(node, session, workspace, open_runtime, collect)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(node, session, workspace, fault_tolerant)
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
-        return _python(node, session, workspace, resolved, fault_tolerant, runtime_scope)
+        return _python(node, session, workspace, resolved, fault_tolerant, open_runtime)
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
     raise RunError(f"{node.node_id} names unknown primitive kind {kind!r}")
 
 
-def _validation(node, session, workspace, runtime_scope, collect: bool):
+def _validation(node, session, workspace, open_runtime, collect: bool):
     """One installed Test or Assumption, run where it is installed.
 
     Delegated rather than reimplemented: what a validation *means* — comparing
@@ -80,10 +88,11 @@ def _validation(node, session, workspace, runtime_scope, collect: bool):
     from ..test_execution import primitive_kind, run_installed_validation
 
     installed = node.installed
-    if (
-        hasattr(runtime_scope, "dispatch_validation")
-        and primitive_kind(installed) == PYTHON_VALIDATION
-    ):
+    # Only a Lakehouse validation is a deployed module, so only it needs the
+    # run's scope — and a Warehouse one must not cause it to be opened.
+    needs_import = primitive_kind(installed) == PYTHON_VALIDATION
+    runtime_scope = _opened(open_runtime) if needs_import else None
+    if needs_import and hasattr(runtime_scope, "dispatch_validation"):
         # A Lakehouse validation *is* a deployed module, so it belongs where the
         # imports are, exactly as a load primitive does. A Warehouse one is a
         # procedure, and TDS reaches it from here.
@@ -101,6 +110,18 @@ def _validation(node, session, workspace, runtime_scope, collect: bool):
         runtime_scope=runtime_scope,
         collect_diagnostics=collect,
     )
+
+
+def _opened(open_runtime):
+    """This run's scope, opened now because something is about to import.
+
+    Accepts a scope directly as well as a callable, so a test that holds one can
+    hand it over without wrapping — the laziness is what matters, not the shape.
+    """
+
+    if open_runtime is None or not callable(open_runtime):
+        return open_runtime
+    return open_runtime()
 
 
 def _carried(payload, installed):
@@ -140,7 +161,7 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     return LoadResult.from_row(row)
 
 
-def _python(node, session, workspace, resolved, fault_tolerant: bool, runtime_scope):
+def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runtime):
     """One deployed Python primitive, run where its module can be imported.
 
     A deployed module is imported inside the session that owns the Spark it will
@@ -153,13 +174,15 @@ def _python(node, session, workspace, resolved, fault_tolerant: bool, runtime_sc
     remote scope knows how to dispatch into the interpreter holding it.
     """
 
-    if runtime_scope is None:
-        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
     expected = getattr(resolved, "expected_class", None)
     if expected is None:
         raise RunError(
             f"{node.node_id} names a deployed module whose expected class is unknown"
         )
+
+    runtime_scope = _opened(open_runtime)
+    if runtime_scope is None:
+        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
 
     if hasattr(runtime_scope, "dispatch_python"):
         from ..runtime.load_result import LoadResult

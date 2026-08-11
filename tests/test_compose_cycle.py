@@ -340,3 +340,62 @@ def test_the_confirmed_sequence_is_not_confirmed_again_per_command(
     run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
     assert all(parsed.authorised for parsed in calls)
+
+
+# --- what a whole sequence will want ------------------------------------------
+
+
+def test_a_composition_warms_the_union_before_the_first_command(
+    tmp_path, recorded, confirmed, monkeypatch
+):
+    """A sequence ending in a load should not wait for Spark at the end of the
+    build in front of it. The resources are shared, so warming the maximum set
+    once is warming it correctly."""
+
+    from weaver.session.requirements import AUTH, LIVY, ONELAKE, RESOLVER, TDS
+
+    calls, parser_factory, _ = recorded
+    path = _write(tmp_path, DEV)
+    prepared = []
+
+    monkeypatch.setattr(
+        "weaver_cli.shell._default_workspace", lambda args: object()
+    )
+
+    class Warmed:
+        closed = False
+
+        def prepare(self, required, *, workspace=None):
+            prepared.append(set(required))
+            return type("W", (), {"started": ()})()
+
+    run_composition(
+        _Args("dev", file=str(path), session=Warmed()), parser_factory=parser_factory
+    )
+
+    (required,) = prepared
+    # wipe and build declare the lot; load and test add nothing new here.
+    assert required == {AUTH, RESOLVER, ONELAKE, LIVY, TDS}
+
+
+def test_a_composition_with_no_workspace_warms_nothing(
+    tmp_path, recorded, confirmed
+):
+    """There is nothing to warm against, and asking would put workspace
+    resolution in front of a sequence that may name one per command."""
+
+    calls, parser_factory, _ = recorded
+    path = _write(tmp_path, DEV)
+    prepared = []
+
+    class Watched:
+        closed = False
+
+        def prepare(self, required, *, workspace=None):
+            prepared.append(required)
+
+    run_composition(
+        _Args("dev", file=str(path), session=Watched()), parser_factory=parser_factory
+    )
+
+    assert prepared == []

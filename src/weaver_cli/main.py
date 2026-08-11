@@ -24,6 +24,82 @@ CAPACITY_ACTIONS = ("status", "resume", "suspend")
 COMPOSE_DEFAULT_FILE = "compose.yml"
 
 
+# --- what each command will want ----------------------------------------------
+#
+# Declared here, from parsed arguments alone, and deliberately coarse. A Session
+# cannot work these out — it has no idea what a build is, and a Session that did
+# would be a second place deciding what an operation does. So commands declare
+# and the Session prepares.
+#
+# These are a *superset*, because arguments cannot know what a repository or a
+# catalogue turns out to contain. `load Lakehouse/Sales` says Livy may be needed
+# because a Lakehouse usually holds Python primitives, not because this estate
+# does. Exact routing comes later, from the BuildBundle or the RunGraph, and
+# nothing below treats a declaration as permission to acquire.
+
+
+def _target_requirements(targets) -> set[str]:
+    """What the named physical targets imply, by their type alone."""
+
+    from weaver.session.requirements import LIVY, ONELAKE, TDS
+
+    wanted: set[str] = set()
+    for value in targets or ():
+        kind = str(value).split("/", 1)[0].strip().lower()
+        if kind.startswith("warehouse"):
+            wanted.add(TDS)
+        else:
+            # A Lakehouse is files and Spark until something says otherwise.
+            wanted |= {ONELAKE, LIVY}
+    return wanted
+
+
+def _requires_targets(args) -> frozenset[str]:
+    from weaver.session.requirements import AUTH, RESOLVER, requirements
+
+    return requirements(
+        AUTH, RESOLVER, *_target_requirements(getattr(args, "targets", ()))
+    )
+
+
+def _requires_build(args) -> frozenset[str]:
+    """A build may touch everything: it writes files, DDL and the catalogue."""
+
+    from weaver.session.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
+
+    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+
+
+def _requires_control(args) -> frozenset[str]:
+    """The catalogue lives in Delta in the Weaver Lakehouse, so Spark reaches it."""
+
+    from weaver.session.requirements import AUTH, LIVY, RESOLVER, requirements
+
+    return requirements(AUTH, RESOLVER, LIVY)
+
+
+def _requires_rest(args) -> frozenset[str]:
+    """Fabric control-plane work: a credential and the resolver, nothing more."""
+
+    from weaver.session.requirements import AUTH, RESOLVER, requirements
+
+    return requirements(AUTH, RESOLVER)
+
+
+def command_requirements(parsed) -> frozenset[str]:
+    """What one parsed command says it will want. Empty when it says nothing."""
+
+    declares = getattr(parsed, "requires", None)
+    return frozenset(declares(parsed)) if declares is not None else frozenset()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="weaver",
@@ -99,7 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
-    build.set_defaults(handler=handle_build)
+    build.set_defaults(handler=handle_build, requires=_requires_build)
 
     push = subcommands.add_parser(
         "push", help="compatibility utility: validate and upload an authored repository"
@@ -107,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument("repository", help="local authored repository folder")
     push.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(push)
-    push.set_defaults(handler=handle_push)
+    push.set_defaults(handler=handle_push, requires=_requires_rest)
 
     load = subcommands.add_parser(
         "load", help="load every installed object in named physical targets"
@@ -130,7 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     load.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(load)
-    load.set_defaults(handler=handle_load)
+    load.set_defaults(handler=handle_load, requires=_requires_targets)
 
     validate = subcommands.add_parser(
         "test", help="run the installed Tests and Assumptions in named targets"
@@ -159,7 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(validate)
-    validate.set_defaults(handler=handle_test)
+    validate.set_defaults(handler=handle_test, requires=_requires_targets)
 
     unbind = subcommands.add_parser(
         "unbind", help="remove catalogue state for named physical targets"
@@ -172,7 +248,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     unbind.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(unbind)
-    unbind.set_defaults(handler=handle_unbind)
+    unbind.set_defaults(handler=handle_unbind, requires=_requires_control)
 
     wipe = subcommands.add_parser(
         "wipe", help="clear a physical Lakehouse or Warehouse"
@@ -192,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     wipe.add_argument("--dry-run", action="store_true", help="report without removing")
     wipe.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
-    wipe.set_defaults(handler=handle_wipe)
+    wipe.set_defaults(handler=handle_wipe, requires=_requires_build)
 
     install = subcommands.add_parser(
         "install",
@@ -205,7 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="stage the wheel and dependencies but do not publish (development only)",
     )
     install.add_argument("--json", action="store_true", help="emit the result as JSON")
-    install.set_defaults(handler=handle_install)
+    install.set_defaults(handler=handle_install, requires=_requires_rest)
 
     notebook = subcommands.add_parser(
         "notebook", help="deploy or execute a Fabric notebook"

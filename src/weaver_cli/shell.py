@@ -144,6 +144,7 @@ def _run_one(session, parser, words: list[str]) -> None:
         return
 
     parsed.session = session
+    _prepare_for(session, parsed)
     try:
         handler(parsed)
     except WeaverError as exc:
@@ -152,6 +153,28 @@ def _run_one(session, parser, words: list[str]) -> None:
         print("\ninterrupted", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - the prompt outlives a defect too
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _prepare_for(session, parsed) -> None:
+    """Start what this command says it will want, before it starts wanting it.
+
+    The banner's warm-up covers the session's default workspace; a command
+    naming a different one arrives at a cold context, and this is where that
+    context gets its head start. Speculative, so a warm-up that cannot complete
+    is the business of whichever operation actually needs the resource.
+    """
+
+    from .main import _resolve_workspace, command_requirements
+
+    required = command_requirements(parsed)
+    if not required:
+        return
+    try:
+        session.prepare(required, workspace=_resolve_workspace(parsed))
+    except WeaverError:
+        # A command with no resolvable workspace fails in its own terms, with
+        # its own message. It must not fail here, warming.
+        pass
 
 
 def _enable_line_editing():

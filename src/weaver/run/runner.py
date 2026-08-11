@@ -466,7 +466,7 @@ class Runner:
                     state=self.state,
                     resolved=resolved,
                     fault_tolerant=self.request.fault_tolerant,
-                    runtime_scope=self.runtime_scope(session),
+                    open_runtime=lambda: self.runtime_scope(session),
                     workspace=self.workspace,
                 )
             except Exception as exc:  # noqa: BLE001 - a failed node is a result

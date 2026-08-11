@@ -148,6 +148,37 @@ session lifetime 61.2s
   resolve.item.cache_hits     4
 ```
 
+## What a command needs
+
+Each command declares its coarse resource requirements from its parsed
+arguments — `auth`, `resolver`, `onelake`, `tds`, `livy` — and the Session
+starts exactly those, in the background, before the command wants them:
+
+```text
+weaver load Warehouse/Reporting   → auth, resolver, tds
+weaver load Lakehouse/Sales       → auth, resolver, onelake, livy
+weaver build ./repository         → auth, resolver, onelake, livy, tds
+```
+
+A Warehouse load therefore never waits on a Spark session, which on a capacity
+permitting one concurrent session is the difference between running and
+queueing.
+
+The Session is *told*; it does not infer. It has no idea what a build is, and a
+Session that decided which resources an operation wanted would be a second place
+deciding what the operation does.
+
+Declarations are coarse and are a **superset** — arguments cannot know what a
+repository or a catalogue turns out to contain. Exact routing comes later, from
+the BuildBundle or the RunGraph. So **preparing is not using**: a declaration
+gives a head start to an acquisition that is coming anyway and never causes one.
+A run that declares `livy` and turns out to be all T-SQL opens no Spark session
+and no remote runtime scope.
+
+`weaver compose` takes the union of every parsed command's requirements and
+warms that once, so a sequence ending in a load does not wait for Spark at the
+end of the build in front of it.
+
 ## Compose
 
 The development loop is the same four commands every time, each carrying the

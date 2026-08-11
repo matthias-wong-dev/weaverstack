@@ -298,7 +298,7 @@ def test_a_remote_scope_is_what_sends_a_python_node_across():
         node,
         session=_Recording(),
         resolved=type("R", (), {"expected_class": "Sales__Customer"})(),
-        runtime_scope=Scope(),
+        open_runtime=Scope,
     )
 
     (arguments,) = sent
@@ -307,3 +307,104 @@ def test_a_remote_scope_is_what_sends_a_python_node_across():
     assert arguments["object"] == "Sales__Customer.py"
     assert arguments["expected_class"] == "Sales__Customer"
     assert result.rows_read == 3
+
+
+# --- preparing is not using ---------------------------------------------------
+
+
+def test_a_warehouse_only_run_never_opens_a_runtime_scope():
+    """The claim that keeps a declared requirement from becoming an acquisition.
+
+    A run of nothing but stored procedures reaches no deployed module, so it
+    needs no scope — and on a desktop, opening one means a Livy session and a
+    `begin_run` crossing for work that is entirely T-SQL.
+    """
+
+    from weaver.load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+    from weaver.run.dispatch import dispatch_primitive
+    from weaver.run.graph import RunNode
+
+    opened = []
+
+    class Sql:
+        def call_procedure(self, name, *, inputs, outputs):
+            return {column: 0 for column, *_ in outputs}
+
+    class Session(_Recording):
+        def sql_executor(self, target, *, workspace=None):
+            return Sql()
+
+    node = RunNode(
+        node_id="load:Warehouse/Reporting/Reporting.Revenue",
+        physical_target=PhysicalTargetRef(kind=WAREHOUSE_TARGET, name="Reporting"),
+        primitive_kind="warehouse_procedure",
+        logical_id=WeaverDocumentId(
+            WeaverItemId("Warehouse", "Reporting"),
+            ObjectId(schema="Reporting", object="Revenue"),
+        ),
+    )
+
+    dispatch_primitive(
+        node,
+        session=Session(),
+        resolved=type("R", (), {"expected_class": None})(),
+        open_runtime=lambda: opened.append(True),
+    )
+
+    assert opened == [], "a Warehouse-only run opened a runtime scope"
+
+
+def test_a_warehouse_validation_opens_no_scope_either():
+    """A Warehouse validation is a procedure, and TDS reaches it from here."""
+
+    from weaver.load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import (
+        PROCEDURE_SHAPE,
+        WeaverDocumentId,
+        WeaverItemId,
+    )
+    from weaver.run.dispatch import dispatch_primitive
+    from weaver.run.graph import RunNode
+    from weaver.test_plan import InstalledValidation
+
+    opened = []
+    item = WeaverItemId("Warehouse", "Reporting")
+    installed = InstalledValidation(
+        logical=WeaverDocumentId(item, ObjectId(schema="Reporting", object="Present")),
+        kind="Assumption",
+        target=PhysicalTargetRef(kind=WAREHOUSE_TARGET, name="Reporting"),
+        artefact=WeaverDocumentId(
+            item,
+            ObjectId(schema="_", object="Assumption Reporting.Present"),
+            shape=PROCEDURE_SHAPE,
+        ),
+        object_type="stored_procedure",
+    )
+
+    class Sql:
+        def call_procedure(self, name, *, inputs, outputs):
+            return {"violation_count": 0}
+
+    class Session(_Recording):
+        def resolver(self, workspace=None):
+            return object()
+
+        def sql_executor(self, target, *, workspace=None):
+            return Sql()
+
+    node = RunNode(
+        node_id="test:Warehouse/Reporting/Reporting.Present",
+        physical_target=installed.target,
+        primitive_kind="warehouse_procedure",
+        logical_id=installed.logical,
+        installed=installed,
+    )
+
+    dispatch_primitive(
+        node, session=Session(), open_runtime=lambda: opened.append(True)
+    )
+
+    assert opened == []

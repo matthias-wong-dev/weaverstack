@@ -47,6 +47,7 @@ import sys
 from pathlib import Path
 
 from weaver.errors import CommandError, WeaverError
+from weaver.session.requirements import union
 
 #: Where a composition lives when nobody says otherwise. Read from the working
 #: directory and nowhere else — a file that is found by searching upwards is a
@@ -186,9 +187,9 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
 
     from .shell import _default_workspace
 
-    with use_or_create_session(
-        getattr(args, "session", None), workspace=_default_workspace(args)
-    ) as session:
+    workspace = _default_workspace(args)
+    with use_or_create_session(getattr(args, "session", None), workspace=workspace) as session:
+        _warm_for(session, parsed_commands, workspace=workspace)
         try:
             return _execute(entries, parsed_commands, session=session)
         finally:
@@ -196,6 +197,31 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
                 from .shell import _report_spending
 
                 _report_spending(session)
+
+
+def _warm_for(session, parsed_commands, *, workspace) -> None:
+    """Start everything the whole sequence will want, before the first command.
+
+    The union rather than each command's own: a sequence that ends in a load
+    should not wait for a Spark session at the end of the build in front of it,
+    and the resources are shared, so warming the maximum set once is warming it
+    correctly.
+
+    Speculative throughout. A composition of nothing but Warehouse work asks for
+    no Spark and gets none; one that asks for it and turns out not to need it
+    has paid for a head start nobody used, which is the right way round.
+    """
+
+    from .main import command_requirements
+
+    if workspace is None:
+        return
+    required = union(*(command_requirements(parsed) for parsed in parsed_commands))
+    if not required:
+        return
+    warm = session.prepare(required, workspace=workspace)
+    if warm.started:
+        print(f"Starting in the background: {', '.join(warm.started)}\n")
 
 
 def _parse(parser: argparse.ArgumentParser, entry: str) -> argparse.Namespace:

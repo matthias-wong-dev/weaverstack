@@ -306,7 +306,7 @@ class ConsoleSession(Session):
     # --- readiness ----------------------------------------------------------
 
     def warm(self, workspace: Workspace | None = None) -> "WarmUp":
-        """Begin acquiring this context's expensive resources, without waiting.
+        """Begin acquiring everything this context could want, without waiting.
 
         The console prompt returns immediately and the first command that needs
         Spark waits on the startup already running rather than starting a second
@@ -315,6 +315,25 @@ class ConsoleSession(Session):
         """
 
         return self.scope(workspace).warm()
+
+    def prepare(
+        self, required, *, workspace: Workspace | None = None
+    ) -> "WarmUp":
+        """Begin acquiring exactly what a caller said it would need.
+
+        The Session is told; it does not infer. It has no idea what a build is
+        and must not acquire one — a Session that decided which resources an
+        operation wanted would be a second place deciding what the operation
+        does.
+
+        **Preparing is not using.** This gives a head start to acquisitions that
+        are coming anyway; it never makes one happen that would not otherwise.
+        A command that declares Livy and then turns out to need none opens no
+        Spark session, because the acquisition still belongs where the need is
+        discovered.
+        """
+
+        return self.scope(workspace).warm(required)
 
     def executes_here(self, workspace: Workspace | None = None) -> bool:
         """Whether this process is already where the data engineering happens."""
@@ -503,7 +522,7 @@ class ConsoleScope(WorkspaceScope):
 
         return self.local_spark is not None
 
-    def warm(self) -> "WarmUp":
+    def warm(self, required=None) -> "WarmUp":
         """Start acquiring what the next command will probably want, and say what.
 
         Speculative throughout: a warm-up nobody asked for must not fail the
@@ -518,13 +537,21 @@ class ConsoleScope(WorkspaceScope):
         skipped, for the caller to show.
         """
 
+        from .requirements import AUTH, LIVY
+
         started: list[str] = []
         skipped: list[tuple[str, str]] = []
+        # No declaration means "whatever this context has", which is what
+        # `weaver session` wants when it starts before any command is typed.
+        wanted = None if required is None else set(required)
 
-        if self.auth is not None:
+        def asked(name: str) -> bool:
+            return wanted is None or name in wanted
+
+        if self.auth is not None and asked(AUTH):
             self.auth.start(speculative=True)
             started.append("Fabric credential")
-        if self.livy is not None:
+        if self.livy is not None and asked(LIVY):
             if getattr(self.workspace, "environment", None):
                 self.livy.start(speculative=True)
                 started.append("Spark session (Livy)")
@@ -536,9 +563,11 @@ class ConsoleScope(WorkspaceScope):
                         "--environment, or set one in workspace configuration",
                     )
                 )
-        if self.local_spark is not None:
+        if self.local_spark is not None and asked(LIVY):
             # The JVM is the largest fixed cost of every local command, so the
-            # emulator gets the same treatment as Livy.
+            # emulator gets the same treatment as Livy. Declared as Livy too:
+            # what a command needs is *Spark*, and which one it gets is the
+            # host's business rather than the caller's.
             self.local_spark.start(speculative=True)
             started.append("local Spark session")
 
