@@ -105,7 +105,12 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         "payload = None\n"
         "if alias.payload is not None:\n"
         "    payload = store.read(bundle.location.join(*alias.payload.split('/')))\n"
+        # `spark_sql` is how the wait asks now: the executor stays wherever the
+        # Installer is and only the probe reaches Spark. A context assembled by
+        # hand has to supply it, exactly as the Installer does.
         "context = InstallationContext(spark=spark, resolver=resolver, store=store,\n"
+        "    spark_sql=lambda statement, exact_case=False: "
+        "[r.asDict() for r in spark.sql(statement).collect()],\n"
         f"    target=resolved[{batch.target_id!r}], targets=resolved)\n"
         "result = execute_install_action(alias, payload, context=context)\n"
         "emit({'status': result.status, 'error': result.error_message,\n"

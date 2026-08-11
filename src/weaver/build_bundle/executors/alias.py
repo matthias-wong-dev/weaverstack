@@ -55,9 +55,11 @@ ADDRESSABLE_POLL_INTERVAL = 5.0
 
 class AliasExecutor:
 
-    #: This executor reaches Spark, so on a host without one the action
-    #: crosses whole rather than the capability being faked underneath it.
-    needs_spark = True
+    # Deliberately *not* `needs_spark`. Creating a shortcut is a REST call that
+    # reaches Fabric from anywhere, and the only thing here that needs Spark is
+    # a question — "can this alias be read yet?" — which crosses as a statement
+    # through `context.spark_sql`. Marking the executor would send the REST call
+    # into the session too, for no reason.
     name = "alias"
 
     def execute(
@@ -91,7 +93,7 @@ class AliasExecutor:
         details: dict[str, Any] = {"aliases": made}
         # Every shortcut is created before anything waits, so the cost is one
         # discovery window rather than one per alias.
-        if shortcut is not None and context.spark is not None:
+        if shortcut is not None:
             waited = self._await_addressable(context, frozen)
             if waited is not None:
                 details["addressable_after_seconds"] = waited
@@ -153,9 +155,31 @@ class AliasExecutor:
         window instead of one each.
         """
 
-        catalogue = context.catalogue
+        if context.spark_sql is None:
+            # Loud, not silent. Every host the Installer builds a context on has
+            # this capability, so its absence means somebody assembled a context
+            # by hand — and quietly not waiting is precisely the race this
+            # behaviour exists to prevent. It failed that way once, in a Fabric
+            # test that built its own context and then asserted the wait had
+            # happened.
+            raise InstallError(
+                "a table alias was created but this context offers no way to ask "
+                "Spark whether it is readable yet, so the discovery wait cannot "
+                "run"
+            )
+
+        # The *destination*, not the catalogue. Qualifying a name and knowing
+        # whether identifiers are case-exact are properties of where the object
+        # lands; `context.catalogue` additionally demands a live Spark session,
+        # which a desktop does not have and this wait does not need.
+        destination = context.target.destination
+        if destination is None:
+            raise InstallError(
+                f"target {context.target.bound.id!r} resolved to no Spark "
+                "destination, so an alias in it cannot be named"
+            )
         pending = {
-            each["alias"]: catalogue.qualify(each["schema"], each["object"])
+            each["alias"]: destination.qualify(each["schema"], each["object"])
             for each in frozen
             if each["area"] != FILES_AREA
         }
@@ -168,11 +192,13 @@ class AliasExecutor:
         while pending:
             for alias, qualified in list(pending.items()):
                 try:
-                    with exact_identifier_case(
-                        context.spark,
-                        enabled=catalogue.destination.preserve_table_identifier_case,
-                    ):
-                        context.spark.sql(f"SELECT * FROM {qualified} LIMIT 0").collect()
+                    # The probe crosses; the waiting does not. Which aliases to
+                    # test, how often, how long and what a failure means all stay
+                    # here — only the question goes to where Spark is.
+                    context.spark_sql(
+                        f"SELECT * FROM {qualified} LIMIT 0",
+                        exact_case=destination.preserve_table_identifier_case,
+                    )
                     del pending[alias]
                 except Exception as exc:  # not discovered yet — or never will be
                     failure = exc
