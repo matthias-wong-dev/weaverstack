@@ -270,6 +270,8 @@ class FabricResolver:
     def build_bundle(self, name: str) -> Location:
         from ..targets import validate_name
 
+        return self.build_bundles_root / validate_name(name, what="bundle name")
+
     def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
         """One destination Lakehouse's ``abfss://`` roots, for Spark to address.
 

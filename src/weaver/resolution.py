@@ -201,6 +201,8 @@ class LocalResolver:
         handover or audit uses a timestamped archive instead.
         """
 
+        return self.build_bundles_root / validate_name(name, what="bundle name")
+
     @property
     def control_tables_root(self) -> Location:
         """``<weaver-lakehouse>/Tables`` — the control-plane tables.

@@ -129,3 +129,28 @@ def test_a_fabric_workspace_is_refused():
 
     with pytest.raises(CommandError, match="LocalWorkspace"):
         LocalResolver(FabricWorkspace(workspace="Analytics"))
+
+
+# --- where a retained bundle lands --------------------------------------------
+#
+# Untested until a refactor silently emptied `build_bundle` and left it returning
+# None. The whole core suite passed: nothing here asked the resolver where a
+# retained bundle goes, and the only caller — `weaver build --bundle` — is
+# exercised against Fabric. A location that is quietly None fails much later, in
+# `store.write`, as an AttributeError about NoneType.
+
+
+def test_a_retained_bundle_lands_under_the_build_bundles_root(resolver):
+    assert resolver.build_bundles_root.value == "/srv/.local/Weaver/Files/build_bundles"
+    assert resolver.build_bundle("nightly").value == (
+        "/srv/.local/Weaver/Files/build_bundles/nightly"
+    )
+
+
+def test_a_bundle_name_is_validated_rather_than_pasted_into_a_path(resolver):
+    """It becomes a directory name, so it is somebody's input reaching a path."""
+
+    from weaver.errors import IdentityError
+
+    with pytest.raises(IdentityError):
+        resolver.build_bundle("../escape")
