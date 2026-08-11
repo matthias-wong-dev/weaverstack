@@ -86,7 +86,7 @@ def node_label(node) -> str:
 
     target = getattr(node, "physical_target", None)
     if node.primitive_kind == ENDPOINT_REFRESH:
-        return f"Refresh the SQL endpoint for {target}"
+        return f"Refresh {target} SQL endpoint"
 
     what = node.logical_id
     if what is None:
@@ -96,9 +96,9 @@ def node_label(node) -> str:
         return node.node_id
     name = getattr(getattr(what, "object_id", None), "qualified", None) or str(what)
     # A load node's role is "load"; a validation carries its own kind — "Test",
-    # "Assumption" — so anything that is not a load is something being checked.
-    verb = "Load" if node.role == LOAD else "Check"
-    return f"{verb} {name} in {target}" if target is not None else f"{verb} {name}"
+    # "Assumption" — so anything that is not a load is being tested.
+    verb = "Load" if node.role == LOAD else "Test"
+    return f"{verb} {target}/{name}" if target is not None else f"{verb} {name}"
 
 
 @contextmanager

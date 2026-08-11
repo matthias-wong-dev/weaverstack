@@ -631,28 +631,38 @@ def read_target_inventories(
     inventories = {}
     delta = []
 
+    # Each Warehouse is its own read over TDS, so each gets its own Sub-step and
+    # its own number. The Lakehouses cannot be split the same way and should not
+    # be: they share one crossing, which is one observation of one moment rather
+    # than several of several (AGENTS.md, "one state transition, one evidence
+    # payload"). So they are named together, honestly, as the one read they are.
     for binding in bindings.entries:
         target = binding.to_bound_target()
         if target.kind == WAREHOUSE_TARGET:
-            sql = supplied_sql.get(binding.item)
-            if sql is None:
-                if workspace is None:
-                    raise BuildError(
-                        f"reading Warehouse inventory for {binding.item} needs a Workspace"
-                    )
-                from ..targets import WarehouseTarget
+            with session.substep(str(binding.item)):
+                sql = supplied_sql.get(binding.item)
+                if sql is None:
+                    if workspace is None:
+                        raise BuildError(
+                            f"reading Warehouse inventory for {binding.item} needs a Workspace"
+                        )
+                    from ..targets import WarehouseTarget
 
-                sql = session.sql_executor(
-                    WarehouseTarget.parse(target.item_id), workspace=workspace
-                )
-            inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
+                    sql = session.sql_executor(
+                        WarehouseTarget.parse(target.item_id), workspace=workspace
+                    )
+                inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
         else:
             delta.append((binding.item, target))
 
     if delta:
-        observed = _lakehouse_inventories(
-            [target for _item, target in delta], session=session, workspace=workspace
-        )
+        named = ", ".join(str(item) for item, _target in delta)
+        with session.substep(named):
+            observed = _lakehouse_inventories(
+                [target for _item, target in delta],
+                session=session,
+                workspace=workspace,
+            )
         for item, target in delta:
             inventories[item] = observed[target.id]
     return inventories

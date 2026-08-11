@@ -697,3 +697,58 @@ def test_an_interrupted_run_still_closes_its_runtime_scope():
         made.run(dispatch=interrupted)
 
     assert closed == [True]
+
+
+# --- what a node is called on screen ------------------------------------------
+
+
+def test_a_node_is_named_by_what_it_does_to_which_object():
+    """``node_id`` is an identifier and reads like one. This is the line
+    somebody watches go past, so it is a verb and a physical id."""
+
+    from weaver.run.runner import node_label
+    from weaver.run.resolution import ENDPOINT_REFRESH
+
+    load = RunNode(
+        node_id="load:Lakehouse/Sales/Sales.Customer",
+        physical_target="Lakehouse/Sales",
+        primitive_kind="python_module",
+        logical_id=_Logical("Sales.Customer"),
+        role="load",
+    )
+    refresh = RunNode(
+        node_id="refresh:Lakehouse/Sales",
+        physical_target="Lakehouse/Sales",
+        primitive_kind=ENDPOINT_REFRESH,
+    )
+    check = RunNode(
+        node_id="Warehouse/Reporting/Reporting.CustomerRevenuePresent",
+        physical_target="Warehouse/Reporting",
+        primitive_kind="warehouse_procedure",
+        logical_id=_Logical("Reporting.CustomerRevenuePresent"),
+        role="Assumption",
+    )
+
+    assert node_label(load) == "Load Lakehouse/Sales/Sales.Customer"
+    assert node_label(refresh) == "Refresh Lakehouse/Sales SQL endpoint"
+    assert node_label(check) == "Test Warehouse/Reporting/Reporting.CustomerRevenuePresent"
+
+
+def test_a_node_with_nothing_logical_to_name_keeps_its_id():
+    """Inventing "Load None" would be worse than the identifier this improves on."""
+
+    from weaver.run.runner import node_label
+
+    node = RunNode(node_id="a", physical_target="Lakehouse/Sales", primitive_kind="x")
+
+    assert node_label(node) == "a"
+
+
+class _Logical:
+    """Enough of a logical id to be named: it carries a qualified object."""
+
+    def __init__(self, qualified):
+        self.object_id = type("ObjectId", (), {"qualified": qualified})()
+
+    def __str__(self):
+        return self.object_id.qualified

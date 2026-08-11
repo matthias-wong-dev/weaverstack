@@ -318,24 +318,6 @@ _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
 
 
-#: What each executor puts in a target, in the words a person would use for it.
-#: Reporting names the work, not the mechanism: ``install.spark`` told a reader
-#: which transport carried something rather than what it was doing, and repeated
-#: seven times it said nothing at all.
-_WHAT_IT_INSTALLS = {
-    "alias": "aliases",
-    "folder": "folders",
-    "load_file": "files",
-    "spark_schema": "schemas",
-    "spark_sql": "views",
-    "spark_sql_batch": "views",
-    "spark_table": "tables",
-    "sql_endpoint_refresh": "the SQL endpoint",
-    "tsql": "procedures",
-    "tsql_batch": "procedures",
-}
-
-
 def _target_name(bound) -> str:
     """A target as a person names it: ``Lakehouse/Sales``.
 
@@ -348,25 +330,23 @@ def _target_name(bound) -> str:
     return f"{kind.title()}/{bound.name}" if kind else str(bound.name)
 
 
-def _batch_description(batch: BuildBatch) -> str:
-    """A batch, described by what it installs rather than by how many actions.
+def _sentence(description: str) -> str:
+    """A planner's description, capitalised for the start of a line."""
 
-    Several executors in one batch are listed in the order the actions appear,
-    deduplicated, because that order is the plan's and reads as a sequence of
-    work. An executor nobody has named here falls back to its own name, which
-    keeps a new executor legible rather than invisible.
-    """
+    text = (description or "").strip()
+    return text[:1].upper() + text[1:] if text else "Install"
 
-    seen: list[str] = []
-    for action in batch.actions:
-        noun = _WHAT_IT_INSTALLS.get(action.executor, action.executor)
-        if noun not in seen:
-            seen.append(noun)
-    if not seen:
-        return "nothing"
-    if len(seen) == 1:
-        return seen[0]
-    return f"{', '.join(seen[:-1])} and {seen[-1]}"
+
+def _batch_targets(sequence: BuildSequence, resolved: dict) -> str | None:
+    """Which targets this sequence touches, for the frame's detail."""
+
+    names: list[str] = []
+    for batch in sequence.batches:
+        target = resolved.get(batch.target_id)
+        name = _target_name(target.bound) if target is not None else batch.target_id
+        if name not in names:
+            names.append(name)
+    return ", ".join(names) or None
 
 
 def _run_batch(
@@ -411,32 +391,34 @@ def _run_sequence(
     action_results: list[ActionResult] = []
     failed = False
 
-    for batch in sequence.batches:
-        target = resolved[batch.target_id]
-        context = InstallationContext(
-            spark=installer.spark_when_needed(),
-            spark_sql=installer.spark_sql(),
-            resolver=installer.resolver,
-            store=installer.store,
-            target=target,
-            sql=installer.sql_for(target.bound),
-            targets=resolved,
-            epoch=epoch,
-        )
-        if failed:
-            action_results.extend(_skipped_action(one, batch) for one in batch.actions)
-            continue
-        # The batch is the unit worth naming: it is one target and one kind of
-        # work, which is the level a reader can act on. An action apiece would
-        # be a wall of sub-second lines, and the whole install would be one
-        # opaque number.
-        with installer.session.substep(
-            f"{_target_name(target.bound)}: {_batch_description(batch)}",
-            f"{len(batch.actions)} action(s)",
-        ):
+    # The sequence is the unit worth naming, and it already carries the words:
+    # the planner wrote "publish catalogue dictionaries and installations" when
+    # it built these, and nothing was showing it. A batch apiece described its
+    # executors instead — "Lakehouse/Weaver: views" for what is plainly the
+    # catalogue being updated — which is the mechanism dressed up as an answer.
+    with installer.session.substep(
+        _sentence(sequence.description), _batch_targets(sequence, resolved)
+    ):
+        for batch in sequence.batches:
+            target = resolved[batch.target_id]
+            context = InstallationContext(
+                spark=installer.spark_when_needed(),
+                spark_sql=installer.spark_sql(),
+                resolver=installer.resolver,
+                store=installer.store,
+                target=target,
+                sql=installer.sql_for(target.bound),
+                targets=resolved,
+                epoch=epoch,
+            )
+            if failed:
+                action_results.extend(
+                    _skipped_action(one, batch) for one in batch.actions
+                )
+                continue
             results = _run_batch(batch, context, bundle, installer)
-        action_results.extend(results)
-        failed = any(result.status == FAILED for result in results)
+            action_results.extend(results)
+            failed = any(result.status == FAILED for result in results)
 
     skipped = bool(action_results) and all(
         result.status == SKIPPED for result in action_results
