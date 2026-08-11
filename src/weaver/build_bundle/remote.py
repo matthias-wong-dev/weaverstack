@@ -84,6 +84,7 @@ def install_actions(
     }
     context = InstallationContext(
         spark=installer.spark,
+        spark_sql=installer.spark_sql(),
         resolver=installer.resolver,
         store=installer.store,
         target=resolved[bound.id],

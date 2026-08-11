@@ -395,18 +395,17 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
 # --- where each half of an alias runs -----------------------------------------
 
 
-def test_creating_a_shortcut_needs_no_spark_at_all():
-    """The half that is REST stays wherever the Installer is.
+def test_the_whole_alias_action_crosses_because_the_wait_is_chatty():
+    """Not because creating a shortcut needs Spark — it does not, it is REST.
 
-    Creating a OneLake shortcut is a Fabric API call and reaches the workspace
-    from a desktop directly. Only the *readability probe* needs Spark, which is
-    why this executor is not marked `needs_spark`: marking it would send the
-    REST call into the session for no reason.
+    The wait polls every five seconds for up to five minutes. In the session
+    that is sixty cheap `spark.sql` calls; from a desktop it would be sixty Livy
+    submissions, and a real workspace killed the session doing exactly that.
     """
 
     from weaver.build_bundle.executors.alias import AliasExecutor
 
-    assert not getattr(AliasExecutor, "needs_spark", False)
+    assert AliasExecutor.needs_spark is True
 
 
 def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):

@@ -55,11 +55,28 @@ ADDRESSABLE_POLL_INTERVAL = 5.0
 
 class AliasExecutor:
 
-    # Deliberately *not* `needs_spark`. Creating a shortcut is a REST call that
-    # reaches Fabric from anywhere, and the only thing here that needs Spark is
-    # a question — "can this alias be read yet?" — which crosses as a statement
-    # through `context.spark_sql`. Marking the executor would send the REST call
-    # into the session too, for no reason.
+    #: The whole action crosses, and the reason is the *wait* rather than the
+    #: shortcut. Creating one is a REST call that reaches Fabric from anywhere,
+    #: so splitting this so only the readability probe crossed looked right —
+    #: and a real workspace killed the Livy session doing it:
+    #:
+    #: .. code-block:: text
+    #:
+    #:     alias(es) ... were created but did not become readable within 300s:
+    #:     Livy session entered state 'dead'
+    #:
+    #: `_await_addressable` polls every five seconds for up to five minutes. In
+    #: the session that is sixty cheap `spark.sql` calls; from a desktop it is
+    #: sixty Livy submissions, and the session did not survive them. Moving a
+    #: *polling loop* across a wire is a different thing from moving a
+    #: statement, and this one is chatty by design because Fabric's discovery
+    #: latency is what it is waiting on.
+    #:
+    #: Splitting it properly means sending the whole wait as one crossing,
+    #: parameterised by the timeout and interval this executor still decides —
+    #: which keeps §6.6's ownership and pays one round trip instead of sixty.
+    #: Not attempted here.
+    needs_spark = True
     name = "alias"
 
     def execute(
