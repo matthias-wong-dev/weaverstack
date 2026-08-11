@@ -751,7 +751,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     assert [sequence.description for sequence in bundle.plan.sequences[-3:]] == [
         "publish catalogue dictionaries and installations",
         "publish item registry last",
-        "refresh the Weaver Lakehouse SQL endpoint after catalogue DML",
+        "refresh the Weaver Lakehouse SQL endpoint",
     ]
     registry = bundle.plan.sequences[-2]
     assert all(
@@ -880,7 +880,7 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     assert len(physical) == 11
     assert (
         bundle.plan.sequences[-1].description
-        == "refresh the Weaver Lakehouse SQL endpoint after catalogue DML"
+        == "refresh the Weaver Lakehouse SQL endpoint"
     )
     assert bundle.plan.sequences[-2].description == "publish item registry last"
     assert bundle.plan.targets[0].logical_item_name == "_weaver"

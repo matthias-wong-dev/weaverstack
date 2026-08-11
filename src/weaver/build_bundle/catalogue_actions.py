@@ -297,7 +297,7 @@ def _control_refresh_stage(control_target) -> PlannedStage:
         phase=CATALOGUE,
         index=3,
         slug="refresh-control-endpoint",
-        description="refresh the Weaver Lakehouse SQL endpoint after catalogue DML",
+        description="refresh the Weaver Lakehouse SQL endpoint",
         batches=(
             BuildBatch(
                 id="refresh-control-endpoint",

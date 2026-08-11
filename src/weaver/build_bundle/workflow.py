@@ -636,10 +636,15 @@ def read_target_inventories(
     # be: they share one crossing, which is one observation of one moment rather
     # than several of several (AGENTS.md, "one state transition, one evidence
     # payload"). So they are named together, honestly, as the one read they are.
+    #
+    # Each line says what it is doing, not just what it is doing it to. Children
+    # print above their parent, so a bare "Warehouse/Reporting" arrives before
+    # the "Read target inventories" it belongs to and reads as a stray line
+    # under the Task heading.
     for binding in bindings.entries:
         target = binding.to_bound_target()
         if target.kind == WAREHOUSE_TARGET:
-            with session.substep(str(binding.item)):
+            with session.substep(f"Read {target.display} inventory"):
                 sql = supplied_sql.get(binding.item)
                 if sql is None:
                     if workspace is None:
@@ -656,8 +661,9 @@ def read_target_inventories(
             delta.append((binding.item, target))
 
     if delta:
-        named = ", ".join(str(item) for item, _target in delta)
-        with session.substep(named):
+        named = ", ".join(target.display for _item, target in delta)
+        plural = "inventories" if len(delta) > 1 else "inventory"
+        with session.substep(f"Read {named} {plural}"):
             observed = _lakehouse_inventories(
                 [target for _item, target in delta],
                 session=session,

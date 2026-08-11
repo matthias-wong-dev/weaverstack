@@ -421,3 +421,23 @@ def test_logical_timing_and_transport_timing_are_kept_apart(session):
     assert [frame.name for frame in session.timings] == ["Build"]
     assert "livy.submit" in session.telemetry.measures
     assert "Build" not in session.telemetry.measures
+
+
+def test_a_child_line_says_what_it_is_doing_not_only_what_to():
+    """Children print above their parent, so a bare object name arrives before
+    the Step it belongs to and reads as a stray line under the Task.
+
+    This is the roll-up's one cost, and the fix is in the naming rather than in
+    the layout: a line that carries its own verb needs no heading above it.
+    """
+
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Build"):
+            with session.step("Read target inventories"):
+                with session.substep("Read Warehouse/Reporting inventory"):
+                    pass
+
+    lines = [line for line in _screen(out.getvalue()) if line.strip()]
+    first_child = lines[1]
+    assert first_child.strip().startswith("Read Warehouse/Reporting")

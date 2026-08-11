@@ -318,35 +318,24 @@ _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
 
 
-def _target_name(bound) -> str:
-    """A target as a person names it: ``Lakehouse/Sales``.
+def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
+    """What this sequence is doing, and which items it is doing it to.
 
-    ``bound.id`` is the manifest-local identifier, and it reads like one —
-    ``Lakehouse-_weaver--lakehouse-Weaver``. It is exactly right for a batch to
-    name a target with and exactly wrong on a line someone is watching.
+    The planner's own description, capitalised, with the targets it touches
+    after it. Both halves earn their place: several sequences share a
+    description — a dependency layer is built once per layer — and the target is
+    what tells them apart.
     """
 
-    kind = (bound.kind or "").strip()
-    return f"{kind.title()}/{bound.name}" if kind else str(bound.name)
-
-
-def _sentence(description: str) -> str:
-    """A planner's description, capitalised for the start of a line."""
-
-    text = (description or "").strip()
-    return text[:1].upper() + text[1:] if text else "Install"
-
-
-def _batch_targets(sequence: BuildSequence, resolved: dict) -> str | None:
-    """Which targets this sequence touches, for the frame's detail."""
-
+    text = (sequence.description or "").strip()
+    said = text[:1].upper() + text[1:] if text else "Install"
     names: list[str] = []
     for batch in sequence.batches:
         target = resolved.get(batch.target_id)
-        name = _target_name(target.bound) if target is not None else batch.target_id
+        name = target.bound.display if target is not None else batch.target_id
         if name not in names:
             names.append(name)
-    return ", ".join(names) or None
+    return f"{said}: {', '.join(names)}" if names else said
 
 
 def _run_batch(
@@ -396,9 +385,10 @@ def _run_sequence(
     # it built these, and nothing was showing it. A batch apiece described its
     # executors instead — "Lakehouse/Weaver: views" for what is plainly the
     # catalogue being updated — which is the mechanism dressed up as an answer.
-    with installer.session.substep(
-        _sentence(sequence.description), _batch_targets(sequence, resolved)
-    ):
+    # The target belongs on the line, not in the detail. "Build dependency
+    # layer" appears once per layer, so four identical lines with four different
+    # durations told a reader that four things happened and nothing about which.
+    with installer.session.substep(_sequence_label(sequence, resolved)):
         for batch in sequence.batches:
             target = resolved[batch.target_id]
             context = InstallationContext(

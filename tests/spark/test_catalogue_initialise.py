@@ -279,7 +279,7 @@ def test_registry_is_published_before_the_local_control_refresh(initialised):
     ]
     assert descriptions[-2:] == [
         "publish item registry last",
-        "refresh the Weaver Lakehouse SQL endpoint after catalogue DML",
+        "refresh the Weaver Lakehouse SQL endpoint",
     ]
     by_description = {
         sequence.description: sequence
@@ -290,7 +290,7 @@ def test_registry_is_published_before_the_local_control_refresh(initialised):
     # skipped rather than pretended.
     assert (
         by_description[
-            "refresh the Weaver Lakehouse SQL endpoint after catalogue DML"
+            "refresh the Weaver Lakehouse SQL endpoint"
         ].status
         == "skipped"
     )
