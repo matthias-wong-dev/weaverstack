@@ -373,10 +373,18 @@ class _Concurrent:
         return {"ran": action.id}
 
 
-def test_independent_tsql_actions_in_one_batch_run_at_once(tmp_path):
-    """The manifest already says these are independent units against one
-    target, so running them together reorders nothing a barrier was
-    protecting — it stops a Warehouse's round trips being paid end to end."""
+def test_actions_in_a_batch_run_one_at_a_time(tmp_path):
+    """They ran concurrently for one commit, and a real Warehouse said no.
+
+    The manifest calls a batch's actions independent units, which is true of
+    *Weaver's* ordering and says nothing about the database's. Concurrent DDL
+    and DML against one Warehouse contended on catalogue metadata and on the
+    rows they touched, and Fabric's snapshot isolation turned that into aborted
+    transactions:
+
+        Transaction (Process ID 55) was deadlocked on lock resources
+        Snapshot isolation transaction aborted due to update conflict
+    """
 
     bundle, store = _tsql_batch(tmp_path, 4)
     executor = _Concurrent()
@@ -384,40 +392,11 @@ def test_independent_tsql_actions_in_one_batch_run_at_once(tmp_path):
     report = given_installer(store=store, executors={"tsql": executor}).install(bundle)
 
     assert report.status == SUCCEEDED
-    assert executor.peak > 1, "T-SQL actions ran one after another"
+    assert executor.peak == 1, "actions in a batch overlapped"
 
 
-def test_results_come_back_in_manifest_order_however_they_finished(tmp_path):
-    """A report that reordered itself by completion would make two runs of one
-    bundle incomparable."""
-
-    bundle, store = _tsql_batch(tmp_path, 4)
-
-    report = given_installer(
-        store=store, executors={"tsql": _Concurrent()}
-    ).install(bundle)
-
-    assert [result.action_id for result in report.action_results()] == [
-        "a0",
-        "a1",
-        "a2",
-        "a3",
-    ]
-
-
-def test_one_action_alone_needs_no_pool(tmp_path):
-    bundle, store = _tsql_batch(tmp_path, 1)
-    executor = _Concurrent()
-
-    report = given_installer(store=store, executors={"tsql": executor}).install(bundle)
-
-    assert report.status == SUCCEEDED
-    assert executor.peak == 1
-
-
-def test_a_failure_among_parallel_actions_fails_the_sequence(tmp_path):
-    """Concurrency does not change what a failure means. The sequence barrier
-    is still what stops anything downstream."""
+def test_a_failure_in_a_batch_fails_the_sequence(tmp_path):
+    """The sequence barrier is what stops anything downstream."""
 
     bundle, store = _tsql_batch(tmp_path, 4)
 

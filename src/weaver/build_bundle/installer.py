@@ -292,41 +292,29 @@ def _epoch(started: datetime) -> str:
     return started.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
-#: Executors whose actions may run at the same time as each other.
+#: Actions within a batch run one at a time.
 #:
-#: T-SQL only, and deliberately. A batch names one target and its actions are
-#: independent units by the manifest's own contract, so concurrency here does
-#: not reorder anything a sequence barrier was protecting. What stops this being
-#: "parallelise everything" is that the others do not benefit the same way: a
-#: Spark statement's concurrency is the Fabric session's business rather than
-#: ours, and OneLake writes and REST calls are a later measurement, not an
-#: assumption.
-PARALLEL_EXECUTORS = frozenset({"tsql", "tsql_batch"})
+#: They were briefly run concurrently, on the reasoning that a batch names one
+#: target and the manifest calls its actions independent units — so concurrency
+#: could not reorder anything a sequence barrier was protecting. That reasoning
+#: was about *Weaver's* ordering and said nothing about the database's, and a
+#: real Warehouse answered:
+#:
+#: .. code-block:: text
+#:
+#:     Transaction (Process ID 55) was deadlocked on lock resources
+#:     Snapshot isolation transaction aborted due to update conflict
+#:
+#: Independent in dependency order is not independent in lock order. Concurrent
+#: DDL and DML against one Warehouse contend on catalogue metadata and on the
+#: rows they touch, and Fabric's snapshot isolation turns that contention into
+#: aborted transactions rather than waiting.
+#:
+#: Widening this again needs a design for *that* problem — retry on deadlock, or
+#: a partition of actions proven not to contend — and a measurement showing it
+#: is worth the complexity. It was not measurably faster on the estate that
+#: broke.
 
-#: How many at once when nothing says otherwise. Bounded rather than unbounded:
-#: a Warehouse is a server with a connection pool, not a thread sink.
-DEFAULT_PARALLEL_WORKERS = 4
-
-
-def _parallel_workers(installer: "Installer", target: ResolvedTarget) -> int:
-    """How wide this target may go, from its own configuration if it says.
-
-    Per target, because a Warehouse's capacity is a property of that Warehouse —
-    which is exactly what `execution.parallel_workers` on a configured target is
-    already for.
-    """
-
-    workspace = installer.workspace
-    declared = None
-    warehouses = getattr(workspace, "warehouses", None) or {}
-    entry = warehouses.get(target.bound.name) if hasattr(warehouses, "get") else None
-    execution = getattr(entry, "execution", None)
-    if execution is not None:
-        declared = execution.parallel_workers
-    if declared is None:
-        execution = getattr(workspace, "execution", None)
-        declared = getattr(execution, "parallel_workers", None)
-    return max(1, declared or DEFAULT_PARALLEL_WORKERS)
 
 
 def _run_batch(
@@ -352,8 +340,6 @@ def _run_batch(
     anything downstream.
     """
 
-    from concurrent.futures import ThreadPoolExecutor
-
     crossing = [action for action in batch.actions if _crosses(action, installer)]
     answers: dict = {}
     started = _now()
@@ -365,27 +351,7 @@ def _run_batch(
             return _crossed_result(action, answers.get(action.id), batch.target_id, started)
         return _run_action(action, batch, context, bundle, installer)
 
-    concurrent = [
-        action
-        for action in batch.actions
-        if action.executor in PARALLEL_EXECUTORS and action not in crossing
-    ]
-    if len(concurrent) < 2:
-        return [run(action) for action in batch.actions]
-
-    workers = min(_parallel_workers(installer, context.target), len(concurrent))
-    results: dict[str, ActionResult] = {}
-    with ThreadPoolExecutor(
-        max_workers=workers, thread_name_prefix="weaver-install"
-    ) as pool:
-        futures = {pool.submit(run, action): action for action in concurrent}
-        for future, action in futures.items():
-            results[action.id] = future.result()
-
-    ordered: list[ActionResult] = []
-    for action in batch.actions:
-        ordered.append(results[action.id] if action.id in results else run(action))
-    return ordered
+    return [run(action) for action in batch.actions]
 
 
 def _run_sequence(
