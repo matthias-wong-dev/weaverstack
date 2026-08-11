@@ -28,7 +28,7 @@ route at a time and let the timings say what to widen.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
@@ -535,24 +535,47 @@ def _run_crossed(
         ),
         workspace=workspace,
     )
-    return {answer["id"]: answer for answer in answered}
+    running = 0.0
+    placed = {}
+    for answer in answered:
+        placed[answer["id"]] = {**answer, "offset": running}
+        running += float(answer.get("seconds") or 0.0)
+    return placed
 
 
 def _crossed_result(
-    action: InstallAction, answer: dict | None, target_id: str, started: datetime
+    action: InstallAction,
+    answer: dict | None,
+    target_id: str,
+    started: datetime,
 ) -> ActionResult:
-    """One remote answer, recorded as the local result shape."""
+    """One remote answer, recorded as the local result shape.
 
-    finished = _now()
+    The duration is the far side's own measurement of *this action*, not the
+    submission's. Stamping every action in a batch with the batch's elapsed time
+    was the first attempt and it was worse than useless: six actions sharing one
+    trip each appeared to have taken the whole trip, so the numbers a reader
+    uses to find the slow one all said the same thing.
+
+    ``started_at`` places that duration on the local timeline by accumulating
+    the offsets the far side reported, so the actions in a batch read in order
+    and their spans do not overlap. It is the remote clock's *duration* on the
+    local clock's *origin*, which is the honest composition of what each side
+    can actually see.
+    """
+
+    seconds = float((answer or {}).get("seconds") or 0.0)
+    offset = float((answer or {}).get("offset") or 0.0)
+    began = started + timedelta(seconds=offset)
     common = dict(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
         source_path=action.source_path,
         target_id=target_id,
         executor=action.executor,
-        started_at=started,
-        finished_at=finished,
-        duration_seconds=(finished - started).total_seconds(),
+        started_at=began,
+        finished_at=began + timedelta(seconds=seconds),
+        duration_seconds=seconds,
     )
     if answer is None:
         return ActionResult(

@@ -36,6 +36,7 @@ shipping an archive: the big bytes take the short path.
 from __future__ import annotations
 
 import base64
+import time
 
 
 def install_actions(
@@ -96,6 +97,11 @@ def install_actions(
     for entry in actions:
         frozen = InstallAction.from_mapping(entry["action"])
         payload = entry.get("payload")
+        # Timed here, per action. The near side cannot see inside one
+        # submission, so a batch that reported only its own duration would give
+        # every action in it the whole batch's time — which is precisely the
+        # kind of number the timing model exists to stop people believing.
+        started = time.monotonic()
         try:
             executor = registry.get(frozen.executor)
             if executor is None:
@@ -112,19 +118,31 @@ def install_actions(
             answers.append(
                 {
                     "id": frozen.id,
+                    "seconds": time.monotonic() - started,
                     "failed": True,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc),
                 }
             )
             continue
+        seconds = time.monotonic() - started
         if isinstance(execution, SkippedExecution):
             answers.append(
-                {"id": frozen.id, "skipped": True, "details": execution.details}
+                {
+                    "id": frozen.id,
+                    "seconds": seconds,
+                    "skipped": True,
+                    "details": execution.details,
+                }
             )
         else:
             answers.append(
-                {"id": frozen.id, "skipped": False, "details": execution or None}
+                {
+                    "id": frozen.id,
+                    "seconds": seconds,
+                    "skipped": False,
+                    "details": execution or None,
+                }
             )
     return answers
 
