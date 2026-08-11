@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import json
 
 import pytest
@@ -58,10 +60,25 @@ def _action() -> InstallAction:
 
 
 def _local_context(tmp_path, *, resolver=None, store=None):
-    destination = _target(DESTINATION_TARGET_ID, "Curated_Dev")
+    from weaver.spark import local_destination
+
+    # With a Spark destination, as a real Lakehouse target resolves to. Without
+    # one an alias in it cannot even be *named*, which used to go unnoticed
+    # because the discovery wait was skipped whenever there was no Spark session.
+    destination = replace(
+        _target(DESTINATION_TARGET_ID, "Curated_Dev"),
+        destination=local_destination(
+            item="Curated_Dev", tables_root=str(tmp_path / "Curated_Dev" / "Tables")
+        ),
+    )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
     return InstallationContext(
         spark=None,
+        # A host that can ask Spark and finds the alias readable at once. The
+        # Installer supplies this on every host, so a context without it is one
+        # nobody would build in production — and the executor now says so rather
+        # than skipping the wait.
+        spark_sql=lambda statement, exact_case=False: [],
         resolver=resolver
         or LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")),
         store=store or FilesystemStore(),
@@ -185,31 +202,33 @@ class _Conf:
 
 
 class _LateSpark:
-    """A session where the shortcut is not readable for the first few tries.
+    """Spark where the shortcut is not readable for the first few tries.
 
     This is what Fabric does: the shortcut is created synchronously and discovered
     asynchronously, and in between the Lakehouse reports the name as neither a view
     nor a table.
+
+    Doubled as the *capability* the executor asks through rather than as a Spark
+    session, because that is now the seam: the alias executor stays on whichever
+    host is installing and only the question crosses. A double shaped like a
+    session would be testing an arrangement the product no longer has.
     """
 
     def __init__(self, failures: int, events=None):
         self.remaining = failures
         self.statements: list[str] = []
+        self.exact_case: list[bool] = []
         self.conf = _Conf()
         self.events = events if events is not None else []
 
-    def sql(self, statement):
+    def __call__(self, statement, *, exact_case: bool = False):
         self.statements.append(statement)
+        self.exact_case.append(exact_case)
         self.events.append("read")
         if self.remaining > 0:
             self.remaining -= 1
             raise RuntimeError("requirement failed: it's neither a view nor a table")
-
-        class _Result:
-            def collect(self):
-                return []
-
-        return _Result()
+        return []
 
 
 def _addressable_context(tmp_path, spark, resolver):
@@ -230,6 +249,7 @@ def _addressable_context(tmp_path, spark, resolver):
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
     return InstallationContext(
         spark=spark,
+        spark_sql=spark,
         resolver=resolver,
         store=FilesystemStore(),
         target=destination,
@@ -370,3 +390,55 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
         "create or alter view [Rpt].[A] as select 1 as x;",
         "create or alter view [Rpt].[B] as select 1 as x;",
     ]
+
+
+# --- where each half of an alias runs -----------------------------------------
+
+
+def test_creating_a_shortcut_needs_no_spark_at_all():
+    """The half that is REST stays wherever the Installer is.
+
+    Creating a OneLake shortcut is a Fabric API call and reaches the workspace
+    from a desktop directly. Only the *readability probe* needs Spark, which is
+    why this executor is not marked `needs_spark`: marking it would send the
+    REST call into the session for no reason.
+    """
+
+    from weaver.build_bundle.executors.alias import AliasExecutor
+
+    assert not getattr(AliasExecutor, "needs_spark", False)
+
+
+def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
+    """A desktop has no Spark session and must still wait for discovery.
+
+    The guard used to be `context.spark is not None`, so an install driven from
+    a desktop skipped the wait entirely — and the next statement to read the
+    alias would fail with "neither a view nor a table".
+    """
+
+    asked = _LateSpark(failures=1)
+    context = _addressable_context(tmp_path, asked, _ShortcutResolver())
+    # No Spark session anywhere: exactly a desktop.
+    context = replace(context, spark=None)
+
+    AliasExecutor().execute(_action(), _payload(), context)
+
+    assert asked.statements, "the discovery wait was skipped without a Spark session"
+    assert all("LIMIT 0" in statement for statement in asked.statements)
+
+
+def test_the_probe_carries_weavers_identifier_case(tmp_path):
+    """The scope has to travel with the statement: a desktop has no Spark to
+    set a conf on, and a probe analysed under the session's default case is a
+    different probe."""
+
+    asked = _LateSpark(failures=0)
+    context = replace(
+        _addressable_context(tmp_path, asked, _ShortcutResolver()),
+        spark=None,
+    )
+
+    AliasExecutor().execute(_action(), _payload(), context)
+
+    assert asked.exact_case and all(asked.exact_case)
