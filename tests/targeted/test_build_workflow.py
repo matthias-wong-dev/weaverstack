@@ -330,3 +330,65 @@ def test_an_archive_is_persisted_where_it_was_asked_for(estate, tmp_path):
 
     assert result.archive == archive
     assert archive.path.is_file()
+
+
+# --- a capability offered is not a capability acquired -------------------------
+
+
+def test_installing_through_fake_executors_never_starts_spark(estate, monkeypatch):
+    """The invariant that keeps plain `pytest` free of Java.
+
+    A ConsoleSession over a LocalWorkspace defines Spark as a lazy Resource, and
+    the Installer used to defeat that by evaluating `installer.spark` while
+    assembling every batch's context. So a build through recording executors —
+    which touch no Spark at all — still started a JVM, and this module, which is
+    deliberately not marked `spark`, needed one.
+
+    Asserted by making acquisition impossible rather than by handing in a fake
+    Spark: a test that supplied one would pass whether or not the production
+    path was lazy, which is the whole thing being guarded.
+    """
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError(
+            "installing through executors that need no Spark acquired a Spark session"
+        )
+
+    monkeypatch.setattr("weaver.spark.local_delta_session", refuse)
+    monkeypatch.setattr(
+        "weaver.session.console.ConsoleScope._acquire_local_spark", refuse
+    )
+
+    result = build(estate)
+
+    assert result.report.status == "succeeded"
+
+
+def test_a_real_spark_executor_still_gets_the_sessions_own_spark(estate):
+    """The other half: deferring acquisition must not stop it happening.
+
+    An executor that asks for Spark gets the Session's — the same resource a
+    second executor would get — rather than a proxy that quietly stands in for
+    one.
+    """
+
+    seen = []
+
+    class Asking:
+        name = "spark_sql"
+
+        def execute(self, action, payload, context):
+            # Touching it is what acquires it, which is the point.
+            seen.append(context.spark.sparkVersionOrSomething)
+            return {"ran": action.id}
+
+    class Marker:
+        sparkVersionOrSomething = "the session's own"
+
+    estate["session"].scope(estate["session"].workspace).local_spark = type(
+        "R", (), {"get": staticmethod(lambda: (Marker(), None))}
+    )()
+
+    build(estate, executors={**estate["executors"], "spark_sql": Asking()})
+
+    assert seen and all(value == "the session's own" for value in seen)

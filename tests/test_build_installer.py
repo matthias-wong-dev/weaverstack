@@ -296,3 +296,158 @@ def test_a_host_with_no_spark_still_says_so_without_starting_anything():
             raise AssertionError("a host that executes elsewhere was asked for Spark")
 
     assert Installer(Elsewhere()).spark_when_needed() is None
+
+
+# --- concurrency within a batch -----------------------------------------------
+
+
+def _tsql_batch(tmp_path, count: int):
+    """One batch of independent T-SQL actions against one Warehouse target."""
+
+    import hashlib
+
+    target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
+    payloads = {}
+    actions = []
+    for index in range(count):
+        path = f"payload/tsql/{index}.sql"
+        data = f"select {index}\n".encode("utf-8")
+        payloads[path] = data
+        actions.append(
+            InstallAction(
+                id=f"a{index}",
+                kind="build_procedure",
+                resource_node_id=None,
+                executor="tsql",
+                payload=path,
+                payload_sha256=hashlib.sha256(data).hexdigest(),
+            )
+        )
+    plan = BuildPlan(
+        format_version=1,
+        bundle_id="",
+        repository_name="MyRepo",
+        repository_signature="sig",
+        targets=(target,),
+        sequences=(
+            BuildSequence(
+                number=10,
+                description="warehouse work",
+                batches=(
+                    BuildBatch(id="b", target_id=target.id, actions=tuple(actions)),
+                ),
+            ),
+        ),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    store = FilesystemStore()
+    location = Location(str(tmp_path / "tsql-bundle"))
+    write_bundle(location, plan=plan, payloads=payloads, store=store)
+    return load_bundle(location, store=store), store
+
+
+class _Concurrent:
+    """Records how many actions were in flight at once."""
+
+    name = "tsql"
+
+    def __init__(self):
+        import threading
+
+        self.lock = threading.Lock()
+        self.running = 0
+        self.peak = 0
+        self.calls = []
+
+    def execute(self, action, payload, context):
+        import time
+
+        with self.lock:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+            self.calls.append(action.id)
+        time.sleep(0.05)
+        with self.lock:
+            self.running -= 1
+        return {"ran": action.id}
+
+
+def test_independent_tsql_actions_in_one_batch_run_at_once(tmp_path):
+    """The manifest already says these are independent units against one
+    target, so running them together reorders nothing a barrier was
+    protecting — it stops a Warehouse's round trips being paid end to end."""
+
+    bundle, store = _tsql_batch(tmp_path, 4)
+    executor = _Concurrent()
+
+    report = given_installer(store=store, executors={"tsql": executor}).install(bundle)
+
+    assert report.status == SUCCEEDED
+    assert executor.peak > 1, "T-SQL actions ran one after another"
+
+
+def test_results_come_back_in_manifest_order_however_they_finished(tmp_path):
+    """A report that reordered itself by completion would make two runs of one
+    bundle incomparable."""
+
+    bundle, store = _tsql_batch(tmp_path, 4)
+
+    report = given_installer(
+        store=store, executors={"tsql": _Concurrent()}
+    ).install(bundle)
+
+    assert [result.action_id for result in report.action_results()] == [
+        "a0",
+        "a1",
+        "a2",
+        "a3",
+    ]
+
+
+def test_one_action_alone_needs_no_pool(tmp_path):
+    bundle, store = _tsql_batch(tmp_path, 1)
+    executor = _Concurrent()
+
+    report = given_installer(store=store, executors={"tsql": executor}).install(bundle)
+
+    assert report.status == SUCCEEDED
+    assert executor.peak == 1
+
+
+def test_a_failure_among_parallel_actions_fails_the_sequence(tmp_path):
+    """Concurrency does not change what a failure means. The sequence barrier
+    is still what stops anything downstream."""
+
+    bundle, store = _tsql_batch(tmp_path, 4)
+
+    class Failing(_Concurrent):
+        def execute(self, action, payload, context):
+            super().execute(action, payload, context)
+            if action.id == "a2":
+                raise RuntimeError("boom a2")
+            return {"ran": action.id}
+
+    report = given_installer(store=store, executors={"tsql": Failing()}).install(bundle)
+
+    by_id = {result.action_id: result for result in report.action_results()}
+    assert report.status == FAILED
+    assert by_id["a2"].status == FAILED
+    # The others were in flight and their results are true, so they are reported
+    # rather than rewritten as skipped.
+    assert by_id["a0"].status == SUCCEEDED
+
+
+def test_spark_actions_are_not_run_concurrently(tmp_path):
+    """A Spark statement's concurrency is the Fabric session's business, not
+    ours. Widening this is a measurement, not an assumption."""
+
+    location, store = _bundle(tmp_path)
+    recorder = _Concurrent()
+    recorder.name = "spark_sql"
+
+    given_installer(store=store, executors={"spark_sql": recorder}).install(
+        load_bundle(location, store=store)
+    )
+
+    assert recorder.peak == 1

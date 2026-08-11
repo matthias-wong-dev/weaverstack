@@ -11,11 +11,19 @@ Build is not load: the installer runs generated create DDL, creates folder
 directories, deploys an item's runtime code, and reconciles the target — it never
 executes an object's code, and it has no route back to the source repository at
 all, because a bundle carries its outputs rather than a second copy of its
-inputs. Concurrency starts conservatively:
-sequences are serial and actions run serially within a batch, because one shared
-local Spark session gives no useful parallel DDL. The manifest still models
-independent actions, so a Fabric installer can add session concurrency later
-without changing bundle semantics.
+inputs.
+
+**Concurrency follows the manifest rather than guessing.** Sequences stay
+serial, because a sequence is a barrier and that is what it is for. Within a
+batch the manifest already says the actions are independent units against one
+target, so T-SQL among them runs at once — a Warehouse's round trips are the
+thing worth not paying end to end, and running them together reorders nothing a
+barrier was protecting.
+
+Only T-SQL. A Spark statement's concurrency is the Fabric session's business
+rather than ours, and OneLake writes and REST calls are a later measurement
+rather than an assumption. The plan's instruction is to decompose one capability
+route at a time and let the timings say what to widen.
 """
 
 from __future__ import annotations
@@ -49,15 +57,17 @@ from .targets import WAREHOUSE_TARGET, BoundTarget
 REPORT_FILENAME = "install-report.yml"
 
 
-class _DeferredSpark:
-    """A Spark session that is started by the first executor that uses it.
+class _Deferred:
+    """A capability acquired by the first executor that uses it.
 
-    Deliberately not a general lazy proxy. It exists so that "this host has a
-    Spark session" and "this host has *started* one" stop being the same
-    question — the first is what a batch needs to know when it is handed its
-    capabilities, and the second costs seconds and is answerable later.
+    A batch is handed its capabilities up front, and the expensive ones — a
+    Spark session, a Warehouse connection — should not be paid for by actions
+    that never touch them. This exists so that "this host has one" and "this
+    host has *started* one" stop being the same question: the first is what a
+    batch needs to know when it is assembled, the second is answerable later.
 
-    Everything is forwarded, so an executor writes ``context.spark.sql(...)``
+    Deliberately not a general lazy proxy. Everything is forwarded, so an
+    executor writes ``context.spark.sql(...)`` or ``context.sql.execute(...)``
     exactly as before and cannot tell the difference.
     """
 
@@ -76,8 +86,8 @@ class _DeferredSpark:
         return getattr(self._resolved(), name)
 
     def __repr__(self) -> str:
-        started = object.__getattribute__(self, "_session")
-        return "<Spark session, not yet started>" if started is None else repr(started)
+        acquired = object.__getattribute__(self, "_session")
+        return "<not yet acquired>" if acquired is None else repr(acquired)
 
 
 class Installer:
@@ -147,17 +157,25 @@ class Installer:
 
         if not self.session.executes_here(self.workspace):
             return None
-        return _DeferredSpark(lambda: self.session.spark(self.workspace))
+        return _Deferred(lambda: self.session.spark(self.workspace))
 
     def sql_for(self, bound: BoundTarget) -> Any:
-        """The Warehouse connection for a batch, from the Session that owns it."""
+        """The Warehouse connection for a batch, from the Session that owns it.
+
+        Deferred for the reason Spark is: a connection is opened by the first
+        action that runs a statement, not by assembling the batch that might.
+        ``None`` still means *this target is not a Warehouse*, which is a
+        structural fact and costs nothing to answer.
+        """
 
         if bound.kind != WAREHOUSE_TARGET:
             return None
         from ..targets import WarehouseTarget
 
-        return self.session.sql_executor(
-            WarehouseTarget(ItemRef(bound.item_id)), workspace=self.workspace
+        return _Deferred(
+            lambda: self.session.sql_executor(
+                WarehouseTarget(ItemRef(bound.item_id)), workspace=self.workspace
+            )
         )
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
@@ -255,6 +273,100 @@ def _epoch(started: datetime) -> str:
     return started.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
+#: Executors whose actions may run at the same time as each other.
+#:
+#: T-SQL only, and deliberately. A batch names one target and its actions are
+#: independent units by the manifest's own contract, so concurrency here does
+#: not reorder anything a sequence barrier was protecting. What stops this being
+#: "parallelise everything" is that the others do not benefit the same way: a
+#: Spark statement's concurrency is the Fabric session's business rather than
+#: ours, and OneLake writes and REST calls are a later measurement, not an
+#: assumption.
+PARALLEL_EXECUTORS = frozenset({"tsql", "tsql_batch"})
+
+#: How many at once when nothing says otherwise. Bounded rather than unbounded:
+#: a Warehouse is a server with a connection pool, not a thread sink.
+DEFAULT_PARALLEL_WORKERS = 4
+
+
+def _parallel_workers(installer: "Installer", target: ResolvedTarget) -> int:
+    """How wide this target may go, from its own configuration if it says.
+
+    Per target, because a Warehouse's capacity is a property of that Warehouse —
+    which is exactly what `execution.parallel_workers` on a configured target is
+    already for.
+    """
+
+    workspace = installer.workspace
+    declared = None
+    warehouses = getattr(workspace, "warehouses", None) or {}
+    entry = warehouses.get(target.bound.name) if hasattr(warehouses, "get") else None
+    execution = getattr(entry, "execution", None)
+    if execution is not None:
+        declared = execution.parallel_workers
+    if declared is None:
+        execution = getattr(workspace, "execution", None)
+        declared = getattr(execution, "parallel_workers", None)
+    return max(1, declared or DEFAULT_PARALLEL_WORKERS)
+
+
+def _run_batch(
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+) -> list[ActionResult]:
+    """One batch's actions, in parallel where that is safe and worth it.
+
+    The manifest already says these are independent — one target, one batch, and
+    "actions are independent units, each reported on its own". So running the
+    T-SQL among them at once reorders nothing that a barrier was protecting; it
+    only stops a Warehouse's round trips being paid end to end.
+
+    Results come back in manifest order however they finished, because a report
+    that reordered itself by completion would make two runs of one bundle
+    incomparable.
+
+    A failure does not cancel work already in flight. Those actions were going
+    to run anyway, their results are true, and reporting them is strictly more
+    than reporting that they were skipped — the *sequence* barrier is what stops
+    anything downstream.
+    """
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    concurrent = [
+        action
+        for action in batch.actions
+        if action.executor in PARALLEL_EXECUTORS
+    ]
+    if len(concurrent) < 2:
+        return [
+            _run_action(action, batch, context, bundle, installer)
+            for action in batch.actions
+        ]
+
+    workers = min(_parallel_workers(installer, context.target), len(concurrent))
+    results: dict[str, ActionResult] = {}
+    with ThreadPoolExecutor(
+        max_workers=workers, thread_name_prefix="weaver-install"
+    ) as pool:
+        futures = {
+            pool.submit(_run_action, action, batch, context, bundle, installer): action
+            for action in concurrent
+        }
+        for future, action in futures.items():
+            results[action.id] = future.result()
+
+    ordered: list[ActionResult] = []
+    for action in batch.actions:
+        if action.id in results:
+            ordered.append(results[action.id])
+        else:
+            ordered.append(_run_action(action, batch, context, bundle, installer))
+    return ordered
+
+
 def _run_sequence(
     sequence: BuildSequence,
     resolved: dict[str, ResolvedTarget],
@@ -277,14 +389,12 @@ def _run_sequence(
             targets=resolved,
             epoch=epoch,
         )
-        for action in batch.actions:
-            if failed:
-                action_results.append(_skipped_action(action, batch))
-                continue
-            result = _run_action(action, batch, context, bundle, installer)
-            action_results.append(result)
-            if result.status == FAILED:
-                failed = True
+        if failed:
+            action_results.extend(_skipped_action(one, batch) for one in batch.actions)
+            continue
+        results = _run_batch(batch, context, bundle, installer)
+        action_results.extend(results)
+        failed = any(result.status == FAILED for result in results)
 
     skipped = bool(action_results) and all(
         result.status == SKIPPED for result in action_results
