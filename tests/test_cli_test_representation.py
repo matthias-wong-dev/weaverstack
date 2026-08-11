@@ -261,7 +261,32 @@ def test_the_task_log_is_pointed_at(captured, capsys):
     )
     _run("Lakehouse/Sales")
 
-    assert "evidence:" in capsys.readouterr().out
+    assert "Logs:" in capsys.readouterr().out
+
+
+def test_a_onelake_task_log_is_offered_as_a_link_that_opens(captured, capsys):
+    """The DFS address is where Weaver wrote it; the portal is where you read it.
+
+    Pasting a ``onelake.dfs`` URL into a browser gets an authentication error,
+    so a line that looks like a helpful link and is not is worse than the raw
+    path — a reader tries it, it fails, and they stop trusting the line.
+    """
+
+    folder = (
+        "https://onelake.dfs.fabric.microsoft.com/ws-id/item-id"
+        "/Files/_/Log/task_date=2026-08-08/x.json"
+    )
+    captured["report"] = ValidationRunReport(
+        status=PASSED,
+        nodes=(_node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),),
+        task_log=folder,
+    )
+    _run("Lakehouse/Sales")
+
+    printed = capsys.readouterr().out
+    assert "app.fabric.microsoft.com/groups/ws-id/lakehouses/item-id" in printed
+    assert "selectedPath=Files%2F_%2FLog%2Ftask_date%3D2026-08-08%2Fx.json" in printed
+    assert "onelake.dfs" not in printed
 
 
 # --- dry run and strict reach file mode too ------------------------------------

@@ -112,10 +112,16 @@ class ConsoleSession(Session):
 
     # --- progress -----------------------------------------------------------
 
-    #: How wide the name column is before the duration. Wide enough for a
-    #: qualified object name at Sub-step depth, narrow enough to sit in an
-    #: eighty-column terminal with the duration still on the same line.
+    #: The narrowest the name column is ever allowed to be. The real width comes
+    #: from the terminal (see :meth:`_width`), because a fixed column is only
+    #: ever right for one estate: a name like
+    #: ``Warehouse/Reporting/Reporting.CustomerRevenuePresent`` runs past
+    #: fifty-two characters and shoves its own duration out of the column,
+    #: which loses the alignment that makes a list of durations scannable.
     PROGRESS_WIDTH = 52
+
+    #: Kept back from the terminal's own width so the duration never wraps.
+    DURATION_WIDTH = 8
 
     #: How often the live line redraws while work is in flight. Slow enough to
     #: cost nothing, fast enough that the elapsed figure is visibly moving —
@@ -180,8 +186,8 @@ class ConsoleSession(Session):
                 else:
                     mark = " "
                 print(
-                    f"{mark} {self._label(frame):<{max(self.PROGRESS_WIDTH - 2, 1)}}"
-                    f"{_duration(frame.elapsed):>8}",
+                    f"{mark} {self._label(frame):<{self._width() - 2}}"
+                    f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}",
                     file=stream,
                 )
                 if frame.kind == TASK:
@@ -194,6 +200,21 @@ class ConsoleSession(Session):
 
         return "  " * max(frame.depth - 1, 0) + frame.name
 
+    def _width(self) -> int:
+        """The name column, from the terminal, never below :attr:`PROGRESS_WIDTH`.
+
+        Read per line rather than cached: a terminal can be resized mid-run, and
+        the cost is one ``ioctl`` against work measured in seconds. When there is
+        no terminal to ask — piped, redirected, captured by pytest —
+        ``get_terminal_size`` answers with its 80-column default, which is the
+        right answer for a log file too.
+        """
+
+        import shutil
+
+        columns = shutil.get_terminal_size().columns
+        return max(self.PROGRESS_WIDTH, columns - self.DURATION_WIDTH - 1)
+
     # --- the live line ------------------------------------------------------
 
     def _paint(self, stream) -> None:
@@ -205,8 +226,8 @@ class ConsoleSession(Session):
         if frame is None:
             return
         text = (
-            f"⋯ {self._label(frame):<{max(self.PROGRESS_WIDTH - 2, 1)}}"
-            f"{_duration(frame.age):>8}"
+            f"⋯ {self._label(frame):<{self._width() - 2}}"
+            f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
         )
         stream.write("\r" + text)
         stream.flush()
@@ -270,6 +291,31 @@ class ConsoleSession(Session):
                 if not self._ticking:
                     return
                 self._erase(stream)
+                self._paint(stream)
+
+    def warn(self, message: str) -> None:
+        """A warning, on a line of its own, with the live line taken back first.
+
+        Both halves matter. The transient line is mid-write when a warning
+        arrives, so without the erase the two collide:
+
+        .. code-block:: text
+
+            ⋯   Read target inventories  40.0swarning: this console runs ...
+
+        And a warning that begins where the previous line left off is one a
+        reader's eye slides straight past, which for the version mismatch is
+        exactly the warning they needed.
+        """
+
+        stream = self._progress_stream()
+        if stream is not None:
+            with self._progress_lock:
+                self._erase(stream)
+                print(file=stream)
+        super().warn(message)
+        if stream is not None:
+            with self._progress_lock:
                 self._paint(stream)
 
     def stop_presenting(self) -> None:
@@ -359,26 +405,25 @@ class ConsoleSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
+        # No frame is opened here, deliberately. A crossing is *how* the caller's
+        # work happens, not a second thing that happened: framing it printed the
+        # program's own name immediately above the frame that asked for it —
+        #
+        #     dispatch_python                     33.5s
+        #   Load Sales.Customer                   33.5s
+        #
+        # — two lines, one duration, and the technical spelling first. The cost
+        # is still recorded, in telemetry, where a transport ledger belongs.
         scope = self.scope(workspace)
-        self.substep_started(program.name, program.detail)
-        try:
-            if scope.executes_here:
-                with self.telemetry.timing(f"python.{program.name}"):
-                    payload = program.call()
-            else:
-                scope.check_published_version(self.warn)
-                payload = scope.livy_run(
-                    program.source,
-                    name=program.name,
-                    timeout=timeout if timeout is not None else program.timeout,
-                )
-        except BaseException as exc:
-            # Reported and re-raised, whatever it was: an interrupt still ends
-            # the sub-step it interrupted, and still travels on.
-            self.substep_failed(program.name, exc)
-            raise
-        self.substep_completed(program.name)
-        return payload
+        if scope.executes_here:
+            with self.telemetry.timing(f"python.{program.name}"):
+                return program.call()
+        scope.check_published_version(self.warn)
+        return scope.livy_run(
+            program.source,
+            name=program.name,
+            timeout=timeout if timeout is not None else program.timeout,
+        )
 
     def execute_spark_sql(
         self,

@@ -180,7 +180,7 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
             file=sys.stderr,
         )
         return 1
-    if not _confirmed():
+    if not _confirmed(stream):
         # Somebody was asked and said no. Nothing went wrong.
         print("Nothing was run.")
         return 0
@@ -247,15 +247,31 @@ def _show(name: str, path: Path, entries: list[str]) -> None:
 
 
 def _interactive(stdin) -> bool:
-    """Whether there is somebody there to answer."""
+    """Whether there is somebody there to answer.
 
-    return stdin is sys.stdin and stdin.isatty()
+    A terminal, and nothing else. A pipe or a file is not somebody: the first
+    entry of a development composition is usually a wipe, and silence must never
+    be read as yes.
+    """
+
+    try:
+        return bool(stdin.isatty())
+    except (AttributeError, ValueError):
+        return False
 
 
-def _confirmed() -> bool:
-    """Explicit ``y``/``yes`` and nothing else, defaulting to no."""
+def _confirmed(stdin) -> bool:
+    """Explicit ``y``/``yes`` and nothing else, defaulting to no.
 
-    answer = input("Execute this sequence? [y/N] ")
+    Reads the stream it was given rather than calling ``input()``, which always
+    reads ``sys.stdin``. Passing a stream in and then asking a different one is
+    how a test proves a confirmation it never actually gave — and for the one
+    prompt that authorises a wipe, the stream that is checked for a terminal has
+    to be the stream that is read.
+    """
+
+    print("Execute this sequence? [y/N] ", end="", flush=True)
+    answer = stdin.readline()
     return answer.strip().lower() in {"y", "yes"}
 
 

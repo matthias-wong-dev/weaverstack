@@ -292,7 +292,7 @@ def _epoch(started: datetime) -> str:
     return started.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
-#: Actions within a batch run one at a time.
+#: Why actions within a batch run one at a time.
 #:
 #: They were briefly run concurrently, on the reasoning that a batch names one
 #: target and the manifest calls its actions independent units — so concurrency
@@ -314,7 +314,47 @@ def _epoch(started: datetime) -> str:
 #: a partition of actions proven not to contend — and a measurement showing it
 #: is worth the complexity. It was not measurably faster on the estate that
 #: broke.
+_WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
+
+
+#: What each executor puts in a target, in the words a person would use for it.
+#: Reporting names the work, not the mechanism: ``install.spark`` told a reader
+#: which transport carried something rather than what it was doing, and repeated
+#: seven times it said nothing at all.
+_WHAT_IT_INSTALLS = {
+    "alias": "aliases",
+    "folder": "folders",
+    "load_file": "files",
+    "spark_schema": "schemas",
+    "spark_sql": "views",
+    "spark_sql_batch": "views",
+    "spark_table": "tables",
+    "sql_endpoint_refresh": "the SQL endpoint",
+    "tsql": "procedures",
+    "tsql_batch": "procedures",
+}
+
+
+def _batch_description(batch: BuildBatch) -> str:
+    """A batch, described by what it installs rather than by how many actions.
+
+    Several executors in one batch are listed in the order the actions appear,
+    deduplicated, because that order is the plan's and reads as a sequence of
+    work. An executor nobody has named here falls back to its own name, which
+    keeps a new executor legible rather than invisible.
+    """
+
+    seen: list[str] = []
+    for action in batch.actions:
+        noun = _WHAT_IT_INSTALLS.get(action.executor, action.executor)
+        if noun not in seen:
+            seen.append(noun)
+    if not seen:
+        return "nothing"
+    if len(seen) == 1:
+        return seen[0]
+    return f"{', '.join(seen[:-1])} and {seen[-1]}"
 
 
 def _run_batch(
@@ -323,21 +363,15 @@ def _run_batch(
     bundle: BuildBundle,
     installer: "Installer",
 ) -> list[ActionResult]:
-    """One batch's actions, in parallel where that is safe and worth it.
+    """One batch's actions, one at a time.
 
-    The manifest already says these are independent — one target, one batch, and
-    "actions are independent units, each reported on its own". So running the
-    T-SQL among them at once reorders nothing that a barrier was protecting; it
-    only stops a Warehouse's round trips being paid end to end.
+    Serial, and the comment on :data:`_WHY_SERIAL` says why concurrency was
+    tried and taken back out. What *is* shared is a crossing: the actions that
+    need Spark go over together in one submission, because the submission is the
+    expensive part. Each still gets its own result, timing and status.
 
-    Results come back in manifest order however they finished, because a report
-    that reordered itself by completion would make two runs of one bundle
-    incomparable.
-
-    A failure does not cancel work already in flight. Those actions were going
-    to run anyway, their results are true, and reporting them is strictly more
-    than reporting that they were skipped — the *sequence* barrier is what stops
-    anything downstream.
+    Results come back in manifest order, because a report that reordered itself
+    would make two runs of one bundle incomparable.
     """
 
     crossing = [action for action in batch.actions if _crosses(action, installer)]
@@ -380,7 +414,15 @@ def _run_sequence(
         if failed:
             action_results.extend(_skipped_action(one, batch) for one in batch.actions)
             continue
-        results = _run_batch(batch, context, bundle, installer)
+        # The batch is the unit worth naming: it is one target and one kind of
+        # work, which is the level a reader can act on. An action apiece would
+        # be a wall of sub-second lines, and the whole install would be one
+        # opaque number.
+        with installer.session.substep(
+            f"{target.bound.id}: {_batch_description(batch)}",
+            f"{len(batch.actions)} action(s)",
+        ):
+            results = _run_batch(batch, context, bundle, installer)
         action_results.extend(results)
         failed = any(result.status == FAILED for result in results)
 
@@ -512,7 +554,7 @@ def _run_crossed(
     )
     answered = installer.session.execute_python(
         RemoteProgram(
-            name="install.spark",
+            name="install_actions",
             call=lambda: remote.install_actions(
                 session=installer.session, workspace=workspace, **arguments
             ),

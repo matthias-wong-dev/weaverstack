@@ -27,6 +27,7 @@ that fails on a slow machine and teaches everyone to widen the bound.
 from __future__ import annotations
 
 import io
+import os
 
 import pytest
 
@@ -269,11 +270,49 @@ def test_the_live_line_is_erased_and_leaves_no_trace_in_the_transcript():
             with session.step("Unbind catalogue claims"):
                 pass
 
-    assert [line for line in _screen(out.getvalue()) if line] == [
-        "Wipe",
-        "  Unbind catalogue claims                               0.0s",
-        "✓ Wipe                                                  0.0s",
-    ]
+    lines = [line for line in _screen(out.getvalue()) if line]
+    assert [line.split()[0] for line in lines] == ["Wipe", "Unbind", "✓"]
+    assert [line.split()[-1] for line in lines[1:]] == ["0.0s", "0.0s"]
+
+
+def test_durations_line_up_however_long_the_names_are(monkeypatch):
+    """A long object name must not shove its own duration out of the column.
+
+    ``Warehouse/Reporting/Reporting.CustomerRevenuePresent`` at Sub-step depth
+    runs past a fixed fifty-two-character column, and the duration that follows
+    lands wherever the name happened to end — which loses the alignment that
+    makes a column of durations scannable at all.
+    """
+
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "get_terminal_size", lambda *a: os.terminal_size((100, 24))
+    )
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Test"):
+            with session.step("Execute"):
+                with session.substep("Reporting.CustomerRevenuePresent"):
+                    pass
+                with session.substep("Short"):
+                    pass
+
+    timed = [line for line in _screen(out.getvalue()) if line.endswith("s")]
+    assert len({len(line) for line in timed}) == 1, timed
+
+
+def test_the_column_never_narrows_below_its_floor(monkeypatch):
+    """A very narrow terminal gets a wrapped line rather than a squashed one."""
+
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "get_terminal_size", lambda *a: os.terminal_size((20, 24))
+    )
+    session = ConsoleSession(progress=_Tty())
+    assert session._width() == ConsoleSession.PROGRESS_WIDTH
+    session.close()
 
 
 def test_the_elapsed_figure_moves_while_nothing_else_happens():

@@ -69,8 +69,40 @@ from .result import (
 from .state import RunState
 
 
+def node_label(node) -> str:
+    """What to call this node on screen: a verb and the thing it acts on.
+
+    ``node_id`` is an identifier and reads like one — ``load:Lakehouse/Sales/
+    Sales.Customer`` — which is right for a report that has to be matched up
+    later and wrong for a line someone is watching go by. The id is unchanged
+    and still what results carry; this is only what the frame is called.
+
+    The target comes along because two Lakehouses can hold the same object
+    name, and without it a reader watching a two-target run cannot tell which
+    ``Sales.Customer`` is in flight.
+    """
+
+    from .resolution import ENDPOINT_REFRESH
+
+    target = getattr(node, "physical_target", None)
+    if node.primitive_kind == ENDPOINT_REFRESH:
+        return f"Refresh the SQL endpoint for {target}"
+
+    what = node.logical_id
+    if what is None:
+        # Nothing logical to name — a barrier, or a node built straight from an
+        # id. The id is the only true answer, and inventing "Load None" would
+        # be worse than the identifier this is trying to improve on.
+        return node.node_id
+    name = getattr(getattr(what, "object_id", None), "qualified", None) or str(what)
+    # A load node's role is "load"; a validation carries its own kind — "Test",
+    # "Assumption" — so anything that is not a load is something being checked.
+    verb = "Load" if node.role == LOAD else "Check"
+    return f"{verb} {name} in {target}" if target is not None else f"{verb} {name}"
+
+
 @contextmanager
-def _node_substep(session, node_id: str):
+def _node_substep(session, node):
     """One node's timing frame, where there is a Session to record it on.
 
     A run-cycle test constructs a Runner with no Session at all — that is the
@@ -81,7 +113,7 @@ def _node_substep(session, node_id: str):
     if session is None or not hasattr(session, "substep"):
         yield None
         return
-    with session.substep(node_id) as frame:
+    with session.substep(node_label(node)) as frame:
         yield frame
 
 
@@ -458,7 +490,7 @@ class Runner:
         # from. The frame is marked failed from inside rather than by an
         # exception, because a failed node is a *result* here — the run records
         # what happened before it decides what to do about it.
-        with _node_substep(session, node.node_id) as frame:
+        with _node_substep(session, node) as frame:
             try:
                 returned = dispatch(
                     node,

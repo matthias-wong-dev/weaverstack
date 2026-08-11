@@ -25,6 +25,32 @@ import uuid
 from ..session.program import RemoteProgram
 
 
+#: How a dead interpreter announces itself. The Livy states Weaver already
+#: treats as "this session is finished" (``LivySession.active``), plus the
+#: resource layer's own word for a capability it could not hand over.
+_INTERPRETER_GONE = ("dead", "killed", "shutting_down", "error", "not usable")
+
+
+def _interpreter_is_gone(exc: BaseException) -> bool:
+    """Whether this failure means the scope was released by the session dying.
+
+    Matched on the error type first, because that is the structural answer, and
+    on the message only for :class:`~weaver.fabric.livy.LivyError`, which
+    reports the session's state as text. A cleanup failure that is *not* one of
+    these is a defect worth hearing about, so the default is False.
+    """
+
+    from ..fabric.livy import LivyError
+    from ..session.resources import ResourceError
+
+    if isinstance(exc, ResourceError):
+        return True
+    if isinstance(exc, LivyError):
+        message = str(exc).casefold()
+        return any(state in message for state in _INTERPRETER_GONE)
+    return False
+
+
 def open_runtime_scope(session, *, workspace=None):
     """The scope this run's Python primitives will be imported into.
 
@@ -38,15 +64,22 @@ def open_runtime_scope(session, *, workspace=None):
 
     if session is None:
         return RuntimeScope.new()
-    try:
-        here = session.executes_here(workspace)
-    except CommandError:
-        # A Session with no workspace to place itself against has no remote to
-        # reach into either, so the imports happen in this process. Positive
-        # knowledge is required to go the other way: a scope opened remotely by
-        # mistake would run the primitive somewhere the caller never named.
-        here = True
-    if here:
+
+    # A Session with no workspace to place itself against has no remote to reach
+    # into either, so the imports happen here. That is the *only* answer worth
+    # guessing at, and it is asked as its own question rather than inferred from
+    # whatever executes_here raises: catching every CommandError from that call
+    # turned a bad configuration or a closed Session into a local RuntimeScope,
+    # so a run that should have stopped instead started importing primitives in
+    # the console — reporting success against nothing the caller had named.
+    placed = getattr(session, "workspace_or_default", None)
+    if placed is not None:
+        try:
+            placed(workspace)
+        except CommandError:
+            return RuntimeScope.new()
+
+    if session.executes_here(workspace):
         return RuntimeScope.new()
     return RemoteScope.begin(session, workspace=workspace)
 
@@ -97,9 +130,23 @@ class RemoteScope:
     def close(self) -> None:
         """Release the far side's imports. Never fails a run that has finished.
 
-        A run that has produced its result must not then fail because the
-        cleanup call did — and if the Livy session is already gone, so is the
-        scope, which is the outcome ``end_run`` exists to reach.
+        Not failing is not the same as not noticing, and the two failures here
+        mean opposite things:
+
+        **The interpreter is gone** — a dead or killed Livy session. The scope
+        went with it, which is the outcome ``end_run`` exists to reach, so there
+        is nothing to report and nothing to fix. Silence is right.
+
+        **The interpreter is alive and the call failed** — a serialisation
+        problem, a signature that has drifted, a name that is not there in the
+        published wheel. That is a defect in this crossing, and the scope it
+        meant to release is *still open in a live session*, where the next run
+        will inherit the modules a rebuild has replaced. Swallowed, it shows up
+        later as a stale primitive nobody can explain.
+
+        So the second is warned about and counted, and the run still succeeds:
+        it produced its result, and a completed run must not be retracted by
+        its own cleanup.
         """
 
         if self._closed:
@@ -107,8 +154,25 @@ class RemoteScope:
         self._closed = True
         try:
             self._submit("end_run", {"run_id": self.run_id}, addressed=False)
-        except Exception:  # noqa: BLE001 - the scope dies with the interpreter
-            pass
+        except Exception as exc:  # noqa: BLE001 - never fails a finished run
+            if _interpreter_is_gone(exc):
+                return
+            self._report_leak(exc)
+
+    def _report_leak(self, exc: BaseException) -> None:
+        """Say that a live session is still holding a scope, and count it."""
+
+        telemetry = getattr(self._session, "telemetry", None)
+        if telemetry is not None:
+            telemetry.count("run.scope_not_released")
+        warn = getattr(self._session, "warn", None)
+        if warn is not None:
+            warn(
+                f"the runtime scope for run {self.run_id} was not released: "
+                f"{type(exc).__name__}: {exc}. The Fabric session is still up, so "
+                "it still holds this run's imported modules — restart it if a "
+                "rebuilt primitive appears not to have taken effect."
+            )
 
     # --- the crossing --------------------------------------------------------
 

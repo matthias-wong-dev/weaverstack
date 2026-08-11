@@ -502,6 +502,31 @@ def _add_workspace_args(
         parser.add_argument("--weaver-lakehouse", help="control Lakehouse name")
 
 
+def _log_link(task_log) -> str:
+    """Where a person goes to read what a run wrote.
+
+    Called *Logs* rather than *evidence*: the folder is durable proof, and the
+    module that writes it can go on calling it that, but a line under a finished
+    command is telling someone where to look.
+
+    The stored address is OneLake DFS, which a browser answers with an
+    authentication error — a link that looks helpful and is not. This is the
+    portal spelling of the same folder. Best-effort: if anything about the
+    address is unexpected, the original is better than nothing.
+    """
+
+    if not task_log:
+        return ""
+    try:
+        from weaver.fabric.onelake import browsable_url
+        from weaver.store import Location
+
+        value = task_log if isinstance(task_log, Location) else Location(str(task_log))
+        return browsable_url(value)
+    except Exception:  # noqa: BLE001 - a link is never worth failing a report for
+        return str(task_log)
+
+
 def _prefer_desktop_credential() -> None:
     """Pin the Azure CLI credential for desktop commands.
 
@@ -863,7 +888,7 @@ def _load_once(args: argparse.Namespace) -> int:
             _print_load(exc.report)
         print(f"error: {exc}", file=sys.stderr)
         if getattr(exc, "task_log", None):
-            print(f"  evidence: {exc.task_log}", file=sys.stderr)
+            print(f"  Logs: {_log_link(exc.task_log)}", file=sys.stderr)
         return 1
 
     if args.json:
@@ -980,7 +1005,7 @@ def _print_load(report) -> None:
             if message.severity != "info":
                 print(f"      {message.severity}: {message.message}")
     if report.task_log:
-        print(f"\n  evidence: {report.task_log}")
+        print(f"\n  Logs: {_log_link(report.task_log)}")
 
 
 def handle_test(args: argparse.Namespace) -> int:
@@ -1076,7 +1101,7 @@ def _print_test(report) -> None:
         f"{totals['invalid']} could not run"
     )
     if report.task_log:
-        print(f"  evidence: {report.task_log}")
+        print(f"  Logs: {_log_link(report.task_log)}")
 
     # The rows a targeted run asked for. Printed last, because the verdict is
     # what a reader wants first and the evidence is what they want next.
@@ -1094,43 +1119,50 @@ def handle_wipe(args: argparse.Namespace) -> int:
     import json
 
     workspace = _resolve_workspace(args)
-    planned = weaver.wipe(
-        args.targets,
-        workspace=workspace,
-        unbind_from=args.unbind_from,
-        dry_run=True,
-        session=_session(args),
-    )
-    print(f"wipe on {workspace.workspace}\n")
-    for report in planned.reports:
-        print(f"  {report.target}")
-        print(f"    {report.location}")
-        for name in report.removed:
-            print(f"      - {name}")
-        if not report.removed:
-            print("      (already empty)")
-    total = planned.count
-    print()
 
-    if args.dry_run:
-        if args.json:
-            print(json.dumps(planned.to_mapping(), indent=2))
-        else:
-            print(f"{total} item(s) would be removed. Nothing was changed.")
-        return 0
+    # The preview exists to be agreed to. Reading the whole estate to show
+    # someone a list, when they have already said --yes and nothing will be
+    # asked, is a second full listing bought for nothing — on the Weaver
+    # Example that was four seconds of a twelve-second wipe.
+    previewing = args.dry_run or not _authorised(args)
+    if previewing:
+        planned = weaver.wipe(
+            args.targets,
+            workspace=workspace,
+            unbind_from=args.unbind_from,
+            dry_run=True,
+            session=_session(args),
+        )
+        print(f"wipe on {workspace.workspace}\n")
+        for report in planned.reports:
+            print(f"  {report.target}")
+            print(f"    {report.location}")
+            for name in report.removed:
+                print(f"      - {name}")
+            if not report.removed:
+                print("      (already empty)")
+        total = planned.count
+        print()
 
-    if total and not _authorised(args):
-        if not sys.stdin.isatty():
-            print(
-                f"Refusing to remove {total} item(s) without confirmation. "
-                "Pass --yes, or --dry-run to preview.",
-                file=sys.stderr,
-            )
-            return 1
-        answer = input(f"Remove {total} item(s)? This cannot be undone [y/N] ")
-        if answer.strip().lower() not in {"y", "yes"}:
-            print("Cancelled.")
-            return 1
+        if args.dry_run:
+            if args.json:
+                print(json.dumps(planned.to_mapping(), indent=2))
+            else:
+                print(f"{total} item(s) would be removed. Nothing was changed.")
+            return 0
+
+        if total:
+            if not sys.stdin.isatty():
+                print(
+                    f"Refusing to remove {total} item(s) without confirmation. "
+                    "Pass --yes, or --dry-run to preview.",
+                    file=sys.stderr,
+                )
+                return 1
+            answer = input(f"Remove {total} item(s)? This cannot be undone [y/N] ")
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("Cancelled.")
+                return 1
 
     result = weaver.wipe(
         args.targets,

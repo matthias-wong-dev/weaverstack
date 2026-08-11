@@ -196,7 +196,7 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
     monkeypatch.setattr("weaver_cli.compose._interactive", lambda stdin: True)
-    monkeypatch.setattr("weaver_cli.compose._confirmed", lambda: False)
+    monkeypatch.setattr("weaver_cli.compose._confirmed", lambda stdin: False)
 
     status = run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
@@ -231,7 +231,7 @@ def confirmed(monkeypatch):
     """An operator who says yes, without a terminal to type it into."""
 
     monkeypatch.setattr("weaver_cli.compose._interactive", lambda stdin: True)
-    monkeypatch.setattr("weaver_cli.compose._confirmed", lambda: True)
+    monkeypatch.setattr("weaver_cli.compose._confirmed", lambda stdin: True)
 
 
 def test_every_command_runs_in_order_with_its_arguments(

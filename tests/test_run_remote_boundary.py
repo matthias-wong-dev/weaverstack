@@ -158,7 +158,7 @@ def test_opening_a_scope_where_execution_is_remote_begins_one_over_there():
     assert scope.run_id in _sources(session)["begin_run"]
 
 
-def test_a_session_that_cannot_place_itself_keeps_the_imports_here():
+def test_a_session_with_no_workspace_at_all_keeps_the_imports_here():
     """Positive knowledge is required to go remote: a scope opened over there by
     mistake would run the primitive somewhere the caller never named."""
 
@@ -166,8 +166,8 @@ def test_a_session_that_cannot_place_itself_keeps_the_imports_here():
     from weaver.runtime.python_context import RuntimeScope
 
     class Unplaceable(_Recording):
-        def executes_here(self, workspace=None):
-            raise CommandError("no workspace")
+        def workspace_or_default(self, workspace=None):
+            raise CommandError("this command needs a workspace")
 
     session = Unplaceable()
     scope = open_runtime_scope(session, workspace=None)
@@ -175,6 +175,28 @@ def test_a_session_that_cannot_place_itself_keeps_the_imports_here():
     assert isinstance(scope, RuntimeScope)
     assert session.submitted == []
     scope.close()
+
+
+def test_a_configuration_failure_is_not_mistaken_for_running_locally():
+    """The narrow fallback above must stay narrow.
+
+    Catching every ``CommandError`` from ``executes_here`` turned a bad
+    configuration — or a Session someone had already closed — into a local
+    RuntimeScope. The run then imported primitives into the console and reported
+    success against an estate it had never reached.
+    """
+
+    from weaver.errors import CommandError
+
+    class Broken(_Recording):
+        def workspace_or_default(self, workspace=None):
+            return workspace
+
+        def executes_here(self, workspace=None):
+            raise CommandError("this session is closed")
+
+    with pytest.raises(CommandError, match="closed"):
+        open_runtime_scope(Broken(), workspace=_fabric())
 
 
 def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
@@ -408,3 +430,72 @@ def test_a_warehouse_validation_opens_no_scope_either():
     )
 
     assert opened == []
+
+
+# --- closing a scope, and the difference between two failures -----------------
+
+
+def _remote_scope(session):
+    """One RemoteScope over a recording Session, already begun."""
+
+    return open_runtime_scope(session, workspace=_fabric())
+
+
+def test_a_dead_interpreter_takes_its_scope_with_it_and_says_nothing():
+    """There is nothing to report: end_run's whole purpose is already achieved."""
+
+    from weaver.fabric.livy import LivyError
+
+    class Dying(_Recording):
+        def __init__(self):
+            super().__init__()
+            self.warnings = []
+            self.counted = []
+
+        def execute_python(self, program, *, workspace=None, timeout=None):
+            self.submitted.append(program)
+            if program.name == "end_run":
+                raise LivyError("Livy session entered state 'dead'")
+            return None
+
+        def warn(self, message):
+            self.warnings.append(message)
+
+    session = Dying()
+    scope = _remote_scope(session)
+    scope.close()
+
+    assert session.warnings == []
+
+
+def test_a_live_session_that_could_not_release_a_scope_is_reported():
+    """The opposite case, and the one that used to vanish.
+
+    A healthy Livy answering with a protocol or serialisation failure means the
+    scope is *still open over there*, holding this run's imported modules. The
+    next run inherits them, and a rebuilt primitive silently does not take
+    effect. The completed run still succeeds — it produced its result — but
+    somebody is told.
+    """
+
+    class Clumsy(_Recording):
+        def __init__(self):
+            super().__init__()
+            self.warnings = []
+
+        def execute_python(self, program, *, workspace=None, timeout=None):
+            self.submitted.append(program)
+            if program.name == "end_run":
+                raise TypeError("end_run() got an unexpected keyword argument")
+            return None
+
+        def warn(self, message):
+            self.warnings.append(message)
+
+    session = Clumsy()
+    scope = _remote_scope(session)
+    scope.close()  # does not raise: the run is finished
+
+    assert len(session.warnings) == 1
+    assert "not released" in session.warnings[0]
+    assert "TypeError" in session.warnings[0]

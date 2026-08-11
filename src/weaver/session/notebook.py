@@ -83,18 +83,12 @@ class NotebookSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
+        # Framed by the caller, not here — see ConsoleSession.execute_python for
+        # why. Both hosts have to agree about this or the same operation reads
+        # differently depending on where it ran.
         self.scope(workspace)  # the attachment check, before any work happens
-        self.substep_started(program.name, program.detail)
-        try:
-            with self.telemetry.timing(f"python.{program.name}"):
-                payload = program.call()
-        except BaseException as exc:
-            # Reported and re-raised, whatever it was: an interrupt still ends
-            # the sub-step it interrupted, and still travels on.
-            self.substep_failed(program.name, exc)
-            raise
-        self.substep_completed(program.name)
-        return payload
+        with self.telemetry.timing(f"python.{program.name}"):
+            return program.call()
 
     def execute_spark_sql(
         self,

@@ -583,24 +583,27 @@ def _build_desktop_fabric(
     bundle_name,
     source,
 ) -> BuildResult:
-    """One build from a console: state observed here, install still coarse.
+    """One build driven from a console. Nothing crosses that does not have to.
 
     .. code-block:: text
 
         read the build state    → through Session capabilities, per part
-        plan the bundle         → locally, in Python
-        upload the archive      → the Session's transport store
-        install the bundle      → one crossing
+        plan the bundle         → here, in Python
+        install the bundle      → here, each action to the capability it needs
 
-    The state read used to be one opaque crossing that returned a whole
-    ``BuildState``. It now goes through the readers themselves, which ask for
-    only what each part needs — Warehouse inventories over TDS from here, the
-    catalogue and the Lakehouse inventories across, each timed as its own Step.
-    That is what makes "read physical state: 27.5s" answerable rather than
-    merely true.
+    The state read goes through the readers themselves, which ask for only what
+    each part needs — Warehouse inventories over TDS from here, the catalogue
+    and the Lakehouse inventories across — each timed as its own Step. That is
+    what makes "Read target inventories 44.1s" answerable rather than merely
+    true.
 
-    The install is still one crossing. Routing each action through the cheapest
-    capability is the rest of the Build decomposition.
+    The Installer then runs in this process. Files go straight to OneLake,
+    T-SQL to TDS, control operations over REST, and only the actions that need
+    Spark cross — batched, because the submission is the expensive part.
+
+    Nothing is packed to install. The archive survives only where it was always
+    the point: ``--bundle`` keeps a build record, written after the install and
+    read by nobody in this path.
     """
 
     if not workspace.environment:
@@ -661,11 +664,11 @@ def _build_desktop_fabric(
             # operations over REST — and only the actions that genuinely need
             # Spark cross into the session.
             #
-            # Which is why there is no archive any more. Zipping the bundle,
+            # Which is why nothing is packed to install. Zipping the bundle,
             # uploading it and unpacking it on the far side existed to get the
             # payloads to where the Installer was; with the Installer here, the
-            # deployed Python tree takes the short path to OneLake and nothing
-            # has to be packed at all.
+            # deployed Python tree takes the short path to OneLake. The archive
+            # below is a retained build record, not a delivery mechanism.
             report = Installer(session, workspace=workspace).install(bundle).to_mapping()
         if retained_archive is not None:
             with session.step("Retain bundle", bundle.bundle_id):
