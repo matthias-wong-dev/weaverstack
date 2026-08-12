@@ -1245,7 +1245,9 @@ def handle_doctor(args: argparse.Namespace) -> int:
         return 0
     print()
     for hint in report.hints:
-        print(f"  → {hint}")
+        # Keep diagnostics printable by legacy Windows consoles whose default
+        # CP-1252 encoding cannot represent the Unicode arrow.
+        print(f"  -> {hint}")
     # A non-zero status keeps this usable as a gate in a script, but on its own
     # it reads as "your installation is broken" to someone who never wanted
     # local Spark. Say plainly that it is optional.

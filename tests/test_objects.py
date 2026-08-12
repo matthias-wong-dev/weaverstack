@@ -254,7 +254,7 @@ def test_a_folder_hands_spark_a_string_and_python_a_path(spark, tmp_path):
 
     assert isinstance(export.path(), Path)
     assert isinstance(export.spark_path(), str)
-    assert str(export.path()) == export.spark_path()
+    assert export.path().as_posix() == export.spark_path()
 
 
 def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):

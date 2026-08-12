@@ -47,10 +47,12 @@ def test_a_folder_hangs_off_the_same_root_as_a_table_locally(tmp_path):
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
 
-    assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
+    assert lakehouse.table_path("Sales", "Order") == (
+        f"{tmp_path.as_posix()}/Tables/Sales/Order"
+    )
     assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
     assert lakehouse.folder_spark_path("Sales", "Export") == (
-        f"{tmp_path}/Files/Sales/Export"
+        f"{tmp_path.as_posix()}/Files/Sales/Export"
     )
 
 
@@ -68,12 +70,14 @@ def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
 
 
 def test_a_trailing_separator_does_not_double_up(tmp_path):
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=f"{tmp_path}/")
+    lakehouse = Lakehouse(name="Sales_LH", spark_root=f"{tmp_path.as_posix()}/")
 
-    assert lakehouse.table_path("Sales", "Order") == f"{tmp_path}/Tables/Sales/Order"
+    assert lakehouse.table_path("Sales", "Order") == (
+        f"{tmp_path.as_posix()}/Tables/Sales/Order"
+    )
     assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
     assert lakehouse.folder_spark_path("Sales", "Export") == (
-        f"{tmp_path}/Files/Sales/Export"
+        f"{tmp_path.as_posix()}/Files/Sales/Export"
     )
 
 
@@ -246,7 +250,7 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.name == "Sales_LH"
-    assert lakehouse.spark_root == str(tmp_path / "Sales_LH")
+    assert lakehouse.spark_root == (tmp_path / "Sales_LH").as_posix()
     assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
 
 
@@ -273,12 +277,14 @@ def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path)
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 
-    assert str(lakehouse.folder_path("Sales", "Export")) == resolver.folder_object(
-        target, "Sales", "Export"
-    ).value
-    assert f"{lakehouse.folder_path('Sales', 'Export')}_Staging" == resolver.folder_staging(
-        target, "Sales", "Export"
-    ).value
+    assert (
+        lakehouse.folder_path("Sales", "Export").as_posix()
+        == resolver.folder_object(target, "Sales", "Export").value
+    )
+    assert (
+        f"{lakehouse.folder_path('Sales', 'Export').as_posix()}_Staging"
+        == resolver.folder_staging(target, "Sales", "Export").value
+    )
 
 
 # --- inferred from the session ----------------------------------------------

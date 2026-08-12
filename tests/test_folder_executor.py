@@ -67,5 +67,5 @@ def test_folder_prune_remains_idempotent(tmp_path):
     context = _context(tmp_path)
     result = FolderExecutor().execute(_action(PRUNE_FOLDER), None, context)
     assert result == {
-        "pruned": str(tmp_path / "Sales" / "Files" / "Sales" / "Export")
+        "pruned": (tmp_path / "Sales" / "Files" / "Sales" / "Export").as_posix()
     }

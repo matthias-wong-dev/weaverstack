@@ -107,7 +107,7 @@ select Id from Sales.Report;
 def _write(root: Path, relative: str, text: str) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="")
 
 
 def _estate(root: Path, **replacements: str) -> Path:

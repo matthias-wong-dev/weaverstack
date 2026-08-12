@@ -38,6 +38,7 @@ import time
 from typing import Any
 
 from ...errors import InstallError
+from ...locations import Location
 from ...targets import DeltaTarget, FolderTarget
 from ..models import InstallAction
 from .base import InstallationContext, ResolvedTarget
@@ -118,6 +119,7 @@ class AliasExecutor:
         return details
 
     def _shortcut(self, shortcut, frozen: dict, context, source) -> dict:
+        source_name = _physical_source_name(frozen, context, source)
         made = shortcut(
             context.target.lakehouse,
             path=f"{frozen['area']}/{frozen['schema']}",
@@ -125,7 +127,7 @@ class AliasExecutor:
             source=source.lakehouse,
             source_path=(
                 f"{frozen['source_area']}/{frozen['source_schema']}"
-                f"/{frozen['source_object']}"
+                f"/{source_name}"
             ),
         )
         return {"alias": frozen["alias"], "source": frozen["source"], **(made or {})}
@@ -247,4 +249,42 @@ def _location(
         )
     return context.resolver.delta_table(
         DeltaTarget(lakehouse=target.lakehouse), schema, name
+    )
+
+
+def _physical_source_name(frozen: dict, context: InstallationContext, source) -> str:
+    """Return the source's storage spelling, which Fabric may have folded.
+
+    Logical identity remains exact-case, but OneLake shortcut target paths are
+    physical and case-sensitive. Some Fabric estates materialise an authored
+    ``Customer`` table directory as ``customer``. Prefer the authored spelling
+    when it exists; otherwise resolve one case-insensitive storage match.
+    """
+
+    producer = _location(source, frozen, context, source=True)
+    if context.store.exists(producer):
+        return producer.name
+
+    parent = Location(producer.value.rsplit("/", 1)[0])
+    try:
+        matches = [
+            entry.name
+            for entry in context.store.list(parent)
+            if entry.name.casefold() == producer.name.casefold()
+        ]
+    except Exception as exc:  # noqa: BLE001 - converted to an install diagnosis
+        raise InstallError(
+            f"alias {frozen['alias']} has no readable source parent at "
+            f"{parent.value}: {type(exc).__name__}: {exc}"
+        ) from exc
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise InstallError(
+            f"alias {frozen['alias']} has no source to point at: "
+            f"{producer.value} does not exist"
+        )
+    raise InstallError(
+        f"alias {frozen['alias']} source {producer.value} is ambiguous on storage: "
+        + ", ".join(sorted(matches))
     )
