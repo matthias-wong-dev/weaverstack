@@ -1,5 +1,10 @@
 # Using the Weaver CLI
 
+## Purpose
+
+This document explains command use and workspace configuration. It describes
+the public CLI, not the implementation of command handlers.
+
 ```bash
 pip install 'weaverstack[cli]'
 weaver --help

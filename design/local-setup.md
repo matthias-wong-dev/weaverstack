@@ -1,5 +1,10 @@
 # Local development
 
+## Purpose
+
+This document explains the supported local development environment and test
+commands. It does not define Fabric runtime behaviour.
+
 Everything Weaver does on Fabric, it can also do against a local filesystem
 standing in for Lakehouses. That is optional — the core installs and imports
 without any of this — but it is how build and load are developed and tested

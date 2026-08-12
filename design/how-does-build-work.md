@@ -1,5 +1,10 @@
 # How Weaver Build Works
 
+## Purpose
+
+This document explains the build lifecycle from repository input to installed
+bundle. Build invariants are defined in [Build philosophy](build-philosophy.md).
+
 ## Status
 
 This document describes the implemented Weaver build system. It combines the

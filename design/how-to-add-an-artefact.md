@@ -1,5 +1,10 @@
 # How to add an artefact
 
+## Purpose
+
+This is the maintainer procedure for adding a runtime artefact while preserving
+Weaver's planning, installation, run, and wipe contracts.
+
 An artefact is anything Weaver installs into a bound target: a table, a view, a
 folder, an alias, a deployed module, a generated procedure. Adding one touches
 six places, and the suite is arranged so that skipping any of them fails with a

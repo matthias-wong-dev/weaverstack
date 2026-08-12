@@ -1,5 +1,10 @@
 # The central catalogue
 
+## Purpose
+
+This document defines the authoritative central catalogue: its ownership,
+records, reconciliation, and certification behaviour.
+
 The catalogue scopes installations by `(item_type, item_name)`, projects each
 item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
 ordinary planner.

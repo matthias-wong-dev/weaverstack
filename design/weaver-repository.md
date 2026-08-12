@@ -1,5 +1,10 @@
 # Weaver repository sources
 
+## Purpose
+
+This document defines the authored repository layout and the relationship
+between logical items, source files, and bound targets.
+
 A Weaver repository has no mandatory workspace location. A build receives its
 source explicitly. Supported sources are a local checkout, a Fabric Notebook's
 Resources directory, or an accessible OneLake location. Remote trees are copied

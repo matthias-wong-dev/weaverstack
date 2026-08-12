@@ -1,5 +1,10 @@
 # Fabric integration tests
 
+## Purpose
+
+This document explains the real-Fabric test environment, marker selection, and
+the evidence each test tier provides.
+
 These touch a real workspace and a running capacity. They are **deselected by
 default** and skip unless a workspace is named, so nobody runs them by accident
 and nobody without a tenant is blocked.

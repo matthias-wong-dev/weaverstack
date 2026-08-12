@@ -1,5 +1,10 @@
 # Test architecture
 
+## Purpose
+
+This document explains how to select the cheapest test layer that can prove a
+claim, and what the more expensive Fabric layers add.
+
 Where a claim belongs, and why. The organising rule is one sentence:
 
 > **Prove a claim at the cheapest layer that can answer it, and use the
