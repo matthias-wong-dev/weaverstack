@@ -94,7 +94,6 @@ def _report(
 def _local(tmp_path, *args: str) -> list[str]:
     return [
         "load",
-        "--targets",
         "Lakehouse/Sales",
         "--workspace-type",
         "local",
@@ -112,7 +111,6 @@ def test_the_command_exposes_every_option_the_contract_names():
     load = parser.parse_args(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "--workspace",
             "My Workspace",
@@ -137,7 +135,7 @@ def test_more_than_one_target_is_one_request():
     parser = build_parser()
 
     load = parser.parse_args(
-        ["load", "--targets", "Lakehouse/Sales", "Warehouse/Reporting"]
+        ["load", "Lakehouse/Sales", "Warehouse/Reporting"]
     )
 
     assert load.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
@@ -191,7 +189,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
         encoding="utf-8",
     )
 
-    main(["load", "--targets", "Lakehouse/Sales", "--workspace-config", str(config)])
+    main(["load", "Lakehouse/Sales", "--workspace-config", str(config)])
 
     assert recorded[0]["workspace"].weaver_lakehouse == "Configured"
 
@@ -206,7 +204,6 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
     main(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "--workspace-config",
             str(config),
@@ -219,7 +216,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
 
 
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
-    exit_code = main(["load", "--targets", "Lakehouse/Sales"])
+    exit_code = main(["load", "Lakehouse/Sales"])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -310,31 +307,61 @@ def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
 
 
 class _FakeLivy:
-    """A Livy session that records the program and answers with a payload."""
+    """A Livy session that records the program and answers with a payload.
+
+    Reached through a real :class:`~weaver.session.console.ConsoleSession`,
+    because that is how the command reaches it: the double is the *transport*,
+    not the Session, so what these tests exercise is the crossing the product
+    performs rather than one arranged for them.
+
+    ``submitted`` holds the programs the command sent. The Session's own version
+    probe is answered but not recorded — it is the Session's business, it
+    happens once per workspace context, and a test about a load should not have
+    to know it exists.
+    """
 
     submitted: list[str] = []
     answer: dict = {}
-
-    def __init__(self, workspace) -> None:
-        self.workspace = workspace
+    started: int = 0
 
     @classmethod
     def for_workspace(cls, workspace, **kwargs):
-        return cls(workspace)
+        instance = cls()
+        instance.workspace = workspace
+        return instance
 
-    def __enter__(self):
-        return self
+    def start(self) -> None:
+        type(self).started += 1
 
-    def __exit__(self, *exc):
-        return False
+    def close(self, **kwargs) -> None:
+        pass
 
     def run(self, code, **kwargs):
-        type(self).submitted.append(code)
+        answer = type(self).answer
+        if "weaver.__version__" in code:
+            from weaver import __version__
+
+            answer = __version__
+        else:
+            type(self).submitted.append(code)
 
         class Result:
-            payload = type(self).answer
+            # ``returned`` is whether the program called ``emit`` at all, which
+            # is a different question from what it emitted — and the one the
+            # Session uses to tell "ran and said nothing" from "ran and said no".
+            returned = answer is not None
+            payload = answer
 
         return Result()
+
+
+class _FakeCredential:
+    """Enough of a credential for a token to exist, and no network at all."""
+
+    def get_token(self, *scopes, **kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(token="token", expires_on=2**31 - 1)
 
 
 class _FakeResolver:
@@ -359,14 +386,28 @@ class _FakeResolver:
 
 @pytest.fixture
 def livy(monkeypatch):
-    import weaver.fabric
+    """The transport a desktop crosses on, doubled beneath a real Session.
+
+    Everything is replaced *before* a Session is constructed: a ``Resource``
+    binds its acquisition at construction, so patching the scope afterwards
+    leaves the original in place and the credential is asked for anyway.
+    """
+
+    from weaver.session.console import ConsoleScope
 
     _FakeLivy.submitted = []
+    _FakeLivy.started = 0
     _FakeLivy.answer = {"failed": False, "report": _report().to_mapping()}
     _FakeResolver.present = {"Sales", "Reporting"}
     _FakeResolver.asked = []
-    monkeypatch.setattr(weaver.fabric, "LivySession", _FakeLivy)
-    monkeypatch.setattr(weaver.fabric, "FabricResolver", _FakeResolver)
+    monkeypatch.setattr("weaver.fabric.auth.credential", _FakeCredential)
+    monkeypatch.setattr(
+        "weaver.fabric.LivySession.for_workspace",
+        classmethod(lambda cls, *args, **kwargs: _FakeLivy.for_workspace(*args)),
+    )
+    monkeypatch.setattr(
+        ConsoleScope, "resolver", property(lambda self: _FakeResolver(self.workspace))
+    )
     monkeypatch.setattr(_cli_module(), "_prefer_desktop_credential", lambda: None)
     return _FakeLivy
 
@@ -374,7 +415,6 @@ def livy(monkeypatch):
 def _fabric(*args: str) -> list[str]:
     return [
         "load",
-        "--targets",
         "Lakehouse/Sales",
         "--workspace",
         "My Workspace",
@@ -384,60 +424,6 @@ def _fabric(*args: str) -> list[str]:
         "weaver",
         *args,
     ]
-
-
-def test_a_desktop_asking_for_fabric_submits_the_load_into_a_session(livy, capsys):
-    """Load runs where the data is, so the desktop reaches in rather than out."""
-
-    exit_code = main(_fabric())
-    (submitted,) = livy.submitted
-
-    assert exit_code == 0
-    assert "import weaver" in submitted
-    assert "weaver.load(" in submitted
-    assert "'Lakehouse/Sales'" in submitted
-    assert "My Workspace" in submitted
-    assert "weaver_lakehouse='Weaver'" in submitted
-
-
-def test_the_submitted_program_carries_the_run_s_own_choices(livy):
-    main(_fabric("--fault-tolerant", "--dry-run"))
-    (submitted,) = livy.submitted
-
-    assert "fault_tolerant=True" in submitted
-    assert "dry_run=True" in submitted
-
-
-def test_a_remote_report_is_reconstructed_and_rendered_like_a_local_one(livy, capsys):
-    main(_fabric())
-    captured = capsys.readouterr()
-
-    assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
-    assert "read 5" in captured.out
-
-
-def test_a_remote_failure_arrives_as_diagnosis_rather_than_an_exception(livy, capsys):
-    """An exception raised in Fabric cannot be re-raised on a desktop that has
-    never heard of its class, so what crosses is what it knew."""
-
-    livy.answer = {
-        "failed": True,
-        "error_type": "LoadError",
-        "message": "load:Lakehouse/Sales/Sales.Customer failed: rows were rejected",
-        "result": LoadResult(
-            succeeded=False, rows_read=9, rows_rejected=2
-        ).as_row(),
-        "report": _report(status=TASK_FAILED, node_status=FAILED).to_mapping(),
-        "task_log": "Files/_/Log/task_date=2026-08-07/x",
-    }
-
-    exit_code = main(_fabric())
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "rows were rejected" in captured.err
-    assert "Files/_/Log/task_date=2026-08-07/x" in captured.err
-    assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
 
 
 def test_a_session_that_returns_nothing_is_an_error_rather_than_a_success(livy, capsys):
@@ -514,7 +500,6 @@ def test_every_requested_target_is_checked_not_only_the_first(livy, capsys):
     exit_code = main(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "Warehouse/Reporting",
             "--workspace",
@@ -540,7 +525,6 @@ def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
     main(
         [
             "load",
-            "--targets",
             "Lakehouse/Sales",
             "Warehouse/Reporting",
             "--workspace",

@@ -136,6 +136,25 @@ class InstallAction:
     ``payload`` is a bundle-relative path to the generated definition, or None
     for an action that carries no payload (an explicit no-op). ``payload_sha256``
     hashes that payload so corruption is caught before anything runs.
+
+    ``source_path`` is the authored repository file this action came from,
+    relative to the repository root, for actions that have one. It exists so a
+    failure can name the file the developer should open:
+
+    .. code-block:: text
+
+        Error installing Warehouse/Reporting/Sales.CustomerRevenue
+        Source: Warehouse/Reporting/Sales.CustomerRevenue.sql
+
+    It is carried from where the authored file was parsed, and must never be
+    reconstructed from ``id``, a procedure name, a physical target or a
+    generated payload name. By the time an action fails, the only spellings left
+    are the deployed ones, and several authored files can compile to one — so a
+    path derived at that point would be a guess presented as evidence.
+
+    An action with no authored source — an alias, an endpoint refresh, a prune,
+    a catalogue publication — has None, which is the truthful answer rather than
+    a nearest-looking file.
     """
 
     id: str
@@ -144,9 +163,10 @@ class InstallAction:
     executor: str
     payload: str | None
     payload_sha256: str | None
+    source_path: str | None = None
 
     def to_mapping(self) -> dict[str, Any]:
-        return {
+        mapping: dict[str, Any] = {
             "id": self.id,
             "kind": self.kind,
             "resource_node_id": self.resource_node_id,
@@ -154,6 +174,13 @@ class InstallAction:
             "payload": self.payload,
             "payload_sha256": self.payload_sha256,
         }
+        if self.source_path is not None:
+            # Omitted when absent rather than written as null: the canonical
+            # plan.yml is what bundle_id hashes, and a key that appeared on
+            # every action would change the id of every bundle that has no
+            # authored source to name.
+            mapping["source_path"] = self.source_path
+        return mapping
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "InstallAction":
@@ -164,6 +191,7 @@ class InstallAction:
             executor=mapping["executor"],
             payload=mapping.get("payload"),
             payload_sha256=mapping.get("payload_sha256"),
+            source_path=mapping.get("source_path"),
         )
 
 

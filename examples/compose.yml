@@ -1,0 +1,26 @@
+# The Weaver Example development loop, written down once.
+#
+#   weaver compose dev --file examples/compose.yml
+#
+# Paths are as you would type them, so run this from the repository root.
+# Nothing here is discovered: the composition names its file, and the commands
+# name their repository and workspace.
+
+compose:
+  # Everything from empty: clear the estate, build it, load it, test it.
+  dev:
+    # The control Lakehouse is wiped too, and that is the whole point of naming
+    # it: `wipe` skips the catalogue unbind entirely when the Weaver Lakehouse
+    # is going, because deleting rows from tables that are about to be removed
+    # is work nobody needs. Leaving it out cost about eighty seconds per cycle
+    # to tidy a catalogue the very next command rebuilds.
+    - weaver wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --workspace-config "examples/weaver_example.yml"
+    - weaver build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Lakehouse/Sales --bind Warehouse/Reporting=Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - weaver load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - weaver test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+
+  # The inner loop: an authored change, rebuilt and re-run without wiping.
+  rebuild:
+    - weaver build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Lakehouse/Sales --bind Warehouse/Reporting=Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - weaver load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - weaver test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"

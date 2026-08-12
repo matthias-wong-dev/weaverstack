@@ -149,18 +149,16 @@ def load(
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        if not opened.executes_here(resolved_workspace):
-            raise CommandError(
-                "load runs where the data is: call it from a Fabric notebook, "
-                "or against a local Workspace"
+        with opened.task(
+            "Load (dry run)" if dry_run else "Load", ", ".join(map(str, requested))
+        ):
+            return run_load(
+                opened,
+                workspace=resolved_workspace,
+                requested=tuple(_physical_ref(target) for target in requested),
+                fault_tolerant=fault_tolerant,
+                dry_run=dry_run,
             )
-        return run_load(
-            opened,
-            workspace=resolved_workspace,
-            requested=tuple(_physical_ref(target) for target in requested),
-            fault_tolerant=fault_tolerant,
-            dry_run=dry_run,
-        )
 
 
 def run_load(
@@ -201,36 +199,43 @@ def run_load(
     from .run.state import read_installed_catalogue, read_target_inventories
 
     started = datetime.now(timezone.utc)
-    catalogue = (
-        state.catalogue
-        if state is not None
-        else read_installed_catalogue(session=session, workspace=workspace)
-    )
-    estate = InstalledEstate.from_catalogue(catalogue)
-    _refuse_uninstalled_targets(estate, requested)
-
-    if state is None:
-        # Only the targets the graph touches: the rest have nothing to be looked
-        # up in them. Planning the graph first is what makes that knowable, and
-        # the reading happens once, here, so everything below decides against a
-        # snapshot rather than against state that is still moving.
-        planned = load_dag(estate, targets=requested)
-        state = RunState(
-            catalogue=catalogue,
-            target_inventories=read_target_inventories(
-                tuple(node.physical_target for node in planned.nodes),
-                session=session,
-                workspace=workspace,
-            ),
+    # Where this run's frames begin in the Session's ledger. A Session outlives
+    # a command and holds every frame it ever closed, so what belongs to *this*
+    # run is what was added after here.
+    timings_from = len(getattr(session, "timings", ()))
+    with session.step("Read catalogue"):
+        catalogue = (
+            state.catalogue
+            if state is not None
+            else read_installed_catalogue(session=session, workspace=workspace)
         )
-    runner = Runner(
-        state,
-        RunRequest.load(
-            requested, fault_tolerant=fault_tolerant, dry_run=dry_run
-        ),
-        workspace=workspace,
-        can_refresh=can_refresh(session, workspace),
-    )
+        estate = InstalledEstate.from_catalogue(catalogue)
+        _refuse_uninstalled_targets(estate, requested)
+
+    with session.step("Build run graph"):
+        if state is None:
+            # Only the targets the graph touches: the rest have nothing to be
+            # looked up in them. Planning the graph first is what makes that
+            # knowable, and the reading happens once, here, so everything below
+            # decides against a snapshot rather than against state that is still
+            # moving.
+            planned = load_dag(estate, targets=requested)
+            state = RunState(
+                catalogue=catalogue,
+                target_inventories=read_target_inventories(
+                    tuple(node.physical_target for node in planned.nodes),
+                    session=session,
+                    workspace=workspace,
+                ),
+            )
+        runner = Runner(
+            state,
+            RunRequest.load(
+                requested, fault_tolerant=fault_tolerant, dry_run=dry_run
+            ),
+            workspace=workspace,
+            can_refresh=can_refresh(session, workspace),
+        )
 
     log = (
         None
@@ -239,19 +244,24 @@ def run_load(
     )
     if log is not None:
         log.write_plan(_plan_document(runner.graph, state, requested, dry_run))
-    result = runner.run(
-        session=session,
-        dispatch=dispatch_primitive,
-        on_node=(
-            None
-            if log is None
-            else lambda node: log.write_step(_step_type(node), node.to_mapping())
-        ),
-    )
+    with session.step("Execute"):
+        result = runner.run(
+            session=session,
+            dispatch=dispatch_primitive,
+            on_node=(
+                None
+                if log is None
+                else lambda node: log.write_step(_step_type(node), node.to_mapping())
+            ),
+        )
 
     report = _as_load_report(result, started=started, task_log=log)
     if log is not None:
-        log.write_completion(_completion_document(report))
+        log.write_completion(
+            _completion_document(
+                report, timings=getattr(session, "timings", ())[timings_from:]
+            )
+        )
     if not fault_tolerant and not dry_run:
         _raise_for_failure(report)
     return report
@@ -418,8 +428,14 @@ def _plan_document(graph, state, requested, dry_run: bool) -> dict:
     }
 
 
-def _completion_document(report: LoadRunReport) -> dict:
-    """What the run added up to, reconciled from the steps rather than tallied."""
+def _completion_document(report: LoadRunReport, timings=()) -> dict:
+    """What the run added up to, reconciled from the steps rather than tallied.
+
+    ``timings`` are the frames this run closed, in closing order. They ride the
+    completion document rather than becoming a file of their own: the evidence
+    folder already says what a task intended and what each step did, and how
+    long a step took is a property of that step, not a second kind of record.
+    """
 
     counted = {status: 0 for status in ("executed", "succeeded", "failed", "blocked")}
     rows = {
@@ -453,6 +469,7 @@ def _completion_document(report: LoadRunReport) -> dict:
         "blocked_steps": counted["blocked"],
         "rows": rows,
         "messages": [message.to_mapping() for message in report.messages],
+        "timings": [frame.to_mapping() for frame in timings],
     }
 
 

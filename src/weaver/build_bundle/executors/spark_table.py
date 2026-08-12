@@ -41,6 +41,10 @@ from .spark_case import exact_identifier_case
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
 
 class SparkTableExecutor:
+
+    #: This executor reaches Spark, so on a host without one the action
+    #: crosses whole rather than the capability being faked underneath it.
+    needs_spark = True
     name = "spark_table"
 
     def execute(

@@ -221,3 +221,283 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
     result = next(report.action_results())
     assert result.status == SKIPPED
     assert "unsupported" in result.details["reason"]
+
+
+# --- capabilities are acquired by need, not by batch --------------------------
+
+
+def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
+    """A Spark session costs seconds to start and a JVM permits exactly one.
+
+    A batch is handed its capabilities up front, and building Spark eagerly
+    meant a bundle of file writes, T-SQL and an endpoint refresh still started
+    one — paying for a capability none of its actions would touch and, in a
+    process that already had a session, failing outright with *Only one
+    SparkContext should be running in this JVM*.
+    """
+
+    action = InstallAction(
+        id="refresh-application-sql-endpoint",
+        kind="refresh_sql_endpoint",
+        resource_node_id=None,
+        executor="sql_endpoint_refresh",
+        payload=None,
+        payload_sha256=None,
+    )
+    plan = BuildPlan(
+        format_version=1,
+        bundle_id="",
+        repository_name="MyRepo",
+        repository_signature="sig",
+        targets=(TARGET,),
+        sequences=(
+            BuildSequence(
+                number=8990,
+                description="refresh endpoints",
+                batches=(
+                    BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),
+                ),
+            ),
+        ),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    store = FilesystemStore()
+    bundle = write_bundle(
+        Location(str(tmp_path / "refresh-bundle")), plan=plan, payloads={}, store=store
+    )
+    workspace = LocalWorkspace(workspace=tmp_path / "local", weaver_lakehouse="Weaver")
+
+    installer = given_installer(
+        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+    )
+    asked = []
+    installer.session.spark = lambda *a, **k: asked.append(True)
+
+    report = installer.install(bundle)
+
+    assert report.status == SUCCEEDED
+    assert asked == [], "a Spark session was started for a batch that never used one"
+
+
+def test_a_host_with_no_spark_still_says_so_without_starting_anything():
+    """``None`` means *this host has no Spark*, which executors read to skip
+    Lakehouse work rather than fail it. That answer must not cost a session."""
+
+    from weaver.build_bundle.installer import Installer
+
+    class Elsewhere:
+        workspace = None
+
+        def executes_here(self, workspace=None):
+            return False
+
+        def spark(self, workspace=None):
+            raise AssertionError("a host that executes elsewhere was asked for Spark")
+
+    assert Installer(Elsewhere()).spark_when_needed() is None
+
+
+# --- concurrency within a batch -----------------------------------------------
+
+
+def _tsql_batch(tmp_path, count: int):
+    """One batch of independent T-SQL actions against one Warehouse target."""
+
+    import hashlib
+
+    target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
+    payloads = {}
+    actions = []
+    for index in range(count):
+        path = f"payload/tsql/{index}.sql"
+        data = f"select {index}\n".encode("utf-8")
+        payloads[path] = data
+        actions.append(
+            InstallAction(
+                id=f"a{index}",
+                kind="build_procedure",
+                resource_node_id=None,
+                executor="tsql",
+                payload=path,
+                payload_sha256=hashlib.sha256(data).hexdigest(),
+            )
+        )
+    plan = BuildPlan(
+        format_version=1,
+        bundle_id="",
+        repository_name="MyRepo",
+        repository_signature="sig",
+        targets=(target,),
+        sequences=(
+            BuildSequence(
+                number=10,
+                description="warehouse work",
+                batches=(
+                    BuildBatch(id="b", target_id=target.id, actions=tuple(actions)),
+                ),
+            ),
+        ),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    store = FilesystemStore()
+    location = Location(str(tmp_path / "tsql-bundle"))
+    write_bundle(location, plan=plan, payloads=payloads, store=store)
+    return load_bundle(location, store=store), store
+
+
+class _Concurrent:
+    """Records how many actions were in flight at once."""
+
+    name = "tsql"
+
+    def __init__(self):
+        import threading
+
+        self.lock = threading.Lock()
+        self.running = 0
+        self.peak = 0
+        self.calls = []
+
+    def execute(self, action, payload, context):
+        import time
+
+        with self.lock:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+            self.calls.append(action.id)
+        time.sleep(0.05)
+        with self.lock:
+            self.running -= 1
+        return {"ran": action.id}
+
+
+def test_actions_in_a_batch_run_one_at_a_time(tmp_path):
+    """They ran concurrently for one commit, and a real Warehouse said no.
+
+    The manifest calls a batch's actions independent units, which is true of
+    *Weaver's* ordering and says nothing about the database's. Concurrent DDL
+    and DML against one Warehouse contended on catalogue metadata and on the
+    rows they touched, and Fabric's snapshot isolation turned that into aborted
+    transactions:
+
+        Transaction (Process ID 55) was deadlocked on lock resources
+        Snapshot isolation transaction aborted due to update conflict
+    """
+
+    bundle, store = _tsql_batch(tmp_path, 4)
+    executor = _Concurrent()
+
+    report = given_installer(store=store, executors={"tsql": executor}).install(bundle)
+
+    assert report.status == SUCCEEDED
+    assert executor.peak == 1, "actions in a batch overlapped"
+
+
+def test_a_failure_in_a_batch_fails_the_sequence(tmp_path):
+    """The sequence barrier is what stops anything downstream."""
+
+    bundle, store = _tsql_batch(tmp_path, 4)
+
+    class Failing(_Concurrent):
+        def execute(self, action, payload, context):
+            super().execute(action, payload, context)
+            if action.id == "a2":
+                raise RuntimeError("boom a2")
+            return {"ran": action.id}
+
+    report = given_installer(store=store, executors={"tsql": Failing()}).install(bundle)
+
+    by_id = {result.action_id: result for result in report.action_results()}
+    assert report.status == FAILED
+    assert by_id["a2"].status == FAILED
+    # The others were in flight and their results are true, so they are reported
+    # rather than rewritten as skipped.
+    assert by_id["a0"].status == SUCCEEDED
+
+
+def test_spark_actions_are_not_run_concurrently(tmp_path):
+    """A Spark statement's concurrency is the Fabric session's business, not
+    ours. Widening this is a measurement, not an assumption."""
+
+    location, store = _bundle(tmp_path)
+    recorder = _Concurrent()
+    recorder.name = "spark_sql"
+
+    given_installer(store=store, executors={"spark_sql": recorder}).install(
+        load_bundle(location, store=store)
+    )
+
+    assert recorder.peak == 1
+
+
+# --- a batched action keeps its own duration ----------------------------------
+
+
+def test_each_crossed_action_reports_the_time_it_took_not_the_batch_s():
+    """Sharing a trip must not mean sharing a number.
+
+    Batched Spark actions cross in one submission, and the near side cannot see
+    inside it. Stamping each with the submission's elapsed time made six actions
+    all look like they took the whole batch — so the timings a reader uses to
+    find the slow one all said the same thing, which is worse than no timing.
+    """
+
+    from datetime import datetime, timezone
+
+    from weaver.build_bundle.installer import _crossed_result
+    from weaver.build_bundle.models import InstallAction
+
+    started = datetime(2026, 8, 11, 12, 0, 0, tzinfo=timezone.utc)
+    actions = [
+        InstallAction(
+            id=f"a{index}",
+            kind="build_table",
+            resource_node_id=None,
+            executor="spark_table",
+            payload=None,
+            payload_sha256=None,
+        )
+        for index in range(3)
+    ]
+    answers = {
+        "a0": {"id": "a0", "seconds": 1.0, "offset": 0.0, "skipped": False},
+        "a1": {"id": "a1", "seconds": 29.0, "offset": 1.0, "skipped": False},
+        "a2": {"id": "a2", "seconds": 2.0, "offset": 30.0, "skipped": False},
+    }
+
+    results = [
+        _crossed_result(action, answers[action.id], "t", started) for action in actions
+    ]
+
+    assert [result.duration_seconds for result in results] == [1.0, 29.0, 2.0]
+    # Placed in order on the local timeline, with spans that do not overlap.
+    assert [result.started_at for result in results] == sorted(
+        result.started_at for result in results
+    )
+    assert results[0].finished_at <= results[1].started_at
+    assert results[1].finished_at <= results[2].started_at
+
+
+def test_an_action_with_no_answer_is_a_failure_rather_than_a_fast_success():
+    from datetime import datetime, timezone
+
+    from weaver.build_bundle.installer import _crossed_result
+    from weaver.build_bundle.models import InstallAction
+
+    action = InstallAction(
+        id="a0",
+        kind="build_table",
+        resource_node_id=None,
+        executor="spark_table",
+        payload=None,
+        payload_sha256=None,
+    )
+
+    result = _crossed_result(
+        action, None, "t", datetime(2026, 8, 11, tzinfo=timezone.utc)
+    )
+
+    assert result.status == FAILED
+    assert "nothing came back" in result.error_message

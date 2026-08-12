@@ -613,3 +613,142 @@ def test_a_result_that_describes_itself_no_further_still_serializes():
         "succeeded": False,
         "error_message": "the model would not refresh",
     }
+
+
+# --- what a run costs, per node -----------------------------------------------
+#
+# One Sub-step per dispatched node, which is where a run's per-object timing
+# comes from. Recorded on the Session, so a Runner given none still runs — that
+# is the whole point of the dispatch seam, and timing must not quietly become a
+# reason to need a Session.
+
+
+def test_each_dispatched_node_is_timed_as_a_substep():
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(progress=False) as session:
+        runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
+            session=session, dispatch=controlled({})
+        )
+
+        assert [frame.name for frame in session.timings] == ["a", "b"]
+        assert all(frame.kind == "substep" for frame in session.timings)
+        assert all(frame.elapsed is not None for frame in session.timings)
+
+
+def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
+    """A failed node is a *result* here — the run records what happened before
+    it decides what to do about it — and the timing has to agree."""
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(progress=False) as session:
+        runner(nodes=[node("a"), node("b")], fault_tolerant=True).run(
+            session=session, dispatch=controlled({"a": Outcome(status=FAILED)})
+        )
+
+        failed = {frame.name: frame.failed for frame in session.timings}
+        assert failed == {"a": True, "b": False}
+
+
+def test_a_node_that_was_never_dispatched_is_never_timed():
+    """Blocked, skipped and pending nodes waited on nothing of their own."""
+
+    from weaver.session import ConsoleSession
+
+    with ConsoleSession(progress=False) as session:
+        runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
+            session=session, dispatch=controlled({"a": Outcome(status=FAILED)})
+        )
+
+        assert [frame.name for frame in session.timings] == ["a"]
+
+
+def test_a_runner_with_no_session_still_runs():
+    result = runner(nodes=[node("a")]).run(session=None, dispatch=controlled({}))
+
+    assert result.succeeded
+
+
+def test_an_interrupted_run_still_closes_its_runtime_scope():
+    """A scope that outlived its run is one the next run would inherit — along
+    with the modules a rebuild has since replaced.
+
+    A failed node is data and never raises out of the loop, so the case that
+    needs a `finally` is the one nothing else covers: an interrupt.
+    """
+
+    closed = []
+
+    class Scope:
+        def context_for(self, **_kwargs):
+            raise AssertionError("nothing should have been imported")
+
+        def close(self):
+            closed.append(True)
+
+    made = runner(nodes=[node("a"), node("b")])
+    made._runtime_scope = Scope()
+
+    def interrupted(node, **asked):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        made.run(dispatch=interrupted)
+
+    assert closed == [True]
+
+
+# --- what a node is called on screen ------------------------------------------
+
+
+def test_a_node_is_named_by_what_it_does_to_which_object():
+    """``node_id`` is an identifier and reads like one. This is the line
+    somebody watches go past, so it is a verb and a physical id."""
+
+    from weaver.run.runner import node_label
+    from weaver.run.resolution import ENDPOINT_REFRESH
+
+    load = RunNode(
+        node_id="load:Lakehouse/Sales/Sales.Customer",
+        physical_target="Lakehouse/Sales",
+        primitive_kind="python_module",
+        logical_id=_Logical("Sales.Customer"),
+        role="load",
+    )
+    refresh = RunNode(
+        node_id="refresh:Lakehouse/Sales",
+        physical_target="Lakehouse/Sales",
+        primitive_kind=ENDPOINT_REFRESH,
+    )
+    check = RunNode(
+        node_id="Warehouse/Reporting/Reporting.CustomerRevenuePresent",
+        physical_target="Warehouse/Reporting",
+        primitive_kind="warehouse_procedure",
+        logical_id=_Logical("Reporting.CustomerRevenuePresent"),
+        role="Assumption",
+    )
+
+    assert node_label(load) == "Load Lakehouse/Sales/Sales.Customer"
+    assert node_label(refresh) == "Refresh Lakehouse/Sales SQL endpoint"
+    assert node_label(check) == "Test Warehouse/Reporting/Reporting.CustomerRevenuePresent"
+
+
+def test_a_node_with_nothing_logical_to_name_keeps_its_id():
+    """Inventing "Load None" would be worse than the identifier this improves on."""
+
+    from weaver.run.runner import node_label
+
+    node = RunNode(node_id="a", physical_target="Lakehouse/Sales", primitive_kind="x")
+
+    assert node_label(node) == "a"
+
+
+class _Logical:
+    """Enough of a logical id to be named: it carries a qualified object."""
+
+    def __init__(self, qualified):
+        self.object_id = type("ObjectId", (), {"qualified": qualified})()
+
+    def __str__(self):
+        return self.object_id.qualified

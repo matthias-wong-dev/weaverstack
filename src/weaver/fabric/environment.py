@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -321,6 +322,22 @@ def delete_stale_wheels(env: Item, keep: str, staged: list[str], *, client: Fabr
 _TERMINAL_PUBLISH = frozenset({"success", "succeeded", "failed", "cancelled"})
 
 
+@contextmanager
+def _null_step(name: str, detail: str | None = None):
+    yield
+
+
+def _reporter(session):
+    """``session.step`` when there is a Session, and a no-op otherwise.
+
+    Reporting is the caller's, not this module's: a pytest fixture installing
+    Weaver wants no frames, and the CLI wants them badly. One accessor rather
+    than an ``if session`` at every phase.
+    """
+
+    return _null_step if session is None else session.step
+
+
 def publish_and_wait(
     env: Item,
     *,
@@ -337,12 +354,20 @@ def publish_and_wait(
 
     client.request("POST", f"{_staging_base(env)}/publish", expected=(200, 202))
     deadline = time.time() + timeout
+    seen = ""
     while time.time() < deadline:
-        state = publish_state(env, client=client)
-        if state.lower() in _TERMINAL_PUBLISH:
-            return state
+        seen = publish_state(env, client=client)
+        if seen.lower() in _TERMINAL_PUBLISH:
+            return seen
         time.sleep(poll_interval)
-    raise FabricError(f"publish did not finish within {int(timeout)}s (last state polled)")
+    # Name the state we actually last saw. The earlier message said "(last state
+    # polled)" literally, so half an hour of waiting ended in a sentence that
+    # described the value instead of containing it — and an empty string here
+    # (Fabric answering with no publishDetails at all) reads very differently
+    # from a publish genuinely stuck in Running.
+    raise FabricError(
+        f"publish did not finish within {int(timeout)}s; last state was {seen!r}"
+    )
 
 
 # --- the orchestrated install ------------------------------------------------
@@ -381,63 +406,76 @@ def install(
     workspace_name: str,
     environment_name: str,
     *,
-    publish: bool = True,
     client: FabricClient | None = None,
     root: Path | None = None,
+    session=None,
 ) -> InstallResult:
-    """Build the wheel, stage what changed, and publish only if needed.
+    """Build the wheel, stage what changed, and publish if anything changed.
 
-    The one supported installation path. The wanted wheel and dependencies are
-    diffed against the Environment's *published* revision: an ordinary code
-    change replaces only the wheel, an unchanged dependency set is left alone,
-    and a rerun that changes nothing (same source — the version is stable) does
-    not republish at all.
+    The one supported installation path, and it always finishes the job. There
+    is no stage-without-publish mode: staging is Fabric's scratch area and a
+    session imports the *published* revision, so stopping half way leaves a
+    workspace that looks installed and cannot import.
+
+    The wanted wheel and dependencies are diffed against the Environment's
+    published revision, so an ordinary code change replaces only the wheel, an
+    unchanged dependency set is left alone, and a rerun that changes nothing
+    (same source — the version is stable) does not republish at all.
+
+    ``session`` is optional and used only for reporting. Publishing is minutes
+    of waiting on Fabric, so the steps are framed: without them the command sits
+    silent long enough to look hung, which is the one thing a five-minute wait
+    must not do.
     """
 
     root = root or project_root()
     client = client or FabricClient()
     timings: dict[str, float] = {}
+    step = _reporter(session)
 
     t = time.perf_counter()
-    wheel = build_wheel(root)
+    with step("Build the wheel"):
+        wheel = build_wheel(root)
     timings["build"] = time.perf_counter() - t
     version = _version_from_wheel(wheel.name)
 
-    workspace = find_workspace(workspace_name, client=client)
-    env, created = find_or_create_environment(workspace, environment_name, client=client)
+    with step("Find the Environment"):
+        workspace = find_workspace(workspace_name, client=client)
+        env, created = find_or_create_environment(workspace, environment_name, client=client)
 
     definition_path = root / ENVIRONMENT_DEFINITION
     wanted_yml = definition_path.read_text("utf-8")
 
     # Diff against what is *published* (what a session imports), not staging.
-    published_libs = read_published(env, client=client)
-    deps_changed = wanted_yml.strip() != (published_libs.get("environmentYml") or "").strip()
-    wheel_changed = wheel.name not in library_wheels(published_libs)
+    with step("Read the published revision"):
+        published_libs = read_published(env, client=client)
+        deps_changed = wanted_yml.strip() != (published_libs.get("environmentYml") or "").strip()
+        wheel_changed = wheel.name not in library_wheels(published_libs)
 
-    # Stage only the differences, and only if they are not already staged (an
-    # interrupted earlier run may have staged them).
-    staging = read_staging(env, client=client)
-    staged = library_wheels(staging)
+        # Stage only the differences, and only if they are not already staged (an
+        # interrupted earlier run may have staged them).
+        staging = read_staging(env, client=client)
+        staged = library_wheels(staging)
+
     t = time.perf_counter()
-    if deps_changed and wanted_yml.strip() != (staging.get("environmentYml") or "").strip():
-        upload_environment_yml(env, definition_path, client=client)
-    if wheel_changed and wheel.name not in staged:
-        upload_wheel(env, wheel, client=client)
-        delete_stale_wheels(env, wheel.name, staged, client=client)
+    with step("Stage what changed"):
+        if deps_changed and wanted_yml.strip() != (staging.get("environmentYml") or "").strip():
+            upload_environment_yml(env, definition_path, client=client)
+        if wheel_changed and wheel.name not in staged:
+            upload_wheel(env, wheel, client=client)
+            delete_stale_wheels(env, wheel.name, staged, client=client)
     timings["upload"] = time.perf_counter() - t
 
     state = publish_state(env, client=client)
     already_published = state.lower() in {"success", "succeeded"}
     something_changed = created or deps_changed or wheel_changed
-    published_now = False
-    if not publish:
-        publish_status = "Skipped"
-    elif not something_changed and already_published:
+    if not something_changed and already_published:
         publish_status = "AlreadyInstalled"
         published_now = True
     else:
         t = time.perf_counter()
-        publish_status = publish_and_wait(env, client=client)
+        with step("Publish", "Fabric resolves dependencies into the image"):
+            publish_status = publish_and_wait(env, client=client)
         timings["publish"] = time.perf_counter() - t
         published_now = publish_status.lower() in {"success", "succeeded"}
         if not published_now:

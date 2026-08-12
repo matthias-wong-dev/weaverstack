@@ -125,21 +125,33 @@ def action_of(plan, kind: str):
     raise AssertionError(f"the plan carried no {kind} action")
 
 
-def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, sql=None):
+def run_from_here(
+    action, bundle, *, workspace, resolver, store, batch_target, sql=None, session=None
+):
     """Execute one real action against real Fabric, from this process.
 
     The same `execute_install_action` an installation calls, with its frozen payload,
     given the capabilities a desktop caller injects rather than the ones a
     session acquires. That the session can acquire its own is a separate claim,
     made once in `test_published_weaver.py`.
-    """
 
-    from support.sessions import given_installer
+    **The Session is given, never built here.** This capacity permits one
+    concurrent Livy session and the harness already holds it, so a Session that
+    acquired its own would ask for a second and be handed one in state 'dead'.
+    That did not matter while the Installer ran inside Fabric and this helper
+    needed no Spark; it matters now that the desktop Installer reaches for one.
+    """
 
     from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext
+    from weaver.build_bundle.installer import Installer
 
-    installer = given_installer(workspace=workspace, store=store, resolver=resolver)
+    if session is None:
+        raise AssertionError(
+            "run_from_here needs the harness's Session: building one here asks "
+            "the capacity for a second Livy session and gets a dead one"
+        )
+    installer = Installer(session, workspace=workspace)
     resolved = {
         target.id: installer.resolve_target(target) for target in bundle.plan.targets
     }
@@ -151,6 +163,10 @@ def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, s
         payload,
         context=InstallationContext(
             spark=None,
+            # From the Installer, as every production context gets it. A table
+            # alias needs a way to ask Spark whether it has become readable —
+            # the executor stays on the desktop and only that question crosses.
+            spark_sql=installer.spark_sql(),
             resolver=resolver,
             store=store,
             target=resolved[batch_target],
@@ -167,7 +183,7 @@ def run_from_here(action, bundle, *, workspace, resolver, store, batch_target, s
 @pytest.fixture(scope="module")
 def alias_estate(
     fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session,
-    tmp_path_factory,
+    weaver_session, tmp_path_factory,
 ):
     """The alias action, run from here against real Fabric."""
 
@@ -219,12 +235,12 @@ def alias_estate(
 
     alias_result = run_from_here(
         alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id,
+        store=store, batch_target=batch.target_id, session=weaver_session,
     )
     assert alias_result.status == "succeeded", alias_result.error_message
     refresh_result = run_from_here(
         refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id,
+        store=store, batch_target=batch.target_id, session=weaver_session,
     )
 
     aliased = at["consumer"].qualify("DWG", "PortableCustomer")
@@ -376,7 +392,7 @@ WAREHOUSE_CONSUMER = "Warehouse/AliasReporting"
 
 def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     fabric_workspace, fabric_client, fabric_alias_lakehouses,
-    clean_disposable_warehouse, livy_session, tmp_path_factory,
+    clean_disposable_warehouse, livy_session, weaver_session, tmp_path_factory,
 ):
     """The other alias form, and the one that leans hardest on the endpoint.
 
@@ -487,12 +503,13 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     refresh_batch, refresh_action = refreshes[0]
     run_from_here(
         refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=refresh_batch.target_id,
+        store=store, batch_target=refresh_batch.target_id, session=weaver_session,
     )
 
     result = run_from_here(
         alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
         store=store, batch_target=batch.target_id, sql=warehouse.executor,
+        session=weaver_session,
     )
 
     assert result.status == "succeeded", result.error_message

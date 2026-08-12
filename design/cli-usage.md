@@ -66,7 +66,7 @@ Commands are the ordinary CLI commands. `exit` to leave.
 
 weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
 weaver> build . --bind Lakehouse/Sales=Lakehouse/Sales
-weaver> load --targets Lakehouse/Sales Warehouse/Reporting
+weaver> load Lakehouse/Sales Warehouse/Reporting
 weaver> test Lakehouse/Sales
 weaver> exit
 ```
@@ -96,6 +96,161 @@ warms its JVM the same way.
 
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
+
+## Progress and timings
+
+Every command is a **Task**, made of **Steps**, and where it is useful, of
+**Sub-steps** — one per physical unit. Each frame reports what it cost as it
+closes, on stderr, so stdout stays the command's answer:
+
+```text
+Build
+
+  Read physical state                                  8.4s
+  Build bundle                                         0.3s
+    Sales.Customer                                     3.2s
+    Sales.Order                                        4.1s
+  Install                                             18.6s
+✓ Build                                               40.7s
+```
+
+Children appear above their parent with the parent's own total underneath — a
+roll-up, the way `du` reads. An error is content attached to whichever frame
+failed, not a level of its own, and a failure closes every frame it unwound so
+a stopped run still reports what it spent.
+
+**While work is in flight**, a line below the completed ones names the innermost
+open frame and how long it has been running, rewritten in place:
+
+```text
+⋯ Unbind catalogue claims                              1m47s
+```
+
+It is erased before anything permanent is written, so it never lands in the
+transcript, and it needs a terminal to rewrite — piped, redirected or captured,
+the output is exactly the completed lines. The elapsed figure ticks, which is
+the half that says a two-minute wait is alive rather than hung.
+
+That is the *logical* ledger. The transport one is separate, and neither can be
+derived from the other — "the load took forty seconds" and "thirty-eight of them
+were one Livy startup" call for opposite changes:
+
+```bash
+weaver session --timings
+weaver compose dev --timings
+```
+
+```text
+session lifetime 61.2s
+  livy.start                  1 calls     40.9s
+  livy.load                   1 calls     14.1s
+  resolve.item                6 calls      1.2s
+  resolve.item.cache_hits     4
+```
+
+## What a command needs
+
+Each command declares its coarse resource requirements from its parsed
+arguments — `auth`, `resolver`, `onelake`, `tds`, `livy` — and the Session
+starts exactly those, in the background, before the command wants them:
+
+```text
+weaver load Warehouse/Reporting   → auth, resolver, tds
+weaver load Lakehouse/Sales       → auth, resolver, onelake, livy
+weaver build ./repository         → auth, resolver, onelake, livy, tds
+```
+
+A Warehouse load therefore never waits on a Spark session, which on a capacity
+permitting one concurrent session is the difference between running and
+queueing.
+
+The Session is *told*; it does not infer. It has no idea what a build is, and a
+Session that decided which resources an operation wanted would be a second place
+deciding what the operation does.
+
+Declarations are coarse and are a **superset** — arguments cannot know what a
+repository or a catalogue turns out to contain. Exact routing comes later, from
+the BuildBundle or the RunGraph. So **preparing is not using**: a declaration
+gives a head start to an acquisition that is coming anyway and never causes one.
+A run that declares `livy` and turns out to be all T-SQL opens no Spark session
+and no remote runtime scope.
+
+`weaver compose` takes the union of every parsed command's requirements and
+warms that once, so a sequence ending in a load does not wait for Spark at the
+end of the build in front of it.
+
+## Wiping a whole estate
+
+Name the Weaver Lakehouse alongside the destinations:
+
+```bash
+weaver wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --yes
+```
+
+`wipe` removes the physical contents of what it is given, then deletes the
+catalogue claims of anything it emptied — unless the control Lakehouse is among
+them, in which case it skips that entirely, because the catalogue tables are
+going with it and deleting rows from a table about to be removed is work nobody
+needs.
+
+That is worth knowing, because the catalogue tidy is not cheap. Measured against
+a real workspace, a wipe of two destination targets spent about **two minutes**,
+almost all of it deleting rows the next build would immediately rewrite. Naming
+the control Lakehouse as well brought the same wipe to **4.4 seconds**.
+
+So for a from-scratch loop, wipe the control Lakehouse too. Keep it out only
+when you mean to preserve the catalogue — decommissioning one target out of an
+estate that carries on.
+
+## Compose
+
+The development loop is the same four commands every time, each carrying the
+bindings and targets the last one had. `compose.yml` writes the sequence down:
+
+```yaml
+compose:
+  dev:
+    - weaver wipe Lakehouse/Sales Warehouse/Reporting
+    - weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    - weaver load Warehouse/Reporting
+    - weaver test Warehouse/Reporting
+```
+
+```bash
+weaver compose dev
+weaver compose dev --file path/to/compose.yml
+```
+
+The sequence is displayed and confirmed before anything runs:
+
+```text
+Compose: dev  (compose.yml)
+
+1. weaver wipe Lakehouse/Sales Warehouse/Reporting
+2. weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+3. weaver load Warehouse/Reporting
+4. weaver test Warehouse/Reporting
+
+Execute this sequence? [y/N]
+```
+
+The default is no, and only `y`/`yes` proceeds. **That one answer authorises the
+whole sequence** — a `wipe` inside it does not stop to ask again, because having
+agreed to four commands, being asked about the first of them is not a second
+safeguard. Without a terminal to ask, nothing runs.
+
+**Entries are ordinary Weaver command lines**, parsed by the same parser and run
+by the same handlers, so an option means here what it means at a prompt. Nothing
+shell-shaped is accepted — no pipes, no redirection, no `&&`, no variables, no
+other executables — and neither is `session`, `doctor` or a nested `compose`.
+
+**One Session runs the whole sequence**, which is the point: authentication,
+item resolution and Livy are paid for once rather than four times. Run inside
+`weaver session`, the composition joins the Session already open.
+
+It is not a workflow engine, and is not meant to become one: no conditionals,
+no parallelism, no variables, no retries, no project-root discovery. Commands
+run in order and stop at the first failure.
 
 ## Install and control-plane bootstrap
 

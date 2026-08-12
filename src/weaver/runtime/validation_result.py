@@ -66,6 +66,21 @@ class TestResult:
             "error_message": self.error_message,
         }
 
+    @classmethod
+    def from_mapping(cls, mapping) -> "TestResult":
+        """The same judgement, rebuilt where the run is being decided.
+
+        ``failure_count`` is derived and deliberately not read back: it is in
+        the mapping for a reader, and taking it as input would let a result
+        arrive disagreeing with its own two counts.
+        """
+
+        return cls(
+            missing_count=mapping.get("missing_count", 0),
+            unexpected_count=mapping.get("unexpected_count", 0),
+            error_message=mapping.get("error_message"),
+        )
+
 
 @dataclass(frozen=True)
 class AssumptionResult:
@@ -87,6 +102,13 @@ class AssumptionResult:
             "violation_count": self.violation_count,
             "error_message": self.error_message,
         }
+
+    @classmethod
+    def from_mapping(cls, mapping) -> "AssumptionResult":
+        return cls(
+            violation_count=mapping.get("violation_count", 0),
+            error_message=mapping.get("error_message"),
+        )
 
 
 __all__ = ["AssumptionResult", "TestResult"]

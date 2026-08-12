@@ -81,3 +81,67 @@ def test_unbind_executes_only_catalogue_dml_without_a_physical_target_client():
 
     assert tuple(catalogue.executed) == result.statements
     assert len(catalogue.executed) > 2
+
+
+# --- what an unbind costs -----------------------------------------------------
+#
+# A DELETE is a Delta transaction that rewrites files, and it costs seconds
+# whether it removes one row or a thousand. So the statement *count* is the
+# cost, and against a real Fabric workspace it was the largest single thing in
+# the development loop: a wipe of the Weaver Example estate spent about 105
+# seconds in one Livy call, almost all of it transaction overhead on thirty-odd
+# tiny deletes.
+
+
+def test_every_installation_is_removed_in_one_pass_over_the_tables():
+    """One statement per table, not one per table per installation."""
+
+    from weaver.catalogue.reconcile import prune_installation
+    from weaver.catalogue.render import InstallationScope, InstallationScopes
+
+    scopes = tuple(
+        InstallationScope(item_type, name)
+        for item_type, name in (
+            ("Lakehouse", "Sales"),
+            ("Warehouse", "Reporting"),
+            ("Lakehouse", "_weaver"),
+        )
+    )
+
+    one_at_a_time = sum(len(prune_installation(scope)) for scope in scopes)
+    together = prune_installation(InstallationScopes(scopes))
+
+    assert len(together) == one_at_a_time // len(scopes)
+    assert len(together) == len(set(together)), "a table was addressed twice"
+
+
+def test_the_combined_delete_names_every_installation_and_no_others():
+    """The predicate is a *bounded* address. `WHERE` with no predicate — or one
+    that reassociates — is every row in the catalogue."""
+
+    from weaver.catalogue.reconcile import prune_installation
+    from weaver.catalogue.render import InstallationScope, InstallationScopes
+
+    scopes = InstallationScopes(
+        (
+            InstallationScope("Lakehouse", "Sales"),
+            InstallationScope("Warehouse", "Reporting"),
+        )
+    )
+
+    for statement in prune_installation(scopes):
+        where = statement.split("WHERE", 1)[1]
+        assert "'Sales'" in where and "'Reporting'" in where
+        # Outer parentheses around the OR: without them a later `AND` would
+        # reassociate and the delete would widen.
+        assert where.strip().startswith("((")
+
+
+def test_removing_nothing_renders_nothing():
+    """An empty selection must not become a `DELETE` with no predicate."""
+
+    from weaver.unbind import plan_unbind
+
+    result = plan_unbind(_Catalogue(()), lakehouses=(), warehouses=())
+
+    assert result.statements == ()

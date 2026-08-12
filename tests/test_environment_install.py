@@ -258,7 +258,15 @@ def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
     assert events["published"] is True
 
 
-def test_no_publish_flag_never_publishes(monkeypatch):
+def test_a_changed_wheel_is_always_published(monkeypatch):
+    """There is no stage-without-publish mode, and there must not be one.
+
+    Staging is Fabric's scratch area; a session imports the published revision.
+    An install that stopped after staging left a workspace that looked done and
+    could not ``import weaver``, so the flag that did it is gone rather than
+    defaulted off.
+    """
+
     yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
     events = _wire(
         monkeypatch,
@@ -267,6 +275,31 @@ def test_no_publish_flag_never_publishes(monkeypatch):
         state="Success",
         wheel_name="weaverstack-0.1.1.dev222-py3-none-any.whl",
     )
-    result = env_mod.install("WS", "weaver", client=object(), publish=False)
-    assert result.publish_status == "Skipped"
-    assert events["published"] is False
+    result = env_mod.install("WS", "weaver", client=object())
+    assert events["published"] is True
+    assert result.published is True
+
+    with pytest.raises(TypeError):
+        env_mod.install("WS", "weaver", client=object(), publish=False)
+
+
+def test_a_long_publish_reports_the_state_it_last_saw(monkeypatch):
+    """The timeout message must contain the state, not describe it.
+
+    It read "(last state polled)" literally, so half an hour of waiting ended
+    in a sentence with the interesting value missing — and 'Running' means
+    something very different from '', which is Fabric answering with no publish
+    details at all.
+    """
+
+    monkeypatch.setattr(env_mod, "publish_state", lambda env, *, client: "Running")
+    monkeypatch.setattr(env_mod.time, "sleep", lambda seconds: None)
+
+    class _Client:
+        def request(self, *a, **k):
+            return None
+
+    env = Item(id="env1", name="Weaver", type="Environment", workspace_id="ws1")
+    with pytest.raises(FabricError) as raised:
+        env_mod.publish_and_wait(env, client=_Client(), timeout=0.01, poll_interval=0.0)
+    assert "'Running'" in str(raised.value)

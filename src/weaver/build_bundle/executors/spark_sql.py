@@ -29,6 +29,10 @@ from .spark_case import exact_identifier_case
 
 
 class SparkSqlExecutor:
+
+    #: This executor reaches Spark, so on a host without one the action
+    #: crosses whole rather than the capability being faked underneath it.
+    needs_spark = True
     name = "spark_sql"
 
     def execute(

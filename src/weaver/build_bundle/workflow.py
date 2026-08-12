@@ -188,23 +188,83 @@ def read_build_state(
     """
 
     workspace = workspace if workspace is not None else session.workspace
-    inventories = read_target_inventories(
-        bindings, session=session, workspace=workspace, sql_by_item=sql_by_item
-    )
     if workspace is None or not workspace.weaver_lakehouse:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
+
+    with session.step("Read target inventories"):
+        inventories = read_target_inventories(
+            bindings, session=session, workspace=workspace, sql_by_item=sql_by_item
+        )
+    with session.step("Read catalogue"):
+        catalogue = _read_catalogue(
+            session=session,
+            workspace=workspace,
+            required=tuple(required_catalogue_items),
+        )
+    return BuildState(catalogue=catalogue, target_inventories=inventories)
+
+
+def _read_catalogue(*, session, workspace, required):
+    """The catalogue a build plans against, read wherever Spark is.
+
+    The catalogue lives in Delta tables in the Weaver Lakehouse, so reading it
+    needs Spark — which a desktop process does not have. It asks for the read as
+    a whole instead, and what comes back is the same
+    :class:`~weaver.catalogue.state.Catalogue` either way, because a Builder is
+    pure and must not be able to tell.
+    """
+
+    from ..catalogue.state import Catalogue
+    from ..session.program import RemoteProgram
+
+    items = [str(item) for item in required]
+    body = (
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.declaration.model import WeaverItemId\n"
+        "from weaver.build_bundle.workflow import _catalogue_here\n"
+        "from weaver.session import NotebookSession\n"
+        f"workspace = {_workspace_literal(workspace)}\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
+        f"required = tuple(WeaverItemId.parse(value) for value in {items!r})\n"
+        "emit(_catalogue_here(session=session, workspace=workspace, "
+        "required=required).to_mapping())\n"
+    )
+    payload = session.execute_python(
+        RemoteProgram(
+            name="read_catalogue",
+            call=lambda: _catalogue_here(
+                session=session, workspace=workspace, required=required
+            ).to_mapping(),
+            source=body,
+            detail=str(workspace.weaver_lakehouse),
+        ),
+        workspace=workspace,
+    )
+    return Catalogue.from_mapping(payload)
+
+
+def _catalogue_here(*, session, workspace, required):
+    """The catalogue read by a host that already has Spark."""
+
     from ..spark import SparkCatalogue
     from ..targets import ItemRef
 
-    catalogue = SparkCatalogue(
-        session.spark(workspace),
-        session.resolver(workspace).spark_destination(
-            ItemRef(workspace.weaver_lakehouse)
+    return read_catalogue_state(
+        SparkCatalogue(
+            session.spark(workspace),
+            session.resolver(workspace).spark_destination(
+                ItemRef(workspace.weaver_lakehouse)
+            ),
         ),
+        required,
     )
-    return BuildState(
-        catalogue=read_catalogue_state(catalogue, required_catalogue_items),
-        target_inventories=inventories,
+
+
+def _workspace_literal(workspace) -> str:
+    return (
+        f"FabricWorkspace(workspace={workspace.workspace!r}, "
+        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"environment={workspace.environment!r})"
     )
 
 
@@ -569,29 +629,105 @@ def read_target_inventories(
     supplied_sql = sql_by_item or {}
     workspace = workspace if workspace is not None else session.workspace
     inventories = {}
+    delta = []
+
+    # Each Warehouse is its own read over TDS, so each gets its own Sub-step and
+    # its own number. The Lakehouses cannot be split the same way and should not
+    # be: they share one crossing, which is one observation of one moment rather
+    # than several of several (AGENTS.md, "one state transition, one evidence
+    # payload"). So they are named together, honestly, as the one read they are.
+    #
+    # Each line says what it is doing, not just what it is doing it to. Children
+    # print above their parent, so a bare "Warehouse/Reporting" arrives before
+    # the "Read target inventories" it belongs to and reads as a stray line
+    # under the Task heading.
     for binding in bindings.entries:
         target = binding.to_bound_target()
         if target.kind == WAREHOUSE_TARGET:
-            sql = supplied_sql.get(binding.item)
-            if sql is None:
-                if workspace is None:
-                    raise BuildError(
-                        f"reading Warehouse inventory for {binding.item} needs a Workspace"
-                    )
-                from ..targets import WarehouseTarget
+            with session.substep(f"Read {target.display} inventory"):
+                sql = supplied_sql.get(binding.item)
+                if sql is None:
+                    if workspace is None:
+                        raise BuildError(
+                            f"reading Warehouse inventory for {binding.item} needs a Workspace"
+                        )
+                    from ..targets import WarehouseTarget
 
-                sql = session.sql_executor(
-                    WarehouseTarget.parse(target.item_id), workspace=workspace
-                )
-            inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
+                    sql = session.sql_executor(
+                        WarehouseTarget.parse(target.item_id), workspace=workspace
+                    )
+                inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
         else:
-            inventories[binding.item] = read_lakehouse_inventory(
-                target,
-                resolver=session.resolver(workspace),
-                store=session.store(workspace),
-                spark=session.spark(workspace),
+            delta.append((binding.item, target))
+
+    if delta:
+        named = ", ".join(target.display for _item, target in delta)
+        plural = "inventories" if len(delta) > 1 else "inventory"
+        with session.substep(f"Read {named} {plural}"):
+            observed = _lakehouse_inventories(
+                [target for _item, target in delta],
+                session=session,
+                workspace=workspace,
             )
+        for item, target in delta:
+            inventories[item] = observed[target.id]
     return inventories
+
+
+def _lakehouse_inventories(targets, *, session, workspace) -> dict:
+    """Every Lakehouse's inventory, in one crossing rather than one apiece.
+
+    A Lakehouse inventory needs the Spark catalogue, so on a desktop this
+    crosses. Once for all of them: a submission costs seconds and the statements
+    inside it cost almost nothing, so a call per target would make observing
+    three Lakehouses three times the price of observing one — and would present
+    three observations of three different moments as one snapshot.
+    """
+
+    from .prune import TargetInventory
+    from ..session.program import RemoteProgram
+
+    frozen = [target.to_mapping() for target in targets]
+    body = (
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.build_bundle.targets import BoundTarget\n"
+        "from weaver.build_bundle.workflow import _lakehouse_inventories_here\n"
+        "from weaver.session import NotebookSession\n"
+        f"workspace = {_workspace_literal(workspace)}\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
+        f"targets = [BoundTarget.from_mapping(one) for one in {frozen!r}]\n"
+        "emit(_lakehouse_inventories_here(targets, session=session, "
+        "workspace=workspace))\n"
+    )
+    payload = session.execute_python(
+        RemoteProgram(
+            name="read_inventories",
+            call=lambda: _lakehouse_inventories_here(
+                targets, session=session, workspace=workspace
+            ),
+            source=body,
+            detail=", ".join(target.name for target in targets),
+        ),
+        workspace=workspace,
+    )
+    return {
+        target_id: TargetInventory.from_mapping(mapping)
+        for target_id, mapping in payload.items()
+    }
+
+
+def _lakehouse_inventories_here(targets, *, session, workspace) -> dict:
+    """Every named Lakehouse's inventory, by a host that has Spark."""
+
+    resolver = session.resolver(workspace)
+    store = session.store(workspace)
+    spark = session.spark(workspace)
+    return {
+        target.id: read_lakehouse_inventory(
+            target, resolver=resolver, store=store, spark=spark
+        ).to_mapping()
+        for target in targets
+    }
 
 
 @contextmanager

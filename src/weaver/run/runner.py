@@ -47,6 +47,7 @@ run behaves when one of them fails.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Sequence
@@ -66,6 +67,54 @@ from .result import (
     run_status,
 )
 from .state import RunState
+
+
+def node_label(node) -> str:
+    """What to call this node on screen: a verb and the thing it acts on.
+
+    ``node_id`` is an identifier and reads like one — ``load:Lakehouse/Sales/
+    Sales.Customer`` — which is right for a report that has to be matched up
+    later and wrong for a line someone is watching go by. The id is unchanged
+    and still what results carry; this is only what the frame is called.
+
+    The target comes along because two Lakehouses can hold the same object
+    name, and without it a reader watching a two-target run cannot tell which
+    ``Sales.Customer`` is in flight.
+    """
+
+    from .resolution import ENDPOINT_REFRESH
+
+    target = getattr(node, "physical_target", None)
+    if node.primitive_kind == ENDPOINT_REFRESH:
+        return f"Refresh {target} SQL endpoint"
+
+    what = node.logical_id
+    if what is None:
+        # Nothing logical to name — a barrier, or a node built straight from an
+        # id. The id is the only true answer, and inventing "Load None" would
+        # be worse than the identifier this is trying to improve on.
+        return node.node_id
+    name = getattr(getattr(what, "object_id", None), "qualified", None) or str(what)
+    # A load node's role is "load"; a validation carries its own kind — "Test",
+    # "Assumption" — so anything that is not a load is being tested.
+    verb = "Load" if node.role == LOAD else "Test"
+    return f"{verb} {target}/{name}" if target is not None else f"{verb} {name}"
+
+
+@contextmanager
+def _node_substep(session, node):
+    """One node's timing frame, where there is a Session to record it on.
+
+    A run-cycle test constructs a Runner with no Session at all — that is the
+    whole point of the dispatch seam — so this yields ``None`` rather than
+    making the Runner's timing depend on having crossed anything.
+    """
+
+    if session is None or not hasattr(session, "substep"):
+        yield None
+        return
+    with session.substep(node_label(node)) as frame:
+        yield frame
 
 
 # --- what a run was asked for -------------------------------------------------
@@ -226,20 +275,24 @@ class Runner:
 
     # --- the run's own runtime ----------------------------------------------
 
-    @property
-    def runtime_scope(self):
+    def runtime_scope(self, session=None):
         """Where this run's deployed Python modules live, and how long they live.
 
         One scope per run, because a Fabric session outlives a build and a build
         rewrites deployed Python in place — so a module kept past the run that
         imported it is a module the next load would use instead of the one now
         on disk.
+
+        *Where* it lives depends on the host: in this process where this process
+        is where the data is, and otherwise in the Fabric session that can
+        perform the imports, named from here. The Runner is told neither — one
+        scope per run, closed at the end of it, is one rule in both cases.
         """
 
         if self._runtime_scope is None:
-            from ..runtime.python_context import RuntimeScope
+            from .runtime_boundary import open_runtime_scope
 
-            self._runtime_scope = RuntimeScope.new()
+            self._runtime_scope = open_runtime_scope(session, workspace=self.workspace)
         return self._runtime_scope
 
     def _close_runtime(self) -> None:
@@ -283,6 +336,11 @@ class Runner:
         statuses: dict[str, str] = {node.node_id: PENDING for node in ordered}
         results: dict[str, RunNodeResult] = {}
         stopped = False
+        # In a `finally`, because a scope that outlived its run is a scope the
+        # next run would inherit — along with the modules a rebuild has since
+        # replaced. A failed node is data and never reaches here, but an
+        # interrupt does, and a leak is exactly what an interrupted run must
+        # not leave behind.
 
         def settle(result: RunNodeResult, status: str | None = None) -> None:
             results[result.node_id] = result
@@ -292,65 +350,73 @@ class Runner:
             if on_node is not None:
                 on_node(result)
 
-        for node in ordered:
-            blocking = self._blocking(node, statuses)
-            if blocking:
-                settle(
-                    self._settled(node, BLOCKED, messages=(_blocked_by(node, blocking),)),
-                    BLOCKED,
-                )
-                continue
-            if stopped:
-                # Fail-fast stops *scheduling*, not reporting. A node whose own
-                # dependencies were fine is not blocked — it simply never
-                # started, and saying so beats inventing a failure for it.
-                settle(self._settled(node, PENDING))
-                continue
+        def _execute() -> None:
+            nonlocal stopped
 
-            resolved = self.resolve(node)
-            if not resolved.valid:
-                # Invalid, not failed: nothing ran. A reader distinguishing "the
-                # primitive reported failure" from "there was nothing to run" is
-                # asking a question the status should answer.
-                settle(
-                    self._settled(
-                        node,
-                        INVALID,
-                        messages=resolved.messages,
-                        location=resolved.dispatch_location,
-                    ),
-                    FAILED,
-                )
-                if not self.request.fault_tolerant:
-                    stopped = True
-                continue
-            if resolved.unsupported:
-                # A capability this host does not have. The node is omitted
-                # rather than failed, exactly as the build's own executor skips.
-                settle(
-                    self._settled(
-                        node,
+            for node in ordered:
+                blocking = self._blocking(node, statuses)
+                if blocking:
+                    settle(
+                        self._settled(node, BLOCKED, messages=(_blocked_by(node, blocking),)),
+                        BLOCKED,
+                    )
+                    continue
+                if stopped:
+                    # Fail-fast stops *scheduling*, not reporting. A node whose own
+                    # dependencies were fine is not blocked — it simply never
+                    # started, and saying so beats inventing a failure for it.
+                    settle(self._settled(node, PENDING))
+                    continue
+
+                resolved = self.resolve(node)
+                if not resolved.valid:
+                    # Invalid, not failed: nothing ran. A reader distinguishing "the
+                    # primitive reported failure" from "there was nothing to run" is
+                    # asking a question the status should answer.
+                    settle(
+                        self._settled(
+                            node,
+                            INVALID,
+                            messages=resolved.messages,
+                            location=resolved.dispatch_location,
+                        ),
+                        FAILED,
+                    )
+                    if not self.request.fault_tolerant:
+                        stopped = True
+                    continue
+                if resolved.unsupported:
+                    # A capability this host does not have. The node is omitted
+                    # rather than failed, exactly as the build's own executor skips.
+                    settle(
+                        self._settled(
+                            node,
+                            SKIPPED,
+                            messages=resolved.messages,
+                            location=resolved.dispatch_location,
+                        ),
                         SKIPPED,
-                        messages=resolved.messages,
-                        location=resolved.dispatch_location,
-                    ),
-                    SKIPPED,
-                )
-                continue
+                    )
+                    continue
 
-            settle(
-                self._dispatched(
-                    node, dispatch=dispatch, session=session, resolved=resolved
-                ),
-                None,
-            )
-            status = results[node.node_id].status
-            statuses[node.node_id] = status
-            if status == FAILED and not self.request.fault_tolerant:
-                stopped = True
+                settle(
+                    self._dispatched(
+                        node, dispatch=dispatch, session=session, resolved=resolved
+                    ),
+                    None,
+                )
+                status = results[node.node_id].status
+                statuses[node.node_id] = status
+                if status == FAILED and not self.request.fault_tolerant:
+                    stopped = True
+
+
+        try:
+            _execute()
+        finally:
+            self._close_runtime()
 
         nodes = tuple(results[node.node_id] for node in ordered)
-        self._close_runtime()
         return self._result(nodes, started=started)
 
     def _dry_run(self, ordered) -> tuple:
@@ -420,25 +486,32 @@ class Runner:
 
         started = _now()
         location = getattr(resolved, "dispatch_location", None)
-        try:
-            returned = dispatch(
-                node,
-                session=session,
-                state=self.state,
-                resolved=resolved,
-                fault_tolerant=self.request.fault_tolerant,
-                runtime_scope=self.runtime_scope,
-                workspace=self.workspace,
-            )
-        except Exception as exc:  # noqa: BLE001 - a failed node is a result
-            # Deliberately not BaseException. A KeyboardInterrupt or a
-            # SystemExit is the operator or the process saying stop, not a
-            # primitive reporting failure — recording one as a failed node
-            # would swallow Ctrl-C at the prompt and leave a run that looks
-            # like it decided something.
-            outcome = settle(node, raised=exc)
-        else:
-            outcome = settle(node, returned=returned)
+        # One Sub-step per node, which is where a run's per-object timing comes
+        # from. The frame is marked failed from inside rather than by an
+        # exception, because a failed node is a *result* here — the run records
+        # what happened before it decides what to do about it.
+        with _node_substep(session, node) as frame:
+            try:
+                returned = dispatch(
+                    node,
+                    session=session,
+                    state=self.state,
+                    resolved=resolved,
+                    fault_tolerant=self.request.fault_tolerant,
+                    open_runtime=lambda: self.runtime_scope(session),
+                    workspace=self.workspace,
+                )
+            except Exception as exc:  # noqa: BLE001 - a failed node is a result
+                # Deliberately not BaseException. A KeyboardInterrupt or a
+                # SystemExit is the operator or the process saying stop, not a
+                # primitive reporting failure — recording one as a failed node
+                # would swallow Ctrl-C at the prompt and leave a run that looks
+                # like it decided something.
+                outcome = settle(node, raised=exc)
+            else:
+                outcome = settle(node, returned=returned)
+            if frame is not None and outcome.status == FAILED:
+                frame.failed = True
         return self._settled(
             node,
             outcome.status,

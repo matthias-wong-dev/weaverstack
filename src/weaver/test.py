@@ -91,20 +91,18 @@ def test(
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
-        if not opened.executes_here(resolved):
-            raise CommandError(
-                "test runs where the data is: call it from a Fabric notebook, "
-                "or against a local Workspace"
+        with opened.task(
+            "Test (dry run)" if dry_run else "Test", ", ".join(map(str, refs))
+        ):
+            return run_test(
+                opened,
+                workspace=resolved,
+                requested=refs,
+                name=name,
+                file=file,
+                dry_run=dry_run,
+                strict=strict,
             )
-        return run_test(
-            opened,
-            workspace=resolved,
-            requested=refs,
-            name=name,
-            file=file,
-            dry_run=dry_run,
-            strict=strict,
-        )
 
 
 def run_test(
@@ -164,31 +162,35 @@ def run_test(
 
     from .run.state import read_installed_catalogue
 
-    if state is None:
-        state = RunState(
-            catalogue=read_installed_catalogue(session=session, workspace=workspace)
+    with session.step("Read catalogue"):
+        if state is None:
+            state = RunState(
+                catalogue=read_installed_catalogue(session=session, workspace=workspace)
+            )
+    with session.step("Build run graph"):
+        runner = Runner(
+            state,
+            RunRequest.test(
+                requested,
+                name=name,
+                dry_run=dry_run,
+                # Validations are independent by construction: each reads the
+                # estate and reports, and none produces what another consumes.
+                # One that fails is a finding, not a reason to stop asking the
+                # others — and "everything I did not get to" is the least useful
+                # answer a run that was asked what is wrong with an estate could
+                # give.
+                fault_tolerant=True,
+            ),
+            workspace=workspace,
         )
-    runner = Runner(
-        state,
-        RunRequest.test(
-            requested,
-            name=name,
-            dry_run=dry_run,
-            # Validations are independent by construction: each reads the estate
-            # and reports, and none produces what another consumes. One that
-            # fails is a finding, not a reason to stop asking the others — and
-            # "everything I did not get to" is the least useful answer a run
-            # that was asked what is wrong with an estate could give.
-            fault_tolerant=True,
-        ),
-        workspace=workspace,
-    )
-    result = runner.run(
-        session=session,
-        # Evidence for a caller who asked about one validation; counts alone for
-        # a whole-target run, which must not transfer diagnostic rows.
-        dispatch=_dispatch_collecting(collect=name is not None),
-    )
+    with session.step("Execute"):
+        result = runner.run(
+            session=session,
+            # Evidence for a caller who asked about one validation; counts alone
+            # for a whole-target run, which must not transfer diagnostic rows.
+            dispatch=_dispatch_collecting(collect=name is not None),
+        )
 
     return _reported(
         session,

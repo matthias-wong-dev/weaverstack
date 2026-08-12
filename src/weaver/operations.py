@@ -34,16 +34,45 @@ from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
 
 @dataclass(frozen=True)
 class BuildFailure:
+    """One action that failed, described the way a developer needs to read it.
+
+    ``artefact`` is the Weaver thing that failed —
+    ``Warehouse/Reporting/Sales.CustomerRevenue`` — and ``source_path`` is the
+    repository file to open. Both are carried from the build rather than
+    recovered from ``action_id``, which by this point spells a slug.
+    """
+
     action_id: str
     error_type: str | None
     message: str | None
+    artefact: str | None = None
+    source_path: str | None = None
 
     def to_mapping(self) -> dict:
         return {
             "id": self.action_id,
             "type": self.error_type,
             "message": self.message,
+            "artefact": self.artefact,
+            "source": self.source_path,
         }
+
+    def describe(self) -> str:
+        """The failure as the plan's error shape: what, where, then why.
+
+        The Weaver operation leads. A developer whose stored procedure has a
+        syntax error is not helped by being told first that TDS raised
+        something — the infrastructure is how it was found out, not what went
+        wrong, and it comes last.
+        """
+
+        subject = self.artefact or self.action_id
+        lines = [f"Error installing {subject}"]
+        if self.source_path:
+            lines.append(f"Source: {self.source_path}")
+        if self.message:
+            lines.append(str(self.message))
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -223,15 +252,16 @@ def build(
                 bundle_name=bundle,
                 source=source_location.value,
             )
-            if opened.executes_here(resolved_workspace):
-                # The emulator and a notebook alike: this process is already
-                # where the data engineering happens, so the build runs here.
-                return _build_in_process(
+            with opened.task("Build", str(resolved_workspace.workspace)):
+                if opened.executes_here(resolved_workspace):
+                    # The emulator and a notebook alike: this process is already
+                    # where the data engineering happens, so the build runs here.
+                    return _build_in_process(
+                        resolved_workspace, session=opened, **arguments
+                    )
+                return _build_desktop_fabric(
                     resolved_workspace, session=opened, **arguments
                 )
-            return _build_desktop_fabric(
-                resolved_workspace, session=opened, **arguments
-            )
 
 
 def wipe(
@@ -269,41 +299,51 @@ def wipe(
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
-        store = opened.store(resolved_workspace) if storage_targets else None
-        reports: list[WipeReport] = []
-        if not dry_run:
-            _drop_local_catalogue(resolved_workspace, storage_targets, session=opened)
-        for target in parsed:
-            reports.extend(
-                _wipe_one(
-                    target,
-                    resolved_workspace,
-                    store=store,
-                    dry_run=dry_run,
-                    session=opened,
+        # Named for what it is. A dry run reads the estate and decides, which
+        # takes real time and is worth seeing; what it must not do is present
+        # itself as the removal.
+        with opened.task("Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, parsed))):
+            storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
+            store = opened.store(resolved_workspace) if storage_targets else None
+            reports: list[WipeReport] = []
+            if not dry_run:
+                _drop_local_catalogue(
+                    resolved_workspace, storage_targets, session=opened
                 )
-            )
+            for target in parsed:
+                with opened.step(str(target)):
+                    reports.extend(
+                        _wipe_one(
+                            target,
+                            resolved_workspace,
+                            store=store,
+                            dry_run=dry_run,
+                            session=opened,
+                        )
+                    )
 
-        unbound = None
-        control = unbind_from or resolved_workspace.weaver_lakehouse
-        whole_lakehouses = {
-            target.physical_name
-            for target in parsed
-            if target.item_type == "Lakehouse"
-        }
-        if not dry_run and control and control not in whole_lakehouses:
-            catalogue_workspace = replace(
-                resolved_workspace, weaver_lakehouse=ItemRef.parse(control).name
-            )
-            unbound = _unbind_physical_targets(catalogue_workspace, parsed)
+            unbound = None
+            control = unbind_from or resolved_workspace.weaver_lakehouse
+            whole_lakehouses = {
+                target.physical_name
+                for target in parsed
+                if target.item_type == "Lakehouse"
+            }
+            if not dry_run and control and control not in whole_lakehouses:
+                catalogue_workspace = replace(
+                    resolved_workspace, weaver_lakehouse=ItemRef.parse(control).name
+                )
+                with opened.step("Unbind catalogue claims"):
+                    unbound = _unbind_physical_targets(
+                        catalogue_workspace, parsed, session=opened
+                    )
 
-        return WipeResult(
-            workspace=str(resolved_workspace.workspace),
-            reports=tuple(reports),
-            unbound=unbound,
-            dry_run=dry_run,
-        )
+            return WipeResult(
+                workspace=str(resolved_workspace.workspace),
+                reports=tuple(reports),
+                unbound=unbound,
+                dry_run=dry_run,
+            )
 
 
 def _operation_workspace(*, workspace, workspace_config, session=None) -> Workspace:
@@ -457,7 +497,11 @@ def _result_from_item_build(source, bindings, result) -> BuildResult:
         status=report.status,
         errors=tuple(
             BuildFailure(
-                action.action_id, action.error_type, action.error_message
+                action.action_id,
+                action.error_type,
+                action.error_message,
+                artefact=action.resource_node_id,
+                source_path=action.source_path,
             )
             for action in report.action_results()
             if action.status == "failed"
@@ -502,49 +546,30 @@ def _build_in_process(
     )
 
     resolver = session.resolver(workspace)
+    # No wrapping Step: `read_build_state` opens one per part it reads, and a
+    # Step inside a Step would make a fourth level of a hierarchy that has
+    # three. What a reader wants is the parts — the catalogue and the
+    # inventories are separately slow, and separately fixable.
     state = read_build_state(
         bindings,
         required_catalogue_items=catalogue_items_for_build(repository, bindings),
         session=session,
         workspace=workspace,
     )
-    result = build_item_repository(
-        repository,
-        bindings=bindings,
-        state=state,
-        session=session,
-        workspace=workspace,
-        source_store=source_store,
-        control_lakehouse=control_lakehouse,
-        archive=_archive_location(resolver, bundle_name),
-    )
+    with session.step("Build and install"):
+        result = build_item_repository(
+            repository,
+            bindings=bindings,
+            state=state,
+            session=session,
+            workspace=workspace,
+            source_store=source_store,
+            control_lakehouse=control_lakehouse,
+            archive=_archive_location(resolver, bundle_name),
+        )
     return _result_from_item_build(source, bindings, result)
 
 
-def _read_build_state_here(workspace, *, session, bindings, repository) -> dict:
-    """The build state, read in this process. The in-host spelling of a crossing."""
-
-    from .build_bundle import catalogue_items_for_build, read_build_state
-
-    return read_build_state(
-        bindings,
-        required_catalogue_items=catalogue_items_for_build(repository, bindings),
-        session=session,
-        workspace=workspace,
-    ).to_mapping()
-
-
-def _install_archive_here(workspace, *, session, archive) -> dict:
-    """One bundle archive installed in this process."""
-
-    from .build_bundle import install_bundle_archive
-
-    return install_bundle_archive(
-        archive,
-        archive_store=session.store(workspace),
-        session=session,
-        workspace=workspace,
-    ).to_mapping()
 
 
 def _build_desktop_fabric(
@@ -558,20 +583,27 @@ def _build_desktop_fabric(
     bundle_name,
     source,
 ) -> BuildResult:
-    """One build from a console, crossing into Fabric twice and coarsely.
-
-    The decision is made here and the physical work happens there:
+    """One build driven from a console. Nothing crosses that does not have to.
 
     .. code-block:: text
 
-        read the build state    → one crossing
-        plan the bundle         → locally, in Python
-        upload the archive      → the Session's transport store
-        install the bundle      → one crossing
+        read the build state    → through Session capabilities, per part
+        plan the bundle         → here, in Python
+        install the bundle      → here, each action to the capability it needs
 
-    Two crossings, whatever the bundle contains. Breaking the install into
-    host-driven actions is the later decomposition work, and nothing here
-    assumes it stays coarse forever — but nothing here does it either.
+    The state read goes through the readers themselves, which ask for only what
+    each part needs — Warehouse inventories over TDS from here, the catalogue
+    and the Lakehouse inventories across — each timed as its own Step. That is
+    what makes "Read target inventories 44.1s" answerable rather than merely
+    true.
+
+    The Installer then runs in this process. Files go straight to OneLake,
+    T-SQL to TDS, control operations over REST, and only the actions that need
+    Spark cross — batched, because the submission is the expensive part.
+
+    Nothing is packed to install. The archive survives only where it was always
+    the point: ``--bundle`` keeps a build record, written after the install and
+    read by nobody in this path.
     """
 
     if not workspace.environment:
@@ -579,15 +611,14 @@ def _build_desktop_fabric(
             "Fabric build requires an Environment in workspace configuration"
         )
     from .build_bundle import (
-        BuildState,
+        Installer,
         catalogue_items_for_build,
         generate_item_build_bundle,
         persist_bundle_archive,
+        read_build_state,
     )
     from .catalogue.state import reconcile_catalogue_state
     from .fabric.preflight import preflight_fabric_targets
-    from .session.program import RemoteProgram
-
     # Above the session, deliberately. Every item this build needs is proved to
     # exist from one workspace listing, so a missing target costs a REST call
     # rather than a Livy session and a Spark traceback about a catalogue.
@@ -599,57 +630,24 @@ def _build_desktop_fabric(
     )
     resolver = session.resolver(workspace)
     transport_store = session.transport_store(workspace)
-    binding_texts = [_binding_text(binding) for binding in bindings.entries]
-    required_items = [
-        str(item) for item in catalogue_items_for_build(repository, bindings)
-    ]
-    workspace_literal = (
-        f"FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
-        f"environment={workspace.environment!r})"
-    )
-    # What runs on the far side is Weaver's own Session, constructed there: the
-    # notebook host, which is where a Fabric session already is. Nothing about
-    # the read differs between here and there except which Session answers.
-    state_body = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.declaration.model import WeaverItemId\n"
-        "from weaver.build_bundle import (ItemBindings, parse_item_binding, "
-        "read_build_state)\n"
-        "from weaver.session import NotebookSession\n"
-        f"workspace = {workspace_literal}\n"
-        "session = NotebookSession(workspace=workspace, spark=spark)\n"
-        f"bindings = ItemBindings(tuple(parse_item_binding(text) for text in {binding_texts!r}))\n"
-        f"items = tuple(WeaverItemId.parse(value) for value in {required_items!r})\n"
-        "emit(read_build_state(bindings, required_catalogue_items=items, "
-        "session=session).to_mapping())\n"
-    )
-    execution_id = uuid.uuid4().hex
-    execution = resolver.cli_execution(execution_id)
-    remote_archive = resolver.cli_bundle(execution_id)
     retained_archive = _archive_location(resolver, bundle_name)
-    bundle = None
-    report = None
 
-    state = BuildState.from_mapping(
-        session.execute_python(
-            RemoteProgram(
-                name="read_build_state",
-                call=lambda: _read_build_state_here(
-                    workspace, session=session, bindings=bindings, repository=repository
-                ),
-                source=state_body,
-                detail=str(workspace.workspace),
-            ),
-            workspace=workspace,
-        )
+    # No wrapping Step: `read_build_state` opens one per part it reads, and a
+    # Step inside a Step would make a fourth level of a hierarchy that has
+    # three. What a reader wants is the parts — the catalogue and the
+    # inventories are separately slow, and separately fixable.
+    state = read_build_state(
+        bindings,
+        required_catalogue_items=catalogue_items_for_build(repository, bindings),
+        session=session,
+        workspace=workspace,
     )
     reconciliation = reconcile_catalogue_state(
         state.catalogue, inventories=state.target_inventories
     )
-    try:
-        with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
-            root = Path(temporary)
+    with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
+        root = Path(temporary)
+        with session.step("Build bundle"):
             bundle = generate_item_build_bundle(
                 repository,
                 bindings=bindings,
@@ -660,44 +658,27 @@ def _build_desktop_fabric(
                 stale_claims=reconciliation.stale_claims,
                 control_lakehouse=control_lakehouse,
             )
-            local_archive = Location((root / "install.weaver.zip").as_posix())
-            persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
-            archive_bytes = FilesystemStore().read(local_archive)
-            transport_store.make_directory(resolver.cli_root)
-            transport_store.make_directory(execution)
-            transport_store.write(remote_archive, archive_bytes)
-            install_body = (
-                "from weaver.workspaces import FabricWorkspace\n"
-                "from weaver.build_bundle import install_bundle_archive\n"
-                "from weaver.session import NotebookSession\n"
-                f"workspace = {workspace_literal}\n"
-                "session = NotebookSession(workspace=workspace, spark=spark)\n"
-                "store = session.store(workspace)\n"
-                "resolver = session.resolver(workspace)\n"
-                f"archive = resolver.cli_bundle({execution_id!r})\n"
-                "report = install_bundle_archive(archive, archive_store=store, "
-                "session=session)\n"
-                "emit(report.to_mapping())\n"
-            )
-            report = session.execute_python(
-                RemoteProgram(
-                    name="install_bundle",
-                    call=lambda: _install_archive_here(
-                        workspace, session=session, archive=remote_archive
-                    ),
-                    source=install_body,
-                    detail=bundle.bundle_id,
-                ),
-                workspace=workspace,
-            )
-            if retained_archive is not None:
+        with session.step("Install"):
+            # The Installer runs *here*. Each action goes to the capability it
+            # needs — files straight to OneLake, T-SQL straight to TDS, control
+            # operations over REST — and only the actions that genuinely need
+            # Spark cross into the session.
+            #
+            # Which is why nothing is packed to install. Zipping the bundle,
+            # uploading it and unpacking it on the far side existed to get the
+            # payloads to where the Installer was; with the Installer here, the
+            # deployed Python tree takes the short path to OneLake. The archive
+            # below is a retained build record, not a delivery mechanism.
+            report = Installer(session, workspace=workspace).install(bundle).to_mapping()
+        if retained_archive is not None:
+            with session.step("Retain bundle", bundle.bundle_id):
+                local_archive = Location((root / "install.weaver.zip").as_posix())
+                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
                 transport_store.make_directory(resolver.build_bundles_root)
-                transport_store.write(retained_archive, archive_bytes)
-    finally:
-        try:
-            transport_store.delete(execution, recursive=True)
-        except WeaverError:
-            pass
+                transport_store.write(
+                    retained_archive, FilesystemStore().read(local_archive)
+                )
+
     assert bundle is not None and report is not None
     return BuildResult(
         source=source,
@@ -710,6 +691,8 @@ def _build_desktop_fabric(
                 action["action_id"],
                 action.get("error_type"),
                 action.get("error_message"),
+                artefact=action.get("resource_node_id"),
+                source_path=action.get("source_path"),
             )
             for sequence in report.get("sequences", ())
             for action in sequence.get("actions", ())
@@ -778,46 +761,49 @@ def _drop_local_catalogue(workspace, targets: Sequence[WipeTarget], *, session) 
         )
 
 
-def _unbind_physical_targets(workspace: Workspace, targets: Sequence[WipeTarget]):
-    lakehouses = sorted(
-        {target.physical_name for target in targets if target.item_type == "Lakehouse"}
+def _unbind_physical_targets(
+    workspace: Workspace, targets: Sequence[WipeTarget], *, session=None
+):
+    """The catalogue claims a set of wiped targets leaves behind."""
+
+    return unbind_catalogue_claims(
+        workspace,
+        lakehouses=sorted(
+            {
+                target.physical_name
+                for target in targets
+                if target.item_type == "Lakehouse"
+            }
+        ),
+        warehouses=sorted(
+            {
+                target.physical_name
+                for target in targets
+                if target.item_type == "Warehouse"
+            }
+        ),
+        session=session,
     )
-    warehouses = sorted(
-        {target.physical_name for target in targets if target.item_type == "Warehouse"}
-    )
-    if isinstance(workspace, LocalWorkspace) or _inside_fabric_session(workspace):
-        from .resolution import resolver_for
-        from .spark import SparkCatalogue
-        from .unbind import unbind_targets
 
-        if isinstance(workspace, LocalWorkspace):
-            from .spark import local_delta_session
 
-            with local_delta_session(workspace) as session:
-                catalogue = SparkCatalogue(
-                    session,
-                    resolver_for(workspace).spark_destination(
-                        ItemRef(workspace.weaver_lakehouse)
-                    ),
-                )
-                return unbind_targets(
-                    catalogue, lakehouses=lakehouses, warehouses=warehouses
-                ).to_mapping()
-        catalogue = SparkCatalogue(
-            _active_spark(),
-            resolver_for(workspace).spark_destination(
-                ItemRef(workspace.weaver_lakehouse)
-            ),
-        )
-        return unbind_targets(
-            catalogue, lakehouses=lakehouses, warehouses=warehouses
-        ).to_mapping()
+def unbind_catalogue_claims(
+    workspace: Workspace, *, lakehouses, warehouses, session=None
+) -> dict:
+    """Remove catalogue claims for named physical targets, where the catalogue is.
 
-    if not workspace.environment:
-        raise CommandError(
-            "Fabric catalogue unbind requires an Environment in workspace configuration"
-        )
-    from .fabric import LivySession
+    One implementation for the two callers that want it — ``weaver unbind``, and
+    the tail of a ``wipe`` that emptied a target the catalogue still claims. They
+    were two, each with its own program text and its own Livy session, and the
+    pair had already drifted: the same operation named its resolver differently
+    on the two sides and only one of them checked for a configured Environment.
+
+    Both spellings live on one :class:`~weaver.session.program.RemoteProgram`,
+    so where this runs is the Session's decision rather than another
+    ``isinstance`` ladder here.
+    """
+
+    from .session.host import use_or_create_session
+    from .session.program import RemoteProgram
 
     body = (
         "from weaver.workspaces import FabricWorkspace\n"
@@ -833,5 +819,40 @@ def _unbind_physical_targets(workspace: Workspace, targets: Sequence[WipeTarget]
         f"emit(unbind_targets(catalogue, lakehouses={tuple(lakehouses)!r}, "
         f"warehouses={tuple(warehouses)!r}).to_mapping())\n"
     )
-    with LivySession.for_workspace(workspace) as session:
-        return session.run(body).payload
+
+    with use_or_create_session(session, workspace=workspace) as opened:
+        if not opened.executes_here(workspace) and not workspace.environment:
+            raise CommandError(
+                "Fabric catalogue unbind requires an Environment in workspace "
+                "configuration"
+            )
+        return opened.execute_python(
+            RemoteProgram(
+                name="unbind",
+                call=lambda: _unbind_here(
+                    workspace,
+                    session=opened,
+                    lakehouses=lakehouses,
+                    warehouses=warehouses,
+                ),
+                source=body,
+                detail=", ".join([*lakehouses, *warehouses]),
+            ),
+            workspace=workspace,
+        )
+
+
+def _unbind_here(workspace, *, session, lakehouses, warehouses) -> dict:
+    """The unbind a host already standing where the catalogue is can just do."""
+
+    from .resolution import resolver_for
+    from .spark import SparkCatalogue
+    from .unbind import unbind_targets
+
+    catalogue = SparkCatalogue(
+        session.spark(workspace),
+        resolver_for(workspace).spark_destination(ItemRef(workspace.weaver_lakehouse)),
+    )
+    return unbind_targets(
+        catalogue, lakehouses=lakehouses, warehouses=warehouses
+    ).to_mapping()

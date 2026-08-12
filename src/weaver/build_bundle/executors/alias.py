@@ -54,6 +54,30 @@ ADDRESSABLE_POLL_INTERVAL = 5.0
 
 
 class AliasExecutor:
+
+    #: The whole action crosses, and the shortcut is not the reason: creating one
+    #: is a REST call that reaches Fabric from anywhere. Only the readability
+    #: wait needs Spark, so splitting this — REST here, probe across — ought to
+    #: work, and an attempt was reverted.
+    #:
+    #: Be careful with the evidence for that revert. It failed as:
+    #:
+    #: .. code-block:: text
+    #:
+    #:     alias(es) ... were created but did not become readable within 300s:
+    #:     Livy session entered state 'dead'
+    #:
+    #: which was read at the time as the polling loop being too chatty to survive
+    #: a wire. It was not: the test helper built its own bare session with no
+    #: ``livy=``, so a capacity that permits one Livy session was asked for a
+    #: second, and the second comes back dead. That helper is fixed, and the
+    #: chatty-loop theory was never tested.
+    #:
+    #: So this stays whole because the split is unproven, not because it is
+    #: known to be wrong. If it is attempted again, send the whole wait as one
+    #: crossing parameterised by the timeout and interval this executor still
+    #: decides — one round trip rather than sixty — and measure it.
+    needs_spark = True
     name = "alias"
 
     def execute(
@@ -87,7 +111,7 @@ class AliasExecutor:
         details: dict[str, Any] = {"aliases": made}
         # Every shortcut is created before anything waits, so the cost is one
         # discovery window rather than one per alias.
-        if shortcut is not None and context.spark is not None:
+        if shortcut is not None:
             waited = self._await_addressable(context, frozen)
             if waited is not None:
                 details["addressable_after_seconds"] = waited
@@ -149,9 +173,31 @@ class AliasExecutor:
         window instead of one each.
         """
 
-        catalogue = context.catalogue
+        if context.spark_sql is None:
+            # Loud, not silent. Every host the Installer builds a context on has
+            # this capability, so its absence means somebody assembled a context
+            # by hand — and quietly not waiting is precisely the race this
+            # behaviour exists to prevent. It failed that way once, in a Fabric
+            # test that built its own context and then asserted the wait had
+            # happened.
+            raise InstallError(
+                "a table alias was created but this context offers no way to ask "
+                "Spark whether it is readable yet, so the discovery wait cannot "
+                "run"
+            )
+
+        # The *destination*, not the catalogue. Qualifying a name and knowing
+        # whether identifiers are case-exact are properties of where the object
+        # lands; `context.catalogue` additionally demands a live Spark session,
+        # which a desktop does not have and this wait does not need.
+        destination = context.target.destination
+        if destination is None:
+            raise InstallError(
+                f"target {context.target.bound.id!r} resolved to no Spark "
+                "destination, so an alias in it cannot be named"
+            )
         pending = {
-            each["alias"]: catalogue.qualify(each["schema"], each["object"])
+            each["alias"]: destination.qualify(each["schema"], each["object"])
             for each in frozen
             if each["area"] != FILES_AREA
         }
@@ -164,11 +210,13 @@ class AliasExecutor:
         while pending:
             for alias, qualified in list(pending.items()):
                 try:
-                    with exact_identifier_case(
-                        context.spark,
-                        enabled=catalogue.destination.preserve_table_identifier_case,
-                    ):
-                        context.spark.sql(f"SELECT * FROM {qualified} LIMIT 0").collect()
+                    # The probe crosses; the waiting does not. Which aliases to
+                    # test, how often, how long and what a failure means all stay
+                    # here — only the question goes to where Spark is.
+                    context.spark_sql(
+                        f"SELECT * FROM {qualified} LIMIT 0",
+                        exact_case=destination.preserve_table_identifier_case,
+                    )
                     del pending[alias]
                 except Exception as exc:  # not discovered yet — or never will be
                     failure = exc

@@ -106,15 +106,6 @@ def test_weaver_items_live_directly_under_the_control_lakehouse(resolver):
 
 def test_control_tables_live_under_the_weaver_lakehouse(resolver):
     assert resolver.control_tables_root.value == "/srv/.local/Weaver/Tables"
-
-
-def test_cli_handover_is_isolated_by_execution(resolver):
-    assert resolver.cli_root.value == "/srv/.local/Weaver/Files/cli"
-    assert resolver.cli_bundle("abc123").value == (
-        "/srv/.local/Weaver/Files/cli/abc123/install.weaver.zip"
-    )
-
-
 def test_the_weaver_lakehouse_is_just_another_item(resolver):
     assert resolver.weaver_lakehouse == resolver.lakehouse(ItemRef("Weaver"))
 
@@ -138,3 +129,28 @@ def test_a_fabric_workspace_is_refused():
 
     with pytest.raises(CommandError, match="LocalWorkspace"):
         LocalResolver(FabricWorkspace(workspace="Analytics"))
+
+
+# --- where a retained bundle lands --------------------------------------------
+#
+# Untested until a refactor silently emptied `build_bundle` and left it returning
+# None. The whole core suite passed: nothing here asked the resolver where a
+# retained bundle goes, and the only caller — `weaver build --bundle` — is
+# exercised against Fabric. A location that is quietly None fails much later, in
+# `store.write`, as an AttributeError about NoneType.
+
+
+def test_a_retained_bundle_lands_under_the_build_bundles_root(resolver):
+    assert resolver.build_bundles_root.value == "/srv/.local/Weaver/Files/build_bundles"
+    assert resolver.build_bundle("nightly").value == (
+        "/srv/.local/Weaver/Files/build_bundles/nightly"
+    )
+
+
+def test_a_bundle_name_is_validated_rather_than_pasted_into_a_path(resolver):
+    """It becomes a directory name, so it is somebody's input reaching a path."""
+
+    from weaver.errors import IdentityError
+
+    with pytest.raises(IdentityError):
+        resolver.build_bundle("../escape")

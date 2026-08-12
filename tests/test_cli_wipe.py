@@ -99,7 +99,14 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     assert "Nothing was changed" in capsys.readouterr().out
 
 
-def test_confirmed_wipe_previews_then_executes_same_public_operation(monkeypatch):
+def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch):
+    """``--yes`` means no question, so the listing that asks it is pure cost.
+
+    A dry run is a full read of the estate — every target, every path — and on
+    the Weaver Example it was four seconds of a twelve-second wipe, spent
+    rendering a list that was never going to be answered.
+    """
+
     cli = importlib.import_module("weaver_cli.main")
     workspace = LocalWorkspace(workspace="/tmp/local", weaver_lakehouse="Control")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
@@ -124,18 +131,28 @@ def test_confirmed_wipe_previews_then_executes_same_public_operation(monkeypatch
     assert calls == [
         (
             ("Lakehouse/Sales/Tables",),
-            {
-                "workspace": workspace,
-                "unbind_from": "Control",
-                "dry_run": True,
-                "session": None,
-            },
-        ),
-        (
-            ("Lakehouse/Sales/Tables",),
             {"workspace": workspace, "unbind_from": "Control", "session": None},
-        ),
+        )
     ]
+
+
+def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):
+    """The listing is the question. Remove it and there is nothing to agree to."""
+
+    cli = importlib.import_module("weaver_cli.main")
+    workspace = LocalWorkspace(workspace="/tmp/local", weaver_lakehouse="Control")
+    monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    calls = []
+
+    def wipe(targets, **kwargs):
+        calls.append(kwargs.get("dry_run", False))
+        return _result(dry_run=kwargs.get("dry_run", False))
+
+    monkeypatch.setattr("weaver.wipe", wipe)
+    assert main(["wipe", "Lakehouse/Sales/Tables", "--workspace", "/tmp/local"]) == 0
+    assert calls == [True, False]
 
 
 def test_noninteractive_wipe_needs_yes(monkeypatch, capsys):

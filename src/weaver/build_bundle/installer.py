@@ -11,16 +11,22 @@ Build is not load: the installer runs generated create DDL, creates folder
 directories, deploys an item's runtime code, and reconciles the target — it never
 executes an object's code, and it has no route back to the source repository at
 all, because a bundle carries its outputs rather than a second copy of its
-inputs. Concurrency starts conservatively:
-sequences are serial and actions run serially within a batch, because one shared
-local Spark session gives no useful parallel DDL. The manifest still models
-independent actions, so a Fabric installer can add session concurrency later
-without changing bundle semantics.
+inputs.
+
+**Everything here runs one at a time.** Sequences are serial because a sequence
+is a barrier and that is what it is for. The actions within a batch are serial
+too — see :data:`_WHY_SERIAL`, which records the attempt to run T-SQL
+concurrently and the deadlocks a real Warehouse answered with.
+
+What *is* shared is a crossing rather than a thread: the actions in a batch that
+need Spark go over to the session together in one submission, because the
+submission is the expensive part. Each still gets its own result, its own timing
+and its own status, so nothing about the report says they travelled together.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
@@ -47,6 +53,39 @@ from .report import (
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 REPORT_FILENAME = "install-report.yml"
+
+
+class _Deferred:
+    """A capability acquired by the first executor that uses it.
+
+    A batch is handed its capabilities up front, and the expensive ones — a
+    Spark session, a Warehouse connection — should not be paid for by actions
+    that never touch them. This exists so that "this host has one" and "this
+    host has *started* one" stop being the same question: the first is what a
+    batch needs to know when it is assembled, the second is answerable later.
+
+    Deliberately not a general lazy proxy. Everything is forwarded, so an
+    executor writes ``context.spark.sql(...)`` or ``context.sql.execute(...)``
+    exactly as before and cannot tell the difference.
+    """
+
+    __slots__ = ("_acquire", "_session")
+
+    def __init__(self, acquire) -> None:
+        object.__setattr__(self, "_acquire", acquire)
+        object.__setattr__(self, "_session", None)
+
+    def _resolved(self):
+        if object.__getattribute__(self, "_session") is None:
+            object.__setattr__(self, "_session", object.__getattribute__(self, "_acquire")())
+        return object.__getattribute__(self, "_session")
+
+    def __getattr__(self, name):
+        return getattr(self._resolved(), name)
+
+    def __repr__(self) -> str:
+        acquired = object.__getattribute__(self, "_session")
+        return "<not yet acquired>" if acquired is None else repr(acquired)
 
 
 class Installer:
@@ -97,15 +136,63 @@ class Installer:
     def spark(self) -> Any:
         return self.session.spark(self.workspace)
 
+    def spark_when_needed(self) -> Any:
+        """Spark for this host, acquired only if an action actually asks for it.
+
+        A batch is given its capabilities up front, and a Spark session is the
+        one that costs seconds to start and that a JVM permits exactly one of.
+        Building it eagerly meant a bundle of nothing but file writes, T-SQL and
+        an endpoint refresh still started one — paying for a capability none of
+        its actions would touch, and, in a process that already had a session,
+        failing outright with *Only one SparkContext should be running in this
+        JVM*.
+
+        ``None`` still means *this host has no Spark*, which several executors
+        read to skip Lakehouse work rather than fail it. That answer is given
+        without acquiring anything: whether a host executes here is a property
+        of the host, not of having started a session.
+        """
+
+        if not self.session.executes_here(self.workspace):
+            return None
+        return _Deferred(lambda: self.session.spark(self.workspace))
+
+    def spark_sql(self):
+        """Ask this host's Spark one question, from wherever this is running.
+
+        The capability an executor needs when it only has a *question* — the
+        alias read probe is the case — rather than work that needs a real
+        DataFrame. Supplying it is what lets shortcut creation stay on the
+        desktop while the probe crosses.
+        """
+
+        session = self.session
+        workspace = self.workspace
+
+        def ask(statement: str, *, exact_case: bool = False):
+            return session.execute_spark_sql(
+                statement, exact_case=exact_case, workspace=workspace
+            )
+
+        return ask
+
     def sql_for(self, bound: BoundTarget) -> Any:
-        """The Warehouse connection for a batch, from the Session that owns it."""
+        """The Warehouse connection for a batch, from the Session that owns it.
+
+        Deferred for the reason Spark is: a connection is opened by the first
+        action that runs a statement, not by assembling the batch that might.
+        ``None`` still means *this target is not a Warehouse*, which is a
+        structural fact and costs nothing to answer.
+        """
 
         if bound.kind != WAREHOUSE_TARGET:
             return None
         from ..targets import WarehouseTarget
 
-        return self.session.sql_executor(
-            WarehouseTarget(ItemRef(bound.item_id)), workspace=self.workspace
+        return _Deferred(
+            lambda: self.session.sql_executor(
+                WarehouseTarget(ItemRef(bound.item_id)), workspace=self.workspace
+            )
         )
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
@@ -203,6 +290,83 @@ def _epoch(started: datetime) -> str:
     return started.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
+#: Why actions within a batch run one at a time.
+#:
+#: They were briefly run concurrently, on the reasoning that a batch names one
+#: target and the manifest calls its actions independent units — so concurrency
+#: could not reorder anything a sequence barrier was protecting. That reasoning
+#: was about *Weaver's* ordering and said nothing about the database's, and a
+#: real Warehouse answered:
+#:
+#: .. code-block:: text
+#:
+#:     Transaction (Process ID 55) was deadlocked on lock resources
+#:     Snapshot isolation transaction aborted due to update conflict
+#:
+#: Independent in dependency order is not independent in lock order. Concurrent
+#: DDL and DML against one Warehouse contend on catalogue metadata and on the
+#: rows they touch, and Fabric's snapshot isolation turns that contention into
+#: aborted transactions rather than waiting.
+#:
+#: Widening this again needs a design for *that* problem — retry on deadlock, or
+#: a partition of actions proven not to contend — and a measurement showing it
+#: is worth the complexity. It was not measurably faster on the estate that
+#: broke.
+_WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
+
+
+
+def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
+    """What this sequence is doing, and which items it is doing it to.
+
+    The planner's own description, capitalised, with the targets it touches
+    after it. Both halves earn their place: several sequences share a
+    description — a dependency layer is built once per layer — and the target is
+    what tells them apart.
+    """
+
+    text = (sequence.description or "").strip()
+    said = text[:1].upper() + text[1:] if text else "Install"
+    names: list[str] = []
+    for batch in sequence.batches:
+        target = resolved.get(batch.target_id)
+        name = target.bound.display if target is not None else batch.target_id
+        if name not in names:
+            names.append(name)
+    return f"{said}: {', '.join(names)}" if names else said
+
+
+def _run_batch(
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+) -> list[ActionResult]:
+    """One batch's actions, one at a time.
+
+    Serial, and the comment on :data:`_WHY_SERIAL` says why concurrency was
+    tried and taken back out. What *is* shared is a crossing: the actions that
+    need Spark go over together in one submission, because the submission is the
+    expensive part. Each still gets its own result, timing and status.
+
+    Results come back in manifest order, because a report that reordered itself
+    would make two runs of one bundle incomparable.
+    """
+
+    crossing = [action for action in batch.actions if _crosses(action, installer)]
+    answers: dict = {}
+    started = _now()
+    if crossing:
+        answers = _run_crossed(crossing, batch, context, bundle, installer)
+
+    def run(action: InstallAction) -> ActionResult:
+        if action.id in {one.id for one in crossing}:
+            return _crossed_result(action, answers.get(action.id), batch.target_id, started)
+        return _run_action(action, batch, context, bundle, installer)
+
+    return [run(action) for action in batch.actions]
+
+
 def _run_sequence(
     sequence: BuildSequence,
     resolved: dict[str, ResolvedTarget],
@@ -214,25 +378,35 @@ def _run_sequence(
     action_results: list[ActionResult] = []
     failed = False
 
-    for batch in sequence.batches:
-        target = resolved[batch.target_id]
-        context = InstallationContext(
-            spark=installer.spark,
-            resolver=installer.resolver,
-            store=installer.store,
-            target=target,
-            sql=installer.sql_for(target.bound),
-            targets=resolved,
-            epoch=epoch,
-        )
-        for action in batch.actions:
+    # The sequence is the unit worth naming, and it already carries the words:
+    # the planner wrote "publish catalogue dictionaries and installations" when
+    # it built these, and nothing was showing it. A batch apiece described its
+    # executors instead — "Lakehouse/Weaver: views" for what is plainly the
+    # catalogue being updated — which is the mechanism dressed up as an answer.
+    # The target belongs on the line, not in the detail. "Build dependency
+    # layer" appears once per layer, so four identical lines with four different
+    # durations told a reader that four things happened and nothing about which.
+    with installer.session.substep(_sequence_label(sequence, resolved)):
+        for batch in sequence.batches:
+            target = resolved[batch.target_id]
+            context = InstallationContext(
+                spark=installer.spark_when_needed(),
+                spark_sql=installer.spark_sql(),
+                resolver=installer.resolver,
+                store=installer.store,
+                target=target,
+                sql=installer.sql_for(target.bound),
+                targets=resolved,
+                epoch=epoch,
+            )
             if failed:
-                action_results.append(_skipped_action(action, batch))
+                action_results.extend(
+                    _skipped_action(one, batch) for one in batch.actions
+                )
                 continue
-            result = _run_action(action, batch, context, bundle, installer)
-            action_results.append(result)
-            if result.status == FAILED:
-                failed = True
+            results = _run_batch(batch, context, bundle, installer)
+            action_results.extend(results)
+            failed = any(result.status == FAILED for result in results)
 
     skipped = bool(action_results) and all(
         result.status == SKIPPED for result in action_results
@@ -302,6 +476,147 @@ def _run_action(
     )
 
 
+def _crosses(action: InstallAction, installer: "Installer") -> bool:
+    """Whether this action has to run where the Spark is, rather than here."""
+
+    executor = installer.executors.get(action.executor)
+    return bool(getattr(executor, "needs_spark", False)) and not (
+        installer.session.executes_here(installer.workspace)
+    )
+
+
+def _run_crossed(
+    actions: list,
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+) -> dict:
+    """Run this batch's Spark actions in the session, in one submission.
+
+    One submission rather than one apiece, and that is a measurement rather than
+    a preference: crossing per action cost about four seconds of overhead each,
+    so six actions in a small estate paid twenty-four seconds of pure transport.
+    The manifest still models independent actions — what is batched is the
+    physical effect, not the semantic unit.
+
+    Each action still gets its own result, its own timing and its own status, so
+    a reader cannot tell from the report that they shared a trip.
+    """
+
+    import base64
+
+    from . import remote
+    from ..session.program import RemoteProgram
+
+    workspace = installer.workspace
+    store = bundle.store or installer.store
+    entries = []
+    for action in actions:
+        payload = None
+        if action.payload is not None:
+            payload = base64.b64encode(
+                store.read(bundle.location.join(*action.payload.split("/")))
+            ).decode()
+        entries.append({"action": action.to_mapping(), "payload": payload})
+
+    arguments = {
+        "actions": entries,
+        "target": context.target.bound.to_mapping(),
+        "targets": [one.bound.to_mapping() for one in context.targets.values()],
+        "epoch": context.epoch,
+    }
+    source = (
+        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.build_bundle.remote import install_actions\n"
+        "from weaver.session import NotebookSession\n"
+        f"workspace = {_workspace_literal(workspace)}\n"
+        "session = NotebookSession(workspace=workspace, spark=spark)\n"
+        f"emit(install_actions(session=session, workspace=workspace, **{arguments!r}))\n"
+    )
+    answered = installer.session.execute_python(
+        RemoteProgram(
+            name="install_actions",
+            call=lambda: remote.install_actions(
+                session=installer.session, workspace=workspace, **arguments
+            ),
+            source=source,
+            detail=f"{len(actions)} action(s)",
+        ),
+        workspace=workspace,
+    )
+    running = 0.0
+    placed = {}
+    for answer in answered:
+        placed[answer["id"]] = {**answer, "offset": running}
+        running += float(answer.get("seconds") or 0.0)
+    return placed
+
+
+def _crossed_result(
+    action: InstallAction,
+    answer: dict | None,
+    target_id: str,
+    started: datetime,
+) -> ActionResult:
+    """One remote answer, recorded as the local result shape.
+
+    The duration is the far side's own measurement of *this action*, not the
+    submission's. Stamping every action in a batch with the batch's elapsed time
+    was the first attempt and it was worse than useless: six actions sharing one
+    trip each appeared to have taken the whole trip, so the numbers a reader
+    uses to find the slow one all said the same thing.
+
+    ``started_at`` places that duration on the local timeline by accumulating
+    the offsets the far side reported, so the actions in a batch read in order
+    and their spans do not overlap. It is the remote clock's *duration* on the
+    local clock's *origin*, which is the honest composition of what each side
+    can actually see.
+    """
+
+    seconds = float((answer or {}).get("seconds") or 0.0)
+    offset = float((answer or {}).get("offset") or 0.0)
+    began = started + timedelta(seconds=offset)
+    common = dict(
+        action_id=action.id,
+        resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
+        target_id=target_id,
+        executor=action.executor,
+        started_at=began,
+        finished_at=began + timedelta(seconds=seconds),
+        duration_seconds=seconds,
+    )
+    if answer is None:
+        return ActionResult(
+            status=FAILED,
+            error_type="InstallError",
+            error_message=f"{action.id} was submitted but nothing came back for it",
+            **common,
+        )
+    if answer.get("failed"):
+        return ActionResult(
+            status=FAILED,
+            error_type=answer.get("error_type"),
+            error_message=answer.get("error_message"),
+            **common,
+        )
+    skipped = answer.get("skipped")
+    return ActionResult(
+        status=SKIPPED if skipped else SUCCEEDED,
+        details=answer.get("details"),
+        **common,
+    )
+
+
+def _workspace_literal(workspace) -> str:
+    return (
+        f"FabricWorkspace(workspace={workspace.workspace!r}, "
+        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"environment={workspace.environment!r})"
+    )
+
+
 def _execute(
     action: InstallAction,
     load_payload,
@@ -334,6 +649,7 @@ def _execute(
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
         target_id=target_id,
         executor=action.executor,
         status=SKIPPED if skipped else SUCCEEDED,
@@ -351,6 +667,7 @@ def _failed(
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
         target_id=target_id,
         executor=action.executor,
         status=FAILED,
@@ -366,6 +683,7 @@ def _skipped_action(action: InstallAction, batch: BuildBatch) -> ActionResult:
     return ActionResult(
         action_id=action.id,
         resource_node_id=action.resource_node_id,
+        source_path=action.source_path,
         target_id=batch.target_id,
         executor=action.executor,
         status=SKIPPED,

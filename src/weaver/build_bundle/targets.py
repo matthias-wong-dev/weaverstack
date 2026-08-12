@@ -56,6 +56,20 @@ class BoundTarget:
 
         return self.item_name or self.item_id
 
+    @property
+    def display(self) -> str:
+        """What to call this target on screen: ``Lakehouse/Sales``.
+
+        The *physical* item, always. A logical name is the estate's own
+        vocabulary and some of it is internal — the control Lakehouse is the
+        logical item ``_weaver``, which means nothing to somebody watching a
+        build write to a Lakehouse they know as ``Weaver``. ``id`` is worse
+        still: ``Lakehouse-_weaver--lakehouse-Weaver``.
+        """
+
+        kind = (self.kind or "").strip()
+        return f"{kind.title()}/{self.name}" if kind else str(self.name)
+
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {
             "id": self.id,

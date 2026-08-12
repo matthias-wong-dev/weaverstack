@@ -365,6 +365,7 @@ def render_document_build_action(identity, source) -> RenderedAction:
                 executor="folder",
                 payload=None,
                 payload_sha256=None,
+                source_path=getattr(source, "relative_path", None),
             ),
             payloads={},
         )
@@ -379,6 +380,7 @@ def render_document_build_action(identity, source) -> RenderedAction:
             executor=ddl.executor,
             payload=filename,
             payload_sha256=sha256_hex(content),
+            source_path=getattr(source, "relative_path", None),
         ),
         payloads={filename: content},
     )
@@ -408,6 +410,7 @@ def render_load_build_action(artefact) -> RenderedAction:
             executor=executor,
             payload=filename,
             payload_sha256=sha256_hex(artefact.payload),
+            source_path=artefact.source_path,
         ),
         payloads={filename: artefact.payload},
     )

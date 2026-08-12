@@ -29,15 +29,32 @@ work will need, not the work itself.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import FabricWorkspace, LocalWorkspace, Workspace
-from .base import Session, WorkspaceScope
+from .base import TASK, Session, WorkspaceScope
 from .program import RemoteProgram
 from .resources import Resource
+
+
+def _duration(seconds: float | None) -> str:
+    """A duration a person reads, not one a machine parses.
+
+    Two significant figures is all anybody acts on: the difference between 8.4s
+    and 8.43s changes no decision, and the extra digit costs a column that a
+    nested name needs more.
+    """
+
+    if seconds is None:
+        return ""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, remainder = divmod(int(seconds), 60)
+    return f"{minutes}m{remainder:02d}s"
 
 
 @dataclass(frozen=True)
@@ -72,6 +89,7 @@ class ConsoleSession(Session):
         spark: Any = None,
         store: Any = None,
         resolver: Any = None,
+        progress: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -80,6 +98,244 @@ class ConsoleSession(Session):
         self._given_spark = spark
         self._given_store = store
         self._given_resolver = resolver
+        #: Where the timing tree is written. stderr by default, because stdout
+        #: is a command's answer and several commands emit JSON on it — progress
+        #: interleaved into that would make the answer unparseable. ``False``
+        #: silences it.
+        self._progress = progress
+        #: How many characters of transient line are currently on screen, and
+        #: the lock that keeps the ticker thread from drawing over a completion.
+        self._painted = 0
+        self._progress_lock = threading.Lock()
+        self._ticker = None
+        self._ticking = False
+
+    # --- progress -----------------------------------------------------------
+
+    #: The narrowest the name column is ever allowed to be. The real width comes
+    #: from the terminal (see :meth:`_width`), because a fixed column is only
+    #: ever right for one estate: a name like
+    #: ``Warehouse/Reporting/Reporting.CustomerRevenuePresent`` runs past
+    #: fifty-two characters and shoves its own duration out of the column,
+    #: which loses the alignment that makes a list of durations scannable.
+    PROGRESS_WIDTH = 52
+
+    #: Kept back from the terminal's own width so the duration never wraps.
+    DURATION_WIDTH = 8
+
+    #: How often the live line redraws while work is in flight. Slow enough to
+    #: cost nothing, fast enough that the elapsed figure is visibly moving —
+    #: which is the half of it that says the wait is alive rather than hung.
+    PROGRESS_TICK = 1.0
+
+    def present(self, frame, event: str, error: BaseException | None = None) -> None:
+        """Keep the open work visible, and record each frame as it closes.
+
+        Two things a reader needs, and they are not the same thing.
+
+        **What finished, and what it cost** is written as a permanent line when
+        a frame closes, because the duration is only known then. Children appear
+        above their parent with the parent's total underneath — a roll-up, the
+        way ``du`` reads:
+
+        .. code-block:: text
+
+            Build
+
+              Read physical state                         8.4s
+                Sales.Customer                            3.2s
+                Sales.Order                               4.1s
+              Install Lakehouse/Sales                    18.6s
+            ✓ Build                                      40.7s
+
+        **What is happening now** is a transient line below that, rewritten in
+        place, naming the innermost frame still open and how long it has been
+        running:
+
+        .. code-block:: text
+
+            ⋯ Unbind catalogue claims                     1m47s
+
+        It is erased before anything permanent is written, so it never lands in
+        the transcript. Recording completions alone was the earlier design and
+        it was wrong for this feature: a Step that takes two minutes showed the
+        Task heading and then nothing at all, and silence is exactly what a tool
+        whose purpose is responsiveness must not answer a long wait with. The
+        thing not wanted was *duplication* — a name printed on the way in and
+        again on the way out — and a line that is overwritten rather than
+        appended avoids that without going quiet.
+
+        Live output needs a terminal to rewrite. Piped, redirected or captured,
+        this degrades to exactly the completed lines it always wrote, so a log
+        file and a test transcript are unchanged.
+        """
+
+        stream = self._progress_stream()
+        if stream is None:
+            return
+        with self._progress_lock:
+            self._erase(stream)
+            if event == "started":
+                if frame.kind == TASK:
+                    print(f"\n{frame.name}\n", file=stream)
+            else:
+                if event == "failed":
+                    mark = "✗"
+                elif frame.kind == TASK:
+                    mark = "✓"
+                else:
+                    mark = " "
+                print(
+                    f"{mark} {self._label(frame):<{self._width() - 2}}"
+                    f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}",
+                    file=stream,
+                )
+                if frame.kind == TASK:
+                    print(file=stream)
+            self._paint(stream)
+        self._start_ticking()
+
+    def _label(self, frame) -> str:
+        """A Task heads its own block, so its Steps are the first indent level."""
+
+        return "  " * max(frame.depth - 1, 0) + frame.name
+
+    def _width(self) -> int:
+        """The name column, from the terminal, never below :attr:`PROGRESS_WIDTH`.
+
+        Read per line rather than cached: a terminal can be resized mid-run, and
+        the cost is one ``ioctl`` against work measured in seconds. When there is
+        no terminal to ask — piped, redirected, captured by pytest —
+        ``get_terminal_size`` answers with its 80-column default, which is the
+        right answer for a log file too.
+        """
+
+        import shutil
+
+        columns = shutil.get_terminal_size().columns
+        return max(self.PROGRESS_WIDTH, columns - self.DURATION_WIDTH - 1)
+
+    # --- the live line ------------------------------------------------------
+
+    def _paint(self, stream) -> None:
+        """Draw the innermost open frame, without ending the line."""
+
+        if not self._live(stream):
+            return
+        frame = self._innermost()
+        if frame is None:
+            return
+        text = (
+            f"⋯ {self._label(frame):<{self._width() - 2}}"
+            f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
+        )
+        stream.write("\r" + text)
+        stream.flush()
+        self._painted = len(text)
+
+    def _erase(self, stream) -> None:
+        """Take the transient line back before anything permanent is written."""
+
+        if not self._painted:
+            return
+        stream.write("\r" + " " * self._painted + "\r")
+        stream.flush()
+        self._painted = 0
+
+    def _innermost(self):
+        """The deepest frame still open — what the wait is actually for.
+
+        A Task names the command, which the heading already said; the useful
+        answer to "what is it doing" is the smallest thing currently in flight.
+        """
+
+        frames = self.frames
+        return frames[-1] if frames else None
+
+    def _live(self, stream) -> bool:
+        """Whether this stream can have a line rewritten in it."""
+
+        try:
+            return bool(stream.isatty())
+        except (AttributeError, ValueError):
+            return False
+
+    def _start_ticking(self) -> None:
+        """Keep the elapsed figure moving while a frame is open.
+
+        Without this the line is painted only when some other frame opens or
+        closes — which for the long waits that most need it is never. A daemon
+        thread, so it can never hold the process open.
+        """
+
+        stream = self._progress_stream()
+        if stream is None or not self._live(stream) or self._ticker is not None:
+            return
+        import threading
+
+        self._ticking = True
+        self._ticker = threading.Thread(
+            target=self._tick, name="weaver-progress", daemon=True
+        )
+        self._ticker.start()
+
+    def _tick(self) -> None:
+        import time
+
+        while self._ticking:
+            time.sleep(self.PROGRESS_TICK)
+            stream = self._progress_stream()
+            if stream is None:
+                return
+            with self._progress_lock:
+                if not self._ticking:
+                    return
+                self._erase(stream)
+                self._paint(stream)
+
+    def warn(self, message: str) -> None:
+        """A warning, on a line of its own, with the live line taken back first.
+
+        Both halves matter. The transient line is mid-write when a warning
+        arrives, so without the erase the two collide:
+
+        .. code-block:: text
+
+            ⋯   Read target inventories  40.0swarning: this console runs ...
+
+        And a warning that begins where the previous line left off is one a
+        reader's eye slides straight past, which for the version mismatch is
+        exactly the warning they needed.
+        """
+
+        stream = self._progress_stream()
+        if stream is not None:
+            with self._progress_lock:
+                self._erase(stream)
+                print(file=stream)
+        super().warn(message)
+        if stream is not None:
+            with self._progress_lock:
+                self._paint(stream)
+
+    def stop_presenting(self) -> None:
+        """Stop the ticker and leave no half-drawn line behind."""
+
+        self._ticking = False
+        stream = self._progress_stream()
+        if stream is not None:
+            with self._progress_lock:
+                self._erase(stream)
+        self._ticker = None
+
+    def _progress_stream(self):
+        if self._progress is False:
+            return None
+        if self._progress is not None:
+            return self._progress
+        import sys
+
+        return sys.stderr
 
     def _new_scope(self, workspace: Workspace) -> "ConsoleScope":
         return ConsoleScope(
@@ -96,7 +352,7 @@ class ConsoleSession(Session):
     # --- readiness ----------------------------------------------------------
 
     def warm(self, workspace: Workspace | None = None) -> "WarmUp":
-        """Begin acquiring this context's expensive resources, without waiting.
+        """Begin acquiring everything this context could want, without waiting.
 
         The console prompt returns immediately and the first command that needs
         Spark waits on the startup already running rather than starting a second
@@ -105,6 +361,25 @@ class ConsoleSession(Session):
         """
 
         return self.scope(workspace).warm()
+
+    def prepare(
+        self, required, *, workspace: Workspace | None = None
+    ) -> "WarmUp":
+        """Begin acquiring exactly what a caller said it would need.
+
+        The Session is told; it does not infer. It has no idea what a build is
+        and must not acquire one — a Session that decided which resources an
+        operation wanted would be a second place deciding what the operation
+        does.
+
+        **Preparing is not using.** This gives a head start to acquisitions that
+        are coming anyway; it never makes one happen that would not otherwise.
+        A command that declares Livy and then turns out to need none opens no
+        Spark session, because the acquisition still belongs where the need is
+        discovered.
+        """
+
+        return self.scope(workspace).warm(required)
 
     def executes_here(self, workspace: Workspace | None = None) -> bool:
         """Whether this process is already where the data engineering happens."""
@@ -130,42 +405,69 @@ class ConsoleSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
+        # No frame is opened here, deliberately. A crossing is *how* the caller's
+        # work happens, not a second thing that happened: framing it printed the
+        # program's own name immediately above the frame that asked for it —
+        #
+        #     dispatch_python                     33.5s
+        #   Load Sales.Customer                   33.5s
+        #
+        # — two lines, one duration, and the technical spelling first. The cost
+        # is still recorded, in telemetry, where a transport ledger belongs.
         scope = self.scope(workspace)
-        self.substep_started(program.name, program.detail)
-        try:
-            if scope.executes_here:
-                with self.telemetry.timing(f"python.{program.name}"):
-                    payload = program.call()
-            else:
-                scope.check_published_version(self.warn)
-                payload = scope.livy_run(
-                    program.source,
-                    name=program.name,
-                    timeout=timeout if timeout is not None else program.timeout,
-                )
-        except BaseException as exc:
-            # Reported and re-raised, whatever it was: an interrupt still ends
-            # the sub-step it interrupted, and still travels on.
-            self.substep_failed(program.name, exc)
-            raise
-        self.substep_completed(program.name)
-        return payload
+        if scope.executes_here:
+            with self.telemetry.timing(f"python.{program.name}"):
+                return program.call()
+        scope.check_published_version(self.warn)
+        return scope.livy_run(
+            program.source,
+            name=program.name,
+            timeout=timeout if timeout is not None else program.timeout,
+        )
 
     def execute_spark_sql(
         self,
         statement: str,
         *,
+        exact_case: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
+        """One Spark SQL statement, wherever this host's Spark is.
+
+        ``exact_case`` carries Weaver's identifier-case scope across with the
+        statement. It has to travel *with* it rather than being arranged by the
+        caller, because on a desktop the caller has no Spark to set a conf on —
+        and a statement analysed under the session's default case is a different
+        statement, which is the whole reason the scope exists.
+        """
+
         scope = self.scope(workspace)
         if scope.executes_here:
+            from ..build_bundle.executors.spark_case import exact_identifier_case
+
+            spark = scope.spark()
             with self.telemetry.timing("spark.sql"):
-                frame = scope.spark().sql(statement)
-                return [row.asDict() for row in frame.collect()]
+                with exact_identifier_case(spark, enabled=exact_case):
+                    return [row.asDict() for row in spark.sql(statement).collect()]
+
+        # Spelled out rather than imported on the far side: this is a Session
+        # capability, and reaching into the build package for a context manager
+        # would point the dependency the wrong way for a two-line conf dance.
         source = (
             f"_statement = {statement!r}\n"
-            "emit([row.asDict() for row in spark.sql(_statement).collect()])\n"
+            f"_exact = {bool(exact_case)!r}\n"
+            "_key = 'spark.sql.caseSensitive'\n"
+            "_previous = spark.conf.get(_key) if _exact else None\n"
+            "_restore = _exact and str(_previous).lower() != 'true'\n"
+            "if _restore:\n"
+            "    spark.conf.set(_key, 'true')\n"
+            "try:\n"
+            "    _rows = [row.asDict() for row in spark.sql(_statement).collect()]\n"
+            "finally:\n"
+            "    if _restore:\n"
+            "        spark.conf.set(_key, _previous)\n"
+            "emit(_rows)\n"
         )
         return scope.livy_run(source, name="spark_sql", timeout=timeout)
 
@@ -293,7 +595,7 @@ class ConsoleScope(WorkspaceScope):
 
         return self.local_spark is not None
 
-    def warm(self) -> "WarmUp":
+    def warm(self, required=None) -> "WarmUp":
         """Start acquiring what the next command will probably want, and say what.
 
         Speculative throughout: a warm-up nobody asked for must not fail the
@@ -308,13 +610,21 @@ class ConsoleScope(WorkspaceScope):
         skipped, for the caller to show.
         """
 
+        from .requirements import AUTH, LIVY
+
         started: list[str] = []
         skipped: list[tuple[str, str]] = []
+        # No declaration means "whatever this context has", which is what
+        # `weaver session` wants when it starts before any command is typed.
+        wanted = None if required is None else set(required)
 
-        if self.auth is not None:
+        def asked(name: str) -> bool:
+            return wanted is None or name in wanted
+
+        if self.auth is not None and asked(AUTH):
             self.auth.start(speculative=True)
             started.append("Fabric credential")
-        if self.livy is not None:
+        if self.livy is not None and asked(LIVY):
             if getattr(self.workspace, "environment", None):
                 self.livy.start(speculative=True)
                 started.append("Spark session (Livy)")
@@ -326,9 +636,11 @@ class ConsoleScope(WorkspaceScope):
                         "--environment, or set one in workspace configuration",
                     )
                 )
-        if self.local_spark is not None:
+        if self.local_spark is not None and asked(LIVY):
             # The JVM is the largest fixed cost of every local command, so the
-            # emulator gets the same treatment as Livy.
+            # emulator gets the same treatment as Livy. Declared as Livy too:
+            # what a command needs is *Spark*, and which one it gets is the
+            # host's business rather than the caller's.
             self.local_spark.start(speculative=True)
             started.append("local Spark session")
 

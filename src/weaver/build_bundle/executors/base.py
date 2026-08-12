@@ -78,6 +78,11 @@ class InstallationContext:
     store: Store
     target: ResolvedTarget
     sql: Any = None
+    #: One Spark SQL statement, wherever this host's Spark is, carrying Weaver's
+    #: identifier-case scope with it. Present on a desktop where ``spark`` is
+    #: not: an executor that only needs to *ask Spark something* can stay here
+    #: and let the question cross, rather than crossing whole.
+    spark_sql: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: This installation's publication instant, resolved into ``{{epoch}}``. One
     #: value for the whole run, so every Registry row a build writes carries the

@@ -27,7 +27,7 @@ explicit" enforceable rather than aspirational.
 from __future__ import annotations
 
 from .errors import CommandError
-from .workspaces import BUILD_BUNDLES_AREA, CLI_AREA, WEAVER_ITEMS_AREA, LocalWorkspace
+from .workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, LocalWorkspace
 from .locations import LakehouseSparkLocation, Location
 from .spark import SparkDestination, local_destination
 from .targets import (
@@ -202,18 +202,6 @@ class LocalResolver:
         """
 
         return self.build_bundles_root / validate_name(name, what="bundle name")
-
-    @property
-    def cli_root(self) -> Location:
-        """Ephemeral desktop-to-session handover beneath ``Files/cli``."""
-
-        return self.files_root(ItemRef(self._weaver_lakehouse_name())) / CLI_AREA
-
-    def cli_execution(self, execution_id: str) -> Location:
-        return self.cli_root / validate_name(execution_id, what="execution id")
-
-    def cli_bundle(self, execution_id: str) -> Location:
-        return self.cli_execution(execution_id) / "install.weaver.zip"
 
     @property
     def control_tables_root(self) -> Location:

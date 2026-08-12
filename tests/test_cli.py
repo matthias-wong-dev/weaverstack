@@ -52,3 +52,52 @@ def test_doctor_exit_status_follows_the_report(capsys):
     exit_code = main(["doctor", "--json"])
     report = json.loads(capsys.readouterr().out)
     assert exit_code == (0 if report["ok"] else 1)
+
+
+# --- one target grammar ------------------------------------------------------
+
+
+TARGET_COMMANDS = ("wipe", "load", "test")
+
+
+@pytest.mark.parametrize("command", TARGET_COMMANDS)
+def test_a_target_oriented_command_takes_its_targets_positionally(command):
+    """The three commands that operate on named targets spell them one way.
+
+    ``load`` used to want ``--targets`` while its two neighbours took
+    positionals, so the same three names had to be typed two ways depending on
+    the verb. There is nothing behind the difference to remember — which is
+    what made it worth removing rather than documenting.
+    """
+
+    from weaver_cli.main import build_parser
+
+    parsed = build_parser().parse_args(
+        [command, "Lakehouse/Sales", "Warehouse/Reporting"]
+    )
+
+    assert parsed.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
+
+
+@pytest.mark.parametrize("command", TARGET_COMMANDS)
+def test_a_target_oriented_command_needs_at_least_one_target(command):
+    from weaver_cli.main import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([command])
+
+
+def test_no_target_oriented_command_still_offers_the_old_spelling(capsys):
+    """Pre-alpha, so the inconsistent spelling is gone rather than aliased.
+
+    Asserted because a silently accepted ``--targets`` would be worse than a
+    removed one: the sequence would keep working for whoever already typed it
+    and stay unlearnable for everyone else.
+    """
+
+    from weaver_cli.main import build_parser
+
+    for command in TARGET_COMMANDS:
+        with pytest.raises(SystemExit):
+            build_parser().parse_args([command, "--targets", "Lakehouse/Sales"])
+        assert "--targets" in capsys.readouterr().err

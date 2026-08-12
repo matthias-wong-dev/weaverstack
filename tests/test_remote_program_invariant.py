@@ -117,6 +117,9 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
     program.
     """
 
+    # `install_action(` is the *current* one-action crossing and is fine.
+    # `execute_action(` was a different thing that was deleted, and reusing
+    # the name would make a reader think the old one came back.
     retired = ("InstallationEnvironment", "install_bundle(", "execute_action(")
     offenders = [
         f"{where}:{line}: names {name}"

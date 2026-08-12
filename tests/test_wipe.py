@@ -217,7 +217,7 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     monkeypatch.setattr(
         operations,
         "_unbind_physical_targets",
-        lambda control, targets: calls.append(
+        lambda control, targets, **_kwargs: calls.append(
             (control.weaver_lakehouse, tuple(map(str, targets)))
         )
         or {"targets": []},
