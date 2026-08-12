@@ -39,6 +39,7 @@ cli = [
     "azure-identity>=1.23",
     "requests>=2.31",
     "build>=1.2",
+    "pyreadline3>=3.5; sys_platform == 'win32'",
 ]
 # Delta and Spark are released in lockstep: delta-spark 3.2.x needs Spark 3.5.x.
 # Ranges rather than pins, so an existing local install is not disturbed.
@@ -60,6 +61,7 @@ test = [
     "pytest>=8.4",
     "azure-identity>=1.23",
     "requests>=2.31",
+    "pyreadline3>=3.5; sys_platform == 'win32'",
 ]
 # Everything: the suite, the Fabric stack and local Spark.
 dev = [

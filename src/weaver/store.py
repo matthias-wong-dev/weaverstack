@@ -143,10 +143,13 @@ class FilesystemStore:
 
     def delete(self, location: Location, *, recursive: bool = False) -> None:
         path = self._local(location)
-        if path.is_symlink():
+        if _is_link(path):
             # A link is removed, never followed: the alias it stands for is
             # disposable, the object it points at belongs to another item.
-            path.unlink()
+            if _is_junction(path):
+                path.rmdir()
+            else:
+                path.unlink()
             return
         if not path.exists():
             return
@@ -201,11 +204,51 @@ class FilesystemStore:
             raise StoreError(f"cannot link to something that does not exist: {source.value}")
         destination_path = self._local(destination)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
-        if destination_path.is_symlink():
-            destination_path.unlink()
+        if _is_link(destination_path):
+            if _is_junction(destination_path):
+                destination_path.rmdir()
+            else:
+                destination_path.unlink()
         try:
             destination_path.symlink_to(source_path, target_is_directory=source_path.is_dir())
         except OSError as exc:
+            # Creating a Windows symlink normally needs Developer Mode or an
+            # elevated process. A directory junction has the shortcut semantics
+            # the emulator needs without either privilege: it follows the live
+            # source, resolves to it, and removing it leaves the source alone.
+            if _create_junction(source_path, destination_path, exc):
+                return
             raise StoreError(
                 f"cannot link {destination.value} to {source.value}: {exc}"
             ) from exc
+
+
+def _is_junction(path: Path) -> bool:
+    check = getattr(path, "is_junction", None)
+    return bool(check is not None and check())
+
+
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or _is_junction(path)
+
+
+def _create_junction(source: Path, destination: Path, symlink_error: OSError) -> bool:
+    """Use a privilege-free Windows directory link when symlinks are denied."""
+
+    import os
+
+    if os.name != "nt" or not source.is_dir():
+        return False
+    try:
+        import _winapi
+
+        create = getattr(_winapi, "CreateJunction", None)
+        if create is None:
+            return False
+        create(str(source.resolve()), str(destination))
+        return True
+    except OSError as junction_error:
+        raise StoreError(
+            f"cannot link {destination} to {source}: symlink failed with "
+            f"{symlink_error}; junction failed with {junction_error}"
+        ) from junction_error

@@ -15,7 +15,7 @@ from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, Insta
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.resolution import LocalResolver
-from weaver.store import FilesystemStore
+from weaver.store import Entry, FilesystemStore
 from weaver.targets import ItemRef
 from weaver.workspaces import LocalWorkspace
 
@@ -72,6 +72,19 @@ def _local_context(tmp_path, *, resolver=None, store=None):
         ),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
+    local_resolver = LocalResolver(
+        LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    )
+    if resolver is not None and hasattr(resolver, "inner"):
+        resolver.inner = local_resolver
+    chosen_store = store or FilesystemStore()
+    if resolver is not None and hasattr(resolver, "create_onelake_shortcut"):
+        chosen_store.make_directory(
+            local_resolver.tables_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
+        )
+        chosen_store.make_directory(
+            local_resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
+        )
     return InstallationContext(
         spark=None,
         # A host that can ask Spark and finds the alias readable at once. The
@@ -79,9 +92,8 @@ def _local_context(tmp_path, *, resolver=None, store=None):
         # nobody would build in production — and the executor now says so rather
         # than skipping the wait.
         spark_sql=lambda statement, exact_case=False: [],
-        resolver=resolver
-        or LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")),
-        store=store or FilesystemStore(),
+        resolver=resolver or local_resolver,
+        store=chosen_store,
         target=destination,
         targets={DESTINATION_TARGET_ID: destination, SOURCE_TARGET_ID: source},
     )
@@ -100,7 +112,7 @@ def test_a_local_alias_links_the_destination_to_the_source_table(tmp_path):
     details = AliasExecutor().execute(_action(), _payload(), context)
 
     linked = context.resolver.tables_root(ItemRef("Curated_Dev")) / "Sales" / "Landed"
-    assert linked.path.is_symlink()
+    assert linked.path.is_symlink() or linked.path.is_junction()
     assert linked.path.resolve() == produced.path.resolve()
     assert store.read(linked / "_delta_log" / "00.json") == b"{}"
     assert details["aliases"][0]["alias"] == "Lakehouse/Curated/Sales.Landed"
@@ -144,7 +156,7 @@ def test_a_files_alias_links_into_the_destination_files_area(tmp_path):
     )
 
     linked = context.resolver.files_root(ItemRef("Curated_Dev")) / "Sales" / "Landed"
-    assert linked.path.is_symlink()
+    assert linked.path.is_symlink() or linked.path.is_junction()
     assert linked.path.resolve() == produced.path.resolve()
 
 
@@ -170,6 +182,12 @@ class _ShortcutResolver:
     def __init__(self, events=None):
         self.calls = []
         self.events = events if events is not None else []
+        self.inner = None
+
+    def __getattr__(self, name):
+        if self.inner is None:
+            raise AttributeError(name)
+        return getattr(self.inner, name)
 
     def create_onelake_shortcut(self, item, *, path, name, source, source_path):
         self.calls.append((item.name, path, name, source.name, source_path))
@@ -188,6 +206,25 @@ def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
     ]
     assert details["aliases"][0]["shortcut"] == "Tables/Sales/Landed"
     assert details["aliases"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
+
+
+class _FoldedSourceStore(FilesystemStore):
+    """A Fabric estate whose physical table name was folded to lower-case."""
+
+    def exists(self, location):
+        return not location.value.endswith("/Customer")
+
+    def list(self, location, *, recursive=False):
+        return [Entry(location=location / "customer", is_directory=True)]
+
+
+def test_a_shortcut_uses_the_source_tables_physical_case(tmp_path):
+    resolver = _ShortcutResolver()
+    context = _local_context(tmp_path, resolver=resolver, store=_FoldedSourceStore())
+
+    AliasExecutor().execute(_action(), _payload(), context)
+
+    assert resolver.calls[0][-1] == "Tables/Sales/customer"
 
 
 class _Conf:
@@ -247,11 +284,22 @@ def _addressable_context(tmp_path, spark, resolver):
         ),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
+    local_resolver = LocalResolver(
+        LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    )
+    resolver.inner = local_resolver
+    store = FilesystemStore()
+    store.make_directory(
+        local_resolver.tables_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
+    )
+    store.make_directory(
+        local_resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
+    )
     return InstallationContext(
         spark=spark,
         spark_sql=spark,
         resolver=resolver,
-        store=FilesystemStore(),
+        store=store,
         target=destination,
         targets={DESTINATION_TARGET_ID: destination, SOURCE_TARGET_ID: source},
     )

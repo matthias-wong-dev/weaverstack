@@ -309,7 +309,15 @@ def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     assert ("Tables/DWG", "PortableCustomer") in found
     target = found[("Tables/DWG", "PortableCustomer")]
     assert target.get("itemId") == alias_estate["producer"].id
-    assert target.get("path") == "Tables/DWG/Customer"
+    source_schema = alias_estate["resolver"].tables_root(
+        ItemRef(alias_estate["producer"].name)
+    ) / "DWG"
+    physical_source = next(
+        entry.name
+        for entry in alias_estate["store"].list(source_schema)
+        if entry.name.casefold() == "customer"
+    )
+    assert target.get("path") == f"Tables/DWG/{physical_source}"
 
 
 def test_the_consumer_reads_the_producers_table_through_its_own_name(alias_estate):
