@@ -68,7 +68,7 @@ def find_workspace(name: str, *, client: FabricClient | None = None) -> Workspac
             f"no workspace named {name!r} — found: {available or 'none'}"
         )
     if len(matches) > 1:
-        raise CommandError(f"more than one workspace named {name!r}")
+        raise CommandError(f"More than one Workspace is named {name!r}.")
     return Workspace(id=matches[0]["id"], name=name)
 
 
@@ -108,7 +108,7 @@ def find_item(
         matches = [item for item in matches if item.type not in FACET_TYPES] or matches
     if not matches:
         raise ItemNotFoundError(
-            f"no {item_type or 'item'} named {name!r} in workspace {workspace.name!r}"
+            f"{item_type or 'Item'} {name!r} was not found in workspace {workspace.name!r}."
         )
     if len(matches) > 1:
         found = ", ".join(sorted(item.type for item in matches))

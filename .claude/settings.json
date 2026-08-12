@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/prose_tripwire.py",
+            "command": "bash .claude/run-prose-tripwire.sh",
             "timeout": 30
           }
         ]

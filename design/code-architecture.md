@@ -1,7 +1,15 @@
 # Code architecture
 
-Weaver decides things in Python and does things to Fabric, and it keeps those
-two activities as far apart as it can.
+## Purpose
+
+This document explains how the repository implements the product architecture.
+It complements [Weaver architecture](weaver-architecture.md), which defines
+product behaviour and is authoritative for that behaviour.
+
+## Responsibilities and handoffs
+
+Weaver decides things in Python and performs physical work through a Session.
+The repository keeps those responsibilities separate.
 
 Almost everything interesting — what to build, what order to build it in, what
 still needs loading, what failed and why — happens as ordinary Python objects in
@@ -9,8 +17,7 @@ memory. Reaching a real Lakehouse or Warehouse happens at a small number of
 named places. In between there are **handoff points**: plain values that one
 part produces and another consumes.
 
-That is the whole idea. The rest of this document is what it looks like in the
-code, and why it turned out to be worth the trouble.
+The rest of this document identifies the handoffs between those responsibilities.
 
 ---
 

@@ -67,11 +67,11 @@ def push_notebook(
 
     source_path = Path(source).expanduser()
     if not source_path.is_file():
-        raise CommandError(f"notebook source not found: {source_path}")
+        raise CommandError(f"Notebook source was not found: {source_path}")
     try:
         definition_format, part_path = _SUPPORTED[source_path.suffix.casefold()]
     except KeyError as exc:
-        raise CommandError("notebook source must be .py or .ipynb") from exc
+        raise CommandError("Notebook source must use the .py or .ipynb extension.") from exc
     notebook_name = name or source_path.stem
     client = client or FabricClient()
     physical_workspace = find_workspace(workspace, client=client)
@@ -168,7 +168,7 @@ def run_notebook(
     )
     job_url = response.headers.get("Location") or response.headers.get("location")
     if not job_url:
-        raise FabricError("notebook job was accepted without a Location header")
+        raise FabricError("Fabric accepted the notebook job without returning its location.")
     result = NotebookRunResult(
         workspace=physical_workspace.name,
         notebook=notebook.name,
@@ -196,6 +196,6 @@ def run_notebook(
         )
         if not result.succeeded:
             reason = body.get("failureReason") or body.get("error") or "no reason returned"
-            raise FabricError(f"notebook {name!r} {status}: {reason}")
+            raise FabricError(f"Notebook {name!r} {status}: {reason}")
         return result
-    raise FabricError(f"notebook {name!r} did not finish within {int(timeout)}s")
+    raise FabricError(f"Notebook {name!r} did not finish within {int(timeout)} seconds.")

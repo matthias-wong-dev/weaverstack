@@ -3,6 +3,11 @@
 This directory describes Weaver for maintainers. Read the documents by purpose
 rather than treating them as one linear specification.
 
+See the [documentation stocktake](documentation-stocktake.md) for the complete
+classification, authority, and future site direction.
+See the [source prose review](source-prose-review.md) for the runtime and source
+boundaries covered by the writing uplift.
+
 ## Overview and architecture
 
 | Document | Type | Use it for |

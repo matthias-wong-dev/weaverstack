@@ -202,7 +202,7 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
 
     assert status == 0
     assert not calls
-    assert "Nothing was run." in capsys.readouterr().out
+    assert "Composition cancelled." in capsys.readouterr().out
 
 
 def test_a_bad_entry_is_found_before_the_first_command_runs(tmp_path, recorded):
@@ -301,7 +301,7 @@ def test_the_sequence_stops_at_the_first_failure(
 
     assert status == 1
     assert len(calls) == 2
-    assert "stopped at [2]" in capsys.readouterr().err
+    assert "Composition stopped at [2]" in capsys.readouterr().err
 
 
 def test_a_raised_weaver_error_stops_the_sequence_too(

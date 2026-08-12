@@ -1,5 +1,11 @@
 # Tests and Assumptions
 
+## Purpose
+
+This document defines Weaver validation: how Tests and Assumptions are authored,
+installed, run, and recorded. It owns validation architecture; command use is
+documented in [CLI usage](cli-usage.md).
+
 Weaver validates an estate with two kinds of authored declaration. Both are
 ordinary Weaver declarations — schema-qualified, dependency-resolved, compiled to
 independently runnable primitives, installed by an ordinary build — and neither

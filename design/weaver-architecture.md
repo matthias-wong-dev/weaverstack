@@ -2,11 +2,17 @@
 
 ## Overview
 
+This document defines Weaver's product model and durable architecture. It is
+authoritative when it differs from implementation detail elsewhere in the
+repository.
+
 Weaver is a declarative framework for authoring, building and deploying Microsoft Fabric workspaces.
 
 Rather than treating a Fabric workspace as a collection of manually managed resources, Weaver represents the workspace as code. Developers describe the logical structure of their solution, while Weaver is responsible for dependency management, metadata, orchestration, deployment and lifecycle management.
 
-A fundamental design goal is that developers continue to write ordinary executable SQL and Python. Weaver adds structure around those assets without introducing template languages or domain-specific scripting.
+A fundamental design goal is that developers continue to write ordinary
+executable SQL and Python. Weaver adds structure around those assets without
+introducing template languages or domain-specific scripting.
 
 ---
 

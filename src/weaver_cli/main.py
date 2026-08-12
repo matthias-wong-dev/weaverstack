@@ -1,10 +1,4 @@
-"""Top-level CLI routing.
-
-Commands are registered here as the core APIs they wrap become available. The
-handler contract is the one convention worth keeping from the old repository:
-a command function returns a plain serialisable structure and the CLI prints
-it.
-"""
+"""CLI command parsing and rendering."""
 
 from __future__ import annotations
 

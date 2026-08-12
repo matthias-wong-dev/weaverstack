@@ -163,15 +163,15 @@ def test_a_workspace_with_no_environment_is_told_why_livy_is_not_starting(
 
     printed = _banner_for("A_Workspace", recorded, capsys, environment=None)
 
-    assert "Not starting: Spark session (Livy)" in printed
+    assert "Not started: Spark session (Livy)" in printed
     assert "--environment" in printed
 
 
 def test_a_session_with_no_workspace_claims_to_start_nothing(recorded, capsys):
     printed = _banner_for(None, recorded, capsys)
 
-    assert "no default workspace" in printed
-    assert "Starting in the background" not in printed
+    assert "No default workspace" in printed
+    assert "Starting:" not in printed
 
 
 # --- the prompt is a prompt --------------------------------------------------

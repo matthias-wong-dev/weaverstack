@@ -103,7 +103,9 @@ def resolve_workspace(
         configured.workspace if configured is not None else None
     )
     if resolved_identity is None:
-        raise ConfigError("give --workspace or --workspace-config containing workspace")
+        raise ConfigError(
+            "A Workspace is required. Use --workspace or --workspace-config."
+        )
 
     common = {
         "workspace": resolved_identity,
@@ -124,7 +126,7 @@ def resolve_workspace(
 
 def _local_path(value: Any, base_dir: str | Path | None) -> Path:
     if not isinstance(value, (str, Path)) or not str(value).strip():
-        raise ConfigError("local workspace must be a non-empty folder path")
+        raise ConfigError("A local Workspace must be a non-empty folder path.")
     path = Path(str(value).strip()).expanduser()
     if not path.is_absolute() and base_dir is not None:
         path = Path(base_dir) / path

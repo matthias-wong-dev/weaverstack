@@ -1,5 +1,12 @@
 # Weaver Build Philosophy
 
+## Purpose
+
+This document defines the build-system invariants that implementations must
+preserve. For the product lifecycle, see
+[Weaver architecture](weaver-architecture.md); for code ownership, see
+[Code architecture](code-architecture.md).
+
 ## Status
 
 This document records the governing philosophy of Weaver's build system.

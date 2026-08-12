@@ -156,13 +156,7 @@ def _run_one(session, parser, words: list[str]) -> None:
 
 
 def _prepare_for(session, parsed) -> None:
-    """Start what this command says it will want, before it starts wanting it.
-
-    The banner's warm-up covers the session's default workspace; a command
-    naming a different one arrives at a cold context, and this is where that
-    context gets its head start. Speculative, so a warm-up that cannot complete
-    is the business of whichever operation actually needs the resource.
-    """
+    """Start resources declared by a command before it runs."""
 
     from .main import _resolve_workspace, command_requirements
 
@@ -172,8 +166,7 @@ def _prepare_for(session, parsed) -> None:
     try:
         session.prepare(required, workspace=_resolve_workspace(parsed))
     except WeaverError:
-        # A command with no resolvable workspace fails in its own terms, with
-        # its own message. It must not fail here, warming.
+        # Let the command report its own workspace error.
         pass
 
 
@@ -252,12 +245,7 @@ def _words(line: str) -> list[str] | None:
 
 
 def _default_workspace(args: argparse.Namespace):
-    """The default context, where the invocation gave enough to resolve one.
-
-    Leniently: a session that cannot resolve a default is still a useful
-    session, because every command may name its own workspace. What would be
-    unhelpful is refusing to start.
-    """
+    """Return the default workspace when the invocation defines one."""
 
     from .main import _resolve_workspace
 
@@ -269,41 +257,27 @@ def _default_workspace(args: argparse.Namespace):
 
 def _banner(workspace) -> None:
     if workspace is None:
-        print("Weaver · no default workspace")
-        print("Name one per command with --workspace.")
-        print("\nEnter commands: wipe, build, load, test to operate. `exit` to leave.\n")
+        print("Weaver · No default workspace")
+        print("Use --workspace on each command.")
+        print("\nCommands: wipe, build, load, test. Type `exit` to leave.\n")
         return
     print(f"Weaver · {workspace.workspace}")
 
 
 def _report_spending(session) -> None:
-    """What the session spent, per transport, once it is over.
-
-    The Task/Step tree already showed the *shape* of each command as it ran.
-    This is the other ledger — how those seconds divided between starting Livy,
-    submitting statements, resolving names and opening connections — and it is
-    the one a decomposition is judged against, because "the load took forty
-    seconds" and "thirty-eight of them were one Livy startup" call for opposite
-    changes.
-    """
+    """Print session time grouped by transport."""
 
     print("\n" + session.telemetry.report(), file=sys.stderr)
 
 
 def _report_warm_up(warm) -> None:
-    """Say what is being acquired, and what is not being acquired and why.
-
-    The second half is the point. A prompt that announced "starting resources"
-    and then silently declined to start the expensive one — because the
-    workspace named no Environment — told a reader nothing they could act on,
-    and left them to discover it from the first command that needed Spark.
-    """
+    """Report session resources that are starting or unavailable."""
 
     if warm.started:
-        print(f"Starting in the background: {', '.join(warm.started)}")
+        print(f"Starting: {', '.join(warm.started)}")
     for resource, reason in warm.skipped:
-        print(f"Not starting: {resource} — {reason}")
-    print("\nEnter commands: wipe, build, load, test to operate. `exit` to leave.\n")
+        print(f"Not started: {resource} — {reason}")
+    print("\nCommands: wipe, build, load, test. Type `exit` to leave.\n")
 
 
 __all__ = ["run_shell"]
