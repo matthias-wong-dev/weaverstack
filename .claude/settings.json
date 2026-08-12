@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/prose_tripwire.py",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

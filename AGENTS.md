@@ -496,6 +496,13 @@ physical target, repository, catalogue, registry, session, composition, build,
 load, test and assumption. Do not invent synonyms in UI text when a defined term
 already exists.
 
+### GitHub publishing
+
+Use GitHub CLI for branch, push and pull-request work. Check `gh auth status`
+before publishing. On Windows, if `gh` is not on `PATH`, use
+`C:\Program Files\GitHub CLI\gh.exe`. Ask for re-authentication when its saved
+token is invalid.
+
 ## Layout
 
 ```text
