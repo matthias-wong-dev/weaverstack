@@ -17,7 +17,7 @@ PATTERNS = {
     "merely": re.compile(r"\bmerely\b", re.IGNORECASE),
     "this is not X; it is Y": re.compile(r"\bthis is not\b.+\b(it is|it's)\b", re.IGNORECASE),
 }
-SKIP = {"AGENTS.md", "CLAUDE.md"}
+SKIP = {"AGENTS.md", "CLAUDE.md", ".claude/prose_tripwire.py"}
 
 
 def changed_lines() -> list[tuple[str, int, str]]:
