@@ -119,10 +119,13 @@ def test_load_dag_excludes_objects_that_own_no_load_primitive(estate):
     assert f"{LOAD_PRODUCER}/Files/_.Load" not in logical
 
 
-def test_load_dag_includes_required_upstream_closure(estate):
+def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
     dag = load_dag(estate, targets=(REPORTING,))
 
-    assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
+    assert node_ids(dag) == (
+        "load:Warehouse/Reporting_WH/Sales.Summary",
+    )
+    assert dag.edges == ()
 
 
 def test_load_dag_excludes_unrelated_downstream_objects(estate):
@@ -131,16 +134,37 @@ def test_load_dag_excludes_unrelated_downstream_objects(estate):
     assert "load:Warehouse/Reporting_WH/Sales.Summary" not in dag.by_id
 
 
-def test_load_dag_excludes_unrelated_objects_in_upstream_targets(estate):
-    """Upstream closure is what the request *needs*, not the upstream target."""
+def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
+    dag = load_dag(estate, targets=(RAW, REPORTING))
 
-    dag = load_dag(estate, targets=(REPORTING,))
+    assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
+    assert "refresh:Lakehouse/Raw_LH" in dag.by_id
+    assert "load:Warehouse/Reporting_WH/Sales.Summary" in dag.by_id
 
-    assert node_ids(dag) == (
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "refresh:Lakehouse/Raw_LH",
-        "load:Warehouse/Reporting_WH/Sales.Summary",
+
+def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
+    dag = load_dag(
+        estate,
+        targets=(RAW,),
+        names=("Sales.Order", "Sales.Daily"),
     )
+
+    assert set(node_ids(dag)) == {
+        "load:Lakehouse/Raw_LH/Sales.Order",
+        "load:Lakehouse/Raw_LH/Sales.Daily",
+    }
+    assert dag.edges == ()
+
+
+def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(estate):
+    dag = load_dag(estate, targets=(RAW,), names=("sales.order",))
+
+    assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
+
+
+def test_an_unknown_load_name_lists_the_installed_loadables(estate):
+    with pytest.raises(LoadError, match="no loadable object named 'Sales.Missing'"):
+        load_dag(estate, targets=(RAW,), names=("Sales.Missing",))
 
 
 # --- ordering -----------------------------------------------------------------
@@ -220,7 +244,7 @@ class Sales__Customer(Table):
 def test_load_dag_crosses_items_through_aliases(estate):
     """The Warehouse consumer's upstream is the Lakehouse table, not the alias."""
 
-    dag = load_dag(estate, targets=(REPORTING,))
+    dag = load_dag(estate, targets=(RAW, REPORTING))
     consumer = "load:Warehouse/Reporting_WH/Sales.Summary"
 
     assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
@@ -230,12 +254,16 @@ def test_load_dag_crosses_items_through_aliases(estate):
 
 
 def test_load_dag_inserts_endpoint_refresh_before_alias_consumers(estate):
-    dag = load_dag(estate, targets=(REPORTING,))
+    dag = load_dag(estate, targets=(RAW, REPORTING))
 
-    assert dag.edges == (
-        ("load:Lakehouse/Raw_LH/Sales.Order", "refresh:Lakehouse/Raw_LH"),
-        ("refresh:Lakehouse/Raw_LH", "load:Warehouse/Reporting_WH/Sales.Summary"),
-    )
+    assert (
+        "load:Lakehouse/Raw_LH/Sales.Order",
+        "refresh:Lakehouse/Raw_LH",
+    ) in dag.edges
+    assert (
+        "refresh:Lakehouse/Raw_LH",
+        "load:Warehouse/Reporting_WH/Sales.Summary",
+    ) in dag.edges
 
 
 def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse(estate):
@@ -278,7 +306,8 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
 
     repository = parse_item_repository(Location(str(tmp_path)))
     dag = LoadDag.from_catalogue(
-        installed_catalogue(repository, load_estate_bindings()), targets=(REPORTING,)
+        installed_catalogue(repository, load_estate_bindings()),
+        targets=(RAW, REPORTING),
     )
 
     refreshes = [

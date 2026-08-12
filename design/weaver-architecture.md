@@ -708,20 +708,30 @@ Load
     Record execution metadata
 ```
 
-A future CLI command is expected to resemble:
+A target-scoped load names the physical Lakehouses and Warehouses it may touch:
 
 ```bash
-weaver load \
+weaver load Lakehouse/Raw Warehouse/Curated \
     --workspace-config workspace.yml
 ```
 
-or
+Dependencies order loadables only within that explicit target set. Naming one
+target is therefore a hard boundary: a dependency does not implicitly add
+another Lakehouse or Warehouse. Naming multiple targets permits dependency
+edges, including endpoint-refresh barriers, between exactly those targets.
+
+An exact operator-selected load repeats ``--name`` for each installed
+``Schema.Object``:
 
 ```bash
-weaver load \
+weaver load Warehouse/Curated \
     --workspace-config workspace.yml \
-    --item Lakehouse/Raw
+    --name DWG.Customer \
+    --name DWG.Order
 ```
+
+Name selection runs only those objects. It deliberately does not expand or
+order them through declared dependencies.
 
 Conceptually, load operates on logical Weaver Documents rather than requiring developers to execute generated stored procedures or notebooks directly.
 

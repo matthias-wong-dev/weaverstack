@@ -119,7 +119,7 @@ def session(tmp_path):
 
 
 
-def dry_run(session, *targets, fault_tolerant=False):
+def dry_run(session, *targets, names=(), fault_tolerant=False):
     return run_load(
         session.session,
         workspace=session.workspace,
@@ -128,6 +128,7 @@ def dry_run(session, *targets, fault_tolerant=False):
             target_inventories=session.inventories,
         ),
         requested=targets or (RAW, REPORTING),
+        names=names,
         fault_tolerant=fault_tolerant,
         dry_run=True,
     )
@@ -147,6 +148,17 @@ def test_load_dry_run_resolves_the_complete_physical_dag(session):
         (ORDER, REFRESH),
         (REFRESH, SUMMARY),
     )
+
+
+def test_named_dry_run_is_the_exact_nodes_without_dependency_edges(session):
+    report = dry_run(
+        session,
+        RAW,
+        names=("Sales.Order", "Sales.Daily"),
+    )
+
+    assert set(report.order) == {ORDER, DAILY}
+    assert report.edges == ()
 
 
 def test_load_dry_run_validates_every_primitive_without_executing_it(session):

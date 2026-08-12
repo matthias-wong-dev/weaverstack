@@ -120,6 +120,10 @@ def test_the_command_exposes_every_option_the_contract_names():
             "environment.yml",
             "--fault-tolerant",
             "--dry-run",
+            "--name",
+            "Sales.Customer",
+            "--name",
+            "Sales.Order",
         ]
     )
 
@@ -129,6 +133,7 @@ def test_the_command_exposes_every_option_the_contract_names():
     assert load.workspace_config == "environment.yml"
     assert load.fault_tolerant
     assert load.dry_run
+    assert load.names == ["Sales.Customer", "Sales.Order"]
 
 
 def test_more_than_one_target_is_one_request():
@@ -162,11 +167,26 @@ def test_fault_tolerance_and_dry_run_reach_the_api(recorded, tmp_path):
     assert recorded[0]["dry_run"] is True
 
 
+def test_repeated_names_reach_the_api_as_one_exact_selection(recorded, tmp_path):
+    main(
+        _local(
+            tmp_path,
+            "--name",
+            "Sales.Customer",
+            "--name",
+            "Sales.Order",
+        )
+    )
+
+    assert recorded[0]["names"] == ["Sales.Customer", "Sales.Order"]
+
+
 def test_the_cautious_answers_are_the_defaults(recorded, tmp_path):
     main(_local(tmp_path))
 
     assert recorded[0]["fault_tolerant"] is False
     assert recorded[0]["dry_run"] is False
+    assert recorded[0]["names"] is None
 
 
 def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded, tmp_path):

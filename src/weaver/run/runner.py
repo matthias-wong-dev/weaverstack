@@ -136,6 +136,8 @@ class RunRequest:
     targets: tuple
     #: One installed node by name, where the caller asked for exactly one.
     name: str | None = None
+    #: Exact installed loadables by ``Schema.Object``. ``load`` only.
+    names: tuple[str, ...] = ()
     #: A source file compiled and run without being installed. ``test`` only.
     file: str | None = None
     #: Continue independent branches after a node fails, and report.
@@ -162,9 +164,14 @@ class RunRequest:
                 "a run selects name= or file=, not both — one names something "
                 "the estate has and the other something it may not"
             )
+        if self.kind == LOAD and (self.name is not None or self.file is not None):
+            raise CommandError("a load selects installed objects with names=")
+        if self.kind == TEST and self.names:
+            raise CommandError("a test selects one installed validation with name=")
 
     @classmethod
     def load(cls, targets: Sequence, **policy) -> "RunRequest":
+        policy["names"] = tuple(policy.get("names") or ())
         return cls(kind=LOAD, targets=tuple(targets), **policy)
 
     @classmethod
@@ -173,16 +180,21 @@ class RunRequest:
         return cls(kind=TEST, targets=tuple(targets), **policy)
 
     @property
-    def selection(self) -> str | None:
+    def selection(self) -> str | tuple[str, ...] | None:
         """What was selected within the targets, for a report to record."""
 
-        return self.file if self.file is not None else self.name
+        if self.file is not None:
+            return self.file
+        if self.name is not None:
+            return self.name
+        return self.names or None
 
     def to_mapping(self) -> dict:
         return {
             "kind": self.kind,
             "targets": [str(target) for target in self.targets],
             "name": self.name,
+            "names": list(self.names),
             "file": self.file,
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,

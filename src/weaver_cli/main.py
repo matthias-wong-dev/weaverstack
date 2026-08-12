@@ -195,6 +195,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lakehouse/Name or Warehouse/Name",
     )
     load.add_argument(
+        "--name",
+        dest="names",
+        action="append",
+        metavar="SCHEMA.OBJECT",
+        help="load only this installed object; repeat to select more than one",
+    )
+    load.add_argument(
         "--fault-tolerant",
         action="store_true",
         help="continue independent branches after a node fails, and report",
@@ -877,6 +884,7 @@ def _load_once(args: argparse.Namespace) -> int:
         report = _run_load(
             workspace,
             targets=args.targets,
+            names=args.names,
             fault_tolerant=args.fault_tolerant,
             dry_run=args.dry_run,
             session=_session(args),
@@ -898,7 +906,15 @@ def _load_once(args: argparse.Namespace) -> int:
     return 0 if report.succeeded else 1
 
 
-def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool, session=None):
+def _run_load(
+    workspace,
+    *,
+    targets,
+    names=None,
+    fault_tolerant: bool,
+    dry_run: bool,
+    session=None,
+):
     """One load, decided here and dispatched where each primitive lives.
 
     There is one call now. `weaver.load` reads the estate through Session
@@ -921,6 +937,7 @@ def _run_load(workspace, *, targets, fault_tolerant: bool, dry_run: bool, sessio
             _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.load(
             list(targets),
+            names=names,
             workspace=workspace,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,

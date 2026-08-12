@@ -24,12 +24,18 @@ carried out. But the *reading* records that finding rather than raising on it, a
 accumulates a Registry row for every item ever bound to a target, and a stale
 duplicate in one Warehouse must not stop a load of an unrelated Lakehouse.
 
-**The graph is physical, and the alias is why that matters.** A logical
-dependency that crosses items is not an edge between two objects; it is a
-publication path, and the path has a barrier in it:
+**The graph is physical, and the request bounds it.** Dependencies order work
+only among the physical targets the caller explicitly named. A single-target
+request therefore never crosses into another Lakehouse or Warehouse; a
+multi-target request can order work across exactly those targets.
+
+When both sides of an alias are in scope, the logical dependency that crosses
+items is not a direct edge between two objects; it is a publication path, and
+the path has a barrier in it:
 
 .. code-block:: text
 
+    requested: Lakehouse/Raw, Warehouse/Reporting
     Lakehouse/Raw/Sales.Order
         → published through a Warehouse-facing alias
         → Warehouse/Reporting/Sales.Order
@@ -49,8 +55,8 @@ seen in a plan, cannot be ordered against anything, and cannot be asserted.
 
 **Views are conduits, not nodes.** A view owns no load work, so it is never
 dispatched; but a table depending on a view depends on whatever the view reads,
-so the traversal passes *through* it to the loadable ancestors behind it. An
-object with no installed load primitive is treated the same way.
+so the traversal passes *through* it to the in-scope loadable ancestors behind
+it. An object with no installed load primitive is treated the same way.
 """
 
 from __future__ import annotations
@@ -545,9 +551,15 @@ class LoadDag:
 
     @classmethod
     def from_catalogue(
-        cls, catalogue: Catalogue, *, targets: Sequence[PhysicalTargetRef]
+        cls,
+        catalogue: Catalogue,
+        *,
+        targets: Sequence[PhysicalTargetRef],
+        names: Sequence[str] = (),
     ) -> "LoadDag":
-        return load_dag(InstalledEstate.from_catalogue(catalogue), targets=targets)
+        return load_dag(
+            InstalledEstate.from_catalogue(catalogue), targets=targets, names=names
+        )
 
     @property
     def by_id(self) -> Mapping[str, LoadNode]:
@@ -606,19 +618,26 @@ class LoadDag:
 
 
 def load_dag(
-    estate: InstalledEstate, *, targets: Sequence[PhysicalTargetRef]
+    estate: InstalledEstate,
+    *,
+    targets: Sequence[PhysicalTargetRef],
+    names: Sequence[str] = (),
 ) -> LoadDag:
     """The physical load graph for one set of requested physical targets.
 
-    *Load every installed loadable object physically hosted in the requested
-    targets, plus every upstream dependency required to load them* — and nothing
-    else. Unrelated downstream objects are outside the request; unrelated objects
-    in upstream targets are not required by it.
+    With no name filter, load every installed loadable object physically hosted
+    in the requested targets. Dependencies order those objects, but may not
+    enlarge the target scope: crossing between two targets happens only when the
+    caller named both.
+
+    With ``names``, select exactly those ``Schema.Object`` loadables within the
+    requested targets. This is an operator override, so dependencies neither add
+    nodes nor add ordering edges.
     """
 
     requested = tuple(dict.fromkeys(targets))
     planner = _Planner(estate)
-    return planner.plan(requested)
+    return planner.plan(requested, names=tuple(names))
 
 
 class _Planner:
@@ -663,20 +682,28 @@ class _Planner:
 
     # --- planning -------------------------------------------------------------
 
-    def plan(self, requested: tuple[PhysicalTargetRef, ...]) -> LoadDag:
+    def plan(
+        self,
+        requested: tuple[PhysicalTargetRef, ...],
+        *,
+        names: tuple[str, ...] = (),
+    ) -> LoadDag:
         self._refuse_ambiguity(requested)
-        seeds = sorted(
-            (
-                identity
-                for identity in self._loadable
-                if self.estate.objects[identity].target in requested
-            ),
-            key=str,
-        )
-        visited: set[WeaverDocumentId] = set()
-        for identity in seeds:
-            self._select(identity, visited)
-        self._place_refresh_barriers()
+        seeds = self._seeds(requested, names=names)
+        if names:
+            # An exact-name request is deliberately not a partial DAG request.
+            # The caller chose the nodes and asked Weaver not to infer more work
+            # or readiness constraints from their dependencies.
+            for identity in seeds:
+                self._load_node(identity)
+        else:
+            allowed_targets = frozenset(requested)
+            visited: set[WeaverDocumentId] = set()
+            for identity in seeds:
+                self._select(
+                    identity, visited, allowed_targets=allowed_targets
+                )
+            self._place_refresh_barriers()
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),
             edges=tuple(sorted(self.edges)),
@@ -687,17 +714,66 @@ class _Planner:
         # to whoever consumes the graph — a planner that returned a cyclic graph
         # would have made a decision it could not defend.
         dag.order()
-        self._refuse_ambiguity(
-            tuple(dict.fromkeys(node.physical_target for node in dag.nodes))
-        )
         return dag
+
+    def _seeds(
+        self,
+        requested: tuple[PhysicalTargetRef, ...],
+        *,
+        names: tuple[str, ...],
+    ) -> tuple[WeaverDocumentId, ...]:
+        """The loadables the caller selected, before any ordering is applied."""
+
+        available = tuple(
+            sorted(
+                (
+                    identity
+                    for identity in self._loadable
+                    if self.estate.objects[identity].target in requested
+                ),
+                key=str,
+            )
+        )
+        if not names:
+            return available
+
+        selected: list[WeaverDocumentId] = []
+        seen: set[str] = set()
+        for written in names:
+            name = str(written).strip()
+            if not name:
+                raise LoadError("a load name must be a non-empty Schema.Object")
+            folded = name.casefold()
+            if folded in seen:
+                continue
+            seen.add(folded)
+            candidates = [
+                identity
+                for identity in available
+                if identity.object_id.qualified.casefold() == folded
+            ]
+            if not candidates:
+                known = ", ".join(
+                    sorted({identity.object_id.qualified for identity in available})
+                )
+                raise LoadError(
+                    f"no loadable object named {name!r} is installed in the "
+                    f"requested target(s). Installed: {known or 'none'}"
+                )
+            if len(candidates) > 1:
+                found = ", ".join(str(identity) for identity in candidates)
+                raise LoadError(
+                    f"{name!r} names more than one installed loadable object "
+                    f"({found}) — qualify the request with a single target"
+                )
+            selected.append(candidates[0])
+        return tuple(selected)
 
     def _refuse_ambiguity(self, targets: tuple[PhysicalTargetRef, ...]) -> None:
         """Stop if any target this request touches holds a duplicated address.
 
-        Asked twice — of what was requested, and of what the upstream closure
-        walked into — because both are targets this run would dispatch against,
-        and neither is known at the moment the other is.
+        Only requested targets can be touched: dependency traversal is bounded
+        by this same set, so ambiguity anywhere else is irrelevant to this run.
         """
 
         for target in targets:
@@ -708,15 +784,25 @@ class _Planner:
                     f"address, so a load of it is ambiguous: {found[0]}"
                 )
 
-    def _select(self, identity: WeaverDocumentId, visited: set) -> str:
-        """Add this loadable object and everything it needs, returning its node id."""
+    def _select(
+        self,
+        identity: WeaverDocumentId,
+        visited: set,
+        *,
+        allowed_targets: frozenset[PhysicalTargetRef],
+    ) -> str:
+        """Add one in-scope loadable and its in-scope ordering constraints."""
 
         node = self._load_node(identity)
         if identity in visited:
             return node.node_id
         visited.add(identity)
-        for producer, crossed in self._upstream_loadable(identity):
-            upstream_id = self._select(producer, visited)
+        for producer, crossed in self._upstream_loadable(
+            identity, allowed_targets=allowed_targets
+        ):
+            upstream_id = self._select(
+                producer, visited, allowed_targets=allowed_targets
+            )
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
             else:
@@ -782,13 +868,17 @@ class _Planner:
     # --- dependency resolution -------------------------------------------------
 
     def _upstream_loadable(
-        self, identity: WeaverDocumentId
+        self,
+        identity: WeaverDocumentId,
+        *,
+        allowed_targets: frozenset[PhysicalTargetRef],
     ) -> tuple[tuple[WeaverDocumentId, PhysicalTargetRef | None], ...]:
-        """The loadable ancestors of one object, and where each hop crossed.
+        """The in-scope loadable ancestors, and where each hop crossed.
 
         Passing through non-loadable producers is what makes a view a conduit:
         it owns no load work, so it is not a node, but a consumer of it still
-        depends on whatever fills the tables behind it.
+        depends on whatever fills the tables behind it. The traversal stops at
+        the requested-target boundary even when that producer is non-loadable.
         """
 
         found: dict[WeaverDocumentId, PhysicalTargetRef | None] = {}
@@ -799,6 +889,8 @@ class _Planner:
         while frontier:
             current, crossing = frontier.pop()
             for producer, hop in self._direct_producers(current):
+                if self.estate.objects[producer].target not in allowed_targets:
+                    continue
                 crossed = crossing or hop
                 if producer in self._loadable:
                     # A closer crossing wins: the barrier belongs to the hop that

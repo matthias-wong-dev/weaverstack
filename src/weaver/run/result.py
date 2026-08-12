@@ -332,7 +332,7 @@ class RunResult:
     edges: tuple[tuple[str, str], ...] = ()
     order: tuple[str, ...] = ()
     messages: tuple = ()
-    selection: str | None = None
+    selection: str | tuple[str, ...] | None = None
     started_at: str | None = None
     finished_at: str | None = None
     workspace: str | None = None
@@ -356,7 +356,11 @@ class RunResult:
             "status": self.status,
             "dry_run": self.dry_run,
             "fault_tolerant": self.fault_tolerant,
-            "selection": self.selection,
+            "selection": (
+                list(self.selection)
+                if isinstance(self.selection, tuple)
+                else self.selection
+            ),
             "workspace": self.workspace,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
