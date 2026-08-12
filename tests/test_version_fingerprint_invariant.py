@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from importlib.util import module_from_spec, spec_from_file_location
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
-import hatch_build
+
+def _load_hatch_build():
+    """Load Hatch's root-only version source without relying on ``sys.path``."""
+
+    source = Path(__file__).resolve().parents[1] / "hatch_build.py"
+    spec = spec_from_file_location("weaver_hatch_build", source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load Weaver's version source from {source}")
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+hatch_build = _load_hatch_build()
 
 
 def _git(repository: Path, *args: str) -> None:

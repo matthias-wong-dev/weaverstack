@@ -31,6 +31,9 @@ If any of these regress, the wheel is broken however green the desktop suite is.
 
 from __future__ import annotations
 
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+
 import pytest
 from factories import item_id, single_document_repository, warehouse_table
 
@@ -43,6 +46,18 @@ pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 #: The Warehouse item the installation probe builds. Its own logical name, so it
 #: cannot collide with an estate another module is publishing under the same one.
 ITEM = "Warehouse/ParityReporting"
+
+
+def _checkout_version() -> str:
+    """Compute the checkout version from Hatch's root-only version source."""
+
+    source = Path(__file__).resolve().parents[2] / "hatch_build.py"
+    spec = spec_from_file_location("weaver_hatch_build", source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load Weaver's version source from {source}")
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.compute_version()
 
 
 def warehouse_target(warehouse) -> ResolvedTarget:
@@ -84,7 +99,6 @@ def test_the_installed_package_imports_and_reports_a_version(
         read_published,
     )
     from weaver.fabric.resources import find_item
-    from hatch_build import compute_version
 
     payload = livy_session.run(
         "import weaver\n"
@@ -103,7 +117,7 @@ def test_the_installed_package_imports_and_reports_a_version(
     )
     wheels = library_wheels(read_published(environment, client=client))
     published = {_wheel_version(name) for name in wheels}
-    wanted = compute_version()
+    wanted = _checkout_version()
 
     assert wanted in published, (
         f"this checkout is weaverstack {wanted}, but the Environment has "
