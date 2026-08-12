@@ -769,12 +769,6 @@ def parse_document(text: str, *, language: str) -> SesDocument:
                 "Comparison columns require a Primary key — they drive upsert comparison, "
                 "which only happens when rows can be matched"
             )
-    if static and is_incremental:
-        raise MetadataError(
-            "Static and Incremental: true contradict — a static object is loaded once, "
-            "so there is nothing to accumulate"
-        )
-
     schema = _apply_column_details(declared_columns, column_notes, primary_key, declared_not_null)
 
     warehouse_alias, lakehouse_alias = _parse_aliases(loaded, language, kind, object_id)

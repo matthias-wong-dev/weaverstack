@@ -81,6 +81,7 @@ TASK_TYPE = "load"
 def load(
     targets: str | Sequence[str],
     *,
+    names: str | Sequence[str] | None = None,
     workspace: str | Path | Workspace | None = None,
     weaver_lakehouse: str | None = None,
     workspace_config: str | Path | None = None,
@@ -88,12 +89,16 @@ def load(
     dry_run: bool = False,
     session=None,
 ) -> LoadRunReport:
-    """Load every installed loadable object in the requested physical targets.
+    """Load installed objects within the requested physical targets.
 
     ``targets`` are typed physical items — ``Lakehouse/Curated``,
-    ``Warehouse/Reporting`` — and the request means *everything loadable hosted
-    there, plus whatever upstream work those objects need*. Object-level
-    selection is not part of this phase.
+    ``Warehouse/Reporting`` — and they are a hard execution boundary. With no
+    name filter, every loadable object hosted there runs in dependency order;
+    dependencies never add an unrequested target.
+
+    ``names`` selects exact installed ``Schema.Object`` loadables inside those
+    targets. It is an operator override: only those nodes run, without dependency
+    expansion or dependency ordering.
 
     Every value resolves the same way, and it is the way ``build`` resolves them:
 
@@ -116,6 +121,7 @@ def load(
         parse_physical_target(value, what="load target", error=CommandError)
         for value in values
     )
+    selected_names = _load_names(names)
 
     from dataclasses import replace
 
@@ -156,6 +162,7 @@ def load(
                 opened,
                 workspace=resolved_workspace,
                 requested=tuple(_physical_ref(target) for target in requested),
+                names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
             )
@@ -166,6 +173,7 @@ def run_load(
     *,
     workspace,
     requested: Sequence[PhysicalTargetRef],
+    names: Sequence[str] = (),
     state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
@@ -219,7 +227,7 @@ def run_load(
             # knowable, and the reading happens once, here, so everything below
             # decides against a snapshot rather than against state that is still
             # moving.
-            planned = load_dag(estate, targets=requested)
+            planned = load_dag(estate, targets=requested, names=names)
             state = RunState(
                 catalogue=catalogue,
                 target_inventories=read_target_inventories(
@@ -231,7 +239,10 @@ def run_load(
         runner = Runner(
             state,
             RunRequest.load(
-                requested, fault_tolerant=fault_tolerant, dry_run=dry_run
+                requested,
+                names=names,
+                fault_tolerant=fault_tolerant,
+                dry_run=dry_run,
             ),
             workspace=workspace,
             can_refresh=can_refresh(session, workspace),
@@ -243,7 +254,9 @@ def run_load(
         else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
     )
     if log is not None:
-        log.write_plan(_plan_document(runner.graph, state, requested, dry_run))
+        log.write_plan(
+            _plan_document(runner.graph, state, requested, names, dry_run)
+        )
     with session.step("Execute"):
         result = runner.run(
             session=session,
@@ -388,7 +401,7 @@ def _step_type(report: LoadNodeReport) -> str:
     return "refresh" if report.primitive_kind == ENDPOINT_REFRESH else "load"
 
 
-def _plan_document(graph, state, requested, dry_run: bool) -> dict:
+def _plan_document(graph, state, requested, names, dry_run: bool) -> dict:
     """The complete intended task, written once before anything runs.
 
     Enough on its own to answer what was requested, what Weaver intended to run,
@@ -406,6 +419,7 @@ def _plan_document(graph, state, requested, dry_run: bool) -> dict:
     return {
         "weaver_version": __version__,
         "requested": [str(target) for target in requested],
+        "selection": list(names),
         "mode": "dry_run" if dry_run else "execute",
         "order": [node.node_id for node in ordered],
         "edges": [list(edge) for edge in graph.edges],
@@ -478,6 +492,17 @@ def _physical_ref(target) -> PhysicalTargetRef:
         kind=LAKEHOUSE_TARGET if isinstance(target, DeltaTarget) else WAREHOUSE_TARGET,
         name=physical_item(target).name,
     )
+
+
+def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
+    """Normalise the notebook convenience spelling into the request contract."""
+
+    if names is None:
+        return ()
+    values = (names,) if isinstance(names, str) else tuple(names)
+    if not values:
+        raise CommandError("load names= needs at least one Schema.Object")
+    return tuple(str(value) for value in values)
 
 
 # --- acquiring capabilities ---------------------------------------------------

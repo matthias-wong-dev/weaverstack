@@ -156,7 +156,9 @@ def _load_graph(request, state) -> RunGraph:
     from ..load_plan import InstalledEstate, load_dag
 
     dag = load_dag(
-        InstalledEstate.from_catalogue(state.catalogue), targets=request.targets
+        InstalledEstate.from_catalogue(state.catalogue),
+        targets=request.targets,
+        names=request.names,
     )
     return RunGraph(
         nodes=tuple(

@@ -3,8 +3,11 @@
 The graph knows nothing about what an edge *means*. That is deliberate,
 because there is more than one graph over the same objects:
 
-**Load order** follows every dependency. To load ``Reporting.OrderReport`` you
-first need the rows in ``Sales.Order``.
+**Load order** follows every dependency inside the target scope the caller
+selected. If ``Reporting.OrderReport`` and ``Sales.Order`` are both in that
+scope, the latter runs first. Selection may deliberately omit it: one named
+target never expands into another, and exact-name loading ignores dependency
+edges altogether.
 
 **Build order** is nearly flat. Building a Folder is a directory; building a
 Delta table is a ``CREATE`` from its declared ``Schema`` — neither needs a
