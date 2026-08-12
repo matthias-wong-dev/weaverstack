@@ -31,6 +31,9 @@ If any of these regress, the wheel is broken however green the desktop suite is.
 
 from __future__ import annotations
 
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+
 import pytest
 from factories import item_id, single_document_repository, warehouse_table
 
@@ -43,6 +46,18 @@ pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 #: The Warehouse item the installation probe builds. Its own logical name, so it
 #: cannot collide with an estate another module is publishing under the same one.
 ITEM = "Warehouse/ParityReporting"
+
+
+def _checkout_version() -> str:
+    """Compute the checkout version from Hatch's root-only version source."""
+
+    source = Path(__file__).resolve().parents[2] / "hatch_build.py"
+    spec = spec_from_file_location("weaver_hatch_build", source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load Weaver's version source from {source}")
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.compute_version()
 
 
 def warehouse_target(warehouse) -> ResolvedTarget:
@@ -69,17 +84,11 @@ def test_the_installed_package_imports_and_reports_a_version(
 ):
     """The precondition for every other claim in this file.
 
-    Checked against the wheel the Environment *has published*, not against a
-    version computed here. Those were the same thing when the version was a
-    fingerprint of the source; now that it is the build instant, recomputing it
-    yields a new number every call and could never match anything.
-
-    The published wheel is also the better question. What every other test in
-    this file depends on is that the session is running the code that was
-    published — and it is not always, because Fabric takes time to serve a newly
-    published Environment to new sessions. A publish reports Success, and a
-    session started straight after can still come up on the previous image. The
-    answer is to wait, not to publish again.
+    The deterministic fingerprint answers two separate questions. The checkout's
+    version must be among the Environment's published wheels, and the session
+    must actually be running one of those published wheels. The second is not
+    immediate: Fabric can report a successful publish while new sessions still
+    start on the previous image. The answer there is to wait, not republish.
     """
 
     from weaver.fabric.client import FabricClient
@@ -108,6 +117,12 @@ def test_the_installed_package_imports_and_reports_a_version(
     )
     wheels = library_wheels(read_published(environment, client=client))
     published = {_wheel_version(name) for name in wheels}
+    wanted = _checkout_version()
+
+    assert wanted in published, (
+        f"this checkout is weaverstack {wanted}, but the Environment has "
+        f"published {sorted(published)} — run `weaver install`"
+    )
 
     assert payload["dist"] in published, (
         f"this Fabric session is running weaverstack {payload['dist']}, but the "
@@ -119,7 +134,7 @@ def test_the_installed_package_imports_and_reports_a_version(
 
 
 def _wheel_version(filename: str) -> str:
-    """``weaverstack-0.1.2.dev20260812065103-py3-none-any.whl`` -> the version."""
+    """``weaverstack-0.1.2.dev123456-py3-none-any.whl`` -> the version."""
 
     return filename.split("-")[1]
 

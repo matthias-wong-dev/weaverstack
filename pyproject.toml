@@ -75,11 +75,11 @@ weaver = "weaver_cli:main"
 Homepage = "https://github.com/matthias-wong-dev/weaverstack"
 
 # Version comes from Git, not a hand-edited string, so every changed checkout
-# builds an identifiable wheel. The scheme (see hatch_build.py) is a public
-# timestamped dev version — unique per build and free of the PEP 440 '+' local
-# segment that Fabric's Environment upload rejects.
+# builds an identifiable wheel. The scheme (see hatch_build.py) is a public,
+# content-addressed dev version — stable for identical source and free of the
+# PEP 440 '+' local segment that Fabric's Environment upload rejects.
 #   clean at tag v0.1.0        -> 0.1.0
-#   ahead of / dirtier than it -> 0.1.1.dev<UTC-seconds>
+#   ahead of / dirtier than it -> 0.1.1.dev<fingerprint>
 [tool.hatch.version]
 source = "code"
 path = "hatch_build.py"
