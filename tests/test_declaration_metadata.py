@@ -284,9 +284,15 @@ def test_incremental_requires_a_primary_key():
         parse(without_key + "\nIncremental: true")
 
 
-def test_static_and_incremental_contradict():
-    with pytest.raises(MetadataError, match="contradict"):
-        parse(TABLE_YAML + "\nIncremental: true\nStatic: true")
+def test_static_and_incremental_stand_together():
+    """Incremental shapes the load; Static decides whether it is invoked."""
+    document = parse(TABLE_YAML + "\nIncremental: true\nStatic: true")
+    assert document.is_incremental
+    assert document.static
+
+    folder = parse(FOLDER_YAML + "\nStatic: true")
+    assert folder.is_incremental
+    assert folder.static
 
 
 def test_audit_column_names_are_reserved():
