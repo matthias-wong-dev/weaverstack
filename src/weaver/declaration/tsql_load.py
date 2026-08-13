@@ -1,65 +1,8 @@
-"""T-SQL load generation — one independently runnable procedure per table.
+"""Generate an independently runnable Warehouse load procedure.
 
-What this produces is not the procedure. It is a script that *installs* the
-procedure, and the difference is the whole design.
-
-.. code-block:: text
-
-    payload            an installer script, frozen at build
-      reads            sys.columns of the target table
-      assembles        the procedure text
-      exec             sp_executesql
-
-The column lists cannot be written at generation time. A Warehouse table may
-infer its shape from its query, so the generator does not always know its
-columns — and even when it does, the *physical* table is what the procedure must
-name. Reading ``sys.columns`` at install settles both, and it excludes the
-identity column for free: the engine generates that column, so ``is_identity =
-0`` keeps it out of every insert list without this module having to know which
-column it was. It is the same two-phase shape
-:mod:`weaver.declaration.tsql_ddl` uses to build the table, for the same reason.
-
-The installed procedure is independently runnable, which is the point of a
-primitive::
-
-    exec [_].[Load Sales.Customer] @fault_tolerant = 1;
-
-It reads no repository, consults no catalogue and calls nothing else Weaver
-owns.
-
-**Its result is in its signature.** The fields of
-:data:`weaver.runtime.load_result.RESULT_COLUMNS` are optional output
-parameters (:data:`RESULT_PARAMETERS`), not a final ``SELECT``. A procedure
-whose authored setup runs ``EXEC`` or ``sp_executesql`` may return rows of its
-own, and it may return several — so "the result set this procedure produced" is
-a question with no answer, and a caller reading the first or the last of them
-would be interpreting somebody else's SQL. Naming the outputs removes the
-question. They are optional so the line above still works typed by hand.
-
-**The intermediate tables are real.** ``Sales.Customer_Staging``, ``_Upsert``
-and ``_Reject`` are ordinary tables in the object's own schema, as they were in
-the reference implementation, joined by ``_Delete`` when an incremental table's
-author names the keys to retire. Real tables are what make a failed load
-inspectable: when rows are rejected the evidence is still there afterwards,
-addressable by anyone with a query tool. They are dropped at the start of every
-run and again at the end only when the run was clean. A run with rejected rows
-leaves the reject table available for inspection.
-
-**Absence retires a row; so, for an incremental table, does naming it.** A
-non-incremental source is the whole truth, so a row it stopped producing is
-gone. An incremental source shows a window, so absence says nothing — and the
-only way such a table can retire anything is a second query naming the keys.
-That is the same contract Spark SQL states, because it belongs to the table load
-rather than to either dialect.
-
-**No history.** The reference carried a ``_Current``/``_History`` pair behind a
-view. Weaver builds only the authored table, so a load updates it directly and a
-row absent from a non-incremental source is deleted outright. The audit columns
-still record insert and update times; the delete sentinel stays live because
-there is nowhere for a deleted row to go.
-
-Ported from ``weaver_runtime.dbrep.sql.etl``, with the history layout removed and
-the ``fault_tolerant`` contract and structured result added.
+The build payload installs a procedure that derives target columns from
+``sys.columns``. Procedure result counts use output parameters, and rejected
+rows remain in the reject table for inspection.
 """
 
 from __future__ import annotations

@@ -1,27 +1,8 @@
-"""File transport — the operations Weaver performs on locations.
+"""Location-based file transport primitives.
 
-This is transport, never policy. It knows how to list, read, write, delete and
-move; it has no opinion about what *should* be copied or deleted. Push,
-deployment and Folder reconciliation each carry their own rules and sit on top
-of these primitives:
-
-- push owns its destination subtree, so a file missing from source is deleted;
-- Folder reconciliation deletes only within its ``File key`` scope, and under
-  ``Incremental`` deletes nothing — governed by load policy, not by transport.
-
-Collapsing those into one ``sync(delete_missing=...)`` would put a data-correctness
-decision behind a transport flag, so they stay separate.
-
-**Listing carries metadata.** :class:`Entry` reports size, modification time and
-etag, because every incremental strategy needs them. A listing of bare names
-would foreclose all of them.
-
-There is deliberately no move operation. Staging promotion, destination
-replacement and atomic publication are all real needs, but their contract comes
-from the load algorithm, not from a guess made here — and the mechanisms differ
-enough (a local rename, a OneLake copy, an in-session ``notebookutils.fs.mv``)
-that a single reassuring name would hide materially different cost. Load
-introduces whatever it actually needs, named for what it does.
+Store handles listing, reading, writing, and deletion. Higher-level operations
+own synchronization and deletion policy; listings include metadata for their
+incremental decisions.
 """
 
 from __future__ import annotations

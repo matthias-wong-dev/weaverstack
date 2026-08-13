@@ -1,13 +1,7 @@
-"""Reconciling a bound physical target against what an item declares.
+"""Plan removals from a bound target against an item's declared state.
 
-Building says what must exist. Pruning says what must stop existing, and it is
-the half that can destroy data, so it is deliberately narrow: only objects the
-target already holds, only in schemas the bound item declares, and only after
-the inventory has been frozen at plan time rather than re-read at install time.
-
-The Delta side reads the Spark catalogue for the bound Lakehouse and the Files
-area for its Folders. The Warehouse side reads the target's own SQL catalogue,
-in the environment the build is running in.
+Prune uses the inventory frozen during planning and only considers objects in
+schemas and file areas managed by the bound item.
 """
 
 from __future__ import annotations
