@@ -1,27 +1,9 @@
 """Creating one schema in the destination the batch names.
 
-A schema create is the one piece of build DDL that cannot be a frozen SQL
-payload, and the reason is instructive: on local Spark it needs a ``LOCATION``,
-and a ``LOCATION`` is a *resolved path*.
-
-Freezing it meant a bundle generated on a laptop carried
-
-.. code-block:: sql
-
-    CREATE SCHEMA IF NOT EXISTS `Sales` LOCATION '/var/folders/…/T/pytest-42/Sales_LH/Tables/Sales'
-
-— a temporary directory, in the hashed plan, deciding where a managed table
-lands. Two runs of the same repository produced different bundles, and a bundle
-kept overnight named a path that no longer existed (how-does-build-work §15). On
-Fabric it froze the opposite mistake: no clause at all, and a bare two-part name,
-so the schema was created in whatever Lakehouse the session was attached to
-rather than in the destination.
-
-So the action names the schema and nothing else, and the destination decides how
-to make one. That is not an installer filling in a semantic decision — which
-schema, in which Lakehouse, is settled and in the manifest — it is the same
-transport-level resolution every other action gets, applied to a clause that is
-purely about storage.
+The action names the schema and nothing else, because the statement cannot be
+frozen into a payload: local Spark needs a ``LOCATION`` and that is a resolved
+path, while a schema-enabled Fabric Lakehouse needs none. Which schema, in which
+Lakehouse, is settled in the manifest; how to make one is the destination's.
 """
 
 from __future__ import annotations
@@ -36,9 +18,6 @@ from .base import InstallationContext
 
 class SparkSchemaExecutor:
 
-    #: This executor reaches Spark, so on a host without one the action
-    #: crosses whole rather than the capability being faked underneath it.
-    needs_spark = True
     name = "spark_schema"
 
     def execute(
@@ -49,16 +28,17 @@ class SparkSchemaExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"spark_schema action {action.id!r} has no payload")
-        if context.spark is None:
+        if context.spark_sql is None:
             raise InstallError(
-                f"spark_schema action {action.id!r} needs a Spark session but none "
-                "was provided"
+                f"spark_schema action {action.id!r} has no way to run a Spark "
+                "statement: this context offers no Spark SQL capability"
             )
         schema = json.loads(payload.decode("utf-8"))["schema"]
-        catalogue = context.catalogue
-        statement = catalogue.create_schema(schema, if_not_exists=False)
+        names = context.names
+        statement = names.create_schema_statement(schema, if_not_exists=False)
+        context.spark_sql(statement)
         return {
-            "destination": catalogue.destination.item,
-            "schema": catalogue.qualified_schema(schema),
+            "destination": names.destination.item,
+            "schema": names.qualified_schema(schema),
             "statement": statement,
         }

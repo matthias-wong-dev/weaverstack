@@ -4,24 +4,17 @@ A plan says what will *run*. This says what it will *mean*: for each bound
 target, the objects a build adds and the objects it removes. The two are written
 side by side, deliberately, and a test holds them to each other.
 
-**Why declare it rather than derive it.** The effect of an action could be
-inferred — ``prune_schema`` removes a schema, ``write_file`` adds a path — but
-that inference is a model of what executors do, living somewhere no executor can
-correct. It drifts silently. Declaring the effect where the action is rendered
-keeps the two statements next to each other in one function, which is where a
-disagreement is cheapest to notice.
+Declared where the action is rendered rather than inferred from the action
+kind: an inference would be a model of what executors do, living where no
+executor can correct it.
 
-**Why that is not self-certification.** A summary the planner writes about its
-own plan proves nothing on its own. What makes it load-bearing is
-:data:`action_id`: every physical action must be named by exactly one change and
-every change must name a real action, so the two cannot fall out of step without
-a test failing. Adding an artefact type means emitting an action *and* a change;
-forget either and the bijection breaks.
+What makes it load-bearing is :data:`action_id`. Every physical action must be
+named by exactly one change and every change must name a real action, so adding
+an artefact type means emitting both — forget either and the bijection breaks.
 
-That is also why the identity lives here rather than on the action. A prune
-action deliberately carries no ``resource_node_id`` — a pruned object has no node
-in the repository, which is precisely why it is being pruned — so the thing a
-prune removes has nowhere else to be written down. Here it has somewhere.
+That is also why the identity lives here. A prune action carries no
+``resource_node_id``, because a pruned object has no node in the repository, so
+what a prune removes has nowhere else to be written down.
 
 Applying these to a :class:`~weaver.build_bundle.prune.TargetInventory` gives the
 state a build is aiming at, which is what lets "a build converges on what the

@@ -78,10 +78,17 @@ def test_creating_an_existing_lakehouse_returns_it(fabric_lakehouses, fabric_cli
 
 @pytest.mark.provision
 def test_an_unknown_item_says_which_workspace(fabric_lakehouses, fabric_client):
-    with pytest.raises(CommandError, match="no Lakehouse named"):
+    with pytest.raises(CommandError) as raised:
         find_item(
             fabric_lakehouses["workspace"],
             "weavertest_absent",
             item_type=LAKEHOUSE,
             client=fabric_client,
         )
+
+    # The name, the type and the workspace, because all three are what a reader
+    # needs to tell a typo from a missing item.
+    message = str(raised.value)
+    assert "weavertest_absent" in message
+    assert "Lakehouse" in message
+    assert fabric_lakehouses["workspace"].name in message

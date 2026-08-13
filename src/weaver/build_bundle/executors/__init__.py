@@ -7,16 +7,15 @@ and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse SQL path.
 ``alias`` points one Lakehouse name at another item's object, and ``sql_endpoint``
 syncs a Lakehouse's SQL analytics endpoint.
 
-``load_file`` closes an item: it writes one file of the deployed runtime tree, or
-removes one the source has stopped claiming. Generated load procedures need no
-executor of their own — a create-or-alter is T-SQL, and ``tsql`` runs the payload
-it is given without inspecting what the payload builds.
+``load_file`` writes one file of the deployed runtime tree, or removes one the
+source has stopped claiming. A generated load procedure needs no executor of its
+own: a create-or-alter is T-SQL, which ``tsql`` runs.
 
 There is no prune executor — a build freezes its drops as payloads, so the
 installer never enumerates the target.
 
-Every Spark executor addresses the destination its batch names, and none of them
-relies on what the session is attached to.
+Every Spark executor addresses the destination its batch names, never what the
+session is attached to.
 """
 
 from __future__ import annotations

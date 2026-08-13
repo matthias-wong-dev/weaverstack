@@ -10,8 +10,8 @@ Three claims, and none of them can be made anywhere else:
 .. code-block:: text
 
     the decomposed path runs at all      against a real installed estate
-    one scope serves every Python node   begin_run once, dispatch many
-    the scope is closed at the end       end_run once, whatever happened
+    one scope serves every Python node   open_scope once, dispatch many
+    the scope is closed at the end       close_scope once, whatever happened
 
 The middle one is the guarantee the decomposition most had to preserve. A run
 that opened a scope per node would still pass every local test — the nodes would
@@ -22,10 +22,10 @@ It is read off the desktop's own telemetry rather than by asking Fabric what it
 holds, because the counts are exactly the claim: one begin, one end, and more
 dispatches than either.
 
-``hosted``, because the primitives run as the installed wheel: the remote scope
-lives in :mod:`weaver.run.remote` inside the Fabric session. The *orchestration*
-is here, which is the whole point, but the thing being imported over there is
-the published package.
+``hosted``, because the primitives run as the installed wheel: the scope registry
+and the entry points a submission calls are :mod:`weaver.runtime.session_scopes`
+and :mod:`weaver.run.entry` inside the Fabric session. The orchestration is here;
+what is imported over there is the published package.
 """
 
 from __future__ import annotations
@@ -98,8 +98,8 @@ def test_every_python_node_shared_one_runtime_scope(loaded):
 
     _, spent = loaded
 
-    assert spent.get("livy.begin_run") == 1
-    assert spent.get("livy.dispatch_python", 0) > 1, (
+    assert spent.get("livy.open_scope") == 1
+    assert spent.get("livy.run_python_primitive", 0) > 1, (
         "this estate should have more than one Python node, or the claim is vacuous"
     )
 
@@ -110,16 +110,22 @@ def test_the_scope_is_closed_when_the_run_ends(loaded):
 
     _, spent = loaded
 
-    assert spent.get("livy.end_run") == 1
+    assert spent.get("livy.close_scope") == 1
 
 
 def test_the_run_read_the_estate_rather_than_shipping_itself(loaded):
-    """What the decomposition removed. The catalogue crosses; the run does not."""
+    """What the decomposition removed. The estate is read; the run is not shipped.
+
+    The read is Spark SQL now rather than a program, so what says it happened is
+    the statements — and what says the run stayed here is that no program named
+    a load.
+    """
 
     _, spent = loaded
 
-    assert spent.get("livy.read_catalogue") == 1
+    assert spent.get("livy.spark_sql", 0) > 1
     assert "livy.load" not in spent
+    assert "livy.read_catalogue" not in spent
 
 
 def test_every_node_reports_where_it_was_dispatched(loaded):

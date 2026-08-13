@@ -19,17 +19,14 @@ SCHEMA = re.compile(r"\{\{schema:([^.{}]+)\}\}")
 
 #: ``{{epoch}}`` — the instant this installation published its Registry.
 #:
-#: The one token that is not about a destination, which is why :func:`expand`
-#: does not resolve it: it is scoped to the *installation*, and every statement
-#: in a build must receive the same value however many destinations they name.
-#: :func:`substitute_epoch` puts it in, and it has to run first — ``expand``
-#: rejects any token it does not recognise, so an epoch that reached it would be
-#: an error rather than silently surviving into the engine.
+#: Scoped to the installation rather than a destination, so :func:`expand` does
+#: not resolve it: every statement in a build receives the same value however
+#: many destinations they name. :func:`substitute_epoch` runs first, because
+#: ``expand`` rejects any token it does not recognise.
 #:
-#: It is a token rather than a literal frozen at generation time for the reason
-#: this whole module exists: a rendered clock would make the same repository
-#: produce different payload bytes on every run, and a bundle's identity is its
-#: bytes.
+#: A token rather than a literal frozen at generation time: a rendered clock
+#: would make the same repository produce different payload bytes on every run,
+#: and a bundle's identity is its bytes.
 EPOCH = re.compile(r"\{\{epoch\}\}")
 
 #: The payload spelling of the publication epoch.

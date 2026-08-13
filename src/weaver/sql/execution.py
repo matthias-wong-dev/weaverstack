@@ -16,10 +16,9 @@ SqlRow = dict[str, Any]
 class ProcedureResult:
     """What one procedure execution produced: its rows, and its outputs.
 
-    Kept apart because they answer different questions and are transported
-    differently — the rows come back as result sets, the outputs as a projection
-    Weaver appended. A caller that wants only the numbers asks
-    :meth:`PooledSqlExecutor.call_procedure` and never materialises the rows.
+    Apart because they are transported differently: the rows come back as
+    result sets, the outputs as a projection Weaver appended. A caller wanting
+    only the numbers asks :meth:`PooledSqlExecutor.call_procedure`.
     """
 
     outputs: "SqlRow"

@@ -39,27 +39,20 @@ class CountingCatalogue:
         self.rows_by_table = rows_by_table or {}
         self.reads: list[str] = []
         self.statements: list[str] = []
-        self.spark = self
-        self._current = None
 
     # --- the SparkCatalogue surface the reader uses ---------------------------
 
     def expand(self, token: str) -> str:
         return token.strip("{}").replace("object:", "")
 
-    def table(self, name: str):
-        self._current = name.split(".", 1)[1]
-        self.reads.append(self._current)
-        return self
+    def columns_of(self, name: str) -> tuple[str, ...]:
+        table = {t.name: t for t in CATALOGUE_TABLES}[name.split(".", 1)[1]]
+        self.reads.append(table.name)
+        return tuple(table.physical_columns)
 
-    @property
-    def columns(self):
-        table = {t.name: t for t in CATALOGUE_TABLES}[self._current]
-        return list(table.physical_columns)
-
-    def sql(self, statement: str):
+    def rows(self, statement: str) -> list[dict]:
         self.statements.append(statement)
-        return _Rows(self.rows_by_table.get(_table_of(statement), ()))
+        return [dict(row) for row in self.rows_by_table.get(_table_of(statement), ())]
 
     def read_count(self, table_name: str) -> int:
         """How many times this table's *rows* were scanned.
@@ -86,22 +79,6 @@ def _table_of(statement: str) -> str:
     return next(
         table.name for table in CATALOGUE_TABLES if f"FROM _.{table.name}" in statement
     )
-
-
-class _Rows:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def collect(self):
-        return [_Row(row) for row in self._rows]
-
-
-class _Row:
-    def __init__(self, values):
-        self._values = values
-
-    def asDict(self):
-        return dict(self._values)
 
 
 def _items(*names):

@@ -34,13 +34,11 @@ class LivyError(WeaverError):
 class LivyStatementError(LivyError):
     """Raised when a *statement* failed. The session that ran it is fine.
 
-    The distinction is the whole difference between a mistake and an outage. A
-    remote ``ModuleNotFoundError`` says the submitted program was wrong; it says
+    A remote ``ModuleNotFoundError`` says the submitted program was wrong and
     nothing about the Spark session, which is still up and still costs a minute
     to replace. Treating the two alike is how one bad command ends a console.
 
-    A subclass so that every existing ``except LivyError`` still catches it —
-    what changes is that a caller which *cares* can now ask.
+    A subclass, so every existing ``except LivyError`` still catches it.
     """
 
     def __init__(self, message: str, *, ename=None, evalue=None) -> None:
@@ -180,9 +178,9 @@ def list_workspace_livy_sessions(
 ) -> tuple[WorkspaceLivySession, ...]:
     """List sessions across every Lakehouse in a Fabric workspace.
 
-    Fabric capacities can apply a session limit across the workspace, while the
-    API exposes collections per Lakehouse. Looking only at the Lakehouse about
-    that will run Weaver would therefore miss a notebook occupying the same slot.
+    A Fabric capacity can apply a session limit across the workspace while the
+    API exposes collections per Lakehouse, so looking only at Weaver's own
+    Lakehouse would miss a notebook occupying the same slot.
     """
 
     from .client import FabricClient
@@ -255,9 +253,8 @@ class LivySession:
     def token(self) -> str:
         """A currently-valid bearer, renewed when it is close to expiring.
 
-        A session is the longest-lived thing here: it is held open across a whole
-        suite, so a snapshotted token expires mid-run and every statement after
-        that fails with ``401``, downstream tests included.
+        A session is held open across a whole suite, so a snapshotted token
+        expires mid-run and every statement after it fails with ``401``.
         """
 
         return self._token_source()
@@ -273,20 +270,16 @@ class LivySession:
         a body that wants Weaver can still import it — but the *session* no
         longer depends on the wheel being current.
 
-        That distinction is worth having. Submitting Spark to a workspace and
-        running the installed package are two different things, and conflating
-        them put a wheel publish in front of every test that merely needed a
-        session to read a table back.
+        Submitting Spark to a workspace and running the installed package are
+        two different things, and conflating them puts a wheel publish in front
+        of a session that only needs to read a table back.
 
-        The session is created against the Weaver Lakehouse (its default), and
-        the workspace's ``environment`` is attached so a plain ``import
-        weaver`` finds the installed package — put there by ``weaver install``.
-        Nothing is copied into the workspace.
+        The session is created against the Weaver Lakehouse, with the
+        workspace's ``environment`` attached so a plain ``import weaver`` finds
+        what ``weaver install`` published. Nothing is copied into the workspace.
 
-        The Environment is required: a workspace without one, or an unresolvable one,
-        is an error rather than a silent fall back to copied source. The
-        bootstrap runs once when the session starts, so callers submit their
-        work and nothing else.
+        The Environment is required: a workspace without one is an error rather
+        than a silent fall back to copied source.
         """
 
         from ..errors import CommandError
@@ -384,16 +377,14 @@ class LivySession:
     def close(self, *, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
         """Ask Fabric to end the session, and wait until it has.
 
-        The waiting is the point, and it is not tidiness. A capacity has a limit on
-        concurrent Spark sessions — often one — and `DELETE` returns as soon as the
-        request is accepted, not when the session has released its slot. A caller
-        that closed and immediately opened another would be asking for a second
-        session while the first still held the only slot: the new one queues, and
-        on a long run it eventually never reaches `idle` at all.
+        The waiting matters: a capacity limits concurrent Spark sessions, often
+        to one, and `DELETE` returns when the request is accepted rather than
+        when the slot is released. Closing and immediately opening another would
+        queue the new session behind the old one's slot.
 
-        A close that cannot be confirmed is reported and not raised. The session is
-        being abandoned either way, and a teardown problem must not mask whatever
-        the caller was actually doing.
+        A close that cannot be confirmed is reported rather than raised: the
+        session is abandoned either way, and a teardown problem must not mask
+        what the caller was doing.
         """
 
         if self.session_url is None:
@@ -479,9 +470,9 @@ def _resolve_environment_id(workspace, resolver) -> str:
 def environment_bootstrap() -> str:
     """The bootstrap for a session whose Weaver comes from an Environment.
 
-    A plain ``import weaver`` — no source copied, no ``sys.path`` change. If the
-    attached Environment has no usable Weaver, the error says so and names the
-    fix rather than silently falling back to a shipped copy.
+    A plain ``import weaver``: no source copied, no ``sys.path`` change. An
+    Environment with no usable Weaver fails naming the fix rather than falling
+    back to a shipped copy.
     """
 
     return (

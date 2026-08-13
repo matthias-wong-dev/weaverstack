@@ -241,7 +241,7 @@ def test_a_broken_test_contract_raises_rather_than_passing(
 
 
 def test_a_test_may_not_author_its_own_read():
-    with pytest.raises(LoadError, match="must not define read()"):
+    with pytest.raises(LoadError, match="which a Test may not"):
         from weaver import Test
 
         class Sales__Sneaky(Test):
@@ -479,7 +479,7 @@ def test_a_compiled_assumption_holding_returns_no_rows(
 def test_a_compiled_test_still_refuses_to_author_read():
     from weaver import SparkSqlTest
 
-    with pytest.raises(LoadError, match="must not define read()"):
+    with pytest.raises(LoadError, match="which a Test may not"):
 
         class Sales__Sneaky(SparkSqlTest):
             def read(self):

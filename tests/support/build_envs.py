@@ -128,6 +128,21 @@ LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE = SesFixture(
 LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
     _FIXTURES / "lakehouse-journey", ("Lakehouse/Sales",)
 )
+#: The journey estate, plus the Warehouse that reports on it. Byte for byte the
+#: same Lakehouse as ``LAKEHOUSE_JOURNEY_FIXTURE``, so the Lakehouse claims are
+#: the same claims, and what the composition adds is a second physical side: an
+#: alias publishing a Delta table into the Warehouse, a table materialised from
+#: it, a view over that, and a Test that reconciles the two.
+#:
+#: The composition is what neither half can state alone. Each side is
+#: self-consistent while the shortcut between them is stale, so only a claim
+#: spanning both catches it — and the endpoint-refresh barrier that keeps them
+#: in step exists nowhere else.
+#:
+#: Fabric only, and not because of cost: the emulator has no Warehouse.
+CROSS_ITEM_JOURNEY_FIXTURE = SesFixture(
+    _FIXTURES / "cross-item-journey", ("Lakehouse/Sales", "Warehouse/Reporting")
+)
 #: A producer and the consumer that aliases it, in two Lakehouses. The emulator
 #: materialises the alias as a filesystem link where Fabric makes a OneLake
 #: shortcut, so the same body proves incremental alias behaviour either side.

@@ -49,12 +49,10 @@ class PythonRuntimeContext:
 class RuntimeScope:
     """One ``weaver.load()``'s worth of runtime contexts.
 
-    Created per run, and torn down when the run ends. Within it, a logical item
-    in a physical target maps to one context however many of its objects are
-    dispatched — so they share their ``lib/`` and ``Files/`` modules, as their
-    author wrote them to. Across runs nothing is shared at all, which is what
-    makes a rebuilt module take effect on the next load rather than the next
-    session.
+    Created per run and torn down with it. Within one, a logical item in a
+    physical target maps to one context however many of its objects are
+    dispatched, so they share their ``lib/`` and ``Files/`` modules. Across runs
+    nothing is shared, so a rebuilt module takes effect on the next load.
     """
 
     def __init__(self) -> None:
@@ -114,10 +112,9 @@ def import_deployed_module(
 ):
     """One deployed module, imported inside its context, with its class present.
 
-    ``relative`` is the module's path within the tree — ``Files/Sales__Seed.py``
-    — which is also what names it: a module is imported as its *position*, so
-    the name another deployed module imports it by is the name it is registered
-    under, and one file never becomes two module objects.
+    ``relative`` is the module's path within the tree —
+    ``Files/Sales__Seed.py`` — which also names it: a module is imported as its
+    position, so one file never becomes two module objects.
     """
 
     _install_finder()
@@ -169,9 +166,9 @@ def import_deployed_module(
 def forget(context: PythonRuntimeContext) -> None:
     """Drop one context's modules, its finder entry and its builtins.
 
-    Called by :meth:`RuntimeScope.close` when a run ends. Nothing survives it:
-    the package name is never minted again, so anything left behind would be
-    unreachable memory rather than a cache.
+    Called by :meth:`RuntimeScope.close` when a run ends. The package name is
+    never minted again, so anything left behind would be unreachable memory
+    rather than a cache.
     """
 
     _forget_modules(context.package)
@@ -193,9 +190,8 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
     """A builtins mapping whose ``__import__`` knows one tree.
 
     Every deployed module executes with this in place of the real builtins, so
-    the redirection reaches exactly the modules Weaver deployed and nothing
-    else. A name the tree does not define — ``weaver``, ``pyspark``, ``json`` —
-    goes to the ordinary import, unchanged.
+    the redirection reaches only what Weaver deployed. A name the tree does not
+    define — ``weaver``, ``pyspark``, ``json`` — goes to the ordinary import.
     """
 
     real = builtins.__import__
@@ -229,21 +225,14 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
 class _ContextLoader:
     """Runs a deployed module with its context's builtins, from source.
 
-    **From source, and that is not an optimisation in reverse.** Python caches
-    compiled bytecode beside the file and decides whether the cache is current
-    from the source's size and its mtime *to the second*. A deployed module is
-    rewritten in place by builds, so a rebuild that changes a module without
-    changing its length — the generated ``SparkSqlTable`` wrapper, whose length
-    moves only if the embedded SQL does — can land inside the same second and be
-    indistinguishable from no change at all. The next load then runs the
-    previous build's code, silently.
+    From source, because Python decides whether its bytecode cache is current
+    from the source's size and its mtime to the second. A build rewrites a
+    deployed module in place, so a rebuild that changes it without changing its
+    length can land inside the same second and be taken for no change at all —
+    and the next load runs the previous build's code.
 
-    Compiling from source each time removes the question. It also stops
-    ``__pycache__`` directories appearing inside the deployed tree, which in
-    Fabric means inside OneLake, inside a folder Weaver manages and prunes.
-
-    The cost is a compile per module per run, against modules that are a few
-    dozen lines and a load that is about to touch a warehouse.
+    It also keeps ``__pycache__`` out of the deployed tree, which in Fabric is a
+    folder Weaver manages and prunes.
     """
 
     def __init__(self, inner, builtins_mapping: dict) -> None:

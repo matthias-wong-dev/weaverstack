@@ -7,19 +7,17 @@ that endpoint — a Warehouse view over another item, a report, a downstream
 shortcut — so a build that created a table and immediately built a dependent view
 over it could and did see the previous shape.
 
-The refresh therefore sits at the item boundary, not in a tail after every item:
-it is the completion barrier for the item that mutated Delta, and it has to be
-behind that item and ahead of anything in a later item layer.
+The refresh therefore sits at the item boundary rather than in a tail after all
+physical work: it is the completion barrier for the item that mutated Delta, and
+it has to be behind that item and ahead of any later item layer. A global tail
+would leave a consumer's Warehouse view created against metadata that had not
+caught up.
 
-It is planned host-independently, exactly like the rest of the bundle. The
-emulator has no SQL analytics endpoint at all, and the executor says so and skips
-rather than inventing a local equivalent that would keep no promise.
+It is planned host-independently. The emulator has no SQL analytics endpoint,
+and the executor skips rather than inventing a local equivalent.
 
-The *placement* is this module's business; the refresh itself belongs to
-:mod:`weaver.build_bundle.executors.sql_endpoint_refresh`. An earlier design put
-one refresh in a global tail after all physical work, which is correct for a
-single item and wrong the moment a second item reads the first: the consumer's
-Warehouse view would be created against endpoint metadata that had not caught up.
+Placement is this module's business; the refresh itself belongs to
+:mod:`weaver.build_bundle.executors.sql_endpoint_refresh`.
 """
 
 from __future__ import annotations

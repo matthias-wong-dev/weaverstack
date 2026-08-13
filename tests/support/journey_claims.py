@@ -211,14 +211,20 @@ emit({
 '''
 
 
-def _assert_installed(env, step) -> None:
-    """The first build: everything declared exists, and nothing landed elsewhere."""
+def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> None:
+    """The first build: everything declared exists, and nothing landed elsewhere.
+
+    ``items`` is the logical items the bundle must carry. It is a parameter
+    because the same Lakehouse estate is driven twice — alone, and with the
+    Warehouse that reports on it — and every other claim below is about the
+    Lakehouse either way.
+    """
 
     _raise_if_the_transition_broke(step)
     plan = step.bundle.plan
     assert plan.format_version == 1
     assert plan.repository_name == env.repository_root.name
-    assert {target.logical_item_name for target in plan.targets} == {"Sales", "_weaver"}
+    assert {target.logical_item_name for target in plan.targets} == set(items)
     assert plan.omitted_nodes == ()
 
     # The source repository was deleted between generating this bundle and
@@ -777,4 +783,189 @@ def drive(journey):
     _assert_failed(
         journey,
         journey.run("broken", before=_change_the_summary, between=_corrupt),
+    )
+
+
+# --- the same estate, with the Warehouse that reports on it -------------------
+#
+# `cross-item-journey` is `lakehouse-journey` byte for byte, plus a Warehouse
+# item that aliases into it. So every claim above is the same claim, and what is
+# added here is the composition: a Delta table published into a Warehouse
+# through an alias, materialised there, and reconciled against its source.
+#
+# Fabric only, and not for cost: a `LocalWorkspace` has no Warehouse, so there
+# is no emulator twin to run this against.
+
+CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
+
+#: The load, over both physical sides. The Warehouse's report is a table with a
+#: generated load procedure of its own, so the run graph has work either side of
+#: the endpoint and a real ordering constraint between them.
+CROSS_ITEM_LOADED = '''
+from weaver.load import run_load
+from weaver.load_plan import PhysicalTargetRef
+from weaver.locations import Location
+from weaver.session import NotebookSession
+
+requested = (
+    PhysicalTargetRef("lakehouse", target.name),
+    PhysicalTargetRef("warehouse", warehouse.name),
+)
+
+
+def orchestrate(dry_run):
+    with NotebookSession(workspace=workspace, spark=spark, store=store) as session:
+        return run_load(
+            session, workspace=workspace, requested=requested, dry_run=dry_run
+        ).to_mapping()
+
+
+dry = orchestrate(True)
+real = orchestrate(False)
+
+emit({"dry": dry, "real": real})
+'''
+
+#: The validation, over both sides. The Warehouse's Test is the reconciliation —
+#: the claim neither side can make alone.
+CROSS_ITEM_VALIDATED = '''
+from weaver.load_plan import PhysicalTargetRef
+from weaver.session import NotebookSession
+from weaver.test import run_test
+
+requested = (
+    PhysicalTargetRef("lakehouse", target.name),
+    PhysicalTargetRef("warehouse", warehouse.name),
+)
+
+with NotebookSession(workspace=workspace, spark=spark, store=store) as session:
+    emit(
+        run_test(session, workspace=workspace, requested=requested).to_mapping()
+    )
+'''
+
+
+def _warehouse_objects(env) -> dict:
+    """What the Warehouse holds, in one query, as name to type."""
+
+    rows = env.warehouse.executor.query(
+        "select s.name as schema_name, o.name as object_name, o.type_desc as kind "
+        "from sys.objects o join sys.schemas s on s.schema_id = o.schema_id "
+        "where o.type in ('U', 'V', 'P')"
+    )
+    return {
+        f"{row['schema_name']}.{row['object_name']}": str(row["kind"])
+        for row in rows
+    }
+
+
+def _assert_warehouse_installed(env, step) -> None:
+    """The reporting side exists, and it was built after what it reads.
+
+    The order is the claim. A Warehouse object reading an aliased Delta table
+    reaches it over the SQL analytics endpoint, which is eventually consistent
+    with the Lakehouse — so building the Warehouse before the refresh would read
+    a table the endpoint has not seen, and each side would be self-consistent
+    while the crossing between them was stale.
+    """
+
+    at = step.sequence_of
+
+    def when(ending):
+        matching = [
+            number for action_id, number in at.items() if action_id.endswith(ending)
+        ]
+        assert matching, f"no action ends with {ending!r}"
+        return min(matching)
+
+    assert (
+        when("Lakehouse--Sales--DWG.Customer")
+        < when("refresh-sql-endpoint-Lakehouse--Sales")
+        < when("aliases-Warehouse--Reporting")
+        < when("Warehouse--Reporting--Rpt.CustomerReport")
+        < when("Warehouse--Reporting--Rpt.ActiveCustomerReport")
+    )
+
+    held = _warehouse_objects(env)
+    assert held.get("Rpt.PortableCustomer") == "VIEW", held
+    assert held.get("Rpt.CustomerReport") == "USER_TABLE", held
+    assert held.get("Rpt.ActiveCustomerReport") == "VIEW", held
+
+    # A Warehouse table carries a generated load procedure, and its Test one of
+    # its own — which is what gives the run graph something to dispatch on this
+    # side of the crossing rather than only on the Lakehouse's.
+    procedures = {
+        name for name, kind in held.items() if kind == "SQL_STORED_PROCEDURE"
+    }
+    assert procedures == {
+        "_.Load Rpt.CustomerReport",
+        "_.Test Rpt.ReportReconciles",
+    }, held
+
+
+def _assert_warehouse_loaded(env, seen) -> None:
+    """The report holds what the Lakehouse produced, read through the alias."""
+
+    dry, real = seen["dry"], seen["real"]
+    assert dry["status"] == "succeeded", _why(dry)
+    assert real["status"] == "succeeded", _why(real)
+
+    # Both sides ran, in one run, ordered by the crossing between them: the
+    # report cannot be materialised before the table it reads through the alias.
+    order = [node_id.rsplit("/", 1)[-1] for node_id in real["order"]]
+    assert {"DWG.Customer", "Rpt.CustomerReport"} <= set(order), order
+    assert order.index("DWG.Customer") < order.index("Rpt.CustomerReport"), order
+    assert all(node["executed"] for node in real["nodes"])
+
+    rows = env.warehouse.executor.query(
+        "select count(*) as n from [Rpt].[CustomerReport]"
+    )
+    assert rows[0]["n"] > 0, "the report materialised nothing from its source"
+
+
+def _assert_reconciled(env, seen) -> None:
+    """The Test that spans both sides passes, which is the composition's claim.
+
+    Each side is self-consistent when the shortcut between them is stale, so this
+    is the one assertion that could not be made on either alone.
+    """
+
+    assert seen["status"] == "passed", seen
+
+    ran = {node["logical_id"].rsplit("/", 1)[-1]: node for node in seen["nodes"]}
+    assert "Rpt.ReportReconciles" in ran, sorted(ran)
+    assert ran["Rpt.ReportReconciles"]["kind"] == "test"
+    assert ran["Rpt.ReportReconciles"]["failure_count"] == 0
+    assert ran["Rpt.ReportReconciles"]["executed"]
+
+
+def drive_across_items(journey):
+    """The journey, over an estate that spans a Lakehouse and a Warehouse.
+
+    The Lakehouse phases are the same phases: this is the same estate with a
+    second physical side, so a claim that changed here would mean the
+    composition had altered what the Lakehouse half does, which it must not.
+    What is added is asserted immediately after the transition it belongs to,
+    for the reason every phase here is: the journey mutates a live estate.
+
+    The failing build is deliberately absent. It corrupts a Lakehouse payload
+    and asserts what a part-built estate reports, which the Lakehouse journey
+    already proves and which would leave this estate's Warehouse half in a state
+    nothing after it could rely on.
+    """
+
+    env = journey.env
+
+    env.install_repo()
+    step = journey.run("install", between=lambda e, _b: e.remove_repo())
+    _assert_installed(env, step, items=CROSS_ITEM_ITEMS)
+    _assert_warehouse_installed(env, step)
+
+    _assert_unchanged(env, journey.run("unchanged", before=lambda e: e.install_repo()))
+
+    loaded = env.run_python(CROSS_ITEM_LOADED, label="load across both items")
+    _assert_warehouse_loaded(env, loaded)
+
+    _assert_reconciled(
+        env, env.run_python(CROSS_ITEM_VALIDATED, label="reconcile the two sides")
     )

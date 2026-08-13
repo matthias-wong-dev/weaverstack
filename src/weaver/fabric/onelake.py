@@ -93,10 +93,9 @@ FABRIC_PORTAL = "https://app.fabric.microsoft.com"
 def browsable_url(location: Location, *, base_url: str = ONELAKE_DFS) -> str:
     """A OneLake location as a link that opens in a browser.
 
-    The DFS URL Weaver writes to is the *storage* address. Pasting one into a
-    browser gets an authentication error rather than a file, which makes a
-    log link that looks helpful and is not. The portal wants the same three
-    facts arranged differently — workspace, item, and the path within it as one
+    The DFS URL Weaver writes to is the storage address, and pasting one into a
+    browser gets an authentication error. The portal wants the same three facts
+    arranged differently — workspace, item, and the path within it as one
     encoded query value:
 
     .. code-block:: text

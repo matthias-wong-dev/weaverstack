@@ -13,6 +13,23 @@ from ..diagnostics import SUPPORTED_JAVA, find_java_home
 from ..errors import CommandError
 
 
+#: Spark's identifier-analysis setting.
+CASE_SENSITIVE = "spark.sql.caseSensitive"
+
+
+def apply_emulator_analysis_policy(spark) -> None:
+    """Make an emulator session analyse identifiers exactly, for its whole life.
+
+    Every declared object keeps its Weaver spelling, and the emulator's folded
+    schema names are lower case. Unlike Fabric's catalogue, Spark's local session
+    catalogue cannot look a PascalCase table up again once analysis returns to
+    case-insensitive, so this is a session policy rather than a scope around one
+    statement.
+    """
+
+    spark.conf.set(CASE_SENSITIVE, "true")
+
+
 @contextmanager
 def local_delta_session(workspace=None) -> Iterator[object]:
     """Create one local Delta session and always stop it before returning.
@@ -73,6 +90,7 @@ def local_delta_session(workspace=None) -> Iterator[object]:
     try:
         session = configure_spark_with_delta_pip(builder).getOrCreate()
         session.sparkContext.setLogLevel("ERROR")
+        apply_emulator_analysis_policy(session)
         yield session
     finally:
         if session is not None:

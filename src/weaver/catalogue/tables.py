@@ -1,13 +1,11 @@
 """The fixed shape of every catalogue table, declared once.
 
-These definitions are the single authority on what the catalogue *is*: the
+These definitions are the single authority on what the catalogue is: the
 tables, their ordered columns, their types, and the key that identifies a row.
-Everything else — the built-in Weaver document that materialises them, the tolerant reader,
-the projection, the rendered DML — reads them from here. A column added in one
-place and forgotten in another is the failure mode this module exists to make
-impossible, so nothing downstream is allowed its own list.
+The built-in Weaver document that materialises them, the reader, the projection
+and the rendered DML all read them from here, so no downstream list can drift.
 
-**Installation scope is in the key, not beside it.** Every table is keyed on
+Installation scope is part of the key. Every table is keyed on
 ``repository`` and ``target_type`` before anything else, because the same
 repository is installed independently into its Lakehouse and its Warehouse and
 the same ``Schema.Object`` legitimately exists in both:
@@ -17,21 +15,16 @@ the same ``Schema.Object`` legitimately exists in both:
     SalesRepo | lakehouse | Sales | Customer
     SalesRepo | warehouse | Sales | Customer
 
-Those are two rows. A Lakehouse build must not touch the second. Making the scope
-part of the identity is what stops a comparison or a delete from accidentally
-spanning both — there is no way to name a row without naming its installation.
+Those are two rows, and a Lakehouse build must not touch the second: with the
+scope in the identity, no comparison or delete can span both.
 
-**The physical target's name is never identity.** A repository has at most one
-current installation per target type, so rebinding it to a different Lakehouse
-updates :data:`INSTALLATION`'s ``target_name``; it does not insert a second
-installation.
+The physical target's name is never identity. A repository has at most one
+current installation per target type, so rebinding it updates
+:data:`INSTALLATION`'s ``target_name`` rather than inserting a second row.
 
-**Signatures and audit columns.** Every table carries ``signature`` — the source
-hash of whatever the row projects — plus Weaver's own audit columns, which the
-ordinary build appends to any Delta table and which are therefore not declared
-here as business columns. ``signature`` is what incremental planning compares to
-decide what changed and must be dropped and rebuilt; it is the reason the
-catalogue is the foundation for idempotent building rather than a report on it.
+Every table carries ``signature``, the source hash of whatever the row projects,
+which incremental planning compares to decide what changed. Weaver's audit
+columns are appended by the ordinary build and so are not declared here.
 """
 
 from __future__ import annotations
@@ -187,7 +180,7 @@ class CatalogueTable:
     def comparison_columns(self) -> tuple[str, ...]:
         """Non-key columns, whose change makes a matched row an update.
 
-        ``signature`` is one of them, which is the point: a row whose source file
+        ``signature`` is one of them: a row whose source file
         changed differs here even when every projected value happens to match.
 
         A published column is deliberately absent. One that compared would differ

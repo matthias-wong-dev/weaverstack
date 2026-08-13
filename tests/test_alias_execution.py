@@ -86,12 +86,12 @@ def _local_context(tmp_path, *, resolver=None, store=None):
             local_resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
         )
     return InstallationContext(
-        spark=None,
         # A host that can ask Spark and finds the alias readable at once. The
         # Installer supplies this on every host, so a context without it is one
-        # nobody would build in production — and the executor now says so rather
+        # nobody would build in production — and the executor says so rather
         # than skipping the wait.
         spark_sql=lambda statement, exact_case=False: [],
+        spark_sql_batch=lambda statements, exact_case=False: [],
         resolver=resolver or local_resolver,
         store=chosen_store,
         target=destination,
@@ -296,8 +296,8 @@ def _addressable_context(tmp_path, spark, resolver):
         local_resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
     )
     return InstallationContext(
-        spark=spark,
         spark_sql=spark,
+        spark_sql_batch=lambda statements, exact_case=False: [],
         resolver=resolver,
         store=store,
         target=destination,
@@ -410,7 +410,6 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
 
     sql = _Sql()
     context = InstallationContext(
-        spark=None,
         resolver=None,
         store=FilesystemStore(),
         target=_target(DESTINATION_TARGET_ID, "Reporting_WH"),
@@ -440,34 +439,16 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
     ]
 
 
-# --- where each half of an alias runs -----------------------------------------
-
-
-def test_the_whole_alias_action_crosses_because_the_wait_is_chatty():
-    """Not because creating a shortcut needs Spark — it does not, it is REST.
-
-    The wait polls every five seconds for up to five minutes. In the session
-    that is sixty cheap `spark.sql` calls; from a desktop it would be sixty Livy
-    submissions, and a real workspace killed the session doing exactly that.
-    """
-
-    from weaver.build_bundle.executors.alias import AliasExecutor
-
-    assert AliasExecutor.needs_spark is True
-
-
 def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
     """A desktop has no Spark session and must still wait for discovery.
 
-    The guard used to be `context.spark is not None`, so an install driven from
-    a desktop skipped the wait entirely — and the next statement to read the
-    alias would fail with "neither a view nor a table".
+    The guard was once ``context.spark is not None``, so a desktop install
+    skipped the wait and the next statement to read the alias failed with
+    "neither a view nor a table". The context carries no session at all now.
     """
 
     asked = _LateSpark(failures=1)
     context = _addressable_context(tmp_path, asked, _ShortcutResolver())
-    # No Spark session anywhere: exactly a desktop.
-    context = replace(context, spark=None)
 
     AliasExecutor().execute(_action(), _payload(), context)
 
@@ -481,10 +462,7 @@ def test_the_probe_carries_weavers_identifier_case(tmp_path):
     different probe."""
 
     asked = _LateSpark(failures=0)
-    context = replace(
-        _addressable_context(tmp_path, asked, _ShortcutResolver()),
-        spark=None,
-    )
+    context = _addressable_context(tmp_path, asked, _ShortcutResolver())
 
     AliasExecutor().execute(_action(), _payload(), context)
 

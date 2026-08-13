@@ -18,12 +18,10 @@ Weaver names things the way SQL does::
 |       | folder, procedure |                               |
 +-------+-------------------+-------------------------------+
 
-Level 4 is the only level written down in Workspace configuration. Level 3
-needs no alias because an item is *uniquely
-identifiable within its workspace* — so it is referred to by its real name, never by
-an alias. That is uniqueness, not invariance: promoting ``Dev_Lakehouse`` to
-``Prod_Lakehouse`` inside one workspace is ordinary, so level-3 names are always
-supplied explicitly at the call site and never inferred.
+Level 4 is the only level written down in Workspace configuration. A level-3
+item is unique within its workspace, so it is named directly rather than
+aliased — but unique is not invariant, so those names are always supplied at the
+call site and never inferred.
 
 Levels 2 and 1 come from the object's own metadata (``Schema.Object``) and do
 not appear here.

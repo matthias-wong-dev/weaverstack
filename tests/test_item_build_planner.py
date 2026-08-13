@@ -6,6 +6,7 @@ import json
 import shutil
 
 import pytest
+from factories import lakehouse_catalogue
 from support.sessions import given_installer
 
 from weaver.targets import ItemRef
@@ -106,7 +107,13 @@ def generate_item_build_bundle(repository, **kwargs):
                 target,
                 resolver=resolver,
                 store=kwargs["store"],
-                spark=spark,
+                # No Spark here means no view listing, which is what these
+                # planner claims want: they are about storage reconciliation.
+                catalogue=(
+                    None
+                    if spark is None
+                    else lakehouse_catalogue(spark, resolver, target.item_id)
+                ),
             )
         else:
             inventories[binding.item] = TargetInventory(

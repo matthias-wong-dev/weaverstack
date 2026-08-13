@@ -915,5 +915,5 @@ def test_a_folder_that_returns_someone_elses_directory_is_refused(
     )
     module = importlib.reload(importlib.import_module("Sales__Export"))
 
-    with pytest.raises(LoadError, match="must return the StagingFolder"):
+    with pytest.raises(LoadError, match="rather than the folder"):
         _load_folder(module.Sales__Export, spark, lakehouse, {})

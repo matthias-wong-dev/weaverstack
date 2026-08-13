@@ -30,9 +30,18 @@ class _Context:
         pass
 
 
+class _Conf:
+    def __init__(self):
+        self.values = {}
+
+    def set(self, key, value):
+        self.values[key] = str(value)
+
+
 class _Session:
     def __init__(self):
         self.sparkContext = _Context()
+        self.conf = _Conf()
         self.stopped = False
 
     def stop(self):
@@ -94,3 +103,34 @@ def test_workspace_session_uses_a_persistent_workspace_scoped_metastore(
     assert str(tmp_path / ".weaver" / "spark") in builder.configured[
         "javax.jdo.option.ConnectionURL"
     ]
+
+
+def test_an_emulator_session_analyses_identifiers_exactly_for_its_whole_life(
+    monkeypatch, tmp_path
+):
+    """A property of the session, not of whatever happens to run in it.
+
+    The emulator's schema names are folded to lower case and its objects keep
+    their declared spelling, and Spark's local catalogue cannot find a
+    PascalCase table again once analysis returns to case-insensitive. Held here
+    rather than by the first caller to build a catalogue, so the order things
+    happen in cannot decide whether a table is findable.
+    """
+
+    session = _Session()
+    monkeypatch.setattr(
+        "weaver.spark.session.import_module",
+        lambda name: (
+            SimpleNamespace(
+                configure_spark_with_delta_pip=lambda _builder: SimpleNamespace(
+                    getOrCreate=lambda: session
+                )
+            )
+            if name == "delta"
+            else SimpleNamespace(SparkSession=SimpleNamespace(builder=_Builder()))
+        ),
+    )
+    monkeypatch.setattr("weaver.spark.session.find_java_home", lambda: "/jdk")
+
+    with local_delta_session(tmp_path):
+        assert session.conf.values["spark.sql.caseSensitive"] == "true"

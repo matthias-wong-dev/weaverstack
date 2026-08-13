@@ -159,9 +159,9 @@ def _with_retry(action) -> None:
 def _validate_paths(destination: str | Path, staging: str | Path) -> tuple[Path, Path]:
     """The exact destination/staging relationship, refusing anything else.
 
-    Staging must be the sibling Weaver names, because that is the only directory
-    the object was given and the only one a load will read from. An object that
-    returned somewhere else would have Weaver publish a tree nothing validated.
+    Staging must be the sibling Weaver names: the only directory the object was
+    given, and the only one a load reads from. Anything else would publish a
+    tree nothing validated.
     """
 
     destination_path = Path(destination)
@@ -185,9 +185,8 @@ def _validate_paths(destination: str | Path, staging: str | Path) -> tuple[Path,
 def _classify(staging_path: Path, contract) -> tuple[list[str], list[str]]:
     """Split the staged tree into what may be published and what may not.
 
-    A file the key does not claim is a rejection rather than something to skip
-    quietly: the author staged it deliberately, and publishing a folder while
-    silently dropping part of it is the kind of success nobody wants.
+    A file the key does not claim is a rejection rather than a quiet skip: the
+    author staged it deliberately.
     """
 
     if not staging_path.is_dir():
@@ -333,10 +332,10 @@ def _reconcile_deletes(destination: Path, deletes, staged, *, contract) -> int:
 def matches_file_key(relative: str, patterns) -> bool:
     """Whether the declared file key claims this path, segment by segment.
 
-    Segment-wise, not a flat string match, and the difference decides what a
+    Segment-wise rather than a flat string match, which decides what a
     replacement may delete. ``*`` stops at a directory boundary, so ``*.csv``
     claims ``a.csv`` and not ``archive/old.csv``; ``**`` spans any number of
-    segments, which is what makes ``**/*`` mean "everything beneath here".
+    segments, so ``**/*`` means everything beneath here.
     """
 
     if not patterns:
@@ -398,9 +397,8 @@ def _identical(source: Path, target: Path) -> bool:
 def _safe_replace(source: Path, target: Path) -> None:
     """Copy into place through a temporary sibling and one atomic rename.
 
-    Copying straight over the destination leaves a half-written file there if
-    anything fails mid-copy — and a folder load's whole job is that what lands
-    is what was staged.
+    Copying straight over the destination would leave a half-written file if
+    anything failed mid-copy.
     """
 
     target.parent.mkdir(parents=True, exist_ok=True)

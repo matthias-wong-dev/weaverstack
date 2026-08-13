@@ -179,7 +179,7 @@ def test_the_consumer_reads_the_producers_table_through_its_own_name(built, spar
     assert consumer.exists("DWG", "PortableCustomer")
     assert consumer.exists("DWG", "CustomerName")
     assert (
-        consumer.sql("SELECT count(*) AS n FROM {{object:DWG.CustomerName}}").collect()[0][0]
+        consumer.sql("SELECT count(*) AS n FROM {{object:DWG.CustomerName}}")[0]["n"]
         == 0
     )
 

@@ -13,6 +13,7 @@ from .destination import (
     identifier,
     local_destination,
 )
+from .naming import SparkNaming
 from .tokens import expand, object_token, schema_token
 from .session import local_delta_session
 
@@ -20,6 +21,7 @@ __all__ = [
     "LOCAL_SEPARATOR",
     "SparkCatalogue",
     "SparkDestination",
+    "SparkNaming",
     "drop_local_destination_catalogue",
     "expand",
     "fabric_destination",

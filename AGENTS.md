@@ -187,11 +187,15 @@ desktop**, with Fabric reached only through Livy, TDS, OneLake and REST, each
 crossing carrying a small clear script rather than an operation. Not two products
 — one, in two positions, because the doers do not know which one they are in.
 
-We are close and not there. Executor parity is the measure: an action whose
-executor works in both positions is done, one that still has to cross whole is
-not. `alias` is the current example, and its executor says so in a comment. The
-honest statement of the gap is that the desktop position needs `weaver install`
-to have been run, because the far side of a crossing imports the published wheel.
+Build is there. Every build action runs in the `Installer` wherever that is, and
+the state a build plans against is read the same way — the catalogue and a
+Lakehouse's views are Spark SQL, a Lakehouse's objects are storage, a Warehouse
+is TDS. So a desktop `weaver build` needs no published wheel: nothing it submits
+imports Weaver.
+
+What still crosses as a program is a run's Python primitives, which are deployed
+modules imported where Spark is. `weaver load` therefore requires the published
+wheel, and that is the remaining gap.
 
 **A Fabric test that runs Weaver on the laptop tests the desktop position, not
 the in-Fabric one** — that is what the `remote` and `hosted` markers are for, and
@@ -408,8 +412,8 @@ Each marker is opted into by name, and none implies another.
 pytest                      # pure Python, under a second
 pytest -m spark             # local Spark/Delta, needs a JDK
 pytest -m fabric            # every test against a real Fabric workspace
-pytest -m "fabric and remote" # Weaver runs here; no published wheel
-pytest -m "fabric and hosted" # Weaver runs as the installed wheel
+pytest -m "fabric and remote" # no published wheel needed
+pytest -m "fabric and hosted" # needs the wheel published to the Environment
 pytest -m full_integration  # the comprehensive Fabric lifecycle journey
 pytest -m provision         # Fabric item lifecycle
 ```
@@ -420,18 +424,22 @@ Every marker says *what a test needs*:
 |---|---|
 | `spark` | a JDK |
 | `fabric` | a workspace; carried by every Fabric test |
-| `remote` | Weaver runs on this machine and reaches into Fabric |
-| `hosted` | Weaver runs inside Fabric as the wheel in the Environment |
+| `remote` | a workspace, and no published wheel |
+| `hosted` | a workspace **and** the wheel published to the Environment |
 | `full_integration` | the composed lifecycle journey |
 | `provision` | creates and deletes Fabric items |
 
 `remote` and `hosted` are the distinction that keeps the loop legible, and they
-are about *where Weaver runs*, not about whether Livy is involved. A Spark body
-that does not import Weaver needs a session, not a published package — which is
-why `LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
+say whether a published wheel is required. Not whether Livy is involved, and not
+where the orchestration runs: a decomposed desktop operation orchestrates here
+*and* imports the wheel on the far side, so it is `hosted`. A Spark body that
+does not import Weaver needs a session, not a published package, which is why
+`LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
 refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
-run from the checkout against the real workspace. What is `hosted` is about the
-wheel: the installed package acquires its own capabilities inside the session.
+run from the checkout against the real workspace and stay `remote`.
+
+Position is worth recording, but it belongs in a test's docstring. A marker says
+what a run costs, and the cost of `hosted` is a five-minute publish.
 
 `full_integration` is the Fabric lifecycle journey alone — one test, no JDK. Its
 local twin lives in `tests/spark` under `spark`, because that is what it needs.

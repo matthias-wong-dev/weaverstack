@@ -131,15 +131,12 @@ class InstallAction:
         Error installing Warehouse/Reporting/Sales.CustomerRevenue
         Source: Warehouse/Reporting/Sales.CustomerRevenue.sql
 
-    It is carried from where the authored file was parsed, and must never be
-    reconstructed from ``id``, a procedure name, a physical target or a
-    generated payload name. By the time an action fails, the only spellings left
-    are the deployed ones, and several authored files can compile to one — so a
-    path derived at that point would be a guess presented as evidence.
+    Carried from where the authored file was parsed, never reconstructed from
+    ``id`` or a payload name: several authored files can compile to one deployed
+    spelling, so a path derived later would be a guess.
 
     An action with no authored source — an alias, an endpoint refresh, a prune,
-    a catalogue publication — has None, which is the truthful answer rather than
-    a nearest-looking file.
+    a catalogue publication — has None.
     """
 
     id: str

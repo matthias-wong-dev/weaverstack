@@ -5,10 +5,9 @@ Livy, submitting a statement, opening TDS, asking a workspace what a name means.
 Timing them anywhere else means timing them twice or not at all, so the ledger
 lives on the Session and every capability records into it.
 
-The point is the *shape* of a run rather than any single number. A suite that
-spends nine minutes in Livy startup and one in execution has a different problem
-from one that spends ten in execution, and the two are indistinguishable from a
-wall-clock total. Counters distinguish them:
+What it is for is the shape of a run rather than a total: nine minutes of Livy
+startup and one of execution is a different problem from ten of execution, and a
+wall clock cannot tell them apart.
 
 .. code-block:: text
 

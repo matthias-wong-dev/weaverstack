@@ -1,22 +1,17 @@
 """Logical stages, and the one place a sequence number is chosen.
 
-A planning component answers *what* has to happen and in what order relative to
-its own siblings. It does not answer *which sequence number* that is, because a
-number is a property of the finished plan and nothing else: with one alias, one
-schema and one endpoint-refresh stage per item, arithmetic over reserved regions
-stops describing the plan and starts constraining it.
+A planning component says what has to happen and in what order relative to its
+siblings, never which sequence number that is: a number is a property of the
+finished plan, and reserved regions constrain the plan rather than describe it.
 
-So each component returns :class:`PlannedStage` values — a phase, a description,
-target-bound batches, and the payloads those batches need, keyed by bare
-filename. The top-level planner concatenates the stages in execution order and
-:func:`enumerate_stages` turns them into :class:`~weaver.build_bundle.models.BuildSequence`
-values, numbering them 1, 2, 3 … and rewriting each payload into
-``payload/<number>-<slug>/<filename>`` so the bundle directory still reads top to
-bottom in deployment order.
+Each component returns :class:`PlannedStage` values — a phase, a description,
+target-bound batches, and the payloads those batches need. The planner
+concatenates them in execution order and :func:`enumerate_stages` numbers them,
+rewriting each payload into ``payload/<number>-<slug>/<filename>`` so the bundle
+directory reads top to bottom in deployment order.
 
-Numbering last also means a stage cannot collide with another stage's region, and
-there is no headroom to run out of: the number *describes* the order the plan
-already has.
+Numbering last means no stage can collide with another's region, and there is no
+headroom to run out of.
 """
 
 from __future__ import annotations
@@ -31,17 +26,13 @@ from .payloads import payload_path
 
 #: The phases one item's work is made of, in the order they must run.
 #:
-#: Prune and managed drops come first because they are the destructive
-#: reconciliation of what is already there. Schemas precede aliases so an alias
-#: materialised as a Warehouse view has a schema to be created in, and aliases
-#: precede builds so every document this item declares is built against a
-#: namespace that already holds what the item imports. The refresh closes the
+#: Prune and managed drops come first, as the destructive reconciliation of what
+#: is already there. Schemas precede aliases so a Warehouse-view alias has a
+#: schema to be created in, and aliases precede builds so every document is built
+#: against a namespace holding what the item imports. The refresh closes the
 #: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
-#: item's view or shortcut would be built over metadata that does not describe it.
-#: Load closes the item, after the refresh. Its artefacts depend on the item's
-#: structural work being finished and on nothing within their own layer — a
-#: deployed module and a generated procedure have no ordering between them,
-#: because nothing here runs them.
+#: item's view or shortcut would be built over stale metadata. Load follows it,
+#: unordered within its own layer — nothing here runs those artefacts.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"

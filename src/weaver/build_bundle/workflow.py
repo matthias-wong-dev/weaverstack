@@ -1,10 +1,9 @@
 """Source preparation, state handover, bundle generation, and installation.
 
-A repository source is independent of the target estate. Remote sources are
-materialised once onto the current process's local filesystem; parsing and
-request validation finish before target state is read. Native builds keep all
-four stages in-environment. A desktop Fabric build serialises only ``BuildState``
-out and hands only a completed archive back for execution.
+A repository source is independent of the target estate: remote sources are
+materialised onto the local filesystem, and parsing and request validation
+finish before any target state is read. The four stages then run in one process
+whichever position that is, reaching the estate through Session capabilities.
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from ..locations import Location
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..store import FilesystemStore, Store
+from ..targets import ItemRef
 from .bundle import BuildBundle, load_bundle
 from .builder import Builder
 from .installer import Installer
@@ -181,10 +181,9 @@ def read_build_state(
 ) -> BuildState:
     """Read only the authoritative state a source-independent planner needs.
 
-    The boundary between the physical estate and the Builder: two reads — the
-    catalogue and every selected target — assembled into one Python handover
-    that a Builder can be given directly, and that a test can construct without
-    an estate at all.
+    The boundary between the physical estate and the Builder: the catalogue and
+    every selected target, assembled into one handover a Builder takes directly
+    and a test can construct without an estate.
     """
 
     workspace = workspace if workspace is not None else session.workspace
@@ -205,66 +204,34 @@ def read_build_state(
 
 
 def _read_catalogue(*, session, workspace, required):
-    """The catalogue a build plans against, read wherever Spark is.
+    """The catalogue a build plans against.
 
-    The catalogue lives in Delta tables in the Weaver Lakehouse, so reading it
-    needs Spark — which a desktop process does not have. It asks for the read as
-    a whole instead, and what comes back is the same
-    :class:`~weaver.catalogue.state.Catalogue` either way, because a Builder is
-    pure and must not be able to tell.
+    The catalogue is Delta tables in the Weaver Lakehouse, so reading it is
+    Spark SQL. The statements go through the Session and the rows are assembled
+    here, in whichever position that is.
     """
 
-    from ..catalogue.state import Catalogue
-    from ..session.program import RemoteProgram
-
-    items = [str(item) for item in required]
-    body = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.declaration.model import WeaverItemId\n"
-        "from weaver.build_bundle.workflow import _catalogue_here\n"
-        "from weaver.session import NotebookSession\n"
-        f"workspace = {_workspace_literal(workspace)}\n"
-        "session = NotebookSession(workspace=workspace, spark=spark)\n"
-        f"required = tuple(WeaverItemId.parse(value) for value in {items!r})\n"
-        "emit(_catalogue_here(session=session, workspace=workspace, "
-        "required=required).to_mapping())\n"
-    )
-    payload = session.execute_python(
-        RemoteProgram(
-            name="read_catalogue",
-            call=lambda: _catalogue_here(
-                session=session, workspace=workspace, required=required
-            ).to_mapping(),
-            source=body,
-            detail=str(workspace.weaver_lakehouse),
-        ),
-        workspace=workspace,
-    )
-    return Catalogue.from_mapping(payload)
-
-
-def _catalogue_here(*, session, workspace, required):
-    """The catalogue read by a host that already has Spark."""
-
-    from ..spark import SparkCatalogue
-    from ..targets import ItemRef
-
     return read_catalogue_state(
-        SparkCatalogue(
-            session.spark(workspace),
-            session.resolver(workspace).spark_destination(
-                ItemRef(workspace.weaver_lakehouse)
-            ),
+        session_catalogue(
+            session, workspace, ItemRef(workspace.weaver_lakehouse)
         ),
         required,
     )
 
 
-def _workspace_literal(workspace) -> str:
-    return (
-        f"FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
-        f"environment={workspace.environment!r})"
+def session_catalogue(session, workspace, item: ItemRef):
+    """Catalogue operations against one Lakehouse, run through the Session.
+
+    The one construction, both positions: in a session the statements run
+    against its Spark, from a desktop they cross. Nothing above it can tell.
+    """
+
+    from ..spark import SparkCatalogue
+
+    destination = session.resolver(workspace).spark_destination(item)
+    return SparkCatalogue.over_sql(
+        lambda statement: session.execute_spark_sql(statement, workspace=workspace),
+        destination,
     )
 
 
@@ -277,9 +244,9 @@ def materialise_tree(
 ) -> Iterator[MaterialisedTree]:
     """Copy a store tree once to a temporary local directory.
 
-    FabricStore uses one recursive ``notebookutils.fs.cp`` operation. A generic
-    Store falls back to one listing and exactly one read per file, which makes the
-    same contract testable without Fabric.
+    FabricStore uses one recursive ``notebookutils.fs.cp``. A generic Store
+    falls back to one listing and one read per file, so the same contract is
+    testable without Fabric.
     """
 
     if not store.exists(source):
@@ -304,13 +271,11 @@ def materialise_tree(
 def _snapshot_name(source: Location) -> str:
     """A usable directory name for the snapshot of ``source``.
 
-    ``.`` and ``..`` are ordinary ways to name a repository on a desktop and
-    neither can name a directory: joining either onto the temporary root would
-    address the root itself, and the copy would fail or land in the wrong place.
-    A filesystem source is therefore resolved first, so the snapshot is named for
-    the directory it actually copies rather than for the way the caller spelled
-    it. A filesystem root, and anything else that leaves no final segment, falls
-    back to a fixed name — the snapshot's identity is its contents, not its name.
+    ``.`` and ``..`` are ordinary ways to name a repository and neither can name
+    a directory: joined onto the temporary root, either addresses the root
+    itself. A filesystem source is resolved first, so the snapshot is named for
+    the directory it copies. Anything leaving no final segment falls back to a
+    fixed name; a snapshot's identity is its contents.
     """
 
     name = source.name if source.is_url else source.path.resolve().name
@@ -450,13 +415,12 @@ def build_item_repository(
 
         Repository + BuildState → Builder → BuildBundle → Installer
 
-    Both halves are separately callable and separately testable; this exists so
-    the common case reads as one call. It adds no decisions of its own, which is
-    what stops it becoming a hidden third architecture.
+    Both halves are separately callable and testable; this exists so the common
+    case reads as one call, and adds no decisions of its own.
 
     ``output`` places the generated bundle tree somewhere durable instead of the
-    temporary directory this otherwise uses. Only a caller that wants the bundle
-    afterwards passes it; the build itself does not care where it sat.
+    temporary directory. Only a caller that wants the bundle afterwards passes
+    it.
     """
 
     builder = Builder(
@@ -631,16 +595,10 @@ def read_target_inventories(
     inventories = {}
     delta = []
 
-    # Each Warehouse is its own read over TDS, so each gets its own Sub-step and
-    # its own number. The Lakehouses cannot be split the same way and should not
-    # be: they share one crossing, which is one observation of one moment rather
-    # than several of several (AGENTS.md, "one state transition, one evidence
-    # payload"). So they are named together, honestly, as the one read they are.
-    #
-    # Each line says what it is doing, not just what it is doing it to. Children
-    # print above their parent, so a bare "Warehouse/Reporting" arrives before
-    # the "Read target inventories" it belongs to and reads as a stray line
-    # under the Task heading.
+    # A Warehouse is its own read over TDS and gets its own Sub-step; the
+    # Lakehouses are named together, as the one read they are. Each line says
+    # what it is doing rather than only what it is doing it to, because children
+    # print above the parent they belong to.
     for binding in bindings.entries:
         target = binding.to_bound_target()
         if target.kind == WAREHOUSE_TARGET:
@@ -675,57 +633,21 @@ def read_target_inventories(
 
 
 def _lakehouse_inventories(targets, *, session, workspace) -> dict:
-    """Every Lakehouse's inventory, in one crossing rather than one apiece.
+    """Every named Lakehouse's inventory.
 
-    A Lakehouse inventory needs the Spark catalogue, so on a desktop this
-    crosses. Once for all of them: a submission costs seconds and the statements
-    inside it cost almost nothing, so a call per target would make observing
-    three Lakehouses three times the price of observing one — and would present
-    three observations of three different moments as one snapshot.
+    Mostly storage — a Delta table is a directory — and Spark SQL for the views,
+    which exist only in the catalogue.
     """
 
-    from .prune import TargetInventory
-    from ..session.program import RemoteProgram
-
-    frozen = [target.to_mapping() for target in targets]
-    body = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.build_bundle.targets import BoundTarget\n"
-        "from weaver.build_bundle.workflow import _lakehouse_inventories_here\n"
-        "from weaver.session import NotebookSession\n"
-        f"workspace = {_workspace_literal(workspace)}\n"
-        "session = NotebookSession(workspace=workspace, spark=spark)\n"
-        f"targets = [BoundTarget.from_mapping(one) for one in {frozen!r}]\n"
-        "emit(_lakehouse_inventories_here(targets, session=session, "
-        "workspace=workspace))\n"
-    )
-    payload = session.execute_python(
-        RemoteProgram(
-            name="read_inventories",
-            call=lambda: _lakehouse_inventories_here(
-                targets, session=session, workspace=workspace
-            ),
-            source=body,
-            detail=", ".join(target.name for target in targets),
-        ),
-        workspace=workspace,
-    )
-    return {
-        target_id: TargetInventory.from_mapping(mapping)
-        for target_id, mapping in payload.items()
-    }
-
-
-def _lakehouse_inventories_here(targets, *, session, workspace) -> dict:
-    """Every named Lakehouse's inventory, by a host that has Spark."""
-
     resolver = session.resolver(workspace)
-    store = session.store(workspace)
-    spark = session.spark(workspace)
+    store = session.transport_store(workspace)
     return {
         target.id: read_lakehouse_inventory(
-            target, resolver=resolver, store=store, spark=spark
-        ).to_mapping()
+            target,
+            resolver=resolver,
+            store=store,
+            catalogue=session_catalogue(session, workspace, ItemRef(target.item_id)),
+        )
         for target in targets
     }
 

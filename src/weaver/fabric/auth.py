@@ -70,23 +70,16 @@ TOKEN_REFRESH_MARGIN_SECONDS = 300.0
 class TokenProvider:
     """A token for one scope, renewed shortly before it expires.
 
-    This exists because holding the *string* is a bug that only shows up in long
-    runs, and then shows up as something else. A caller that snapshots
-    :func:`get_token` keeps sending the same bearer until the API starts
-    answering ``401`` — and because ``AzureCliCredential`` serves from the Azure
-    CLI's own cache, the string may already be most of the way through its life
-    when it arrives. The usable budget is therefore *not* the nominal lifetime
-    and cannot be assumed from it: a run that starts with a nearly-spent token
-    has minutes, not an hour.
+    Holding the token *string* is a bug that only appears in long runs.
+    ``AzureCliCredential`` serves from the Azure CLI's own cache, so an arriving
+    token may already be most of the way through its life: the usable budget is
+    not the nominal lifetime, and a snapshotted token starts answering ``401``
+    part-way through a run.
 
-    That is not hypothetical. A Fabric suite whose session snapshotted its token
-    died twenty minutes in with ``401: no body``, taking every downstream test
-    with it, and looked like six unrelated failures.
-
-    Refetching on every call would also be correct, and is what the SQL path does
-    — but there a token is fetched per *connection*. A REST client fetches per
-    *request*, and a credential shells out to ``az``, so the expiry is kept and
-    the token renewed only when it is close.
+    Refetching per call is also correct and is what the SQL path does, but there
+    a token is fetched per connection. A REST client fetches per request and a
+    credential shells out to ``az``, so the expiry is kept and the token renewed
+    only when it is close.
     """
 
     def __init__(

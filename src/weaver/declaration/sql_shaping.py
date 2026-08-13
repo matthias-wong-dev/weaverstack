@@ -8,17 +8,13 @@ work over a flattened, offset-carrying token stream rather than by string
 munging, so nested queries, CTEs, set operations and existing ``WHERE`` clauses
 are handled correctly.
 
-**Everything here is T-SQL's.** The keyword sets, the ``GO`` boundary, the
-``SELECT INTO`` placement and the shape-only guard are all this dialect's, and
-they stay here for that reason. What is *not* dialect-specific — flattening text
-into offset-carrying tokens, and finding where one statement ends — lives in
-:mod:`weaver.sql_statements`, because Spark SQL needs the same answer and a
-second splitter would be a second set of bugs about string literals.
+Everything here is T-SQL's: the keyword sets, the ``GO`` boundary, the
+``SELECT INTO`` placement and the shape-only guard. What is not dialect-specific
+— flattening text into offset-carrying tokens, and finding where a statement
+ends — lives in :mod:`weaver.sql_statements`, because Spark SQL needs the same
+answer.
 
-Ported from the proven ``weaver_runtime.dbrep.sql.wrangle`` reference
-implementation; only the dependency-finding and CTAS helpers (which weaverstack
-covers elsewhere) were dropped. :func:`render_sql_template` fills the T-SQL DDL
-templates in ``ses/templates``.
+:func:`render_sql_template` fills the T-SQL DDL templates in ``ses/templates``.
 """
 
 from __future__ import annotations

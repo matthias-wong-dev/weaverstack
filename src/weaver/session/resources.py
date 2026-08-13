@@ -91,16 +91,13 @@ class Resource(Generic[T]):
     def start(self, *, speculative: bool = False) -> Future:
         """Begin acquiring without waiting, returning the one acquisition.
 
-        Called again while an acquisition is in flight, this returns *that*
-        acquisition rather than starting another — which is what makes a
-        background warm-up and a foreground caller share one Livy session.
+        Called again while an acquisition is in flight, this returns that
+        acquisition rather than starting another, so a background warm-up and a
+        foreground caller share one Livy session.
 
-        ``speculative`` marks an acquisition nobody asked for: a warm-up started
-        at the prompt on the chance that the next command needs Spark. Those
-        must not fail work that follows. A speculative acquisition that fails
+        ``speculative`` marks an acquisition nobody asked for. One that fails
         leaves the resource unstarted rather than failed, so the first caller
-        that genuinely needs it tries again and is told what went wrong by the
-        command that wanted it, in that command's own terms.
+        that needs it tries again and reports in its own terms.
         """
 
         with self._lock:
@@ -153,9 +150,8 @@ class Resource(Generic[T]):
     def fail(self, error: BaseException | None = None) -> None:
         """Declare the resource dead — the caller has seen it is unusable.
 
-        This is for a resource fault, not a statement fault. A failed SQL
-        statement leaves a healthy connection, and calling this for one would
-        throw away something that still works.
+        For a resource fault, not a statement fault: a failed SQL statement
+        leaves a healthy connection.
         """
 
         with self._lock:
@@ -171,9 +167,8 @@ class Resource(Generic[T]):
     def reacquire(self) -> None:
         """Permit one further acquisition of a failed resource.
 
-        Bounded on purpose. A resource that has exhausted its attempts stays
-        failed and says so, because the alternative is a run that never finishes
-        failing.
+        Bounded: a resource that has exhausted its attempts stays failed and
+        says so.
         """
 
         with self._lock:
@@ -195,16 +190,13 @@ class Resource(Generic[T]):
     def close(self) -> None:
         """Release what this resource acquired, if it acquired anything.
 
-        **A close that arrives mid-acquisition waits for it.** Leaving a
-        starting Livy session behind would leak the thing it is most expensive
-        to leak: a small capacity permits one Spark session, and an abandoned
-        one holds that slot until Fabric reaps it — so the next run queues
-        behind a session nobody is using. Waiting a few tens of seconds at exit
-        is the cheaper mistake, and it is deliberate rather than incidental.
+        A close arriving mid-acquisition waits for it. A small capacity permits
+        one Spark session, and an abandoned starting one holds that slot until
+        Fabric reaps it, so the next run queues behind a session nobody is
+        using.
 
-        The wait is bounded. A resource that never finishes starting is
-        abandoned rather than allowed to hold the process open forever, because
-        an exit that cannot complete is worse than a slot that will be reaped.
+        The wait is bounded: a resource that never finishes starting is
+        abandoned rather than holding the process open.
         """
 
         with self._lock:

@@ -62,11 +62,9 @@ def _logical_name(value: object, *, what: str) -> str:
 def _relative_path(value: object, *, what: str) -> str:
     """One relative, canonical path — a file identity's schema half.
 
-    A file's schema is where it sits, so it may contain ``/``. Everything that
-    would make it ambiguous or let it escape its root may not: an absolute path,
-    a backslash, an empty component, or a ``.``/``..`` component. The result is
-    a path that joins onto a root exactly once and means the same thing however
-    it is read back.
+    A file's schema is where it sits, so it may contain ``/``. What would make
+    it ambiguous or let it escape its root may not: an absolute path, a
+    backslash, an empty component, or ``.``/``..``.
     """
 
     if not isinstance(value, str):

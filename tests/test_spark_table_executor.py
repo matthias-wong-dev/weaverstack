@@ -1,10 +1,15 @@
-"""The ``spark_table`` executor, driven with a fake session — no JVM.
+"""The ``spark_table`` executor, driven with a fake capability — no JVM.
 
-The install-time behaviour (run the query, read its shape, validate, create the
-table) is proven end to end against real Delta in
-``tests/spark/test_sql_table_build.py``. These tests pin the executor's own
-logic cheaply: what SQL it generates, and that it surfaces every column
-violation the plan lists — without paying for a Spark session.
+The install-time behaviour (describe the query, validate, create the table) is
+proven end to end against real Delta in ``tests/spark/test_sql_table_build.py``
+and against a real Lakehouse in ``tests/fabric/test_spark_table_build.py``. These
+tests pin the executor's own logic cheaply: what it asks Spark, what SQL it
+generates, and that it surfaces every column violation the plan lists — without
+paying for a Spark session.
+
+The executor reaches Spark twice and only twice: once to describe the query's
+shape, once to create the table. Everything between is decided here, from the
+frozen payload.
 """
 
 from __future__ import annotations
@@ -21,100 +26,58 @@ from weaver.errors import BuildError, InstallError
 from weaver.spark import fabric_destination, local_destination
 from weaver.targets import ItemRef
 
-
-class _FakeType:
-    def __init__(self, simple: str) -> None:
-        self._simple = simple
-
-    def simpleString(self) -> str:
-        return self._simple
+DESCRIBE = "DESCRIBE QUERY "
 
 
-class _FakeField:
-    def __init__(self, name: str, simple: str) -> None:
-        self.name = name
-        self.dataType = _FakeType(simple)
+class _Capability:
+    """The Session's Spark SQL capability, answering DESCRIBE QUERY from a shape.
 
-
-class _FakeSchema:
-    def __init__(self, fields: list[_FakeField]) -> None:
-        self.fields = fields
-
-
-class _FakeFrame:
-    def __init__(self, fields: list[_FakeField]) -> None:
-        self.schema = _FakeSchema(fields)
-
-    def collect(self) -> list:
-        return []
-
-
-class _FakeRow:
-    def __init__(self, **values) -> None:
-        self._values = values
-
-    def asDict(self) -> dict:
-        return self._values
-
-
-class _FakeListing:
-    def __init__(self, rows: list[_FakeRow]) -> None:
-        self._rows = rows
-
-    def collect(self) -> list[_FakeRow]:
-        return self._rows
-
-
-class _FakeConf:
-    def __init__(self) -> None:
-        self.value = "false"
-        self.changes: list[str] = []
-
-    def get(self, key: str) -> str:
-        assert key == "spark.sql.caseSensitive"
-        return self.value
-
-    def set(self, key: str, value: str) -> None:
-        assert key == "spark.sql.caseSensitive"
-        self.value = str(value)
-        self.changes.append(self.value)
-
-
-class _FakeSpark:
-    """Returns a fixed query shape, and records the statements it is asked to run."""
+    It records every call — the statements it carried and the identifier-case
+    scope they travelled under — because both are claims the executor makes.
+    """
 
     def __init__(
         self,
         query_fields: list[tuple[str, str]],
         *,
-        existing_tables: tuple[str, ...] = (),
+        describe_error: Exception | None = None,
+        create_error: Exception | None = None,
     ) -> None:
-        self._fields = [_FakeField(name, simple) for name, simple in query_fields]
-        self.existing_tables = list(existing_tables)
-        self.executed: list[str] = []
-        self.conf = _FakeConf()
-        self.case_at_create: str | None = None
-        self.case_at_drop: str | None = None
-        self.case_at_query: str | None = None
+        self._fields = list(query_fields)
+        self._describe_error = describe_error
+        self._create_error = create_error
+        #: One entry per call: ``(statements, exact_case)``.
+        self.calls: list[tuple[list[str], bool]] = []
 
-    def sql(self, statement: str):
-        self.executed.append(statement)
-        normalized = statement.lstrip().upper()
-        if normalized.startswith("SHOW VIEWS"):
-            return _FakeListing([])
-        if normalized.startswith("SHOW TABLES"):
-            return _FakeListing(
-                [_FakeRow(tableName=name, isTemporary=False) for name in self.existing_tables]
-            )
-        if normalized.startswith("DROP TABLE"):
-            self.case_at_drop = self.conf.value
-            self.existing_tables = []
-            return None
-        if normalized.startswith("CREATE"):
-            self.case_at_create = self.conf.value
-            return None
-        self.case_at_query = self.conf.value
-        return _FakeFrame(self._fields)
+    def one(self, statement: str, *, exact_case: bool = False):
+        return self.many([statement], exact_case=exact_case)
+
+    def many(self, statements, *, exact_case: bool = False):
+        ordered = list(statements)
+        self.calls.append((ordered, exact_case))
+        last = ordered[-1].lstrip()
+        if last.upper().startswith(DESCRIBE):
+            if self._describe_error is not None:
+                raise self._describe_error
+            return [
+                {"col_name": name, "data_type": simple, "comment": None}
+                for name, simple in self._fields
+            ]
+        if last.upper().startswith("CREATE") and self._create_error is not None:
+            raise self._create_error
+        return []
+
+    @property
+    def statements(self) -> list[str]:
+        return [one for statements, _case in self.calls for one in statements]
+
+    @property
+    def described(self) -> str:
+        return next(one for one in self.statements if one.upper().startswith(DESCRIBE))
+
+    @property
+    def created(self) -> str:
+        return next(one for one in self.statements if one.lstrip().upper().startswith("CREATE"))
 
 
 AUDIT = [
@@ -148,8 +111,8 @@ def _payload(**overrides) -> bytes:
     return (json.dumps(payload) + "\n").encode("utf-8")
 
 
-def _run(spark, payload: bytes, *, destination=DESTINATION):
-    action = InstallAction(
+def _action() -> InstallAction:
+    return InstallAction(
         id="build-delta-Sales.Customer",
         kind="build_table",
         resource_node_id="delta:Sales.Customer",
@@ -157,29 +120,107 @@ def _run(spark, payload: bytes, *, destination=DESTINATION):
         payload="payload/x.spark-table.json",
         payload_sha256="x",
     )
+
+
+def _context(capability, destination):
     target = ResolvedTarget(
         bound=BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH"),
         lakehouse=ItemRef("Sales_LH"),
         destination=destination,
     )
-    context = InstallationContext(
-        spark=spark, resolver=None, store=None, target=target
+    return InstallationContext(
+        resolver=None,
+        store=None,
+        target=target,
+        spark_sql=None if capability is None else capability.one,
+        spark_sql_batch=None if capability is None else capability.many,
     )
-    return SparkTableExecutor().execute(action, payload, context)
 
 
-def _create_statement(spark) -> str:
-    return next(s for s in spark.executed if s.lstrip().upper().startswith("CREATE"))
+def _run(capability, payload: bytes, *, destination=DESTINATION):
+    return SparkTableExecutor().execute(
+        _action(), payload, _context(capability, destination)
+    )
+
+
+# --- what reaches Spark, and how often ----------------------------------------
+
+
+def test_the_shape_is_asked_for_rather_than_the_query_being_run():
+    """``DESCRIBE QUERY`` answers the two things the executor takes from a query.
+
+    The names in order and each type as ``simpleString`` spells it — without
+    running the query, and without a ``DataFrame`` to hold.
+    """
+
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(capability, _payload())
+
+    assert capability.described == (
+        "DESCRIBE QUERY select CustomerId, CustomerName from "
+        "`sales_lh__sales`.`Raw`"
+    )
+
+
+def test_setup_and_describe_travel_as_one_piece_of_work():
+    """A temporary view registered in one session and read in another is not
+    there, so the setup goes with the describe that depends on it."""
+
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(
+        capability,
+        _payload(
+            setup=["CREATE OR REPLACE TEMPORARY VIEW staged AS SELECT * FROM {{object:Sales.Raw}}"],
+            source_query="select CustomerId, CustomerName from staged",
+        ),
+    )
+
+    shape, _case = capability.calls[0]
+    assert shape == [
+        "CREATE OR REPLACE TEMPORARY VIEW staged AS SELECT * FROM `sales_lh__sales`.`Raw`",
+        "DESCRIBE QUERY select CustomerId, CustomerName from staged",
+    ]
+
+
+def test_a_table_is_built_in_exactly_two_reaches_for_spark():
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(capability, _payload())
+
+    assert len(capability.calls) == 2
+    assert capability.calls[0][0][-1].startswith(DESCRIBE)
+    assert capability.calls[1][0] == [capability.created]
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [FABRIC_DESTINATION, DESTINATION],
+    ids=["fabric", "local"],
+)
+def test_the_shape_and_the_create_share_one_case_scope(destination):
+    """A table created as ``CustomerEnriched`` has to be readable by the next
+    action in the same build, so both halves are analysed the same way."""
+
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(capability, _payload(), destination=destination)
+
+    assert [exact_case for _statements, exact_case in capability.calls] == [True, True]
+
+
+def test_nothing_is_dropped_to_make_room_for_a_case_variant():
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(capability, _payload(), destination=FABRIC_DESTINATION)
+
+    assert not any(one.lstrip().upper().startswith("DROP") for one in capability.statements)
 
 
 # --- generation -------------------------------------------------------------
 
 
 def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
-    details = _run(spark, _payload())
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    details = _run(capability, _payload())
 
-    statement = _create_statement(spark)
+    statement = capability.created
     assert statement.startswith(f"CREATE TABLE {CUSTOMER} (\n")
     # CustomerId is the primary key, so it is not null even when inferred;
     # CustomerName is not, so it stays nullable.
@@ -195,68 +236,45 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
-def test_fabric_creation_preserves_identifier_case_and_restores_the_session_setting():
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
-
-    _run(spark, _payload(), destination=FABRIC_DESTINATION)
-
-    assert spark.case_at_query == "true"
-    assert spark.case_at_create == "true"
-    assert spark.conf.value == "false"
-    assert spark.conf.changes == ["true", "false"]
-
-
-def test_fabric_creation_never_drops_a_legacy_case_variant_implicitly():
-    spark = _FakeSpark(
-        [("CustomerId", "int"), ("CustomerName", "string")],
-        existing_tables=("customer",),
-    )
-
-    _run(spark, _payload(), destination=FABRIC_DESTINATION)
-
-    assert not any(s.lstrip().upper().startswith("DROP") for s in spark.executed)
-    assert spark.case_at_create == "true"
-    assert spark.conf.value == "false"
-
-
 def test_local_creation_uses_the_registered_folded_schema_and_pascal_table_name():
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(capability, _payload())
 
-    _run(spark, _payload())
+    assert capability.created.startswith("CREATE TABLE `sales_lh__sales`.`Customer`")
 
-    assert _create_statement(spark).startswith(
-        "CREATE TABLE `sales_lh__sales`.`Customer`"
+
+def test_a_complex_query_type_reaches_the_created_table_unchanged():
+    """Whatever ``DESCRIBE QUERY`` spells the type, that is the column's type."""
+
+    capability = _Capability(
+        [
+            ("CustomerId", "int"),
+            ("Balance", "decimal(18,2)"),
+            ("SeenAt", "timestamp"),
+            ("Lines", "array<struct<amount:decimal(9,3)>>"),
+            ("Tags", "map<string,int>"),
+        ]
     )
-    assert spark.case_at_create == "true"
-    assert spark.conf.value == "true"
+    _run(capability, _payload(references=[]))
 
-
-def test_a_failed_create_still_restores_the_session_setting():
-    class _FailingCreate(_FakeSpark):
-        def sql(self, statement: str):
-            if statement.lstrip().upper().startswith("CREATE"):
-                self.case_at_create = self.conf.value
-                raise RuntimeError("create failed")
-            return super().sql(statement)
-
-    spark = _FailingCreate([("CustomerId", "int"), ("CustomerName", "string")])
-
-    with pytest.raises(RuntimeError, match="create failed"):
-        _run(spark, _payload(), destination=FABRIC_DESTINATION)
-
-    assert spark.case_at_create == "true"
-    assert spark.conf.value == "false"
+    statement = capability.created
+    assert "`Balance` decimal(18,2)" in statement
+    assert "`SeenAt` timestamp" in statement
+    assert "`Lines` array<struct<amount:decimal(9,3)>>" in statement
+    assert "`Tags` map<string,int>" in statement
 
 
 def test_the_not_null_header_marks_inferred_columns_not_null():
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string"), ("Note", "string")])
+    capability = _Capability(
+        [("CustomerId", "int"), ("CustomerName", "string"), ("Note", "string")]
+    )
     _run(
-        spark,
+        capability,
         _payload(
             references=[["Primary key", "CustomerId"], ["Not null", "CustomerName"]],
         ),
     )
-    statement = _create_statement(spark)
+    statement = capability.created
     # The primary key and the Not null column are not null; Note is nullable.
     assert "`CustomerId` int NOT NULL" in statement
     assert "`CustomerName` string NOT NULL" in statement
@@ -273,18 +291,18 @@ def test_a_delta_table_is_built_with_no_identity_column():
     audit columns, and nothing else.
     """
 
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
-    _run(spark, _payload())
-    statement = _create_statement(spark)
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
+    _run(capability, _payload())
+    statement = capability.created
     assert statement.startswith(f"CREATE TABLE {CUSTOMER} (\n    `CustomerId` int")
     assert "identity" not in statement.lower()
     assert "generated" not in statement.lower()
 
 
 def test_declared_table_uses_declared_types_and_nullability_not_the_query():
-    spark = _FakeSpark([("CustomerId", "int"), ("CustomerName", "string")])
+    capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(
-        spark,
+        capability,
         _payload(
             schema_mode="declared",
             declared_columns=[
@@ -293,17 +311,17 @@ def test_declared_table_uses_declared_types_and_nullability_not_the_query():
             ],
         ),
     )
-    statement = _create_statement(spark)
+    statement = capability.created
     # The declaration asked for bigint NOT NULL; the query's int is ignored.
     assert "`CustomerId` bigint NOT NULL" in statement
     assert "`CustomerName` string,\n" in statement
 
 
 def test_column_names_are_case_sensitive_against_the_declaration():
-    spark = _FakeSpark([("customerid", "int")])
+    capability = _Capability([("customerid", "int")])
     with pytest.raises(BuildError, match="not returned by the query under the same case"):
         _run(
-            spark,
+            capability,
             _payload(
                 schema_mode="declared",
                 declared_columns=[["CustomerId", "bigint", True]],
@@ -316,10 +334,10 @@ def test_column_names_are_case_sensitive_against_the_declaration():
 
 
 def test_a_declared_column_missing_from_the_query_fails_install():
-    spark = _FakeSpark([("CustomerId", "int")])
+    capability = _Capability([("CustomerId", "int")])
     with pytest.raises(BuildError, match="not returned by the query under the same case: CustomerName"):
         _run(
-            spark,
+            capability,
             _payload(
                 schema_mode="declared",
                 declared_columns=[
@@ -332,10 +350,10 @@ def test_a_declared_column_missing_from_the_query_fails_install():
 
 
 def test_an_undeclared_extra_query_column_fails_install():
-    spark = _FakeSpark([("CustomerId", "int"), ("Extra", "string")])
+    capability = _Capability([("CustomerId", "int"), ("Extra", "string")])
     with pytest.raises(BuildError, match="not in the declared schema"):
         _run(
-            spark,
+            capability,
             _payload(
                 schema_mode="declared",
                 declared_columns=[["CustomerId", "bigint", True]],
@@ -345,23 +363,58 @@ def test_an_undeclared_extra_query_column_fails_install():
 
 
 def test_case_colliding_query_output_names_fail_install():
-    spark = _FakeSpark([("CustomerId", "int"), ("customerid", "bigint")])
+    capability = _Capability([("CustomerId", "int"), ("customerid", "bigint")])
     with pytest.raises(BuildError, match="collide by name"):
-        _run(spark, _payload(references=[]))
+        _run(capability, _payload(references=[]))
 
 
 def test_a_primary_key_naming_a_missing_column_fails_install():
-    spark = _FakeSpark([("CustomerName", "string")])
+    capability = _Capability([("CustomerName", "string")])
     with pytest.raises(BuildError, match="Primary key names column 'CustomerId'"):
-        _run(spark, _payload())
+        _run(capability, _payload())
 
 
 def test_a_query_column_colliding_with_an_audit_column_is_refused():
-    spark = _FakeSpark([("CustomerId", "int"), ("row_insert_datetime", "string")])
+    capability = _Capability([("CustomerId", "int"), ("row_insert_datetime", "string")])
     with pytest.raises(InstallError, match="reserved for Weaver's audit columns"):
-        _run(spark, _payload(references=[]))
+        _run(capability, _payload(references=[]))
 
 
-def test_a_missing_session_is_a_clear_install_error():
-    with pytest.raises(InstallError, match="needs a Spark session"):
+def test_a_query_that_does_not_resolve_names_the_action_and_carries_spark():
+    """The failure moved from running the query to describing it, and it still
+    has to say which action failed and what Spark said about it."""
+
+    capability = _Capability(
+        [], describe_error=RuntimeError("[UNRESOLVED_COLUMN] `NoSuchColumn`")
+    )
+
+    with pytest.raises(InstallError) as raised:
+        _run(capability, _payload())
+
+    message = str(raised.value)
+    assert "build-delta-Sales.Customer" in message
+    assert "`sales_lh__sales`.`Customer`" in message
+    assert "UNRESOLVED_COLUMN" in message
+    assert not any(one.lstrip().upper().startswith("CREATE") for one in capability.statements)
+
+
+def test_a_query_producing_no_columns_is_refused():
+    capability = _Capability([])
+
+    with pytest.raises(InstallError, match="produces no columns"):
+        _run(capability, _payload())
+
+
+def test_a_failing_create_is_not_swallowed():
+    capability = _Capability(
+        [("CustomerId", "int"), ("CustomerName", "string")],
+        create_error=RuntimeError("create failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="create failed"):
+        _run(capability, _payload())
+
+
+def test_no_way_to_run_a_statement_is_a_clear_install_error():
+    with pytest.raises(InstallError, match="no Spark SQL capability"):
         _run(None, _payload())

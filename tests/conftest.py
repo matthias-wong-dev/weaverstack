@@ -354,6 +354,8 @@ def spark():
     from delta import configure_spark_with_delta_pip
     from pyspark.sql import SparkSession
 
+    from weaver.spark.session import apply_emulator_analysis_policy
+
     builder = (
         SparkSession.builder.appName("weaverstack-tests")
         .master("local[2]")
@@ -368,6 +370,10 @@ def spark():
     )
     session = configure_spark_with_delta_pip(builder).getOrCreate()
     session.sparkContext.setLogLevel("ERROR")
+    # This session is the emulator's, so it carries the emulator's policy — the
+    # same one `weaver.spark.session.local_delta_session` applies to the one the
+    # CLI builds.
+    apply_emulator_analysis_policy(session)
     try:
         yield session
     finally:

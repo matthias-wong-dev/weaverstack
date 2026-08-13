@@ -194,20 +194,26 @@ class Runner:
         return resolve(node, self.state, can_refresh=self.can_refresh)
 
     def runtime_scope(self, session=None):
-        """Open the deployed-module scope for this run."""
+        """This run's deployed-module scope, held unopened until something imports.
+
+        A Warehouse-only run never calls ``get()``, so it opens no scope and,
+        on a desktop, submits nothing to open one.
+        """
 
         if self._runtime_scope is None:
-            from .runtime_boundary import open_runtime_scope
+            from .runtime_boundary import LazyRunScope, open_runtime_scope
 
-            self._runtime_scope = open_runtime_scope(session, workspace=self.workspace)
+            self._runtime_scope = LazyRunScope(
+                lambda: open_runtime_scope(session, workspace=self.workspace)
+            )
         return self._runtime_scope
 
     def _close_runtime(self) -> None:
         """Close the run's deployed-module scope."""
 
-        scope, self._runtime_scope = self._runtime_scope, None
-        if scope is not None:
-            scope.close()
+        holder, self._runtime_scope = self._runtime_scope, None
+        if holder is not None:
+            holder.close()
 
     def run(
         self,
@@ -372,7 +378,7 @@ class Runner:
                     state=self.state,
                     resolved=resolved,
                     fault_tolerant=self.request.fault_tolerant,
-                    open_runtime=lambda: self.runtime_scope(session),
+                    open_runtime=self.runtime_scope(session),
                     workspace=self.workspace,
                 )
             except Exception as exc:  # noqa: BLE001 - failures become node results

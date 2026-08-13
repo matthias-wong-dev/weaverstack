@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import pytest
 from factories import (
+    lakehouse_catalogue,
     folder_document,
     lakehouse_table,
     single_document_repository,
@@ -255,7 +256,7 @@ def test_drop_table_action_clears_the_way_for_a_rebuild(
         bound_target(id="target-1", item_id=TARGET),
         resolver=lakehouses.resolver,
         store=lakehouses.store,
-        spark=spark,
+        catalogue=lakehouse_catalogue(spark, lakehouses.resolver, TARGET),
     )
     results = build_item(
         repository, target=TARGET, inventory=installed, rebuild=True
@@ -424,5 +425,5 @@ def read_back(lakehouses, spark):
         bound_target(id="target-1", item_id=TARGET),
         resolver=lakehouses.resolver,
         store=lakehouses.store,
-        spark=spark,
+        catalogue=lakehouse_catalogue(spark, lakehouses.resolver, TARGET),
     )

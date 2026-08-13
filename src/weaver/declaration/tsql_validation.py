@@ -37,11 +37,9 @@ RESULT_PARAMETERS = {TEST: TEST_PARAMETERS, ASSUMPTION: ASSUMPTION_PARAMETERS}
 #: is the caller that has to ask for silence, and it knows to.
 SUPPRESS_PARAMETER = "suppress_result_set"
 
-#: Banners marking where the author's own code sits in the generated procedure.
-#: A generated artefact is read by people — usually when something has gone
-#: wrong — and the first question is always "which of this did I write?".
-#: The same two words a generated load procedure uses, so the artefacts an
-#: operator opens read alike whichever one they landed in.
+#: Banners marking where the author's own code sits in the generated procedure,
+#: so a reader can tell what they wrote from what Weaver added. The same two
+#: words a generated load procedure uses.
 SETUP_BANNER = "/*-- Pre-processing --*/"
 POSTPROCESSING_BANNER = "/*-- Post-processing --*/"
 
@@ -78,10 +76,8 @@ def generate_tsql_validation_batch(document: SesDocument, body: str) -> str:
     """The same body, runnable directly, without installing anything.
 
     What ``weaver test --file`` executes. The locals stand in for the
-    procedure's output parameters and are projected at the end, so a caller gets
-    the same counts from the same SQL — which is the point: a file run that
-    compiled differently would be testing a different thing from the one a build
-    installs.
+    procedure's output parameters and are projected at the end, so a file run
+    gives the same counts from the same SQL a build installs.
     """
 
     parameters = RESULT_PARAMETERS[document.kind]
@@ -146,10 +142,9 @@ def _assumption_body(document: SesDocument, body: str) -> str:
 def _test_body(document: SesDocument, body: str) -> str:
     """Capture both sides, difference them both ways, then correlate.
 
-    The order matters and is the same order the Spark comparison uses: both
-    relations are materialised *first*, so the two ``EXCEPT``s read one snapshot
-    of each rather than re-running the author's queries and differencing data
-    that moved in between.
+    The same order the Spark comparison uses: both relations are materialised
+    first, so the two ``EXCEPT``s read one snapshot of each rather than
+    differencing data that moved between two runs of the author's queries.
     """
 
     qualified = document.qualified
@@ -187,9 +182,8 @@ def _test_body(document: SesDocument, body: str) -> str:
 def _difference(into: str, left: str, right: str) -> str:
     """One side of the symmetric difference, as a set.
 
-    A derived table rather than ``select … into … except …``: the placement
-    rules for ``INTO`` inside a set operation are a detail nobody reading this
-    should have to recall, and wrapping it removes the question.
+    A derived table rather than ``select … into … except …``, which avoids the
+    placement rules for ``INTO`` inside a set operation.
     """
 
     return (
@@ -220,11 +214,10 @@ def _correlated_diagnostics(
 ) -> str:
     """Rank the distinct key values once, then join both sides to them.
 
-    Ranking over a union of the *rows* would be the obvious shape and does not
-    work: the rows are projected with ``*`` — Weaver does not know a Test's
-    columns — so a ``_weaver_side`` added to the union would appear in the
-    output twice. Ranking the keys instead needs only the declared key names,
-    which the header gives, and leaves ``d.*`` to carry the Test's own columns.
+    Ranking over a union of the rows does not work: they are projected with
+    ``*``, since Weaver does not know a Test's columns, so a ``_weaver_side``
+    added to the union would appear twice. Ranking the keys needs only the
+    declared key names and leaves ``d.*`` to carry the Test's own columns.
     """
 
     keys = temp_table_name("#weaver_keys", qualified)
@@ -261,9 +254,9 @@ def _correlated_diagnostics(
 def _unpaired_diagnostics(missing: str, unexpected: str) -> str:
     """No key, so nothing is paired and every row is keyed on its own.
 
-    Each side is numbered within itself and the actual side is offset past the
-    missing count, which is already known — distinct keys throughout, and no
-    claim that any two rows describe one entity.
+    Each side is numbered within itself and the actual side offset past the
+    known missing count: distinct keys throughout, and no claim that two rows
+    describe one entity.
     """
 
     numbered = "row_number() over (order by (select null))"
@@ -286,10 +279,9 @@ def _unpaired_diagnostics(missing: str, unexpected: str) -> str:
 def _shape_guard(expected: str, actual: str, qualified: str) -> str:
     """Two sides that cannot be compared are a broken Test, not a failing one.
 
-    ``EXCEPT`` would say so itself, in a message about a query plan, and the
-    author's mistake is about two relations they believe are the same shape. The
-    column counts come from ``tempdb.sys.columns``, which is where the answer
-    already is once both sides are materialised.
+    ``EXCEPT`` would report it as a query-plan error, while the mistake is about
+    two relations the author believes are the same shape. The column counts come
+    from ``tempdb.sys.columns``, once both sides are materialised.
     """
 
     return (
@@ -313,9 +305,8 @@ def _shape_guard(expected: str, actual: str, qualified: str) -> str:
 def _key_guard(table: str, side: str, document: SesDocument, qualified: str) -> str:
     """A declared key that does not identify rows cannot correlate them.
 
-    Blank and null are refused together, and duplicates are refused, on the same
-    terms a load refuses them. A Test whose key repeats would pair rows
-    arbitrarily and call the result evidence.
+    Blank, null and duplicate keys are refused on the same terms a load refuses
+    them: a Test whose key repeats would pair rows arbitrarily.
     """
 
     columns = document.primary_key
@@ -347,15 +338,14 @@ def _key_guard(table: str, side: str, document: SesDocument, qualified: str) -> 
 def _capture_contract_queries(body: str, into: tuple[str, ...]) -> str:
     """The authored body, with each contract query diverted into a temp table.
 
-    A single pass over the original text, so **everything the author wrote other
-    than the contract queries travels verbatim and in place** — their setup,
-    their comments, their formatting, their statement separators. That is what
-    makes a generated procedure readable by the person who wrote the query in
-    it, and it is why this splices offsets rather than reassembling statements.
+    A single pass over the original text, so everything other than the contract
+    queries travels verbatim and in place — setup, comments, formatting,
+    separators. That is why this splices offsets rather than reassembling
+    statements.
 
     The ``INTO`` is placed by the same offset-exact transform the shape-only
     build uses, so a CTE gets it on the body ``SELECT`` and a set operation on
-    its first branch, rather than wherever text-matching would have put it.
+    its first branch.
     """
 
     contract = [span for span in query_spans(body) if not selects_into(body, span)]

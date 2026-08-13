@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 from factories import (
+    lakehouse_catalogue,
     FixtureInventory,
     bound_target,
     folder_document,
@@ -53,7 +54,7 @@ def read_back(lakehouses, spark) -> "object":
         bound_target(id="target-1", item_id=TARGET),
         resolver=lakehouses.resolver,
         store=lakehouses.store,
-        spark=spark,
+        catalogue=lakehouse_catalogue(spark, lakehouses.resolver, TARGET),
     )
 
 

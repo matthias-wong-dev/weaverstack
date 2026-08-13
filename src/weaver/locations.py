@@ -92,25 +92,18 @@ class LakehouseSparkLocation:
     variable data plane, so they are reached through explicit roots instead, and
     never by making the session point somewhere else.
 
-    That distinction is what lets one session build several Lakehouses in one
-    invocation. Switching the current catalogue between targets would make two
-    destinations that share a schema name indistinguishable; resolving each
-    target's roots keeps them separate by construction::
-
-        locations = {
-            target: resolver.lakehouse_spark_location(target)
-            for target in bound_lakehouse_targets
-        }
+    That is what lets one session build several Lakehouses: switching the
+    current catalogue between targets would make two destinations sharing a
+    schema name indistinguishable.
 
     Roots are plain strings rather than :class:`Location` values because this is
-    what *Spark* addresses: an ``abfss://`` URL on Fabric, a filesystem path in
-    the local emulator. Same contract, different transport.
+    what Spark addresses — an ``abfss://`` URL on Fabric, a filesystem path
+    locally.
 
-    A resolved location is deliberately **not** carried in a build bundle. It is
-    derived from the item at install time, because on Fabric it embeds workspace
-    and item ids and locally it embeds a temporary directory — and a bundle whose
-    identity moved with a temporary path would not be comparable between
-    environments (how-does-build-work §15).
+    A resolved location is never carried in a build bundle. It embeds workspace
+    and item ids on Fabric and a temporary directory locally, so a bundle
+    carrying one would not be comparable between environments
+    (how-does-build-work §15).
     """
 
     #: The Lakehouse this resolves, by its logical name.

@@ -196,12 +196,10 @@ def _staging_base(env: Item) -> str:
 def read_staging(env: Item, *, client: FabricClient) -> dict:
     """What the Environment currently has staged: custom wheels and the env yml.
 
-    A **freshly created** Environment answers 404 here — ``This environment does
-    not have any staged libraries`` — which is the same "nothing yet" that
-    :func:`read_published` already reads from a 404, and has to be read the same
-    way. Treating it as fatal made the very first ``weaver install`` into a new
-    Environment fail, so the one path that had never been exercised was the one
-    that could not work.
+    A freshly created Environment answers 404 here — ``This environment does not
+    have any staged libraries`` — which is the same "nothing yet"
+    :func:`read_published` reads from a 404, and is read the same way. Treated
+    as fatal, it made the first ``weaver install`` into a new Environment fail.
     """
 
     try:
@@ -215,10 +213,10 @@ def read_staging(env: Item, *, client: FabricClient) -> dict:
 def read_published(env: Item, *, client: FabricClient) -> dict:
     """What the Environment has *published* — the live image's libraries.
 
-    The diff that decides whether a republish is needed compares against this,
-    not against staging: staging can hold half-finished changes from an
-    interrupted run, whereas the published revision is what a session actually
-    imports. A never-published Environment answers 404, read as "nothing".
+    The diff that decides whether a republish is needed compares against this
+    rather than staging, which can hold half-finished changes from an
+    interrupted run. A never-published Environment answers 404, read as
+    "nothing".
     """
 
     try:
@@ -320,9 +318,9 @@ def _null_step(name: str, detail: str | None = None):
 def _reporter(session):
     """``session.step`` when there is a Session, and a no-op otherwise.
 
-    Reporting is the caller's, not this module's: a pytest fixture installing
-    Weaver wants no frames, and the CLI wants them badly. One accessor rather
-    than an ``if session`` at every phase.
+    Reporting is the caller's: a pytest fixture installing Weaver wants no
+    frames and the CLI wants them. One accessor rather than an ``if session`` at
+    every phase.
     """
 
     return _null_step if session is None else session.step
@@ -350,11 +348,9 @@ def publish_and_wait(
         if seen.lower() in _TERMINAL_PUBLISH:
             return seen
         time.sleep(poll_interval)
-    # Name the state we actually last saw. The earlier message said "(last state
-    # polled)" literally, so half an hour of waiting ended in a sentence that
-    # described the value instead of containing it — and an empty string here
-    # (Fabric answering with no publishDetails at all) reads very differently
-    # from a publish genuinely stuck in Running.
+    # Name the state last seen rather than describing it: an empty string, from
+    # Fabric answering with no publishDetails, reads very differently from a
+    # publish genuinely stuck in Running.
     raise FabricError(
         f"Environment publish did not finish within {int(timeout)} seconds. Last state: {seen!r}."
     )
@@ -402,20 +398,16 @@ def install(
 ) -> InstallResult:
     """Build the wheel, stage what changed, and publish if anything changed.
 
-    The one supported installation path, and it always finishes the job. There
-    is no stage-without-publish mode: staging is Fabric's scratch area and a
-    session imports the *published* revision, so stopping half way leaves a
-    workspace that looks installed and cannot import.
+    The one installation path, and it always finishes: there is no
+    stage-without-publish mode, because staging is Fabric's scratch area and a
+    session imports the published revision.
 
-    The wanted wheel and dependencies are diffed against the Environment's
-    published revision, so an ordinary code change replaces only the wheel, an
-    unchanged dependency set is left alone, and a rerun that changes nothing
-    (same source — the version is stable) does not republish at all.
+    The wanted wheel and dependencies are diffed against the published revision,
+    so a code change replaces only the wheel, an unchanged dependency set is
+    left alone, and a rerun over the same source does not republish.
 
-    ``session`` is optional and used only for reporting. Publishing is minutes
-    of waiting on Fabric, so the steps are framed: without them the command sits
-    silent long enough to look hung, which is the one thing a five-minute wait
-    must not do.
+    ``session`` is used only for reporting. Publishing is minutes of waiting, so
+    the steps are framed rather than silent.
     """
 
     root = root or project_root()

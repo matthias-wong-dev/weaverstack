@@ -18,10 +18,9 @@ This is arithmetic only. Nothing here touches the filesystem — every location
 can be inspected before any mutation occurs. Mutation is a
 :class:`~weaver.store.Store` concern.
 
-Together with the Fabric resolver (checkpoint 7) this is the *only* place that
-knows how a name becomes a location. Everything downstream receives resolved
-locations and never derives them, which is what makes "every target root is
-explicit" enforceable rather than aspirational.
+With the Fabric resolver, this is the only place that knows how a name becomes
+a location. Everything downstream receives resolved locations and never derives
+them.
 """
 
 from __future__ import annotations
@@ -47,9 +46,8 @@ TABLES_AREA = "Tables"
 class LocalResolver:
     """Resolves level-three identities against a local workspace root.
 
-    Checkpoint 7 adds a Fabric resolver with the same surface, returning URL
-    locations. No shared protocol is declared yet: one implementation is a
-    guess at the shape, two make it visible.
+    The Fabric resolver has the same surface, returning URL locations. No
+    shared protocol is declared between them.
     """
 
     def __init__(self, workspace: LocalWorkspace) -> None:
@@ -87,8 +85,8 @@ class LocalResolver:
         """The root Spark writes through, for a Lakehouse.
 
         The local counterpart of the Fabric ``abfss://`` root: same contract,
-        filesystem transport, and the same reason for existing — a destination is
-        addressed explicitly rather than by attaching the session to it.
+        filesystem transport, and a destination addressed explicitly rather than
+        by attaching the session to it.
         """
 
         return self.lakehouse(item).value
@@ -205,11 +203,7 @@ class LocalResolver:
 
     @property
     def control_tables_root(self) -> Location:
-        """``<weaver-lakehouse>/Tables`` — the control-plane tables.
-
-        The table names and whether they sit under a schema are a checkpoint 16
-        decision; this is only their root.
-        """
+        """``<weaver-lakehouse>/Tables`` — the root of the control-plane tables."""
 
         return self.tables_root(ItemRef(self._weaver_lakehouse_name()))
 

@@ -1036,6 +1036,14 @@ class FakeSql:
             raise self._error
 
 
+def lakehouse_catalogue(spark, resolver, item: str):
+    """Catalogue operations against one Lakehouse, as a caller with Spark builds them."""
+
+    from weaver.spark import SparkCatalogue
+
+    return SparkCatalogue(spark, resolver.spark_destination(ItemRef(item)))
+
+
 def spark_destination(
     item: str = "Sales_LH", *, schema_prefix: str = "sales_lh__", **extra
 ):
@@ -1068,6 +1076,31 @@ def resolved_target(
     )
 
 
+def spark_sql_capability(spark):
+    """A Session's Spark SQL capability, backed by a session that is right here.
+
+    The same two things a host running in a Spark session does: hold one
+    identifier-case scope over the statements, and answer with the last one's
+    rows. A test supplying a ``spark`` therefore gets a context that behaves as
+    the in-session position does, and can still assert on what reached it.
+    """
+
+    from weaver.build_bundle.executors.spark_case import exact_identifier_case
+    from weaver.session.base import run_spark_statements
+
+    def many(statements, *, exact_case: bool = False):
+        ordered = list(statements)
+        if not ordered:
+            return []
+        with exact_identifier_case(spark, enabled=exact_case):
+            return run_spark_statements(spark, ordered)
+
+    def one(statement: str, *, exact_case: bool = False):
+        return many([statement], exact_case=exact_case)
+
+    return one, many
+
+
 def installation_context(
     *,
     spark=None,
@@ -1085,16 +1118,21 @@ def installation_context(
     executor's behaviour when a capability is *missing* is a real claim — a
     ``tsql`` action with no SQL executor must fail saying so, not fail obscurely
     somewhere deeper.
+
+    A supplied ``spark`` also supplies the Spark SQL capability over it, because
+    that is what a host with a session of its own hands an executor.
     """
 
     from weaver.build_bundle.executors.base import InstallationContext
 
+    one, many = (None, None) if spark is None else spark_sql_capability(spark)
     return InstallationContext(
-        spark=spark,
         resolver=resolver,
         store=store,
         target=target if target is not None else resolved_target(),
         sql=sql,
+        spark_sql=one,
+        spark_sql_batch=many,
         targets=targets or {},
         epoch=epoch,
     )

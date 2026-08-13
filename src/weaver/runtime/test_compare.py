@@ -144,9 +144,8 @@ def _check_key(frame: Any, *, side: str, key: tuple[str, ...], what: str) -> Non
     blank = frame.where(blank_key_predicate(key, alias="")).take(1)
     if blank:
         raise ValidationError(
-            f"{what}: the declared Primary key ({', '.join(key)}) is null or blank on "
-            f"the {side} side, so it cannot identify a row. A key that does not "
-            "identify rows is a Test contract failure, not evidence about the data"
+            f"{what}: the declared Primary key ({', '.join(key)}) is null or "
+            f"blank on the {side} side, so it cannot identify a row."
         )
 
     duplicated = frame.groupBy(*[f"`{column}`" for column in key]).count()
@@ -156,9 +155,9 @@ def _check_key(frame: Any, *, side: str, key: tuple[str, ...], what: str) -> Non
             f"{column}={repeated[0][index]!r}" for index, column in enumerate(key)
         )
         raise ValidationError(
-            f"{what}: the declared Primary key ({', '.join(key)}) repeats on the "
-            f"{side} side ({values}), so it cannot correlate the two sides of the "
-            "comparison. Declare a key that identifies a row, or declare none"
+            f"{what}: the declared Primary key ({', '.join(key)}) repeats on "
+            f"the {side} side ({values}), so it cannot correlate the two sides. "
+            "Declare a key that identifies a row, or declare none."
         )
 
 

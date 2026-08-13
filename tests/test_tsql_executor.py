@@ -36,7 +36,7 @@ ACTION = InstallAction(
 
 def _context(sql):
     return InstallationContext(
-        spark=None, resolver=None, store=None, target=None, sql=sql
+        resolver=None, store=None, target=None, sql=sql
     )
 
 

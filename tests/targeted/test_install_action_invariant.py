@@ -152,3 +152,28 @@ def test_the_named_execution_test_exists(kind: str, test_name: str):
 def test_every_deferral_says_why():
     for kind, reason in DEFERRED.items():
         assert reason and len(reason) > 20, kind
+
+
+def test_no_executor_declares_where_it_has_to_run():
+    """Every build action runs in the Installer, in whichever position that is.
+
+    Executors used to declare ``needs_spark``, and the Installer read it to send
+    those actions to a second Installer constructed inside a Fabric session.
+    They now reach for the capability their work needs — storage, REST, TDS, or
+    the Session's Spark SQL — and the Session knows what that means where it is.
+    So there is no class of action that travels differently, and an executor
+    that started declaring one again would bring the routing back with it.
+    """
+
+    from weaver.build_bundle.executors import default_executors
+
+    declaring = sorted(
+        name
+        for name, executor in default_executors().items()
+        if hasattr(executor, "needs_spark")
+    )
+
+    assert not declaring, (
+        "these executors declare where they have to run, which the Installer no "
+        f"longer routes on: {declaring}"
+    )

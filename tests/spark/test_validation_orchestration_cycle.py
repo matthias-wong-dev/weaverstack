@@ -504,7 +504,7 @@ def test_python_source_says_to_import_the_class_instead(validated, spark, tmp_pa
         "    def actual(self):\n        return None\n",
     )
 
-    with pytest.raises(CommandError, match="already directly runnable"):
+    with pytest.raises(CommandError, match="Import the class and call read"):
         run(validated, spark, file=str(path))
 
 

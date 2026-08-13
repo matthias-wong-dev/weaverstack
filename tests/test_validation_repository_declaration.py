@@ -495,7 +495,7 @@ def test_a_test_may_not_author_read(lakehouse):
 """
     _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
 
-    with pytest.raises(DiscoveryError, match="must not define read"):
+    with pytest.raises(DiscoveryError, match="which a Test may not"):
         parse(lakehouse)
 
 

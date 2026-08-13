@@ -1,27 +1,25 @@
-"""Spark SQL table build — inference and creation in one self-contained action.
+"""Spark SQL table build — shape inference and creation in one action.
 
-A Spark SQL table's shape is only settled by running its query in the session, so
-its payload is not finished SQL. It is a JSON instruction (built by
-:func:`weaver.ses.ddl._spark_table_ddl`) that this executor completes in a single
-pass, the Spark counterpart of the old T-SQL self-contained script
-(how-does-build-work §2):
+A Spark SQL table's shape is settled by asking Spark about its query, so the
+payload is a JSON instruction rather than finished SQL
+(:func:`weaver.declaration.ddl._spark_table_ddl`). This executor completes it:
 
-1. run the query and read the resulting ``DataFrame`` schema — Spark resolves the
-   column names and types from the logical plan without running a job, so no rows
-   are read;
-2. validate the columns with the same guards a declared schema passes at parse
-   (:func:`weaver.ses.columns.validate_build_columns`), driven entirely by the
-   frozen payload — the Weaver document source is never reopened;
+1. ``DESCRIBE QUERY``, after whatever setup the body needs — one piece of work,
+   so a temporary view the query reads is registered in the session describing it;
+2. validate the columns with the guards a declared schema passes at parse
+   (:func:`weaver.declaration.columns.validate_build_columns`);
 3. choose the physical business columns — declared types when declared, the
-   query's inferred types otherwise;
+   query's otherwise;
 4. append Weaver's audit columns;
 5. create the table with strict ``CREATE TABLE``.
 
-A Delta table has no identity column, so nothing here handles one. Native
-identity is what makes the column worth having, and no Delta version Weaver
-runs on generates it, so the ``Identity`` header is a Warehouse-only
-declaration the parser refuses elsewhere (:data:`weaver.declaration.metadata.IDENTITY_LANGUAGES`)
-rather than something accepted here and quietly not materialised.
+Only 1 and 5 reach Spark, and each is a statement, so this runs wherever the
+Installer does. ``DESCRIBE QUERY`` answers what reading the ``DataFrame`` schema
+used to — the output columns in order and each type as ``simpleString`` spells
+it — and neither reads a row.
+
+A Delta table has no identity column, so the ``Identity`` header is a
+Warehouse-only declaration the parser refuses elsewhere.
 """
 
 from __future__ import annotations
@@ -34,7 +32,6 @@ from ...declaration.columns import validate_build_columns
 from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
 from ..models import InstallAction
 from .base import InstallationContext
-from .spark_case import exact_identifier_case
 
 #: Reserved audit names, in the Delta (underscored) spelling, for collision
 #: detection against an inferred query's own output columns.
@@ -42,9 +39,6 @@ _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_
 
 class SparkTableExecutor:
 
-    #: This executor reaches Spark, so on a host without one the action
-    #: crosses whole rather than the capability being faked underneath it.
-    needs_spark = True
     name = "spark_table"
 
     def execute(
@@ -55,75 +49,112 @@ class SparkTableExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"spark_table action {action.id!r} has no payload")
-        if context.spark is None:
+        if context.spark_sql is None or context.spark_sql_batch is None:
             raise InstallError(
-                f"spark_table action {action.id!r} needs a Spark session but none "
-                "was provided"
+                f"spark_table action {action.id!r} has no way to run a Spark "
+                "statement: this context offers no Spark SQL capability"
             )
 
         instruction = json.loads(payload.decode("utf-8"))
-        catalogue = context.catalogue
+        names = context.names
         # Both sides are resolved against the batch's destination: the table this
         # creates, and every managed object its query reads. Inferring the shape
         # from a query that resolved through the session's own catalogue would
         # read some other Lakehouse's table of that name — and then create a table
         # of that shape, silently, in the right place.
-        qualified = catalogue.expand(instruction["object"])
-        query = catalogue.expand(instruction["source_query"])
+        qualified = names.expand(instruction["object"])
+        query = names.expand(instruction["source_query"])
 
-        # Fabric defaults case-sensitive analysis off. Weaver identities are exact,
-        # so the source query and the resulting DDL must share one exact-case scope:
-        # otherwise a table created as ``CustomerEnriched`` cannot be consumed by
-        # the next action in the same coordinated build.
-        with exact_identifier_case(
-            context.spark,
-            enabled=catalogue.destination.preserve_table_identifier_case,
-        ):
-            # An authored body may build a temporary view before selecting from
-            # it. The setup runs for its effect; the query that follows is the
-            # one whose shape becomes the table.
-            for statement in instruction.get("setup") or ():
-                context.spark.sql(catalogue.expand(statement))
-            frame = context.spark.sql(query)
-            query_columns = tuple(field.name for field in frame.schema.fields)
-            query_types = {
-                field.name: field.dataType.simpleString() for field in frame.schema.fields
-            }
+        # Fabric defaults case-sensitive analysis off, and Weaver identities are
+        # exact, so the query and the DDL must share one scope — or a table
+        # created as ``CustomerEnriched`` cannot be read by the next action.
+        exact_case = names.exact_case
 
-            declared = instruction["declared_columns"]
-            declared_names = (
-                tuple(name for name, _type, _nn in declared)
-                if declared is not None
-                else None
-            )
-            references = tuple(
-                (label, column) for label, column in instruction["references"]
-            )
-            business_columns = validate_build_columns(
-                qualified,
-                query_columns,
-                declared_columns=declared_names,
-                references=references,
-            )
+        # The setup and the describe are one piece of work: a view registered in
+        # a different session is one the query cannot see.
+        setup = [names.expand(statement) for statement in instruction.get("setup") or ()]
+        query_columns, query_types = self._query_shape(
+            [*setup, f"DESCRIBE QUERY {query}"],
+            context,
+            action=action,
+            qualified=qualified,
+            exact_case=exact_case,
+        )
 
-            business = self._physical_columns(
-                qualified, business_columns, declared, query_types, references
-            )
-            physical = business + [
-                tuple(entry) for entry in instruction["audit_columns"]
-            ]
+        declared = instruction["declared_columns"]
+        declared_names = (
+            tuple(name for name, _type, _nn in declared)
+            if declared is not None
+            else None
+        )
+        references = tuple(
+            (label, column) for label, column in instruction["references"]
+        )
+        business_columns = validate_build_columns(
+            qualified,
+            query_columns,
+            declared_columns=declared_names,
+            references=references,
+        )
 
-            statement = _create_table_sql(
-                qualified,
-                physical,
-                column_mapping=instruction.get("column_mapping", True),
-            )
-            context.spark.sql(statement)
+        business = self._physical_columns(
+            qualified, business_columns, declared, query_types, references
+        )
+        physical = business + [tuple(entry) for entry in instruction["audit_columns"]]
+
+        statement = _create_table_sql(
+            qualified,
+            physical,
+            column_mapping=instruction.get("column_mapping", True),
+        )
+        context.spark_sql(statement, exact_case=exact_case)
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
             "columns": [name for name, _type, _nn in physical],
         }
+
+    def _query_shape(
+        self,
+        statements: list[str],
+        context: InstallationContext,
+        *,
+        action: InstallAction,
+        qualified: str,
+        exact_case: bool,
+    ) -> tuple[tuple[str, ...], dict[str, str]]:
+        """The query's output columns, in order, with each column's type.
+
+        A query that does not resolve fails here rather than at the create, so
+        the failure names the action and carries Spark's message.
+        """
+
+        try:
+            rows = context.spark_sql_batch(statements, exact_case=exact_case)
+        except Exception as exc:
+            raise InstallError(
+                f"spark_table action {action.id!r} could not read the shape of "
+                f"the query behind {qualified}: {exc}"
+            ) from exc
+
+        columns: list[str] = []
+        types: dict[str, str] = {}
+        for row in rows:
+            name = row.get("col_name")
+            data_type = row.get("data_type")
+            if not name or not data_type:
+                raise InstallError(
+                    f"spark_table action {action.id!r}: DESCRIBE QUERY answered "
+                    f"for {qualified} with a row naming no column and type: {row!r}"
+                )
+            columns.append(name)
+            types[name] = data_type
+        if not columns:
+            raise InstallError(
+                f"spark_table action {action.id!r}: the query behind {qualified} "
+                "produces no columns"
+            )
+        return tuple(columns), types
 
     def _physical_columns(
         self,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..spark.catalogue import is_absent
 from .render import (
     InstallationScope,
     InstallationScopes,
@@ -16,32 +17,6 @@ from .render import (
     qualified_name,
 )
 from .tables import CatalogueTable
-
-#: Spark's error class for a table or view that is not registered. A missing
-#: *schema* reports the same class, which is what we want — an installation whose
-#: schema `_` has never been created is as absent as one whose table has not.
-_ABSENT = frozenset({"TABLE_OR_VIEW_NOT_FOUND"})
-
-
-def _is_absent(exception: Exception) -> bool:
-    """Whether this exception means "not created yet" rather than "went wrong".
-
-    Keyed on Spark's error class rather than on message text, so a reworded
-    message cannot silently turn an infrastructure failure into an empty read. The
-    message is consulted only when no class is available, which is the case for a
-    session or connector that raises a plain error.
-    """
-
-    error_class = getattr(exception, "getErrorClass", None)
-    if callable(error_class):
-        try:
-            found = error_class()
-        except Exception:  # pragma: no cover - defensive; a broken accessor is not absence
-            found = None
-        if found:
-            return found in _ABSENT
-    return False
-
 
 def read_table(
     catalogue: Any,
@@ -72,9 +47,9 @@ def read_table(
 
     name = catalogue.expand(qualified_name(table))
     try:
-        existing = catalogue.spark.table(name).columns
+        existing = catalogue.columns_of(name)
     except Exception as exception:
-        if _is_absent(exception):
+        if is_absent(exception):
             return ()
         raise
 
@@ -90,8 +65,7 @@ def read_table(
     if scope is not None:
         where = f" WHERE {scope.predicate}"
 
-    rows = catalogue.spark.sql(f"SELECT {projected} FROM {name}{where}").collect()
-    return tuple(row.asDict() for row in rows)
+    return tuple(catalogue.rows(f"SELECT {projected} FROM {name}{where}"))
 
 
 def _projected_column(column, actual: str | None) -> str:
@@ -136,21 +110,13 @@ def read_installations(
 ) -> dict[str, tuple[Row, ...]]:
     """Every catalogue table, read **once** for every installation at issue.
 
-    The read a build wants. A build is pointed at several items and they share
-    the same physical catalogue tables, so reading per item would cost
-
-    .. code-block:: text
-
-        catalogue tables × bound items
-
-    round trips to answer what one predicate per table already answers. More
-    items make the predicate longer and the result larger; they do not make it
-    another read. That is the whole difference, and it is why this returns rows
-    for all scopes together and leaves the grouping to Python — see
+    Bound items share the same physical tables, so reading per item would cost
+    ``catalogue tables × bound items`` round trips to answer what one predicate
+    per table already answers. Rows come back for every scope together and the
+    grouping is done in Python — see
     :func:`weaver.catalogue.state.read_catalogue_state`.
 
-    Still scoped, and returns nothing outside ``scopes``: a build has no more
-    business seeing an unrelated installation's rows than it had before.
+    Still scoped: nothing outside ``scopes`` is returned.
     """
 
     from .tables import CATALOGUE_TABLES

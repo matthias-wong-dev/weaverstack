@@ -33,7 +33,6 @@ def _action():
 def _context(resolver):
     bound = BoundTarget(id="lakehouse-Sales", kind="lakehouse", item_id="Sales")
     return InstallationContext(
-        spark=None,
         resolver=resolver,
         store=FilesystemStore(),
         target=ResolvedTarget(bound=bound, lakehouse=ItemRef("Sales")),

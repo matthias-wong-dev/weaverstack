@@ -5,9 +5,10 @@ optional structured details, or raises. It never reads the repository, resolves
 a dependency or selects a target: those decisions are all in the bundle already.
 The installer owns timing, status and reporting; an executor owns the work.
 
-The context carries runtime services — a Spark session, the resolver and store —
-plus the one target the current batch is bound to. It carries no planning input,
-and no way back to the repository: everything an action needs is its payload.
+The context carries runtime capabilities — the resolver, the store, Warehouse
+SQL, Spark SQL — plus the one target the current batch is bound to. It carries no
+planning input and no way back to the repository: everything an action needs is
+its payload.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from typing import Any, Mapping, Protocol
 
 from ...errors import InstallError
 from ...locations import LakehouseSparkLocation
-from ...spark import SparkCatalogue, SparkDestination
+from ...spark import SparkDestination, SparkNaming
 from ...store import Store
 from ...targets import ItemRef
 from ..models import InstallAction
@@ -39,18 +40,14 @@ class ResolvedTarget:
         the catalogue name — what a statement calls it. Fabric's four-part
         ``workspace.lakehouse.schema.object``; locally the folded database name.
 
-    Both are needed, and neither substitutes for the other: a folder is created at
-    a path and has no catalogue name, while a view exists only as a name and has no
-    path of its own.
+    Neither substitutes for the other: a folder is created at a path and has no
+    catalogue name, while a view exists only as a name.
 
-    Resolution happens here, once per target, rather than in each executor. An
-    executor that derived either for itself would be re-deciding where an action
-    lands, which is a planning decision it is not allowed to make. It is also what
-    lets one session build several destinations, and write the catalogue to a
-    different one again, without ever switching what the session is attached to.
+    Resolved once per target rather than in each executor, so no executor
+    re-decides where an action lands — and so one session can build several
+    destinations without switching what it is attached to.
 
-    Both are None for a Warehouse target, which is reached over TDS and has
-    neither.
+    Both are None for a Warehouse target, which is reached over TDS.
     """
 
     bound: BoundTarget
@@ -63,26 +60,26 @@ class ResolvedTarget:
 class InstallationContext:
     """Runtime services and the one target the current batch is bound to.
 
-    ``spark`` runs Lakehouse work; ``sql`` runs Warehouse (T-SQL) work. A batch
-    names one target, so only the capability its actions need has to be present.
+    ``spark_sql`` runs Lakehouse work; ``sql`` runs Warehouse (T-SQL) work. A
+    batch names one target, so only the capability its actions need has to be
+    present.
 
     ``targets`` holds every target the plan declared, already resolved. It exists
-    for the one action that legitimately spans two of them — an alias, which
-    points a name in ``target`` at an object in another — and it carries resolved
-    targets rather than ids so that a second destination is addressed exactly as
-    the batch's own is, and never derived by an executor.
+    for the one action that spans two of them — an alias, which points a name in
+    ``target`` at an object in another — and it carries resolved targets rather
+    than ids so a second destination is addressed exactly as the batch's own is.
     """
 
-    spark: Any
     resolver: Any
     store: Store
     target: ResolvedTarget
     sql: Any = None
     #: One Spark SQL statement, wherever this host's Spark is, carrying Weaver's
-    #: identifier-case scope with it. Present on a desktop where ``spark`` is
-    #: not: an executor that only needs to *ask Spark something* can stay here
-    #: and let the question cross, rather than crossing whole.
+    #: identifier-case scope with it.
     spark_sql: Any = None
+    #: Several Spark SQL statements as one piece of work — ordered, one
+    #: submission where they cross, one identifier-case scope over all of them.
+    spark_sql_batch: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: This installation's publication instant, resolved into ``{{epoch}}``. One
     #: value for the whole run, so every Registry row a build writes carries the
@@ -102,13 +99,12 @@ class InstallationContext:
         return found
 
     @property
-    def catalogue(self) -> SparkCatalogue:
-        """Catalogue operations against *this batch's* destination.
+    def names(self) -> SparkNaming:
+        """What this batch's destination calls things.
 
-        Built per access rather than stored, so the context stays a frozen record
-        of what was resolved. Failing here — rather than falling back to the
-        session's own catalogue — is the point: an action with nowhere to go must
-        stop, not land somewhere plausible (how-does-build-work §4).
+        Failing rather than falling back to the session's own catalogue is what
+        stops an action with nowhere to go from landing somewhere plausible
+        (how-does-build-work §4).
         """
 
         if self.target.destination is None:
@@ -116,7 +112,7 @@ class InstallationContext:
                 f"target {self.target.bound.id!r} resolved to no Spark destination, "
                 "so a statement naming an object has nowhere to run"
             )
-        return SparkCatalogue(self.spark, self.target.destination)
+        return SparkNaming(self.target.destination)
 
 
 @dataclass(frozen=True)

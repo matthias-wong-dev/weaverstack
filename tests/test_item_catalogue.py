@@ -269,32 +269,26 @@ class _FakeCatalogue:
 
     def __init__(self, columns_by_table):
         self._columns = columns_by_table
-        self.spark = self
 
     def expand(self, token: str) -> str:
         return token.strip("{}").replace("object:", "")
 
-    def table(self, name: str):
+    def columns_of(self, name: str) -> tuple[str, ...]:
         table = name.split(".", 1)[1]
         if table not in self._columns:
             raise _Absent(name)
-        return self
+        return ()
 
-    def __call__(self, *_a, **_k):
+    def rows(self, *_a, **_k):
         raise AssertionError("no rows should be read")
-
-    @property
-    def columns(self):
-        return self._current
 
 
 class _Shaped(_FakeCatalogue):
-    def table(self, name: str):
+    def columns_of(self, name: str) -> tuple[str, ...]:
         table = name.split(".", 1)[1]
         if table not in self._columns:
             raise _Absent(name)
-        self._current = self._columns[table]
-        return self
+        return tuple(self._columns[table])
 
 
 def test_a_registry_without_the_epoch_column_is_refused_by_name():

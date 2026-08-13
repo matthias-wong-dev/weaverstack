@@ -347,7 +347,7 @@ def test_a_users_own_schema_in_the_weaver_lakehouse_survives_initialisation(spar
             weaver_lakehouse=ItemRef("Weaver"), workspace=workspace, store=store, spark=spark
         )
         assert result.succeeded, _failures(result.report)
-        assert weaver.sql("SELECT * FROM {{object:Scratch.Notes}}").count() == 0
+        assert weaver.sql("SELECT * FROM {{object:Scratch.Notes}}") == []
     finally:
         spark.sql(f"DROP SCHEMA IF EXISTS {weaver.qualified_schema('Scratch')} CASCADE")
         _drop_catalogue_schema(spark)

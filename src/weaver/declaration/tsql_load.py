@@ -127,9 +127,8 @@ def generate_tsql_load_script(
 def _result_parameters() -> str:
     """The result fields, declared as optional outputs on the procedure.
 
-    Optional so that ``exec [_].[Load Sales.Customer];`` still works by hand:
-    someone running the load to see whether it works should not have to declare
-    seven variables first. A caller that wants the numbers asks for them.
+    Optional so ``exec [_].[Load Sales.Customer];`` still works by hand without
+    declaring seven variables first.
     """
 
     return "\n".join(
@@ -140,10 +139,9 @@ def _result_parameters() -> str:
 def _result_assignment(**values: str) -> str:
     """Fill the output parameters, at one of the procedure's exits.
 
-    Every exit assigns *all* of them. A caller reading a field the procedure
-    happened not to set on the path it took would get the ``null`` default and
-    have no way to tell it from a real one, so the defaults exist to make the
-    parameters optional rather than to be observed.
+    Every exit assigns all of them: an unset field would read as its ``null``
+    default and be indistinguishable from a real one. The defaults exist to make
+    the parameters optional rather than to be observed.
     """
 
     defaults = {
@@ -165,17 +163,15 @@ def _result_assignment(**values: str) -> str:
 def _static_gate(names: dict, contract: LoadContract) -> str:
     """The check a ``Static`` object makes before it does anything else.
 
-    Baked into the procedure rather than performed by whoever calls it, because
-    the procedure is an independently runnable artefact: someone executing it by
-    hand must get the same answer an orchestrated run gets, and a caller-side
-    check would be a rule that only applied when Weaver was driving.
+    Baked into the procedure rather than performed by its caller, because the
+    procedure is independently runnable: running it by hand must give the same
+    answer an orchestrated run gets.
 
     Before the staging query, so a populated static table costs one existence
-    check rather than a full source read. And ``exists`` rather than a count:
-    the question is whether the table has been seeded, not how much.
+    check rather than a full source read — and ``exists`` rather than a count,
+    because the question is whether it has been seeded.
 
-    A non-static object gets a comment. Emitting the branch and disabling it
-    would leave a reader wondering which way it went.
+    A non-static object gets a comment rather than a disabled branch.
     """
 
     if not contract.static:
@@ -196,15 +192,13 @@ def _static_gate(names: dict, contract: LoadContract) -> str:
 def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> str:
     """Run the author's program, materialising each query it produces.
 
-    The body is emitted in the order it was written. Setup is not a preamble
-    that happens to come first — an author may build a working table, stage from
-    it, then build another and name the retired keys from *that* — so a setup
-    statement written between two queries is run between them, where it was put.
+    The body is emitted in the order it was written, so a setup statement
+    between two queries runs between them: an author may build a working table,
+    stage from it, then build another and name the retired keys from that.
 
-    The staging query is wrapped rather than inlined, because a duplicate key is
-    identified by its rank and computing the rank later would mean reading the
-    staged rows twice. With no key there is nothing to rank and the query is
-    staged as it stands.
+    The staging query is wrapped rather than inlined because a duplicate key is
+    identified by its rank, and ranking later would read the staged rows twice.
+    With no key there is nothing to rank.
     """
 
     pieces = [TRANSFORMATION_BANNER]
@@ -225,16 +219,14 @@ def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> s
 def _hoisted(query: str, temp_table: str) -> str:
     """The author's query, diverted into a session temp table of its own.
 
-    Because a query cannot always be a subquery. ``with … select …`` is a legal
-    statement and an illegal derived table, so ``from (<query>) as s`` — which is
-    how ranking and key-matching would otherwise reach the rows — is a syntax
-    error for every body that opens with a CTE. Running the query as the
-    statement it is, into a table, and reading *that* works whatever the query's
-    shape.
+    A query cannot always be a subquery: ``with … select …`` is a legal
+    statement and an illegal derived table, so ``from (<query>) as s`` is a
+    syntax error for any body opening with a CTE. Running the query as the
+    statement it is, into a table, works whatever its shape.
 
     The ``INTO`` is placed by the same offset-exact transform the shape-only
     build uses, so a CTE gets it on the body ``SELECT`` and a ``UNION`` on its
-    first branch, rather than wherever text-matching would have put it.
+    first branch.
     """
 
     return (
@@ -246,10 +238,9 @@ def _hoisted(query: str, temp_table: str) -> str:
 def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
     """Materialise the object's rows, ranking duplicate keys as it goes.
 
-    The rank is what identifies a duplicate, and it is computed here rather than
-    later because computing it later would mean reading the staged rows twice.
-    With no key there is nothing to rank, and the query becomes the staging
-    table directly.
+    The rank identifies a duplicate, and is computed here because computing it
+    later would read the staged rows twice. With no key there is nothing to
+    rank, and the query becomes the staging table directly.
     """
 
     if not contract.primary_key:
@@ -272,10 +263,8 @@ def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
 def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
     """Settle which target rows the author's second query actually names.
 
-    Three things are decided here rather than at the delete, and the reason is
-    the same for all three: the stability threshold has to be checked against
-    what will *really* be removed, and a count taken from the raw claim would
-    be a count of what was asked for.
+    Narrowed here rather than at the delete, so the stability threshold is
+    checked against what will really be removed rather than what was asked for:
 
     .. code-block:: text
 
@@ -283,10 +272,9 @@ def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
         not blank     whitespace identifies no row a person would call a match
         in the target claiming a key that was never there deletes nothing
 
-    So this table is both the count and the driver: what it holds is exactly
-    what will go, and ``rows_deleted`` stays a report of rows actually removed.
-    The target is read before anything modifies it, which is what makes the
-    guard a decision not to start rather than an unwind.
+    The table is both the count and the driver, so ``rows_deleted`` reports rows
+    actually removed. The target is read before anything modifies it, which
+    makes the guard a decision not to start rather than an unwind.
     """
 
     claim = temp_table_name("#weaver_delete_claim", names["object"])
@@ -382,11 +370,9 @@ def _reconciliation(
 ) -> str:
     """Remove the target rows this load retires — a physical delete.
 
-    Which rows those are is the whole of what ``Incremental`` decides. A
-    non-incremental source is the whole truth, so a row it stopped producing has
-    been retired and absence is the signal. An incremental source shows a window
-    instead, so absence says nothing and only an explicit second query can
-    retire anything.
+    Which rows those are is what ``Incremental`` decides. A non-incremental
+    source is the whole truth, so absence retires a row; an incremental source
+    is a window, so only an explicit second query can retire anything.
     """
 
     if claims_deletes:
@@ -415,11 +401,10 @@ def _reconciliation(
 def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     """Drop whatever a previous run left behind, newest dependency first.
 
-    Only the tables this procedure actually makes. An unkeyed load has no reject
-    or upsert table — with no key nothing can be matched, so there is nothing to
-    reject and no upsert set — and a load whose author named no deletes has no
-    delete table. Dropping them anyway would leave a reader hunting for the
-    statement that creates them.
+    Only the tables this procedure makes. An unkeyed load has no reject or
+    upsert table, and one whose author named no deletes has no delete table;
+    dropping them anyway would send a reader hunting for the statement that
+    creates them.
     """
 
     if not contract.primary_key:
@@ -439,8 +424,8 @@ def _end_cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> s
     """Clear the intermediate tables, unless they are the evidence of a problem.
 
     A run that rejected nothing leaves nothing to look at, so its artefacts go.
-    A run that rejected rows keeps them all: the reject table names what was
-    refused, and the others are what make the rejection explicable.
+    One that rejected rows keeps them all: the reject table names what was
+    refused, and the others make the rejection explicable.
     """
 
     cleanup = _cleanup(names, contract, claims_deletes)
@@ -479,10 +464,9 @@ def _column_metadata_sql(names: dict, contract: LoadContract) -> str:
 def _update_select(names: dict, contract: LoadContract, source_column_filter: str) -> str:
     """Build the UPDATE SET list: every loadable column except the key.
 
-    The key is excluded because it is what matched the rows — setting a column
-    to the value it was joined on is work that cannot change anything. The audit
-    columns are appended unconditionally, since an updated row's update time and
-    live sentinel are Weaver's to state.
+    The key is excluded because it is what matched the rows. The audit columns
+    are appended unconditionally: an updated row's update time and live sentinel
+    are Weaver's to state.
     """
 
     if not contract.primary_key:
@@ -526,9 +510,9 @@ def _update_select(names: dict, contract: LoadContract, source_column_filter: st
 def _table_names(document: SesDocument, procedure_name: str) -> dict:
     """The five names one load deals in, quoted once here and reused.
 
-    The intermediate tables sit in the object's own schema beside it, which is
-    the reference's arrangement: they belong to the object being loaded, not to
-    the generated ``_`` schema, which holds procedures.
+    The intermediate tables sit in the object's own schema beside it: they
+    belong to the object being loaded, not to the generated ``_`` schema, which
+    holds procedures.
     """
 
     schema = document.object_id.schema
@@ -554,9 +538,9 @@ def _join(left: str, right: str, columns: tuple[str, ...]) -> str:
 def _blank_key_predicate(columns: tuple[str, ...], *, alias: str = "s") -> str:
     """A key column that is null, empty or only spaces is not a key.
 
-    Blank is rejected alongside null deliberately: a key that is whitespace
-    matches nothing a human would call a match, and letting it through would
-    create a row nobody can find again — or, on the delete side, claim one.
+    Blank is rejected alongside null: a whitespace key matches nothing a person
+    would call a match, and would create a row nobody can find again — or, on
+    the delete side, claim one.
     """
 
     predicates = [
@@ -580,8 +564,7 @@ def _escape_literal(text: str) -> str:
     """Text going *inside* an already-quoted literal in the procedure template.
 
     The procedure is itself embedded in a string literal by the installer, so a
-    quote here is doubled twice over. Escaping once at each layer is what keeps
-    the two levels straight.
+    quote here is doubled twice over: once at each layer.
     """
 
     return text.replace("'", "''")

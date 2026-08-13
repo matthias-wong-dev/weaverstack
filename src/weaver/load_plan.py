@@ -79,11 +79,10 @@ class PhysicalTargetRef:
 class PhysicalObjectRef:
     """One installed object, addressed as its physical target holds it.
 
-    ``schema`` is the catalogue's ``schema_name`` unchanged — which for a folder
-    carries its ``Files/`` prefix and for a deployed file is the path beneath
-    ``Files``. Keeping the stored spelling means a reference can be handed
-    straight to :meth:`weaver.build_bundle.prune.TargetInventory.has_object`
-    without a translation that could disagree with the one the catalogue used.
+    ``schema`` is the catalogue's ``schema_name`` unchanged: for a folder that
+    carries its ``Files/`` prefix, and for a deployed file it is the path
+    beneath ``Files``. Keeping the stored spelling lets a reference go straight
+    to :meth:`weaver.build_bundle.prune.TargetInventory.has_object`.
     """
 
     target_id: str
@@ -140,9 +139,9 @@ class InstalledDependency:
 class InstalledEstate:
     """The installed catalogue, reversed into what load planning asks of it.
 
-    Transport-neutral by construction: it is built from a :class:`Catalogue`,
-    which a test can hand-write and production reads over Spark. Everything below
-    this class is arithmetic on these five mappings.
+    Built from a :class:`Catalogue`, which a test can hand-write and production
+    reads over Spark. Everything below this class is arithmetic on these five
+    mappings.
     """
 
     installations: Mapping[WeaverItemId, PhysicalTargetRef]
@@ -160,15 +159,13 @@ class InstalledEstate:
     def from_catalogue(cls, catalogue: Catalogue) -> "InstalledEstate":
         """Reverse the whole catalogue, recording ambiguity rather than refusing it.
 
-        Two logical objects at one physical address is a real fault and load
-        planning must not proceed through one — but *where* it stops matters. An
-        estate accumulates Registry rows for every item ever bound to a target, so
-        a Warehouse that was rebound years ago can carry a duplicate claim
-        indefinitely; refusing here would make that stale row stop a load of an
-        unrelated Lakehouse, which is a fault report about the wrong thing.
+        Two logical objects at one physical address is a real fault, but an
+        estate accumulates Registry rows from every item ever bound to a target,
+        so a stale duplicate claim can outlive its binding. Refusing here would
+        let it stop a load of an unrelated target.
 
-        So the finding is kept and :func:`load_dag` refuses when it touches the
-        request — which is exactly when the request is genuinely ambiguous.
+        The finding is kept instead, and :func:`load_dag` refuses when it
+        touches the request.
         """
 
         installations = _installations(catalogue)
@@ -239,17 +236,12 @@ class InstalledEstate:
 def _installations(catalogue: Catalogue) -> dict[WeaverItemId, PhysicalTargetRef]:
     """Each logical item's bound physical target, keyed for reverse lookup.
 
-    Several logical items may name one physical target, and that is not an error
-    to catch here. A request names a *target*, and what it means is "everything
-    installed there" — which is answerable whoever installed it, as long as no
-    two objects claim one address. That narrower question is the one ambiguity
-    actually turns on, and :meth:`InstalledEstate.from_catalogue` asks it per
-    object.
-
-    Refusing at the item level instead looked equivalent and was not: an estate
-    accumulates Installation rows from every item ever bound to a target, so a
-    binding that has since moved on would stop a load of a target it no longer
-    has a single object in.
+    Several logical items may name one physical target, which is not an error: a
+    request names a target and means everything installed there, answerable so
+    long as no two objects claim one address.
+    :meth:`InstalledEstate.from_catalogue` asks that narrower question per
+    object. Refusing at the item level instead would let a binding that has
+    since moved on stop a load of a target it no longer has an object in.
     """
 
     bound: dict[WeaverItemId, PhysicalTargetRef] = {}
@@ -338,15 +330,12 @@ _FILES = "Files"
 def _is_python_module_reference(reference: str) -> bool:
     """Whether a stored dependency names a Python module rather than an object.
 
-    The catalogue records a dependency *exactly as its author wrote it*, and for
-    a Python object the author wrote an import — ``.Files.Sales__Seed``, or
-    ``Files.Sales__Seed``. So reversing the graph means reapplying the rule that
-    turned one into an identity, and telling the two spellings apart first.
+    The catalogue records a dependency as its author wrote it, and for a Python
+    object that is an import — ``.Files.Sales__Seed``, or ``Files.Sales__Seed``.
 
-    A leading dot is a relative import and can be nothing else. Otherwise the
-    tell is the separator: a module name cannot carry a dot, so a Python object
-    module spells ``Schema.Object`` as ``Schema__Object`` — which a
-    ``Schema.Object`` reference never does.
+    A leading dot is a relative import. Otherwise the tell is the separator: a
+    module name cannot carry a dot, so a Python object module spells
+    ``Schema.Object`` as ``Schema__Object``.
     """
 
     if not reference:
@@ -361,10 +350,10 @@ def _python_module_identity(
 ) -> WeaverDocumentId | None:
     """The object one written import names, or ``None`` if it names none.
 
-    The mirror of :func:`weaver.declaration.item_dependencies._python_references`,
-    and it has to be: what the build resolved on the way in is what this resolves
-    on the way back out, so the two use one rule for the ``__`` split — including
-    the case where the schema is itself underscores.
+    The mirror of
+    :func:`weaver.declaration.item_dependencies._python_references`: the two
+    share one rule for the ``__`` split, including a schema that is itself
+    underscores.
     """
 
     from .declaration.source import python_id_parts
@@ -385,9 +374,8 @@ def _python_module_identity(
 def _registry_identity(catalogue, item, row) -> WeaverDocumentId | None:
     """The document a dictionary row describes, when the Registry certifies it.
 
-    A dictionary row for something no Registry row certifies describes an object
-    that is declared and not installed, so it contributes no edge — the graph is
-    of what is *there*.
+    A dictionary row no Registry row certifies describes something declared and
+    not installed, so it contributes no edge: the graph is of what is there.
     """
 
     identity = _document_id(
@@ -404,18 +392,14 @@ def primitive_candidates(
 ) -> tuple[tuple[str, WeaverDocumentId], ...]:
     """Where an object's installed load primitive would be, and what kind it is.
 
-    Derived from identity and object type alone, because that is all a build has
-    when it decides where to put one — the naming is the contract, not a lookup
-    table. Returning candidates rather than an answer keeps the shape the
-    Registry settles, and keeps this honest about the one case that still has
-    two: a Warehouse table's load is a procedure, a Lakehouse object's is a
-    deployed module.
+    Derived from identity and object type alone, which is all a build has when
+    it decides where to put one: the naming is the contract. Candidates rather
+    than an answer, because one case has two — a Warehouse table's load is a
+    procedure, a Lakehouse object's a deployed module.
 
-    **A Lakehouse table has one candidate whatever it was authored in.** A Spark
-    SQL table is compiled into a ``SparkSqlTable`` module and deployed under the
-    module's own name, so ``Sales.OrderSummary.sql`` and a hand-written
-    ``Sales__OrderSummary.py`` install to one path — which they cannot both do,
-    because the repository already refuses one object declared twice.
+    A Lakehouse table has one candidate whatever it was authored in: a Spark SQL
+    table compiles to a ``SparkSqlTable`` module under the module's own name, so
+    it and a hand-written ``Sales__OrderSummary.py`` install to one path.
     """
 
     item = identity.item
@@ -467,9 +451,9 @@ class LoadNode:
     def sort_key(self) -> tuple[str, str, str, str]:
         """What orders two nodes that became ready at the same moment.
 
-        Target kind, then target, then logical identity, then primitive kind —
-        so the order a plan prints is a property of the estate rather than of
-        the dictionary iteration that happened to build it.
+        Target kind, then target, then logical identity, then primitive kind,
+        so a plan's order is a property of the estate rather than of dictionary
+        iteration.
         """
 
         return (
@@ -484,9 +468,9 @@ class LoadNode:
 class LoadDag:
     """The selected physical load graph: nodes, edges and what was requested.
 
-    An edge means *the upstream node must complete successfully before the
-    downstream node may execute*, and nothing else. It is not a data-flow
-    statement and not a claim about what the downstream node reads.
+    An edge means the upstream node must complete successfully before the
+    downstream node may execute, and nothing else — not a data-flow statement,
+    and not a claim about what the downstream node reads.
     """
 
     nodes: tuple[LoadNode, ...]
@@ -531,10 +515,9 @@ class LoadDag:
     def order(self) -> tuple[LoadNode, ...]:
         """The deterministic topological order, or a refusal if there is a cycle.
 
-        Ready nodes are sorted rather than taken as they come, which is what
-        makes a dry run inspectable, a log reproducible and a test stable. The
-        cycle check is here rather than in a validator because the sort is the
-        one place that can see one.
+        Ready nodes are sorted rather than taken as they come, so a dry run is
+        inspectable and a log reproducible. The cycle check is here because the
+        sort is the one place that can see one.
         """
 
         remaining = {node.node_id: node for node in self.nodes}
@@ -570,14 +553,13 @@ def load_dag(
 ) -> LoadDag:
     """The physical load graph for one set of requested physical targets.
 
-    With no name filter, load every installed loadable object physically hosted
-    in the requested targets. Dependencies order those objects, but may not
-    enlarge the target scope: crossing between two targets happens only when the
-    caller named both.
+    With no name filter, every installed loadable object hosted in the requested
+    targets. Dependencies order them but never enlarge the target scope: two
+    targets are crossed only when the caller named both.
 
-    With ``names``, select exactly those ``Schema.Object`` loadables within the
-    requested targets. This is an operator override, so dependencies neither add
-    nodes nor add ordering edges.
+    With ``names``, exactly those ``Schema.Object`` loadables within the
+    requested targets — an operator override, so dependencies add neither nodes
+    nor ordering edges.
     """
 
     requested = tuple(dict.fromkeys(targets))
@@ -588,9 +570,8 @@ def load_dag(
 class _Planner:
     """One planning run's working state.
 
-    A class rather than a fold of functions because the traversal, the barrier
-    placement and the message stream all read the same three lookups, and passing
-    them through six signatures obscured what each step actually decided.
+    A class rather than free functions because the traversal, the barrier
+    placement and the message stream all read the same three lookups.
     """
 
     def __init__(self, estate: InstalledEstate) -> None:
@@ -796,11 +777,10 @@ class _Planner:
     def _place_refresh_barriers(self) -> None:
         """Every selected load in a refreshed Lakehouse runs before its barrier.
 
-        Deliberately broad: one barrier per affected Lakehouse, behind *all* of
-        that Lakehouse's selected loads rather than only the ones an alias names.
-        A narrower placement would have to know which tables a consumer's query
-        actually touches, and the catalogue records the alias, not the shape of
-        the read.
+        Broad by necessity: one barrier per affected Lakehouse, behind all of
+        its selected loads rather than only those an alias names. A narrower
+        placement would need to know which tables a consumer's query touches,
+        and the catalogue records the alias rather than the read.
         """
 
         for node_id, target in self.refresh_sources.items():
@@ -821,9 +801,9 @@ class _Planner:
         """The in-scope loadable ancestors, and where each hop crossed.
 
         Passing through non-loadable producers is what makes a view a conduit:
-        it owns no load work, so it is not a node, but a consumer of it still
-        depends on whatever fills the tables behind it. The traversal stops at
-        the requested-target boundary even when that producer is non-loadable.
+        it owns no load work, so it is not a node, but a consumer still depends
+        on whatever fills the tables behind it. The traversal stops at the
+        requested-target boundary even so.
         """
 
         found: dict[WeaverDocumentId, PhysicalTargetRef | None] = {}
@@ -880,10 +860,9 @@ class _Planner:
     ) -> tuple[WeaverDocumentId, bool] | None:
         """What one written reference names, in the consumer's own namespace.
 
-        Aliases are consulted *before* native objects, and the order is not a
-        preference. An alias destination is registered in the consuming item like
-        any other object — that is what makes it addressable — so a native lookup
-        would find it and stop there, and the crossing would disappear.
+        Aliases are consulted before native objects, and the order matters: an
+        alias destination is registered in the consuming item like any other, so
+        a native lookup would find it, stop there, and lose the crossing.
         """
 
         reference = edge.reference

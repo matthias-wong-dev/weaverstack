@@ -83,6 +83,11 @@ class _PresentResolver:
     def resolve(self, item, *, item_type):
         return SimpleNamespace(id="00000000-0000-0000-0000-000000000000")
 
+    def spark_destination(self, item):
+        from weaver.spark import fabric_destination
+
+        return fabric_destination(workspace="My Workspace", lakehouse=item.name)
+
 
 @pytest.fixture
 def transport(monkeypatch):
@@ -125,16 +130,10 @@ def _answer_for(code: str):
     return {}
 
 
-def _programs(session):
-    """Which crossings happened, by the function each submitted program calls."""
+def _weaver_python(session):
+    """Which submitted programs imported Weaver rather than running a statement."""
 
-    names = []
-    for code in session.submitted:
-        for name in ("_catalogue_here", "unbind_targets", "_lakehouse_inventories_here"):
-            if name in code:
-                names.append(name)
-                break
-    return names
+    return [code for code in session.submitted if "import weaver" in code]
 
 
 def _workspace() -> FabricWorkspace:
@@ -187,13 +186,12 @@ def test_each_command_still_did_its_own_work(transport, capsys):
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["unbind", "Lakehouse/Sales"])
 
-    # A run reads the estate first and decides locally from what it finds, so
-    # what crosses is the read — not the run.
-    assert _programs(transport) == [
-        "_catalogue_here",
-        "_catalogue_here",
-        "unbind_targets",
-    ]
+    # Each command reached the estate, and none of them imported Weaver to do
+    # it: reading the catalogue and unbinding it are both Spark SQL.
+    assert any("SELECT" in code for code in transport.submitted), (
+        "the estate was never read, so this passes for the wrong reason"
+    )
+    assert _weaver_python(transport) == []
 
 
 def test_no_command_ships_its_whole_run_across(transport):

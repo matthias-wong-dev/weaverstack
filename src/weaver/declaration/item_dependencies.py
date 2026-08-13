@@ -177,26 +177,20 @@ def _document_graph(
 ) -> Graph:
     """The graph incremental selection is planned against.
 
-    **This is deliberately not a projection of** :attr:`dependency_edges`. An
-    edge records what the author wrote and where it resolved to, and
-    :data:`~weaver.catalogue.tables.DEPENDENCY` publishes exactly that — an
-    alias edge names the *source document* as its producer, because that is the
-    truth about where the data comes from. The graph answers a different
-    question: what must be built, in what order. There the alias destination is
-    a thing in its own right — a shortcut or a view that some build has to
-    create — so the path is three hops rather than two:
+    Not a projection of :attr:`dependency_edges`. An edge records where a
+    reference resolved to, so an alias edge names the source document as the
+    producer. This graph answers what must be *built*, where the alias
+    destination is a shortcut or view in its own right:
 
     .. code-block:: text
 
         source document → alias destination → consumer document
 
-    Representing it that way is what lets impact propagate across items without
-    the planner needing a special case: an alias is an ordinary node, rebuilt
-    when its source is, and its consumers are ordinary descendants of it.
+    Three hops rather than two, so impact propagates across items with the alias
+    as an ordinary node rather than a planner special case.
 
     Every alias contributes its ``source → destination`` edge whether or not a
-    document consumes it. An alias with no consumer still has to be materialised
-    after the thing it points at exists.
+    document consumes it: it still has to be materialised after its source.
     """
 
     edges = set(graph_edges)

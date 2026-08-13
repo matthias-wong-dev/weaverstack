@@ -1,11 +1,9 @@
 """What a repository's load layer owns, derived from the source alone.
 
-A load artefact is not a side effect of building an object. It is a target in its
-own right — claimed during interpretation, registered in the catalogue, signed,
-selected incrementally, built by a physical action and pruned when its source
-stops declaring it. This module answers the one question the rest of the build
-asks about them: *given this repository, which load artefacts exist, where do
-they go, and what is each one's signature.*
+A load artefact is a target in its own right — claimed, registered, signed,
+selected incrementally, built and pruned when its source stops declaring it.
+This module answers which load artefacts a repository has, where they go, and
+what each one's signature is.
 
 Three artefacts, from three kinds of source:
 
@@ -15,22 +13,18 @@ Three artefacts, from three kinds of source:
     Lakehouse/Sales/lib/dates.py              -> Files/_/Load/lib/dates.py
     Lakehouse/Sales/Sales__Customer.sql       -> Files/_/Load/Sales__Customer.sql
 
-Views produce nothing on either side. A view's definition *is* its query, so
-there is no work to schedule and nothing for a load to do.
+A view produces nothing: its definition is its query, so there is no work to
+schedule.
 
-**Nothing here inspects a target.** The current repository contents determine the
-complete set of claims, which is what lets a deleted or renamed source produce an
-ordinary prune through catalogue reconciliation rather than needing a scan to
-notice its artefact has been orphaned.
+Nothing here inspects a target: the repository's current contents are the
+complete set of claims, so a deleted or renamed source is pruned through
+catalogue reconciliation rather than found by a scan.
 
-**Nothing here generates a payload.** A T-SQL or Spark SQL load's bytes come
-from :meth:`weaver.declaration.source.SourceDocument.create_load`, and deployed
-Python is its own authored source. This module asks for a payload and carries
-what it gets, so the question of *what a load does* stays with the generator
-that knows the language, and the question of *which loads exist and how they are
-signed* stays here. Each generated payload arrives with its generator's version,
-which salts the signature — so a change to load generation invalidates exactly
-the artefacts it changed, and leaves deployed Python untouched.
+Nothing here generates a payload either. A T-SQL or Spark SQL load's bytes come
+from :meth:`weaver.declaration.source.SourceDocument.create_load`; this module
+carries what it gets. Each generated payload arrives with its generator's
+version, which salts the signature, so a change to load generation invalidates
+exactly the artefacts it changed and leaves deployed Python untouched.
 """
 
 from __future__ import annotations
@@ -99,30 +93,23 @@ PYTHON_SUFFIX = ".py"
 class RuntimeArtefact:
     """One installed runnable target: what it is, where it goes, what it holds.
 
-    Everything a build needs about an artefact and nothing about how it was
-    reached. The identity is the catalogue key; the signature is what incremental
-    selection compares; the payload is the frozen bytes the installer is *given*
-    — deployed source for a Python object, and for a generated load an installer
-    script or an instruction the executor completes against the built target. An
-    artefact carries its own content either way, so the installer is never sent
-    back to a repository it must never reopen.
+    The identity is the catalogue key; the signature is what incremental
+    selection compares; the payload is the frozen bytes the installer is given,
+    so it is never sent back to the repository.
 
-    ``role`` is what it is *for*, and it is carried rather than inferred. A load
-    module and a Test module are both files; a load procedure and a Test
-    procedure are both procedures. One lifecycle serves all of them — claimed,
-    signed, selected, installed, registered, pruned — and the role is what keeps
-    a Test out of the load DAG at the other end.
+    ``role`` is carried rather than inferred. A load module and a Test module
+    are both files, and a load procedure and a Test procedure are both
+    procedures; one lifecycle serves them all, and the role is what keeps a Test
+    out of the load DAG.
 
-    ``origin`` is the declaration this artefact was derived from, where there was
-    one. A deployed helper module under ``lib/`` has none: it is authored source
-    that no Weaver document declares, which is exactly why it needs a claim of
-    its own or nothing would ever notice it had been deleted.
+    ``origin`` is the declaration this was derived from, where there was one. A
+    helper module under ``lib/`` has none — it is authored source no document
+    declares — which is why it needs a claim of its own to be noticed when it is
+    deleted.
 
-    ``source_path`` is the authored file this came from, relative to the
-    repository root — the path the developer has open in their editor, not the
-    deployed one. It is *carried*, never reconstructed: by the time an install
-    fails, ``_/Load/Sales__Customer.py`` is all that is left, and the mapping
-    back to ``Lakehouse/Sales/Sales__Customer.py`` is only knowable here.
+    ``source_path`` is the authored file, relative to the repository root, and is
+    carried rather than reconstructed: by the time an install fails only the
+    deployed spelling is left.
     """
 
     identity: WeaverDocumentId
@@ -153,11 +140,9 @@ class RuntimeArtefact:
 def runtime_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ...]:
     """Everything this repository installs to be *run*, in identity order.
 
-    Loads and validations together, because from here on they have one
-    lifecycle: the same claiming, signing, incremental selection, installation,
-    registration and pruning. The producers below stay focused — what a load is
-    and what a validation is are different questions — and only the answers are
-    pooled.
+    Loads and validations together, because from here on they share one
+    lifecycle: claiming, signing, selection, installation, registration and
+    pruning. The producers below stay separate; only their answers are pooled.
     """
 
     artefacts: list[RuntimeArtefact] = []
@@ -200,12 +185,10 @@ def item_validation_artefacts(
     """One item's validation artefacts, derived from what it declares.
 
     A Warehouse validation is a procedure in the generated ``_`` schema; a
-    Lakehouse one is a module under the *existing* deployed runtime tree, in a
-    ``tests/`` or ``assumptions/`` subdirectory of it. Under the same root
-    rather than beside it, deliberately: that root is the item's Python import
-    root, so ``from Sales__Order import Sales__Order`` resolves from a
-    validation exactly as it does from a load, with no second import root and no
-    duplicated object modules.
+    Lakehouse one is a module under the deployed runtime tree, in a ``tests/``
+    or ``assumptions/`` subdirectory. Under that root rather than beside it,
+    because it is the item's Python import root: ``from Sales__Order import
+    Sales__Order`` then resolves from a validation as it does from a load.
     """
 
     if _is_builtin(item):
@@ -261,11 +244,9 @@ def item_load_artefacts(
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's load artefacts, derived from what it declares.
 
-    The built-in ``Lakehouse/_weaver`` owns none, and is excluded here rather
-    than filtered out downstream. It is Weaver's own control plane — the tables
-    that record what was installed — not a user ETL package, and letting its
-    claims through planning only to suppress them later would leave the question
-    "does the catalogue have a load layer?" answered in two places.
+    The built-in ``Lakehouse/_weaver`` owns none: it is Weaver's control plane
+    rather than a user ETL package. Excluded here rather than downstream, so
+    "does the catalogue have a load layer?" has one answer.
     """
 
     if _is_builtin(item):
@@ -381,10 +362,10 @@ def _file_artefact(
 ) -> RuntimeArtefact:
     """One deployed file, at the item-relative path reproduced under the root.
 
-    The authored path is preserved whole, ``Files/`` segment included. That
-    segment is not noise: ``Sales__Customer.py`` at the item root and
-    ``Files/Sales__Customer.py`` are legitimately different documents, and
-    flattening them would deploy two files to one path.
+    The authored path is preserved whole, ``Files/`` segment included:
+    ``Sales__Customer.py`` at the item root and ``Files/Sales__Customer.py`` are
+    different documents, and flattening them would deploy two files to one
+    path.
     """
 
     path = f"{LOAD_ROOT}/{relative}"
@@ -467,8 +448,7 @@ def validation_procedure_name(kind: str, source: ObjectId) -> str:
     """How the generated validation procedure spells its own name in T-SQL.
 
     Derived from the same parts as :func:`validation_procedure_id`, so the
-    identity the catalogue registers and the name the script creates cannot
-    drift.
+    registered identity and the created name cannot drift.
     """
 
     schema = _tsql_ident(ETL_SCHEMA)
@@ -483,15 +463,13 @@ def validation_artefact_id(
 ) -> WeaverDocumentId:
     """The runtime artefact one logical validation compiles to.
 
-    **The function that connects `_.TestDictionary` to `_.Registry.`** A
-    validation has no Registry row of its own — nothing is materialised under
-    its logical ID — so orchestration finds its installed primitive by computing
-    the identity rather than by looking the logical ID up. That only works while
-    exactly one function computes it, which is why the build claims its
-    artefacts through this too.
+    What connects ``_.TestDictionary`` to ``_.Registry``. A validation has no
+    Registry row of its own, so orchestration finds its installed primitive by
+    computing the identity — which works only while one function computes it,
+    so the build claims its artefacts through this too.
 
-    Which physical form follows from the owning item, and nothing else: a
-    Warehouse installs a procedure, a Lakehouse a module in its runtime tree.
+    The physical form follows from the owning item: a Warehouse installs a
+    procedure, a Lakehouse a module in its runtime tree.
     """
 
     if item.item_type == WAREHOUSE:
@@ -518,9 +496,9 @@ def validation_module_path(kind: str, source: ObjectId) -> str:
 def _salted(signature: str, version: int) -> str:
     """A generated artefact's signature: what it is rendered from, and by what.
 
-    Both halves have to be in it. The document alone would leave every generated
-    body stale after the generator changed, with nothing to say so; the version
-    alone would rebuild the estate whenever anything at all was edited.
+    Both halves are needed: the document alone leaves every generated body
+    stale after the generator changes, and the version alone rebuilds the estate
+    whenever anything is edited.
     """
 
     digest = hashlib.sha256()

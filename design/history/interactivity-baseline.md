@@ -425,3 +425,47 @@ instead.
 For a developer the wipe now reads: about 40s waiting for the Livy session it is
 the first command to need, and about 83s deleting catalogue rows. The first is
 paid once per `weaver session`; the second is paid per wipe.
+
+---
+
+# The four seconds were not transport — 2026-08-13
+
+The section above attributes about four seconds per install action to submission
+overhead, and roughly twenty-four seconds of "pure transport" to six actions
+crossing individually. A probe against the pytest workspace measured the wire
+directly, and it does not cost that.
+
+| Question | Result |
+| --- | --- |
+| Warm round trip, trivial statement | 0.59s mean over 8 calls, range 0.50s to 0.71s |
+| Session start, paid once | 37.9s |
+| Eight statements in one submission | 3.82s, against 4.8s submitted individually |
+| Submission overhead, by difference | about 0.11s per statement |
+
+So a warm submission costs about 0.6s, and each extra statement inside one costs
+about 0.11s. The repository's own later measurement agrees: per-node dispatch in
+the Run decomposition is around a second on the same mechanism.
+
+Whatever the remaining three seconds were, they were not the wire. The likely
+answer is the work the far side did per submission — `install_actions`
+constructed an `Installer` and re-resolved every target the plan declared before
+running an action — but that is read from the code rather than measured, and the
+code is gone, so it stays a reading.
+
+## What followed from it
+
+Cross-action batching existed to avoid a cost that turned out to be about 0.11s
+per statement, so it was removed with the routing it belonged to. Every build
+action now runs in the Installer wherever that is, and reaches Spark through the
+Session. Statements belonging to *one* action still travel together, because
+that is semantic rather than economic: a setup registering a temporary view and
+the query that reads it only mean anything in the same session.
+
+The two positions this leaves are worth stating plainly, because the earlier
+sections predate them:
+
+```text
+install actions   no wheel required — statements cross, nothing imports Weaver
+build as a whole  wheel still required — reading the catalogue and the target
+                  inventories crosses as a program that imports Weaver
+```
