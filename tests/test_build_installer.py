@@ -432,72 +432,32 @@ def test_spark_actions_are_not_run_concurrently(tmp_path):
     assert recorder.peak == 1
 
 
-# --- a batched action keeps its own duration ----------------------------------
+# --- every action is timed where it runs ---------------------------------------
 
 
-def test_each_crossed_action_reports_the_time_it_took_not_the_batch_s():
-    """Sharing a trip must not mean sharing a number.
+def test_each_action_reports_its_own_duration(tmp_path):
+    """Actions in a batch share a target and a context, never a number.
 
-    Batched Spark actions cross in one submission, and the near side cannot see
-    inside it. Stamping each with the submission's elapsed time made six actions
-    all look like they took the whole batch — so the timings a reader uses to
-    find the slow one all said the same thing, which is worse than no timing.
+    Spark actions used to cross to the session together and be stamped with the
+    offsets the far side reported. Every action runs here now, one at a time, so
+    each result carries the time that action actually took and the spans sit on
+    one clock in the order they ran.
     """
 
-    from datetime import datetime, timezone
+    bundle, store = _tsql_batch(tmp_path, 3)
 
-    from weaver.build_bundle.installer import _crossed_result
-    from weaver.build_bundle.models import InstallAction
+    class _Slow(_Concurrent):
+        def execute(self, action, payload, context):
+            import time
 
-    started = datetime(2026, 8, 11, 12, 0, 0, tzinfo=timezone.utc)
-    actions = [
-        InstallAction(
-            id=f"a{index}",
-            kind="build_table",
-            resource_node_id=None,
-            executor="spark_table",
-            payload=None,
-            payload_sha256=None,
-        )
-        for index in range(3)
-    ]
-    answers = {
-        "a0": {"id": "a0", "seconds": 1.0, "offset": 0.0, "skipped": False},
-        "a1": {"id": "a1", "seconds": 29.0, "offset": 1.0, "skipped": False},
-        "a2": {"id": "a2", "seconds": 2.0, "offset": 30.0, "skipped": False},
-    }
+            if action.id == "a1":
+                time.sleep(0.2)
+            return super().execute(action, payload, context)
 
-    results = [
-        _crossed_result(action, answers[action.id], "t", started) for action in actions
-    ]
+    report = given_installer(store=store, executors={"tsql": _Slow()}).install(bundle)
 
-    assert [result.duration_seconds for result in results] == [1.0, 29.0, 2.0]
-    # Placed in order on the local timeline, with spans that do not overlap.
-    assert [result.started_at for result in results] == sorted(
-        result.started_at for result in results
-    )
-    assert results[0].finished_at <= results[1].started_at
-    assert results[1].finished_at <= results[2].started_at
-
-
-def test_an_action_with_no_answer_is_a_failure_rather_than_a_fast_success():
-    from datetime import datetime, timezone
-
-    from weaver.build_bundle.installer import _crossed_result
-    from weaver.build_bundle.models import InstallAction
-
-    action = InstallAction(
-        id="a0",
-        kind="build_table",
-        resource_node_id=None,
-        executor="spark_table",
-        payload=None,
-        payload_sha256=None,
-    )
-
-    result = _crossed_result(
-        action, None, "t", datetime(2026, 8, 11, tzinfo=timezone.utc)
-    )
-
-    assert result.status == FAILED
-    assert "nothing came back" in result.error_message
+    by_id = {result.action_id: result for result in report.action_results()}
+    assert by_id["a1"].duration_seconds > by_id["a0"].duration_seconds
+    assert by_id["a1"].duration_seconds > by_id["a2"].duration_seconds
+    assert by_id["a0"].finished_at <= by_id["a1"].started_at
+    assert by_id["a1"].finished_at <= by_id["a2"].started_at

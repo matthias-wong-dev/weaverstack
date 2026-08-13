@@ -117,10 +117,16 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
     program.
     """
 
-    # `install_action(` is the *current* one-action crossing and is fine.
-    # `execute_action(` was a different thing that was deleted, and reusing
-    # the name would make a reader think the old one came back.
-    retired = ("InstallationEnvironment", "install_bundle(", "execute_action(")
+    # `install_actions(` sent a batch's Spark actions to be run by an Installer
+    # constructed on the far side. Every build action now runs where the
+    # Installer already is, so nothing crosses but the statements themselves,
+    # and no program should name it again.
+    retired = (
+        "InstallationEnvironment",
+        "install_bundle(",
+        "install_actions(",
+        "execute_action(",
+    )
     offenders = [
         f"{where}:{line}: names {name}"
         for where, line, body in _programs()

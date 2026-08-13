@@ -18,15 +18,16 @@ is a barrier and that is what it is for. The actions within a batch are serial
 too — see :data:`_WHY_SERIAL`, which records the attempt to run T-SQL
 concurrently and the deadlocks a real Warehouse answered with.
 
-What *is* shared is a crossing rather than a thread: the actions in a batch that
-need Spark go over to the session together in one submission, because the
-submission is the expensive part. Each still gets its own result, its own timing
-and its own status, so nothing about the report says they travelled together.
+**Every action runs here**, whichever position this is. An executor reaches for
+the capability its work needs — storage, REST, TDS, or the Session's Spark SQL —
+and the Session knows whether that means doing it in this process or submitting
+it. So an action is never routed anywhere, and there is no class of action that
+travels differently from the rest.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
@@ -359,29 +360,17 @@ def _run_batch(
     bundle: BuildBundle,
     installer: "Installer",
 ) -> list[ActionResult]:
-    """One batch's actions, one at a time.
+    """One batch's actions, one at a time, in manifest order.
 
     Serial, and the comment on :data:`_WHY_SERIAL` says why concurrency was
-    tried and taken back out. What *is* shared is a crossing: the actions that
-    need Spark go over together in one submission, because the submission is the
-    expensive part. Each still gets its own result, timing and status.
-
-    Results come back in manifest order, because a report that reordered itself
-    would make two runs of one bundle incomparable.
+    tried and taken back out. Manifest order, because a report that reordered
+    itself would make two runs of one bundle incomparable.
     """
 
-    crossing = [action for action in batch.actions if _crosses(action, installer)]
-    answers: dict = {}
-    started = _now()
-    if crossing:
-        answers = _run_crossed(crossing, batch, context, bundle, installer)
-
-    def run(action: InstallAction) -> ActionResult:
-        if action.id in {one.id for one in crossing}:
-            return _crossed_result(action, answers.get(action.id), batch.target_id, started)
-        return _run_action(action, batch, context, bundle, installer)
-
-    return [run(action) for action in batch.actions]
+    return [
+        _run_action(action, batch, context, bundle, installer)
+        for action in batch.actions
+    ]
 
 
 def _run_sequence(
@@ -492,149 +481,6 @@ def _run_action(
         target_id=batch.target_id,
         executors=installer.executors,
     )
-
-
-def _crosses(action: InstallAction, installer: "Installer") -> bool:
-    """Whether this action has to run where the Spark is, rather than here."""
-
-    executor = installer.executors.get(action.executor)
-    return bool(getattr(executor, "needs_spark", False)) and not (
-        installer.session.executes_here(installer.workspace)
-    )
-
-
-def _run_crossed(
-    actions: list,
-    batch: BuildBatch,
-    context: InstallationContext,
-    bundle: BuildBundle,
-    installer: "Installer",
-) -> dict:
-    """Run this batch's Spark actions in the session, in one submission.
-
-    One submission rather than one apiece, and that is a measurement rather than
-    a preference: crossing per action cost about four seconds of overhead each,
-    so six actions in a small estate paid twenty-four seconds of pure transport.
-    The manifest still models independent actions — what is batched is the
-    physical effect, not the semantic unit.
-
-    Each action still gets its own result, its own timing and its own status, so
-    a reader cannot tell from the report that they shared a trip.
-    """
-
-    import base64
-
-    from . import remote
-    from ..session.program import RemoteProgram
-
-    workspace = installer.workspace
-    store = bundle.store or installer.store
-    entries = []
-    for action in actions:
-        payload = None
-        if action.payload is not None:
-            payload = base64.b64encode(
-                store.read(bundle.location.join(*action.payload.split("/")))
-            ).decode()
-        entries.append({"action": action.to_mapping(), "payload": payload})
-
-    arguments = {
-        "actions": entries,
-        "target": context.target.bound.to_mapping(),
-        "targets": [one.bound.to_mapping() for one in context.targets.values()],
-        "epoch": context.epoch,
-    }
-    source = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.build_bundle.remote import install_actions\n"
-        "from weaver.session import NotebookSession\n"
-        f"workspace = {_workspace_literal(workspace)}\n"
-        "session = NotebookSession(workspace=workspace, spark=spark)\n"
-        f"emit(install_actions(session=session, workspace=workspace, **{arguments!r}))\n"
-    )
-    answered = installer.session.execute_python(
-        RemoteProgram(
-            name="install_actions",
-            call=lambda: remote.install_actions(
-                session=installer.session, workspace=workspace, **arguments
-            ),
-            source=source,
-            detail=f"{len(actions)} action(s)",
-        ),
-        workspace=workspace,
-    )
-    running = 0.0
-    placed = {}
-    for answer in answered:
-        placed[answer["id"]] = {**answer, "offset": running}
-        running += float(answer.get("seconds") or 0.0)
-    return placed
-
-
-def _crossed_result(
-    action: InstallAction,
-    answer: dict | None,
-    target_id: str,
-    started: datetime,
-) -> ActionResult:
-    """One remote answer, recorded as the local result shape.
-
-    The duration is the far side's own measurement of *this action*, not the
-    submission's. Stamping every action in a batch with the batch's elapsed time
-    was the first attempt and it was worse than useless: six actions sharing one
-    trip each appeared to have taken the whole trip, so the numbers a reader
-    uses to find the slow one all said the same thing.
-
-    ``started_at`` places that duration on the local timeline by accumulating
-    the offsets the far side reported, so the actions in a batch read in order
-    and their spans do not overlap. It is the remote clock's *duration* on the
-    local clock's *origin*, which is the honest composition of what each side
-    can actually see.
-    """
-
-    seconds = float((answer or {}).get("seconds") or 0.0)
-    offset = float((answer or {}).get("offset") or 0.0)
-    began = started + timedelta(seconds=offset)
-    common = dict(
-        action_id=action.id,
-        resource_node_id=action.resource_node_id,
-        source_path=action.source_path,
-        target_id=target_id,
-        executor=action.executor,
-        started_at=began,
-        finished_at=began + timedelta(seconds=seconds),
-        duration_seconds=seconds,
-    )
-    if answer is None:
-        return ActionResult(
-            status=FAILED,
-            error_type="InstallError",
-            error_message=f"{action.id} was submitted but nothing came back for it",
-            **common,
-        )
-    if answer.get("failed"):
-        return ActionResult(
-            status=FAILED,
-            error_type=answer.get("error_type"),
-            error_message=answer.get("error_message"),
-            **common,
-        )
-    skipped = answer.get("skipped")
-    return ActionResult(
-        status=SKIPPED if skipped else SUCCEEDED,
-        details=answer.get("details"),
-        **common,
-    )
-
-
-def _workspace_literal(workspace) -> str:
-    return (
-        f"FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
-        f"environment={workspace.environment!r})"
-    )
-
-
 def _execute(
     action: InstallAction,
     load_payload,

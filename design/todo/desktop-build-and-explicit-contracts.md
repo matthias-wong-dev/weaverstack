@@ -209,8 +209,15 @@ query that shaped it.
 **C5. Delete.** `needs_spark` and its five declarations, `_crosses`,
 `_run_crossed`, `_crossed_result`, and `build_bundle/remote.py`. Neither
 `tests/test_public_api.py` nor `tests/test_remote_program_invariant.py` names
-`install_actions`, so it is not a pinned symbol. `require_weaver` becomes
-conditional on the operation.
+`install_actions`, so it is not a pinned symbol.
+
+`require_weaver` was to become conditional on the operation, and does not: the
+premise was that install was `build`'s last far-side import, and it is not.
+`read_build_state` reads the catalogue and the Lakehouse inventories through
+`execute_python`, so a Fabric build still imports the published wheel — before
+installing anything, and by design, because both phases decide against the
+target's real state. Installing needs no wheel; building does. Decomposing the
+two reads into Spark SQL and storage would change that, and is separate work.
 
 `context.spark` stays. The emulator's alias path registers an external table
 through it, and there it is always present. What is removed is the claim that
