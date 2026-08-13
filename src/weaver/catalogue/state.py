@@ -1,4 +1,8 @@
-"""Read and reconcile catalogue claims before bundle generation."""
+"""Read and validate central catalogue state.
+
+The reader accepts bootstrap and compatible-upgrade absences and reports other
+storage or schema errors.
+"""
 
 from __future__ import annotations
 

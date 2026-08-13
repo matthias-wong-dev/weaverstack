@@ -1,16 +1,15 @@
 # Source prose review
 
-This records the completed Python source prose uplift. It is not a
-prose-linter specification.
+This records the Python source prose uplift. It is not a prose-linter
+specification.
 
 ## Status
 
-Completed: the `src/weaver/` and `src/weaver_cli/` trees were inventoried for
-user-facing strings, long module prose, and high-signal rhetorical phrasing.
-CLI help, prompts, errors, report types, session and Fabric boundaries, build,
-catalogue, run, validation, declaration, SQL, Spark, storage, and test-support
-modules received editorial review. Long explanations of system behaviour now
-belong in the relevant document under `design/`.
+Complete. The tree was inventoried for user-facing strings, long module prose,
+and high-signal rhetorical phrasing. The final source-only pass reviewed the
+inventoried comments and docstrings against their local constraints, removing
+or shortening design rationale, implementation history, and reviewer-facing
+explanations.
 
 ## User-facing boundaries
 
@@ -29,11 +28,9 @@ not reformatted as part of editorial changes.
 
 ## Source prose conventions
 
-Modules were reviewed for narrative comments, reviewer-facing arguments, and
-implementation history. Comments explain a platform constraint, invariant, cache
-boundary, or failure mode that code cannot show. Docstrings state a callable or
-module contract. System-wide reasoning belongs in the relevant document under
-`design/`.
+Comments must explain a platform constraint, invariant, cache boundary, or
+failure mode that code cannot show. Docstrings state a callable or module
+contract. System-wide reasoning belongs in the relevant document under `design/`.
 
 For future review, search changed Python code for rhetorical language and read
 the surrounding paragraph. The advisory Claude tripwire checks common

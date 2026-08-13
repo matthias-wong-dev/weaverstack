@@ -38,26 +38,10 @@ from .changes import (
 from .payloads import sha256_hex
 from .targets import BoundTarget
 
-#: Files areas a prune never touches: they are Weaver's own, not an item's
-#: materialised output.
-#: ``cli`` no longer holds anything — the desktop Installer stopped staging
-#: bundles there when it stopped shipping them — but it stays reserved so a
-#: prune against an estate built by an older Weaver removes nothing it did
-#: not put there.
+#: Weaver-owned Files areas excluded from prune.
 _RESERVED_FILES_AREAS = frozenset({BUILD_BUNDLES_AREA, CLI_AREA})
 
-#: *Delta* schemas a prune never touches. A schema-enabled Fabric Lakehouse has a
-#: default ``dbo`` schema that cannot be dropped and that Weaver does not manage;
-#: ``_`` holds Weaver's own catalogue, which no item owns. A build normally cannot
-#: see `_` at all — it lives in the Weaver Lakehouse and prune is scoped to the
-#: bound destination's own storage — but an item built *into* the Weaver Lakehouse
-#: would, and a prune that dropped the catalogue would take the record of every
-#: installation with it.
-#:
-#: The load layer's ``_`` is a different object wearing the same name: a *folder*
-#: under Files, and a *Warehouse* schema. Neither is listed here, and neither
-#: should be — both are generated, projected and pruned like any other managed
-#: object, which is exactly how they go when an item stops declaring load code.
+#: Delta schemas excluded from prune because Weaver does not manage them.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 
 #: Warehouse schemas that belong to the engine rather than to any item.

@@ -1,30 +1,6 @@
-"""Weaver driven from a console process, against a local emulator or Fabric.
+"""Provide ConsoleSession capabilities for local and Fabric workspaces.
 
-One console session, several possible workspaces. What the workspace *is*
-decides how every capability is met:
-
-.. code-block:: text
-
-    ConsoleSession + LocalWorkspace     ConsoleSession + FabricWorkspace
-
-    local Python/Spark, in process      Livy, in the workspace
-    FilesystemStore                     OneLake
-    LocalResolver                       FabricResolver over REST
-    no SQL                              TDS per Warehouse
-
-The expensive half is Fabric, and this class exists mostly to stop paying for it
-repeatedly. One credential, so ``az`` is shelled out to once rather than per
-operation. One REST client and one resolver, so a name resolved by ``build`` is
-still resolved for the ``load`` that follows. One Livy session, because a small
-capacity has exactly one slot and starting a second means queueing behind the
-first. One TDS connection per Warehouse, because a connection is not a statement
-and a failed statement leaves a healthy connection.
-
-**Execution here stays coarse.** A console does not orchestrate a graph node by
-node across Livy; it prepares what it can locally and crosses once, with a whole
-:class:`~weaver.session.program.RemoteProgram`. Breaking those crossings into
-host-driven steps is the later decomposition work — this class is the seam that
-work will need, not the work itself.
+Resources are cached per workspace for reuse across commands.
 """
 
 from __future__ import annotations

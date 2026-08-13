@@ -1,7 +1,9 @@
 # Claude guidance
 
-Read and follow the shared [writing rules](AGENTS.md#writing). `AGENTS.md` is
-the source of truth; this file addresses recurring Claude-specific drift.
+@AGENTS.md
+
+`AGENTS.md` is the shared source of truth. This file addresses recurring
+Claude-specific drift.
 
 Claude-generated prose can become rhetorical, argumentative, overly clever,
 curt or condescending. Treat user-facing text as product copy: write calm,

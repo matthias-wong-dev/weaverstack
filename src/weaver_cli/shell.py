@@ -1,43 +1,6 @@
-"""``weaver session`` — one console session, many commands.
+"""Interactive CLI session that reuses one ConsoleSession.
 
-The cost of a Fabric command is mostly not the command. It is acquiring a
-credential, asking the workspace what a handful of names mean, and waiting for a
-Spark session that a small capacity will only give you one of. A developer
-running ``wipe``, ``build``, ``load`` and ``test`` pays all of that four times:
-
-.. code-block:: text
-
-    weaver wipe  ...   auth, resolve, Livy, work, close
-    weaver build ...   auth, resolve, Livy, work, close
-    weaver load  ...   auth, resolve, Livy, work, close
-    weaver test  ...   auth, resolve, Livy, work, close
-
-The shell pays once:
-
-.. code-block:: text
-
-    weaver session     auth, Livy starting in the background
-    weaver> wipe  ...  work
-    weaver> build ...  work
-    weaver> load  ...  work
-    weaver> test  ...  work
-    weaver> exit       close
-
-**Same grammar, same handlers.** The shell parses each line with the CLI's own
-parser and calls the same handler function, with one difference: the Session is
-attached to the parsed arguments, so every operation reuses it instead of
-creating one. A second command grammar would be a second thing to keep correct,
-and would drift.
-
-**No workspace is required to start.** A workspace arrives with each command,
-exactly as it does for a one-shot invocation, and the Session caches resources
-per workspace context. A ``--workspace`` given here is a default context for
-commands that name none — never the Session's identity.
-
-**An ordinary failure does not end the session.** A build that fails, a typo, a
-Spark error: the command reports and the prompt returns, with the Livy session
-still up. Only a genuinely dead resource is reacquired, and only within its
-bounded allowance.
+Commands use the standard CLI parser and handlers while sharing session resources.
 """
 
 from __future__ import annotations
@@ -50,15 +13,11 @@ from weaver.errors import WeaverError
 
 PROMPT = "weaver> "
 
-#: Where the prompt remembers what was typed. Overridable, because a shared or
-#: read-only home is somebody's real setup and a session that refused to start
-#: over its history file would be worse than one that forgets.
+#: Optional history-file override.
 HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 HISTORY_LIMIT = 1000
 
-#: Commands the shell does not run, and why. ``session`` would nest a console
-#: inside a console; the rest are one-shot machine-level operations whose whole
-#: point is a fresh process.
+#: Commands unavailable from an interactive session.
 NOT_IN_A_SESSION = {
     "session": "already in a session",
     "doctor": "run it from a shell, not a session",
@@ -84,10 +43,7 @@ def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> i
     with ConsoleSession(workspace=workspace) as session:
         _banner(workspace)
         if workspace is not None:
-            # Proactive, and deliberately not awaited: the prompt is available
-            # while the credential and the Spark session are still being
-            # acquired, and the first command that needs either waits on the
-            # acquisition already running rather than starting a second one.
+            # Start reusable resources while the prompt remains available.
             _report_warm_up(session.warm())
         try:
             return _loop(session, parser, stdin=stdin or sys.stdin)

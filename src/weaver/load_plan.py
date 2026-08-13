@@ -1,62 +1,7 @@
-"""The physical load graph, derived from the installed catalogue alone.
+"""Build the physical load graph from installed catalogue state.
 
-This is where load orchestration decides *what runs and in what order*, and it is
-pure Python: a catalogue in, a graph out. No session, no SQL connection, no
-target and no repository. That is not an economy — it is the claim. The
-repository is the *source*; once an estate is installed, the catalogue is the
-authority on what exists, and an orchestrator that reopened the source would be
-loading what somebody meant to install rather than what is there.
-
-The direction of travel is the interesting part. A build establishes
-
-.. code-block:: text
-
-    logical identity  →  physical target and physical object
-
-and load orchestration needs the reverse, because a caller names physical
-targets. So the first thing that happens is that the Installation and Registry
-rows are turned inside out into :class:`InstalledEstate`.
-
-Two logical objects resolving to one physical object would make "load
-Warehouse/Reporting" a request with two possible meanings, and no such request is
-carried out. But the *reading* records that finding rather than raising on it, and
-:func:`load_dag` refuses when it touches what was asked for — because an estate
-accumulates a Registry row for every item ever bound to a target, and a stale
-duplicate in one Warehouse must not stop a load of an unrelated Lakehouse.
-
-**The graph is physical, and the request bounds it.** Dependencies order work
-only among the physical targets the caller explicitly named. A single-target
-request therefore never crosses into another Lakehouse or Warehouse; a
-multi-target request can order work across exactly those targets.
-
-When both sides of an alias are in scope, the logical dependency that crosses
-items is not a direct edge between two objects; it is a publication path, and
-the path has a barrier in it:
-
-.. code-block:: text
-
-    requested: Lakehouse/Raw, Warehouse/Reporting
-    Lakehouse/Raw/Sales.Order
-        → published through a Warehouse-facing alias
-        → Warehouse/Reporting/Sales.Order
-        → consumed by Warehouse/Reporting/Sales.Summary
-
-becomes
-
-.. code-block:: text
-
-    load Raw Sales.Order  →  refresh Raw SQL endpoint  →  load Reporting Sales.Summary
-
-The refresh is a node, not something dispatch does quietly on the way past. A
-Lakehouse presents its Delta tables to SQL through an endpoint whose metadata
-lags the write, so a consumer reading across that boundary before the refresh
-reads the previous shape — and a barrier that lives inside dispatch cannot be
-seen in a plan, cannot be ordered against anything, and cannot be asserted.
-
-**Views are conduits, not nodes.** A view owns no load work, so it is never
-dispatched; but a table depending on a view depends on whatever the view reads,
-so the traversal passes *through* it to the in-scope loadable ancestors behind
-it. An object with no installed load primitive is treated the same way.
+The graph contains selected targets, load dependencies, and required endpoint
+refresh barriers.
 """
 
 from __future__ import annotations

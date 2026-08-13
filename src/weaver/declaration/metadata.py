@@ -21,15 +21,7 @@ TABLE = "Table"
 VIEW = "View"
 OBJECT_KINDS = frozenset({FOLDER, TABLE, VIEW})
 
-#: The two validation kinds. A Test compares an expected relation with an actual
-#: one and succeeds when the symmetric difference is empty; an Assumption returns
-#: violation rows directly and succeeds when there are none.
-#:
-#: Both are first-class logical Weaver declarations and neither is a physical
-#: data object: they carry a ``Schema.Object`` identity, declare dependencies and
-#: are compiled into runnable primitives, but nothing is materialised under the
-#: logical ID. Keeping them out of :data:`OBJECT_KINDS` is what stops a Test
-#: reaching table or view DDL merely because it has an object identity.
+#: Logical validation declaration kinds.
 TEST = "Test"
 ASSUMPTION = "Assumption"
 VALIDATION_KINDS = frozenset({TEST, ASSUMPTION})

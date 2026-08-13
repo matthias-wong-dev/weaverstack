@@ -1,28 +1,7 @@
-"""Rendering catalogue rows as deterministic, scoped Spark SQL.
+"""Render catalogue projections as deterministic SQL statements.
 
-Every statement this module produces is frozen into a build bundle at generation
-time and executed unchanged (how-does-build-work §11, §12). Three properties follow,
-and each is enforced here rather than trusted to a caller:
-
-**Deterministic.** The same rows always render the same text, byte for byte. Rows
-are sorted by their key before rendering, so a mapping's iteration order cannot
-change a payload — and therefore cannot change a bundle's identity
-(how-does-build-work §15).
-
-**Scoped.** Every ``DELETE`` and every ``MERGE`` predicate names one
-``repository`` and one ``target_type``. A Lakehouse build physically cannot touch
-a Warehouse row, because the scope is not an argument a renderer might forget: it
-is part of the row's identity and part of every statement's ``WHERE``.
-
-**Explicit about values.** Every literal is cast to its declared column type, so
-a null is a typed null and a row of all-nulls cannot silently change the source
-frame's schema. Strings are escaped for Spark's default parser, where a backslash
-escapes.
-
-The one thing deliberately *not* frozen is the clock. ``current_timestamp()`` is
-rendered as a call, not as a literal: a rendered time would make the same input
-produce a different payload every run, which would destroy bundle identity for no
-gain. The engine supplies the instant; the payload stays stable.
+Publication timestamps are supplied at installation time and are excluded from
+projection comparison.
 """
 
 from __future__ import annotations

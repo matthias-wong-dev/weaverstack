@@ -1,29 +1,7 @@
-"""One source file, read and checked without executing it.
+"""Read and validate one authored Weaver source file.
 
-A :class:`SourceDocument` wraps the validated
-:class:`~weaver.ses.metadata.SesDocument` with everything else the file
-yielded: its language, its content hash, and the parse — a Python AST or the
-split SQL statements. Holding the parse here means later checkpoints read the
-repository once rather than once per question.
-
-The contract this enforces is *structural*: the object's declared ID, its
-filename and (for Python) its class name must all agree, and the file must
-present exactly one unit of work.
-
-+------------+---------------------------------+------------------+
-| Language   | File                            | ID               |
-+============+=================================+==================+
-| Python     | ``Sales__Order.py``             | ``Sales.Order``  |
-| SQL        | ``Sales.Order.sql``             | ``Sales.Order``  |
-+------------+---------------------------------+------------------+
-
-Python uses ``__`` because a module name cannot contain a dot without breaking
-imports; SQL files have no such constraint and use the dot directly. The Python
-class carries the same full name as its file — ``class Sales__Order(Table)`` —
-so the import at a call site is explicit about which object it names.
-
-**The owning item chooses the SQL dialect.** A ``.sql`` file in a Lakehouse item
-is Spark SQL; the same name in a Warehouse item is T-SQL.
+A SourceDocument retains its metadata, source text, language, hash, and parsed
+Python or SQL representation.
 """
 
 from __future__ import annotations

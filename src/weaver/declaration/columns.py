@@ -1,40 +1,7 @@
-"""The one column-validation model both build engines share.
+"""Validate physical columns for declared and inferred tables.
 
-A SQL-backed table's physical business columns are known in two ways. A declared
-schema states them up front and is validated at parse time by
-:func:`weaver.ses.metadata._validate_columns`. An *inferred* table has no
-declared schema, so the same guards cannot run until the query's output shape is
-known — which, per how-does-build-work §2, is at build, inside the install action.
-
-This module is that deferred guard, expressed once so Spark and T-SQL agree. The
-Spark executor calls :func:`resolve_build_columns` directly with the columns its
-``DataFrame`` reported; the generated T-SQL script mirrors the identical rules in
-SQL because a Warehouse only knows its query's shape server-side. Both draw the
-set of column-referencing metadata from :func:`metadata_column_references`, so
-neither can drift from the other.
-
-A column name is an exact, case-sensitive Weaver contract, even where the target
-engine would fold case. The rules:
-
-- a query may not produce two columns whose names collide **case-insensitively**
-  — ``CustomerId`` and ``customerid`` together are ambiguous, and no unambiguous
-  table could be built from them;
-- when a schema is declared, the declared column set and the query's output set
-  must be equivalent **by exact name** — every declared column returned under the
-  same spelling, no undeclared column produced — while types, order, width,
-  precision and nullability are not compared, so a declaration may deliberately
-  be wider or more stable;
-- every column named by ``Primary key``, ``Not null``, ``Comparison columns`` or
-  ``Column notes`` must exist among the business columns **under exactly its
-  declared spelling** (the ``Identity`` column counts as present here — see below).
-
-Case is thus exact for naming and equivalence, but case-insensitive for the
-ambiguity guard — a name that only sometimes matches is not a name Weaver can
-rely on.
-
-``Identity`` is not in that list: it names a **Weaver-managed** surrogate column
-build adds, not a business column, so it must *not* clash with the query's output
-— but the primary key may name it when the surrogate is the key.
+The functions check column names, metadata references, and identity-column
+collisions after the engine reports a query's output shape.
 """
 
 from __future__ import annotations

@@ -1,11 +1,6 @@
-"""Running Weaver code inside a Fabric Spark session.
+"""Manage Weaver execution inside Fabric Spark sessions.
 
-This is the third execution position — not Weaver reaching into a workspace over
-HTTP, but Weaver *running there*. It is the position the product claim rests on,
-and the only one that proves a notebook user could do the same thing.
-
-A session is expensive to start and cheap to reuse, so callers should hold one
-open across a batch of work rather than paying for it per statement.
+Livy sessions are reused across related work to avoid repeated startup cost.
 """
 
 from __future__ import annotations

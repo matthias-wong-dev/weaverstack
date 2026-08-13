@@ -1,8 +1,4 @@
-"""Load contract parsed from a declaration or an installed module.
-
-The contract contains the metadata required to load one object. Repository-wide
-constraints are validated before installation.
-"""
+"""Load metadata parsed from a declaration or installed module."""
 
 from __future__ import annotations
 
@@ -29,25 +25,14 @@ from ..errors import LoadError
 
 @dataclass(frozen=True)
 class LoadContract:
-    """Everything needed to execute one table's load, and nothing else.
-
-    ``primary_key`` empty means full replacement: with no way to match a source
-    row to a target row there is no such thing as an update, so the target's
-    contents are replaced by the source's. Every other field is meaningful only
-    when there is a key, which is why the parser refuses ``Incremental`` and
-    ``Comparison columns`` without one rather than letting them sit unused.
-    """
+    """Metadata required to load one table."""
 
     object_id: ObjectId
     primary_key: tuple[str, ...] = ()
     comparison_columns: tuple[str, ...] = ()
     identity_column: str | None = None
     incremental: bool = False
-    #: Loaded once, into an empty target, and never again. A reference list, a
-    #: seeded dimension, a fixture — something whose source is a *starting*
-    #: state rather than a running one. A load asks this *first* and only then
-    #: whether the target is populated, because the second question costs a query
-    #: and cannot change the answer for anything else.
+    #: Load the target only when it is empty.
     static: bool = False
     delete_threshold: int = DEFAULT_DELETE_THRESHOLD
     update_threshold: int = DEFAULT_UPDATE_THRESHOLD
@@ -59,31 +44,20 @@ class LoadContract:
 
     @property
     def replaces_wholesale(self) -> bool:
-        """No key, so the load replaces the target's contents entirely."""
+        """Return whether the load has no matching key."""
 
         return not self.primary_key
 
     @property
     def deletes_absent_rows(self) -> bool:
-        """Whether a target row the source stopped producing is removed.
-
-        Only a keyed, non-incremental load deletes. An incremental load is a
-        statement that the source shows a *window* rather than the whole truth,
-        so absence from it says nothing about whether a row should still exist.
-        """
+        """Return whether a keyed full load deletes rows absent from the source."""
 
         return bool(self.primary_key) and not self.incremental
 
     def breaches(self, *, target_rows: int, deleting: int, updating: int) -> str | None:
-        """Return a stability-threshold breach, or ``None``.
+        """Return a stability-threshold breach, or ``None``."""
 
-        Percentages apply to the target row count before the load. Small and
-        unkeyed targets are excluded because their change percentages do not
-        indicate a comparable replacement risk.
-        """
-
-        # An empty target has no proportion to be a percentage of, and a first
-        # load into one is the case the guard must never stand in the way of.
+        # Stability thresholds do not apply to empty, small, or replacement loads.
         if (
             self.replaces_wholesale
             or target_rows == 0
@@ -104,12 +78,7 @@ class LoadContract:
 
     @classmethod
     def from_document(cls, document: SesDocument) -> "LoadContract":
-        """The contract a parsed Weaver document describes.
-
-        One derivation, used by generation and by the runtime alike, so the
-        procedure Weaver generates for a Warehouse table and the Python load of
-        a Delta table cannot come to disagree about what the same header meant.
-        """
+        """Create a table load contract from a parsed document."""
 
         if document.kind != TABLE:
             raise LoadError(
@@ -131,18 +100,12 @@ class LoadContract:
 
 @dataclass(frozen=True)
 class FolderLoadContract:
-    """What a folder load needs: what it manages, and whether it accumulates.
-
-    A folder has no rows, so none of the row machinery applies. What it has is a
-    file key naming the scope of what Weaver manages inside it — which is what
-    makes replacement safe, because it says which files a replacement is
-    entitled to remove.
-    """
+    """Metadata required to load one managed folder."""
 
     object_id: ObjectId
     file_keys: tuple[str, ...] = ()
     incremental: bool = False
-    #: Materialised once; checked before staging or ``read()``.
+    #: Load the folder only when it is absent.
     static: bool = False
 
     @property
@@ -151,7 +114,7 @@ class FolderLoadContract:
 
     @property
     def replaces_wholesale(self) -> bool:
-        """A non-incremental folder is replaced; an incremental one accumulates."""
+        """Return whether the folder load replaces its contents."""
 
         return not self.incremental
 
@@ -171,16 +134,7 @@ class FolderLoadContract:
 
 
 def module_metadata_text(module) -> str:
-    """One installed module's metadata block, from its own docstring.
-
-    The docstring *is* the metadata block — the repository reader extracts the
-    same text with :func:`ast.get_docstring`, and ``cleandoc`` reproduces the
-    dedenting it does, so the runtime and the repository read one document from
-    one source of truth.
-
-    Separated from the parse because a generated Spark SQL module carries its
-    *authored* header, which has to be read in the language it was written in.
-    """
+    """Return an installed module's dedented metadata docstring."""
 
     doc = getattr(module, "__doc__", None)
     name = getattr(module, "__name__", "<module>")
@@ -199,10 +153,7 @@ def document_for_module(module) -> SesDocument:
     return parse_document(module_metadata_text(module), language=PYTHON)
 
 
-#: Why a row was refused. One spelling on both engines, so a reject table
-#: written by a Warehouse procedure and one written by a Delta load can be read
-#: by the same query. Taken from the reference implementation rather
-#: than reinvented — these strings are already in use against real data.
+#: Rejection reasons shared by Warehouse and Delta load results.
 REASON_BLANK_PK = "blank_primary_key"
 REASON_DUPLICATE_PK = "duplicate_primary_key"
 
@@ -211,7 +162,7 @@ REJECTION_REASON = "_reject_reason"
 
 
 def delta_audit_columns() -> tuple[str, str, str]:
-    """The insert, update and delete audit column names, spelled for Delta."""
+    """Return Delta audit column names."""
 
     return tuple(
         audit_column_name(logical, PYTHON)
