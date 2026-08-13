@@ -3,6 +3,10 @@
 Each operation qualifies the destination rather than relying on the attached
 catalogue. Schema discovery reads the destination's ``Tables/`` area because
 Fabric cannot list schemas for an arbitrary Lakehouse.
+
+Only the operations that reach a session live here. What a destination *calls*
+things is :class:`~weaver.spark.naming.SparkNaming`, which needs no session and
+is what a caller holding a destination and no Spark uses.
 """
 
 from __future__ import annotations
@@ -10,8 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InstallError
-from . import tokens
 from .destination import SparkDestination
+from .naming import SparkNaming, escaped as _escaped
 
 
 class SparkCatalogue:
@@ -25,6 +29,7 @@ class SparkCatalogue:
             )
         self.spark = spark
         self.destination = destination
+        self.names = SparkNaming(destination)
         if destination.case_sensitive_analysis:
             # Local's folded schema is lower-case and every declared object keeps
             # its exact Weaver spelling. Unlike Fabric's catalogue, Spark's local
@@ -36,15 +41,15 @@ class SparkCatalogue:
     # --- naming -----------------------------------------------------------
 
     def qualify(self, schema: str, name: str) -> str:
-        return self.destination.qualify(schema, name)
+        return self.names.qualify(schema, name)
 
     def qualified_schema(self, schema: str) -> str:
-        return self.destination.qualified_schema(schema)
+        return self.names.qualified_schema(schema)
 
     def expand(self, statement: str) -> str:
         """One payload's object tokens, resolved to this destination."""
 
-        return tokens.expand(statement, self.destination)
+        return self.names.expand(statement)
 
     # --- execution ---------------------------------------------------------
 
@@ -56,21 +61,11 @@ class SparkCatalogue:
     # --- structure ---------------------------------------------------------
 
     def create_schema(self, schema: str, *, if_not_exists: bool = True) -> str:
-        """Create a schema in this destination, and return the statement run.
+        """Create a schema in this destination, and return the statement run."""
 
-        The ``LOCATION`` clause is the destination's business, not the planner's:
-        local Spark needs one so a managed table lands under the Lakehouse's
-        ``Tables`` area, and a schema-enabled Fabric Lakehouse pins it natively and
-        must not be given one. It is also a resolved path, so it could not have
-        been frozen into a payload without tying the bundle to the machine that
-        generated it (how-does-build-work §15).
-        """
-
-        qualifier = " IF NOT EXISTS" if if_not_exists else ""
-        statement = f"CREATE SCHEMA{qualifier} {self.qualified_schema(schema)}"
-        location = self.destination.schema_location(schema)
-        if location is not None:
-            statement += f" LOCATION '{_escaped(location)}'"
+        statement = self.names.create_schema_statement(
+            schema, if_not_exists=if_not_exists
+        )
         self.spark.sql(statement)
         return statement
 
@@ -192,10 +187,6 @@ def _is_missing_schema(exception: Exception) -> bool:
         "NoSuchNamespaceException" in type(exception).__name__
         or "NoSuchDatabaseException" in type(exception).__name__
     )
-
-
-def _escaped(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def drop_local_destination_catalogue(

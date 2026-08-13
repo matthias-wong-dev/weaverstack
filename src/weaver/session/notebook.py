@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 from ..errors import CommandError
 from ..workspaces import Workspace
-from .base import Session, WorkspaceScope, workspace_context
+from .base import Session, WorkspaceScope, run_spark_statements, workspace_context
 from .program import RemoteProgram
 from .resources import Resource
 
@@ -74,16 +74,30 @@ class NotebookSession(Session):
         with self.telemetry.timing(f"python.{program.name}"):
             return program.call()
 
-    def execute_spark_sql(
+    def execute_spark_sql_batch(
         self,
-        statement: str,
+        statements: Sequence[str],
         *,
+        exact_case: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
+        """Ordered Spark SQL statements against the attached session.
+
+        Nothing crosses here, so a batch is a batch only in that the statements
+        share one identifier-case scope — which is what makes a setup and the
+        query that reads it mean the same thing in both positions.
+        """
+
+        ordered = list(statements)
+        if not ordered:
+            return []
+        from ..build_bundle.executors.spark_case import exact_identifier_case
+
+        spark = self.scope(workspace).spark()
         with self.telemetry.timing("spark.sql"):
-            frame = self.scope(workspace).spark().sql(statement)
-            return [row.asDict() for row in frame.collect()]
+            with exact_identifier_case(spark, enabled=exact_case):
+                return run_spark_statements(spark, ordered)
 
     def execute_tsql(
         self,

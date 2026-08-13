@@ -236,14 +236,47 @@ class Session(ABC):
         """
 
     @abstractmethod
+    def execute_spark_sql_batch(
+        self,
+        statements: Sequence[str],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        """Run ordered Spark SQL statements together, and return the last one's rows.
+
+        One submission wherever the statements have to cross, because several
+        statements that belong to one action are one piece of work: a setup that
+        registers a temporary view and the query that reads it only mean anything
+        in the same session, in this order.
+
+        ``exact_case`` carries Weaver's identifier-case scope across with them.
+        It travels with the statements rather than being arranged by the caller,
+        because on a desktop the caller has no Spark to set a conf on — and a
+        statement analysed under the host's default case is a different
+        statement.
+
+        Only the last statement's rows come back. The others are run for their
+        effect, as they are in a session.
+        """
+
     def execute_spark_sql(
         self,
         statement: str,
         *,
+        exact_case: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
         """Run one Spark SQL statement and return its rows."""
+
+        return self.execute_spark_sql_batch(
+            [statement],
+            exact_case=exact_case,
+            workspace=workspace,
+            timeout=timeout,
+        )
 
     @abstractmethod
     def execute_tsql(
@@ -553,6 +586,19 @@ class WorkspaceScope:
             resource.close()
 
 
+def run_spark_statements(spark: Any, statements: Sequence[str]) -> list[dict]:
+    """Run each statement in order against a live session; collect only the last.
+
+    The earlier statements are run for their effect, and Spark executes a command
+    when it is asked for. Collecting each one would materialise a result nothing
+    reads.
+    """
+
+    for statement in statements[:-1]:
+        spark.sql(statement)
+    return [row.asDict() for row in spark.sql(statements[-1]).collect()]
+
+
 def is_fabric(workspace: Workspace) -> bool:
     return isinstance(workspace, FabricWorkspace)
 
@@ -570,5 +616,6 @@ __all__ = [
     "WorkspaceScope",
     "is_fabric",
     "is_local",
+    "run_spark_statements",
     "workspace_context",
 ]

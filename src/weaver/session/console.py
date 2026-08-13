@@ -12,7 +12,7 @@ from typing import Any, Sequence
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import FabricWorkspace, LocalWorkspace, Workspace
-from .base import TASK, Session, WorkspaceScope
+from .base import TASK, Session, WorkspaceScope, run_spark_statements
 from .program import RemoteProgram
 from .resources import Resource
 
@@ -401,23 +401,24 @@ class ConsoleSession(Session):
             timeout=timeout if timeout is not None else program.timeout,
         )
 
-    def execute_spark_sql(
+    def execute_spark_sql_batch(
         self,
-        statement: str,
+        statements: Sequence[str],
         *,
         exact_case: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        """One Spark SQL statement, wherever this host's Spark is.
+        """Ordered Spark SQL statements, wherever this host's Spark is.
 
-        ``exact_case`` carries Weaver's identifier-case scope across with the
-        statement. It has to travel *with* it rather than being arranged by the
-        caller, because on a desktop the caller has no Spark to set a conf on —
-        and a statement analysed under the session's default case is a different
-        statement, which is the whole reason the scope exists.
+        One Livy submission when they have to cross, so statements belonging to
+        one action share a trip and a session. See
+        :meth:`weaver.session.base.Session.execute_spark_sql_batch`.
         """
 
+        ordered = list(statements)
+        if not ordered:
+            return []
         scope = self.scope(workspace)
         if scope.executes_here:
             from ..build_bundle.executors.spark_case import exact_identifier_case
@@ -425,13 +426,13 @@ class ConsoleSession(Session):
             spark = scope.spark()
             with self.telemetry.timing("spark.sql"):
                 with exact_identifier_case(spark, enabled=exact_case):
-                    return [row.asDict() for row in spark.sql(statement).collect()]
+                    return run_spark_statements(spark, ordered)
 
         # Spelled out rather than imported on the far side: this is a Session
         # capability, and reaching into the build package for a context manager
         # would point the dependency the wrong way for a two-line conf dance.
         source = (
-            f"_statement = {statement!r}\n"
+            f"_statements = {ordered!r}\n"
             f"_exact = {bool(exact_case)!r}\n"
             "_key = 'spark.sql.caseSensitive'\n"
             "_previous = spark.conf.get(_key) if _exact else None\n"
@@ -439,7 +440,9 @@ class ConsoleSession(Session):
             "if _restore:\n"
             "    spark.conf.set(_key, 'true')\n"
             "try:\n"
-            "    _rows = [row.asDict() for row in spark.sql(_statement).collect()]\n"
+            "    for _statement in _statements[:-1]:\n"
+            "        spark.sql(_statement)\n"
+            "    _rows = [row.asDict() for row in spark.sql(_statements[-1]).collect()]\n"
             "finally:\n"
             "    if _restore:\n"
             "        spark.conf.set(_key, _previous)\n"

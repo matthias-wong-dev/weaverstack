@@ -25,6 +25,7 @@ import pytest
 from weaver.errors import IdentityError, InstallError
 from weaver.spark import (
     SparkCatalogue,
+    SparkNaming,
     expand,
     fabric_destination,
     local_destination,
@@ -346,6 +347,31 @@ def test_existence_is_asked_of_the_qualified_name(fabric):
 def test_a_catalogue_without_a_session_is_refused_at_construction(fabric):
     with pytest.raises(InstallError, match="Play_Lakehouse_1"):
         SparkCatalogue(None, fabric)
+
+
+def test_naming_a_destination_needs_no_session(fabric):
+    """The half a desktop executor holds: names and statement text, no Spark."""
+
+    names = SparkNaming(fabric)
+
+    assert names.qualify("Sales", "Customer") == (
+        "`Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`"
+    )
+    assert names.qualified_schema("Sales") == "`Weaver`.`Play_Lakehouse_1`.`Sales`"
+    assert names.expand("SELECT * FROM {{object:Sales.Customer}}") == (
+        "SELECT * FROM `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`"
+    )
+    assert names.exact_case is True
+
+
+def test_a_rendered_schema_create_matches_the_one_the_catalogue_runs(local, fabric):
+    for destination in (local, fabric):
+        spark = _Spark()
+        catalogue = SparkCatalogue(spark, destination)
+
+        assert SparkNaming(destination).create_schema_statement(
+            "Sales", if_not_exists=False
+        ) == catalogue.create_schema("Sales", if_not_exists=False)
 
 
 def test_local_wipe_drops_only_the_destination_folded_namespaces():

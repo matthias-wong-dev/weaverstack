@@ -17,7 +17,7 @@ from typing import Any, Mapping, Protocol
 
 from ...errors import InstallError
 from ...locations import LakehouseSparkLocation
-from ...spark import SparkCatalogue, SparkDestination
+from ...spark import SparkCatalogue, SparkDestination, SparkNaming
 from ...store import Store
 from ...targets import ItemRef
 from ..models import InstallAction
@@ -102,13 +102,13 @@ class InstallationContext:
         return found
 
     @property
-    def catalogue(self) -> SparkCatalogue:
-        """Catalogue operations against *this batch's* destination.
+    def names(self) -> SparkNaming:
+        """What *this batch's* destination calls things.
 
-        Built per access rather than stored, so the context stays a frozen record
-        of what was resolved. Failing here — rather than falling back to the
-        session's own catalogue — is the point: an action with nowhere to go must
-        stop, not land somewhere plausible (how-does-build-work §4).
+        Failing here — rather than falling back to the session's own catalogue —
+        is what stops an action with nowhere to go from landing somewhere
+        plausible (how-does-build-work §4). It needs no Spark, so an executor
+        that only renders a statement can run wherever the Installer does.
         """
 
         if self.target.destination is None:
@@ -116,7 +116,17 @@ class InstallationContext:
                 f"target {self.target.bound.id!r} resolved to no Spark destination, "
                 "so a statement naming an object has nowhere to run"
             )
-        return SparkCatalogue(self.spark, self.target.destination)
+        return SparkNaming(self.target.destination)
+
+    @property
+    def catalogue(self) -> SparkCatalogue:
+        """Catalogue operations against this batch's destination, through Spark.
+
+        Built per access rather than stored, so the context stays a frozen record
+        of what was resolved. For naming alone, use :attr:`names`.
+        """
+
+        return SparkCatalogue(self.spark, self.names.destination)
 
 
 @dataclass(frozen=True)
