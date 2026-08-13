@@ -1,47 +1,7 @@
-"""Generated create DDL — the *build* form of an Weaver document source.
+"""Generate deterministic, destination-free create definitions.
 
-Build creates structure; it does not load data. So the create definition for a
-source is pure structure: a table becomes an empty table of the right shape, a
-view becomes ``CREATE VIEW`` over its query body. Nothing here runs an
-object's ``read()`` or reads a row — populating a table is *load*, a separate
-phase, and the repository is read once to freeze a bundle, never again.
-
-The source is the right place for this because it alone knows its language,
-object kind, ID and validated body/schema. A build planner calls
-:meth:`SourceDocument.create_ddl` and never re-derives create syntax.
-
-Two invariants hold:
-
-- **deterministic** — the same validated source and format version always produce
-  the same :class:`GeneratedDdl`.
-- **destination-free** — a table or view is named ``{{object:Schema.Object}}`` and
-  the executor resolves that against whichever Lakehouse the batch is bound to.
-  No Lakehouse, workspace or filesystem path is baked into a payload, so the same
-  repository generates the same bytes in every environment (how-does-build-work §15)
-  and two bundles can be diffed for what actually differs.
-
-The second used to read "path-free", and a bare ``Schema.Object`` was taken to
-satisfy it. It does not. A two-part name is not free of a destination — it
-silently *takes* one, from whatever catalogue the session is currently attached
-to, which is the Weaver Lakehouse. Locally that was masked by pinning each schema
-to the one destination's storage; on Fabric it put the object in the control
-plane. The name has to say which Lakehouse it means, and only the installer knows
-how that Lakehouse is spelled, so the payload names the object and defers the
-spelling (see :mod:`weaver.spark.tokens`).
-
-**Bodies are rewritten, not reformatted.** A view's query is the author's text
-with each managed two-part reference replaced in place — same whitespace, same
-comments, same casing, same delimiters. Three- and four-part references are left
-exactly as written: the author named a physical thing deliberately, and Weaver
-does not second-guess it.
-
-Schema is **declared or inferred** (how-does-build-work §2). A Python-backed Delta
-table has no query and must declare its schema; the generated DDL is a concrete
-strict ``CREATE TABLE`` over the declared columns. A Spark SQL table has a
-query, so it may declare its schema or leave it to be inferred at build — either
-way the shape is only settled by running the query in the target session, so its
-payload is not finished SQL but a deterministic instruction the ``spark_table``
-executor completes in one self-contained install action (how-does-build-work §2).
+Build definitions create structures; load definitions populate tables. Executors
+resolve object tokens against the target destination at installation time.
 """
 
 from __future__ import annotations

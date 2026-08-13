@@ -1,21 +1,7 @@
-"""OneLake as a :class:`~weaver.store.Store`, over the DFS API.
+"""OneLake DFS storage transport for desktop access to Fabric.
 
-This is the **desktop's** way of reaching into a Fabric workspace: authenticated
-HTTPS against the ADLS Gen2 DFS endpoint. It is what the CLI uses to push
-repository files up and to inspect results from a test on the laptop. It is not
-the path Weaver should use when it is *running inside* Fabric — there the native
-in-session mechanisms (``notebookutils.fs``, Spark) apply — so this store is a
-cross-into-Fabric transport, not the canonical in-workspace Fabric implementation.
-
-Two things OneLake does over DFS that a plain filesystem does not:
-
-**Writing is three calls, not one.** Create the file, append the bytes, flush at
-the final offset.
-
-**Listing is paged.** A large directory returns a continuation token rather than
-everything. Pagination is not implemented yet, so a paged listing fails loudly
-(see :meth:`OneLakeDfsClient.list`) rather than silently returning a first page —
-which would quietly truncate a wipe, a sync or a reconciliation.
+The client handles DFS writes and reports paged listings instead of returning a
+partial directory result.
 """
 
 from __future__ import annotations

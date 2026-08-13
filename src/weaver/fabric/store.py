@@ -1,17 +1,6 @@
-"""Session-native storage for Weaver running inside Microsoft Fabric.
+"""Session-native Fabric storage backed by ``notebookutils.fs``.
 
-This is the within-workspace counterpart to :class:`OneLakeDfsClient`.  It uses the
-``notebookutils.fs`` object already present in a Fabric Spark session and never
-authenticates back across the workspace boundary.
-
-Directory operations came first, for wipe. Byte reads and writes came next, for
-installing a build bundle in-session — the installer reads ``plan.yml`` and the
-generated payloads from OneLake and writes an install report back. They go
-through ``notebookutils.fs.head``/``put``, which exchange UTF-8 text: a build
-bundle's manifest and payloads are UTF-8, so this is exact for them. Arbitrary
-binary artefacts do not pass through those methods: recursive repository
-materialisation and bundle-archive persistence use ``notebookutils.fs.cp``
-between OneLake and the driver's ``file:/tmp`` filesystem.
+FabricStore operates within a Fabric session; desktop callers use OneLake DFS.
 """
 
 from __future__ import annotations

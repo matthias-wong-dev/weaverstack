@@ -1,31 +1,6 @@
-"""Static dependency extraction — the names a source file refers to.
+"""Extract dependency references from Python and SQL source.
 
-Extraction only. Nothing here decides whether a name resolves: a two-part name
-may be an object in this repository, a shortcut declared elsewhere, or a typo,
-and telling those apart needs the external-dependency configuration supplied at
-build. This module's whole job is to report, accurately, what the file says.
-
-**Python** declares a dependency by importing the other object's module. The
-marker is structural — one ``__`` in an absolute import name::
-
-    from Sales__Order import Sales__Order    ->  Sales.Order
-    from weaver import Table                 ->  not a reference
-    from ._helpers.dates import parse        ->  not a reference
-
-**SQL** declares them by relation position — after ``from``, ``join``,
-``apply`` or ``using``. Names are returned with their delimiters removed and
-their part count intact:
-
-===================================  ==========================================
-``Schema.Object``                    two parts — Weaver's namespace
-``Catalogue.Schema.Object``          three parts — a physical thing, named by
-                                     the author
-``Server.Catalogue.Schema.Object``   four parts — likewise
-===================================  ==========================================
-
-Single-part names are never relations. A CTE, a temp view, a temp table and a
-table alias are all single-part, so requiring two parts excludes every one of
-them without tracking scope.
+Resolution and policy checks occur outside this module.
 """
 
 from __future__ import annotations

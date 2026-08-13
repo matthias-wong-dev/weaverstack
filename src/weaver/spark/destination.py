@@ -1,47 +1,7 @@
-"""How one logical Lakehouse is *named* in a Spark session.
+"""Name one logical Lakehouse in a Spark session.
 
-:class:`~weaver.locations.LakehouseSparkLocation` answers where a destination's
-bytes live. This answers the other half: what a statement has to write to reach
-that destination's catalogue, given that the session is attached somewhere else.
-
-The two workspaces disagree, and the disagreement is **data**, not behaviour — which
-is why there is one class here and two constructors rather than two classes.
-
-**Fabric** has a native namespace for exactly this. Under ``spark_catalog`` a
-schema is a three-level name, so an object is four parts::
-
-    `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`
-     ^workspace ^lakehouse       ^schema ^object
-
-One session can create, read and drop through that name in any Lakehouse in the
-workspace, and can build a view in one over a table in another. Nothing has to be
-attached, and nothing has to be switched.
-
-**Local Spark** has no such namespace, and cannot be given one: a Delta catalogue
-can only be the *session* catalogue (``DeltaCatalog`` extends
-``DelegatingCatalogExtension``, and registered as an ordinary named catalogue its
-delegate is null), so ``spark.sql.catalog.<lakehouse>`` is not available. Its one
-namespace level is the database. The proxy therefore folds the Lakehouse into
-that level::
-
-    `sales_lh__sales`.`Customer`
-
-which is not Fabric syntax and is not meant to be. What it reproduces is the
-*property* Fabric's namespace provides and a bare ``Sales.Customer`` does not:
-two destinations that declare a schema of the same name stay apart. Storage is
-untouched by the folding — the database still carries an explicit ``LOCATION`` of
-``<lakehouse>/Tables/<schema>``, so a managed table lands exactly where the
-Fabric layout puts it and the emulator keeps mirroring OneLake. The folded
-database identifier is lower-case because the local session catalogue registers
-it that way; declared object identifiers remain exact-case under the emulator's
-case-sensitive analysis policy.
-
-A destination is never carried in a build bundle. It is derived at install time
-from the item the bundle names, because a Fabric namespace is workspace-specific
-and a local one is rooted in a temporary directory — see
-:class:`~weaver.locations.LakehouseSparkLocation` for why a bundle that moved
-with either would stop being comparable between environments
-(how-does-build-work §15).
+Fabric uses four-part names; the local emulator folds Lakehouse and schema into
+its single namespace level.
 """
 
 from __future__ import annotations

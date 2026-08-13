@@ -1,47 +1,7 @@
-"""Generated load definitions — the *load* form of a Weaver document source.
+"""Generate load definitions from validated Weaver document sources.
 
-The sibling of :mod:`weaver.declaration.ddl`, and the division between them is
-the one Weaver is built on: build creates structure, load puts rows in it. A
-source knows how to produce both, because it alone holds its language, kind, ID
-and validated body — and neither generator ever reopens a repository.
-
-.. code-block:: text
-
-    SourceDocument
-        knows the parsed contract, source body and language
-        creates the executable load definition
-
-    RuntimeArtefact
-        carries the completed payload into claiming, planning,
-        installation, registration and pruning
-
-:class:`weaver.etl.RuntimeArtefact` remains the lifecycle object and does not
-generate itself. It asks for a payload and carries what it gets, which is why
-replacing what this module returns moves exactly the artefacts whose bytes
-changed and nothing else.
-
-Which sources own a load, and in what form:
-
-.. code-block:: text
-
-    Warehouse table (T-SQL)     an installer script for [_].[Load S.N]
-    Lakehouse table (Spark SQL) a deployed SparkSqlTable module
-    Lakehouse table (Python)    the authored module itself
-    Folder (Python)             the authored module itself
-
-**Only the Warehouse load is finished by its installer.** What a T-SQL load
-writes are the *physical* target's columns, and they are not knowable while the
-target is still a declaration, so generation produces a destination-free
-installer script that assembles the procedure server-side from ``sys.columns``.
-
-Every Lakehouse load is a Python module, generated or authored, and none of them
-needs a second phase: a module reads its target's columns when it runs, which is
-the same question answered at the same place. A Spark SQL table is *compiled*
-into such a module (:mod:`weaver.declaration.spark_sql_module`) rather than into
-a load program, so the whole Delta load lifecycle stays in
-:func:`weaver.runtime.table_load.load_table` instead of being emitted twice in
-two languages. A view owns no load; its definition is its query, so there is
-nothing to run.
+Warehouse tables generate installer scripts; Spark SQL tables generate Python
+modules; Python tables and folders use their authored modules.
 """
 
 from __future__ import annotations

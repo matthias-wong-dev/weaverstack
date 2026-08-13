@@ -1,26 +1,6 @@
-"""Dependency graph primitives.
+"""Deterministic directed-acyclic-graph primitives.
 
-The graph knows nothing about what an edge *means*. That is deliberate,
-because there is more than one graph over the same objects:
-
-**Load order** follows every dependency inside the target scope the caller
-selected. If ``Reporting.OrderReport`` and ``Sales.Order`` are both in that
-scope, the latter runs first. Selection may deliberately omit it: one named
-target never expands into another, and exact-name loading ignores dependency
-edges altogether.
-
-**Build order** is nearly flat. Building a Folder is a directory; building a
-Delta table is a ``CREATE`` from its declared ``Schema`` — neither needs a
-single upstream object to exist. Only a Warehouse object has build
-dependencies, because its shape is inferred from its query. So a build is every
-Folder and every Delta table in one parallel wave, then the Warehouse objects in
-order, with a SQL endpoint refresh where the first of them reads Delta.
-
-Both are the same machinery over different edge sets, so this module takes
-nodes and edges and answers ordering questions about them.
-
-Order is deterministic: ties are broken by name, so the same repository always
-produces the same plan and two plans can be diffed.
+Build and load use the same graph operations with different node and edge sets.
 """
 
 from __future__ import annotations

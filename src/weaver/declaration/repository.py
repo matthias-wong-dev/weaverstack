@@ -1,27 +1,7 @@
-"""The workspace declaration — a tree of Weaver items, read and checked whole.
+"""Read and validate a Weaver repository through a Store.
 
-The first directory level is the item type and the second is the logical item
-name. Everything below belongs to exactly one item.
-
-::
-
-    repository/
-    ├── Lakehouse/
-    │   └── Raw/
-    │       ├── schemas/Sales.yml
-    │       ├── Sales__Order.py            Delta table, Python
-    │       ├── Sales.OrderSummary.sql     Delta table, Spark SQL
-    │       ├── Files/Sales__Export.py     Folder
-    │       └── lib/dates.py
-    └── Warehouse/
-        └── Reporting/
-            ├── schemas/Sales.yml
-            ├── alias.yml
-            └── Sales.OrderReport.sql      Warehouse table, T-SQL
-
-The owning item chooses the SQL dialect, so no document carries one. Reading
-goes through a :class:`~weaver.store.Store`, so the same reader serves a local
-checkout, Notebook Resources, and an accessible OneLake source.
+The first two directory levels identify the item type and logical item. The
+owning item determines each SQL document's dialect.
 """
 
 from __future__ import annotations
