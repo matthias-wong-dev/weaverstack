@@ -74,18 +74,14 @@ class InstallationScope:
 class InstallationScopes:
     """Several installations addressed by one statement.
 
-    A build reads and writes for every item it was pointed at, and those items
-    live in the same physical catalogue tables. Addressing them one at a time
-    costs one round trip per item per table for an answer that one predicate
-    already contains — so the read, and the aggregated publication that follows
-    it, take this instead of a single scope.
+    A build's items share the same physical catalogue tables, so addressing them
+    one at a time costs a round trip per item per table for an answer one
+    predicate contains.
 
-    It is still a *bounded* address, which is the property that matters: the
-    predicate names exactly the scopes it was given, so widening what a build
-    touches requires widening this, visibly, at the call site. An empty
-    collection addresses nothing and is refused rather than rendered, because
-    ``WHERE`` with no predicate is every row in the catalogue — the one mistake
-    here that would be silent and unbounded.
+    Still a bounded address: the predicate names exactly the scopes it was
+    given, so widening what a build touches means widening this at the call
+    site. An empty collection is refused rather than rendered, because ``WHERE``
+    with no predicate is every row in the catalogue.
     """
 
     scopes: tuple[InstallationScope, ...]
@@ -113,9 +109,9 @@ class InstallationScopes:
     def predicate_for(self, qualifier: str = "") -> str:
         """The scopes as one predicate, safe to compose with ``AND``.
 
-        The outer parentheses are not decoration and removing them is a
-        data-loss bug rather than a style change. ``AND`` binds tighter than
-        ``OR``, so a bare ``(a AND b) OR (c AND d)`` embedded in
+        The outer parentheses are load-bearing: removing them loses data.
+        ``AND`` binds tighter than ``OR``, so a bare ``(a AND b) OR (c AND d)``
+        embedded in
 
         .. code-block:: text
 
@@ -156,12 +152,12 @@ def identifier(name: str) -> str:
 def qualified_name(table: CatalogueTable) -> str:
     """How a rendered statement names one catalogue table.
 
-    Not ``_.Registry``. The catalogue lives in the Weaver Lakehouse, and a build's
-    other statements are aimed at a destination Lakehouse — one session, two
-    places — so a name that resolved through the session's current catalogue
-    would put the record of the build wherever the session happened to be
-    pointed. The statement names the object; the batch names the Weaver
-    Lakehouse; the executor puts the two together (:mod:`weaver.spark.tokens`).
+    Not ``_.Registry``: the catalogue is in the Weaver Lakehouse while a build's
+    other statements are aimed at a destination, so a name resolved through the
+    session's current catalogue would record the build wherever the session
+    happened to point. The statement names the object, the batch names the
+    Weaver Lakehouse, and the executor combines them
+    (:mod:`weaver.spark.tokens`).
     """
 
     return object_token(CATALOGUE_SCHEMA, table.name)
@@ -170,9 +166,8 @@ def qualified_name(table: CatalogueTable) -> str:
 def literal(value: object) -> str:
     """One value as a Spark SQL literal.
 
-    Spark's default parser treats a backslash as an escape, so both it and the
-    quote are escaped. Booleans and nulls are rendered as themselves rather than
-    as strings that happen to read that way.
+    Spark's parser treats a backslash as an escape, so both it and the quote are
+    escaped. Booleans and nulls render as themselves rather than as strings.
     """
 
     if value is None:
@@ -192,9 +187,9 @@ def literal(value: object) -> str:
 def typed_literal(value: object, column_type: str) -> str:
     """One value, cast to its declared type.
 
-    The cast is not decoration. A ``MERGE`` source is a ``SELECT`` union whose
-    schema comes from its first branch, so an uncast null would type a column by
-    accident and a later branch could then fail to match the target.
+    A ``MERGE`` source is a ``SELECT`` union whose schema comes from its first
+    branch, so an uncast null would type a column by accident and a later branch
+    could fail to match the target.
     """
 
     if column_type == BOOLEAN and value is not None and not isinstance(value, bool):
@@ -205,10 +200,9 @@ def typed_literal(value: object, column_type: str) -> str:
 def column_set(columns: Iterable[str]) -> str | None:
     """A comma-separated column set, declared order preserved.
 
-    Order is meaning here — a key on ``(Region, Country)`` is not the same key as
-    one on ``(Country, Region)`` — so this never sorts. An empty set is null
-    rather than an empty string, because "no key" and "a key of no columns" are
-    different claims.
+    Order is meaning — ``(Region, Country)`` is not the key ``(Country, Region)``
+    is — so this never sorts. An empty set is null rather than an empty string:
+    "no key" and "a key of no columns" are different claims.
     """
 
     joined = ", ".join(columns)
@@ -238,10 +232,9 @@ def render_merge(
     Returns None when there is nothing to merge, so a caller emits no action
     rather than an empty statement.
 
-    An unchanged row is a genuine no-op: the ``MATCHED`` branch is guarded by a
+    An unchanged row is a no-op: the ``MATCHED`` branch is guarded by a
     null-safe comparison of every non-key column, so it neither writes nor
-    advances ``row_update_datetime``. That is what makes a rebuild of unchanged
-    Weaver document leave the catalogue alone.
+    advances ``row_update_datetime``.
 
     A published column is set on insert and never on update. Every object a
     build rebuilds reaches this statement as an insert — it is new, or its
@@ -323,18 +316,16 @@ def render_merge(
 def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
     """The merge source: one ``VALUES`` relation, cast by an enclosing projection.
 
-    The obvious construction — one ``SELECT`` of cast literals per row, chained
-    with ``UNION ALL`` — does not scale, and the failure is nasty. Spark generates
-    Java for the plan, a method's bytecode may not exceed 64 KB, and a union of a
-    hundred projections exceeds it: the catalogue's own ``ColumnDictionary`` has a
-    row per column of every catalogue table, and that was enough to break the
-    bootstrap with ``Code grows beyond 64 KB``.
+    Not one ``SELECT`` of cast literals per row chained with ``UNION ALL``:
+    Spark generates Java for the plan, a method's bytecode may not exceed 64 KB,
+    and a union of a hundred projections exceeds it. The catalogue's own
+    ``ColumnDictionary`` was enough to break the bootstrap with ``Code grows
+    beyond 64 KB``.
 
-    One ``VALUES`` relation is a single plan node however many rows it carries, so
-    the casts move outward into one projection over it. The values themselves are
-    bare literals: ``VALUES`` unifies a column's type across rows — all-null
-    becomes void — and the enclosing ``CAST`` settles it either way, which is what
-    keeps the source's schema exactly the target's.
+    One ``VALUES`` relation is a single plan node however many rows it carries,
+    so the casts move outward into one projection over it. The values are bare
+    literals — ``VALUES`` unifies a column's type across rows, all-null becoming
+    void — and the enclosing ``CAST`` settles it either way.
     """
 
     tuples = ",\n                    ".join(
@@ -366,18 +357,17 @@ def render_delete_obsolete(
 ) -> str | None:
     """A scoped ``DELETE`` of everything in this installation the rows do not claim.
 
-    An installation that now projects *no* rows for a table gets a plain scoped
-    delete: rendering nothing there would leave stale rows behind forever.
+    An installation projecting no rows for a table gets a plain scoped delete;
+    rendering nothing would leave stale rows behind forever.
 
-    Returns None only for a table whose key is the installation scope itself —
-    :data:`~weaver.catalogue.tables.INSTALLATION`. There is at most one such row
-    per scope, so "the rows this projection does not claim" is empty by
-    construction and the merge alone keeps it current. Rendering a predicate over
-    no columns beyond the scope would delete the very row about to be merged.
+    Returns None only for a table keyed by the installation scope itself
+    (:data:`~weaver.catalogue.tables.INSTALLATION`): there is at most one such
+    row per scope, so a predicate over no columns beyond the scope would delete
+    the very row about to be merged.
 
-    The predicate is written as a disjunction of key equalities rather than a
-    tuple ``IN``: it renders identically on any engine, reads in a review, and
-    keeps the scope visible at the front of the statement.
+    The predicate is a disjunction of key equalities rather than a tuple ``IN``,
+    so it renders identically on any engine and keeps the scope at the front of
+    the statement.
     """
 
     rows = sorted_rows(table, rows)
@@ -421,10 +411,9 @@ def render_delete_scope(
 ) -> str:
     """A scoped ``DELETE`` of whole installations from one table.
 
-    This is installation pruning: it is what decommissioning a target does, and it
-    is never what an ordinary build does. A build that did not include a target
-    type has no opinion about it, which is a different thing from having removed
-    it.
+    Installation pruning: what decommissioning a target does, and never what an
+    ordinary build does. A build that did not include a target type has no
+    opinion about it.
     """
 
     return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
@@ -435,11 +424,9 @@ def render_delete_scope(
 def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
     """Refuse a merge whose source holds two rows with one key.
 
-    Delta fails a ``MERGE`` when several source rows match one target row, and it
-    fails at *install* time — long after the bundle was reviewed. Catching it here
-    turns a late, obscure runtime error into a generation error naming the table
-    and the key, and it means a duplicate can only be a projection fault rather
-    than a mystery.
+    Delta fails a ``MERGE`` when several source rows match one target row, and
+    it fails at install time, long after the bundle was reviewed. Caught here it
+    is a generation error naming the table and the key.
     """
 
     seen: dict[tuple, int] = {}
@@ -464,9 +451,8 @@ def _check_scope(
 ) -> None:
     """Refuse to render a statement over rows from another installation.
 
-    The guard exists because the consequence is invisible: a stray row would be
-    merged into the wrong installation's scope and read as truth. Cheap to check,
-    expensive to discover.
+    The consequence is invisible: a stray row would be merged into the wrong
+    installation's scope and read as truth.
     """
 
     stray = [row for row in rows if not scope.owns(row)]
