@@ -152,7 +152,7 @@ not an intermediate remote filesystem required by every build.
 
 ---
 
-## 4. Installation is deliberately unintelligent
+## 4. Installation is mechanical
 
 The installer validates and executes the bundle. It does not make architectural
 decisions.
@@ -181,9 +181,7 @@ For example, a folder-delete executor may translate a frozen target-relative
 path into the correct OneLake or local filesystem operation. It may not list the
 parent directory and decide what else ought to be deleted.
 
-This is a feature, not a limitation:
-
-> **A production installer should be boring.**
+The installer is intentionally limited to executing the reviewed bundle.
 
 ---
 

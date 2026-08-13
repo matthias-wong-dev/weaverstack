@@ -366,8 +366,8 @@ the result without installing it — no Registry row, no `TestDictionary` row, n
 task log. From a desktop the file's *content* crosses into the session, not its
 path. `--name` and `--file` are mutually exclusive.
 
-Python validation is not run through `--file`, deliberately: it is already
-directly runnable in a notebook.
+`--file` supports SQL validation. Python validation is directly runnable in a
+notebook.
 
 ```python
 from tests.Sales__OrderCustomerExists import Sales__OrderCustomerExists

@@ -108,7 +108,7 @@ a script.
 `JAVA_HOME` does not need setting by hand. When it is unset, Weaver asks
 `/usr/libexec/java_home` for a supported JDK on macOS, newest first, and falls
 back to whatever `java` is on `PATH` elsewhere. When it *is* set, it is
-respected — a deliberately configured machine is never second-guessed.
+respected.
 
 ## Windows
 

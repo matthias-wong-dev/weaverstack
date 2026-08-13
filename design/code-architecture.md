@@ -311,13 +311,13 @@ The `remote` / `hosted` pair is the parity question made selectable. Every Fabri
 test states which position it runs in, so a capability proven in one and not the
 other is a gap you can *see* rather than one someone has to remember to look for.
 
-The suite is deliberately bottom-heavy. A planning bug should be caught by a test
+The suite is bottom-heavy. A planning bug should be caught by a test
 that constructs a `BuildState` and asserts a `BuildBundle` — not by a
 thirty-minute Fabric run. The expensive tests are for claims only a real estate
 can make: that an alias really becomes readable, that a bundle's order is
 *viable*, that the endpoint really catches up.
 
-Two things learned the hard way, both worth keeping in mind:
+Operational constraints:
 
 - **A capability being available is not the same as it being acquired.** Building
   a context must not start a Spark session; the executor that uses one starts it.
