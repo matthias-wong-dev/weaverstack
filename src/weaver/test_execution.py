@@ -34,9 +34,8 @@ def run_installed_validation(
     """One installed validation, run through the Session that owns the engines.
 
     Returns the result the validation produced, with any diagnostic rows
-    attached to it — a run's *status* is the Runner's to decide, from a result,
-    exactly as it is for a load. What this owes the caller is the judgement the
-    validation made, not an opinion about what that means for the run.
+    attached. A run's status is the Runner's to decide from that result, as it
+    is for a load.
     """
 
     environment = _capabilities(session, workspace, runtime_scope)
@@ -70,9 +69,9 @@ def run_installed_validation(
 class _WithDiagnostics:
     """A validation result, carrying the rows a caller asked to see.
 
-    A wrapper rather than a field on the result: the result types are the
-    validation runtime's, shared with the primitives that produce them, and
-    diagnostics are a property of *this run* having been asked for them.
+    A wrapper rather than a field on the result: the result types belong to the
+    validation runtime, and diagnostics are a property of this run having asked
+    for them.
     """
 
     def __init__(self, result, diagnostics) -> None:
@@ -93,11 +92,10 @@ class _WithDiagnostics:
 class _Capabilities:
     """What the validation dispatchers read, taken from the Session that owns it.
 
-    ``spark`` is a property rather than a value, and that is the whole of why
-    this is a class. Asked for eagerly, a Warehouse validation — a stored
-    procedure reached over TDS, needing no Spark at all — could not run from a
-    desktop, because assembling the bundle of capabilities failed before
-    anything looked at which capability the validation actually wanted.
+    ``spark`` is a property rather than a value, which is why this is a class:
+    asked for eagerly, a Warehouse validation reached over TDS could not run
+    from a desktop, because assembling the capabilities failed before anything
+    looked at which one it wanted.
     """
 
     def __init__(self, session, workspace, runtime_scope) -> None:
@@ -138,9 +136,9 @@ def _dispatch_warehouse(
 ):
     """Execute the installed procedure once, and read what it set.
 
-    Once, whether or not the caller wanted rows. The transport keeps the result
-    sets *and* the outputs from a single execution, so asking for evidence never
-    costs a second run over data that may have moved.
+    Once, whether or not the caller wanted rows: the transport keeps the result
+    sets and the outputs from one execution, so asking for evidence never costs
+    a second run over data that may have moved.
     """
 
     from .declaration.tsql_validation import RESULT_PARAMETERS
@@ -194,9 +192,9 @@ def _dispatch_python(
 ):
     """Import the deployed module, construct it, and read it.
 
-    The same import machinery a load uses, in the same isolated runtime context,
-    because a validation sits in the same deployed tree and imports the same
-    object modules its author wrote against.
+    The same import machinery a load uses, in the same isolated context: a
+    validation sits in the same deployed tree and imports the same object
+    modules its author wrote against.
     """
 
     from .lakehouse import lakehouse_for
@@ -230,11 +228,9 @@ def _dispatch_python(
             _collected(frame) if collect else None
         )
 
-    # Evaluated once, either way. A collected run counts the rows it already
-    # has; a suppressed run aggregates *by side* in one action rather than
-    # counting each side separately — two counts are two evaluations of the
-    # whole comparison, and between them the tables can move, so the two halves
-    # of one Test's answer could describe different data.
+    # Evaluated once either way: a collected run counts rows it already has, a
+    # suppressed run aggregates by side in one action. Two counts would be two
+    # evaluations of the comparison, between which the tables can move.
     if collect:
         rows = _collected(frame)
         sides = [str(row["_weaver_side"]) for row in rows]
@@ -271,9 +267,8 @@ def _collected(frame: Any) -> tuple:
 def _class_name(validation: InstalledValidation) -> str:
     """``Sales__OrdersReconcile``, from the deployed module's own filename.
 
-    From the file rather than from the logical ID, because the file is what was
-    installed — and the two agree by construction, since one function computed
-    the path from the ID.
+    From the file rather than the logical ID, because the file is what was
+    installed. The two agree by construction: one function computed the path.
     """
 
     name = validation.artefact.object_id.object
@@ -284,8 +279,8 @@ def _join(root: str, *parts: str) -> str:
     """The same string join the load dispatcher uses.
 
     A string, not a ``Location``: ``files_root()`` answers as Python addresses
-    it, and calling ``.join`` on that would be ``str.join`` — which silently
-    interleaves the characters instead of appending a path segment.
+    it, so ``.join`` on it would be ``str.join``, interleaving characters rather
+    than appending a segment.
     """
 
     return "/".join([str(root).rstrip("/"), *parts])
