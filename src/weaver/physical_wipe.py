@@ -57,9 +57,8 @@ def _clear(
 ) -> tuple[str, ...]:
     """Remove the contents of a location, keeping the location itself.
 
-    ``keep`` names entries the wipe passes over. It is not a scoping of what a
-    wipe is *for* — a wipe still clears the target — but a recognition that not
-    everything under an area belongs to the target. See :data:`_KEPT_SCHEMAS`.
+    ``keep`` names entries the wipe passes over: not everything under an area
+    belongs to the target. See :data:`_KEPT_SCHEMAS`.
     """
 
     _guard(location, root)

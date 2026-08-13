@@ -43,9 +43,8 @@ def test(
 
     ``name`` runs one installed validation and returns its diagnostic rows
     alongside its counts; ``file`` compiles and runs a source file without
-    installing it. They are mutually exclusive: one names something the estate
-    has and the other names something it may not, and a request that meant both
-    would have to decide which won.
+    installing it. Mutually exclusive: one names something the estate has, the
+    other something it may not.
     """
 
     if name is not None and file is not None:
@@ -94,15 +93,12 @@ def run_test(
 ) -> ValidationRunReport:
     """The whole orchestration path, over a prepared session.
 
-    Separated from :func:`test` for the reason :func:`weaver.load.run_load` is:
-    workspace resolution and capability acquisition differ between the desktop,
-    the emulator and a Fabric session, and none of them changes the
-    orchestration itself.
+    Separated from :func:`test` as :func:`weaver.load.run_load` is: workspace
+    resolution and capability acquisition differ between positions, and none of
+    them changes the orchestration.
 
     ``state`` is the same preflight snapshot :func:`weaver.load.run_load` takes,
-    for the same reason: reading the estate is a boundary act, and a caller who
-    has already read it — or who is describing one deliberately — should not
-    have the run read it again behind them.
+    so a caller that has already read the estate is not made to read it twice.
     """
 
     started = datetime.now(timezone.utc)
@@ -117,11 +113,9 @@ def run_test(
             started=started,
             dry_run=dry_run,
         )
-        # Through the same reporting as an installed run, so `--dry-run` means
-        # the same thing and `strict` raises on the same outcomes. What differs
-        # is only that a file run publishes nothing, which `_reported` handles
-        # by writing no task log when there is nothing installed to record
-        # against.
+        # Through the same reporting as an installed run, so `--dry-run` and
+        # `strict` mean the same thing. A file run publishes nothing, which
+        # `_reported` handles by writing no task log.
         return _reported(
             session,
             workspace=workspace,
@@ -150,12 +144,10 @@ def run_test(
                 requested,
                 name=name,
                 dry_run=dry_run,
-                # Validations are independent by construction: each reads the
-                # estate and reports, and none produces what another consumes.
-                # One that fails is a finding, not a reason to stop asking the
-                # others — and "everything I did not get to" is the least useful
-                # answer a run that was asked what is wrong with an estate could
-                # give.
+                # Validations are independent: each reads the estate and
+                # reports, and none produces what another consumes. One that
+                # fails is a finding rather than a reason to stop asking the
+                # others.
                 fault_tolerant=True,
             ),
             workspace=workspace,
@@ -194,9 +186,8 @@ def _dispatch_collecting(*, collect: bool):
 def _as_validation_node(node) -> ValidationNodeReport:
     """One run node, in the vocabulary a validation's readers use.
 
-    A validation does not "succeed" — it passes or fails, which is a judgement
-    about data rather than about work. One internal model does not mean one
-    public shape, and this is where the two meet.
+    A validation passes or fails rather than succeeding: a judgement about data
+    rather than about work. One internal model, two public shapes.
     """
 
     from .run.result import INVALID as RUN_INVALID
@@ -249,10 +240,9 @@ def _reported(
 ) -> ValidationRunReport:
     """Write the evidence, assemble the report, and raise only if asked.
 
-    ``durable`` is false for a run over source that was never installed. Such a
-    run is a developer's loop rather than an estate event, and a task log
-    claiming otherwise would put a record of something the estate does not have
-    into the estate's own evidence.
+    ``durable`` is false for a run over source that was never installed: a
+    developer's loop rather than an estate event, so the estate's evidence
+    records nothing it does not have.
     """
 
     status = run_status(nodes)

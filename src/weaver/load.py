@@ -147,14 +147,12 @@ def run_load(
 
         physical catalogue + targets  →  RunState  →  Runner  →  RunResult
 
-    Nothing about *when* a node runs lives here any more. What is left is the
-    load operation's own business — reading the estate, writing the evidence,
-    and rendering the result in the shape a load's readers expect.
+    When a node runs is the Runner's. What is left here is the load operation's
+    own business: reading the estate, writing the evidence, and rendering the
+    result in the shape a load's readers expect.
 
-    ``state`` is the handover, and a caller that already has one supplies it:
-    the estate is a Python representation, so a caller holding an observed
-    snapshot should not have to arrange for it to be re-observed. Omitted, this
-    reads one — which is what the operation does in production.
+    ``state`` is the handover, supplied by a caller that already holds a
+    snapshot. Omitted, this reads one.
     """
 
     from .run import (
@@ -183,11 +181,9 @@ def run_load(
 
     with session.step("Build run graph"):
         if state is None:
-            # Only the targets the graph touches: the rest have nothing to be
-            # looked up in them. Planning the graph first is what makes that
-            # knowable, and the reading happens once, here, so everything below
-            # decides against a snapshot rather than against state that is still
-            # moving.
+            # Only the targets the graph touches, which planning it first is
+            # what makes knowable. Read once here, so everything below decides
+            # against a snapshot rather than moving state.
             planned = load_dag(estate, targets=requested, names=names)
             state = RunState(
                 catalogue=catalogue,
@@ -244,10 +240,8 @@ def run_load(
 def _as_load_report(result, *, started, task_log) -> LoadRunReport:
     """One RunResult, rendered as the shape a load's readers expect.
 
-    The internal model is one; the public shapes are not. A load reader wants
-    rows moved and a task log to point at, and gets exactly the report they got
-    before — which is why the CLI, the notebook and the task log did not have to
-    learn a new one.
+    One internal model, several public shapes. A load reader wants rows moved
+    and a task log to point at.
     """
 
     return LoadRunReport(
@@ -285,18 +279,15 @@ def _as_load_report(result, *, started, task_log) -> LoadRunReport:
 def _raise_for_failure(report: LoadRunReport) -> None:
     """Turn an intolerant run's recorded failure into the exception it is.
 
-    **Everything durable is already written.** Every planned node has its final
-    record, and the completion document says the task reached a decided outcome
-    — so the absence of one still means an interruption rather than an ordinary
-    handled failure, which is the distinction a reader depends on.
+    Everything durable is written first: every planned node has its final
+    record and the completion document says the task reached a decided outcome,
+    so a missing completion still means an interruption rather than a handled
+    failure.
 
-    Only then does this raise. ``fault_tolerant=False`` is a caller saying *stop
-    if anything fails*, and returning an ordinary report would make that
-    indistinguishable from success to everyone who did not read it. A tolerant
-    run is the opposite instruction and returns its report as it always did.
-
-    The exception carries what the report knew: the failing node's counts, the
-    partial report, and where the evidence went.
+    Only then does this raise. ``fault_tolerant=False`` means stop if anything
+    fails, and an ordinary report would be indistinguishable from success. The
+    exception carries the failing node's counts, the partial report, and where
+    the evidence went.
     """
 
     failed = [node for node in report.nodes if node.status == FAILED]
@@ -395,9 +386,8 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
     """What the run added up to, reconciled from the steps rather than tallied.
 
     ``timings`` are the frames this run closed, in closing order. They ride the
-    completion document rather than becoming a file of their own: the evidence
-    folder already says what a task intended and what each step did, and how
-    long a step took is a property of that step, not a second kind of record.
+    completion document rather than a file of their own: how long a step took is
+    a property of that step.
     """
 
     counted = {status: 0 for status in ("executed", "succeeded", "failed", "blocked")}
