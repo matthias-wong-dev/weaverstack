@@ -56,29 +56,10 @@ ADDRESSABLE_POLL_INTERVAL = 5.0
 
 class AliasExecutor:
 
-    #: The whole action crosses, and the shortcut is not the reason: creating one
-    #: is a REST call that reaches Fabric from anywhere. Only the readability
-    #: wait needs Spark, so splitting this — REST here, probe across — ought to
-    #: work, and an attempt was reverted.
-    #:
-    #: Be careful with the evidence for that revert. It failed as:
-    #:
-    #: .. code-block:: text
-    #:
-    #:     alias(es) ... were created but did not become readable within 300s:
-    #:     Livy session entered state 'dead'
-    #:
-    #: which was read at the time as the polling loop being too chatty to survive
-    #: a wire. It was not: the test helper built its own bare session with no
-    #: ``livy=``, so a capacity that permits one Livy session was asked for a
-    #: second, and the second comes back dead. That helper is fixed, and the
-    #: chatty-loop theory was never tested.
-    #:
-    #: So this stays whole because the split is unproven, not because it is
-    #: known to be wrong. If it is attempted again, send the whole wait as one
-    #: crossing parameterised by the timeout and interval this executor still
-    #: decides — one round trip rather than sixty — and measure it.
-    needs_spark = True
+    #: This action runs wherever the Installer is. Creating a shortcut is a REST
+    #: call that reaches Fabric from anywhere, and the readability wait asks
+    #: Spark a question through ``context.spark_sql`` rather than needing a
+    #: session of its own.
     name = "alias"
 
     def execute(

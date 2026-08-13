@@ -443,17 +443,25 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
 # --- where each half of an alias runs -----------------------------------------
 
 
-def test_the_whole_alias_action_crosses_because_the_wait_is_chatty():
-    """Not because creating a shortcut needs Spark — it does not, it is REST.
+def test_the_alias_action_runs_where_the_installer_is():
+    """Neither half of an alias needs a Spark session of its own.
 
-    The wait polls every five seconds for up to five minutes. In the session
-    that is sixty cheap `spark.sql` calls; from a desktop it would be sixty Livy
-    submissions, and a real workspace killed the session doing exactly that.
+    Creating a shortcut is a REST call, and the readability wait asks Spark a
+    question through ``context.spark_sql``. Asserted against the routing rather
+    than against the executor, because the claim is that a desktop install runs
+    this action locally.
     """
 
-    from weaver.build_bundle.executors.alias import AliasExecutor
+    from weaver.build_bundle.installer import Installer, _crosses
 
-    assert AliasExecutor.needs_spark is True
+    class _Elsewhere:
+        """A Session addressing a workspace it is not running inside."""
+
+        def executes_here(self, workspace=None):
+            return False
+
+    installer = Installer(_Elsewhere(), workspace=LocalWorkspace(workspace="/tmp/x"))
+    assert not _crosses(_action(), installer)
 
 
 def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
