@@ -1,54 +1,7 @@
-"""RunResult — the canonical answer to "what happened?", and what makes one up.
+"""Common result, status, and message types for runtime operations.
 
-One result model for every kind of run. ``weaver load`` and ``weaver test`` were
-two report models describing the same events — a node ran, a node was blocked, a
-node was skipped, the run as a whole came to a status — kept in agreement by
-hand, which meant a fix to one was a bug waiting in the other.
-
-This is the *internal* model, and it is authoritative in memory. A physical task
-log is downstream of it:
-
-.. code-block:: text
-
-    Runner
-      ├── events
-      ├── node results
-      └── RunResult
-                ↓  optional boundary
-             _/Log
-
-Ordinary correctness must not require a log, which is what lets a run-cycle test
-execute a whole Runner with no storage at all. Production still writes one.
-
-**One internal model does not mean one user-facing shape.** ``weaver load
---json`` and ``weaver test --json`` render projections of this, because their
-readers are asking different questions — a load reader wants rows moved, a test
-reader wants which checks disagreed and by how much.
-
-Everything a result is made of lives here too. Split across four modules, the
-shape could not be read in one sitting: the contract was in one file, what a
-result may say in another, the statuses in a third.
-
-.. code-block:: text
-
-    the contract   a result reports whether it succeeded, and nothing more
-    the messages   what a run has to say about a node, typed by code
-    the statuses   what became of one node, and of the run
-    the results    RunNodeResult, RunResult
-
-**The contract is one sentence** — a result reports whether it succeeded — and
-that is deliberately all a Runner asks. A load returns counts of work; a
-validation returns a judgement about data; a semantic-model refresh will return
-something else again. Requiring any of them to be the others' type would mean
-that adding a runtime operation meant importing another operation's vocabulary
-into the Runner, which is the thing this package exists not to do.
-
-**Messages are typed rather than written out**, because they are read by two
-audiences. A person wants the sentence; a task log, a report renderer and
-anything filtering evidence want the *code* — and a code survives rewording in a
-way a sentence does not. ``source`` says who noticed, primitive or orchestration,
-so a caller reading a node's findings does not have to know which layer wrote
-each one in order to see everything that was wrong with it.
+Run results record whether each node succeeded. Operation-specific report
+renderers project the common model into their own public output.
 """
 
 from __future__ import annotations

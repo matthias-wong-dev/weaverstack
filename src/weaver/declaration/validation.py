@@ -1,25 +1,7 @@
-"""Generated validation definitions — the runnable form of a Test or Assumption.
+"""Generate runnable Test and Assumption definitions.
 
-The sibling of :mod:`weaver.declaration.load`, and deliberately its shape. A
-validation declaration knows its language, kind, ID and validated body, so it
-knows how to produce the primitive that runs it:
-
-.. code-block:: text
-
-    Warehouse Test/Assumption (T-SQL)      an installed [_].[Test S.N] procedure
-    Lakehouse Test/Assumption (Spark SQL)  a deployed SparkSqlTest module
-    Lakehouse Test/Assumption (Python)     the authored module itself
-
-A Python validation needs no generation for the same reason a Python table does:
-the module a developer wrote *is* the primitive, and it reads its own contract
-from its own docstring when it runs.
-
-**Compiled, not interpreted.** A Spark SQL Test becomes a Python module carrying
-the authored SQL, exactly as a Spark SQL table does — so the comparison,
-key validation, correlation and diagnostics all stay in
-:func:`weaver.runtime.test_compare.compare` instead of being emitted a second
-time in SQL. There is no installed ``.sql`` validation program and nothing that
-runs one.
+T-SQL validations become procedures, Spark SQL validations become Python
+modules, and Python validations use their authored module directly.
 """
 
 from __future__ import annotations

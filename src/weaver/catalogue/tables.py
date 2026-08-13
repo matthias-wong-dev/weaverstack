@@ -44,9 +44,7 @@ from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
 #: One character, reserved, and never touched by an application build's prune.
 CATALOGUE_SCHEMA = "_"
 
-#: What an installed object is, in the catalogue's vocabulary. Deliberately
-#: coarse: enough for a later operation to know how to address the thing, without
-#: inventing an identity scheme that competes with Weaver document's kind and language.
+#: Installed-object vocabulary used for runtime addressing.
 #: ``file`` and ``stored_procedure`` are what a load layer installs — a deployed
 #: module or generated statement, and a generated load procedure — and they are
 #: ordinary managed objects rather than infrastructure exempt from the lifecycle.

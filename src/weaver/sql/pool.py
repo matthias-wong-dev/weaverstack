@@ -73,18 +73,10 @@ class SqlConnectionPool:
             self._release(lease)
 
     def _acquire(self):
-        """A connection that is believed to work, not merely one that exists.
+        """Acquire a connection, validating a long-idle pooled connection first.
 
-        A pooled connection can be dropped by the server while it sits idle, and
-        the drop is not announced — the next statement fails with a
-        communication link failure, which looks like the statement's fault and
-        is not. Retrying the statement would be the obvious fix and the wrong
-        one: a link can also drop *after* the server received a write, so a
-        retry can apply it twice. Checking before handing the connection out
-        cannot, because nothing has been sent.
-
-        Only connections that have been idle a while are checked. A caller
-        running statements back to back pays nothing.
+        Validation occurs before a statement is sent, avoiding unsafe retries
+        after a possible write.
         """
 
         while True:

@@ -1,20 +1,7 @@
-"""The build manifest — immutable plan, sequence, batch and action types.
+"""Immutable BuildBundle plan, sequence, batch, and action types.
 
-A :class:`BuildPlan` is the whole deployment, fully bound: every executable
-identifies one physical target and carries everything an installer needs. It is
-produced once, by the planner, and thereafter only read.
-
-The execution shape is deliberately flat and explicit:
-
-- **sequences are barriers.** They run in order; the next begins only when every
-  action in the current one has succeeded.
-- **batches are target-bound.** A batch names exactly one target, so a physical
-  destination appears once per batch rather than being repeated inside actions.
-- **actions are independent units.** Each has its own payload (where one is
-  required), and is reported on its own.
-
-Every type serialises to and from plain mappings, which is what the canonical
-``plan.yml`` and the ``bundle_id`` hash are built from — see :mod:`weaver.build_bundle.bundle`.
+Sequences are execution barriers, batches bind actions to one target, and every
+type serialises to the canonical manifest.
 """
 
 from __future__ import annotations
@@ -45,9 +32,7 @@ REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 WRITE_FILE = "write_file"
 BUILD_PROCEDURE = "build_procedure"
 
-#: Managed rebuild drops.  They are deliberately distinct from prune: these
-#: objects remain desired and are removed only so a selected definition can be
-#: recreated.
+#: Rebuild drops remove desired objects before their selected definition is recreated.
 DROP_FOLDER = "drop_folder"
 DROP_TABLE = "drop_table"
 DROP_VIEW = "drop_view"

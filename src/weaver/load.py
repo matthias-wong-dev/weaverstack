@@ -1,42 +1,7 @@
-"""The public ``weaver.load(...)`` operation.
+"""Public ``weaver.load(...)`` entry point and orchestration.
 
-The adaptation boundary between the small notebook-facing surface and the
-planning, resolution, execution and logging seams beneath it — the load
-counterpart of :mod:`weaver.operations`, and deliberately shaped like it:
-
-.. code-block:: python
-
-    weaver.load(["Warehouse/Reporting", "Lakehouse/Curated"])
-
-Typed physical target strings at the boundary; an explicit workspace or workspace
-configuration where there is one; the notebook's own context where there is not;
-and typed objects retained only as internal seams. What a caller writes here is
-what they already write for ``build`` and ``wipe``, because it is parsed by the
-same grammar.
-
-**The catalogue is the source, and the repository is not consulted.** By the time
-anything is loadable it has been built, and what was built is recorded. Reopening
-the declaration would orchestrate what somebody meant to install rather than what
-is installed, and the two differ exactly when it matters most.
-
-The order below is the order things must happen in, and each step is somebody
-else's module:
-
-.. code-block:: text
-
-    parse targets            weaver.targets
-    resolve workspace        weaver.operations
-    read the catalogue       weaver.catalogue.state
-    observe every target     weaver.run.state
-    reverse the bindings     weaver.load_plan
-    build the physical DAG   weaver.run.graph
-    resolve every node       weaver.run.resolution
-    ── dry run stops here ──
-    dispatch each primitive  weaver.run.runner
-    write task evidence      weaver.task_logging
-
-Nothing executes while catalogue state is still being discovered: the whole plan
-is settled, ordered and resolved before the first primitive is dispatched.
+Loads read installed state from the catalogue, construct and resolve a physical
+DAG, then dispatch primitives and write task evidence.
 """
 
 from __future__ import annotations

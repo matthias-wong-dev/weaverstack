@@ -11,11 +11,10 @@ product behaviour and is authoritative for that behaviour.
 Weaver decides things in Python and performs physical work through a Session.
 The repository keeps those responsibilities separate.
 
-Almost everything interesting — what to build, what order to build it in, what
-still needs loading, what failed and why — happens as ordinary Python objects in
-memory. Reaching a real Lakehouse or Warehouse happens at a small number of
-named places. In between there are **handoff points**: plain values that one
-part produces and another consumes.
+Planning, dependency selection, status tracking, and failure handling use
+ordinary Python objects in memory. Access to a Lakehouse or Warehouse is confined
+to named boundaries. The values passed between those responsibilities are plain
+handoff objects.
 
 The rest of this document identifies the handoffs between those responsibilities.
 
@@ -49,15 +48,15 @@ The rest of this document identifies the handoffs between those responsibilities
 Read from the top: two kinds of input arrive, a decision is made, the decision
 is written down, and only then does anything physical happen.
 
-The value of the middle layer is that it is *inspectable*. A `BuildBundle` is a
-description of everything a build intends to do. You can print it, diff it,
-serialise it, or hand it to a test — before a single byte moves.
+A `BuildBundle` describes everything a build intends to do. It can be printed,
+compared, serialised, or used in a test before physical work begins.
 
 ---
 
 ## The four doers
 
-Four objects do things. Nothing else does.
+Four components own runtime behaviour: `Session`, `Builder`, `Installer`, and
+`Runner`.
 
 ```text
 Session     supplies physical capabilities and resources
@@ -66,15 +65,10 @@ Installer   carries out a BuildBundle
 Runner      decides what runs next, and records what happened
 ```
 
-They are deliberately few, and the boundary between them is the thing most worth
-protecting. The rule that keeps it honest:
-
-> **Builder, Installer and Runner own Weaver semantics. Session owns reusable
-> physical capabilities and transport.**
-
-A Session that learned what a DAG was would become a second Runner, and then two
-things would disagree about a node's status. So Session answers *"how do I reach
-Spark from here?"* and never *"what should run next?"*.
+`Builder`, `Installer`, and `Runner` interpret Weaver semantics. `Session`
+provides reusable physical capabilities and transport. `Session` does not
+interpret dependency graphs; DAG selection and execution state belong to
+`Runner`.
 
 ### Session
 
@@ -92,8 +86,8 @@ session.store(workspace)                 # files
 session.resolver(workspace)              # names → physical items
 ```
 
-`session.livy` is deliberately not part of that list. The day domain code writes
-it is the day Weaver stops being able to run anywhere else.
+Domain code does not access `session.livy`; doing so would couple it to Fabric
+transport.
 
 Commands say up front what they will need, coarsely, and the Session starts those
 in the background:
@@ -103,9 +97,9 @@ weaver load Warehouse/Reporting   → auth, resolver, tds
 weaver load Lakehouse/Sales       → auth, resolver, onelake, livy
 ```
 
-The Session is *told*; it does not infer. And **preparing is not using** — a
-declaration gives a head start to something that was coming anyway. A run that
-declares `livy` and turns out to be all T-SQL opens no Spark session at all.
+Commands declare the capabilities they may need. Preparation starts them in the
+background, but a capability is acquired only when an executor uses it. A run
+that declares `livy` and performs only T-SQL does not open a Spark session.
 
 ### Builder
 
@@ -126,11 +120,10 @@ tenant, no credentials and no JVM.
 BuildBundle  →  physical estate
 ```
 
-The doer with no opinions. It validates the bundle, walks its sequences as
-barriers, runs each action through the executor the bundle named, and records one
-result per action. It never reopens the repository, resolves a dependency or
-second-guesses the Builder — every such decision is already in the bundle, and an
-Installer that could overrule one would make *"who decided?"* unanswerable.
+`Installer` executes the actions already defined in a `BuildBundle`. It validates
+the bundle, walks its sequences as barriers, calls the named executor for each
+action, and records one result per action. Repository reading and dependency
+resolution have already completed when installation begins.
 
 ### Runner
 
@@ -143,9 +136,9 @@ and fail-fast, and aggregates the result. One Runner serves both `weaver load`
 and `weaver test`; what differs is which nodes are selected and which primitive
 runs, not how a run behaves when one of them fails.
 
-Execution leaves through exactly one hole: `dispatch`, a callable. Give it the
-real one and nodes run against the estate; give it a controlled one and the whole
-state machine is provable in milliseconds.
+`Runner` delegates node execution through the `dispatch` callable. Production
+execution supplies the estate-backed dispatcher; tests can supply a controlled
+dispatcher for the same state machine.
 
 ---
 
@@ -164,19 +157,15 @@ The handoff points, roughly in the order you meet them.
 | `RunGraph` | the selected nodes and their edges |
 | `RunResult` / reports | what happened, per node, per action |
 
-Two properties matter more than the list.
-
-**They are plain values.** A test constructs a `BuildState` directly and needs no
-estate. A `RunGraph` can be asserted against without dispatching anything.
-
-**They round-trip.** `BuildBundle` serialises to a canonical `plan.yml` and back,
-which is what lets a bundle be archived, inspected, or executed by a different
-process from the one that planned it.
+The representations are plain values. A test can construct a `BuildState`
+directly and assert a `RunGraph` without dispatching anything. `BuildBundle`
+serialises to and from canonical `plan.yml`, so a bundle can be archived,
+inspected, or executed by a different process from the one that planned it.
 
 ### Carrying, not reconstructing
 
-One habit runs through all of them: when something is known early, it is carried
-forward rather than derived later.
+Values known during planning are carried forward rather than derived again during
+execution.
 
 The clearest case is source provenance. A build may involve hundreds of files, and
 by the time an action fails the only spellings left are the deployed ones —
@@ -192,15 +181,14 @@ SourceDocument.relative_path
           → "Source: Lakehouse/Sales/Sales__Customer.py"
 ```
 
-Deriving it at the end would be a guess presented as evidence — and sometimes an
-impossible one, since a Spark SQL table is authored as `.sql` and deployed as
-`.py` under a different name.
+The path cannot always be derived from the deployed artefact: a Spark SQL table
+is authored as `.sql` and deployed as `.py` under a different name.
 
 ---
 
 ## The physical handoff
 
-Everything above is Python. Here is where it stops being Python.
+The following capabilities cross the boundary to a physical environment.
 
 A `Session` decides how each capability is met, based on where the code is
 running:
@@ -222,12 +210,11 @@ refresh_sql_endpoint  → REST
 build_table, alias    → Livy           (genuine Spark, or a Spark read probe)
 ```
 
-The pieces that need Spark cross; nothing else does. And when several actions in
-one batch need Spark, they cross **together** — one submission carrying several
-actions, each still reporting its own status, duration and failure. The semantic
-unit stays the action; what gets batched is the physical effect.
+Only actions that need Spark use the Spark crossing. When several actions in one
+batch need Spark, one submission carries them while each action retains its own
+status, duration, and failure result.
 
-### One thing that has to stay remote
+### Remote runtime scope
 
 A deployed Python primitive is a *module imported inside the Fabric session*, and
 the object owning those imports — `RuntimeScope` — has to live where the imports
@@ -242,9 +229,8 @@ dispatch(run_id, B)    ──►     same scope
 end_run(run_id)        ──►     scope.close(), forgotten
 ```
 
-One scope per run, closed when the run ends — including when it fails. A scope
-that outlived its run would let the next run import modules a rebuild had already
-replaced.
+Each run has one scope, closed when the run ends or fails. Retaining a scope after
+its run could let a later run import modules that a rebuild replaced.
 
 ---
 
@@ -252,14 +238,12 @@ replaced.
 
 ### Remote and local run the same code
 
-The doers do not know where they are. Swap the Session and a build that ran in a
-notebook runs from a laptop, against the same workspace, through the same
-`Builder` and the same `Installer`. That is what makes the two supported
-experiences — `pip install weaverstack` in a Fabric notebook, and `weaver build`
-from a terminal — genuinely the same product rather than two implementations that
-drift.
+The runtime components do not depend on where they execute. Changing the
+`Session` lets the same `Builder` and `Installer` run in a notebook or from a
+laptop against the same workspace. The notebook and desktop entry points use the
+same implementation.
 
-The destination is **either**, in the strong sense:
+Both execution positions are supported:
 
 ```text
 in a notebook     Weaver runs in the session. Everything is local to it.
@@ -269,31 +253,24 @@ from a desktop    Weaver runs on your machine. Fabric is reached only through
                   small, clear script rather than an operation.
 ```
 
-Not a fast loop and a real one. Two complete ways to work, with the same code
-underneath, and you pick whichever suits the moment.
+Both positions use the same code and support complete workflows.
 
-**Where we actually are.** Close, not finished, and the measure is executor
-parity: an action whose executor works in both positions is done; one that still
-has to cross whole is not. `alias` is the current example — creating a shortcut
-is a REST call that works from anywhere, but the readability wait still crosses
-with it, and the executor's own comment says why the split was reverted and what
-would prove it.
+Executor parity remains incomplete. An executor is complete when it works in both
+positions. `alias` is the current exception: shortcut creation uses REST from
+either position, but its readability wait still runs across the boundary.
 
-**One honest caveat**, and it is the other half of the gap. The far side of a
-decomposed operation imports the published wheel — `weaver.run.remote` for a
-Python primitive, `weaver.build_bundle.remote` for a Spark install action — so a
-desktop build or load needs `weaver install` to have been run, and the version
-check will tell you plainly if it hasn't:
+Remote entry points import the published wheel — `weaver.run.remote` for a Python
+primitive and `weaver.build_bundle.remote` for a Spark install action. A desktop
+build or load therefore requires `weaver install` to have published the current
+wheel; the version check reports when it has not:
 
 ```text
 the Weaver published in <workspace> is older than this console ...
 Publish the current wheel with `weaver install ...`
 ```
 
-Shrinking that surface is worth doing; pretending it isn't there is not. Keeping
-the remote entry points *few and stable* is the practical mitigation — one entry
-point that runs whichever executor the bundle named, rather than an API shaped
-like the executor registry.
+Remote entry points remain few and stable: one entry point runs the executor
+named by the bundle instead of exposing an API shaped like the executor registry.
 
 ### Testing lands where the logic is
 
@@ -307,15 +284,12 @@ pytest -m "fabric and remote"      real workspace, Weaver on this machine
 pytest -m "fabric and hosted"      real workspace, Weaver as the published wheel
 ```
 
-The `remote` / `hosted` pair is the parity question made selectable. Every Fabric
-test states which position it runs in, so a capability proven in one and not the
-other is a gap you can *see* rather than one someone has to remember to look for.
+The `remote` and `hosted` markers identify the execution position of each Fabric
+test. A capability requires coverage in both positions.
 
-The suite is bottom-heavy. A planning bug should be caught by a test
-that constructs a `BuildState` and asserts a `BuildBundle` — not by a
-thirty-minute Fabric run. The expensive tests are for claims only a real estate
-can make: that an alias really becomes readable, that a bundle's order is
-*viable*, that the endpoint really catches up.
+Planning tests construct a `BuildState` and assert a `BuildBundle`. Fabric tests
+cover behaviour that requires a real estate, including alias readability, bundle
+ordering, and endpoint convergence.
 
 Operational constraints:
 
@@ -329,24 +303,21 @@ Operational constraints:
 
 ### The physical work can be deferred, batched or parallelised
 
-This is the quiet payoff. Because every decision is settled *before* anything
-physical happens, the physical layer is a stream of independent effects rather
-than a series of choices. So it can be reshaped without touching the decision:
+Because planning completes before physical work begins, the physical layer can be
+reshaped without changing planning:
 
 - batched — several Spark actions in one submission
 - routed — files to OneLake, T-SQL to TDS, control to REST
 - deferred — evidence written to the task log after the fact
 - reordered within a barrier, where the physical semantics genuinely allow it
 
-The barriers are what make this safe. A `BuildBundle`'s sequences are ordered and
-a batch's actions belong to one target, so anything that reshapes execution has a
-stated boundary it must not cross.
+`BuildBundle` sequences are ordered and a batch's actions belong to one target.
+Execution changes must preserve those boundaries.
 
-A caution from experience: *independent in dependency order is not independent in
-lock order*. Running a batch's T-SQL concurrently looked safe by the manifest's
-own contract and a real Warehouse answered with deadlocks and snapshot-isolation
-aborts. The manifest describes Weaver's ordering, not the database's. Reshaping
-the physical layer is allowed — but it is a measurement, not a deduction.
+Dependency ordering does not imply database lock independence. Concurrent T-SQL
+within a batch caused deadlocks and snapshot-isolation aborts in a Warehouse. The
+manifest describes Weaver ordering, not database locking, so changes to physical
+execution require measurement.
 
 ---
 
@@ -361,6 +332,6 @@ weaver/catalogue/        the control plane: what is installed, and its tables
 weaver_cli/              argument parsing and rendering, and nothing else
 ```
 
-The CLI owns no semantics — it resolves a workspace, calls the API, renders what
-comes back, and picks an exit code. A test reads its source to make sure it stays
-that way, because that is the kind of rule that decays quietly.
+The CLI resolves a workspace, calls the API, renders the result, and chooses an
+exit code. `tests/test_core_boundary.py` prevents it from acquiring core
+semantics.

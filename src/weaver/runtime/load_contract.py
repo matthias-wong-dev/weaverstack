@@ -1,34 +1,7 @@
-"""What one object's load needs to know, and where a running module reads it.
+"""Load contract parsed from a declaration or an installed module.
 
-A load contract is the *whole* input to loading one object: the key it matches
-on, the columns whose change means an update, whether absent rows are deleted.
-It is deliberately small. Everything a repository knows and a load does not need
-— dependencies, lineage, revision notes, aliases, the other documents in the
-item — is absent, so a primitive cannot come to rely on state only an
-orchestrator could supply.
-
-Two ways in, one model out:
-
-.. code-block:: text
-
-    a parsed SesDocument      -> LoadContract   (generation, on the desktop)
-    an installed module's
-    docstring                 -> LoadContract   (runtime, inside the session)
-
-The second is why this module exists. A deployed ``Sales__Customer.py`` is a
-complete executable artefact: it carries its own contract in its docstring, and
-``Sales__Customer(spark).load()`` reads it from there. No repository is opened,
-no catalogue is queried and no build bundle is consulted — which is what lets a
-developer edit a module in a notebook and see the change on the next reload,
-and what stops the load primitives quietly acquiring an orchestrator.
-
-**The runtime parser is not the repository parser.** It reuses the same metadata
-model, because two spellings of one contract would be a defect waiting to
-happen, but it validates only what loading one object requires. Filename and
-class agreement, dependency resolution and repository-wide constraints are the
-repository's business and were settled before the module was ever installed.
-Importing a module edited by hand after deployment is therefore at the
-operator's risk, exactly as running an altered stored procedure is.
+The contract contains the metadata required to load one object. Repository-wide
+constraints are validated before installation.
 """
 
 from __future__ import annotations

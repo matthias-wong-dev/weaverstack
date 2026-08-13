@@ -1,32 +1,8 @@
-"""The public ``weaver.test(...)`` operation.
+"""Public ``weaver.test(...)`` entry point and orchestration.
 
-The validation counterpart of :mod:`weaver.load`, and deliberately shaped like
-it: typed physical target strings at the boundary, the same workspace resolution,
-the same session, the same task log machinery.
-
-.. code-block:: python
-
-    weaver.test("Lakehouse/Sales")
-    weaver.test("Lakehouse/Sales", name="Sales.OrdersReconcile")
-    weaver.test("Lakehouse/Sales", file="tests/Sales.OrdersReconcile.sql")
-
-**The installed catalogue is authoritative and the repository is not reopened**,
-for whole-target and ``name=`` runs. By the time anything is runnable it has been
-built, and what was built is recorded.
-
-``file=`` is the exception, and is the only mode that reads source: it compiles a
-file with the same compiler a build uses and executes the result without
-installing it, so a developer can run a validation they have not committed. It
-publishes nothing.
-
-**There is no ``weaver.assumption(...)``.** One operation runs both kinds,
-because a caller asking "does this estate hold up?" is not asking two questions.
-
-**A failing validation is a returned report, not an exception.** A run that
-found discrepancies did its job; raising would make the evidence harder to reach
-than ignoring it. A validation that could not be *evaluated* is a different
-outcome, reported as ``invalid`` — and ``strict=True`` is how a caller asks for
-either to be raised.
+Target and named runs use installed catalogue state. File runs compile a source
+validation without installing or publishing it. Reports distinguish failed
+validations from validations that could not be evaluated.
 """
 
 from __future__ import annotations

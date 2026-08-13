@@ -163,8 +163,7 @@ class TablePublication:
     """One physical catalogue table's statements, aggregated across scopes."""
 
     table: CatalogueTable
-    #: Present only when some scope holds rows the desired state no longer
-    #: claims. A delete is never emitted merely because the table was considered.
+    #: Present only when a scope holds rows absent from the desired state.
     delete: str | None
     #: Present only when some row is new or changed. Unchanged rows are left
     #: alone rather than merged to the same values.

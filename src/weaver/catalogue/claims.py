@@ -74,8 +74,7 @@ _COMMON_OBJECT_RULES = (
     CatalogueClaimRule(DEPENDENCY),
 )
 
-# This is deliberately exhaustive. Adding another Registry object_type requires
-# an ownership declaration here before it can participate in reconciliation.
+# Each Registry object type requires an ownership declaration before reconciliation.
 CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = {
     "folder": (
         _COMMON_OBJECT_RULES[0],
