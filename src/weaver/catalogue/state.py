@@ -151,9 +151,8 @@ class Catalogue:
 
     # --- constructors ---------------------------------------------------------
     #
-    # Symmetrical on purpose. One reads what is persisted, the other derives what
-    # the source says should be; both produce this class, which is what lets the
-    # two be compared at all.
+    # One reads what is persisted, the other derives what the source says should
+    # be. Both produce this class, which is what lets the two be compared.
 
     @classmethod
     def from_weaver_lakehouse(cls, catalogue: Any, items) -> "Catalogue":
@@ -165,15 +164,13 @@ class Catalogue:
     def from_repository(cls, repository) -> "Catalogue":
         """Everything the source declares — the whole logical catalogue.
 
-        *All* of it, deliberately. Not the subset some build is ready to certify:
-        making selection an input would mean the caller had to know what was
-        certifiable before the desired state could be described, and the desired
-        state would then be a statement about a build rather than about the
-        repository. Selection and materialisation *transform* this later — see
-        :meth:`retaining` and :meth:`for_targets`.
+        All of it, not the subset some build is ready to certify: with selection
+        as an input, the desired state would be a statement about a build rather
+        than about the repository. :meth:`retaining` and :meth:`for_targets`
+        transform it later.
 
-        It carries no binding: no target name, no Weaver version, no Installation
-        row, no publication epoch, and no Registry certification for an alias
+        It carries no binding — no target name, Weaver version, Installation
+        row, publication epoch, or Registry certification for an alias
         destination, because an alias is a view in a Warehouse and a table in a
         Lakehouse and this does not know which.
         """
@@ -207,11 +204,10 @@ class Catalogue:
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
 
-        Read it as: *persisted* `.diff(` *derived from source* `)`. This is the
-        **report** — what a reviewer sees before a bundle runs. The statements
-        come from :func:`weaver.catalogue.reconcile.publish`, which compares the
-        same two sides; the two are separate because a count is not a statement
-        and a reader should not have to infer one from the other.
+        Read it as *persisted* ``.diff(`` *derived from source* ``)``. This is
+        the report a reviewer sees before a bundle runs; the statements come
+        from :func:`weaver.catalogue.reconcile.publish`, which compares the same
+        two sides.
         """
 
         return CatalogueChanges(current=self, desired=desired)
@@ -224,10 +220,9 @@ class CatalogueChanges:
     Reporting only. How many rows are new, changed, unchanged and removed, per
     item and per table, so a bundle can be reviewed before it is installed.
 
-    A row is *unchanged* when every non-key column matches, which is exactly the
+    A row is unchanged when every non-key column matches, which is the same
     condition publication tests before it emits anything — so a reported no-op
-    and a silent build are the same fact, arrived at the same way, rather than
-    two claims that happen to agree.
+    and a silent build are one fact rather than two that agree.
     """
 
     current: "Catalogue"
@@ -260,15 +255,13 @@ class CatalogueChanges:
 def retaining(catalogue: Catalogue, repository, identities) -> Catalogue:
     """Narrow a desired catalogue to what a build actually certified.
 
-    The step that keeps a Registry row meaning *this succeeded*. Publishing the
-    whole logical catalogue would claim every declared object as installed,
-    including the ones a build omitted or failed to materialise — which is what
-    the planner's uncertified set exists to prevent.
+    What keeps a Registry row meaning "this succeeded": publishing the whole
+    logical catalogue would claim every declared object as installed, including
+    those a build omitted or failed to materialise.
 
-    A function rather than a method, and ``repository`` passed rather than
-    remembered, because a catalogue is rows: making it carry the repository it
-    came from would give a *persisted* one two fields that mean nothing and two
-    methods that refuse. The dependency is real, so it is visible.
+    A function rather than a method, with ``repository`` passed rather than
+    remembered, because a persisted catalogue has no repository and would carry
+    two fields meaning nothing.
     """
 
     from .projection import project_item_catalogue
@@ -295,20 +288,18 @@ def for_targets(
 ) -> Catalogue:
     """Bind to targets: certify alias destinations, and scope to what is bound.
 
-    ``target_kinds`` names the items being published *and* what each is bound to,
-    and those are one decision rather than two. An item not named is not
-    published — so an alias can never be certified against a guessed kind,
-    because there is no path that reaches the certification without stating the
-    binding. A default would have written a Warehouse alias into the Registry as
-    a table, quietly, in the authoritative record.
+    ``target_kinds`` names the items being published and what each is bound to,
+    as one decision: an item not named is not published, so an alias can never
+    be certified against a guessed kind. A default would write a Warehouse alias
+    into the Registry as a table.
 
-    ``identities`` is what the build certified, and it is passed rather than read
-    off the rows because the two differ on purpose: an alias whose source item is
-    unbound still has its *declaration* published — the name does point there —
-    while a Registry row would claim work that never happened.
+    ``identities`` is what the build certified, passed rather than read off the
+    rows because the two differ: an alias whose source item is unbound still has
+    its declaration published, while a Registry row would claim work that never
+    happened.
 
-    An item named here but retaining nothing is still published, and must be: its
-    scope's rows are all obsolete and the publication is what says so.
+    An item named here but retaining nothing is still published: its scope's
+    rows are all obsolete, and the publication is what says so.
     """
 
     from .projection import project_alias_registry
@@ -336,11 +327,9 @@ def for_targets(
 class Reconciliation:
     """What reconciling a catalogue against prepared inventories produced.
 
-    Two things, and they are genuinely two: the catalogue with disproved claims
-    removed, and the claims that were removed — which the build turns into delete
-    DML. Carrying the second on the catalogue itself made it look like catalogue
-    state, when it is a *finding about* the catalogue, and left claim collection
-    reading one of its two claim sources off an object and computing the other.
+    Two things: the catalogue with disproved claims removed, and the claims that
+    were removed, which the build turns into delete DML. The second is a finding
+    about the catalogue rather than catalogue state, so it is not carried on it.
     """
 
     catalogue: Catalogue
@@ -361,12 +350,10 @@ class RegisteredDocument:
     signature: str
     #: What the installed object is *for* — data, load, test or assumption.
     #:
-    #: Kept rather than dropped after parsing, because it is the only place the
-    #: answer survives. A physical shape used to imply it: a file or a procedure
-    #: could only be a load artefact, because a load layer installed the only
-    #: files and procedures there were. A Test compiles to a module and a
-    #: procedure too, so the shape now answers nothing and planning has to read
-    #: what the row says.
+    #: Kept after parsing, because it is the only place the answer survives. A
+    #: physical shape once implied it — a file or a procedure could only be a
+    #: load artefact — but a Test compiles to a module and a procedure too, so
+    #: planning has to read what the row says.
     object_role: str = ROLE_DATA
     #: When the build that last certified this object published it. ``None`` for
     #: a row written before epochs existed, which orders as older than any epoch.
@@ -573,19 +560,16 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
 def read_installed_catalogue(catalogue: Any) -> Catalogue:
     """Read the whole installed catalogue, without being told what is in it.
 
-    The sibling of :func:`read_catalogue_state`, and the difference is the one
-    that matters to an operation which runs *after* a build. A build knows its
-    items — it is holding the repository that declares them — and reads each
-    installation's scope. Load orchestration knows only physical targets, and
-    has to discover which logical items are installed and where they are bound
-    before it can decide anything at all. So this reads unscoped and groups the
-    rows by the installation scope they carry.
+    The sibling of :func:`read_catalogue_state`, for an operation that runs
+    after a build. A build knows its items and reads each installation's scope;
+    load orchestration knows only physical targets and has to discover which
+    logical items are installed and where they are bound. So this reads unscoped
+    and groups rows by the scope they carry.
 
-    The shape check is deliberately weaker than the build's: a table that does
-    not exist reads as no rows rather than as a fault, because an estate with no
-    aliases has never had an Alias table written and that is an ordinary state
-    for something that only reads. Nothing here writes, so nothing here needs
-    the guarantee that the catalogue can *be* written.
+    The shape check is weaker than the build's: a missing table reads as no rows
+    rather than a fault, because an estate with no aliases has never had an
+    Alias table written. Nothing here writes, so nothing needs the guarantee
+    that the catalogue can be written.
     """
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
@@ -622,9 +606,9 @@ def reconcile_catalogue_state(
 ) -> Reconciliation:
     """Discard catalogue claims the prepared inventories physically disprove.
 
-    Pure: a catalogue in, an inventory in, a catalogue and its stale claims out.
-    Both inputs can be built directly, so what a registered object does when the
-    thing it claims is *not there* needs no Lakehouse to demonstrate.
+    Pure: a catalogue and an inventory in, a catalogue and its stale claims out.
+    Both inputs can be built directly, so no Lakehouse is needed to demonstrate
+    what happens when a registered object is not there.
     """
 
     registered = state.registered
@@ -696,13 +680,11 @@ def _row_identity(
 ) -> WeaverDocumentId:
     """One Registry row's identity, built from its own columns.
 
-    The row already *is* the identity: item, schema, object and what kind of
-    object it is are four stored fields. Composing them into a line and handing
-    it to a parser was a round trip through a grammar built for table-style
-    ``Schema.Object`` names, and it could not express the two the load layer
-    installs — a path and a filename, or a procedure named for what it loads.
-    Constructing directly means the stored name is the real name, in both
-    directions.
+    The row is the identity: item, schema, object and object type are four
+    stored fields. Composing them into a line for the ``Schema.Object`` parser
+    could not express what the load layer installs — a path and a filename, or a
+    procedure named for what it loads — so it is constructed directly and the
+    stored name stays the real name.
     """
 
     schema = str(row.get("schema_name") or "")

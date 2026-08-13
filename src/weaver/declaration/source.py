@@ -62,9 +62,9 @@ def content_hash(data: bytes) -> str:
 def sql_dialect_for_item_type(item_type: str) -> str:
     """The SQL a ``.sql`` file speaks inside an item of this type.
 
-    This is the whole reason a Weaver document needs no dialect suffix: the
-    containing item already decides. A Lakehouse materialises Delta through
-    Spark; a Warehouse materialises tables and views through T-SQL.
+    Why a Weaver document needs no dialect suffix: the containing item decides.
+    A Lakehouse materialises Delta through Spark; a Warehouse materialises
+    tables and views through T-SQL.
     """
 
     return SPARK_SQL if item_type == LAKEHOUSE else SQL
@@ -93,14 +93,12 @@ def _stem(filename: str) -> str:
 def python_id_parts(stem: str) -> list[str]:
     """Split ``Schema__Object`` where the schema may itself be underscores.
 
-    ``Sales__Order`` is unambiguous, but ``_`` is a real schema — it is where
-    generated infrastructure lives — and ``_`` + ``__`` + ``Load`` spells
-    ``___Load``, which an ordinary split reads as an empty schema. A run of
-    leading underscores is therefore read as what it is: the last two are the
-    separator and the rest are the schema, so ``___Load`` is ``_.Load``.
+    ``Sales__Order`` is unambiguous, but ``_`` is a real schema, and ``_`` +
+    ``__`` + ``Load`` spells ``___Load``, which an ordinary split reads as an
+    empty schema. So in a run of leading underscores the last two are the
+    separator and the rest the schema: ``___Load`` is ``_.Load``.
 
-    Only a schema made *entirely* of underscores needs this. ``_ETL__Load`` has
-    one leading underscore, splits once, and never reaches the branch.
+    Only a schema made entirely of underscores reaches that branch.
     """
 
     leading = len(stem) - len(stem.lstrip("_"))
@@ -207,11 +205,10 @@ class SourceDocument:
     def target_kind(self) -> str:
         """Which physical destination this object materialises into.
 
-        A validation materialises nothing, and this still answers, because the
-        answer it gives is the *namespace* every later reader wants: a Test in a
-        Warehouse binds its references in the Warehouse, one in a Lakehouse in
-        the Lakehouse. Nothing routes a validation to DDL on the strength of it —
-        that follows from which collection it is in, not from this.
+        A validation materialises nothing and this still answers, because what
+        it gives is the namespace: a Test in a Warehouse binds its references
+        there, one in a Lakehouse in the Lakehouse. Nothing routes a validation
+        to DDL on the strength of it.
         """
 
         return target_kind_for(self.language, self.document.kind)
@@ -289,8 +286,8 @@ class SourceDocument:
         """References that leave the repository: physical names and functions.
 
         A valid repository resolves every ordinary two-part reference, so what
-        remains is deliberately outside: a physically-qualified name, or a
-        table-valued function. Recorded, never an error.
+        remains is outside it: a physically-qualified name, or a table-valued
+        function. Recorded, never an error.
         """
 
         return tuple(
@@ -315,9 +312,9 @@ class SourceDocument:
     def create_ddl(self) -> "GeneratedDdl":
         """The generated, installable create definition for this source.
 
-        Delegates to :mod:`weaver.ses.ddl`. The source owns this because it is
-        the only thing that knows its language, kind, ID and validated body;
-        a build planner calls it and never re-derives create syntax.
+        Delegates to :mod:`weaver.ses.ddl`. The source owns it because it knows
+        its language, kind, ID and validated body; a planner calls it and never
+        re-derives create syntax.
         """
 
         from .ddl import generate_ddl
@@ -475,13 +472,10 @@ def _check_validation_methods(
 
     A Test declares two relations and Weaver compares them; an Assumption
     declares the violating rows directly. So a Test writes ``expected()`` and
-    ``actual()`` and must *not* write ``read()`` — an authored ``read()`` would
-    leave the class called a Test while meaning something else, and every
-    downstream reading of "the Sales tests pass" depends on it not doing that.
+    ``actual()`` and must not write ``read()``.
 
-    The runtime refuses the same override, so it fails whether the class is
-    written in a notebook or committed here. This check exists as well because a
-    repository must not need executing to be refused.
+    The runtime refuses the same override; this exists as well so a repository
+    need not be executed to be refused.
     """
 
     if kind == ASSUMPTION:
@@ -525,9 +519,9 @@ def _require_method(relative_path: str, declared: ast.ClassDef, name: str) -> No
 def _imported_modules(module: ast.Module) -> tuple[str, ...]:
     """Top-level module names imported absolutely, in source order.
 
-    Relative imports are helper imports by construction and are excluded. What
-    is a dependency rather than a plain import is decided by the repository,
-    which knows every object's module name.
+    Relative imports are helper imports and are excluded. Which of the rest is
+    a dependency is decided by the repository, which knows every object's module
+    name.
     """
 
     names: list[str] = []
@@ -637,10 +631,9 @@ def _check_sql_validation_program(
 ) -> None:
     """Refuse a SQL validation whose queries cannot be its contract.
 
-    Through the dialect's own parser, exactly as a SQL table's contract is
-    checked, because each dialect has its own idea of where a statement ends.
-    What the parser produces then meets one counting rule — see
-    :mod:`weaver.declaration.validation_program`.
+    Through the dialect's own parser, as a SQL table's contract is, because each
+    dialect has its own idea of where a statement ends. What it produces then
+    meets one counting rule — see :mod:`weaver.declaration.validation_program`.
     """
 
     from .validation_program import validate_validation_contract
@@ -664,11 +657,9 @@ def _check_sql_table_program(
     The same checks the generated artefact depends on, made here so a body that
     could never load is refused by a build rather than discovered by one.
 
-    Note what is *not* refused: a body whose result-set count is beyond static
-    reach because it uses dynamic SQL. The contract is about the queries Weaver
-    can see, and ``EXEC`` is setup like any other statement — so what matters is
-    whether the visible ``SELECT``s make sense, not whether the invisible ones
-    can be counted.
+    A body whose result-set count is beyond static reach — dynamic SQL — is not
+    refused. The contract is about the queries Weaver can see; ``EXEC`` is setup
+    like any other statement.
     """
 
     if language == SPARK_SQL:
@@ -711,12 +702,10 @@ _PERMANENT_DDL = re.compile(
 def _permanent_ddl(statements: tuple[str, ...]) -> tuple[str, ...]:
     """Statements that appear to create a permanent object.
 
-    Normally the author writes the query and Weaver writes the ``CREATE``, so
-    one of these usually means the wrapper has been written by hand. It is
-    *recorded*, not refused: this is fail-early validation, not critical-path,
-    and there may be a legitimate reason to create something durable inside a
-    body. Getting it wrong would block valid work in exchange for an error the
-    build would have produced anyway.
+    The author writes the query and Weaver writes the ``CREATE``, so one of
+    these usually means the wrapper was written by hand. Recorded rather than
+    refused: there may be a legitimate reason to create something durable inside
+    a body, and the build would produce the error anyway.
     """
 
     return tuple(
@@ -729,9 +718,8 @@ def _permanent_ddl(statements: tuple[str, ...]) -> tuple[str, ...]:
 def analyse_sql(body: str) -> SqlAnalysis:
     """Count result-producing statements, or report why that is unknowable.
 
-    Deliberately calibrated to abstain rather than guess: a wrong rejection
-    blocks a legitimate object, while a missed one merely fails at build the
-    way it does today.
+    Calibrated to abstain rather than guess: a wrong rejection blocks a
+    legitimate object, while a missed one fails at build as it does today.
     """
 
     import sqlparse
