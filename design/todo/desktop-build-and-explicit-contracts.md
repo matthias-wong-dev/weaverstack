@@ -72,12 +72,13 @@ marker no longer describes what it needs.
 This comes first because the later phases are described in these terms, and
 because Phase C changes which tests need a wheel.
 
-**A2. Replace two attribute checks with the existing helper.**
-`hasattr(target, "lakehouse")` in `weaver/fabric/preflight.py` and
-`weaver/operations.py` becomes `physical_kind(target)`, which is already
-defined in `weaver/targets.py`.
+A1 does not need a Fabric run.
 
-Neither task needs a Fabric run.
+An earlier draft paired it with a second task: replacing
+`hasattr(target, "lakehouse")` in `weaver/fabric/preflight.py` and
+`weaver/operations.py` with the existing `physical_kind` helper. That was
+attempted and reverted, because the premise was wrong. See [B0](#phase-b-one-run-scope-interface),
+which is where the change belongs.
 
 ## Phase B: one run-scope interface
 
@@ -86,6 +87,25 @@ Fabric session and submits statements to reach it. They share no declared
 interface, so `run/dispatch.py` decides which it holds by looking for methods.
 When the attribute is absent the code takes the local path, which on a desktop
 means importing a deployed module into the console.
+
+**B0. Give the binding types a declared kind.** `weaver/fabric/preflight.py`
+and `weaver/operations.py` ask `hasattr(target, "lakehouse")` to tell a bound
+Lakehouse from a bound Warehouse. `physical_kind` does not answer it:
+`binding.target` is a `LakehouseBinding` or a `WarehouseBinding` from
+`build_bundle/targets.py`, which are a different type family from `DeltaTarget`
+and `WarehouseTarget`, and `physical_kind` raises for them. The two binding
+types carry their kind only inside `to_bound_target()`, and spell it
+`"lakehouse"` where Fabric's item type is `"Lakehouse"`, so preflight needs a
+translation as well as a declaration.
+
+The change is to declare the kind on both binding types and translate to the
+Fabric item type at the preflight boundary, which is the same kind of work as
+the rest of this phase rather than a substitution.
+
+Severity is low, and the plan's own test says so: there are exactly two binding
+types, neither carries both attributes, and a third would fail with an
+`AttributeError` on `.warehouse` rather than silently taking the wrong branch.
+The fault is misdiagnosis, not silent misbehaviour.
 
 **B1.** Declare `RunScope` with `dispatch_python`, `dispatch_validation` and
 `close`. Add `DirectRunScope`, wrapping `RuntimeScope` so that module isolation
@@ -246,12 +266,12 @@ about the source's readiness barrier. Plan it separately.
 ## Sequence
 
 ```text
-A1 A2 ──┬─→ C1 ───────────────────────────┐
-        │                                  ├─→ C5 → C6
-        ├─→ C2 ─→ C3 ──────────────────────┤
-        │         C4 and its test ─────────┘
-        ├─→ B1 B2 B3 ─→ B4 with republish ─→ B5
-        └─→ E1                               E2 → E3
+A1 ──┬─→ C1 ───────────────────────────┐
+     │                                  ├─→ C5 → C6
+     ├─→ C2 ─→ C3 ──────────────────────┤
+     │         C4 and its test ─────────┘
+     ├─→ B0 B1 B2 B3 ─→ B4 with republish ─→ B5
+     └─→ E1                                  E2 → E3
 ```
 
 ## Risks
