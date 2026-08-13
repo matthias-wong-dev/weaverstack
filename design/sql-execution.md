@@ -1,5 +1,10 @@
 # Warehouse SQL execution
 
+## Purpose
+
+This document defines the Warehouse SQL execution boundary for desktop and
+in-Fabric positions.
+
 Weaver has one SQL execution contract and two explicit connection modes. The
 split is at the caller boundary, not inside statement execution:
 

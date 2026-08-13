@@ -1,49 +1,4 @@
-"""Runner — what runs next, and what happened.
-
-The fourth doer, and the owner of every piece of state that changes during a
-run:
-
-.. code-block:: text
-
-    RunState + RunRequest
-             ↓
-          Runner
-        ┌────┴────┐
-    RunGraph   node state
-        └────┬────┘
-       dispatch one primitive
-             ↓
-         RunResult
-
-**Planning needs no Session.** A Runner is constructed from a Catalogue and some
-observed inventories — ordinary Python — so the whole of what a run *decides*
-can be proven without Fabric, without Spark and without an estate:
-
-.. code-block:: python
-
-    runner = Runner(state, RunRequest.load(targets))
-    assert [node.node_id for node in runner.graph.order()] == [...]
-
-**Execution crosses outward at exactly one point.** ``dispatch`` is a callable,
-not another doer: give it the real one and nodes run against the installed
-estate; give it a controlled one and the whole state machine — readiness,
-blocking, fail-fast, aggregation — is provable in milliseconds.
-
-.. code-block:: python
-
-    result = runner.run(session=session, dispatch=dispatch_primitive)
-    result = runner.run(dispatch=controlled)          # no session at all
-
-The Runner never learns which it got. That is what makes a fixture runtime
-artefact indistinguishable from a production one, and it is why there is no
-``test_mode`` anywhere in this file: the Registry indirection already points
-nodes wherever the estate says, so a trivial fixture artefact is simply an
-installed artefact that happens to be trivial.
-
-One Runner serves load, test and whatever runtime work comes next. What differs
-between them is which nodes are selected and which primitive runs — not how a
-run behaves when one of them fails.
-"""
+"""Plan and execute a RunGraph through an injected primitive dispatcher."""
 
 from __future__ import annotations
 
@@ -70,17 +25,7 @@ from .state import RunState
 
 
 def node_label(node) -> str:
-    """What to call this node on screen: a verb and the thing it acts on.
-
-    ``node_id`` is an identifier and reads like one — ``load:Lakehouse/Sales/
-    Sales.Customer`` — which is right for a report that has to be matched up
-    later and wrong for a line someone is watching go by. The id is unchanged
-    and still what results carry; this is only what the frame is called.
-
-    The target comes along because two Lakehouses can hold the same object
-    name, and without it a reader watching a two-target run cannot tell which
-    ``Sales.Customer`` is in flight.
-    """
+    """Return a display label that includes the target and logical object."""
 
     from .resolution import ENDPOINT_REFRESH
 
@@ -90,25 +35,17 @@ def node_label(node) -> str:
 
     what = node.logical_id
     if what is None:
-        # Nothing logical to name — a barrier, or a node built straight from an
-        # id. The id is the only true answer, and inventing "Load None" would
-        # be worse than the identifier this is trying to improve on.
+        # Barriers and directly constructed nodes have no logical label.
         return node.node_id
     name = getattr(getattr(what, "object_id", None), "qualified", None) or str(what)
-    # A load node's role is "load"; a validation carries its own kind — "Test",
-    # "Assumption" — so anything that is not a load is being tested.
+    # Validations use their Test or Assumption kind in the display label.
     verb = "Load" if node.role == LOAD else "Test"
     return f"{verb} {target}/{name}" if target is not None else f"{verb} {name}"
 
 
 @contextmanager
 def _node_substep(session, node):
-    """One node's timing frame, where there is a Session to record it on.
-
-    A run-cycle test constructs a Runner with no Session at all — that is the
-    whole point of the dispatch seam — so this yields ``None`` rather than
-    making the Runner's timing depend on having crossed anything.
-    """
+    """Return a node timing frame when the Runner has a Session."""
 
     if session is None or not hasattr(session, "substep"):
         yield None
@@ -116,11 +53,6 @@ def _node_substep(session, node):
     with session.substep(node_label(node)) as frame:
         yield frame
 
-
-# --- what a run was asked for -------------------------------------------------
-#
-# Here rather than in a module of its own: the Runner is what a request is
-# for, and reading one meant opening the other anyway.
 
 #: Run every loadable object installed in the requested targets.
 LOAD = "load"
@@ -144,14 +76,7 @@ class RunRequest:
     fault_tolerant: bool = False
     #: Plan, resolve and report without dispatching anything.
     dry_run: bool = False
-    #: Whether resolution should require the estate to be there before running.
-    #:
-    #: A load is about to *write*, so a missing target or an uninstalled
-    #: artefact is a reason not to start — and saying which of the two it was is
-    #: the point of resolving ahead of dispatching. A validation *reads*: if
-    #: what it reads is not there, its own dispatch fails with a message about
-    #: the thing that was missing, which is more precise than anything an
-    #: inventory could say ahead of time.
+    #: Whether resolution requires the target and primitive before dispatch.
     verifies_estate: bool = True
 
     def __post_init__(self) -> None:
@@ -198,9 +123,7 @@ class RunRequest:
             "file": self.file,
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,
-            # Behaviourally significant, so it is in the handover. A request
-            # that crossed a boundary without it would arrive meaning something
-            # else — preflighting an estate the caller said not to.
+            # Preserve resolution policy across process boundaries.
             "verifies_estate": self.verifies_estate,
         }
 
@@ -211,7 +134,7 @@ def _now() -> str:
 
 
 def _blocked_by(node, upstream, *, validated: bool = False):
-    """Why this node may not run, said with the code a reader can filter on."""
+    """Return the dependency-blocked message for a node."""
 
     from .result import DEPENDENCY_BLOCKED, error
 
@@ -224,7 +147,7 @@ def _blocked_by(node, upstream, *, validated: bool = False):
 
 
 class Runner:
-    """One runtime execution: its graph, its node state, and its result."""
+    """Execute one run graph and collect its results."""
 
     def __init__(
         self,
@@ -237,19 +160,15 @@ class Runner:
         self.state = state
         self.request = request
         self.workspace = workspace
-        #: Whether this host has a SQL analytics endpoint to refresh at all. The
-        #: emulator has none, which is an honest absence rather than a fault, so
-        #: a refresh node is skipped there rather than failed.
+        #: Whether this host has a SQL analytics endpoint.
         self.can_refresh = can_refresh
         self._graph: RunGraph | None = None
         self._events: list[dict] = []
         self._runtime_scope = None
 
-    # --- planning -----------------------------------------------------------
-
     @property
     def graph(self) -> RunGraph:
-        """The graph this request implies. Planned once, then inspectable."""
+        """Return the graph implied by this request."""
 
         if self._graph is None:
             self._graph = graph_for(self.request, self.state)
@@ -260,46 +179,22 @@ class Runner:
 
     @property
     def events(self) -> tuple[dict, ...]:
-        """What the run did, in order. The source a log sink is written from."""
+        """Return the settled node events in order."""
 
         return tuple(self._events)
 
-    # --- resolution ---------------------------------------------------------
-
     def resolve(self, node):
-        """Whether this node's target and primitive are actually there.
-
-        Kept ahead of dispatch because the two fail for entirely different
-        reasons and a reader deserves to be told which: a wrong graph is a
-        planning fault, and a right graph pointing at an estate that is not
-        there is a missing installation. Answered from the observed snapshot,
-        never from a live connection — the reading happened once, above.
-        """
+        """Resolve the node against the observed state."""
 
         from .resolution import Resolved, resolve
 
         if not self.request.verifies_estate:
-            # This run reads rather than writes, so an absent thing is its own
-            # dispatch's answer to give. Claiming absence from an inventory
-            # nobody read would be inventing a finding.
+            # Test-file runs do not read the installed estate.
             return Resolved(node=node, target_present=True, primitive_present=True)
         return resolve(node, self.state, can_refresh=self.can_refresh)
 
-    # --- the run's own runtime ----------------------------------------------
-
     def runtime_scope(self, session=None):
-        """Where this run's deployed Python modules live, and how long they live.
-
-        One scope per run, because a Fabric session outlives a build and a build
-        rewrites deployed Python in place — so a module kept past the run that
-        imported it is a module the next load would use instead of the one now
-        on disk.
-
-        *Where* it lives depends on the host: in this process where this process
-        is where the data is, and otherwise in the Fabric session that can
-        perform the imports, named from here. The Runner is told neither — one
-        scope per run, closed at the end of it, is one rule in both cases.
-        """
+        """Open the deployed-module scope for this run."""
 
         if self._runtime_scope is None:
             from .runtime_boundary import open_runtime_scope
@@ -308,13 +203,11 @@ class Runner:
         return self._runtime_scope
 
     def _close_runtime(self) -> None:
-        """Every module this run imported goes with it."""
+        """Close the run's deployed-module scope."""
 
         scope, self._runtime_scope = self._runtime_scope, None
         if scope is not None:
             scope.close()
-
-    # --- execution ----------------------------------------------------------
 
     def run(
         self,
@@ -323,14 +216,9 @@ class Runner:
         dispatch: Callable | None = None,
         on_node: Callable | None = None,
     ) -> RunResult:
-        """Execute the graph and return the whole result.
+        """Execute the graph and return a result for every planned node.
 
-        ``on_node`` receives **every** planned node's result at the moment its
-        status settles — executed, blocked, skipped or pending alike — which is
-        how durable evidence reaches a sink without this class knowing what a
-        file is. One record per planned node, in graph order: the alternative is
-        a log that says which nodes ran and leaves a reader to infer what became
-        of the rest, exactly when inference is least safe.
+        ``on_node`` receives each result when its status settles.
         """
 
         started = _now()
@@ -348,11 +236,7 @@ class Runner:
         statuses: dict[str, str] = {node.node_id: PENDING for node in ordered}
         results: dict[str, RunNodeResult] = {}
         stopped = False
-        # In a `finally`, because a scope that outlived its run is a scope the
-        # next run would inherit — along with the modules a rebuild has since
-        # replaced. A failed node is data and never reaches here, but an
-        # interrupt does, and a leak is exactly what an interrupted run must
-        # not leave behind.
+        # Always close imported modules before another run can reuse them.
 
         def settle(result: RunNodeResult, status: str | None = None) -> None:
             results[result.node_id] = result
@@ -374,17 +258,13 @@ class Runner:
                     )
                     continue
                 if stopped:
-                    # Fail-fast stops *scheduling*, not reporting. A node whose own
-                    # dependencies were fine is not blocked — it simply never
-                    # started, and saying so beats inventing a failure for it.
+                    # Fail-fast leaves otherwise-ready nodes pending.
                     settle(self._settled(node, PENDING))
                     continue
 
                 resolved = self.resolve(node)
                 if not resolved.valid:
-                    # Invalid, not failed: nothing ran. A reader distinguishing "the
-                    # primitive reported failure" from "there was nothing to run" is
-                    # asking a question the status should answer.
+                    # Invalid means resolution failed before dispatch.
                     settle(
                         self._settled(
                             node,
@@ -398,8 +278,7 @@ class Runner:
                         stopped = True
                     continue
                 if resolved.unsupported:
-                    # A capability this host does not have. The node is omitted
-                    # rather than failed, exactly as the build's own executor skips.
+                    # Skip nodes unsupported by the current host.
                     settle(
                         self._settled(
                             node,
@@ -432,14 +311,7 @@ class Runner:
         return self._result(nodes, started=started)
 
     def _dry_run(self, ordered) -> tuple:
-        """The whole run, resolved and classified, with nothing executed.
-
-        A validation status is never an execution status: a node that resolved
-        is ``validated``, not ``succeeded``. And a dry run still says what could
-        not run — a node whose upstream did not resolve is reported blocked,
-        because "everything validated except the four things that depend on the
-        one that did not" is the answer a dry run exists to give.
-        """
+        """Resolve and classify every node without dispatching it."""
 
         resolutions = {node.node_id: self.resolve(node) for node in ordered}
         invalid = {
@@ -464,9 +336,7 @@ class Runner:
                     )
                 )
             elif resolved.valid:
-                # Validated even where the host cannot perform it: a dry run
-                # says what *would* happen, and "this host would skip it" is a
-                # warning on a node that resolved, not an outcome of its own.
+                # Unsupported nodes are valid but would be skipped.
                 settled.append(
                     self._settled(
                         node,
@@ -487,21 +357,13 @@ class Runner:
         return tuple(settled)
 
     def _dispatched(self, node, *, dispatch, session, resolved=None) -> RunNodeResult:
-        """One node, run. A failure is data here, not an exception.
-
-        Unconditionally so, whatever fault tolerance says: the run records what
-        happened before it decides what to do about it, and deciding belongs to
-        the operation once the whole graph is recorded.
-        """
+        """Dispatch one node and record failures as node results."""
 
         from .outcome import settle
 
         started = _now()
         location = getattr(resolved, "dispatch_location", None)
-        # One Sub-step per node, which is where a run's per-object timing comes
-        # from. The frame is marked failed from inside rather than by an
-        # exception, because a failed node is a *result* here — the run records
-        # what happened before it decides what to do about it.
+        # Record one timing frame for each dispatched node.
         with _node_substep(session, node) as frame:
             try:
                 returned = dispatch(
@@ -513,12 +375,8 @@ class Runner:
                     open_runtime=lambda: self.runtime_scope(session),
                     workspace=self.workspace,
                 )
-            except Exception as exc:  # noqa: BLE001 - a failed node is a result
-                # Deliberately not BaseException. A KeyboardInterrupt or a
-                # SystemExit is the operator or the process saying stop, not a
-                # primitive reporting failure — recording one as a failed node
-                # would swallow Ctrl-C at the prompt and leave a run that looks
-                # like it decided something.
+            except Exception as exc:  # noqa: BLE001 - failures become node results
+                # Do not intercept process-control exceptions.
                 outcome = settle(node, raised=exc)
             else:
                 outcome = settle(node, returned=returned)
@@ -535,10 +393,7 @@ class Runner:
             raised=outcome.raised,
         )
 
-    #: An upstream in one of these did not stop the work downstream of it.
-    #: Rejects belong here: the primitive wrote the valid rows and reported the
-    #: refusal, so what a consumer reads is there — blocking on it would stop a
-    #: run that partially succeeded from finishing the parts that were fine.
+    #: Upstream outcomes that permit downstream work.
     _SATISFIED = (SUCCEEDED, SUCCEEDED_WITH_REJECTS, SKIPPED, VALIDATED)
 
     def _blocking(self, node, statuses) -> tuple[str, ...]:

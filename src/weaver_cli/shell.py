@@ -1,43 +1,6 @@
-"""``weaver session`` — one console session, many commands.
+"""Interactive CLI session that reuses one ConsoleSession.
 
-The cost of a Fabric command is mostly not the command. It is acquiring a
-credential, asking the workspace what a handful of names mean, and waiting for a
-Spark session that a small capacity will only give you one of. A developer
-running ``wipe``, ``build``, ``load`` and ``test`` pays all of that four times:
-
-.. code-block:: text
-
-    weaver wipe  ...   auth, resolve, Livy, work, close
-    weaver build ...   auth, resolve, Livy, work, close
-    weaver load  ...   auth, resolve, Livy, work, close
-    weaver test  ...   auth, resolve, Livy, work, close
-
-The shell pays once:
-
-.. code-block:: text
-
-    weaver session     auth, Livy starting in the background
-    weaver> wipe  ...  work
-    weaver> build ...  work
-    weaver> load  ...  work
-    weaver> test  ...  work
-    weaver> exit       close
-
-**Same grammar, same handlers.** The shell parses each line with the CLI's own
-parser and calls the same handler function, with one difference: the Session is
-attached to the parsed arguments, so every operation reuses it instead of
-creating one. A second command grammar would be a second thing to keep correct,
-and would drift.
-
-**No workspace is required to start.** A workspace arrives with each command,
-exactly as it does for a one-shot invocation, and the Session caches resources
-per workspace context. A ``--workspace`` given here is a default context for
-commands that name none — never the Session's identity.
-
-**An ordinary failure does not end the session.** A build that fails, a typo, a
-Spark error: the command reports and the prompt returns, with the Livy session
-still up. Only a genuinely dead resource is reacquired, and only within its
-bounded allowance.
+Commands use the standard CLI parser and handlers while sharing session resources.
 """
 
 from __future__ import annotations
@@ -50,15 +13,11 @@ from weaver.errors import WeaverError
 
 PROMPT = "weaver> "
 
-#: Where the prompt remembers what was typed. Overridable, because a shared or
-#: read-only home is somebody's real setup and a session that refused to start
-#: over its history file would be worse than one that forgets.
+#: Optional history-file override.
 HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 HISTORY_LIMIT = 1000
 
-#: Commands the shell does not run, and why. ``session`` would nest a console
-#: inside a console; the rest are one-shot machine-level operations whose whole
-#: point is a fresh process.
+#: Commands unavailable from an interactive session.
 NOT_IN_A_SESSION = {
     "session": "already in a session",
     "doctor": "run it from a shell, not a session",
@@ -84,10 +43,7 @@ def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> i
     with ConsoleSession(workspace=workspace) as session:
         _banner(workspace)
         if workspace is not None:
-            # Proactive, and deliberately not awaited: the prompt is available
-            # while the credential and the Spark session are still being
-            # acquired, and the first command that needs either waits on the
-            # acquisition already running rather than starting a second one.
+            # Start reusable resources while the prompt remains available.
             _report_warm_up(session.warm())
         try:
             return _loop(session, parser, stdin=stdin or sys.stdin)
@@ -156,13 +112,7 @@ def _run_one(session, parser, words: list[str]) -> None:
 
 
 def _prepare_for(session, parsed) -> None:
-    """Start what this command says it will want, before it starts wanting it.
-
-    The banner's warm-up covers the session's default workspace; a command
-    naming a different one arrives at a cold context, and this is where that
-    context gets its head start. Speculative, so a warm-up that cannot complete
-    is the business of whichever operation actually needs the resource.
-    """
+    """Start resources declared by a command before it runs."""
 
     from .main import _resolve_workspace, command_requirements
 
@@ -172,8 +122,7 @@ def _prepare_for(session, parsed) -> None:
     try:
         session.prepare(required, workspace=_resolve_workspace(parsed))
     except WeaverError:
-        # A command with no resolvable workspace fails in its own terms, with
-        # its own message. It must not fail here, warming.
+        # Let the command report its own workspace error.
         pass
 
 
@@ -252,12 +201,7 @@ def _words(line: str) -> list[str] | None:
 
 
 def _default_workspace(args: argparse.Namespace):
-    """The default context, where the invocation gave enough to resolve one.
-
-    Leniently: a session that cannot resolve a default is still a useful
-    session, because every command may name its own workspace. What would be
-    unhelpful is refusing to start.
-    """
+    """Return the default workspace when the invocation defines one."""
 
     from .main import _resolve_workspace
 
@@ -269,41 +213,27 @@ def _default_workspace(args: argparse.Namespace):
 
 def _banner(workspace) -> None:
     if workspace is None:
-        print("Weaver · no default workspace")
-        print("Name one per command with --workspace.")
-        print("\nEnter commands: wipe, build, load, test to operate. `exit` to leave.\n")
+        print("Weaver · No default workspace")
+        print("Use --workspace on each command.")
+        print("\nCommands: wipe, build, load, test. Type `exit` to leave.\n")
         return
     print(f"Weaver · {workspace.workspace}")
 
 
 def _report_spending(session) -> None:
-    """What the session spent, per transport, once it is over.
-
-    The Task/Step tree already showed the *shape* of each command as it ran.
-    This is the other ledger — how those seconds divided between starting Livy,
-    submitting statements, resolving names and opening connections — and it is
-    the one a decomposition is judged against, because "the load took forty
-    seconds" and "thirty-eight of them were one Livy startup" call for opposite
-    changes.
-    """
+    """Print session time grouped by transport."""
 
     print("\n" + session.telemetry.report(), file=sys.stderr)
 
 
 def _report_warm_up(warm) -> None:
-    """Say what is being acquired, and what is not being acquired and why.
-
-    The second half is the point. A prompt that announced "starting resources"
-    and then silently declined to start the expensive one — because the
-    workspace named no Environment — told a reader nothing they could act on,
-    and left them to discover it from the first command that needed Spark.
-    """
+    """Report session resources that are starting or unavailable."""
 
     if warm.started:
-        print(f"Starting in the background: {', '.join(warm.started)}")
+        print(f"Starting: {', '.join(warm.started)}")
     for resource, reason in warm.skipped:
-        print(f"Not starting: {resource} — {reason}")
-    print("\nEnter commands: wipe, build, load, test to operate. `exit` to leave.\n")
+        print(f"Not started: {resource} — {reason}")
+    print("\nCommands: wipe, build, load, test. Type `exit` to leave.\n")
 
 
 __all__ = ["run_shell"]

@@ -1,11 +1,6 @@
-"""Running Weaver code inside a Fabric Spark session.
+"""Manage Weaver execution inside Fabric Spark sessions.
 
-This is the third execution position — not Weaver reaching into a workspace over
-HTTP, but Weaver *running there*. It is the position the product claim rests on,
-and the only one that proves a notebook user could do the same thing.
-
-A session is expensive to start and cheap to reuse, so callers should hold one
-open across a batch of work rather than paying for it per statement.
+Livy sessions are reused across related work to avoid repeated startup cost.
 """
 
 from __future__ import annotations
@@ -306,8 +301,8 @@ class LivySession:
         if environment_id is None:
             if not getattr(workspace, "environment", None):
                 raise CommandError(
-                    "this workspace names no environment; set one and run "
-                    "`weaver install --workspace <ws> --environment <env>`"
+                    "A Fabric Environment is required to start a Livy session. "
+                    "Configure one and run `weaver install --workspace <ws> --environment <env>`."
                 )
             environment_id = _resolve_environment_id(workspace, resolver)
 
@@ -370,7 +365,7 @@ class LivySession:
         """
 
         if self.session_url is None:
-            raise LivyError("the Livy session has not been started")
+            raise LivyError("The Livy session has not been started.")
 
         submitted = _call(
             "POST", f"{self.session_url}/statements", self.token,

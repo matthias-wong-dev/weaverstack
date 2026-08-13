@@ -1,27 +1,7 @@
-"""The workspace declaration — a tree of Weaver items, read and checked whole.
+"""Read and validate a Weaver repository through a Store.
 
-The first directory level is the item type and the second is the logical item
-name. Everything below belongs to exactly one item.
-
-::
-
-    repository/
-    ├── Lakehouse/
-    │   └── Raw/
-    │       ├── schemas/Sales.yml
-    │       ├── Sales__Order.py            Delta table, Python
-    │       ├── Sales.OrderSummary.sql     Delta table, Spark SQL
-    │       ├── Files/Sales__Export.py     Folder
-    │       └── lib/dates.py
-    └── Warehouse/
-        └── Reporting/
-            ├── schemas/Sales.yml
-            ├── alias.yml
-            └── Sales.OrderReport.sql      Warehouse table, T-SQL
-
-The owning item chooses the SQL dialect, so no document carries one. Reading
-goes through a :class:`~weaver.store.Store`, so the same reader serves a local
-checkout, Notebook Resources, and an accessible OneLake source.
+The first two directory levels identify the item type and logical item. The
+owning item determines each SQL document's dialect.
 """
 
 from __future__ import annotations
@@ -80,13 +60,7 @@ IGNORED_DIRECTORIES = frozenset(
 IGNORED_FILENAMES = frozenset({".DS_Store", "Thumbs.db"})
 IGNORED_SUFFIXES = (".pyc", ".pyo", ".swp", ".orig", ".rej")
 
-#: Where validation is authored, and what each directory declares. Both are
-#: allowed under a Lakehouse and a Warehouse item: validation is not a property
-#: of one engine, and the item continues to choose the SQL dialect.
-#:
-#: The directory names the kind rather than merely grouping it, so a file cannot
-#: sit in ``tests/`` and declare an Assumption. Two names beat one directory
-#: plus a header everyone has to open the file to read.
+#: Validation source directories and their declared kinds.
 VALIDATION_DIRECTORIES = {"tests": TEST, "assumptions": ASSUMPTION}
 
 #: The subdirectories an item may author, for the message that lists them.
@@ -112,15 +86,7 @@ def _read_validation(
     source_documents: dict[WeaverDocumentId, SourceDocument],
     validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]],
 ) -> None:
-    """Read one file from ``tests/`` or ``assumptions/`` into the repository.
-
-    Inserted into the same ``source_documents`` map as the objects, deliberately.
-    A validation carries the ordinary item-qualified ``Schema.Object`` identity,
-    so a Test and a Table that both claim ``Sales.Order`` in one item are an
-    ambiguous duplicate and are refused by the machinery that already refuses
-    two tables of the same name — rather than by a second rule that would have
-    to be remembered.
-    """
+    """Read one validation file into the repository."""
 
     directory = within[0]
     kind = VALIDATION_DIRECTORIES[directory]
@@ -286,11 +252,7 @@ def parse_item_repository(
     schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {
         item: [] for item in item_ids
     }
-    #: Validation declarations, held apart from the objects. They share the one
-    #: ``source_documents`` keyspace — which is what makes a Test and a Table of
-    #: the same name within one item an ordinary duplicate — but they are not
-    #: data objects, and every projection that asks an item for its documents
-    #: must not be handed something nothing materialises.
+    #: Validation declarations, separate from materialised objects.
     validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
         item: [] for item in item_ids
     }
@@ -302,8 +264,7 @@ def parse_item_repository(
         within = parts[2:]
 
         if within == ["alias.yml"]:
-            # The item owns its aliases, so the file travels and certifies with
-            # the rest of the item's source rather than as a shared root file.
+            # Alias files are part of their owning item.
             alias_files[item] = relative
             support_files.append(relative)
             continue
@@ -396,19 +357,13 @@ def parse_item_repository(
             schemas_by_item[builtin_item].append(identity)
             continue
         source = read_source_document(relative, data, builtin_item.item_type)
-        # The control plane declares a Folder as well as its tables — the task
-        # log — and a Folder is a Files document. Read from the same path the
-        # authored branch reads it from, so a generated declaration and an
-        # authored one of the same kind produce the same identity.
+        # Folder declarations are stored under Files/.
         is_files = f"/{FILES}/" in relative
         identity = WeaverDocumentId(builtin_item, source.object_id, is_files=is_files)
         source_documents[identity] = replace(source, logical_id=identity)
         documents_by_item[builtin_item].append(identity)
 
-    # An item with load code owns the runtime tree that code is deployed into,
-    # and owning it means declaring it. The folder and its schema are generated
-    # here rather than reserved somewhere later, so they are ordinary managed
-    # objects from the moment the repository is interpreted.
+    # Generate runtime declarations for items with load code.
     from ..etl import ETL_SCHEMA, generated_item_files
 
     for item in sorted(item_ids):
@@ -434,8 +389,7 @@ def parse_item_repository(
     for item in sorted(item_ids):
         item_files = generated_item_files(
             item,
-            # Validations too: an item that only validates still owns the
-            # runtime tree or the generated schema its primitive lands in.
+            # Validations also require generated runtime declarations.
             documents=[
                 source_documents[identity]
                 for identity in documents_by_item[item]
@@ -464,9 +418,7 @@ def parse_item_repository(
         documents = tuple(sorted(documents_by_item[item_id], key=str))
         validations = tuple(sorted(validations_by_item.get(item_id, ()), key=str))
         declared = {schema.schema for schema in schemas}
-        # A validation names a schema the same way an object does, and for the
-        # same reason: the schema is the item's declared namespace, not a
-        # convenience of the thing that happens to sit in it.
+        # Validations must use an item-declared schema.
         for document_id in documents + validations:
             if document_id.object_id.schema not in declared:
                 source = source_documents[document_id]

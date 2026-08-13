@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/run-prose-tripwire.sh",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

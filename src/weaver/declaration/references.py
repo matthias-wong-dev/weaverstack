@@ -1,33 +1,8 @@
-"""Following a ``$Schema.Object`` documentation reference to its text.
+"""Resolve ``$Schema.Object`` references used in descriptive metadata.
 
-A ``Description``, ``Lineage`` or column note is either literal prose or exactly
-one reference (:class:`~weaver.ses.metadata.MetadataText`). A reference means
-*the text over there is the text here* — the same sentence written once and
-pointed at from everywhere it applies, so a correction lands in one place.
-
-Resolving one is therefore a copy, and this module performs it:
-
-.. code-block:: text
-
-    Description: $Sales.Order          -> Sales.Order's description
-    Description: $Sales.Order[Order id] -> that column's note on Sales.Order
-
-Pointers may chain — B points at A, C points at B — and the chain is followed to
-the literal at its end. A **cycle** is an error: it can never produce text, so it
-is a broken declaration rather than a missing one.
-
-**A documentation reference is not a dependency.** A dependency binds in its
-consumer's execution namespace, because that is what the SQL will bind to. A
-reference is a logical pointer to *the object of that name*, and the interesting
-case is precisely the cross-target one: the Warehouse ``Sales.Customer`` written
-by a Lakehouse table of the same name, saying "I come from that Delta table".
-Resolution therefore excludes the referring object itself and prefers the
-referrer's own namespace only to break a tie.
-
-Unresolved is **not** an error. A reference may legitimately name an object in
-another repository, and refusing it would cost someone a working object for a
-documentation nicety. The reference is recorded as written and the resolved text
-is simply absent — the catalogue keeps both columns for exactly this reason.
+References copy text from another logical object and may chain. They do not
+create execution dependencies. Unresolved external references remain recorded
+without resolved text; cycles are declaration errors.
 """
 
 from __future__ import annotations

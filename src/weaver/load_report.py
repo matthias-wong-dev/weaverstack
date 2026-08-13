@@ -1,25 +1,7 @@
-"""What a load run reports: statuses, messages and the shape returned to a caller.
+"""Load-run statuses, messages, and serialisable report types.
 
-The vocabulary layer of load orchestration, and it is deliberately the only one
-that has no behaviour. Planning, resolution, execution and logging all produce
-these values; nothing here produces anything.
-
-**A message stream, not an error string.** A node can fail for several reasons at
-once — its target is missing *and* the module it would import cannot be located —
-and an orchestrator that flattened those into one string would be choosing which
-half of the answer to keep. So every finding, whether the primitive returned it
-or the orchestrator caught it, enters one stream of :class:`LoadMessage`, and a
-node carries as many as it has.
-
-**Dry-run statuses are not execution statuses.** A validated node has not run,
-and calling it ``succeeded`` would put a claim in a report that nothing performed.
-The two sets are kept apart here so the distinction cannot be lost downstream —
-see :data:`VALIDATION_STATUSES` and :data:`EXECUTION_STATUSES`.
-
-:class:`weaver.runtime.load_result.LoadResult` is re-exported rather than
-redefined. A primitive already returns that shape on all four engines, and a
-second dataclass meaning the same thing is exactly the drift the runtime module
-exists to prevent.
+Nodes retain all reported messages. Dry-run statuses remain distinct from
+execution statuses.
 """
 
 from __future__ import annotations
@@ -43,10 +25,7 @@ SUCCEEDED_WITH_REJECTS = "succeeded_with_rejects"
 FAILED = "failed"
 #: An upstream dependency failed or could not be validated.
 BLOCKED = "blocked"
-#: Deliberately omitted by a planner or execution policy. Never used for failure
-#: propagation — a node whose dependency failed is ``blocked``, and conflating
-#: the two would make "nothing was wrong" and "something upstream broke" read the
-#: same in a log.
+#: Omitted by planning or execution policy. Dependency failures use ``blocked``.
 SKIPPED = "skipped"
 
 EXECUTION_STATUSES = (
@@ -112,12 +91,10 @@ from .run.result import (  # noqa: E402 - the vocabulary this report projects
 
 @dataclass(frozen=True)
 class LoadNodeReport:
-    """What became of one planned node.
+    """Report for one planned node.
 
-    ``executed`` is separate from ``status`` and has to be: a dry run reports
-    ``validated`` having executed nothing, and a real run reports ``blocked``
-    having executed nothing either. A reader asking "did this touch the target?"
-    is asking about ``executed``, and no status answers it on its own.
+    ``executed`` distinguishes a dry run or blocked node from work that touched
+    the target.
     """
 
     node_id: str
@@ -173,12 +150,9 @@ class LoadNodeReport:
 
 @dataclass(frozen=True)
 class LoadRunReport:
-    """One ``weaver.load(...)`` invocation, whole.
+    """Report for one ``weaver.load(...)`` invocation.
 
-    The same shape whether or not anything ran, which is what lets a dry run be
-    inspected exactly as a real run is. ``task_id`` and ``task_log`` are absent
-    for a dry run, and their absence is the report saying so — dry runs write no
-    evidence, so there is none to point at.
+    Dry runs use the same shape as executions but do not have task evidence.
     """
 
     requested: tuple[str, ...]
@@ -222,14 +196,7 @@ class LoadRunReport:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadRunReport":
-        """Reconstruct a report that crossed a process boundary.
-
-        The desktop CLI runs a load *inside* Fabric and gets its report back as
-        JSON, and what it renders has to be the same object an in-session caller
-        holds — otherwise the two would drift into two renderers and the CLI
-        would quietly become the second place that knows what a load report
-        means.
-        """
+        """Reconstruct a report returned across a process boundary."""
 
         return cls(
             requested=tuple(payload.get("requested") or ()),

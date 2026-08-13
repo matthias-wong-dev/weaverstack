@@ -1,13 +1,7 @@
-"""Reconciling a bound physical target against what an item declares.
+"""Plan removals from a bound target against an item's declared state.
 
-Building says what must exist. Pruning says what must stop existing, and it is
-the half that can destroy data, so it is deliberately narrow: only objects the
-target already holds, only in schemas the bound item declares, and only after
-the inventory has been frozen at plan time rather than re-read at install time.
-
-The Delta side reads the Spark catalogue for the bound Lakehouse and the Files
-area for its Folders. The Warehouse side reads the target's own SQL catalogue,
-in the environment the build is running in.
+Prune uses the inventory frozen during planning and only considers objects in
+schemas and file areas managed by the bound item.
 """
 
 from __future__ import annotations
@@ -44,26 +38,10 @@ from .changes import (
 from .payloads import sha256_hex
 from .targets import BoundTarget
 
-#: Files areas a prune never touches: they are Weaver's own, not an item's
-#: materialised output.
-#: ``cli`` no longer holds anything — the desktop Installer stopped staging
-#: bundles there when it stopped shipping them — but it stays reserved so a
-#: prune against an estate built by an older Weaver removes nothing it did
-#: not put there.
+#: Weaver-owned Files areas excluded from prune.
 _RESERVED_FILES_AREAS = frozenset({BUILD_BUNDLES_AREA, CLI_AREA})
 
-#: *Delta* schemas a prune never touches. A schema-enabled Fabric Lakehouse has a
-#: default ``dbo`` schema that cannot be dropped and that Weaver does not manage;
-#: ``_`` holds Weaver's own catalogue, which no item owns. A build normally cannot
-#: see `_` at all — it lives in the Weaver Lakehouse and prune is scoped to the
-#: bound destination's own storage — but an item built *into* the Weaver Lakehouse
-#: would, and a prune that dropped the catalogue would take the record of every
-#: installation with it.
-#:
-#: The load layer's ``_`` is a different object wearing the same name: a *folder*
-#: under Files, and a *Warehouse* schema. Neither is listed here, and neither
-#: should be — both are generated, projected and pruned like any other managed
-#: object, which is exactly how they go when an item stops declaring load code.
+#: Delta schemas excluded from prune because Weaver does not manage them.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 
 #: Warehouse schemas that belong to the engine rather than to any item.
@@ -603,12 +581,7 @@ def _child_dirs(store: Store, root) -> list:
 
 
 def _catalogue_for(resolver, lakehouse: ItemRef, spark) -> "SparkCatalogue | None":
-    """Catalogue operations against the Lakehouse being reconciled.
-
-    None without a session — prune still reconciles tables, folders and schemas
-    from storage, and simply cannot see views, which is the documented cost of
-    generating without one.
-    """
+    """Return catalogue operations, or ``None`` when no Spark session is available."""
 
     if spark is None:
         return None

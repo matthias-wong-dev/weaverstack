@@ -1,14 +1,6 @@
-"""OneLake shortcuts — Fabric's own way of pointing one item at another's data.
+"""Fabric OneLake shortcut operations used to implement aliases.
 
-A shortcut is how an alias exists in Fabric. It has no bytes: the destination
-Lakehouse gains a table (or a folder) under its own name, and reads pass through
-to the item that owns the data. That is precisely what a Weaver alias claims —
-the destination item owns the name, the source stays the canonical producer — so
-the two map onto each other exactly.
-
-Created by replacement. A shortcut carries no data of its own, so removing and
-remaking one loses nothing, and a build that could not re-run over its own aliases
-would not be re-runnable.
+Shortcuts are recreated during installation because they contain no data.
 """
 
 from __future__ import annotations

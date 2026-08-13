@@ -1,48 +1,7 @@
-"""What an authored T-SQL body means, as a program.
+"""Classify authored T-SQL statements as setup or result-producing queries.
 
-The Warehouse counterpart of :mod:`weaver.declaration.spark_sql_program`, and it
-exists for the same reason: a build and a load both have to know which part of a
-body produces the object's rows, and two answers to that would be a bug waiting
-for the first body complicated enough to tell them apart.
-
-.. code-block:: text
-
-    the build      materialises the staging query in shape-only form
-    the load       stages that query, and deletes by the next one
-
-**Setup and query, and the difference is not a semicolon.** T-SQL does not
-require statement terminators, so where one statement ends cannot come from
-splitting on ``;`` the way it can in Spark. It comes from
-:func:`weaver.declaration.sql_shaping.query_spans`, which is the recognition the
-shape-only build has always used — a ``SELECT`` that begins a query told apart
-from one that is the tail of an ``INSERT``, a branch of a ``UNION``, the body of
-a ``WITH`` or a subquery inside a predicate. Everything a span does not cover is
-setup, and setup is what a statement is by default rather than by enumeration.
-
-**One query is staging; two are staging and explicit deletes.**
-
-.. code-block:: text
-
-    0 queries       not a table — nothing visibly produces rows
-    1 query         the staging rows
-    2 queries       the staging rows, then the keys to delete
-    3 or more       ambiguous, and refused
-
-**Dynamic SQL is setup, and is not read.** ``EXEC`` and ``sp_executesql`` may do
-whatever they like — build a working table, branch, loop — and Weaver runs them
-as authored. What they must not do is *be* the staging query: a result set that
-exists only inside a string literal is not something this module can see, and it
-will not guess. So ``exec sp_executesql N'select …';`` is a body with no query
-in it, and is refused as one. The boundary is visibility, not capability.
-
-**A delete query is a claim only an incremental keyed table may make.** A
-non-incremental source is the whole truth, so absence from staging is what
-retires a row, and a second statement of the same thing would be applied on top
-of a reconciliation that already accounted for it. The same rule Spark SQL
-states, because it is the table load's rule rather than either dialect's.
-
-Nothing here parses T-SQL grammar. Every statement is still handed to the
-Warehouse, which remains the only authority on whether it is valid.
+The parsed program supplies build and load staging queries without validating
+T-SQL grammar.
 """
 
 from __future__ import annotations

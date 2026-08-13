@@ -1,34 +1,7 @@
-"""One resolved Lakehouse — where an authored object's bytes are.
+"""Resolved Lakehouse destinations for authored objects.
 
-An authored object is an ordinary Python object bound to a Spark session, and
-this is the second half of that binding: the *destination*. It exists because a
-Spark session cannot answer "which Lakehouse" on its own. A session builds
-several destinations in one invocation (see
-:class:`~weaver.locations.LakehouseSparkLocation`), so the destination is
-resolved and supplied, never inferred from whatever the session happens to be
-attached to.
-
-There is exactly one exception, and it is the notebook case:
-
-* a developer working in a Fabric notebook has attached a default Lakehouse, and
-  that attachment *is* the answer — :func:`default_lakehouse` reads it;
-* the orchestrator, and anyone addressing more than one Lakehouse, resolves the
-  destination by name and passes it in — :func:`lakehouse_for`.
-
-Both produce the same value, so authored code cannot tell which path built it.
-
-**One root, both areas.** ``spark_root`` is what Spark and Hadoop address — an
-``abfss://`` URL on Fabric, a directory locally — and *everything* an authored
-object reaches hangs off it: tables under ``Tables/``, folders under ``Files/``.
-It is turned into a :class:`~weaver.locations.LakehouseSparkLocation` and joined
-by that, so there is one piece of path arithmetic rather than a second set of
-string joins that could drift.
-
-Deliberately not a mount. ``/lakehouse/default`` addresses whichever Lakehouse a
-notebook attached, and orchestration runs detached against Lakehouses it resolved
-by name — so a folder that could only be reached through a mount could not be
-loaded at all by the thing that loads it. The Hadoop-compatible root reaches
-every resolved Lakehouse, attached or not, which is why it is the only one here.
+Notebook code can infer an attached default Lakehouse. Orchestration resolves an
+explicit destination so a session can address multiple Lakehouses.
 """
 
 from __future__ import annotations

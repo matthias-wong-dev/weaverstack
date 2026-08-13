@@ -1,27 +1,7 @@
-"""Splitting SQL text into statements, in no particular dialect.
+"""Split SQL text into top-level statements without interpreting a dialect.
 
-The one piece of SQL handling that is genuinely neutral, and it is here rather
-than beside either dialect's transforms because *both* engines and both sides of
-the system need it:
-
-.. code-block:: text
-
-    repository parsing     is this authored program well formed?
-    load generation        which statements set up, and which produce rows?
-    the runtime primitive  execute these, in this order, in this session
-
-A deployed Spark SQL primitive parses its own embedded program when it runs, so
-this module must stay importable with nothing but ``sqlparse`` — which is a base
-dependency, present in every Fabric Environment Weaver installs into.
-
-**Lexical, not grammatical.** What is answered here is where one statement ends
-and the next begins, which needs the lexer to know that a semicolon inside a
-string, a comment, an identifier or a parenthesised subquery does not end
-anything. What each statement *means* is the engine's business: every statement
-is still handed to Spark or to the Warehouse, which are the only authorities on
-whether it parses.
-
-``str.split(";")`` is the thing this exists to stop anybody writing.
+The parser identifies statement boundaries while Spark and Warehouse validate
+statement semantics.
 """
 
 from __future__ import annotations

@@ -235,16 +235,10 @@ class ValidationEstate:
 def validation_order(
     validations: Sequence[InstalledValidation],
 ) -> tuple[InstalledValidation, ...]:
-    """The order to run them in, which is the order of what they read.
+    """Return a stable order for installed validations.
 
-    Deliberately shallow. Nothing depends on a validation — the repository
-    refuses a declaration that names one — so there are no edges *between* these
-    nodes to order, and a validation's own dependencies were installed and
-    loaded before it. What remains is a stable order, and stability is what
-    makes a run's report comparable with the last one's.
-
-    A second dependency language for validation is what the design says not to
-    build, and this is where the temptation would have been.
+    Validations do not depend on one another; their own dependencies are
+    installed and loaded before validation begins.
     """
 
     return tuple(sorted(validations, key=lambda each: str(each.logical)))

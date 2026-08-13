@@ -1,13 +1,15 @@
 # Tests and Assumptions
 
-Weaver validates an estate with two kinds of authored declaration. Both are
-ordinary Weaver declarations — schema-qualified, dependency-resolved, compiled to
-independently runnable primitives, installed by an ordinary build — and neither
-is a data object. That last clause is what this document is mostly about,
-because it is the thing the rest of the system was not previously shaped for.
+## Purpose
 
-This is the authoritative design for validation. Where it and the code disagree,
-the code is wrong.
+This document defines Weaver validation: how Tests and Assumptions are authored,
+installed, run, and recorded. It owns validation architecture; command use is
+documented in [CLI usage](cli-usage.md).
+
+Weaver validates an estate with two kinds of authored declaration. Both are
+schema-qualified, dependency-resolved, compiled to independently runnable
+primitives, and installed by an ordinary build. Neither materialises a data
+object.
 
 ## The two kinds
 
@@ -44,20 +46,12 @@ The owning item continues to choose the SQL dialect — a `.sql` file is Spark S
 in a Lakehouse and T-SQL in a Warehouse — and Python validation runs through
 Spark, so it belongs to a Lakehouse item.
 
-**The directory names the kind rather than merely grouping it.** A file in
-`tests/` declaring an Assumption is refused and told where it belongs. Two
-directory names beat one directory plus a header nobody reads without opening
-the file.
+The directory identifies the validation kind. A file in `tests/` that declares
+an Assumption is refused and directed to the appropriate directory.
 
 ## The metadata contract
 
-The old `_COMMON_KEYS` said what every document got and left each kind to add to
-it. That is the wrong shape for a declaration that is not a data object: almost
-everything in it — `Lineage`, `Static`, `Prohibit rebuild`, the aliases — is not
-a key a Test *happens not to use*, it is a key that could not mean anything on
-one.
-
-So the keys are grouped by what they are about, and each kind composes the
+Keys are grouped by their purpose, and each validation kind composes only the
 groups that apply to it:
 
 | group | keys | who has it |

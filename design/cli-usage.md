@@ -1,5 +1,10 @@
 # Using the Weaver CLI
 
+## Purpose
+
+This document explains command use and workspace configuration. It describes
+the public CLI, not the implementation of command handlers.
+
 ```bash
 pip install 'weaverstack[cli]'
 weaver --help
@@ -150,6 +155,9 @@ session lifetime 61.2s
 
 ## What a command needs
 
+This section describes command behaviour. The Session and resource-boundary
+rationale is defined in [Code architecture](code-architecture.md).
+
 Each command declares its coarse resource requirements from its parsed
 arguments — `auth`, `resolver`, `onelake`, `tds`, `livy` — and the Session
 starts exactly those, in the background, before the command wants them:
@@ -164,9 +172,8 @@ A Warehouse load therefore never waits on a Spark session, which on a capacity
 permitting one concurrent session is the difference between running and
 queueing.
 
-The Session is *told*; it does not infer. It has no idea what a build is, and a
-Session that decided which resources an operation wanted would be a second place
-deciding what the operation does.
+Commands declare resources; the Session prepares them without taking ownership
+of build or run planning.
 
 Declarations are coarse and are a **superset** — arguments cannot know what a
 repository or a catalogue turns out to contain. Exact routing comes later, from
@@ -359,8 +366,8 @@ the result without installing it — no Registry row, no `TestDictionary` row, n
 task log. From a desktop the file's *content* crosses into the session, not its
 path. `--name` and `--file` are mutually exclusive.
 
-Python validation is not run through `--file`, deliberately: it is already
-directly runnable in a notebook.
+`--file` supports SQL validation. Python validation is directly runnable in a
+notebook.
 
 ```python
 from tests.Sales__OrderCustomerExists import Sales__OrderCustomerExists
@@ -376,9 +383,7 @@ weaver.test("Lakehouse/Sales", name="Sales.OrderSummaryReconciliation")
 weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql")
 ```
 
-There is deliberately no `weaver assumption` command. One operation runs both
-kinds, because a caller asking whether an estate holds up is not asking two
-questions. See [validation](validation.md).
+`weaver test` runs both Tests and Assumptions. See [validation](validation.md).
 
 ## Unbind
 
@@ -397,10 +402,9 @@ installations remain.
 
 ## Wipe
 
-Wipe is intentionally broader: it clears everything in each selected typed
-target. Physical wipe does not require catalogue access; immediate catalogue
-cleanup is selected separately with `--unbind-from` (or the configured control
-Lakehouse).
+Wipe clears everything in each selected typed target. Physical wipe does not
+require catalogue access; immediate catalogue cleanup is selected separately
+with `--unbind-from` (or the configured control Lakehouse).
 
 ```bash
 weaver wipe \

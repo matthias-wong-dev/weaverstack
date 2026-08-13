@@ -1,34 +1,7 @@
-"""Reading the catalogue through its fixed expected schema.
+"""Read catalogue tables through their expected schema.
 
-A build compares what the catalogue holds with what the repository now declares,
-so it has to read tables that may not be there yet and may be an older shape than
-this Weaver knows about. Both are ordinary states, not faults:
-
-**Bootstrap.** The very first build has no catalogue at all — the tables are
-created by the build that then writes to them. A missing table reads as no rows.
-
-**Upgrade.** A Weaver that adds a column runs against a catalogue built by an
-older one. A missing column reads as a typed null, so newer code compares
-successfully against an older shape and the next build repairs it. An unexpected
-extra column is ignored, which is the other half: an older Weaver must not choke
-on a catalogue a newer one extended.
-
-What must **not** happen is a genuine failure being read as an empty catalogue. A
-permission error, a corrupt Delta log, an unavailable store or a broken session
-that returned "no rows" would make the next build's comparison conclude that
-everything is new — and, once drop policy lands, that everything the catalogue no
-longer mentions may be removed. So the absence check is deliberately narrow: only
-Spark's own ``TABLE_OR_VIEW_NOT_FOUND`` is absence. Everything else propagates.
-
-That asymmetry is the whole design of this module. Tolerance is cheap when it is
-specific and dangerous when it is a bare ``except``.
-
-**A read names the Lakehouse it reads from.** The catalogue lives in the Weaver
-Lakehouse; a build's other work is aimed at a destination Lakehouse; one session
-serves both. So a read takes a :class:`~weaver.spark.catalogue.SparkCatalogue`
-rather than a bare session — asking "the catalogue" of whatever the session is
-attached to would answer for the wrong Lakehouse, and answer *plausibly*, which
-is the failure mode this whole area exists to remove.
+Missing tables and compatible missing columns are handled as bootstrap or upgrade
+state; other read failures propagate.
 """
 
 from __future__ import annotations

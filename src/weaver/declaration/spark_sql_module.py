@@ -1,37 +1,7 @@
-"""Compiling an authored Spark SQL table into the module that will run it.
+"""Compile Spark SQL documents into deployed Python primitives.
 
-A Spark SQL table is *authored* as SQL and *installed* as Python::
-
-    Lakehouse/Sales/Sales.OrderSummary.sql   what the developer writes
-    Files/_/Load/Sales__OrderSummary.py      what a build deploys
-
-and the second is an ordinary Weaver primitive: importable, constructible,
-``read()``-able and ``load()``-able, indistinguishable to orchestration from a
-module somebody wrote by hand. That is the whole point of compiling rather than
-interpreting. There is no installed ``.sql`` load program and nothing that runs
-one, so a SQL-authored table inherits the Delta load lifecycle — validation,
-rejection, fault tolerance, stability thresholds, static behaviour — instead of
-having a second implementation of it generated in SQL.
-
-**Three things travel, and nothing else.** The authored metadata header becomes
-the module docstring, which is the contract the primitive reads at run time; the
-authored SQL becomes ``SQL``, exactly as written; the class name is the
-``Schema__Object`` spelling every deployed module already uses. Nothing is
-derived from the target, so unlike the generated program it replaced, this needs
-no built table, no columns and no Spark session to render.
-
-**One encoder, applied always.** Authored SQL may contain quotes, backslashes,
-triple quotes and anything else, so the text is encoded by one deterministic
-rule rather than by choosing a quoting style per body and hoping. What comes out
-the other side is byte-identical, which
-``tests/test_spark_sql_module_representation.py`` asserts against text designed to break
-it.
-
-**The marker is a fact about the file, not about its name.** A generated module
-and an authored one are both ``.py`` in the same tree, and only the generated
-one carries object tokens for the installer to resolve — so it says so on its
-first line. Keying on the name instead was tried in the previous design and was
-wrong: a generated load kept its authored filename, so the suffix never matched.
+Generated modules retain authored metadata and SQL while using the ordinary
+Delta load or validation runtime.
 """
 
 from __future__ import annotations

@@ -1,14 +1,7 @@
-"""Payload naming and hashing — where a generated definition lives in a bundle.
+"""Payload naming and hashing for BuildBundle definitions.
 
-A bundle's ``payload/`` tree groups definitions by the sequence that runs them,
-so the directory order mirrors the deployment order and a reviewer can read it
-top to bottom. This module owns those names and the payload hash, so the planner
-does not scatter path arithmetic through its logic.
-
-There are deliberately no reserved sequence numbers here. A stage's number comes
-from its position in the assembled plan — see :mod:`weaver.build_bundle.stages`
-— so nothing has to leave arithmetic headroom for a repository's dependency depth
-and nothing can collide with a region another phase claimed.
+Payload directories follow assembled sequence numbers so their layout mirrors
+execution order.
 """
 
 from __future__ import annotations

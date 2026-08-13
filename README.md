@@ -13,8 +13,7 @@ describe objects in one repository; Weaver routes them to the physical targets
 you name, builds one global dependency graph across all three forms, and
 certifies each object in the central catalogue only once it has built.
 
-> **Status: pre-alpha.** The current CLI, Workspace and catalogue work follows
-> [the Weaver master plan](design/weaver_master_cli_plan.md).
+> **Status: pre-alpha.**
 
 ## Installation
 
@@ -60,7 +59,7 @@ unbind.
 
 ## Documentation
 
-- [Authoritative master plan](design/weaver_master_cli_plan.md)
+- [Design documentation map](design/README.md)
 - [How Weaver build works](design/how-does-build-work.md) — incremental selection, bundle order and certification
 - [Where your Weaver document repository lives](design/weaver-repository.md) — a folder of files, and how it reaches Fabric
 - [CLI usage](design/cli-usage.md) — signing in, workspaces, capacity, wipe

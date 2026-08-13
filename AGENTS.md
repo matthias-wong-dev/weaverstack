@@ -454,6 +454,55 @@ materialisation forms, not tiers. `T0`/`T1`/`T2` naming is house jargon and is
 rejected by `tests/test_neutrality.py`; widely-understood naming such as
 bronze/silver/gold is fine where it aids a reader.
 
+## Writing
+
+### User-facing text
+
+User-facing text is product copy. Write neutral, respectful, ordinary technical
+English. State what happened and, when known, what the developer can do next.
+
+Do not lecture, scold, argue, joke or write as though correcting the developer.
+Avoid describing something as obvious, simple, merely or the whole point. Avoid
+“this is not X; it is Y” unless the distinction is necessary.
+
+CLI help says what a command or option does; it does not explain implementation
+rationale. Errors should be short enough to scan and specific enough to act on.
+Detailed diagnostics belong in logs.
+
+### Comments and docstrings
+
+Comments explain non-obvious constraints, invariants, platform behaviour, edge
+cases, or why an apparently simpler implementation is unsafe. Do not narrate
+clear code, defend an implementation to an imagined reviewer, or put
+architecture essays or implementation history in comments.
+
+Prefer one plain sentence. Use two when the consequence matters. If an
+explanation needs a paragraph, consider putting it in `design/`.
+
+Docstrings describe a callable's purpose and non-obvious contract. They do not
+contain design essays or implementation history.
+
+### Design documentation
+
+Design docs explain the system for maintainers. Prefer direct technical
+explanation over rhetorical argument. When behaviour changes, update the
+relevant design document rather than adding a competing explanation elsewhere.
+
+### Terminology
+
+Use the established name for each public concept. In particular: Workspace,
+Environment, Weaver Lakehouse, Lakehouse, Warehouse, target, logical target,
+physical target, repository, catalogue, registry, session, composition, build,
+load, test and assumption. Do not invent synonyms in UI text when a defined term
+already exists.
+
+### GitHub publishing
+
+Use GitHub CLI for branch, push and pull-request work. Check `gh auth status`
+before publishing. On Windows, if `gh` is not on `PATH`, use
+`C:\Program Files\GitHub CLI\gh.exe`. Ask for re-authentication when its saved
+token is invalid.
+
 ## Layout
 
 ```text

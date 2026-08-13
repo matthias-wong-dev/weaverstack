@@ -1,8 +1,7 @@
 """Explicit catalogue ownership rules for Weaver document types.
 
-Catalogue rows are not owned merely because their table happens to contain an
-object-shaped pair of columns.  Each supported document type names every table
-it may populate and the predicate by which rows in that table are its claims.
+Each supported document type declares the tables and row predicates that define
+its catalogue claims.
 """
 
 from __future__ import annotations
@@ -74,8 +73,7 @@ _COMMON_OBJECT_RULES = (
     CatalogueClaimRule(DEPENDENCY),
 )
 
-# This is deliberately exhaustive. Adding another Registry object_type requires
-# an ownership declaration here before it can participate in reconciliation.
+# Each Registry object type requires an ownership declaration before reconciliation.
 CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = {
     "folder": (
         _COMMON_OBJECT_RULES[0],

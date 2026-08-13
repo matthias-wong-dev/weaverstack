@@ -63,13 +63,13 @@ def capacity_command(
     verb = _AZ_VERB.get(action)
     if verb is None:
         raise CapacityError(
-            f"unknown capacity action {action!r} — expected one of "
+            f"Capacity action {action!r} is not supported. Choose from: "
             + ", ".join(CAPACITY_ACTIONS)
         )
     if not resource_group:
-        raise CapacityError("a capacity needs its resource group")
+        raise CapacityError("A capacity resource group is required.")
     if not capacity_name:
-        raise CapacityError("a capacity needs its name")
+        raise CapacityError("A capacity name is required.")
 
     command = [
         "az", "fabric", "capacity", verb,
@@ -96,7 +96,7 @@ def run_capacity_action(
         from ..diagnostics import install_command
 
         raise CapacityError(
-            f"the Azure CLI is not installed. Install it:  {install_command('azure-cli')}"
+            f"Azure CLI is required for capacity commands. Install it: {install_command('azure-cli')}"
         )
 
     command = capacity_command(

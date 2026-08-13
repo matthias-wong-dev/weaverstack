@@ -1,24 +1,8 @@
-"""T-SQL create generation — one self-contained script per Warehouse object.
+"""Generate a self-contained T-SQL build script for a Warehouse object.
 
-A Warehouse table's build is a single T-SQL script that finishes itself on the
-server (how-does-build-work §2): it materialises the object's query in shape-only
-form into a temp table, reads that temp table's column metadata back, validates
-the authored metadata against it, and creates the one physical table — all in one
-execution, so the installer makes no round-trip. This is the Warehouse
-counterpart of the ``spark_table`` executor; the script *is* the frozen payload.
-
-Two paths, sharing the shape-only materialisation and metadata validation:
-
-- **inferred** — no declared schema: the physical column types are computed on
-  the server from the temp table's own types, through a Fabric-safe type map;
-- **declared** — a declared schema: the table is created from the declaration
-  and the query is materialised only to validate case-exact column-set
-  equivalence.
-
-Only the authored main table is built. There is no generated view, no
-``_Current`` and no ``_History`` — history is a later, automatic load-time
-consequence. Ported from the ``weaver_runtime.dbrep.sql`` reference generator,
-with that older physical layout removed.
+The script materialises query shape, validates metadata, and creates the main
+table in one server-side execution. Declared and inferred schemas share the
+same shape validation path.
 """
 
 from __future__ import annotations

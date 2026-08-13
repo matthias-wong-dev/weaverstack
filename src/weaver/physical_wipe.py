@@ -1,41 +1,8 @@
 """Internal mechanics for clearing a physical target.
 
-Wipe is per target, because the three are different places with different
-mechanics. It is also the bluntest thing Weaver does, so it reports what it
-would remove before it removes anything.
-
-**Delta.** Weaver addresses Delta tables by explicit path and never registers
-them in a metastore, so there is no catalogue to consult and none to leave
-dangling — a table is a directory, and wiping is removing it. That is the same
-property that lets a Fabric notebook write to a Lakehouse it is not attached
-to, showing up again as a simplification. On Fabric the Lakehouse auto-discovers
-what appears under ``Tables/``, so removing the directory is expected to
-de-register it; that is worth confirming against a real workspace before relying
-on it.
-
-**Shortcuts, first.** A shortcut is the one thing in a Lakehouse that is not the
-Lakehouse's own data: it is a name this item holds for data another item owns. So
-it cannot be removed by deleting a directory, and *must not be* — a recursive
-delete of a directory holding one would be reaching through the pointer at the
-producer's data, which is the one outcome a wipe of *this* Lakehouse must never
-have. Shortcuts are therefore removed through the workspace, and removed before
-any storage is swept, so the sweep can never meet one.
-
-The local emulator materialises an alias as a symbolic link, and
-:meth:`weaver.store.FilesystemStore.delete` unlinks a link rather than following it —
-so the emulator reaches the same guarantee by a different mechanism, and neither
-needs the other's.
-
-**Folders.** The Files area is kept and its contents removed, so the target
-survives and only what it held goes. Shortcuts under ``Files/`` go first, for the
-same reason.
-
-**Warehouse.** One dynamic statement enumerates and removes user objects in
-dependency-safe order while preserving the Warehouse item and system schemas.
-
-Nothing here is scoped to Weaver-managed objects: a wipe clears the target. That
-suits a development loop, and makes the function something a CLI must gate
-rather than something safe by default.
+Wipe clears a target after reporting its planned removals. Lakehouse shortcuts
+are removed through the workspace before storage is swept, so a wipe cannot
+affect their source items. Warehouse system schemas are retained.
 """
 
 from __future__ import annotations
@@ -69,26 +36,12 @@ class WipeReport:
         return f"{self.target}: {verb} {self.count} from {self.location}"
 
 
-#: Schemas a wipe empties but does not remove. A schema-enabled Fabric Lakehouse
-#: is created holding ``dbo``; Fabric owns it, Weaver never manages it, and
-#: nothing recreates it once its directory is gone — the Lakehouse is simply left
-#: unable to resolve a schema it is supposed to have. Deleting it is therefore
-#: not "clearing the target" but damaging it, which is a different act and not
-#: one a wipe is asking for.
-#:
-#: This is the same judgement :data:`weaver.build_bundle.prune._RESERVED_SCHEMAS`
-#: already makes for prune. The two agreeing is the point: an operator should not
-#: have to know which of Weaver's destructive paths respects the default schema.
+#: Fabric owns the default ``dbo`` schema. Wipe empties it but does not remove it.
 _KEPT_SCHEMAS = ("dbo",)
 
 
 def _guard(location: Location, root: Location) -> None:
-    """Never remove anything outside the workspace root.
-
-    Locations are derived rather than supplied, so this should be unreachable —
-    which is exactly why it is worth having, since the failure it prevents is
-    unrecoverable.
-    """
+    """Reject a deletion outside the workspace root."""
 
     inside = location.value == root.value or location.value.startswith(
         root.value.rstrip("/") + "/"

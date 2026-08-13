@@ -1,14 +1,7 @@
-"""Installing the Weaver runtime into a Fabric Environment.
+"""Build and publish the Weaver wheel to a Fabric Environment.
 
-This is the authoritative deployment path: a wheel built from the current
-checkout is uploaded to a named Fabric Environment as a custom library, the
-external packages Weaver needs are staged from ``environment.yml``, and the
-Environment is published. Afterwards a notebook, a Livy session or a Fabric
-pytest run attached to that Environment can simply ``import weaver`` — no source
-copied into a Lakehouse, no ``sys.path`` surgery.
-
-The command runs from a developer's checkout, not from installed Weaver: it
-builds the wheel and reads the Environment definition from the working tree.
+The install command stages the wheel and runtime dependencies from a checkout,
+then publishes the selected Environment.
 """
 
 from __future__ import annotations
@@ -43,20 +36,15 @@ ENVIRONMENT_DEFINITION = Path("deployment/fabric/environment.yml")
 
 
 def project_root() -> Path:
-    """The checkout root — the nearest ancestor holding ``pyproject.toml``.
-
-    The install command is a desktop developer tool, so it always runs from a
-    source tree. Locating the root from the package file keeps it working
-    whatever directory the command is invoked from.
-    """
+    """Return the nearest ancestor containing ``pyproject.toml``."""
 
     here = Path(__file__).resolve()
     for parent in here.parents:
         if (parent / "pyproject.toml").is_file():
             return parent
     raise CommandError(
-        "cannot find the project root (no pyproject.toml above "
-        f"{here}); run weaver install from a Weaver checkout"
+        "A Weaver project root was not found. Run `weaver install` from a "
+        f"checkout containing pyproject.toml above {here}."
     )
 
 
@@ -138,7 +126,7 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
     )
     if result.returncode != 0:
         raise CommandError(
-            "wheel build failed — is the [cli] extra installed?\n"
+            "Wheel build failed. Install the [cli] extra and try again.\n"
             + (result.stderr.strip() or result.stdout.strip())[-1000:]
         )
     built = sorted(
@@ -152,7 +140,9 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
         output_dir.glob(f"{WHEEL_PREFIX}*{WHEEL_SUFFIX}"), key=lambda p: p.stat().st_mtime
     )
     if not existing:
-        raise CommandError(f"wheel build produced no {WHEEL_PREFIX}*{WHEEL_SUFFIX} in {output_dir}")
+        raise CommandError(
+            f"Wheel build produced no {WHEEL_PREFIX}*{WHEEL_SUFFIX} file in {output_dir}."
+        )
     return existing[-1]
 
 
@@ -196,7 +186,7 @@ def _await_environment(
             return find_item(workspace, name, item_type=ENVIRONMENT, client=client)
         except ItemNotFoundError:
             time.sleep(3.0)
-    raise FabricError(f"Environment {name!r} did not appear within {int(timeout)}s")
+    raise FabricError(f"Environment {name!r} did not appear within {int(timeout)} seconds.")
 
 
 def _staging_base(env: Item) -> str:
@@ -366,7 +356,7 @@ def publish_and_wait(
     # (Fabric answering with no publishDetails at all) reads very differently
     # from a publish genuinely stuck in Running.
     raise FabricError(
-        f"publish did not finish within {int(timeout)}s; last state was {seen!r}"
+        f"Environment publish did not finish within {int(timeout)} seconds. Last state: {seen!r}."
     )
 
 
@@ -479,7 +469,7 @@ def install(
         timings["publish"] = time.perf_counter() - t
         published_now = publish_status.lower() in {"success", "succeeded"}
         if not published_now:
-            raise FabricError(f"Environment publish finished as {publish_status!r}, not Success")
+            raise FabricError(f"Environment publish finished with status {publish_status!r}.")
 
     return InstallResult(
         workspace_name=workspace.name,

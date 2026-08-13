@@ -1,29 +1,7 @@
-"""Running a validation from source, without installing it.
+"""Compile and run a SQL validation source file without installing it.
 
-``weaver test <target> --file path/to/Sales.MyTest.sql``.
-
-The one mode that reads a repository, and it exists for the loop a developer is
-actually in: write a Test, run it, fix it, run it again — none of which should
-require a build. It publishes nothing. No Registry row, no ``TestDictionary``
-row, no change to the installed estate.
-
-**The same compiler, or it proves nothing.** A file run that compiled
-differently from a build would answer a question about code that will never be
-installed. So a Warehouse file is rendered by
-:func:`weaver.declaration.tsql_validation.generate_tsql_validation_batch`, which
-wraps the *same* body the installed procedure carries; and a Spark SQL file runs
-through the same program execution and the same comparison the compiled module
-reaches.
-
-**The content travels, not the path.** A desktop CLI names a file on the
-developer's machine and the execution boundary may be a Fabric session that has
-never heard of it, so what crosses is the source.
-
-Python source files are deliberately not supported here, and the plan says why:
-a Python validation is already directly runnable — ``Sales__OrdersReconcile(spark).read()``
-in a notebook — so a second, temporary-module path to the same place would be
-machinery in exchange for nothing. The refusal says that rather than failing
-obscurely.
+The file path remains local while its content crosses to a Fabric session. File
+runs use the same compilers and comparison path as an installed validation.
 """
 
 from __future__ import annotations
@@ -55,14 +33,7 @@ def source_file_node(
     started: datetime,
     dry_run: bool = False,
 ) -> ValidationNodeReport:
-    """Compile one source file and run it against the requested target.
-
-    Returns the node rather than a report: assembling the report, deciding the
-    run's status and raising for ``strict`` belong to the caller, which does
-    them identically for an installed run. Two copies of that would be two
-    chances for ``--dry-run`` to mean different things depending on how the
-    validation was named.
-    """
+    """Compile one source file and run it against the requested target."""
 
     if len(requested) != 1:
         raise CommandError(
@@ -73,8 +44,7 @@ def source_file_node(
     if not path.exists():
         raise CommandError(f"no validation source at {path}")
 
-    # Compiled even for a dry run, and deliberately: what a dry run reports is
-    # what *would* be executed, and a file that cannot compile would not be.
+    # Validate compilation before reporting a dry run.
     document = _read(path, target)
     if dry_run:
         return ValidationNodeReport(
@@ -95,11 +65,9 @@ def source_file_node(
 
 
 def _read(path: Path, target: PhysicalTargetRef):
-    """The file, parsed as the validation it declares.
+    """Parse a file through the ordinary validation reader.
 
-    Through the ordinary reader, so a source file gets the same structural
-    checks a committed one does — the ID must match the filename, the contract
-    queries must be there, the metadata must be a validation's.
+    Source files receive the same structural checks as committed validations.
     """
 
     from .declaration import read_source_document

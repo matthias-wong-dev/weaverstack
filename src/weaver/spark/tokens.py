@@ -1,32 +1,7 @@
-"""How a frozen payload names an object without naming a destination.
+"""Expand logical object tokens in frozen Spark payloads.
 
-A generated statement has to say *which* object it acts on. It must not say
-which Lakehouse, in which workspace, at which path: that is bound by the batch's
-target, resolved at install time, and different in every environment. Writing it
-into the SQL would make two bundles of the same repository differ in every
-payload merely for having been generated somewhere else, which is exactly the
-comparison how-does-build-work §15 exists to protect.
-
-So a payload names an object logically, and the executor asks the batch's
-destination what that is called there::
-
-    CREATE VIEW {{object:Sales.ActiveCustomer}} AS
-    SELECT * FROM {{object:Sales.Customer}} WHERE IsActive
-
-    Fabric   ->  `Weaver`.`Play_Lakehouse_1`.`Sales`.`ActiveCustomer`
-    local    ->  `sales_lh__sales`.`ActiveCustomer`
-
-This is substitution of a transport-level value, not a template (§16). Nothing
-semantic is left for the installer to decide: the object, its schema, the
-statement and the destination are all fixed before the bundle is written — the
-only thing supplied late is how that already-chosen destination spells a name.
-A reviewer reading the payload sees the object; the manifest's target block says
-where it goes. A bare two-part name said neither, and resolved through whatever
-the session happened to be attached to.
-
-The tokens are deliberately unmistakable. ``{{`` and ``}}`` are not Spark SQL, so
-an unexpanded one is a syntax error at the point of use rather than a name that
-quietly resolves somewhere else.
+Payloads identify objects logically; installation resolves the selected target's
+physical spelling. Unexpanded token syntax is invalid Spark SQL.
 """
 
 from __future__ import annotations

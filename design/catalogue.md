@@ -1,18 +1,21 @@
 # The central catalogue
 
+## Purpose
+
+This document defines the authoritative central catalogue: its ownership,
+records, reconciliation, and certification behaviour.
+
 The catalogue scopes installations by `(item_type, item_name)`, projects each
 item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
 ordinary planner.
 
-Weaver's catalogue records, for every object it has successfully built, what Weaver document
-declared about it. It lives in schema `_` of the Weaver Lakehouse, and it is the
-control plane the rest of the system reads from.
+For every successfully built object, the catalogue records the metadata declared
+by its Weaver document. It lives in schema `_` of the Weaver Lakehouse and
+provides the control-plane records used by later operations.
 
-It is **not** a second authoring model. Nothing in it is discovered from a
-physical table and nothing in it can be written by hand. Weaver document remains authoritative
-for descriptive metadata, keys, lineage, dependencies and behavioural flags; the
-catalogue is where that information lands once an object exists, so later
-operations are driven from one place instead of by re-reading a repository.
+Weaver documents remain authoritative for descriptive metadata, keys, lineage,
+dependencies, and behavioural flags. The catalogue contains their installed
+projection; it is not populated by physical discovery or manual editing.
 
 A row in `_.Registry` means:
 
@@ -52,12 +55,12 @@ Registry and nothing else: they declare no columns, keys, relationships or
 dependencies, so no dictionary row describes them. A build cannot
 touch another item because every key begins with its exact item identity.
 
-An object left out because its owning item was not bound is **out of scope**, not
-deleted. A build has no opinion about unbound items.
+An object whose owning item is not bound is outside the build scope. The build
+does not delete or update its catalogue rows.
 
-The bound item's name is an attribute, never identity. Rebinding an item to a
-different Lakehouse **updates** its `_.Installation` row; it does not add a second
-installation.
+The bound item's name is an attribute rather than part of its identity. Rebinding
+an item to a different Lakehouse updates its `_.Installation` row instead of
+adding a second installation.
 
 ## The ten tables
 
@@ -89,25 +92,22 @@ dictionary, column, key or dependency rows, because it declares none of them.
 
 ### Why some tables look sparse
 
-**`_.ColumnDictionary` holds only described columns.** It is documentation, not a
-physical column list. That matters architecturally: a SQL-backed table may infer
-its shape from its query, and those columns are not known until install time
-([How Weaver Build Works](how-does-build-work.md), section 2). Keeping ordinals, types and nullability out is what
-allows the *whole* catalogue to be projected when the bundle is generated rather
-than half of it waiting on the engine. Whether every column *should* carry a note
-is a quality question to ask of this table, not a precondition for filling it.
+`_.ColumnDictionary` contains described columns rather than a physical column
+list. A SQL-backed table can infer its shape from its query, so those columns are
+not known until installation ([How Weaver Build Works](how-does-build-work.md),
+section 2). Omitting ordinals, types, and nullability allows the complete
+catalogue to be projected during bundle generation. Whether every column has a
+description is a quality question, not a condition of publication.
 
-**Logical keys and relationships have no names.** Nothing physical is created from
-them, so a name would have to be invented. A key is identified by its type and its
+Logical keys and relationships are identified without names because no physical
+object is created from them. A key is identified by its type and its
 columns; a relationship by the whole edge — which is why several relationships may
 run between one pair of objects, and why an object may reference itself.
 
-**`_.Dependency` keeps the author's spelling.** The reference is recorded exactly
-as written and resolves within the consuming item. Recording a resolved physical
-name would let one item appear to depend directly on another's storage. Crossing
-items or engines is an *alias*, and aliases are a separate table — composing
-`_.Dependency`, `_.Alias` and `_.Registry` is what yields the estate's whole
-graph, and only that composition may cross.
+`_.Dependency` retains the author's spelling and resolves it within the
+consuming item. Cross-item and cross-engine references use aliases, which are
+stored separately in `_.Alias`. Combining `_.Dependency`, `_.Alias`, and
+`_.Registry` produces the full estate graph.
 
 A dependency may leave its item. A two-part logical name is recorded with
 `is_within_item=true`; a canonical cross-item name or an authored physical name is
@@ -116,10 +116,9 @@ recorded exactly as declared with `is_within_item=false`.
 ## Weaver builds its own catalogue
 
 Weaver composes `Lakehouse/_weaver` in memory from the authoritative table
-definitions and parses those generated schema and source files through the same
-static readers as authored content. It never mutates authored source to make the
-built-in visible. The **ordinary item planner and installer** then build it.
-There is no second "create the control tables" path.
+definitions and parses the generated schema and source files through the same
+static readers used for authored content. The ordinary item planner and installer
+build the result; authored source is unchanged.
 
 Every build implicitly binds `Lakehouse/_weaver` to the control Lakehouse.
 Missing tables are classified as new and created before the same bundle reaches
@@ -146,10 +145,9 @@ scope and cannot be treated as orphans.
 
 ## How a build writes it
 
-Catalogue work concludes every build and is appended at bundle **generation**, not
-decided at install time. Its statements are two per table — a scoped delete of
-everything the desired catalogue does not claim, then an idempotent merge of
-everything it does.
+Catalogue work concludes every build and is appended during bundle generation.
+Each table receives two statements: a scoped delete for rows absent from the
+desired catalogue, followed by an idempotent merge for desired rows.
 
 The desired catalogue is derived in three steps, each one idea:
 
@@ -159,14 +157,10 @@ certified   = retaining(logical, repository, ids)     # what this build actually
 publishable = for_targets(certified, repository, ids, kinds)
 ```
 
-`from_repository` takes no selection and no binding: it is what the *source* says,
-so a developer keeps it correct by adding a declaration rather than by remembering
-a fixture. `retaining` is what keeps a Registry row meaning *this succeeded* —
-publishing the whole declaration would claim objects a build omitted or failed to
-materialise. `for_targets` certifies alias destinations, which cannot be done
-earlier: an alias is a view in a Warehouse and a table in a Lakehouse, so the
-Registry row needs the binding. It scopes as well as binds, so there is no path
-that certifies an alias against a guessed kind.
+`from_repository` takes no selection or binding and represents the declared
+source. `retaining` limits Registry rows to objects the build successfully
+materialised. `for_targets` adds target bindings for alias destinations, whose
+physical type differs between Warehouses and Lakehouses.
 
 Publication is then a diff:
 
@@ -175,19 +169,14 @@ changes = current.diff(publishable)
 dml     = changes.render_dml(installation=...)
 ```
 
-**The two sides are used for different things, and that asymmetry is the design.**
-`current` informs the *report* — new, changed, unchanged, removed — so a reviewer
-can see what a bundle will do before it runs. `desired` alone drives the
-*statements*.
+`current` produces the report of new, changed, unchanged, and removed rows.
+`desired` alone produces the statements.
 
-That matters because a row-level delete would look equivalent and is not. A
-partial or wrongly-scoped read returns *fewer* rows in `current`, so it would emit
-*fewer* deletes — and obsolete claims would survive indefinitely, silently, in the
-authoritative record. Scoped against what the desired catalogue claims, the pair
-is correct against any prior state, including one the reader never saw. Three
-catalogues that disagree completely about what is persisted render byte-identical
-statements, which `tests/targeted/test_catalogue_diff.py` asserts rather than
-describes.
+The statements use `desired` rather than `current` because a partial or
+wrongly scoped read can omit rows. A delete derived from that read would retain
+obsolete claims. Statements scoped to the desired catalogue are independent of
+the reader's prior state; the targeted diff tests assert that this produces
+byte-identical statements for different persisted catalogues.
 
 Nothing about a binding reaches the projection. Target name, Weaver version, the
 Installation row and the publication epoch are supplied at render time, because
@@ -217,38 +206,31 @@ An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by 
 comparison of every non-key column, so rebuilding unchanged Weaver document writes nothing and
 does not move `row_update_datetime`.
 
-`build_epoch` is a **published** column: declared and created like any other, but
-supplied by the installer rather than projected, and excluded from that
-comparison. One that compared would differ on every build by construction — its
-value is new each time — and every row would update every build, which would
-destroy the no-op above. It is written on insert only; see
-[how-does-build-work §7a](how-does-build-work.md#7a-cross-item-freshness) for why
-that is what makes it true rather than merely cheap.
+`build_epoch` is supplied by the installer, excluded from the merge
+comparison, and written only on insert. Including it in the comparison would
+update every row on every build because the value changes for each publication.
 
-The Installation signature is deliberately item-scoped. The repository signature
-still certifies the complete coordinated source a bundle was planned from, while
-object rows retain their individual source signatures. This separation lets a future
-incremental planner see that changing `Lakehouse/Raw` does not by itself make an
-installed `Warehouse/Reporting` stale. An alias lives in the consuming item's own
-`alias.yml`, so it contributes to that item's signature and not the producer's.
+The Installation signature is item-scoped. The repository signature represents
+the complete source used for planning, while object rows retain individual source
+signatures. This allows an incremental planner to distinguish a change to
+`Lakehouse/Raw` from the state of `Warehouse/Reporting`. An alias contributes to
+the signature of its consuming item's `alias.yml`.
 
 ## Removing things
 
-Three scopes, and they are deliberately different operations:
+Three removal scopes:
 
 | Scope | What it removes | Reached from |
 |---|---|---|
 | object | rows no longer projected, within one installation | every build |
 | installation | one `(item_type, item_name)` entirely | decommissioning a logical item, explicitly |
 
-Only the first is part of a build. A build that did not bind an item has no opinion
-about it, so nothing in the build path can reach its installation rows.
+Only object removal is part of a build. An unbound item's installation rows are
+outside the build path.
 
-### Reconciliation self-heals, but only within scope
+### Reconciliation scope
 
-Worth stating plainly, because "reconciliation removes claims reality disproves"
-invites the belief that the catalogue eventually repairs anything. It does not,
-and must not.
+Reconciliation repairs catalogue rows only for the items read by the build.
 
 `catalogue_items_for_build` returns the bound items plus the source items of any
 alias they consume. `read_build_state` reads the catalogue for exactly those, so
@@ -257,16 +239,10 @@ build did not bind is never read, never compared against an inventory, and never
 healed — because its claims may be perfectly true about a Lakehouse this build
 cannot see, and deleting them would destroy the record of a real installation.
 
-The consequence is worth knowing before it surprises someone: **a physical target
-accumulates a Registry row for every logical item ever bound to it**, and only the
-current one is being maintained. In production that is rare and usually means an
-item was rebound, which is what `weaver.wipe(..., unbind_from=...)` is for. Where
-one physical target is deliberately reused under many logical names — a test
-suite, a shared development workspace — the residue is permanent, and the honest
-reset is to *wipe* the control plane rather than to unbind target by target: a
-wipe needs no list of what to forget, so it cannot forget half of it, and the next
-build bootstraps the catalogue from the built-in item exactly as a first build
-does.
+A physical target can retain Registry rows for every logical item bound to it.
+For an intentional shared target, reset the control plane with
+`weaver.wipe(..., unbind_from=...)` rather than unbinding individual residue;
+the next build bootstraps the catalogue from the built-in item.
 
 Load orchestration is where this becomes visible, because it reads the *whole*
 installed catalogue rather than one build's scope — so it is the first operation
@@ -304,7 +280,7 @@ and once drop policy lands, that is a licence to remove an estate. So absence is
 recognised only by Spark's own `TABLE_OR_VIEW_NOT_FOUND` error class, never by
 message text.
 
-## The execution model
+## Target addressing during catalogue work
 
 **The Spark session is attached to the Weaver Lakehouse.** That is the fixed
 control-plane context: it is where the session lives, and it is a useful execution
@@ -328,9 +304,8 @@ Build targets                      data plane, named explicitly
 └── Lakehouse C
 ```
 
-That is what makes one invocation building several Lakehouses possible. Relying on
-the current catalogue would make `Sales` in Lakehouse A indistinguishable from
-`Sales` in Lakehouse B.
+One invocation can therefore build several Lakehouses without conflating objects
+with the same schema and name.
 
 ### A Lakehouse has two addresses, and a build needs both
 
@@ -371,11 +346,8 @@ them: Fabric refuses `SHOW SCHEMAS IN `workspace`.`lakehouse``, and a bare
 `SHOW SCHEMAS` answers for the attached Lakehouse only, so schema discovery reads
 the destination's `Tables/` area through the store instead.
 
-Responsibilities stay separated. `ItemRef` identifies the logical item; the workspace
-adapter resolves both addresses; the plan carries the item; the installation
-context resolves it once per target; the executor uses it. An executor deriving
-either for itself would be re-deciding where an action lands, which is a planning
-decision.
+`ItemRef` identifies the logical item. The workspace adapter resolves both
+addresses, the plan carries the item, and the executor uses the resolved target.
 
 Two things worth knowing:
 
@@ -401,8 +373,7 @@ collision fails rather than being hidden.
 
 ## See also
 
-- [How Weaver Build Works](how-does-build-work.md) — the mechanics and governing properties every
-  build implementation must preserve.
-- [weaver-repository.md](weaver-repository.md) — where a repository lives and how it is
-  installed.
-- [weaver_master_cli_plan.md](weaver_master_cli_plan.md) — the authoritative lifecycle plan.
+- [How Weaver Build Works](how-does-build-work.md) — build lifecycle and
+  catalogue reconciliation.
+- [Build philosophy](build-philosophy.md) — planning and installation invariants.
+- [Weaver repository sources](weaver-repository.md) — repository declarations.

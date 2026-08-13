@@ -1,10 +1,4 @@
-"""Top-level CLI routing.
-
-Commands are registered here as the core APIs they wrap become available. The
-handler contract is the one convention worth keeping from the old repository:
-a command function returns a plain serialisable structure and the CLI prints
-it.
-"""
+"""CLI command parsing and rendering."""
 
 from __future__ import annotations
 
@@ -103,7 +97,7 @@ def command_requirements(parsed) -> frozenset[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="weaver",
-        description="Weaver — build and load Fabric Lakehouse and Warehouse objects.",
+        description="Build, load, and test Fabric Lakehouse and Warehouse objects.",
     )
     parser.add_argument(
         "--version",
@@ -113,55 +107,55 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", metavar="command")
 
     doctor = subcommands.add_parser(
-        "doctor", help="check whether this machine can run local Spark and Delta"
+        "doctor", help="Check whether this machine can run local Spark and Delta."
     )
     doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
     doctor.set_defaults(handler=handle_doctor)
 
     shell = subcommands.add_parser(
         "session",
-        help="one persistent console session running many commands",
+        help="Run multiple Weaver commands in one persistent session.",
     )
     _add_workspace_args(shell)
     shell.add_argument(
         "--timings",
         action="store_true",
-        help="on exit, report what this session spent per transport",
+        help="Report time spent by transport when the session ends.",
     )
     shell.set_defaults(handler=handle_session)
 
     compose = subcommands.add_parser(
         "compose",
-        help="run a named sequence of Weaver commands in one session",
+        help="Run a named composition in one session.",
     )
-    compose.add_argument("name", help="the composition to run, from compose.yml")
+    compose.add_argument("name", help="Composition name in compose.yml.")
     compose.add_argument(
         "--file",
         metavar="PATH",
-        help=f"composition file; defaults to ./{COMPOSE_DEFAULT_FILE}",
+        help=f"Composition file. Defaults to ./{COMPOSE_DEFAULT_FILE}.",
     )
     compose.add_argument(
         "--timings",
         action="store_true",
-        help="after the sequence, report what it spent per transport",
+        help="Report time spent by transport after the composition finishes.",
     )
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)
 
     build = subcommands.add_parser(
-        "build", help="build bound logical items from an explicit repository"
+        "build", help="Build repository objects into bound targets."
     )
     build.add_argument(
         "repository",
         nargs="?",
-        help="authored repository folder; defaults to the current directory/Notebook Resources",
+        help="Repository folder. Defaults to the current directory or Notebook Resources.",
     )
     build.add_argument(
         "--bind",
         dest="item_bindings",
         action="append",
         metavar="PHYSICAL[=LOGICAL]",
-        help="typed physical target with configured default or logical override",
+        help="Physical target with an optional logical target override.",
     )
     build.add_argument(
         "--bundle",
@@ -169,8 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         const="",
         metavar="NAME",
         help=(
-            "optionally retain a .weaver.zip build record; omit NAME for a UTC "
-            "timestamp"
+            "Keep a .weaver.zip build record. Omit NAME to use a UTC timestamp."
         ),
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
@@ -178,15 +171,15 @@ def build_parser() -> argparse.ArgumentParser:
     build.set_defaults(handler=handle_build, requires=_requires_build)
 
     push = subcommands.add_parser(
-        "push", help="compatibility utility: validate and upload an authored repository"
+        "push", help="Validate and upload a repository."
     )
-    push.add_argument("repository", help="local authored repository folder")
+    push.add_argument("repository", help="Local repository folder.")
     push.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(push)
     push.set_defaults(handler=handle_push, requires=_requires_rest)
 
     load = subcommands.add_parser(
-        "load", help="load every installed object in named physical targets"
+        "load", help="Load installed objects in named targets."
     )
     load.add_argument(
         "targets",
@@ -199,24 +192,24 @@ def build_parser() -> argparse.ArgumentParser:
         dest="names",
         action="append",
         metavar="SCHEMA.OBJECT",
-        help="load only this installed object; repeat to select more than one",
+        help="Load one installed object. Repeat to select more than one.",
     )
     load.add_argument(
         "--fault-tolerant",
         action="store_true",
-        help="continue independent branches after a node fails, and report",
+        help="Continue independent branches after a failure.",
     )
     load.add_argument(
         "--dry-run",
         action="store_true",
-        help="resolve and render the plan without dispatching anything",
+        help="Show the load plan without running it.",
     )
     load.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(load)
     load.set_defaults(handler=handle_load, requires=_requires_targets)
 
     validate = subcommands.add_parser(
-        "test", help="run the installed Tests and Assumptions in named targets"
+        "test", help="Run installed Tests and Assumptions in named targets."
     )
     validate.add_argument(
         "targets",
@@ -228,24 +221,24 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument(
         "--name",
         metavar="Schema.Object",
-        help="run one installed validation and return its diagnostic rows",
+        help="Run one installed validation and return diagnostic rows.",
     )
     selection.add_argument(
         "--file",
         metavar="PATH",
-        help="compile and run a source file without installing it",
+        help="Compile and run a source file without installing it.",
     )
     validate.add_argument(
         "--dry-run",
         action="store_true",
-        help="report what would run without dispatching anything",
+        help="Show the test plan without running it.",
     )
     validate.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_targets)
 
     unbind = subcommands.add_parser(
-        "unbind", help="remove catalogue state for named physical targets"
+        "unbind", help="Remove catalogue state for named targets."
     )
     unbind.add_argument(
         "targets",
@@ -270,16 +263,16 @@ def build_parser() -> argparse.ArgumentParser:
     wipe.add_argument(
         "--unbind-from",
         metavar="LAKEHOUSE",
-        help="immediately remove wiped target claims from this Weaver catalogue",
+        help="Remove claims for wiped targets from this Weaver catalogue.",
     )
-    wipe.add_argument("--dry-run", action="store_true", help="report without removing")
-    wipe.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    wipe.add_argument("--dry-run", action="store_true", help="Show what would be removed.")
+    wipe.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
     wipe.set_defaults(handler=handle_wipe, requires=_requires_build)
 
     install = subcommands.add_parser(
         "install",
-        help="build Weaver and install it into a Fabric Environment",
+        help="Build and install Weaver in a Fabric Environment.",
     )
     # Fabric only, and no way to ask for less than a publish. An Environment
     # that is staged but not published is one a session cannot import from, so
@@ -292,29 +285,29 @@ def build_parser() -> argparse.ArgumentParser:
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
     notebook = subcommands.add_parser(
-        "notebook", help="deploy or execute a Fabric notebook"
+        "notebook", help="Deploy or run a Fabric notebook."
     )
     notebook_commands = notebook.add_subparsers(
         dest="notebook_command", metavar="command"
     )
 
     notebook_push = notebook_commands.add_parser(
-        "push", help="create or update a notebook definition"
+        "push", help="Create or update a notebook definition."
     )
-    notebook_push.add_argument("source", help="local .py or .ipynb notebook source")
-    notebook_push.add_argument("--name", help="Fabric display name; defaults to filename")
+    notebook_push.add_argument("source", help="Local .py or .ipynb notebook source.")
+    notebook_push.add_argument("--name", help="Fabric display name. Defaults to the filename.")
     notebook_push.add_argument("--description")
     notebook_push.add_argument("--json", action="store_true")
     _add_workspace_args(notebook_push, include_weaver_lakehouse=False)
     notebook_push.set_defaults(handler=handle_notebook_push)
 
     notebook_run = notebook_commands.add_parser(
-        "run", help="execute a deployed notebook in Fabric"
+        "run", help="Run a deployed notebook in Fabric."
     )
-    notebook_run.add_argument("name", help="Fabric Notebook display name")
+    notebook_run.add_argument("name", help="Fabric Notebook display name.")
     notebook_run.add_argument(
         "--lakehouse",
-        help="default Lakehouse attached to the notebook session",
+        help="Default Lakehouse for the notebook session.",
     )
     notebook_run.add_argument("--no-wait", action="store_true")
     notebook_run.add_argument("--timeout", type=float, default=7200.0)
@@ -324,14 +317,14 @@ def build_parser() -> argparse.ArgumentParser:
     notebook_run.set_defaults(handler=handle_notebook_run)
 
     capacity = subcommands.add_parser(
-        "capacity", help="turn a Fabric capacity on or off, or report its state"
+        "capacity", help="Start, stop, or report the state of a Fabric capacity."
     )
     capacity.add_argument("action", choices=CAPACITY_ACTIONS)
     capacity.add_argument("--resource-group", required=True)
     capacity.add_argument("--capacity-name", required=True)
     capacity.add_argument(
         "--subscription-id",
-        help="only needed when az has more than one subscription",
+        help="Azure subscription ID when more than one subscription is available.",
     )
     capacity.set_defaults(handler=handle_capacity)
 
@@ -346,7 +339,7 @@ def _fabric_cli_workspace(args: argparse.Namespace):
 
     workspace = _resolve_workspace(args)
     if not isinstance(workspace, FabricWorkspace):
-        raise CommandError("weaver notebook requires a Fabric Workspace")
+        raise CommandError("A Fabric Workspace is required for notebook commands.")
     return workspace
 
 
@@ -385,11 +378,13 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     lakehouse = args.lakehouse or workspace.weaver_lakehouse
     if not lakehouse:
         raise CommandError(
-            "notebook run requires --lakehouse or a configured Weaver Lakehouse"
+            "A Lakehouse is required to run this notebook. "
+            "Use --lakehouse or configure a Weaver Lakehouse for this workspace."
         )
     if not workspace.environment:
         raise CommandError(
-            "notebook run requires --environment or a configured Environment"
+            "A Fabric Environment is required to run this notebook. "
+            "Use --environment or configure one for this workspace."
         )
     result = run_notebook(
         args.name,
@@ -431,9 +426,12 @@ def handle_install(args: argparse.Namespace) -> int:
 
     workspace = _resolve_workspace(args)
     if not isinstance(workspace, FabricWorkspace):
-        raise CommandError("weaver install requires a Fabric Workspace")
+        raise CommandError("A Fabric Workspace is required to install Weaver.")
     if not workspace.environment:
-        raise CommandError("weaver install requires --environment or a configured environment")
+        raise CommandError(
+            "A Fabric Environment is required to install Weaver. "
+            "Use --environment or configure one for this workspace."
+        )
     _prefer_desktop_credential()
     from weaver.fabric import install as run_install
 
@@ -471,7 +469,7 @@ def handle_capacity(args: argparse.Namespace) -> int:
     )
     print(result)
     if args.action == "resume" and not result.running:
-        print("  (resuming takes a moment; run `capacity status` to confirm)")
+        print("  The capacity is starting. Run `capacity status` to confirm its state.")
     return 0
 
 
@@ -497,16 +495,16 @@ def _add_workspace_args(
             else "Fabric Workspace name"
         ),
     )
-    parser.add_argument("--workspace-config", help="one Workspace configuration file")
+    parser.add_argument("--workspace-config", help="Workspace configuration file.")
     if include_workspace_type:
         parser.add_argument(
             "--workspace-type",
             choices=("fabric", "local"),
-            help="resource environment; defaults to fabric",
+            help="Resource environment. Defaults to fabric.",
         )
-    parser.add_argument("--environment", help="Fabric Environment name")
+    parser.add_argument("--environment", help="Fabric Environment name.")
     if include_weaver_lakehouse:
-        parser.add_argument("--weaver-lakehouse", help="control Lakehouse name")
+        parser.add_argument("--weaver-lakehouse", help="Weaver Lakehouse name.")
 
 
 def _log_link(task_log) -> str:
@@ -649,15 +647,7 @@ def handle_compose(args: argparse.Namespace) -> int:
     return run_composition(args)
 
 
-#: What a developer is offered when a Task they can fix has failed. It names the
-#: two keys and instructs nothing: the error above it has already said what went
-#: wrong, and a build failure has already named the authored file to open. A
-#: prompt that added "fix the file" would be telling somebody who just read
-#: `Source: …` to do the obvious, and telling a load whose upstream is empty to
-#: edit a file that is not the problem.
-#:
-#: It still says how to *leave*, because an interaction offering only "try
-#: again" is a trap.
+#: Retry controls for an interactive task failure.
 RETRY_PROMPT = "Enter to retry, Esc to exit."
 
 ESC = "\x1b"
@@ -667,24 +657,9 @@ ENTER = ("\r", "\n")
 
 
 def _until_fixed(args: argparse.Namespace, attempt) -> int:
-    """Run one Task, and offer to run it again from fresh inputs when it fails.
+    """Run a task and offer another attempt after an interactive failure.
 
-    **Retry is the whole Task from the beginning.** The repository is re-read,
-    the physical state re-observed, the bundle or graph rebuilt. Nothing resumes
-    inside a stale BuildBundle, RunGraph or half-settled plan — those describe a
-    repository that has just been edited, which is precisely why the retry is
-    happening. The estate may of course already hold work that succeeded; the
-    fresh Task observes that and decides what is left to do.
-
-    **The Session is not part of what gets rebuilt.** Its credential, resolver,
-    item cache, Livy session and TDS connections are healthy — a SQL syntax
-    error is a Task failure, not a resource failure — so the loop holds one open
-    across attempts rather than paying for a cold start per fix. That is the
-    whole point: the developer edits a file, presses Enter, and the next attempt
-    begins immediately.
-
-    **Non-interactive execution never prompts.** With nobody to ask, the first
-    failure is the answer, and no Session is opened on retry's behalf.
+    Each retry reads fresh inputs but keeps the existing Session open.
     """
 
     if not _can_ask():
@@ -705,13 +680,7 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
 
 
 def _retry_wanted() -> bool:
-    """Ask, and wait for one key. Enter retries; Esc leaves.
-
-    One keypress rather than a typed word, because the answer is binary and the
-    hands are already on the keyboard having just saved a file. Stray keys are
-    ignored rather than treated as either answer — a developer who tabs back to
-    the terminal and hits an arrow key has not decided anything.
-    """
+    """Read one retry decision. Enter retries; Esc leaves."""
 
     print(f"\n{RETRY_PROMPT} ", end="", file=sys.stderr, flush=True)
     try:
@@ -721,8 +690,7 @@ def _retry_wanted() -> bool:
                 print(file=sys.stderr)
                 return True
             if key in (ESC, INTERRUPT, END_OF_FILE, ""):
-                # Esc leaves; Ctrl-C and Ctrl-D are the operator declining, not
-                # failures of their own.
+                # Ctrl-C and Ctrl-D decline the retry without creating another error.
                 print(file=sys.stderr)
                 return False
     except (EOFError, KeyboardInterrupt):
@@ -731,19 +699,9 @@ def _retry_wanted() -> bool:
 
 
 def _read_key() -> str:
-    """One keypress, unbuffered, without waiting for a line.
+    """Read one keypress without waiting for a line.
 
-    ``input()`` cannot see Esc — it waits for Enter, which is the very key Esc
-    is meant to be an alternative to. So the terminal is put into cbreak mode
-    for exactly as long as it takes to read one character, and restored
-    afterwards whatever happens.
-
-    A bare Esc and the start of an arrow key are the same first byte. What tells
-    them apart is whether anything follows immediately: a real escape sequence
-    arrives in one burst, a person pressing Esc does not. So the rest of a
-    sequence is read and *returned with it* — an arrow key comes back as
-    ``"\\x1b[A"``, which is not Esc and is therefore ignored as a stray key.
-    Draining it and returning the bare Esc would make every arrow key mean exit.
+    Preserve complete escape sequences so arrow keys are not treated as Esc.
     """
 
     try:
@@ -763,10 +721,7 @@ def _read_key() -> str:
 
     try:
         tty.setcbreak(descriptor)
-        # The file descriptor, not ``sys.stdin``: a text stream reads a whole
-        # chunk into its own buffer, so the rest of an escape sequence would sit
-        # in Python where ``select`` cannot see it, and every arrow key would
-        # look exactly like a bare Esc.
+        # Text buffering would hide the remaining bytes of an escape sequence.
         key = os.read(descriptor, 1).decode(errors="replace")
         if key == ESC:
             while select.select([descriptor], [], [], 0.05)[0]:
@@ -783,14 +738,7 @@ def _can_ask() -> bool:
 
 
 def _authorised(args: argparse.Namespace) -> bool:
-    """Whether this invocation already carries the operator's go-ahead.
-
-    Two spellings of one fact. ``--yes`` is what somebody types to skip the
-    question for a single command; ``authorised`` is what ``compose`` sets
-    after showing the whole sequence and being told yes — because having agreed
-    to four commands, being asked again about the first of them is not a second
-    safeguard, it is the first one repeated.
-    """
+    """Return whether a command has already received confirmation."""
 
     return bool(getattr(args, "yes", False) or getattr(args, "authorised", False))
 
@@ -807,7 +755,10 @@ def handle_push(args: argparse.Namespace) -> int:
 
     workspace = _resolve_workspace(args)
     if not workspace.weaver_lakehouse:
-        raise CommandError("push requires --weaver-lakehouse or a configured value")
+        raise CommandError(
+            "A Weaver Lakehouse is required to push a repository. "
+            "Use --weaver-lakehouse or configure one for this workspace."
+        )
     resolver = resolver_for(workspace)
     result = push_item_repository(
         Location(args.repository),
@@ -818,7 +769,7 @@ def handle_push(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
-        print(f"pushed {len(result.files)} file(s)")
+        print(f"Uploaded {len(result.files)} file(s).")
         print(f"  from: {result.source}")
         print(f"  to:   {result.destination}")
         print(f"  signature: {result.repository_signature}")
@@ -834,7 +785,7 @@ def handle_unbind(args: argparse.Namespace) -> int:
     lakehouses, warehouses = _unbind_target_names(args.targets)
     workspace = _resolve_workspace(args)
     if not workspace.weaver_lakehouse:
-        raise CommandError("unbind requires a configured Weaver Lakehouse")
+        raise CommandError("A configured Weaver Lakehouse is required to unbind targets.")
     result = _run_unbind(
         workspace,
         lakehouses=lakehouses,
@@ -844,7 +795,7 @@ def handle_unbind(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print(f"unbound {len(result['logical_items'])} logical installation(s)")
+        print(f"Removed {len(result['logical_items'])} logical installation(s).")
         for target in result["targets"]:
             print(f"  {target}")
     return 0
@@ -989,16 +940,11 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
         try:
             resolve(physical_item(target), item_type=item_type)
         except ItemNotFoundError:
-            # What the user typed, not a re-spelling of it: this message exists
-            # to help them see a typo, and showing them a normalised form is
-            # showing them something they did not write.
+            # Preserve the requested spelling so the developer can identify a typo.
             absent.append(value)
     if absent:
         raise CommandError(
-            "no such item in "
-            + f"{workspace.workspace!r}: "
-            + ", ".join(absent)
-            + " — check the name, or build into it first"
+            f"{', '.join(absent)} was not found in workspace {workspace.workspace!r}."
         )
 
 
@@ -1120,8 +1066,7 @@ def _print_test(report) -> None:
     if report.task_log:
         print(f"  Logs: {_log_link(report.task_log)}")
 
-    # The rows a targeted run asked for. Printed last, because the verdict is
-    # what a reader wants first and the evidence is what they want next.
+    # Print requested diagnostic rows after the summary.
     for node in report.nodes:
         if not node.diagnostics:
             continue
@@ -1137,10 +1082,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
     workspace = _resolve_workspace(args)
 
-    # The preview exists to be agreed to. Reading the whole estate to show
-    # someone a list, when they have already said --yes and nothing will be
-    # asked, is a second full listing bought for nothing — on the Weaver
-    # Example that was four seconds of a twelve-second wipe.
+    # A preview is needed only when the command needs confirmation.
     previewing = args.dry_run or not _authorised(args)
     if previewing:
         planned = weaver.wipe(
@@ -1224,10 +1166,7 @@ def _build_once(args: argparse.Namespace) -> int:
             print(f"  record: {result.archive}")
         print(f"  items:  {', '.join(result.items)}")
         for error in result.errors:
-            # The Weaver operation, then the file to open, then why. Whatever
-            # raised it comes last or not at all: a developer whose stored
-            # procedure has a syntax error is not helped by reading first that
-            # TDS was involved.
+            # Show the operation and source before lower-level diagnostics.
             print()
             print(_indented(error.describe()), file=sys.stderr)
     return 0 if result.succeeded else 1

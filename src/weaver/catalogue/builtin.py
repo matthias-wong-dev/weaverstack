@@ -1,28 +1,7 @@
-"""The built-in Weaver document repository that declares the catalogue tables.
+"""Generate the built-in ``Lakehouse/_weaver`` catalogue declaration item.
 
-Weaver's catalogue is built by Weaver, from ordinary Weaver document, through the ordinary
-planner and installer. There is no second "create the control tables" path — that
-recursion is the point, and it is the proof that a catalogue table is an ordinary
-Weaver object rather than a privileged one.
-
-The item is rendered from :mod:`weaver.catalogue.tables`, so the declaration and
-the table definitions cannot drift: there is one source of truth and the text is
-derived from it. ``Lakehouse/_weaver`` is composed into the parsed repository
-in memory and built through the ordinary planner.
-
-Every table declares:
-
-``Static: true``
-    Its rows are not produced by a load. Catalogue rows are maintained only by
-    the DML a build appends.
-
-``Prohibit rebuild: true``
-    This stops an ordinary build treating the catalogue as a disposable
-    application object.
-
-``Dependencies: []``
-    Explicitly nothing. The body is literals, so there is nothing to discover
-    and nothing to declare.
+The item is composed into parsed repositories and built through ordinary planner
+and installer paths. Its definitions are rendered from catalogue table metadata.
 """
 
 from __future__ import annotations
@@ -171,12 +150,8 @@ def render_source(table: CatalogueTable) -> str:
 def render_log_file() -> str:
     """The declaration for ``Files/_/Log`` — where task evidence is written.
 
-    An ordinary Folder document, and that is the whole point. A task log could
-    have been a path the logger alone knew about, but then its creation, its
-    registration, its survival through a prune and its removal would each need a
-    rule of their own. Declared here it is claimed, projected, inventoried,
-    installed, converged and protected by the machinery that already exists, and
-    the logger asks the *folder* where to write rather than composing a path.
+    The folder is declared so normal build, inventory, and prune behaviour owns
+    its lifecycle. The logger resolves the folder rather than composing a path.
 
     ``Static: true`` because nothing loads into it: a task writes its own
     evidence beneath it, exactly as a Folder object's authored code writes files

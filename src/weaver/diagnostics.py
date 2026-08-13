@@ -75,11 +75,7 @@ class LocalSparkReport:
 
 
 def find_java_home() -> str | None:
-    """A JDK that Spark 3.5 can use, preferring the newest supported.
-
-    ``JAVA_HOME`` wins when it is already set to something that exists, so a
-    deliberately configured machine is never second-guessed.
-    """
+    """Return a JDK Spark 3.5 can use, preferring a configured ``JAVA_HOME``."""
 
     existing = os.environ.get("JAVA_HOME")
     if existing and Path(existing).exists():

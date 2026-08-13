@@ -1,5 +1,10 @@
 # How to add an artefact
 
+## Purpose
+
+This is the maintainer procedure for adding a runtime artefact while preserving
+Weaver's planning, installation, run, and wipe contracts.
+
 An artefact is anything Weaver installs into a bound target: a table, a view, a
 folder, an alias, a deployed module, a generated procedure. Adding one touches
 six places, and the suite is arranged so that skipping any of them fails with a
@@ -121,16 +126,10 @@ asserted as *text* only; nothing seeds one and wipes it.
 
 ---
 
-## Why the order matters
+## Why this order
 
-The failures are arranged so the *first* one names the artefact. A missing
-catalogue registration surfaces as "this object type has no rows", not as an
-install error four layers away with a stack trace about a payload.
-
-That ordering is verified rather than hoped for. Adding a hypothetical
-`semantic_model` to `OBJECT_TYPES` fails step 1's test and only that one;
-suppressing the load layer's declarations fails step 3's and, in consequence,
-step 2's convergence.
+Each step adds its own targeted test so an incomplete artefact fails at the
+layer that owns the missing declaration or lifecycle behaviour.
 
 ## What each layer is allowed to cost
 
@@ -141,9 +140,8 @@ step 2's convergence.
 | Fabric, TDS | seconds | the same, where only Fabric can answer, without a session |
 | Fabric, Livy | ~40s a session | one thing: does a whole bundle install, in order |
 
-A claim belongs at the cheapest layer that can answer it. If you find yourself
-reaching for a session to check a decision, the decision is testable in pure
-Python and the session is hiding that.
+A claim belongs at the cheapest layer that can answer it. See
+[Test architecture](test-architecture.md) for the full testing policy.
 
 ## See also
 

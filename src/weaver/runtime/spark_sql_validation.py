@@ -1,37 +1,7 @@
-"""Running a Spark-SQL-authored validation's program.
+"""Execute a Spark-SQL validation program.
 
-The whole of what a SQL-authored validation does differently, and it is
-deliberately this small. A Spark SQL Test is authored as SQL, installed as an
-importable Python module, and compared by the *ordinary*
-:meth:`weaver.objects.Test.read` — so the only thing that has to exist here is
-the step between the two: run the program, and hand back the relations.
-
-.. code-block:: text
-
-    Test         setup statements   run, in order, for their effect
-                 first query        expected
-                 second query       actual
-
-    Assumption   setup statements   run, in order, for their effect
-                 first query        the violating rows
-
-Nothing here compares, counts, correlates or classifies. That is
-:func:`weaver.runtime.test_compare.compare`, unchanged and shared, which is the
-point of the arrangement: a Test authored in SQL and a Test authored in Python
-are one comparison with two fronts, so what passing means cannot come to differ
-between them.
-
-**One pass, both sides.** The program is executed once and both frames come back
-together, rather than each side re-running the setup — a Test whose setup
-materialised a snapshot would otherwise compare two different snapshots and
-report the difference between them as failure.
-
-**One session, one order.** Every statement runs through the object's own Spark
-session, so a temporary view a setup statement creates is visible to both
-queries. Spark evaluates a ``SELECT`` lazily, so a program that *replaces* a
-view between its two queries has changed what the first will read when it is
-finally materialised — Spark's semantics rather than Weaver's, and the author's
-to avoid.
+The program returns expected and actual relations for a Test, or violating rows
+for an Assumption. Statements run once, in order, on the object's Spark session.
 """
 
 from __future__ import annotations

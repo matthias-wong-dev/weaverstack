@@ -1,8 +1,12 @@
 # Fabric integration tests
 
-These touch a real workspace and a running capacity. They are **deselected by
-default** and skip unless a workspace is named, so nobody runs them by accident
-and nobody without a tenant is blocked.
+## Purpose
+
+This document explains the real-Fabric test environment, marker selection, and
+the evidence each test tier provides.
+
+These tests use a real workspace and running capacity. They are deselected by
+default and skip unless a workspace is configured.
 
 ## Once
 
@@ -34,18 +38,9 @@ waits for capacity.
 The suite reuses a fixed set of items rather than creating disposable ones per
 run.
 
-**This is not a speed-up, and it is worth being exact about that.** Measured, item
-provisioning was about seven seconds in a twenty-four minute run: a Lakehouse
-takes ~2s and a Warehouse's endpoint answered in 0.45s. What reuse removes is the
-*tail* — that endpoint wait is unbounded and the harness tolerates ten minutes for
-it, so 0.45s was luck rather than a budget — and the artifact churn that makes
-Fabric's namespace resolver intermittently report `Artifact not found` for an item
-that is plainly there.
-
-The run's time is dominated by something else entirely: nine bundle
-generate/install round trips through Livy, most installs 75–123s, roughly twenty
-of the thirty-two minutes. If you want the suite meaningfully faster, that is the
-lever — fewer full build cycles, not fewer items.
+Fixed items avoid provisioning variance, endpoint-wait tail risk, and namespace
+churn. The suite is dominated by bundle generation and installation round trips
+through Livy; reduce those cycles to improve run time.
 
 Create these once, in the workspace you will point the suite at:
 
@@ -332,14 +327,8 @@ can honestly answer.
 
 ### `weaver install` is a precondition of two tiers, not of the suite
 
-This used to be true of everything Fabric, and it was the single worst thing about
-working on this codebase: a five-minute publish stood between a developer and
-finding out a REST body was malformed.
-
-**A tier that runs the installed package tests the wheel that was last published,
-not your working tree.** That applies to `fabric and hosted`, including the
-Fabric `full_integration` journey, and for it the whole point is that
-Weaver-on-Fabric is doing the job.
+`fabric and hosted`, including the Fabric `full_integration` journey, tests the
+wheel last published to the Environment rather than the working tree.
 
 It does not apply to `-m "fabric and remote"`, which drives real Fabric from this checkout.
 The bundle is generated here, in pure Python, so the actions that run are provably
@@ -352,6 +341,10 @@ A Spark body that does not import Weaver needs a session, not a published
 package.
 
 ## The test tiers
+
+The test-layer selection rule and directory conventions are defined in
+[Test architecture](test-architecture.md). This section records the Fabric
+preconditions for those tiers.
 
 | | command | needs |
 |---|---|---|
@@ -371,9 +364,7 @@ rather than by convention — a module under `tests/fabric` answering to `-m spa
 would load the Fabric conftest, and with it a workspace, a credential and a
 session.
 
-## Known Fabric behaviour
-
-Things learned the hard way, kept here so they are not learned twice.
+## Fabric platform behaviour
 
 **OneLake does not support directory rename.** `PUT ?resource=directory` with
 `x-ms-rename-source` returns `400 UnsupportedHeader`. Moving data on OneLake

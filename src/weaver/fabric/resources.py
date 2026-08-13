@@ -65,10 +65,10 @@ def find_workspace(name: str, *, client: FabricClient | None = None) -> Workspac
             sorted(w.get("displayName", "?") for w in client.paged("workspaces"))
         )
         raise CommandError(
-            f"no workspace named {name!r} — found: {available or 'none'}"
+            f"Workspace {name!r} was not found. Available Workspaces: {available or 'none'}."
         )
     if len(matches) > 1:
-        raise CommandError(f"more than one workspace named {name!r}")
+        raise CommandError(f"More than one Workspace is named {name!r}.")
     return Workspace(id=matches[0]["id"], name=name)
 
 
@@ -108,13 +108,13 @@ def find_item(
         matches = [item for item in matches if item.type not in FACET_TYPES] or matches
     if not matches:
         raise ItemNotFoundError(
-            f"no {item_type or 'item'} named {name!r} in workspace {workspace.name!r}"
+            f"{item_type or 'Item'} {name!r} was not found in workspace {workspace.name!r}."
         )
     if len(matches) > 1:
         found = ", ".join(sorted(item.type for item in matches))
         raise CommandError(
-            f"more than one item named {name!r} in {workspace.name!r} ({found}) — "
-            "say which type is meant"
+            f"More than one item named {name!r} was found in {workspace.name!r}: {found}. "
+            "Specify the item type."
         )
     return matches[0]
 
@@ -151,7 +151,7 @@ def create_lakehouse(
     )
     if response.status_code == 409:
         raise CommandError(
-            f"cannot create Lakehouse {name!r} in {workspace.name!r}: "
+            f"Lakehouse {name!r} could not be created in {workspace.name!r}: "
             + (response.json().get("message") or response.text.strip()[:200])
         )
     if response.status_code == 202:
@@ -180,7 +180,7 @@ def create_warehouse(
     )
     if response.status_code == 409:
         raise CommandError(
-            f"cannot create Warehouse {name!r} in {workspace.name!r}: "
+            f"Warehouse {name!r} could not be created in {workspace.name!r}: "
             + (response.json().get("message") or response.text.strip()[:200])
         )
     if response.status_code == 202:
@@ -205,7 +205,7 @@ def refresh_sql_endpoint_metadata(
 
     if endpoint.type != SQL_ENDPOINT:
         raise CommandError(
-            f"SQL endpoint refresh needs a {SQL_ENDPOINT} item, got {endpoint.type!r}"
+            f"SQL endpoint refresh requires a {SQL_ENDPOINT} item. Received {endpoint.type!r}."
         )
     client = client or FabricClient()
     response = client.request(

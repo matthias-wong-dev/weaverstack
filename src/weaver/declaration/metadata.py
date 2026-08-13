@@ -1,43 +1,7 @@
-"""The Weaver document document contract.
+"""Parse and validate the YAML contract at the top of a Weaver source file.
 
-This is the basic unit of work in Weaver: a Folder, a Delta table, or a
-Warehouse table or view, declared as YAML at the top of its source file — a
-Python module docstring, or the opening ``/* … */`` of a SQL file.
-
-The contract is validated to exhaustion up front. Every key is known, every
-column reference is checked against the declared schema where one exists, and
-every contradiction is refused before anything physical happens. A mistyped
-``Primary Key`` must not parse as "no primary key" and silently become a full
-replacement at load time.
-
-Where validation cannot happen here it is recorded rather than skipped: a SQL
-object infers its shape from its query, so its column references are parsed but
-resolved at build. :attr:`SesDocument.defers_column_validation` says so.
-
-Nothing here imports the module it describes, reads a file, or resolves a
-reference to another object. Reference resolution needs sibling documents and
-belongs with the repository reader.
-
-**Layout convention.** Separate each subsection with a blank line. This is not
-enforced — YAML does not care — but the header is the contract a reader meets
-first, and a wall of keys is a worse contract than a legible one::
-
-    Table ID: Sales.Order
-
-    Description: One row per confirmed customer order.
-
-    Lineage: $Sales.OrderExport
-
-    Primary key: Order id
-
-    Schema:
-      Order id: string
-      Order date: date
-
-    Revision notes:
-      - 2026-07-23 Added the amount column.
-
-Fixtures and examples follow it so the convention is learned by reading.
+Known keys, declared columns, and incompatible settings are validated before
+build. Query-derived SQL shapes defer column validation until build.
 """
 
 from __future__ import annotations
@@ -57,15 +21,7 @@ TABLE = "Table"
 VIEW = "View"
 OBJECT_KINDS = frozenset({FOLDER, TABLE, VIEW})
 
-#: The two validation kinds. A Test compares an expected relation with an actual
-#: one and succeeds when the symmetric difference is empty; an Assumption returns
-#: violation rows directly and succeeds when there are none.
-#:
-#: Both are first-class logical Weaver declarations and neither is a physical
-#: data object: they carry a ``Schema.Object`` identity, declare dependencies and
-#: are compiled into runnable primitives, but nothing is materialised under the
-#: logical ID. Keeping them out of :data:`OBJECT_KINDS` is what stops a Test
-#: reaching table or view DDL merely because it has an object identity.
+#: Logical validation declaration kinds.
 TEST = "Test"
 ASSUMPTION = "Assumption"
 VALIDATION_KINDS = frozenset({TEST, ASSUMPTION})
@@ -139,14 +95,9 @@ WAREHOUSE_ALIAS = "Warehouse alias"
 LAKEHOUSE_ALIAS = "Lakehouse alias"
 _ALIAS_KEYS = {WAREHOUSE_ALIAS, LAKEHOUSE_ALIAS}
 
-#: Stability thresholds — the guard against a load that is *technically* correct
-#: and obviously wrong. A source that broke overnight and returned a tenth of its
-#: rows produces a load Weaver would otherwise carry out faithfully.
-#:
-#: The percentages are of the target's row count *before* the load, and the row
-#: threshold is the size below which neither applies: on a small table a single
-#: row is a large percentage, and tripping on that would teach everyone to turn
-#: the guard off.
+#: Stability thresholds compare changed rows with the target before the load.
+#: The row threshold excludes small targets where a single row can dominate the
+#: percentage.
 DELETE_THRESHOLD = "Delete percentage threshold"
 UPDATE_THRESHOLD = "Update percentage threshold"
 STABILITY_ROWS = "Stability row threshold"

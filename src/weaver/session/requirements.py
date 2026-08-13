@@ -1,37 +1,8 @@
-"""What a command needs, said before it runs.
+"""Coarse resource requirements declared by commands.
 
-A Session cannot guess. It does not know what a build is, and it must not learn
-— a Session that understood build/load/test semantics would be a second place
-deciding what an operation does. So the direction is the other way round:
-**a command declares its coarse requirements, and the Session prepares them.**
-
-.. code-block:: text
-
-    weaver load Warehouse/Reporting     → auth, resolver, tds
-    weaver load Lakehouse/Sales         → auth, resolver, onelake, livy
-    weaver build ./repository           → auth, resolver, onelake, livy, tds
-
-That is enough to start the expensive things once, in the background, before
-the first one is wanted — which is the whole reason `weaver session` exists, and
-the reason `compose` can take the union of a whole sequence and warm the maximum
-set once rather than discovering each resource mid-run.
-
-**Two levels, deliberately.**
-
-*Command requirements* are what parsed arguments already imply. They are coarse
-and they are a **superset**: `weaver load Lakehouse/Sales` says Livy may be
-needed, because a Lakehouse usually holds Python primitives — not because this
-particular estate does.
-
-*Execution requirements* are what the BuildBundle or RunGraph actually turns out
-to contain, and only they can be exact. A RunGraph of nothing but Warehouse
-procedures needs no Livy however the request was spelled.
-
-Warm-up uses the first; routing uses the second. Which is why nothing below this
-may treat a declared requirement as permission to acquire: **preparing is not
-using.** A Warehouse-only run declares Livy, warms nothing it does not want, and
-must still never open a Spark session — the acquisition stays where the need is
-discovered, and this only gives it a head start when it is coming anyway.
+Commands declare possible requirements before execution so a Session can warm
+shared resources. Runtime planning decides which resources an operation uses;
+declaring a requirement does not acquire it.
 """
 
 from __future__ import annotations

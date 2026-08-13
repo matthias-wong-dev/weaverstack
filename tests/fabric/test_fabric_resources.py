@@ -36,7 +36,7 @@ def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
 
     from weaver.fabric import find_workspace
 
-    with pytest.raises(CommandError, match="no workspace named"):
+    with pytest.raises(CommandError, match="Workspace 'weavertest_no_such_workspace' was not found"):
         find_workspace("weavertest_no_such_workspace")
 
 

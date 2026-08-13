@@ -1,31 +1,8 @@
-"""One expensive resource, acquired at most once while it is healthy.
+"""Shared Session resources with explicit, bounded recovery.
 
-A Session owns things that cost tens of seconds and, on a small capacity, exist
-in quantity one: a Fabric token, a Livy session, a TDS connection per Warehouse.
-Two rules govern all of them, and both are properties of *this* object rather
-than of any caller:
-
-.. code-block:: text
-
-    concurrent callers share one acquisition
-    a statement that fails does not destroy the resource that ran it
-
-The first is why the console prompt can return while Livy is still starting. The
-background warm-up and the first command that needs Spark meet on the same
-:class:`~concurrent.futures.Future`, so the command waits for the startup already
-running rather than asking a capacity with one session slot for a second one.
-
-The second is the distinction the state machine exists to keep:
-
-.. code-block:: text
-
-    statement failure   → the resource is fine; the caller's work failed
-    resource failure    → mark it failed, and recover only deliberately
-
-A resource that silently reacquired itself on every error would turn a lifecycle
-defect into a slow, intermittent, invisible one. Recovery is therefore explicit
-and bounded: :meth:`Resource.reacquire` allows a stated number of further
-attempts and records each, so a run that limps is visibly limping.
+Concurrent callers share one acquisition. A failed operation does not mark its
+resource failed; callers explicitly reacquire resources after acquisition or
+transport failures.
 """
 
 from __future__ import annotations

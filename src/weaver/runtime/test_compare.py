@@ -1,31 +1,7 @@
-"""What a Test means, in one place.
+"""Compare expected and actual relations for a validation.
 
-A Test compares an expected relation with an actual one and passes when the
-symmetric difference is empty::
-
-    missing     = expected EXCEPT actual
-    unexpected  = actual   EXCEPT expected
-
-The comparison is Weaver's rather than the author's, and this module is why: a
-Test written in Python, a Test compiled from Spark SQL and a Test compiled to a
-Warehouse procedure must all mean the same thing, or "the Sales tests pass"
-means nothing across an estate. The T-SQL renderer emits the same two ``EXCEPT``
-statements; this is the Spark side of one contract.
-
-**The counting is deliberately physical.** ``failure_count`` is the number of
-discrepancy rows, so one changed entity contributes two — an expected-side row
-and an actual-side row. A second, logical counting model would have to decide
-what "changed" means without a key, and a Test is not required to have one.
-
-**The primary key correlates; it does not count.** Rows from the two sides that
-share the declared key values get the same ``_weaver_sk``, which is what lets a
-reader tell *changed* from *missing* and *unexpected*. Remove the key and the
-same Test reports the same number of failures.
-
-Nothing here imports PySpark, in any form. The frames arrive as arguments and are
-used through their ordinary API and through SQL expressions, which is what keeps
-the core importable in a process that has no Spark — the same discipline the
-load runtime keeps.
+The comparison returns physical discrepancy rows and uses declared primary keys
+only to correlate matching rows.
 """
 
 from __future__ import annotations
@@ -87,8 +63,7 @@ def compare(
     )
 
     if key:
-        # dense_rank over the declared key: the two sides of one changed entity
-        # share a key and therefore a rank, which is the whole point.
+        # Pair rows from the same changed entity under one diagnostic key.
         ordering = ", ".join(_quoted(column) for column in key)
         rank = f"dense_rank() OVER (ORDER BY {ordering})"
     else:

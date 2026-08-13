@@ -229,6 +229,9 @@ __marimo__/
 # Generated build bundles for local inspection
 .sample-bundle/
 
+# Local Claude Code permissions are machine-specific.
+.claude/settings.local.json
+
 # Spark's default warehouse directory, created in the working directory by any
 # local Spark run — including `pytest -m spark`
 spark-warehouse/

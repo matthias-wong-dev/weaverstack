@@ -68,10 +68,7 @@ from .tables import (
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
 
-#: How an Weaver document kind names itself in the catalogue. Deliberately a translation
-#: rather than a reuse: Weaver document kinds are title case and the catalogue's vocabulary
-#: is lower case, and pinning the mapping here means a new Weaver document kind must be given
-#: a catalogue meaning rather than leaking one.
+#: Map Weaver document kinds to the catalogue's lower-case vocabulary.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
 
 #: How a validation kind names itself in ``TestDictionary.test_type``. A

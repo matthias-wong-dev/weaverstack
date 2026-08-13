@@ -46,7 +46,7 @@ def test_a_console_session_needs_no_workspace_to_exist(console):
 
 
 def test_a_command_without_a_workspace_says_what_is_missing(console):
-    with pytest.raises(CommandError, match="needs a workspace"):
+    with pytest.raises(CommandError, match="A Workspace is required for this command"):
         console.scope(None)
 
 
@@ -94,7 +94,7 @@ def test_a_session_started_without_a_workspace_never_gains_one():
         session.scope(_local("./named-by-a-command"))
 
         assert session.workspace is None
-        with pytest.raises(CommandError, match="needs a workspace"):
+        with pytest.raises(CommandError, match="A Workspace is required for this command"):
             session.scope(None)
 
 

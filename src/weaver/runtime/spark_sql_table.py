@@ -1,32 +1,7 @@
-"""Executing a Spark-SQL-authored table's extraction — the mechanics behind
-``SparkSqlTable.read()``.
+"""Execute a Spark-SQL table extraction for ``SparkSqlTable.read()``.
 
-The whole of what a SQL-authored table does differently, and it is deliberately
-this small. A Spark SQL table is authored as SQL, installed as an importable
-Python module and loaded by the *ordinary* :meth:`weaver.objects.Table.load` —
-so the only thing that has to exist here is the step between the two: run the
-program, and hand back the pair ``read()`` returns everywhere else.
-
-.. code-block:: text
-
-    setup statements   run, in order, for their effect
-    first query        the staging rows
-    second query       the keys to delete, if there is one
-
-Nothing here validates rows, rejects keys, merges, deletes, counts or builds a
-:class:`~weaver.runtime.load_result.LoadResult`. That is
-:func:`weaver.runtime.table_load.load_table`'s, unchanged and shared, which is
-the point of the whole arrangement: a table authored in SQL and a table authored
-in Python are the same load with two extraction fronts, so fault tolerance,
-stability thresholds, rejection policy and static behaviour cannot come to
-differ between them.
-
-**One session, one order.** Every statement runs through the object's own Spark
-session, so a temporary view a setup statement creates is visible to both
-queries. Spark evaluates a ``SELECT`` lazily, so a program that *replaces* a
-view between its two queries has changed what the first one will read when it is
-finally materialised — that is Spark's semantics rather than Weaver's, and the
-author's to avoid.
+Setup statements, the staging query, and an optional delete-key query run in
+order on one Spark session. Shared table loading handles the returned relations.
 """
 
 from __future__ import annotations

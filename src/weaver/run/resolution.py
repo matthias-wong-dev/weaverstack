@@ -1,21 +1,7 @@
-"""Can the Runner locate what it would dispatch — answered without asking Fabric.
+"""Resolve runnable nodes against an observed RunState.
 
-The seam between "what should run" and "run it", kept apart because the two fail
-for entirely different reasons. A planning fault is a wrong graph. A resolution
-fault is a graph that is right about an estate that is not there: a procedure
-that was never installed, a module deleted from the runtime tree, a Warehouse
-that has been wiped. A run that could not tell them apart would send its reader
-to check the wrong thing.
-
-**Every answer here comes from the observed snapshot.** The reading happened once,
-at a boundary, above the Runner — so this module is pure: a node and a RunState
-in, a verdict out. That is what lets a dry run be complete and still touch
-nothing, and what lets the whole of resolution be tested with no estate at all.
-
-One thing deliberately does *not* live here: where the primitive physically is.
-A path is a question for the resolver that owns the workspace, and it is needed
-only at the moment of dispatch — so computing one during resolution would drag a
-physical dependency into the one place that is supposed to be free of them.
+Resolution uses the supplied snapshot and does not access Fabric or resolve
+physical dispatch paths.
 """
 
 from __future__ import annotations

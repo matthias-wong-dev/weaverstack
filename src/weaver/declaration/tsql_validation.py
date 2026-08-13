@@ -1,41 +1,6 @@
-"""T-SQL validation generation — one independently runnable procedure per Test.
+"""Generate T-SQL validation procedures and direct file-run batches.
 
-The sibling of :mod:`weaver.declaration.tsql_load`, and simpler than it in one
-respect worth stating up front: **a validation needs no install phase.**
-
-A load procedure cannot be written whole at build time because it has to name
-the target's physical columns, which are not knowable while the target is still
-a declaration — so what a load generates is a script that reads ``sys.columns``
-and assembles the procedure server-side. A validation names no target. Its
-columns are whatever its own queries return, materialised into temp tables, and
-``EXCEPT`` and ``e.*`` are column-agnostic. So the payload is the procedure.
-
-.. code-block:: text
-
-    create or alter procedure [_].[Test Sales.OrdersReconcile]
-        @missing_count       bigint = null output
-      , @unexpected_count    bigint = null output
-      , @suppress_result_set bit = 0
-
-**One body, two ways to run it.** The installed procedure and direct ``--file``
-execution share :func:`validation_body` exactly — the procedure is that body
-under a signature, and a file run is that body under a batch that declares the
-same locals. Two renderers would be two contracts, and the whole promise of
-``--file`` is that it runs what an install would have run.
-
-**The counts are in the signature, not in a result set.** Authored setup may run
-``EXEC`` or ``sp_executesql`` and return rows of its own, so "the result set this
-procedure produced" is a question with no answer. Optional outputs cannot be
-confused with anything, and they stay optional so this still works typed by
-hand::
-
-    exec [_].[Test Sales.OrdersReconcile];
-
-**Suppression is what whole-target orchestration uses.** ``@suppress_result_set
-= 1`` collects the counts and transfers no diagnostic rows, which may be large
-and may carry sensitive business data. Targeted execution passes 0 and gets both
-from one execution, because running a Test twice would compare data that could
-have changed in between.
+Installed and direct validation runs share the same validation body.
 """
 
 from __future__ import annotations

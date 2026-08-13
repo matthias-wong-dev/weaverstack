@@ -1,54 +1,7 @@
-"""RunResult — the canonical answer to "what happened?", and what makes one up.
+"""Common result, status, and message types for runtime operations.
 
-One result model for every kind of run. ``weaver load`` and ``weaver test`` were
-two report models describing the same events — a node ran, a node was blocked, a
-node was skipped, the run as a whole came to a status — kept in agreement by
-hand, which meant a fix to one was a bug waiting in the other.
-
-This is the *internal* model, and it is authoritative in memory. A physical task
-log is downstream of it:
-
-.. code-block:: text
-
-    Runner
-      ├── events
-      ├── node results
-      └── RunResult
-                ↓  optional boundary
-             _/Log
-
-Ordinary correctness must not require a log, which is what lets a run-cycle test
-execute a whole Runner with no storage at all. Production still writes one.
-
-**One internal model does not mean one user-facing shape.** ``weaver load
---json`` and ``weaver test --json`` render projections of this, because their
-readers are asking different questions — a load reader wants rows moved, a test
-reader wants which checks disagreed and by how much.
-
-Everything a result is made of lives here too. Split across four modules, the
-shape could not be read in one sitting: the contract was in one file, what a
-result may say in another, the statuses in a third.
-
-.. code-block:: text
-
-    the contract   a result reports whether it succeeded, and nothing more
-    the messages   what a run has to say about a node, typed by code
-    the statuses   what became of one node, and of the run
-    the results    RunNodeResult, RunResult
-
-**The contract is one sentence** — a result reports whether it succeeded — and
-that is deliberately all a Runner asks. A load returns counts of work; a
-validation returns a judgement about data; a semantic-model refresh will return
-something else again. Requiring any of them to be the others' type would mean
-that adding a runtime operation meant importing another operation's vocabulary
-into the Runner, which is the thing this package exists not to do.
-
-**Messages are typed rather than written out**, because they are read by two
-audiences. A person wants the sentence; a task log, a report renderer and
-anything filtering evidence want the *code* — and a code survives rewording in a
-way a sentence does not. ``source`` says who noticed, primitive or orchestration,
-so a caller reading a node's findings does not have to know which layer wrote
-each one in order to see everything that was wrong with it.
+Run results record whether each node succeeded. Operation-specific report
+renderers project the common model into their own public output.
 """
 
 from __future__ import annotations
@@ -66,12 +19,9 @@ from ..errors import WeaverError
 
 
 class RunError(WeaverError):
-    """A run could not proceed.
+    """An error raised when a run cannot proceed.
 
-    The runtime's own error, so a run raises without reaching for a load's
-    vocabulary. ``result`` carries whatever the failure was holding — a load's
-    counts, a validation's judgement — because a reader handed only an exception
-    has to go and ask the estate what it was, and that is what they came for.
+    ``result`` retains operation-specific evidence when it is available.
     """
 
     def __init__(self, message: str, *, result: object | None = None) -> None:
@@ -80,27 +30,16 @@ class RunError(WeaverError):
 
 
 def reports_outcome(result: object) -> bool:
-    """Whether this is something a run can settle: does it say if it succeeded?"""
+    """Return whether a result reports a success outcome."""
 
     return hasattr(result, "succeeded")
 
 
 def represent(result: object) -> dict | None:
-    """One result, as a mapping, without assuming which kind of result it is.
+    """Serialise a result without requiring an operation-specific type.
 
-    The Runner's contract is that a result reports whether it succeeded. Its
-    *serialization* has to be exactly as narrow, or the contract quietly becomes
-    "reports whether it succeeded, and also happens to look like a load result"
-    — and the day a semantic-model refresh returns something else, a run that
-    executed perfectly would fail while writing itself down.
-
-    So three ways of asking, in order of how much the result has chosen to say:
-
-    .. code-block:: text
-
-        to_mapping()   the result describes itself
-        as_row()       the result is row-shaped, as Weaver's own are
-        neither        what every result must answer, and nothing more
+    All results report ``succeeded``; richer result types provide their own
+    mapping or row representation.
     """
 
     if result is None:
@@ -117,13 +56,7 @@ def represent(result: object) -> dict | None:
 
 @dataclass(frozen=True)
 class RunFailure:
-    """A failure a primitive did not describe, in the shape a result has.
-
-    Used where nothing came back that could report an outcome — a dispatch that
-    threw without carrying a result, or one that returned something else
-    entirely. Deliberately minimal: inventing counts here would put numbers in a
-    report that nothing measured.
-    """
+    """Represent a dispatch failure that has no operation-specific result."""
 
     error_message: str
     succeeded: bool = False
@@ -375,12 +308,9 @@ class RunResult:
 
 
 def run_status(nodes, *, dry_run: bool = False) -> str:
-    """The worst thing that happened, which is what a run's status means.
+    """Return the overall run status from node statuses.
 
-    Not a count and not a majority: a caller asking whether a run succeeded is
-    asking whether anything did not, so one failure among fifty successes is a
-    failed run — and one that merely rejected rows is neither a success nor a
-    failure and says so in its own word.
+    A rejection result has its own status and does not make the run fail.
     """
 
     statuses = {node.status for node in nodes}

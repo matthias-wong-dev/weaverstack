@@ -1,22 +1,7 @@
-"""What a validation run reports, as numbers.
+"""Transport-neutral scalar results for validation runs.
 
-Deliberately scalar and transport-neutral. A Test's evidence is rows, and rows
-are what a person looks at; what a *run* records is how many there were. The two
-are separated here because they have different lifetimes and different risks —
-diagnostic rows may be large and may carry sensitive business data, so they are
-returned to an interactive caller and never persisted, while the counts are
-small, safe and the whole of what a task log needs.
-
-.. code-block:: text
-
-    TestResult         missing_count + unexpected_count = failure_count
-    AssumptionResult   violation_count
-
-**Zero is not the only way to succeed, and it is not the only way to be
-finished.** A validation that could not be evaluated has no counts at all, and
-saying it found nothing would report a broken Test as a passing one. So
-``error_message`` is what separates them, and ``succeeded`` is false whenever it
-is set, whatever the counts say.
+Diagnostic rows remain with interactive callers; durable reports carry counts
+and an error when a validation could not be evaluated.
 """
 
 from __future__ import annotations
@@ -40,11 +25,7 @@ class TestResult:
 
     @property
     def failure_count(self) -> int:
-        """The physical discrepancy rows, which is what a Test counts.
-
-        One changed entity contributes two — an expected-side row and an
-        actual-side row — deliberately. See :mod:`weaver.runtime.test_compare`.
-        """
+        """Return the number of physical discrepancy rows."""
 
         return self.missing_count + self.unexpected_count
 
@@ -68,12 +49,7 @@ class TestResult:
 
     @classmethod
     def from_mapping(cls, mapping) -> "TestResult":
-        """The same judgement, rebuilt where the run is being decided.
-
-        ``failure_count`` is derived and deliberately not read back: it is in
-        the mapping for a reader, and taking it as input would let a result
-        arrive disagreeing with its own two counts.
-        """
+        """Rebuild a result from its serialised counts and error."""
 
         return cls(
             missing_count=mapping.get("missing_count", 0),

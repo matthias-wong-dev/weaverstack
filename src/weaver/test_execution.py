@@ -1,26 +1,7 @@
-"""Running installed validation primitives, and reporting what they said.
+"""Run installed validation primitives and report their results.
 
-The sibling of :mod:`weaver.load_execution`, and much smaller than it for a
-reason that is the whole point of the design: a validation reads and never
-writes, so there is no staging, no reconciliation, no fault tolerance and no
-rollback to think about. What is left is dispatch.
-
-.. code-block:: text
-
-    Warehouse   exec [_].[Test Sales.X] with output counts
-    Lakehouse   import the deployed module, construct it, call read()
-
-**One failure does not stop the rest.** A validation is read-only, so a Test
-that failed has told you something and the next Test can still tell you
-something else. Losing that evidence to an early exit is exactly what makes a
-validation run less useful than running the queries by hand.
-
-**Suppression is not an optimisation.** A whole-target run counts without ever
-materialising the rows — ``@suppress_result_set = 1`` on a Warehouse, a count
-that never collects on Spark — because diagnostic rows may be enormous and may
-carry sensitive business data. A targeted run asks for them, and gets them from
-the *same* execution as the counts, because running a Test twice compares data
-that could have changed in between.
+Targeted runs collect diagnostics; whole-target runs collect counts only. A
+failed validation does not prevent the remaining validations from running.
 """
 
 from __future__ import annotations
@@ -37,9 +18,7 @@ from .runtime.validation_result import AssumptionResult, TestResult
 from .test_plan import InstalledValidation
 from .test_report import FAILED, INVALID, PASSED, PLANNED, ValidationNodeReport
 
-#: What a node calls the thing it dispatches. A small vocabulary deliberately:
-#: it says how to reach the primitive, not what language somebody authored it
-#: in, because the second is the declaration's business and is already recorded.
+#: Runtime primitives used to dispatch installed validations.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_VALIDATION = "python_validation"
 

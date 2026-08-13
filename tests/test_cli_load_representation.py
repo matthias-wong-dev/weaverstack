@@ -509,7 +509,7 @@ def test_a_target_that_does_not_exist_is_refused_without_opening_a_session(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "no such item" in captured.err
+    assert "Lakehouse/Sales was not found" in captured.err
     assert "Lakehouse/Sales" in captured.err
     assert livy.submitted == [], "no session should have been started"
 

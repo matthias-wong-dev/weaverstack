@@ -292,13 +292,7 @@ def _item_layers(
     repository: WeaverRepository,
     target_by_item: Mapping[WeaverItemId, object],
 ) -> tuple[tuple[WeaverItemId, ...], ...]:
-    """The bound items, grouped by their repository topological layer.
-
-    Selection is document-based and the bindings are sparse, so an unbound
-    producer simply drops out — but the items that remain keep the repository's
-    order rather than being re-derived here. That is the point of the repository
-    owning the graph: one authoritative ordering, consumed rather than rebuilt.
-    """
+    """Group bound items by their repository topological layer."""
 
     layers = repository.item_layers
     if not layers:

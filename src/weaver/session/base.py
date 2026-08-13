@@ -1,40 +1,9 @@
-"""The Session contract — where Weaver is running and how it reaches physical things.
+"""Host-neutral access to workspace resources and execution capabilities.
 
-A Session answers exactly one family of questions:
-
-.. code-block:: text
-
-    where am I running
-    what resources do I already have
-    what physical thing does this logical Fabric reference mean
-    how do I execute work in this host
-
-and deliberately answers none of these:
-
-.. code-block:: text
-
-    what should be built          → Builder
-    install this decision         → Installer
-    what runs next, and what happened → Runner
-
-That boundary is the whole point. A Session that learned what a DAG was would
-become a second Runner, and the two would then disagree about which of them owns
-a node's status.
-
-**A Session is a process scope, not a workspace binding.** ``weaver session``
-starts before any workspace has been named, and one console can address several
-— a build into one workspace and a load out of another are two commands in one
-shell. So the workspace arrives with the *command*, and this object caches a
-:class:`WorkspaceScope` per workspace context: one resolver, one item cache, one
-Livy session, one TDS connection per Warehouse, for as long as the Session lives.
-A default workspace, where one was configured, is a default context only —
-never the Session's identity.
-
-**Capabilities are host-neutral.** Domain code asks for ``execute_python``, not
-for Livy; the Session decides that a console reaching into Fabric means Livy and
-that a notebook means the current process. Transport-specific methods stay
-private, because the day a domain caller writes ``session.livy`` is the day
-Weaver stops being able to run anywhere else.
+A Session scopes cached resources to a workspace context and exposes operations
+such as ``execute_python`` without exposing the underlying transport. Builder,
+Installer, and Runner retain planning and orchestration responsibilities. See
+``design/code-architecture.md`` for the layer boundaries.
 """
 
 from __future__ import annotations
@@ -72,10 +41,8 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
-#: The execution hierarchy, outermost first. A Task is one thing a person asked
-#: for; a Step is a boundary within it worth waiting at; a Sub-step is one
-#: physical unit. There is deliberately no fourth level: an error is *content*
-#: attached to whichever of these failed, not a depth of its own.
+#: The reporting hierarchy: task, step, then physical sub-step. Failures attach
+#: to the reporting frame that failed.
 TASK = "task"
 STEP = "step"
 SUBSTEP = "substep"
@@ -179,8 +146,8 @@ class Session(ABC):
         resolved = workspace if workspace is not None else self._default_workspace
         if resolved is None:
             raise CommandError(
-                "this command needs a workspace: pass --workspace, or configure "
-                "one in a workspace configuration file"
+                "A Workspace is required for this command. Pass --workspace or configure "
+                "one in a workspace configuration file."
             )
         return resolved
 
@@ -191,7 +158,7 @@ class Session(ABC):
         key = workspace_context(resolved)
         with self._scope_lock:
             if self._closed:
-                raise CommandError("this session is closed")
+                raise CommandError("The Session is closed.")
             scope = self._scopes.get(key)
             if scope is None:
                 scope = self._scopes[key] = self._new_scope(resolved)

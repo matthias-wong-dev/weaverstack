@@ -1,17 +1,20 @@
 # Weaver Build Philosophy
 
+## Purpose
+
+This document defines the build-system invariants that implementations must
+preserve. For the product lifecycle, see
+[Weaver architecture](weaver-architecture.md); for code ownership, see
+[Code architecture](code-architecture.md).
+
 ## Status
 
-This document records the governing philosophy of Weaver's build system.
+This document defines the build invariants across local Spark, Microsoft Fabric
+Lakehouses, and Warehouses. It is a contract, not an implementation diary or a
+step-by-step build guide.
 
-It is not an implementation plan and it is not a description of one particular
-version of the code. It defines the properties that implementations must
-preserve as Weaver evolves across local Spark, Microsoft Fabric Lakehouse and
-Warehouse targets.
-
-Where an implementation conflicts with this document, the conflict should be
-treated as an architectural decision requiring explicit resolution rather than
-an incidental coding detail.
+An implementation that conflicts with these invariants requires an explicit
+architectural decision.
 
 ---
 
@@ -149,7 +152,7 @@ not an intermediate remote filesystem required by every build.
 
 ---
 
-## 4. Installation is deliberately unintelligent
+## 4. Installation is mechanical
 
 The installer validates and executes the bundle. It does not make architectural
 decisions.
@@ -178,9 +181,7 @@ For example, a folder-delete executor may translate a frozen target-relative
 path into the correct OneLake or local filesystem operation. It may not list the
 parent directory and decide what else ought to be deleted.
 
-This is a feature, not a limitation:
-
-> **A production installer should be boring.**
+The installer is intentionally limited to executing the reviewed bundle.
 
 ---
 
@@ -764,7 +765,7 @@ schema, and the destination decides how to make one.
 
 ---
 
-## 17. The standard of review
+## 17. Bundle review
 
 A reviewer of a BuildBundle should be able to answer:
 
@@ -777,14 +778,11 @@ A reviewer of a BuildBundle should be able to answer:
 7. Can this artifact execute without the source repository?
 8. Will execution perform exactly these actions and no others?
 
-If those questions cannot be answered from the bundle and its summary, the
-bundle is not complete enough.
+The bundle and its summary must answer these questions before installation.
 
 ---
 
-## 18. Governing principles
-
-The philosophy can be condensed into ten rules:
+## 18. Principles
 
 1. **Build creates structure and the code that will load it; load moves data.**
 2. **Interpret the repository once.**
@@ -797,7 +795,5 @@ The philosophy can be condensed into ten rules:
 9. **Fail closed when inventory, identity or capability is uncertain.**
 10. **Test the invariants that make production mistakes impossible.**
 
-These constraints are intentionally strict because they encode accumulated
-production experience. Their purpose is not ceremony. Their purpose is to move
-risk earlier, make consequential actions visible, and prevent entire classes of
-deployment failure by construction.
+Together, these principles make the interpreted, reviewed, and executed plan the
+same artefact.
