@@ -18,10 +18,9 @@ This is arithmetic only. Nothing here touches the filesystem — every location
 can be inspected before any mutation occurs. Mutation is a
 :class:`~weaver.store.Store` concern.
 
-Together with the Fabric resolver (checkpoint 7) this is the *only* place that
-knows how a name becomes a location. Everything downstream receives resolved
-locations and never derives them, which is what makes "every target root is
-explicit" enforceable rather than aspirational.
+With the Fabric resolver, this is the only place that knows how a name becomes
+a location. Everything downstream receives resolved locations and never derives
+them.
 """
 
 from __future__ import annotations
@@ -205,11 +204,7 @@ class LocalResolver:
 
     @property
     def control_tables_root(self) -> Location:
-        """``<weaver-lakehouse>/Tables`` — the control-plane tables.
-
-        The table names and whether they sit under a schema are a checkpoint 16
-        decision; this is only their root.
-        """
+        """``<weaver-lakehouse>/Tables`` — the root of the control-plane tables."""
 
         return self.tables_root(ItemRef(self._weaver_lakehouse_name()))
 

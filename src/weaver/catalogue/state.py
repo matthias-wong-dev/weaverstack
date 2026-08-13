@@ -48,27 +48,18 @@ _FILES_PREFIX = "Files/"
 class Catalogue:
     """The catalogue the build reads and reasons about.
 
-    One class, whatever produced it. In production it is read from the Weaver
-    Lakehouse over Spark; a test may build one directly from Registry rows, or
-    from a repository — the state a successful build of that repository would
-    have left. That is not a fake: it is the same class the build consumes, begun
-    further along, exactly as installing a frozen bundle begins further along
-    than building one from a repository.
+    One class whatever produced it: read from the Weaver Lakehouse in
+    production, or built directly from Registry rows or a repository in a test.
+    Incremental selection, alias staleness and claim collection all work from
+    ``registered`` and ``rows``, so they are pure Python.
 
-    Everything the build's own logic needs is here and nothing else. Incremental
-    selection, alias staleness and claim collection all work from ``registered``
-    and ``rows``, so they are pure Python and can be proven without standing up a
-    Lakehouse to seed a signature.
+    ``rows`` is the row data by item and table. ``registered`` is the certified
+    documents derived from the Registry rows — identity, type, signature and
+    publication epoch, without the audit columns, which no build decision reads.
 
-    ``rows`` is the catalogue's own row data, by item and table. ``registered`` is
-    the certified documents derived from the Registry rows — identity, type,
-    signature and publication epoch, and no audit columns, because none of the
-    build's decisions depend on who wrote a row or when it was touched.
-
-    ``present_tables`` records which catalogue tables physically exist. One line
-    of the reconciler needs it and the rule it encodes is not optional: a claim
-    can only be raised against a table that is actually there, or reconciliation
-    would emit deletes against tables that are not.
+    ``present_tables`` records which catalogue tables physically exist: a claim
+    can only be raised against a table that is there, or reconciliation would
+    emit deletes against tables that are not.
     """
 
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
@@ -394,16 +385,14 @@ class RegisteredDocument:
 
 #: Catalogue tables introduced after the first release of the control plane.
 #:
-#: An estate built by an older Weaver has every other table and not these, and
-#: that is an *upgrade*, not damage — which matters because the two are
-#: indistinguishable from the physical state alone. What separates them is
-#: consequence: the partial-catalogue refusal exists so a scoped build cannot
-#: recreate a table and lose rows belonging to items it was not pointed at, and
-#: a table that has never existed has no such rows to lose.
+#: An estate built by an older Weaver has every other table and not these: an
+#: upgrade rather than damage, and indistinguishable from the physical state
+#: alone. The partial-catalogue refusal protects rows a scoped build would lose,
+#: and a table that never existed has none to lose.
 #:
-#: Add a name here in the same change that adds the table, and only then. A table
-#: listed here that *was* in an older release would turn a real repair case into
-#: a silent partial rebuild.
+#: Add a name here in the same change that adds the table, and only then: a table
+#: listed here that *was* in an older release would turn a repair case into a
+#: silent partial rebuild.
 INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name})
 
 

@@ -260,25 +260,18 @@ def _epoch(started: datetime) -> str:
 
 #: Why actions within a batch run one at a time.
 #:
-#: They were briefly run concurrently, on the reasoning that a batch names one
-#: target and the manifest calls its actions independent units — so concurrency
-#: could not reorder anything a sequence barrier was protecting. That reasoning
-#: was about *Weaver's* ordering and said nothing about the database's, and a
-#: real Warehouse answered:
+#: Independent in dependency order is not independent in lock order. Run
+#: concurrently, DDL and DML against one Warehouse contend on catalogue metadata
+#: and on the rows they touch, and Fabric's snapshot isolation aborts rather
+#: than waits:
 #:
 #: .. code-block:: text
 #:
 #:     Transaction (Process ID 55) was deadlocked on lock resources
 #:     Snapshot isolation transaction aborted due to update conflict
 #:
-#: Independent in dependency order is not independent in lock order. Concurrent
-#: DDL and DML against one Warehouse contend on catalogue metadata and on the
-#: rows they touch, and Fabric's snapshot isolation turns that contention into
-#: aborted transactions rather than waiting.
-#:
-#: Widening this again needs a design for *that* problem — retry on deadlock, or
-#: a partition of actions proven not to contend — and a measurement showing it
-#: is worth the complexity. It was not measurably faster on the estate that
+#: Widening this needs a design for that contention and a measurement showing it
+#: is worth the complexity; it was not measurably faster on the estate that
 #: broke.
 _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 

@@ -95,30 +95,23 @@ PYTHON_SUFFIX = ".py"
 class RuntimeArtefact:
     """One installed runnable target: what it is, where it goes, what it holds.
 
-    Everything a build needs about an artefact and nothing about how it was
-    reached. The identity is the catalogue key; the signature is what incremental
-    selection compares; the payload is the frozen bytes the installer is *given*
-    — deployed source for a Python object, and for a generated load an installer
-    script or an instruction the executor completes against the built target. An
-    artefact carries its own content either way, so the installer is never sent
-    back to a repository it must never reopen.
+    The identity is the catalogue key; the signature is what incremental
+    selection compares; the payload is the frozen bytes the installer is given,
+    so it is never sent back to the repository.
 
-    ``role`` is what it is *for*, and it is carried rather than inferred. A load
-    module and a Test module are both files; a load procedure and a Test
-    procedure are both procedures. One lifecycle serves all of them — claimed,
-    signed, selected, installed, registered, pruned — and the role is what keeps
-    a Test out of the load DAG at the other end.
+    ``role`` is carried rather than inferred. A load module and a Test module
+    are both files, and a load procedure and a Test procedure are both
+    procedures; one lifecycle serves them all, and the role is what keeps a Test
+    out of the load DAG.
 
-    ``origin`` is the declaration this artefact was derived from, where there was
-    one. A deployed helper module under ``lib/`` has none: it is authored source
-    that no Weaver document declares, which is exactly why it needs a claim of
-    its own or nothing would ever notice it had been deleted.
+    ``origin`` is the declaration this was derived from, where there was one. A
+    helper module under ``lib/`` has none — it is authored source no document
+    declares — which is why it needs a claim of its own to be noticed when it is
+    deleted.
 
-    ``source_path`` is the authored file this came from, relative to the
-    repository root — the path the developer has open in their editor, not the
-    deployed one. It is *carried*, never reconstructed: by the time an install
-    fails, ``_/Load/Sales__Customer.py`` is all that is left, and the mapping
-    back to ``Lakehouse/Sales/Sales__Customer.py`` is only knowable here.
+    ``source_path`` is the authored file, relative to the repository root, and is
+    carried rather than reconstructed: by the time an install fails only the
+    deployed spelling is left.
     """
 
     identity: WeaverDocumentId

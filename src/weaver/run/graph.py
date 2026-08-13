@@ -42,7 +42,7 @@ class RunNode:
     #: What this node is for, where one graph carries more than one kind.
     role: str | None = None
     #: The installed thing this node runs, as the estate describes it. Opaque
-    #: to the Runner — which is the point: the Runner decides *when* a node
+    #: to the Runner: the Runner decides *when* a node
     #: runs, and only dispatch needs to know what it is.
     installed: object | None = None
 

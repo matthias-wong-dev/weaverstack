@@ -215,14 +215,11 @@ _MOUNTS: dict[str, str] = {}
 #: one — a single fixed point would let the second quietly address the first.
 _MOUNT_POINT = "/weaver/{item}"
 
-#: Mount configuration, and the whole of it. ``fileCacheTimeout=0`` is the repair
-#: for the one way a mount can lie: Weaver reaches the same Files area two ways —
-#: ``abfss://`` for storage work and this mount for authored Python — so anything
-#: that changes OneLake *outside* the mount must be visible through it
-#: immediately. A wipe over DFS, another session's write, a shortcut created by
-#: REST. With caching on, it is not, and the symptom is a directory listing that
-#: still holds entries the storage no longer has: ``shutil.rmtree`` deletes what
-#: it was told about and then fails to remove the directory, as ``ENOTEMPTY``.
+#: Mount configuration. ``fileCacheTimeout=0`` because Weaver reaches the same
+#: Files area two ways — ``abfss://`` for storage work and this mount for
+#: authored Python — so a change made outside the mount must be visible through
+#: it at once. With caching on, a directory listing still holds entries the
+#: storage no longer has, and ``shutil.rmtree`` fails with ``ENOTEMPTY``.
 #:
 #: Invalidating the cache afterwards is not an alternative. Dropping Weaver's own
 #: record of the mount leaves the host's mount in place, and asking for the mount

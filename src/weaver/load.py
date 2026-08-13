@@ -65,7 +65,7 @@ def load(
     targets. It is an operator override: only those nodes run, without dependency
     expansion or dependency ordering.
 
-    Every value resolves the same way, and it is the way ``build`` resolves them:
+    Every value resolves as ``build`` resolves it:
 
     .. code-block:: text
 
@@ -73,10 +73,6 @@ def load(
           → a workspace configuration file
             → what the notebook is attached to
               → a configuration error naming what is missing
-
-    So ``workspace=None`` means the current Fabric session, and an explicit
-    ``weaver_lakehouse`` stands on its own — a caller who names both the
-    workspace and the control Lakehouse needs no configuration file at all.
     """
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
@@ -329,20 +325,15 @@ def _raise_for_failure(report: LoadRunReport) -> None:
 
 # --- preflight ----------------------------------------------------------------
 #
-# One check, and it is about the *catalogue*: nobody ever built into this target,
-# so there is no estate to load. Almost always a typo, and reporting it as "no
-# work to do" is the single worst answer available, because it looks like
-# success.
+# One check, about the catalogue: nobody ever built into this target, so there
+# is no estate to load. Almost always a typo, and reporting it as "no work to
+# do" would look like success.
 #
-# Whether the physical item still exists is deliberately *not* asked here. That
-# check exists to save a desktop the forty seconds of starting a Livy session for
-# a request already known to be bad, so it belongs where that cost is paid —
-# in the CLI, before the session — and nowhere else. By the time this runs the
-# session exists, the saving is spent, and asking again would be paying for an
-# answer nobody can act on. See ``weaver_cli.main._refuse_absent_targets``.
-#
-# An item the workspace no longer holds still fails, and says so: reading its
-# inventory raises carrying the cause.
+# Whether the physical item still exists is not asked here. That check saves a
+# desktop the cost of starting a Livy session for a request already known to be
+# bad, so it belongs in the CLI before the session — see
+# ``weaver_cli.main._refuse_absent_targets``. An item the workspace no longer
+# holds still fails here: reading its inventory raises, carrying the cause.
 
 
 def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:

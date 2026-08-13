@@ -40,18 +40,14 @@ class ResolvedTarget:
         the catalogue name — what a statement calls it. Fabric's four-part
         ``workspace.lakehouse.schema.object``; locally the folded database name.
 
-    Both are needed, and neither substitutes for the other: a folder is created at
-    a path and has no catalogue name, while a view exists only as a name and has no
-    path of its own.
+    Neither substitutes for the other: a folder is created at a path and has no
+    catalogue name, while a view exists only as a name.
 
-    Resolution happens here, once per target, rather than in each executor. An
-    executor that derived either for itself would be re-deciding where an action
-    lands, which is a planning decision it is not allowed to make. It is also what
-    lets one session build several destinations, and write the catalogue to a
-    different one again, without ever switching what the session is attached to.
+    Resolved once per target rather than in each executor, so no executor
+    re-decides where an action lands — and so one session can build several
+    destinations without switching what it is attached to.
 
-    Both are None for a Warehouse target, which is reached over TDS and has
-    neither.
+    Both are None for a Warehouse target, which is reached over TDS.
     """
 
     bound: BoundTarget

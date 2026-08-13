@@ -14,27 +14,17 @@ from .metadata import SPARK_SQL, SQL, TABLE
 if TYPE_CHECKING:
     from .source import SourceDocument
 
-#: The T-SQL load generator's version, and the Spark SQL one's. Separate because
-#: the two evolve independently: a change to the Spark DML has no bearing on what
-#: a Warehouse procedure should contain, and bumping one must not invalidate the
-#: other's artefacts. Each is a *signature salt*, never part of an identity.
+#: The T-SQL and Spark SQL load generators' versions, kept separate so bumping
+#: one does not invalidate the other's artefacts. Each is a signature salt,
+#: never part of an identity.
 #:
 #: **Raise one whenever its generated output changes.** A signature is the
-#: source's plus this number, so an edit to a generator that leaves both alone
-#: produces different bytes with an unchanged signature — and incremental
-#: selection, correctly, rebuilds nothing. The estate then keeps running the
-#: previous generation's artefacts, which is the failure this exists to prevent
-#: and which cost a Fabric round trip to notice.
-#: 6 baked the ``Static`` gate into the generated procedure, so every
-#: previously installed load procedure is stale.
-#: 7 runs the authored body as a program rather than a preamble and a trailing
-#: query, and gives a two-query incremental table a ``_Delete`` working table —
-#: so the transformation section, the delete reconciliation and the prospective
-#: delete count all changed.
-#: 8 moves the load result out of a final ``SELECT`` and into optional output
-#: parameters, so a caller no longer has to identify Weaver's result set among
-#: any the authored setup produced. The procedure's signature changed, which
-#: means every installed one is not merely stale but incompatible.
+#: source's plus this number, so a generator edit that leaves both alone
+#: produces different bytes under an unchanged signature, and the estate goes on
+#: running the previous generation's artefacts.
+#:
+#: 8 moved the T-SQL load result into output parameters, so every installed
+#: procedure is incompatible, not just stale.
 TSQL_LOAD_VERSION = 8
 #: 8 replaced the generated SQL load program with a deployed ``SparkSqlTable``
 #: module, so every previously installed Spark load artefact is stale.

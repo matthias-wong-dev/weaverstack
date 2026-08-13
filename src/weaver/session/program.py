@@ -1,27 +1,18 @@
-"""One coarse unit of work, spelled for both sides of the physical boundary.
+"""One unit of Python work, spelled for both sides of the physical boundary.
 
-Weaver executes some work where the data is. On a desktop reaching into Fabric
-that means shipping Python into a Livy session; in a notebook, or against the
-local emulator, it means calling a function. Those are two spellings of the same
-unit, and the caller above them should choose neither:
-
-.. code-block:: python
-
-    report = session.execute_python(install_program(archive, workspace))
-
-A :class:`RemoteProgram` carries both spellings and the promise that binds them:
+Some work has to happen where the data is. In a notebook or against the local
+emulator that is a function call; from a desktop reaching into Fabric it is
+Python shipped into a Livy session. A :class:`RemoteProgram` carries both
+spellings so the caller chooses neither:
 
 .. code-block:: text
 
     call()   → the payload, computed in this process
     source   → Python that computes the same payload and emits it
 
-Keeping them in one object is what stops the two drifting into different
-answers, and what stops every operation growing an ``if we are inside Fabric``
-of its own. The unit stays **coarse** — a whole build state read, a whole
-install, a whole run. Breaking these into host-driven steps is the later
-decomposition work, and this shape is what makes that a change of granularity
-rather than a redesign.
+Holding them together is what stops the two drifting into different answers.
+What still crosses this way is a run's deployed Python primitives, which are
+imported where Spark is; build reads and installs are statements instead.
 """
 
 from __future__ import annotations

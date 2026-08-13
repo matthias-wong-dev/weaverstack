@@ -1,25 +1,17 @@
 """Proving a desktop build's Fabric targets exist before a session is started.
 
-A Livy session costs tens of seconds to create and a slice of a capacity to
-hold. Discovering inside it that the Warehouse a binding names was never created
-is the most expensive possible way to learn a fact that one REST call already
-knew — and it surfaces as a Py4J or Spark failure about a missing catalogue
-rather than as a sentence about a missing item.
+A Livy session costs tens of seconds and a slice of a capacity, and a missing
+item discovered inside one surfaces as a Spark failure about a catalogue rather
+than a sentence about the item. So a desktop Fabric build asks the workspace
+what it holds first, and starts nothing until every required item is found with
+the type its binding implies.
 
-So a desktop Fabric build asks the workspace what it holds *first*, and starts
-nothing until every required item has been found with the type its binding
-implies. Preflight reads; it never creates. A missing Weaver Lakehouse is a
-failure here rather than something a build quietly provisions, because a Fabric
-Lakehouse is a workspace item and creating one is provisioning, not building.
+Preflight reads and never creates: a missing Weaver Lakehouse is a failure here,
+because creating a workspace item is provisioning rather than building.
 
-**One inventory, every check.** The workspace's items are listed once and every
-target is resolved from that one result. Asking per target would turn a fixed
-cost into one proportional to the number of bindings, for an answer that cannot
-change between the calls.
-
-**Every failure at once.** A build stopped by a missing Lakehouse, restarted,
-then stopped by a missing Warehouse has cost two round trips to learn one thing:
-the estate is not ready. The report names everything missing together.
+The workspace's items are listed once and every target resolved from that one
+result, and every missing item is reported together — a build stopped twice has
+paid two round trips to learn one thing.
 """
 
 from __future__ import annotations

@@ -15,15 +15,13 @@ Fabric or local Lakehouse        a ``create_alias`` action — a OneLake shortcu
 Fabric Warehouse                 a frozen view over the bound source
 ===============================  ==============================================
 
-Only the last of the two is spelled out in SQL, because only there is the
-statement itself the semantic decision. A shortcut and a link are two transports
-for one frozen decision — this destination, that source — which is the same split
-:mod:`weaver.build_bundle.executors.spark_schema` documents for ``LOCATION``.
+Only the Warehouse form is spelled out in SQL, because only there is the
+statement itself the decision. A shortcut and a link are two transports for one
+frozen decision — this destination, that source.
 
-Where the current bindings give an alias no physical form at all, it is left out
-of the plan and recorded as an omission. That is deliberately the planner's
-decision and never the installer's: the installer may only run an alias action
-already frozen for it.
+An alias the current bindings give no physical form is left out of the plan and
+recorded as an omission. That is the planner's decision: the installer may only
+run an alias action already frozen for it.
 """
 
 from __future__ import annotations

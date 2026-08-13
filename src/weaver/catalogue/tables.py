@@ -180,7 +180,7 @@ class CatalogueTable:
     def comparison_columns(self) -> tuple[str, ...]:
         """Non-key columns, whose change makes a matched row an update.
 
-        ``signature`` is one of them, which is the point: a row whose source file
+        ``signature`` is one of them: a row whose source file
         changed differs here even when every projected value happens to match.
 
         A published column is deliberately absent. One that compared would differ

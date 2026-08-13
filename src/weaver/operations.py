@@ -355,8 +355,8 @@ def _operation_workspace(*, workspace, workspace_config, session=None) -> Worksp
               → what the notebook is attached to
                 → a configuration error naming what is missing
 
-    The Session's default context is new, and it is what lets a command inside
-    ``weaver session`` omit what the session already knows:
+    The Session's default context lets a command inside ``weaver session`` omit
+    what the session already knows:
 
     .. code-block:: text
 
@@ -364,9 +364,7 @@ def _operation_workspace(*, workspace, workspace_config, session=None) -> Worksp
         weaver> build .
         weaver> load Lakehouse/Sales
 
-    A session default is a *default*, so an explicit argument still outranks it —
-    and naming a different workspace addresses that one, in its own scope, from
-    the same console.
+    It is a default, so an explicit argument still outranks it.
     """
 
     if isinstance(workspace, Workspace):
@@ -581,7 +579,7 @@ def _build_desktop_fabric(
     bundle_name,
     source,
 ) -> BuildResult:
-    """One build driven from a console. Nothing crosses that does not have to.
+    """One build driven from a console.
 
     .. code-block:: text
 
@@ -589,15 +587,9 @@ def _build_desktop_fabric(
         plan the bundle         → here, in Python
         install the bundle      → here, each action to the capability it needs
 
-    The state read goes through the readers themselves, which ask for only what
-    each part needs — Warehouse inventories over TDS from here, the catalogue
-    and the Lakehouse inventories across — each timed as its own Step. That is
-    what makes "Read target inventories 44.1s" answerable rather than merely
-    true.
-
-    The Installer then runs in this process. Files go straight to OneLake,
-    T-SQL to TDS, control operations over REST, and only the actions that need
-    Spark cross — batched, because the submission is the expensive part.
+    Each part of the state read asks for only what it needs — a Warehouse
+    inventory over TDS, a Lakehouse's objects from storage, the catalogue and
+    its views as Spark SQL — and each is timed as its own Step.
 
     Nothing is packed to install. The archive survives only where it was always
     the point: ``--bundle`` keeps a build record, written after the install and
@@ -657,16 +649,9 @@ def _build_desktop_fabric(
                 control_lakehouse=control_lakehouse,
             )
         with session.step("Install"):
-            # The Installer runs *here*. Each action goes to the capability it
-            # needs — files straight to OneLake, T-SQL straight to TDS, control
-            # operations over REST — and only the actions that genuinely need
-            # Spark cross into the session.
-            #
-            # Which is why nothing is packed to install. Zipping the bundle,
-            # uploading it and unpacking it on the far side existed to get the
-            # payloads to where the Installer was; with the Installer here, the
-            # deployed Python tree takes the short path to OneLake. The archive
-            # below is a retained build record, not a delivery mechanism.
+            # The Installer runs here, so nothing is packed to install: the
+            # deployed Python tree goes straight to OneLake. The archive below
+            # is a retained build record, not a delivery mechanism.
             report = Installer(session, workspace=workspace).install(bundle).to_mapping()
         if retained_archive is not None:
             with session.step("Retain bundle", bundle.bundle_id):

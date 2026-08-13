@@ -1,10 +1,9 @@
 """Source preparation, state handover, bundle generation, and installation.
 
-A repository source is independent of the target estate. Remote sources are
-materialised once onto the current process's local filesystem; parsing and
-request validation finish before target state is read. Native builds keep all
-four stages in-environment. A desktop Fabric build serialises only ``BuildState``
-out and hands only a completed archive back for execution.
+A repository source is independent of the target estate: remote sources are
+materialised onto the local filesystem, and parsing and request validation
+finish before any target state is read. The four stages then run in one process
+whichever position that is, reaching the estate through Session capabilities.
 """
 
 from __future__ import annotations
@@ -600,16 +599,10 @@ def read_target_inventories(
     inventories = {}
     delta = []
 
-    # Each Warehouse is its own read over TDS, so each gets its own Sub-step and
-    # its own number. The Lakehouses cannot be split the same way and should not
-    # be: they share one crossing, which is one observation of one moment rather
-    # than several of several (AGENTS.md, "one state transition, one evidence
-    # payload"). So they are named together, honestly, as the one read they are.
-    #
-    # Each line says what it is doing, not just what it is doing it to. Children
-    # print above their parent, so a bare "Warehouse/Reporting" arrives before
-    # the "Read target inventories" it belongs to and reads as a stray line
-    # under the Task heading.
+    # A Warehouse is its own read over TDS and gets its own Sub-step; the
+    # Lakehouses are named together, as the one read they are. Each line says
+    # what it is doing rather than only what it is doing it to, because children
+    # print above the parent they belong to.
     for binding in bindings.entries:
         target = binding.to_bound_target()
         if target.kind == WAREHOUSE_TARGET:

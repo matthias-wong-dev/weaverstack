@@ -31,17 +31,13 @@ from .payloads import payload_path
 
 #: The phases one item's work is made of, in the order they must run.
 #:
-#: Prune and managed drops come first because they are the destructive
-#: reconciliation of what is already there. Schemas precede aliases so an alias
-#: materialised as a Warehouse view has a schema to be created in, and aliases
-#: precede builds so every document this item declares is built against a
-#: namespace that already holds what the item imports. The refresh closes the
+#: Prune and managed drops come first, as the destructive reconciliation of what
+#: is already there. Schemas precede aliases so a Warehouse-view alias has a
+#: schema to be created in, and aliases precede builds so every document is built
+#: against a namespace holding what the item imports. The refresh closes the
 #: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
-#: item's view or shortcut would be built over metadata that does not describe it.
-#: Load closes the item, after the refresh. Its artefacts depend on the item's
-#: structural work being finished and on nothing within their own layer — a
-#: deployed module and a generated procedure have no ordering between them,
-#: because nothing here runs them.
+#: item's view or shortcut would be built over stale metadata. Load follows it,
+#: unordered within its own layer — nothing here runs those artefacts.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"

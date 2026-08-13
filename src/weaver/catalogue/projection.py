@@ -1,25 +1,19 @@
 """Projecting one logical item's catalogue rows from a validated declaration.
 
-This is the boundary the whole design turns on. On one side is a declaration
-that has already been read, validated and closed, and a build that has already
-decided which items it is installing. On the other side are rows. Nothing here
-re-reads a source file, imports an object module, or asks a physical table what
-shape it is — every value comes from the validated declaration or from the
-declaration's own resolved graph.
+Nothing here re-reads a source file, imports an object module, or asks a
+physical table what shape it is: every value comes from the validated
+declaration or its resolved graph.
 
-**Only bound items are projected.** Objects owned by unbound items are *out of
-scope*, not deleted: a build has no opinion about an item it was not asked to
-install, and projecting them would invite a comparison that removed them.
+Only bound items are projected. Objects owned by unbound items are out of scope
+rather than deleted — projecting them would invite a comparison that removed
+them.
 
-**Every row is stamped with the same item scope.** The scope is passed in once
-and applied to every row, rather than each projector deriving it — a projector
-that derived it differently would silently write into the wrong installation,
-which the renderer then refuses.
+Every row is stamped with the same item scope, passed in once, so no projector
+can derive a different one and write into the wrong installation.
 
-**An alias is not a dependency.** A dependency row records the reference exactly
-as the author wrote it, and :data:`~weaver.catalogue.tables.ALIAS` records what
-the consuming item's alias points at. Joining Dependency, Alias and Registry is
-what yields the estate's whole graph; keeping them apart is what stops one item
+An alias is not a dependency. A dependency row records the reference as the
+author wrote it; :data:`~weaver.catalogue.tables.ALIAS` records what the
+consuming item's alias points at. Keeping them apart is what stops one item
 appearing to depend directly on another's physical object.
 """
 

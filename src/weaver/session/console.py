@@ -568,12 +568,10 @@ class ConsoleScope(WorkspaceScope):
         command that follows, so a failure here leaves the resource unstarted
         and the real attempt reports in its own terms.
 
-        What it returns matters as much as what it starts. Livy is warmed only
-        where it *can* start — a workspace naming no Environment cannot have a
-        session created against it — and a prompt that announced "starting
-        resources" and then quietly declined would be worse than one that says
-        nothing. So a skipped resource comes back with the reason it was
-        skipped, for the caller to show.
+        Livy is warmed only where it can start: a workspace naming no
+        Environment cannot have a session created against it. A skipped resource
+        comes back with the reason, so a caller can say why rather than
+        announcing work it declined to start.
         """
 
         from .requirements import AUTH, LIVY

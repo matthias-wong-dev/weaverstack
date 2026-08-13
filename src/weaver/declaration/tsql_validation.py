@@ -79,7 +79,7 @@ def generate_tsql_validation_batch(document: SesDocument, body: str) -> str:
 
     What ``weaver test --file`` executes. The locals stand in for the
     procedure's output parameters and are projected at the end, so a caller gets
-    the same counts from the same SQL — which is the point: a file run that
+    the same counts from the same SQL: a file run that
     compiled differently would be testing a different thing from the one a build
     installs.
     """
