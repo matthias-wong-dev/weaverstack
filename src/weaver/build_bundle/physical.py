@@ -476,7 +476,7 @@ def item_load_removals(
 
     Driven by the previous Registry rows rather than a diff against the target,
     which makes a rename ordinary: the old identity is no longer claimed and its
-    row says what to remove, while the new identity is simply new.
+    row says what to remove, while the new identity is new.
 
     The removals ride in the item's load layer alongside its writes. They cannot
     collide — an identity is either still claimed or not — so everything the

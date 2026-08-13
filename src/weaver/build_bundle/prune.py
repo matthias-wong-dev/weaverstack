@@ -495,7 +495,7 @@ def managed_sets(
     """The keep-set for one physical side: Delta objects, or Warehouse ones.
 
     ``alias_destinations`` belong in the keep-set: they are desired state in
-    this item as a declared document is, merely produced elsewhere, and a build
+    this item as a declared document is, produced elsewhere, and a build
     that pruned the shortcut it was about to create would be destructive and
     pointless. Which set one joins follows its physical form — a folder under
     Files, a view in a Warehouse, a table directory in a Lakehouse.

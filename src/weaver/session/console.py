@@ -670,7 +670,7 @@ class ConsoleScope(WorkspaceScope):
     # --- Livy ---------------------------------------------------------------
 
     def _acquire_livy(self):
-        """A Livy session that is running, not merely constructed.
+        """A Livy session that is running, rather than constructed.
 
         ``for_workspace`` builds the object; ``start`` asks Fabric for the
         session, waits for idle and runs the bootstrap. Returning the unstarted

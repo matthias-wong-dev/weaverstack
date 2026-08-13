@@ -28,10 +28,10 @@ class SqlToken:
 class SqlStatement:
     """One top-level statement, as it was written.
 
-    ``text`` excludes the terminating semicolon, because what an engine is asked
-    to execute is the statement rather than the separator. ``terminated`` keeps
-    the separator's presence, which is the whole of what a caller needs to
-    enforce a termination rule without re-splitting the text.
+    ``text`` excludes the terminating semicolon, since what an engine executes
+    is the statement rather than the separator. ``terminated`` records whether
+    there was one, so a caller can enforce a termination rule without
+    re-splitting.
     """
 
     text: str
@@ -44,8 +44,7 @@ class SqlStatement:
         """The leading significant keyword, upper-cased, or ``""``.
 
         Leading comments and whitespace are skipped, so a statement introduced
-        by an explanatory comment classifies by what it does rather than by what
-        it is prefaced with.
+        by a comment classifies by what it does.
         """
 
         return first_keyword(self.text)
@@ -92,10 +91,9 @@ def unterminated(sql_text: str) -> SqlStatement | None:
 def strip_terminator(sql_text: str) -> str:
     """The text with one trailing statement terminator removed, if it has one.
 
-    For the callers that embed an authored body into something that will run it
-    as a single unit — a shape-only build instruction, a view definition — where
-    the separator is not part of the statement and would be a syntax error where
-    it lands.
+    For callers embedding an authored body into something that runs it as one
+    unit — a shape-only build instruction, a view definition — where the
+    separator would be a syntax error.
     """
 
     stripped = (sql_text or "").strip()
@@ -106,8 +104,7 @@ def first_keyword(sql_text: str) -> str:
     """The first significant word of a statement, upper-cased.
 
     ``""`` when there is nothing but whitespace and comments. A leading ``(`` is
-    returned as itself, because a parenthesised query is a query and the caller
-    that cares needs to be able to say so.
+    returned as itself, so a caller can recognise a parenthesised query.
     """
 
     for token in flatten_with_offsets(sql_text):
@@ -125,9 +122,9 @@ def first_keyword(sql_text: str) -> str:
 def flatten_with_offsets(sql_text: str) -> list[SqlToken]:
     """Every token in ``sql_text``, flattened, with exact offsets and depth.
 
-    Offsets are into the original string and lose nothing, so a caller can slice
-    the source back out rather than reassembling it from tokens — which is what
-    keeps an authored program byte-identical through parsing.
+    Offsets are into the original string, so a caller slices the source back out
+    rather than reassembling it from tokens — which keeps an authored program
+    byte-identical through parsing.
     """
 
     flat: list[SqlToken] = []
