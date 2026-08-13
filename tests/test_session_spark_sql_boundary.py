@@ -242,6 +242,27 @@ def test_every_statement_in_a_batch_shares_the_exact_case_scope(
 
 
 @pytest.mark.parametrize("host", ["emulator", "notebook"])
+def test_a_failing_statement_still_puts_the_case_scope_back(
+    host, emulator, notebook, request
+):
+    """A session left case-sensitive by a failure would change every statement
+    that followed it, including ones from other work in the same session."""
+
+    class _Failing(_Spark):
+        def sql(self, statement):
+            super().sql(statement)
+            raise RuntimeError("analysis failed")
+
+    spark = _Failing()
+    session = request.getfixturevalue(host)(spark)
+
+    with pytest.raises(RuntimeError, match="analysis failed"):
+        session.execute_spark_sql_batch(["SELECT 1"], exact_case=True)
+
+    assert spark.conf.values[CASE_KEY] == "false"
+
+
+@pytest.mark.parametrize("host", ["emulator", "notebook"])
 def test_without_exact_case_the_host_default_stands(host, emulator, notebook, request):
     spark = _Spark()
     session = request.getfixturevalue(host)(spark)

@@ -174,13 +174,13 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     assert "sales_lh__DWG" in statement
 
 
-def test_a_spark_action_without_a_session_fails_saying_so():
+def test_a_spark_action_with_no_way_to_run_a_statement_fails_saying_so():
     result = execute_install_action(
         build_action(payload="p.sql"), VIEW_SQL, context=installation_context()
     )
 
     assert result.status == "failed"
-    assert "Spark session" in result.error_message
+    assert "no Spark SQL capability" in result.error_message
 
 
 def test_a_spark_action_with_no_destination_refuses_rather_than_guessing():

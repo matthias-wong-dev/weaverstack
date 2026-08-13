@@ -80,9 +80,12 @@ class InstallationContext:
     sql: Any = None
     #: One Spark SQL statement, wherever this host's Spark is, carrying Weaver's
     #: identifier-case scope with it. Present on a desktop where ``spark`` is
-    #: not: an executor that only needs to *ask Spark something* can stay here
-    #: and let the question cross, rather than crossing whole.
+    #: not: an executor whose work is a statement runs here and lets the
+    #: statement cross.
     spark_sql: Any = None
+    #: Several Spark SQL statements as one piece of work — ordered, one
+    #: submission where they cross, one identifier-case scope over all of them.
+    spark_sql_batch: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: This installation's publication instant, resolved into ``{{epoch}}``. One
     #: value for the whole run, so every Registry row a build writes carries the

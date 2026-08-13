@@ -25,14 +25,10 @@ from typing import Any
 from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
-from .spark_case import exact_identifier_case
 
 
 class SparkSqlExecutor:
 
-    #: This executor reaches Spark, so on a host without one the action
-    #: crosses whole rather than the capability being faked underneath it.
-    needs_spark = True
     name = "spark_sql"
 
     def execute(
@@ -43,21 +39,18 @@ class SparkSqlExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"spark_sql action {action.id!r} has no payload")
-        if context.spark is None:
+        if context.spark_sql is None:
             raise InstallError(
-                f"spark_sql action {action.id!r} needs a Spark session but none was provided"
+                f"spark_sql action {action.id!r} has no way to run a Spark "
+                "statement: this context offers no Spark SQL capability"
             )
-        catalogue = context.catalogue
-        statement = catalogue.expand(payload.decode("utf-8").strip())
-        with exact_identifier_case(
-            context.spark,
-            enabled=catalogue.destination.preserve_table_identifier_case,
-        ):
-            context.spark.sql(statement)
+        names = context.names
+        statement = names.expand(payload.decode("utf-8").strip())
+        context.spark_sql(statement, exact_case=names.exact_case)
         # The destination is reported, not just used: an install report that says
         # which Lakehouse each statement ran against is the record a reviewer needs
         # when the answer used to depend on what the session was attached to.
         return {
-            "destination": catalogue.destination.item,
+            "destination": names.destination.item,
             "statement_first_line": statement.splitlines()[0] if statement else "",
         }

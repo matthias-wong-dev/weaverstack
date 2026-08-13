@@ -163,10 +163,12 @@ def run_from_here(
         payload,
         context=InstallationContext(
             spark=None,
-            # From the Installer, as every production context gets it. A table
-            # alias needs a way to ask Spark whether it has become readable —
-            # the executor stays on the desktop and only that question crosses.
+            # From the Installer, as every production context gets them. An
+            # executor stays on the desktop and only its statements cross — a
+            # table alias asking whether it has become readable, a table build
+            # asking what shape its query has.
             spark_sql=installer.spark_sql(),
+            spark_sql_batch=installer.spark_sql_batch(),
             resolver=resolver,
             store=store,
             target=resolved[batch_target],

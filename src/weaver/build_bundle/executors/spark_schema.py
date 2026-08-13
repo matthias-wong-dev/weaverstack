@@ -36,9 +36,6 @@ from .base import InstallationContext
 
 class SparkSchemaExecutor:
 
-    #: This executor reaches Spark, so on a host without one the action
-    #: crosses whole rather than the capability being faked underneath it.
-    needs_spark = True
     name = "spark_schema"
 
     def execute(
@@ -49,16 +46,17 @@ class SparkSchemaExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"spark_schema action {action.id!r} has no payload")
-        if context.spark is None:
+        if context.spark_sql is None:
             raise InstallError(
-                f"spark_schema action {action.id!r} needs a Spark session but none "
-                "was provided"
+                f"spark_schema action {action.id!r} has no way to run a Spark "
+                "statement: this context offers no Spark SQL capability"
             )
         schema = json.loads(payload.decode("utf-8"))["schema"]
-        catalogue = context.catalogue
-        statement = catalogue.create_schema(schema, if_not_exists=False)
+        names = context.names
+        statement = names.create_schema_statement(schema, if_not_exists=False)
+        context.spark_sql(statement)
         return {
-            "destination": catalogue.destination.item,
-            "schema": catalogue.qualified_schema(schema),
+            "destination": names.destination.item,
+            "schema": names.qualified_schema(schema),
             "statement": statement,
         }

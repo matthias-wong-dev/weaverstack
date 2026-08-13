@@ -10,7 +10,13 @@ caused, and how a module's second test came to find nothing.
 from __future__ import annotations
 
 import pytest
-from factories import bound_target, item_id, registered_document, target_inventory
+from factories import (
+    bound_target,
+    item_id,
+    registered_document,
+    spark_sql_capability,
+    target_inventory,
+)
 
 from weaver.targets import ItemRef
 from weaver.build_bundle import execute_install_action, plan_item_build
@@ -45,11 +51,14 @@ def context_for(
     """
 
     target = resolved_for(lakehouses, item, target_id=target_id)
+    one, many = spark_sql_capability(spark)
     return InstallationContext(
         spark=spark,
         resolver=lakehouses.resolver,
         store=lakehouses.store,
         target=target,
+        spark_sql=one,
+        spark_sql_batch=many,
         targets={target.bound.id: target},
         epoch=epoch,
     )

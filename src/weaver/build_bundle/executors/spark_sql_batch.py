@@ -1,4 +1,8 @@
-"""Execute one ordered batch of Spark SQL statements from a JSON payload."""
+"""Execute one ordered batch of Spark SQL statements from a JSON payload.
+
+The statements belong to one action, so they travel as one piece of work: one
+submission where they cross, in order, under one identifier-case scope.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +13,10 @@ from ...errors import InstallError
 from ...spark.tokens import substitute_epoch
 from ..models import InstallAction
 from .base import InstallationContext
-from .spark_case import exact_identifier_case
 
 
 class SparkSqlBatchExecutor:
 
-    #: This executor reaches Spark, so on a host without one the action
-    #: crosses whole rather than the capability being faked underneath it.
-    needs_spark = True
     name = "spark_sql_batch"
 
     def execute(
@@ -27,9 +27,10 @@ class SparkSqlBatchExecutor:
     ) -> dict[str, Any]:
         if payload is None:
             raise InstallError(f"spark_sql_batch action {action.id!r} has no payload")
-        if context.spark is None:
+        if context.spark_sql_batch is None:
             raise InstallError(
-                f"spark_sql_batch action {action.id!r} needs a Spark session"
+                f"spark_sql_batch action {action.id!r} has no way to run Spark "
+                "statements: this context offers no Spark SQL capability"
             )
         try:
             statements = json.loads(payload.decode("utf-8"))
@@ -44,18 +45,17 @@ class SparkSqlBatchExecutor:
             raise InstallError(
                 f"spark_sql_batch action {action.id!r} must contain SQL strings"
             )
-        with exact_identifier_case(
-            context.spark,
-            enabled=context.catalogue.destination.preserve_table_identifier_case,
-        ):
-            for statement in statements:
-                # The epoch first: it is scoped to this installation rather than
-                # to a destination, and ``expand`` rejects every token it does
-                # not itself resolve — so one left behind here would be reported
-                # as an unresolvable name instead of quietly reaching the engine.
-                dated = substitute_epoch(statement.strip(), context.epoch)
-                context.spark.sql(context.catalogue.expand(dated))
+        names = context.names
+        # The epoch first: it is scoped to this installation rather than to a
+        # destination, and ``expand`` rejects every token it does not itself
+        # resolve — so one left behind here would be reported as an unresolvable
+        # name instead of quietly reaching the engine.
+        resolved = [
+            names.expand(substitute_epoch(statement.strip(), context.epoch))
+            for statement in statements
+        ]
+        context.spark_sql_batch(resolved, exact_case=names.exact_case)
         return {
-            "destination": context.catalogue.destination.item,
+            "destination": names.destination.item,
             "statement_count": len(statements),
         }

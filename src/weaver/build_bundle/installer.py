@@ -158,23 +158,40 @@ class Installer:
         return _Deferred(lambda: self.session.spark(self.workspace))
 
     def spark_sql(self):
-        """Ask this host's Spark one question, from wherever this is running.
+        """Run one Spark SQL statement, from wherever this is running.
 
-        The capability an executor needs when it only has a *question* — the
-        alias read probe is the case — rather than work that needs a real
-        DataFrame. Supplying it is what lets shortcut creation stay on the
-        desktop while the probe crosses.
+        The capability an executor needs when its work is a *statement* rather
+        than something that needs a real DataFrame. Supplying it is what lets an
+        action stay where the Installer is while only the statement crosses.
         """
 
         session = self.session
         workspace = self.workspace
 
-        def ask(statement: str, *, exact_case: bool = False):
+        def run(statement: str, *, exact_case: bool = False):
             return session.execute_spark_sql(
                 statement, exact_case=exact_case, workspace=workspace
             )
 
-        return ask
+        return run
+
+    def spark_sql_batch(self):
+        """Run several Spark SQL statements together, as one piece of work.
+
+        Ordered, in one submission where they cross, under one identifier-case
+        scope. That is what a setup and the query reading it need, and it is why
+        an action carrying several statements does not become several trips.
+        """
+
+        session = self.session
+        workspace = self.workspace
+
+        def run(statements, *, exact_case: bool = False):
+            return session.execute_spark_sql_batch(
+                statements, exact_case=exact_case, workspace=workspace
+            )
+
+        return run
 
     def sql_for(self, bound: BoundTarget) -> Any:
         """The Warehouse connection for a batch, from the Session that owns it.
@@ -392,6 +409,7 @@ def _run_sequence(
             context = InstallationContext(
                 spark=installer.spark_when_needed(),
                 spark_sql=installer.spark_sql(),
+                spark_sql_batch=installer.spark_sql_batch(),
                 resolver=installer.resolver,
                 store=installer.store,
                 target=target,
