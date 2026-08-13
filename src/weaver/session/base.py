@@ -26,11 +26,9 @@ from .telemetry import SessionTelemetry
 def workspace_context(workspace: Workspace) -> tuple:
     """The identity a Session caches resources under.
 
-    Not the ``Workspace`` itself: it carries mappings of target declarations, so
-    it is unhashable, and two configurations that differ only in which targets
-    they declare still address the same Fabric workspace with the same items and
-    the same Livy session. What matters for resource identity is the place, the
-    control Lakehouse and the Environment the code will run in.
+    Not the ``Workspace`` itself: it carries target declarations, so it is
+    unhashable, and two configurations differing only in those still address the
+    same workspace, items and Livy session.
     """
 
     return (
@@ -63,9 +61,8 @@ SUBSTEP = "substep"
 class ReportingFrame:
     """One Task, Step or Sub-step, and what it cost.
 
-    ``elapsed`` is None while the frame is open and a duration once it closes —
-    which is the only honest way to hold it, because a frame that is still
-    running has no elapsed time, it has an age.
+    ``elapsed`` is None while the frame is open and a duration once it closes; a
+    frame still running has an age rather than an elapsed time.
     """
 
     kind: str
@@ -203,9 +200,8 @@ class Session(ABC):
     def resolver(self, workspace: Workspace | None = None):
         """The one resolver for this workspace context, with its own cache.
 
-        One per Session lifetime rather than one per operation. A resolver
-        rebuilt for each call carries a cache that is always empty, so every
-        operation re-asks the workspace what the same names mean.
+        One per Session lifetime: rebuilt per call, its cache would always be
+        empty and every operation would re-ask what the same names mean.
         """
 
         return self.scope(workspace).resolver
@@ -218,10 +214,9 @@ class Session(ABC):
     def transport_store(self, workspace: Workspace | None = None):
         """The store this host writes *across* the boundary with.
 
-        The same thing as :meth:`store` wherever Weaver is already inside the
-        workspace. A console reaching into Fabric has no within-workspace store
-        at all, so this is where a bundle archive crosses — which is a Session
-        concern, not something a Builder should know how to do.
+        The same as :meth:`store` wherever Weaver is already inside the
+        workspace. A console reaching into Fabric has no within-workspace store,
+        so this is where a bundle archive crosses.
         """
 
         return self.scope(workspace).transport_store
@@ -259,9 +254,8 @@ class Session(ABC):
     ) -> Any:
         """Run a Python program where this host's data engineering happens.
 
-        The program returns a value by calling ``emit(...)``; what comes back is
-        that payload. A console reaching into Fabric crosses Livy here; a
-        notebook is already there.
+        The program returns a value by calling ``emit(...)``. A console reaching
+        into Fabric crosses Livy here; a notebook is already there.
         """
 
     @abstractmethod
@@ -315,8 +309,7 @@ class Session(ABC):
         """Run one T-SQL statement against a named Warehouse, over TDS.
 
         A statement, not a question: nothing comes back. Asking is
-        :meth:`query_tsql`, and the two are separate because the SQL layer
-        separates them — reading a result set from a statement that produces
+        :meth:`query_tsql`. Reading a result set from a statement that produces
         several answers with whichever came first, which is how a failing check
         reports as passing.
         """
@@ -371,11 +364,10 @@ class Session(ABC):
 
     # --- the paired form, which is the one to use ----------------------------
     #
-    # A frame that is not closed is worse than one that was never opened: it
-    # swallows everything nested under it and reports a duration for work that
-    # stopped. So instrumentation is written as a `with`, and the explicit
-    # started/completed pairs above remain for the few callers that genuinely
-    # cannot bracket their work in one place.
+    # An unclosed frame swallows everything nested under it and reports a
+    # duration for work that stopped, so instrumentation is written as a `with`.
+    # The explicit pairs above remain for callers that cannot bracket their work
+    # in one place.
 
     @contextmanager
     def task(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
@@ -398,11 +390,9 @@ class Session(ABC):
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:
             # The one safe moment to replace a dead resource. A Livy session
-            # that dies mid-Task takes every RuntimeScope in it with it, so a
-            # run continuing on a replacement interpreter would dispatch against
-            # scopes that no longer exist — succeeding at nothing, silently. So
-            # the failure stands, the Task fails, and the *next* Task gets a
-            # fresh acquisition.
+            # that dies mid-Task takes its RuntimeScopes with it, so a run
+            # continuing on a replacement would dispatch against scopes that no
+            # longer exist. The Task fails; the next one acquires afresh.
             self.recover()
         frame = self._enter(kind, name, detail)
         try:
@@ -468,9 +458,8 @@ class Session(ABC):
         """Tell the operator something they should know but need not act on now.
 
         Overridable, so a notebook can render it and a test can collect it. The
-        default reaches stderr because the alternative — a library that notices a
-        problem and says nothing — is how a mismatched deployment stays invisible
-        until it produces a confusing failure somewhere else.
+        default reaches stderr: a mismatched deployment that warned about
+        nothing stays invisible until it fails somewhere confusing.
         """
 
         import sys
@@ -499,9 +488,8 @@ class Session(ABC):
 class WorkspaceScope:
     """One workspace's resolver, store and expensive resources, for a Session.
 
-    Not a doer and not a second Session: it holds no execution semantics, only
-    the things that are expensive to acquire and safe to share for as long as
-    the Session lives.
+    It holds no execution semantics, only what is expensive to acquire and safe
+    to share for as long as the Session lives.
     """
 
     def __init__(
@@ -581,10 +569,9 @@ class WorkspaceScope:
     def recover(self) -> None:
         """Permit one further acquisition of anything that failed here.
 
-        Bounded by the resource's own allowance, and deliberately quiet when
-        that allowance is spent: a resource that will not come back should say
-        so to whoever *uses* it, naming what it was for, rather than failing a
-        Task before it has begun.
+        Bounded by the resource's own allowance, and quiet when it is spent: a
+        resource that will not come back says so to whoever uses it, rather than
+        failing a Task before it has begun.
         """
 
         from .resources import ResourceError, ResourceState

@@ -7,11 +7,9 @@ sequence begins. It records exactly one result per action and persists the
 report. It never reads the source repository, resolves a dependency or selects a
 target — every such decision is already in the bundle.
 
-Build is not load: the installer runs generated create DDL, creates folder
-directories, deploys an item's runtime code, and reconciles the target — it never
-executes an object's code, and it has no route back to the source repository at
-all, because a bundle carries its outputs rather than a second copy of its
-inputs.
+Build is not load: it runs generated create DDL, creates folder directories,
+deploys an item's runtime code and reconciles the target. It never executes an
+object's code, and has no route back to the source repository.
 
 Everything runs one at a time. Sequences are serial because a sequence is a
 barrier; the actions within a batch are serial too — see :data:`_WHY_SERIAL`.
