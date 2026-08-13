@@ -1,9 +1,8 @@
 """Render one item's frozen physical prune, drop, schema and build stages.
 
-Every function here plans for exactly one logical item against exactly one bound
-target. That is the shape multi-item build needs: the item graph orders the items,
-and inside an item the document graph orders the work, so nothing here reaches
-across items or chooses a sequence number.
+Every function here plans one logical item against one bound target. The item
+graph orders the items and the document graph orders the work inside one, so
+nothing here reaches across items or chooses a sequence number.
 """
 
 from __future__ import annotations
@@ -81,7 +80,7 @@ def _slug(value) -> str:
 
     Separators, spaces and the shape marker's colon all go: a payload path must
     stay relative and inside the bundle, and a colon reads as a drive letter on
-    one of the platforms a bundle is unpacked on.
+    Windows.
     """
 
     return str(value).replace("/", "--").replace(" ", "-").replace(":", "-")
@@ -97,12 +96,10 @@ def item_prune_stage(
 ) -> PlannedStage | None:
     """Freeze one item's authoritative repository/inventory diff.
 
-    The keep-set is derived here rather than handed in, and the load artefacts
-    are why. They contribute the ``_`` schema a Warehouse's generated procedures
-    live in, which no document declares — so a caller that did not think to pass
-    them would produce a prune that drops the schema the same build just created.
-    A destructive default is not something to leave reachable, and the repository
-    is already here, so nothing has to be remembered.
+    The keep-set is derived here rather than handed in, because the load
+    artefacts contribute the ``_`` schema a Warehouse's generated procedures live
+    in and no document declares it. A caller that forgot to pass them would
+    prune the schema the same build just created.
     """
 
     documents = {
@@ -273,9 +270,8 @@ def item_schema_stage(
     """The schemas this item needs and its target does not already hold.
 
     ``extra_schemas`` carries the schemas the item's planned aliases land in.
-    They are the item's own declared schemas — an alias destination has to be —
-    but no *document* of the item need live in them, so a namespace an alias
-    depends on would otherwise never be created.
+    They are the item's own declared schemas, but no document of the item need
+    live in them, so the namespace would otherwise never be created.
     """
 
     present = {schema.casefold() for schema in inventory.schemas}
@@ -331,11 +327,9 @@ def item_schema_stage(
 class RenderedAction:
     """One authored document turned into one action and its frozen payload.
 
-    The smallest unit the build has: a declaration in, an executable out. Kept as
-    a value rather than written straight into a stage's payload dict so that the
-    mapping from *declaration* to *bundle action* — which executor runs it, what
-    the payload is called, what its hash is — can be examined on its own, without
-    planning an item or generating a bundle to see it.
+    The smallest unit the build has: a declaration in, an executable out. A
+    value rather than a direct write into a stage's payloads, so the mapping
+    from declaration to action can be examined without planning an item.
 
     ``payloads`` is empty for a folder, which is created rather than executed.
     """
@@ -347,10 +341,9 @@ class RenderedAction:
 def render_document_build_action(identity, source) -> RenderedAction:
     """The InstallAction and payload one declared document renders to.
 
-    This is where ``source.create_ddl()`` becomes something a bundle can carry:
-    the DDL says *what statement*, and this says what action runs it, under what
-    id, with which executor, and against which frozen bytes. The two are separate
-    claims and are worth failing separately.
+    Where ``source.create_ddl()`` becomes something a bundle can carry: the DDL
+    says what statement, and this says what action runs it, under what id, with
+    which executor and against which frozen bytes.
     """
 
     action_slug = _slug(identity)
@@ -389,10 +382,9 @@ def render_document_build_action(identity, source) -> RenderedAction:
 def render_load_build_action(artefact) -> RenderedAction:
     """The action and frozen payload one load artefact installs as.
 
-    The load half of :func:`render_document_build_action`, and the same claim:
-    what runs it, under what id, against which bytes. A file is written into the
-    runtime tree by the ``load_file`` executor; a procedure is a create-or-alter
-    run by ``tsql``, which needs no knowledge that it happens to be a procedure.
+    The load half of :func:`render_document_build_action`. A file is written
+    into the runtime tree by the ``load_file`` executor; a procedure is a
+    create-or-alter run by ``tsql``, which needs no knowledge of what it builds.
     """
 
     action_slug = _slug(artefact.identity)
@@ -425,15 +417,13 @@ def item_load_stages(
 ) -> tuple[PlannedStage, ...]:
     """One item's load layer: the last thing it does, and one barrier wide.
 
-    A single stage rather than dependency layers, because there are no
-    dependencies to express — nothing here runs anything, so a deployed module
-    and a generated procedure have no ordering between them. What they *do*
-    depend on is the item's structural work, and that is expressed by the layer
-    being last rather than by an edge.
+    A single stage rather than dependency layers: nothing here runs anything, so
+    a deployed module and a generated procedure have no ordering between them.
+    What they depend on is the item's structural work, expressed by the layer
+    being last.
 
-    Empty when the item has no selected load work, which is a phase with nothing
-    to do rather than an empty barrier: an unpopulated stage takes no sequence
-    number.
+    Empty when the item has no selected load work; an unpopulated stage takes no
+    sequence number.
     """
 
     selected = [
@@ -484,14 +474,13 @@ def item_load_removals(
 ) -> tuple[PlannedStage, ...]:
     """Frozen removals for load artefacts the source has stopped claiming.
 
-    Driven by the previous Registry rows rather than by a diff against the
-    target, and that is what makes a rename ordinary: the old identity is no
-    longer claimed, so its row names exactly what to remove and where, while the
-    new identity is simply new. Nothing has to notice that the two are related.
+    Driven by the previous Registry rows rather than a diff against the target,
+    which makes a rename ordinary: the old identity is no longer claimed and its
+    row says what to remove, while the new identity is simply new.
 
     The removals ride in the item's load layer alongside its writes. They cannot
-    collide — an identity is either still claimed or not — and keeping them
-    together means everything the load layer does to a target is in one barrier.
+    collide — an identity is either still claimed or not — so everything the
+    load layer does is in one barrier.
     """
 
     # Scoped by what the Registry says each removed object *is*, not by what its

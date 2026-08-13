@@ -63,12 +63,9 @@ class _Managed:
 class TargetInventory:
     """Transport-neutral physical state prepared before bundle generation.
 
-    ``files`` and ``procedures`` are what a load layer installs, and they are
-    read like everything else here. A type the inventory cannot see would be
-    disproved by every reconciliation — the claim tested against nothing and
-    found missing — so an artefact would be rebuilt on every build, silently.
-    Observing them is what lets the ordinary machinery answer presence, physical
-    deletion and drift for load artefacts too.
+    ``files`` and ``procedures`` are what a load layer installs, read like
+    everything else here. A type the inventory could not see would be disproved
+    by every reconciliation and rebuilt on every build.
     """
 
     target_id: str
@@ -262,11 +259,10 @@ def read_lakehouse_inventory(
 def _load_files(store: Store, files_root) -> tuple[str, ...]:
     """Every deployed load file, as the path beneath ``Files`` that names it.
 
-    Scoped to the runtime tree rather than the whole Files area, and deliberately:
-    a Folder object's *contents* are data an item loaded, not objects Weaver
-    installed, so walking all of Files would inventory rows as though they were
-    artefacts. The load tree is the one place a build puts individual files it
-    claims one by one.
+    Scoped to the runtime tree rather than the whole Files area: a Folder
+    object's contents are data an item loaded, so walking all of Files would
+    inventory rows as artefacts. The load tree is where a build puts individual
+    files it claims one by one.
     """
 
     root = files_root / LOAD_ROOT.split("/")[0]
@@ -365,11 +361,10 @@ def render_inventory_prune(
     caller owns which sequence these actions land in and therefore which payload
     directory they live under.
 
-    Returns the changes alongside, and this is the one place they are not merely
-    convenient. A prune action carries no ``resource_node_id`` — the object it
-    removes has no node in the repository, which is why it is being pruned — so
-    what a prune destroys is otherwise recorded nowhere a reader or a test can
-    reach without parsing SQL.
+    The changes come back alongside, and here they are load-bearing: a prune
+    action carries no ``resource_node_id``, because the object it removes has no
+    node in the repository, so what it destroys is otherwise recorded nowhere
+    reachable without parsing SQL.
     """
 
     actions: list[InstallAction] = []
@@ -499,20 +494,17 @@ def managed_sets(
 ) -> _Managed:
     """The keep-set for one physical side: Delta objects, or Warehouse ones.
 
-    ``alias_destinations`` are the item's alias destinations. They belong in the
-    keep-set because they are desired state in this item exactly as a declared
-    document is — merely produced somewhere else — and a build that pruned the
-    shortcut or view it was about to create would be both destructive and
-    pointless. Which set an alias joins follows its physical form: a folder under
+    ``alias_destinations`` belong in the keep-set: they are desired state in
+    this item as a declared document is, merely produced elsewhere, and a build
+    that pruned the shortcut it was about to create would be destructive and
+    pointless. Which set one joins follows its physical form — a folder under
     Files, a view in a Warehouse, a table directory in a Lakehouse.
 
-    ``load_identities`` contribute the one namespace a document cannot: the ``_``
-    schema a Warehouse's generated load procedures live in. Nothing *declares* a
-    document there, so without this the schema would be an orphan and every build
-    would drop the schema it had just created. It is derived from the artefacts
-    rather than added unconditionally, which is what lets the schema go when the
-    last procedure does. On the Lakehouse side the runtime tree needs nothing
-    here — it is a declared folder, and is spared as one.
+    ``load_identities`` contribute the ``_`` schema a Warehouse's generated load
+    procedures live in, which nothing declares: without it every build would
+    drop the schema it had just created. Derived from the artefacts rather than
+    added unconditionally, so the schema goes when the last procedure does. The
+    Lakehouse runtime tree needs nothing here, being a declared folder.
     """
 
     tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
