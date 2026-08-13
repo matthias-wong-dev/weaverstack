@@ -65,11 +65,9 @@ WAREHOUSE_TARGET = "warehouse"
 #: Map Weaver document kinds to the catalogue's lower-case vocabulary.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
 
-#: How a validation kind names itself in ``TestDictionary.test_type``. A
-#: separate vocabulary from the Registry's ``object_role``, because the logical
-#: declaration and the physical primitive are different things — the dictionary
-#: describes the Test, the Registry certifies the procedure or module it
-#: compiled to.
+#: How a validation kind names itself in ``TestDictionary.test_type``. Separate
+#: from the Registry's ``object_role``: the dictionary describes the Test, the
+#: Registry certifies the procedure or module it compiled to.
 TEST_TYPE_FOR_KIND = {TEST: "test", ASSUMPTION: "assumption"}
 
 
@@ -96,22 +94,17 @@ def project_item_catalogue(
 ) -> CatalogueProjection:
     """One item's catalogue rows, from the declaration and nothing else.
 
-    Every value here is a function of *source*: what the item declares, what it
-    aliases, what its documents describe. Nothing about a build, a binding or a
-    target reaches it. That is what makes the projection something a developer
-    keeps correct by adding a declaration, rather than a fixture someone has to
-    remember to update alongside one.
+    Every value is a function of source: what the item declares, aliases and
+    describes. Nothing about a build, a binding or a target reaches it, so a
+    developer keeps the projection correct by adding a declaration.
 
-    Not an *installation* projection, despite what this was once called. It says
-    what the repository declares; whether any of it has been installed, where,
-    and by which Weaver are separate facts composed at publication.
+    It says what the repository declares; whether any of it is installed, where,
+    and by which Weaver are composed at publication.
 
-    **No Registry row is written for an alias destination.** The Alias row —
-    this name points at that object — is a declaration and belongs here. The
-    Registry row is a certification that a physical object exists at that name
-    *and what it is*, and an alias is a view in a Warehouse and a table in a
-    Lakehouse. That cannot be answered without a binding, so it is not answered
-    here; see :func:`project_alias_registry`.
+    No Registry row is written for an alias destination. The Alias row is a
+    declaration and belongs here; the Registry row certifies that a physical
+    object exists at that name and what it is, which needs a binding — see
+    :func:`project_alias_registry`.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -360,14 +353,12 @@ def project_alias_registry(
 ) -> tuple[Row, ...]:
     """Registry rows certifying this item's alias destinations, given a binding.
 
-    Separate from :func:`project_item_catalogue` because it is the one part of an
-    item's catalogue that cannot be derived from source: an alias is registered
-    as the thing it physically *is*, and that depends on what it was bound to.
+    Separate from :func:`project_item_catalogue` because it is the one part of
+    an item's catalogue that source cannot derive: an alias is registered as
+    what it physically is, which depends on its binding.
 
-    Requiring the kind rather than defaulting it is deliberate. A default would
-    write a *wrong* Registry row quietly — a Warehouse alias recorded as a table —
-    and a wrong certification is the one failure the catalogue must never produce
-    on its own.
+    The kind is required rather than defaulted, because a default would quietly
+    record a Warehouse alias as a table.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -393,16 +384,13 @@ def project_alias_registry(
 def _alias_object_type(destination: WeaverDocumentId, target_kind: str) -> str:
     """What an alias destination physically *is*, in the catalogue's vocabulary.
 
-    Not a type of its own. An alias is registered as the thing it actually is —
-    a folder under ``Files``, a view in a Warehouse, a table in a Lakehouse —
-    because to every reader of the catalogue that is what it is, and because the
-    operations that matter (does it exist, how is it addressed, how is it
-    dropped) are the ordinary ones for that type. That a Lakehouse table alias
-    happens to be implemented as a OneLake shortcut is execution detail, the way
-    a managed table's storage layout is.
+    Not a type of its own: an alias is registered as what it is — a folder under
+    ``Files``, a view in a Warehouse, a table in a Lakehouse — so existence,
+    addressing and dropping are the ordinary operations for that type. A
+    Lakehouse table alias being a OneLake shortcut is execution detail.
 
-    Its *alias-ness* is not lost: :data:`~weaver.catalogue.tables.ALIAS` records
-    it, and that is the only place that does.
+    Its alias-ness is recorded by :data:`~weaver.catalogue.tables.ALIAS`, and
+    nowhere else.
     """
 
     if destination.is_files:

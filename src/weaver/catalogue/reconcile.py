@@ -83,9 +83,8 @@ class TableReconciliation:
 class CatalogueReconciliation:
     """One installation's catalogue statements, unconditionally.
 
-    The grouping is the contract: dictionaries may run in any order among
-    themselves, Installation follows them, and Registry follows everything. A
-    caller turns each group into its own barrier.
+    The grouping is the contract: dictionaries in any order among themselves,
+    then Installation, then Registry. A caller turns each group into a barrier.
 
     Not what a build produces — see :class:`CataloguePublication`.
     """
@@ -118,17 +117,14 @@ class CatalogueReconciliation:
 def reconcile(projection: CatalogueProjection) -> CatalogueReconciliation:
     """Authoritative scoped replacement of one installation, from its projection.
 
-    **Not the build path.** A build publishes a *difference* — see
-    :func:`publish` — so that an unchanged table produces no statement and an
-    identical second build does nothing at all. This renders one installation's
-    statements from the desired side alone, unconditionally: the delete keeps
-    exactly the keys the projection claims and the merge is idempotent, so the
-    pair is correct against any prior state including one nobody read.
+    Not the build path: a build publishes a difference (:func:`publish`), so an
+    unchanged table produces no statement. This renders one installation from
+    the desired side alone — the delete keeps exactly the keys the projection
+    claims and the merge is idempotent, so the pair is correct against any prior
+    state, including one nobody read.
 
-    That property is exactly what an explicit repair mode wants and exactly what
-    ordinary build must not have. Reaching this from a build path would restore
-    the unconditional rewrite this module's header describes replacing, so the
-    two are kept apart by name rather than by a flag.
+    That is what an explicit repair mode wants and what ordinary build must not
+    have, so the two are kept apart by name rather than by a flag.
     """
 
     scope = projection.scope
@@ -186,9 +182,8 @@ class TablePublication:
 class CataloguePublication:
     """Every catalogue statement one build appends, grouped by when it may run.
 
-    The grouping is the contract, and it survives the change of orientation:
-    dictionaries may run in any order among themselves, Installation follows
-    them, and Registry follows everything.
+    The grouping is the contract: dictionaries in any order among themselves,
+    then Installation, then Registry.
     """
 
     dictionaries: tuple[TablePublication, ...]
@@ -222,7 +217,7 @@ def publish(current, desired) -> CataloguePublication:
 
     Read it as *persisted* → *certified*. Only the items ``desired`` names are
     considered, so a scoped build cannot touch an installation it was not
-    pointed at, however much of the catalogue it read.
+    pointed at.
     """
 
     return CataloguePublication(
@@ -238,12 +233,10 @@ def publish(current, desired) -> CataloguePublication:
 def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublication:
     """One table's delete and merge, across every scope that needs them.
 
-    The two are computed from different row sets, and conflating them would be a
-    silent data-loss bug rather than an inefficiency. The *merge* carries only
-    rows that are new or changed, because an unchanged row needs no statement.
-    The *delete* is given every desired row for the scopes it covers, because it
-    works by keeping what is claimed — handing it only the changed rows would
-    make it delete every unchanged row in those scopes.
+    The two take different row sets, and conflating them loses data. The merge
+    carries only new or changed rows. The delete is given every desired row for
+    the scopes it covers, because it works by keeping what is claimed: handed
+    only the changed rows, it would delete every unchanged one.
     """
 
     changed: list[Row] = []
@@ -304,9 +297,8 @@ def compare(
 ) -> TableChanges:
     """How one table's rows differ from what is there — for review, not for DML.
 
-    A row is *unchanged* when every non-key column matches, which is exactly the
-    condition the merge's ``MATCHED`` guard tests. So a reported no-op is a real
-    no-op: the statement will run and write nothing.
+    A row is unchanged when every non-key column matches, which is what the
+    merge's ``MATCHED`` guard tests — so a reported no-op is a real one.
     """
 
     wanted = _keyed(table, desired)
