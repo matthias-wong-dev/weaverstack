@@ -19,12 +19,9 @@ from ..errors import WeaverError
 
 
 class RunError(WeaverError):
-    """A run could not proceed.
+    """An error raised when a run cannot proceed.
 
-    The runtime's own error, so a run raises without reaching for a load's
-    vocabulary. ``result`` carries whatever the failure was holding — a load's
-    counts, a validation's judgement — because a reader handed only an exception
-    has to go and ask the estate what it was, and that is what they came for.
+    ``result`` retains operation-specific evidence when it is available.
     """
 
     def __init__(self, message: str, *, result: object | None = None) -> None:
@@ -33,27 +30,16 @@ class RunError(WeaverError):
 
 
 def reports_outcome(result: object) -> bool:
-    """Whether this is something a run can settle: does it say if it succeeded?"""
+    """Return whether a result reports a success outcome."""
 
     return hasattr(result, "succeeded")
 
 
 def represent(result: object) -> dict | None:
-    """One result, as a mapping, without assuming which kind of result it is.
+    """Serialise a result without requiring an operation-specific type.
 
-    The Runner's contract is that a result reports whether it succeeded. Its
-    *serialization* has to be exactly as narrow, or the contract quietly becomes
-    "reports whether it succeeded, and also happens to look like a load result"
-    — and the day a semantic-model refresh returns something else, a run that
-    executed perfectly would fail while writing itself down.
-
-    So three ways of asking, in order of how much the result has chosen to say:
-
-    .. code-block:: text
-
-        to_mapping()   the result describes itself
-        as_row()       the result is row-shaped, as Weaver's own are
-        neither        what every result must answer, and nothing more
+    All results report ``succeeded``; richer result types provide their own
+    mapping or row representation.
     """
 
     if result is None:
@@ -70,13 +56,7 @@ def represent(result: object) -> dict | None:
 
 @dataclass(frozen=True)
 class RunFailure:
-    """A failure a primitive did not describe, in the shape a result has.
-
-    Used where nothing came back that could report an outcome — a dispatch that
-    threw without carrying a result, or one that returned something else
-    entirely. Deliberately minimal: inventing counts here would put numbers in a
-    report that nothing measured.
-    """
+    """Represent a dispatch failure that has no operation-specific result."""
 
     error_message: str
     succeeded: bool = False

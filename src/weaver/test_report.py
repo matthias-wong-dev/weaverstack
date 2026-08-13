@@ -46,11 +46,9 @@ class ValidationNodeReport:
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "ValidationNodeReport":
-        """Read one node back, whichever side of a transport wrote it.
+        """Read one node report from a transport mapping.
 
-        Diagnostics are never carried: they are not in the mapping, so a report
-        that crossed a boundary has counts and no rows — which is what the
-        design says a durable or transported record holds.
+        Transported reports include durable counts but not diagnostic rows.
         """
 
         from .runtime.validation_result import AssumptionResult, TestResult
@@ -112,12 +110,9 @@ class ValidationRunReport:
 
     @property
     def succeeded(self) -> bool:
-        """Nothing failed and nothing was unrunnable.
+        """Return whether no validation failed or was invalid.
 
-        ``PLANNED`` counts, and has to: a dry run dispatched nothing, so there
-        is nothing for it to have got wrong, and a non-zero exit would tell a
-        pipeline that asking what *would* run had failed. The node property
-        agrees, which it did not before — and the CLI reads this one.
+        A planned dry run is successful because it dispatches no validation.
         """
 
         return self.status in (PASSED, PLANNED)
@@ -139,12 +134,7 @@ class ValidationRunReport:
         raise KeyError(name)
 
     def totals(self) -> dict[str, int]:
-        """What a completion document aggregates.
-
-        Physical counts throughout — the symmetric difference's own rows — and
-        no manufactured logical "changed row" count, which would need a key that
-        a Test is not required to have.
-        """
+        """Return the report's physical discrepancy and violation counts."""
 
         missing = unexpected = violations = 0
         for node in self.nodes:
@@ -190,13 +180,7 @@ class ValidationRunReport:
 
 
 def run_status(nodes: Sequence[ValidationNodeReport]) -> str:
-    """The run's status, from its nodes, worst first.
-
-    A run with something unrunnable in it is invalid even if every validation
-    that *did* run passed: the estate could not answer the question it was
-    asked, and reporting that as a pass is the failure mode the whole status
-    vocabulary exists to prevent.
-    """
+    """Return the run status from node statuses, with invalid taking priority."""
 
     statuses = {node.status for node in nodes}
     if INVALID in statuses:
