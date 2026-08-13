@@ -113,15 +113,31 @@ class BoundTarget:
 class LakehouseBinding:
     """A bound destination Lakehouse for Folder and Delta materialisation."""
 
+    #: Which of the two a caller is holding, declared rather than inferred from
+    #: whichever item field the class happens to carry.
+    kind = LAKEHOUSE_TARGET
+
     lakehouse: ItemRef
     workspace_id: str | None = None
     #: The concrete Fabric item id; locally the logical Lakehouse name serves.
     item_id: str | None = None
 
+    @property
+    def item(self) -> ItemRef:
+        """The bound item, under a name that does not presume its kind."""
+
+        return self.lakehouse
+
+    @property
+    def physical_kind(self) -> str:
+        """The kind as the target grammar spells it, for a message or a lookup."""
+
+        return LAKEHOUSE
+
     def to_bound_target(self) -> BoundTarget:
         return BoundTarget(
-            id=f"{LAKEHOUSE_TARGET}-{self.lakehouse.name}",
-            kind=LAKEHOUSE_TARGET,
+            id=f"{self.kind}-{self.lakehouse.name}",
+            kind=self.kind,
             item_id=self.item_id or self.lakehouse.name,
             item_name=self.lakehouse.name,
             workspace_id=self.workspace_id,
@@ -133,15 +149,29 @@ class WarehouseBinding:
     """A bound destination Warehouse. Present so the boundary is visible; v1
     installation of Warehouse work is not supported and raises."""
 
+    kind = WAREHOUSE_TARGET
+
     warehouse: ItemRef
     workspace_id: str | None = None
     item_id: str | None = None
     sql_endpoint_id: str | None = None
 
+    @property
+    def item(self) -> ItemRef:
+        """The bound item, under a name that does not presume its kind."""
+
+        return self.warehouse
+
+    @property
+    def physical_kind(self) -> str:
+        """The kind as the target grammar spells it, for a message or a lookup."""
+
+        return WAREHOUSE
+
     def to_bound_target(self) -> BoundTarget:
         return BoundTarget(
-            id=f"{WAREHOUSE_TARGET}-{self.warehouse.name}",
-            kind=WAREHOUSE_TARGET,
+            id=f"{self.kind}-{self.warehouse.name}",
+            kind=self.kind,
             item_id=self.item_id or self.warehouse.name,
             item_name=self.warehouse.name,
             workspace_id=self.workspace_id,

@@ -700,12 +700,7 @@ def _build_desktop_fabric(
 
 
 def _binding_text(binding) -> str:
-    target = binding.target
-    if hasattr(target, "lakehouse"):
-        physical = f"Lakehouse/{target.lakehouse.name}"
-    else:
-        physical = f"Warehouse/{target.warehouse.name}"
-    return f"{physical}={binding.item}"
+    return f"{binding.target.physical_kind}/{binding.target.item.name}={binding.item}"
 
 
 def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):

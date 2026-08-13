@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..build_bundle.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 from ..errors import BuildError
 from .resources import (
     ENVIRONMENT,
@@ -37,6 +38,15 @@ from .resources import (
     find_workspace,
     list_items,
 )
+
+
+#: A binding's target kind, as the Fabric item type the workspace must hold it
+#: as. Two vocabularies that happen to name the same two things, so the mapping
+#: is written out rather than left to a spelling coincidence.
+_ITEM_TYPE_FOR_BINDING = {
+    LAKEHOUSE_TARGET: LAKEHOUSE,
+    WAREHOUSE_TARGET: WAREHOUSE,
+}
 
 
 class PreflightError(BuildError):
@@ -91,15 +101,10 @@ def required_items(
     if environment:
         wanted.append(RequiredItem(environment, ENVIRONMENT, "Environment"))
     for binding in bindings.entries:
-        target = binding.target
-        if hasattr(target, "lakehouse"):
-            wanted.append(
-                RequiredItem(target.lakehouse.name, LAKEHOUSE, "Lakehouse target")
-            )
-        else:
-            wanted.append(
-                RequiredItem(target.warehouse.name, WAREHOUSE, "Warehouse target")
-            )
+        item_type = _ITEM_TYPE_FOR_BINDING[binding.target.kind]
+        wanted.append(
+            RequiredItem(binding.target.item.name, item_type, f"{item_type} target")
+        )
 
     seen: dict[tuple[str, str], RequiredItem] = {}
     for item in wanted:
