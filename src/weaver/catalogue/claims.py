@@ -1,8 +1,7 @@
 """Explicit catalogue ownership rules for Weaver document types.
 
-Catalogue rows are not owned merely because their table happens to contain an
-object-shaped pair of columns.  Each supported document type names every table
-it may populate and the predicate by which rows in that table are its claims.
+Each supported document type declares the tables and row predicates that define
+its catalogue claims.
 """
 
 from __future__ import annotations

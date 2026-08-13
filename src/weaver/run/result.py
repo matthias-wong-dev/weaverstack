@@ -308,12 +308,9 @@ class RunResult:
 
 
 def run_status(nodes, *, dry_run: bool = False) -> str:
-    """The worst thing that happened, which is what a run's status means.
+    """Return the overall run status from node statuses.
 
-    Not a count and not a majority: a caller asking whether a run succeeded is
-    asking whether anything did not, so one failure among fifty successes is a
-    failed run — and one that merely rejected rows is neither a success nor a
-    failure and says so in its own word.
+    A rejection result has its own status and does not make the run fail.
     """
 
     statuses = {node.status for node in nodes}

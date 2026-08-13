@@ -1,8 +1,8 @@
-"""Source-neutral public build and target-oriented wipe operations.
+    """Build one Fabric workspace from the local console.
 
-Optional platform imports remain inside the operation paths that require them,
-so importing ``weaver`` does not require Spark, Fabric credentials, or the CLI.
-"""
+    The operation reads state, plans locally, and dispatches each install action
+    through the required Session capability.
+    """
 
 from __future__ import annotations
 
