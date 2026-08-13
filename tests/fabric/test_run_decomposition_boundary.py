@@ -114,12 +114,18 @@ def test_the_scope_is_closed_when_the_run_ends(loaded):
 
 
 def test_the_run_read_the_estate_rather_than_shipping_itself(loaded):
-    """What the decomposition removed. The catalogue crosses; the run does not."""
+    """What the decomposition removed. The estate is read; the run is not shipped.
+
+    The read is Spark SQL now rather than a program, so what says it happened is
+    the statements — and what says the run stayed here is that no program named
+    a load.
+    """
 
     _, spent = loaded
 
-    assert spent.get("livy.read_catalogue") == 1
+    assert spent.get("livy.spark_sql", 0) > 1
     assert "livy.load" not in spent
+    assert "livy.read_catalogue" not in spent
 
 
 def test_every_node_reports_where_it_was_dispatched(loaded):
