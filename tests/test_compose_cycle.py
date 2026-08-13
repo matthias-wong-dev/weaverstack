@@ -187,7 +187,7 @@ def test_without_a_terminal_nothing_runs(tmp_path, recorded, capsys):
 
     assert status == 1
     assert not calls
-    assert "without confirmation" in capsys.readouterr().err
+    assert "requires confirmation from an interactive input stream" in capsys.readouterr().err
 
 
 def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):

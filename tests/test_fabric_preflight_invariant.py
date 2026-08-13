@@ -193,7 +193,7 @@ def test_a_missing_workspace_fails_before_anything_is_listed():
     client = FakeClient([])
     client.paged = lambda path: []  # noqa: E731 - the workspace does not exist
 
-    with pytest.raises(CommandError, match="no workspace named"):
+    with pytest.raises(CommandError, match="Workspace 'Analytics' was not found"):
         _preflight(client, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
 
