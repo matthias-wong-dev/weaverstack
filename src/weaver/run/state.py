@@ -1,30 +1,7 @@
-"""RunState — what the estate was, when the run was planned against it.
+"""Observed catalogue and target inventories used to plan a run.
 
-The runtime twin of :class:`~weaver.build_bundle.workflow.BuildState`, and for
-the same reason. A Runner decides what runs, in what order, and what is blocked;
-it must not be the thing that discovers whether a Warehouse is still there,
-because a decision made against state that is still moving is a decision nobody
-can reproduce.
-
-.. code-block:: text
-
-    physical catalogue  → Catalogue
-    physical targets    → TargetInventory
-                        ↓
-                     RunState
-                        ↓
-                      Runner
-
-So the reading happens once, at a boundary, above the Runner — and everything
-the Runner does afterwards is Python. A run-cycle test constructs one of these
-directly and needs no estate at all.
-
-**Inventories are keyed by the target's public spelling** — ``Lakehouse/Raw_LH``
-— because that is what a caller wrote and what a report prints. A key that could
-not be read back would put a second vocabulary between the request and the
-answer. A target with no entry is a target that is not there, which is a
-different failure from a graph that is wrong about one, and the Runner says
-which.
+RunState is read at an operation boundary and then used as an immutable planning
+input by Runner.
 """
 
 from __future__ import annotations

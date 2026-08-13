@@ -1,17 +1,7 @@
-"""Resolved physical locations.
+"""Resolved filesystem and URL locations.
 
-A :class:`Location` is what a workspace resolution produces: the concrete place an
-item, folder or table lives. It exists because ``pathlib.Path`` cannot be the
-common currency — ``Path("abfss://ws@onelake.dfs.fabric.microsoft.com/lh")``
-silently collapses the double slash and yields a broken root with no error.
-
-So a location always carries a string and always joins by string. ``.path`` is
-available when, and only when, the location is a filesystem path; asking a URL
-location for a ``Path`` is a mistake worth raising on rather than corrupting.
-
-Local resolution (checkpoint 2) produces filesystem locations. Fabric
-resolution (checkpoint 7) will produce ``abfss://`` and OneLake URL locations
-through the same type, so everything downstream is written once.
+Locations use string joins so filesystem paths and Fabric URLs preserve their
+transport-specific syntax.
 """
 
 from __future__ import annotations

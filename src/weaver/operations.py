@@ -1,9 +1,7 @@
 """Source-neutral public build and target-oriented wipe operations.
 
-This module is the adaptation boundary between the small notebook-facing API
-and Weaver's typed planning and execution machinery.  It deliberately keeps
-all optional platform imports inside the path that needs them so importing
-``weaver`` remains safe without Spark, Fabric credentials, or the desktop CLI.
+Optional platform imports remain inside the operation paths that require them,
+so importing ``weaver`` does not require Spark, Fabric credentials, or the CLI.
 """
 
 from __future__ import annotations
