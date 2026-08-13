@@ -147,14 +147,14 @@ def test_no_run_identifier_appears_in_the_staging_path(export):
 def test_returning_a_raw_path_is_refused(export):
     export.returns = Path("/tmp/somewhere")
 
-    with pytest.raises(LoadError, match="must return the StagingFolder"):
+    with pytest.raises(LoadError, match="rather than the folder"):
         export.load()
 
 
 def test_returning_a_string_is_refused(export):
     export.returns = "/tmp/somewhere"
 
-    with pytest.raises(LoadError, match="must return the StagingFolder"):
+    with pytest.raises(LoadError, match="rather than the folder"):
         export.load()
 
 
@@ -169,7 +169,7 @@ def test_returning_another_staging_folder_of_the_same_path_is_refused(export):
 
     export.returns = StagingFolder(path=_staging(export))
 
-    with pytest.raises(LoadError, match="must return the StagingFolder"):
+    with pytest.raises(LoadError, match="rather than the folder"):
         export.load()
 
 
@@ -254,7 +254,7 @@ def test_staging_survives_an_intolerant_rejection(export):
 def test_the_issued_reference_is_cleared_after_a_successful_load(export):
     export.load()
 
-    with pytest.raises(LoadError, match="issued by load"):
+    with pytest.raises(LoadError, match="only available while a load is running"):
         export.staging_folder()
 
 
@@ -264,7 +264,7 @@ def test_the_issued_reference_is_cleared_after_a_failed_load(export):
     with pytest.raises(RuntimeError):
         export.load()
 
-    with pytest.raises(LoadError, match="issued by load"):
+    with pytest.raises(LoadError, match="only available while a load is running"):
         export.staging_folder()
 
 

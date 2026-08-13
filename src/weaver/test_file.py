@@ -87,9 +87,8 @@ def _read(path: Path, target: PhysicalTargetRef):
         )
     if document.language == PYTHON:
         raise CommandError(
-            f"{path} is Python, which test file= does not run. A Python validation "
-            "is already directly runnable — import the class and call read() — so "
-            "there is nothing a file mode would add"
+            f"{path} is Python, which test file= does not run. Import the class "
+            "and call read() instead."
         )
     return document
 

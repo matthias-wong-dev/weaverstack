@@ -1,30 +1,17 @@
 """The installed validation estate, and the order it runs in.
 
-The sibling of :mod:`weaver.load_plan`, and it shares that module's whole
-premise: **the installed catalogue is authoritative and the repository is not
-reopened.** By the time anything is runnable it has been built, and what was
-built is recorded. Reading the declaration instead would orchestrate what
-somebody meant to install rather than what is installed, and the two differ
-exactly when it matters most.
+The sibling of :mod:`weaver.load_plan`, sharing its premise: the installed
+catalogue is authoritative and the repository is not reopened.
 
-One thing here is genuinely unlike load planning, and it is the reason this
-module exists rather than a few more branches in that one.
+What makes this a module rather than more branches in that one is that a
+validation has no Registry row — nothing is materialised under a logical Test
+ID. The estate comes from ``_.TestDictionary`` instead, and each declaration is
+connected to its installed primitive by computing the artefact identity with
+:func:`weaver.etl.validation_artefact_id`, the function the build claimed it
+with. A row whose computed artefact is absent from Registry is a missing
+installation, reported as an invalid node rather than skipped.
 
-**A validation has no Registry row.** Nothing is materialised under a logical
-Test ID, so the estate cannot be recovered by walking Registry the way load
-planning walks it. It is recovered from ``_.TestDictionary`` — the logical
-declarations — and each is then connected to its installed primitive by
-*computing* the artefact identity with
-:func:`weaver.etl.validation_artefact_id`, the same function the build claimed
-it with. A `TestDictionary` row whose computed artefact is absent from Registry
-is a missing installation, reported as an invalid node rather than skipped: a
-Test that was declared and never installed must not read as an estate with one
-fewer Test in it.
-
-Dependency rows are associated the same way, against logical IDs rather than
-through Registry. That is the whole of what §14 of the design settles, and a
-fake Registry row for the logical validation — which would have let the load
-helper be reused unchanged — is exactly what it settles against.
+Dependency rows are associated the same way, against logical IDs.
 """
 
 from __future__ import annotations

@@ -107,12 +107,9 @@ class ConsoleSession(Session):
     def present(self, frame, event: str, error: BaseException | None = None) -> None:
         """Keep the open work visible, and record each frame as it closes.
 
-        Two things a reader needs, and they are not the same thing.
-
-        **What finished, and what it cost** is written as a permanent line when
-        a frame closes, because the duration is only known then. Children appear
-        above their parent with the parent's total underneath — a roll-up, the
-        way ``du`` reads:
+        A closed frame is written as a permanent line, since its duration is
+        only known then. Children appear above their parent with the parent's
+        total underneath, the way ``du`` reads:
 
         .. code-block:: text
 
@@ -124,26 +121,16 @@ class ConsoleSession(Session):
               Install Lakehouse/Sales                    18.6s
             ✓ Build                                      40.7s
 
-        **What is happening now** is a transient line below that, rewritten in
-        place, naming the innermost frame still open and how long it has been
-        running:
+        Below that sits a transient line, rewritten in place, naming the
+        innermost frame still open and how long it has been running:
 
         .. code-block:: text
 
             ⋯ Unbind catalogue claims                     1m47s
 
         It is erased before anything permanent is written, so it never lands in
-        the transcript. Recording completions alone was the earlier design and
-        it was wrong for this feature: a Step that takes two minutes showed the
-        Task heading and then nothing at all, and silence is exactly what a tool
-        whose purpose is responsiveness must not answer a long wait with. The
-        thing not wanted was *duplication* — a name printed on the way in and
-        again on the way out — and a line that is overwritten rather than
-        appended avoids that without going quiet.
-
-        Live output needs a terminal to rewrite. Piped, redirected or captured,
-        this degrades to exactly the completed lines it always wrote, so a log
-        file and a test transcript are unchanged.
+        the transcript. Live output needs a terminal to rewrite: piped or
+        captured, this degrades to the completed lines alone.
         """
 
         stream = self._progress_stream()

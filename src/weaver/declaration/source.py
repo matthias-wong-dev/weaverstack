@@ -490,10 +490,10 @@ def _check_validation_methods(
 
     if _methods(declared, "read"):
         raise DiscoveryError(
-            f"{relative_path}: class {declared.name!r} declares a Test, so it must "
-            "not define read() — the comparison is Weaver's, so that passing means "
-            "the same thing for every Test. Define expected() and actual(); to "
-            "author the returned rows directly, declare an Assumption instead"
+            f"{relative_path}: class {declared.name!r} declares a Test and "
+            "defines read(), which a Test may not: Weaver compares the two "
+            "sides. Define expected() and actual(), or declare an Assumption to "
+            "author the returned rows directly."
         )
     for name in ("expected", "actual"):
         _require_method(relative_path, declared, name)

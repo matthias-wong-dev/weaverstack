@@ -15,17 +15,15 @@ if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .runtime.folder_load import StagingFolder
 
 #: What Weaver names a folder's staging sibling. Repeated from
-#: :mod:`weaver.runtime.folder_load` rather than imported, because the authoring
-#: surface must stay importable without the runtime beneath it — the same reason
-#: :data:`CLASS_ID_SEPARATOR` is repeated from the parser. The two are asserted
-#: identical by ``tests/test_objects.py``.
+#: :mod:`weaver.runtime.folder_load` rather than imported: the authoring surface
+#: stays importable without the runtime beneath it. ``tests/test_objects.py``
+#: asserts the two are identical.
 STAGING_SUFFIX = "_Staging"
 
-#: What separates schema from object in a class name. A module name cannot carry
-#: a dot, so a Python object spells ``Sales.Order`` as ``Sales__Order`` — the rule
-#: :func:`weaver.declaration.source.object_id_for_filename` applies to the
-#: filename, repeated here because the authoring surface must not import the
-#: parser (the parser imports it, for the base classes).
+#: What separates schema from object in a class name: a module name cannot carry
+#: a dot, so ``Sales.Order`` is spelled ``Sales__Order``. Repeated from
+#: :func:`weaver.declaration.source.object_id_for_filename` because the authoring
+#: surface must not import the parser.
 CLASS_ID_SEPARATOR = "__"
 
 
@@ -94,13 +92,8 @@ class WeaverObject:
     def _document(self):
         """This object's parsed declaration, from the module it was defined in.
 
-        The module *is* the contract. A deployed object in a session has no
-        repository to reopen and no catalogue to query, so if its docstring were
-        not sufficient then ``load()`` would be the tail end of an orchestration
-        rather than something runnable on its own.
-
-        It is read on every call rather than cached, which is what makes an edit
-        visible on the next reload — the notebook loop this is meant to support.
+        Read on every call rather than cached, so an edit takes effect on the
+        next reload.
         """
 
         import sys
@@ -125,12 +118,9 @@ class Folder(WeaverObject):
     ``read()`` writes into this object's staging directory and returns
     ``(staging_folder, files_to_delete)``.
 
-    **Two spellings of one location, and which you want depends on who reads
-    it.** Authored folder code is ordinary Python — it globs, opens and writes —
-    so :meth:`path` is a :class:`pathlib.Path`. An engine cannot use that:
-    ``spark.read`` wants the ``abfss://`` form, so :meth:`spark_path` is a
-    string. Neither is convertible into the other by string surgery, which is
-    why there are two methods rather than one and a rule.
+    Its location has two spellings, and neither converts to the other by string
+    surgery: :meth:`path` is a :class:`pathlib.Path` for ordinary Python,
+    :meth:`spark_path` the ``abfss://`` string an engine needs.
     """
 
     def path(self) -> Path:
@@ -139,11 +129,9 @@ class Folder(WeaverObject):
             for file in Sales__Export(self).path().glob("*.json"):
                 ...
 
-        A real ``Path``, so ``/``, ``.glob()``, ``.open()``, ``.read_text()`` and
-        ``.write_text()`` all work. In OneLake it is Weaver's mount of the root
-        the Lakehouse resolved to — never ``/lakehouse/default``, which names
-        only whatever a notebook attached, and a load runs detached against
-        Lakehouses it resolved by name.
+        In OneLake this is Weaver's mount of the root the Lakehouse resolved to,
+        never ``/lakehouse/default`` — that names whatever a notebook attached,
+        and a load runs detached against Lakehouses it resolved by name.
         """
 
         return self.lakehouse.folder_path(*self.identity)
@@ -153,8 +141,7 @@ class Folder(WeaverObject):
 
             rows = self.spark.read.json(Sales__Export(self).spark_path())
 
-        The ``abfss://`` form on Fabric, the same directory locally. What one
-        object hands another when the reader is an engine.
+        The ``abfss://`` form on Fabric, the same directory locally.
         """
 
         return self.lakehouse.folder_spark_path(*self.identity)
@@ -162,23 +149,20 @@ class Folder(WeaverObject):
     def staging_folder(self) -> "StagingFolder":
         """The staging directory Weaver issued for this load.
 
-        Called from ``read()``, and it hands back the *same* object every time
-        within one load — the one Weaver reset before ``read()`` began and will
-        publish from afterwards. There is no shared staging area and no run
-        identifier: staging belongs to the object, at a fixed sibling path named
-        ``<destination>_Staging``, so a failed load leaves exactly one directory
-        to look at and the next run knows where it is.
+        Called from ``read()``, and the same object throughout one load. Staging
+        is a fixed sibling named ``<destination>_Staging`` rather than a per-run
+        directory, so a failed load leaves exactly one to look at.
 
-        Outside a load there is nothing to issue, and asking says so rather than
-        inventing a directory nobody reset.
+        Outside a load there is nothing to issue, and asking fails rather than
+        naming a directory nobody reset.
         """
 
         issued = getattr(self, "_issued_staging", None)
         if issued is None:
             raise LoadError(
-                f"{type(self).__name__}.staging_folder() is issued by load(), and "
-                "nothing has issued one — call it from read(), or call "
-                f"{type(self).__name__}(spark).load() to run the load that issues it"
+                f"{type(self).__name__}.staging_folder() is only available while "
+                f"a load is running. Call it from read(), or run "
+                f"{type(self).__name__}(spark).load()."
             )
         return issued
 
@@ -186,7 +170,7 @@ class Folder(WeaverObject):
         """Where staging goes: the destination's own path, with a suffix.
 
         The same sibling :meth:`weaver.resolution.LocalResolver.folder_staging`
-        issues, and fixed rather than per-run — see :meth:`staging_folder`.
+        issues.
         """
 
         destination = self.path()
@@ -195,29 +179,12 @@ class Folder(WeaverObject):
     def load(self, fault_tolerant: bool = False) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
 
-        Independently runnable, which is the point::
+        Independently runnable, needing no repository, catalogue or bundle::
 
             Sales__Export(spark).load(fault_tolerant=False)
 
-        No repository, no catalogue, no bundle and no orchestrator — the module
-        carries its own contract and this object carries its own destination.
-
-        The order below is the whole lifecycle, and each step is there because
-        the alternative loses something:
-
-        .. code-block:: text
-
-            reset the fixed staging directory   a run begins from nothing it
-                                                did not itself produce
-            issue one StagingFolder             read() fills what load() will
-                                                publish, and they are the same
-            run read()                          the author's work
-            check identity, not equality        a copy would mean publishing a
-                                                directory nobody reset
-            publish                             from the issued path
-            remove staging on success           nothing to mistake for evidence
-            retain staging on failure           the one directory worth looking
-                                                at when a load fails
+        Staging is reset, issued to ``read()``, published, and removed on
+        success — retained on failure, as the one directory worth looking at.
         """
 
         from .runtime.folder_load import (
@@ -231,11 +198,9 @@ class Folder(WeaverObject):
 
         contract = FolderLoadContract.from_document(self._document())
         # Static folders bypass staging, source reads, and file reconciliation.
-        #
-        # `static` first, and the order is not style: Python evaluates arguments
-        # eagerly, so asking whether the folder is populated *inside* the call
-        # would walk the managed tree on every ordinary load to answer a question
-        # only a static one can act on.
+        # `static` is tested first because Python evaluates arguments eagerly:
+        # the populated check walks the managed tree, and only a static folder
+        # can act on the answer.
         if contract.static and folder_is_populated(self.path(), contract.file_keys):
             return LoadResult(succeeded=True)
 
@@ -245,10 +210,9 @@ class Folder(WeaverObject):
             staged, deletes = _load_pair(self, self.read())
             if staged is not issued:
                 raise LoadError(
-                    f"{type(self).__name__}.read() must return the StagingFolder "
-                    f"self.staging_folder() issued, and returned "
-                    f"{type(staged).__name__} {staged!r} instead — return "
-                    "self.staging_folder()"
+                    f"{type(self).__name__}.read() returned "
+                    f"{type(staged).__name__} {staged!r} rather than the folder "
+                    "self.staging_folder() issued. Return self.staging_folder()."
                 )
             result = load_folder(
                 contract=contract,
@@ -259,7 +223,7 @@ class Folder(WeaverObject):
             )
         finally:
             # Cleared whatever happened, so a second load cannot be handed the
-            # first one's directory — and so asking outside a load still fails.
+            # first one's directory.
             self._issued_staging = None
         remove_staging(issued.path)
         return result
@@ -274,9 +238,8 @@ class Table(WeaverObject):
     def dataframe(self) -> Any:
         """This table as it currently stands, read from its Delta files.
 
-        Addressed by path rather than by catalogue name, which is how Weaver
-        reaches Delta everywhere else: a path needs nothing attached, so the same
-        call serves any resolved Lakehouse.
+        By path rather than catalogue name: a path needs nothing attached, so
+        the same call serves any resolved Lakehouse.
         """
 
         return self.spark.read.format("delta").load(
@@ -286,10 +249,8 @@ class Table(WeaverObject):
     def empty_dataframe(self) -> Any:
         """This table's shape with no rows — an incremental load's no-op result.
 
-        Taken from the table itself, so the columns are exactly the ones the load
-        has to match. That means the physical table must already exist, which is no
-        constraint at all: a load returning *this* table's empty shape is by
-        definition running against a target that has been built.
+        Taken from the table itself, so the columns are the ones the load has to
+        match. The physical table must therefore already exist.
         """
 
         return self.dataframe().limit(0)
@@ -301,17 +262,12 @@ class Table(WeaverObject):
     ) -> "LoadResult":
         """Run this table's ``read()`` and write what it staged.
 
-        Independently runnable, which is the point::
+        Independently runnable, needing no repository, catalogue or bundle::
 
             Sales__Customer(spark).load(fault_tolerant=True)
 
-        No repository, no catalogue, no bundle and no orchestrator — the module
-        carries its own contract and this object carries its own destination.
-
         ``ignore_stability_threshold`` waives the declared delete and update
-        limits for one run. It exists for the case where a very large change is
-        the correct answer — a genuine bulk retirement — and is a deliberate act
-        each time rather than a setting that stays on.
+        limits for one run, for when a very large change is the correct answer.
         """
 
         from .runtime.load_contract import LoadContract
@@ -319,22 +275,17 @@ class Table(WeaverObject):
         from .runtime.table_load import load_table, table_is_populated
 
         contract = LoadContract.from_document(self._document())
-        # Before read(), so a static object that is already seeded costs nothing
-        # — no query against the source, no staging table, no comparison. The
-        # primitive ran and found the work done; that is not an orchestration
-        # skip, and the successful no-op result says as much.
-        #
-        # `static` first, and the order is not style: Python evaluates arguments
-        # eagerly, so asking whether the target is populated *inside* the call
-        # would put a Spark action on every ordinary load to answer a question
-        # only a static one can act on.
+        # Before read(), so an already-seeded static object costs no source
+        # query. `static` is tested first because Python evaluates arguments
+        # eagerly: the populated check is a Spark action, and only a static
+        # object can act on the answer.
         if contract.static and table_is_populated(
             self.spark, contract=contract, lakehouse=self.lakehouse
         ):
             return LoadResult(succeeded=True)
 
-        # The first value is *staging* — unvalidated, unreconciled, nothing yet
-        # classified as new or changed. Naming it so is the point.
+        # Staging: unvalidated, unreconciled, nothing yet classified as new or
+        # changed.
         staged, deletes = _load_pair(self, self.read())
         return load_table(
             self.spark,
@@ -357,12 +308,8 @@ class SparkSqlTable(Table):
         class Sales__OrderSummary(SparkSqlTable):
             sql = SQL
 
-    That module is an ordinary deployed primitive: it imports, constructs and
-    loads exactly as a hand-written one does, and orchestration cannot tell the
-    two apart. It is public because the deployed module imports it and because
-    someone reaching for an installed primitive in a notebook meets it — not as
-    a second way to author an object. A repository ``.py`` subclassing this is
-    refused, because ``.sql`` is where a SQL table is written.
+    Public because the deployed module imports it, not as a second way to author
+    an object: a repository ``.py`` subclassing this is refused.
 
     The program's shape is its contract: one query stages, a second names the
     keys to delete. See :mod:`weaver.declaration.spark_sql_program`.
@@ -374,11 +321,9 @@ class SparkSqlTable(Table):
     def _document(self):
         """This module's contract, read as the Spark SQL document it came from.
 
-        The docstring *is* the authored ``.sql`` header, carried over verbatim,
-        so it has to be parsed as what it was written as. Reading it as Python
-        metadata would apply Python's rules to a SQL declaration — and refuse
-        every table that leaves its schema to be inferred, which is a shape only
-        a SQL table has.
+        The docstring is the authored ``.sql`` header verbatim, so it is parsed
+        under SQL rules: Python's would refuse a table that leaves its schema to
+        be inferred, which only a SQL table does.
         """
 
         import sys
@@ -416,8 +361,7 @@ class View(WeaverObject):
     def dataframe(self) -> Any:
         """This view's contents.
 
-        By name, not by path: a view exists only in the catalogue, so unlike a
-        table there is nothing on disk to address.
+        By name, not by path: a view exists only in the catalogue.
         """
 
         return self.spark.table(self.lakehouse.qualify(*self.identity))
@@ -444,19 +388,15 @@ class Assumption(WeaverObject):
                 orders = Sales__Orders(self).dataframe()
                 return orders.where(...)   # empty when the assumption holds
 
-    ``read()`` is authored, and what it returns *is* the evidence — there is no
-    expected relation to compare against and so nothing to correlate. That is
-    why an Assumption may not declare a primary key.
-
-    It is an ordinary Weaver object in every other way: constructed from a
-    session, or from another object with ``Sales__Orders(self)``, reaching its
-    dependencies through the same imports as a Table does.
+    What ``read()`` returns is the evidence itself, so there is nothing to
+    correlate and an Assumption may not declare a primary key. In every other
+    way it is an ordinary Weaver object.
     """
 
     def read(self):
         raise NotImplementedError(
-            f"{type(self).__name__} must implement read(), returning the rows that "
-            "contradict the assumption — no rows means it holds"
+            f"{type(self).__name__} must implement read(), returning the rows "
+            "that contradict the assumption. No rows means it holds."
         )
 
 
@@ -486,16 +426,12 @@ class Test(WeaverObject):
             def actual(self):
                 return Sales__Orders(self).dataframe()
 
-    **The author writes the two sides; Weaver writes the comparison.** ``read()``
-    computes the symmetric difference and is deliberately not authorable — a Test
-    that could redefine it would still be called a Test while meaning something
-    else, and the one thing a reader must be able to assume about every Test in
-    an estate is what passing means. An override is refused here and by the
-    repository parser, so it fails whether the class is written in a notebook or
-    committed to a repository.
+    The author writes the two sides; ``read()`` is Weaver's symmetric difference
+    and may not be overridden, so passing means the same for every Test. The
+    parser refuses an override too.
 
-    The declared primary key correlates diagnostic rows across the two sides. It
-    changes nothing about what is compared or counted — see
+    The declared primary key correlates diagnostic rows across the two sides and
+    changes nothing about what is compared — see
     :mod:`weaver.runtime.test_compare`.
     """
 
@@ -508,10 +444,9 @@ class Test(WeaverObject):
         super().__init_subclass__(**kwargs)
         if "read" in cls.__dict__:
             raise LoadError(
-                f"{cls.__name__} must not define read() — a Test's comparison is "
-                "Weaver's, so that passing means the same thing for every Test. "
-                "Write expected() and actual(); to author the returned rows "
-                "directly, declare an Assumption instead"
+                f"{cls.__name__} defines read(), which a Test may not: Weaver "
+                "compares the two sides. Write expected() and actual(), or "
+                "declare an Assumption to return the rows directly."
             )
 
     def expected(self):
@@ -529,12 +464,9 @@ class Test(WeaverObject):
     def _sides(self):
         """The two relations to compare, as a pair.
 
-        The hook a compiled Test overrides. A Spark SQL Test's two sides come
-        out of one program, and running that program twice — once for each side
-        — would compare two different snapshots of anything its setup
-        materialised, then report the difference between them as failure. So the
-        pair is produced in one call, and an ordinary authored Test simply asks
-        its own two methods.
+        The hook a compiled Test overrides. A Spark SQL Test's sides come from
+        one program: running it twice would compare two snapshots of whatever
+        its setup materialised and report the difference as failure.
         """
 
         return self.expected(), self.actual()
@@ -561,17 +493,9 @@ class Test(WeaverObject):
 class _SparkSqlValidation:
     """What the two generated validation bases share.
 
-    **Generated, not authored.** A developer writes
-    ``Sales.OrdersReconcile.sql`` and Weaver installs
-    ``Sales__OrdersReconcile.py``, which is one of these classes with the
-    authored SQL attached. The installed module is an ordinary Weaver primitive:
-    it imports, constructs and runs exactly as a hand-written one does, and
-    orchestration cannot tell the two apart.
-
-    Public because the deployed module imports it and because someone reaching
-    for an installed primitive in a notebook meets it — not as a second way to
-    author a validation. A repository ``.py`` subclassing one is refused,
-    because ``.sql`` is where a SQL validation is written.
+    Generated, not authored: a developer writes ``Sales.OrdersReconcile.sql``
+    and Weaver installs ``Sales__OrdersReconcile.py``, one of these classes with
+    the authored SQL attached. A repository ``.py`` subclassing one is refused.
     """
 
     #: The authored program, addressed and embedded when the module was built.
@@ -580,9 +504,8 @@ class _SparkSqlValidation:
     def _document(self):
         """This module's contract, read as the SQL document it came from.
 
-        The docstring *is* the authored ``.sql`` header, carried over verbatim,
-        so it has to be parsed as what it was written as. Reading it as Python
-        metadata would apply Python's rules to a SQL declaration.
+        The docstring is the authored ``.sql`` header verbatim, so it is parsed
+        under SQL rules rather than Python's.
         """
 
         import sys
@@ -640,19 +563,17 @@ class SparkSqlAssumption(_SparkSqlValidation, Assumption):
 
 
 def _load_pair(obj, returned):
-    """Unpack what ``read()`` returned, refusing anything else by name.
+    """Unpack what ``read()`` returned, naming the object if it is not a pair.
 
-    Both kinds of object return a pair, and the error has to name the object
-    rather than surface as a tuple-unpacking failure three frames deeper — an
-    author who returned a single frame should be told that, not shown a
-    ValueError about lengths.
+    Checked here so an author who returned a single frame is told that, rather
+    than meeting a tuple-unpacking failure several frames deeper.
     """
 
     if not isinstance(returned, tuple) or len(returned) != 2:
         raise LoadError(
-            f"{type(obj).__name__}.read() must return a pair — "
-            f"(staging, deletes) for a Table, (staging_folder, files_to_delete) "
-            f"for a Folder — and returned {type(returned).__name__}"
+            f"{type(obj).__name__}.read() returned {type(returned).__name__}, "
+            "not a pair. A Table returns (staging, deletes); a Folder returns "
+            "(staging_folder, files_to_delete)."
         )
     return returned
 
@@ -660,11 +581,10 @@ def _load_pair(obj, returned):
 def _identity(class_name: str) -> tuple[str, str]:
     """``Sales__Order`` → ``("Sales", "Order")``; ``___Load`` → ``("_", "Load")``.
 
-    A run of leading underscores is read as a schema plus the separator, because
-    ``_`` is a real schema and spelling ``_.Load`` as a class name produces three
-    of them. The rule is the parser's — see
-    :func:`weaver.declaration.source.python_id_parts` — repeated rather than
-    imported, for the same reason the separator itself is.
+    A run of leading underscores is read as a schema plus the separator: ``_``
+    is a real schema, so ``_.Load`` spells as three. The rule is the parser's
+    (:func:`weaver.declaration.source.python_id_parts`), repeated here rather
+    than imported.
     """
 
     leading = len(class_name) - len(class_name.lstrip("_"))
@@ -678,18 +598,17 @@ def _identity(class_name: str) -> tuple[str, str]:
     parts = [part.strip() for part in split]
     if len(parts) != 2 or not all(parts):
         raise LoadError(
-            f"{class_name!r} does not name an object: a Weaver class separates "
-            f"schema and object with {CLASS_ID_SEPARATOR!r}, as in Sales__Order"
+            f"{class_name!r} does not name an object. A Weaver class separates "
+            f"schema and object with {CLASS_ID_SEPARATOR!r}, as in Sales__Order."
         )
     return parts[0], parts[1]
 
 
 #: The authoring base classes, by the metadata kind that selects them.
 #:
-#: :class:`SparkSqlTable` is deliberately absent. It is a *generated* base — the
-#: installed form of a ``.sql`` table — and admitting it here would make the same
-#: object authorable two ways, with two parsers, two dependency readings and two
-#: chances to disagree about what it declared.
+#: :class:`SparkSqlTable` is absent: it is the *generated* form of a ``.sql``
+#: table, and admitting it would make one object authorable two ways, with two
+#: parsers that could disagree about what it declared.
 BASE_CLASSES = {
     "Folder": Folder,
     "Table": Table,

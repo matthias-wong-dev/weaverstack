@@ -1,13 +1,10 @@
 """Loading a Python-defined Delta table — the mechanics behind ``Table.load()``.
 
 The authored class proposes rows; this owns everything that happens to them.
-``read()`` returns ``(staging, deletes)`` and never touches the target, which is
-the invariant the whole runtime rests on: an object that wrote to its own table
-would make Weaver's accounting a guess.
+``read()`` returns ``(staging, deletes)`` and never touches the target.
 
-**The first value is staging, not an upsert set.** It has not been validated,
-nothing has been rejected from it, and no row in it has yet been classified as
-new or changed. It goes through the same phases the Warehouse procedure runs::
+The first value is *staging*: unvalidated, with nothing yet rejected or
+classified. It goes through the same phases the Warehouse procedure runs::
 
     staging
       → validate keys
@@ -20,30 +17,21 @@ new or changed. It goes through the same phases the Warehouse procedure runs::
       → apply explicit deletes, separately, by key
       → delete absent rows, for non-incremental loads only
 
-**The intermediate tables are real**, as they are in the Warehouse:
-``<Schema>.<Object>_Staging``, ``_Upsert`` and
-``_Reject``. That is what makes a load inspectable — what the source produced,
-what was refused, and what Weaver decided to change are all still there
-afterwards, and a run that failed can be understood without re-running the
-authored code that produced it. Temporary views cannot do that: they vanish with
-the session that made them, which is exactly when someone wants to look.
+The intermediate tables are real — ``<Schema>.<Object>_Staging``, ``_Upsert``
+and ``_Reject`` — so a failed run can be inspected afterwards. Temporary views
+vanish with the session that made them.
 
-**``Incremental`` chooses the delete driver, and there is only ever one.** An
+``Incremental`` chooses the delete driver, and there is only ever one. An
 incremental source is a window on the truth, so absence proves nothing and the
-object must *state* what went — ``read()[1]``. A non-incremental source is the
-whole truth, so absence is the statement and an explicit list would be a second,
-quieter answer to a question already answered; a non-incremental table that
-returns one is refused rather than silently ignored, as a non-incremental folder
-already is.
+object states what went (``read()[1]``); a non-incremental source is the whole
+truth, so absence is the statement and an explicit list is refused. One driver
+serves both the stability count and the deletion, so the guard cannot protect
+against a number the load never intended to delete.
 
-One driver, used for both the stability count and the deletion itself. Adding
-two paths together would let the guard protect against a number the load never
-intended to delete.
-
-Two departures from the reference remain, both forced. It is written in SQL
-rather than the DataFrame API, because ``tests/test_core_boundary.py`` forbids
-importing ``pyspark`` or ``delta`` anywhere in ``weaver``. And ``fault_tolerant``
-is Weaver's own addition: an intolerant run returns before any target mutation.
+Written in SQL rather than the DataFrame API because
+``tests/test_core_boundary.py`` forbids importing ``pyspark`` or ``delta``
+anywhere in ``weaver``. ``fault_tolerant`` is Weaver's own addition: an
+intolerant run returns before any target mutation.
 """
 
 from __future__ import annotations

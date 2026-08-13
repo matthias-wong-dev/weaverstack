@@ -276,7 +276,7 @@ def test_staging_is_issued_by_a_load_and_asking_outside_one_says_so(spark, tmp_p
         spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
     )
 
-    with pytest.raises(LoadError, match="issued by load"):
+    with pytest.raises(LoadError, match="only available while a load is running"):
         export.staging_folder()
 
 

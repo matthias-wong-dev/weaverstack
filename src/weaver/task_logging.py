@@ -16,24 +16,18 @@ completion, and what those contain is the task's business.
             ├── 20260803T091530.441092Z_refresh_<step-uuid>.json
             └── 20260803T091540.102334Z_complete_<task-uuid>.json
 
-**The folder is a declared Weaver document, not a path this module knows.**
-``_.Log`` is an ordinary ``Folder`` in the built-in control-plane item, so it is
-projected into the catalogue, inventoried, installed, converged on and protected
-from prune by the machinery that already exists — and this module asks a resolver
-where that folder is rather than composing ``Files/_/Log`` for itself. A special
-path known only to the logger would need its own creation rule, its own prune
-exemption and its own removal rule, each of which is a rule nothing else has.
+``_.Log`` is a declared ``Folder`` in the built-in control-plane item, so this
+module asks a resolver where it is rather than composing ``Files/_/Log``. That
+gives it the catalogue projection, inventory, installation and prune protection
+every other folder has.
 
-**Nothing is ever rewritten.** A step's file is written when the step finishes
-and is never touched again, which is what makes the log usable after an
-interruption: the plan says what was intended, the step files say what completed,
-and the *absence* of a completion file is how you know the task did not finish.
-A log the runner updated in place could not say that — a crashed task and a
-finished one would look the same.
+Nothing is ever rewritten. A step's file is written when the step finishes and
+never touched again, so an interrupted task is legible afterwards: the plan says
+what was intended, the step files say what completed, and the absence of a
+completion file is how a crashed task is told from a finished one.
 
-**A dry run writes nothing at all.** Validation is not execution, and a folder of
-plausible-looking steps that never ran is worse than no folder: it is evidence of
-work nobody did. The dry run's complete result is returned in memory instead.
+A dry run writes nothing, and returns its complete result in memory. A folder of
+plausible steps that never ran would be evidence of work nobody did.
 """
 
 from __future__ import annotations

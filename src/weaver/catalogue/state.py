@@ -466,51 +466,19 @@ def _registered_documents(
 
 
 def read_catalogue_state(catalogue: Any, items) -> Catalogue:
-    """Read the catalogue over Spark — the production way to populate one.
+    """Read the catalogue from the Weaver Lakehouse, for the items named.
 
-    The one place a catalogue meets a session. Everything downstream of it is
-    pure, so this is the boundary whose *fidelity* is worth a Spark test: does a
-    real catalogue read back into the same class a fixture builds directly.
+    A missing table is either a first run or damage, and what tells them apart
+    is whether anything else is there: every table missing is bootstrap and
+    reads as an empty catalogue, while some missing and some present stops the
+    build.
 
-    The shape check is deliberately strict and must stay so. A physically
-    incomplete catalogue is rejected here rather than tolerated, because tests
-    wanting a Registry-only catalogue can construct one directly — weakening this
-    to accommodate them would trade a real production guarantee for a fixture's
-    convenience.
-
-    **A missing table is either the first run or damage, and what tells them
-    apart is whether anything else is there.**
-
-    *Nothing at all.* Bootstrap. The build about to run creates the catalogue,
-    so every table missing is the ordinary first-run state and reads as an empty
-    catalogue.
-
-    *Some tables missing, others present.* Damage, whichever tables they are,
-    and the build stops.
-
-    The tempting exception is a *dictionary* table, and it is wrong. The
-    built-in item does declare every catalogue table on every build, so the
-    physical table would indeed be recreated — but recreating the table is not
-    the same as restoring its contents, and only the contents make the catalogue
-    true. An ordinary build is scoped to the items it was pointed at:
-    :func:`retaining` and :func:`for_targets` narrow the desired catalogue to
-    the bound items, so the republication after the table is recreated carries
-    rows for *those* items and no others.
-
-    So on an estate holding ``Sales`` and ``Finance``, a build scoped to
-    ``Sales`` alone would recreate the table, write Sales' rows, and leave
-    Finance with none — while Finance's Registry and Installation rows survived,
-    still claiming objects the dictionaries no longer describe. Nothing later
-    would notice, because the next build sees a table that exists and rows that
-    match whatever it was scoped to.
-
-    Registry and Installation carry the same property for a different reason:
-    they hold build-time facts — what was certified, which target it was bound
-    to — that no repository can re-derive at all.
-
-    Repairing a partial catalogue therefore needs authority over every
-    installation, which an ordinary build does not have and should not acquire.
-    That is a separate explicit path; this one refuses.
+    That holds for dictionary tables too, tempting as the exception is. A build
+    is scoped to the items it was pointed at, so recreating a dictionary would
+    republish rows for *those* items and leave every other item's Registry and
+    Installation rows claiming objects the dictionaries no longer describe.
+    Repairing a partial catalogue needs authority over every installation, which
+    a scoped build does not have.
     """
 
     present: set[str] = set()

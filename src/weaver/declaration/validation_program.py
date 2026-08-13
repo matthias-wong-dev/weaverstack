@@ -12,20 +12,15 @@ same statement in either dialect:
     Assumption   setup … then the violating rows
 
 So the counting rule lives here, once, over whatever program object the dialect
-produced. Neither parser is duplicated and neither dialect gets its own idea of
-what a Test is — which is the property that lets "the Sales tests pass" mean one
-thing across an estate.
+produced, and neither dialect gets its own idea of what a Test is.
 
-**Setup is unrestricted and comes first.** Anything that returns no rows is
-setup, however much of it there is: temporary views, table variables, a
-``CREATE TABLE #expected``, dynamic SQL. What the contract constrains is the
-final one or two result-producing queries, because those are what the comparison
-reads.
+Setup is unrestricted and comes first: anything returning no rows is setup,
+however much of it there is. What the contract constrains is the final one or
+two result-producing queries, because those are what the comparison reads.
 
-**An undetermined count is not a refusal.** Dynamic SQL puts the count beyond
-static reach, and a validation whose *setup* builds something dynamically is
-ordinary. What the compiler then requires is that the final queries are
-capturable, which is a rendering question and is answered where the rendering
+An undetermined count is not a refusal — dynamic SQL puts it beyond static
+reach, and a validation whose setup builds something dynamically is ordinary.
+Whether the final queries are capturable is answered where the rendering
 happens.
 """
 

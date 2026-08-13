@@ -12,26 +12,13 @@ One of Weaver's four doers, and the one that makes every decision:
                   ↓
               Installer
 
-**Builder is pure once its inputs are supplied.** It does not query Fabric REST,
-read Spark catalogue state, inspect OneLake, connect to a Warehouse, read
-physical catalogue tables, or install anything. Everything it needs to know
-about the estate arrived as :class:`~weaver.build_bundle.workflow.BuildState`,
-which a boundary read once, above.
+Builder is pure once its inputs are supplied: it reaches no REST, Spark,
+OneLake or Warehouse. Everything it knows about the estate arrived as
+:class:`~weaver.build_bundle.workflow.BuildState`, read once at a boundary
+above, so a decision is reproducible and a test needs no estate at all.
 
-That is not a stylistic preference. A decision made against state that is still
-moving is a decision nobody can reproduce — and a planner that can reach the
-estate will eventually be asked to check its own work, at which point the
-question of who decided becomes unanswerable.
-
-It also means a Builder can be constructed and run in a test with no Fabric, no
-Spark and no estate at all: a Catalogue and some inventories are ordinary Python
-objects. What such a test cannot prove is that those objects match what a real
-readback produces, which is why the boundary fidelity tests exist and why they
-are separate.
-
-Reconciliation happens here, on the decision side. It is the step that turns
-"what the catalogue claims" plus "what the target actually holds" into "what is
-stale", and it needs no physical access to do it.
+Reconciliation happens here too — what the catalogue claims plus what the target
+holds gives what is stale — and needs no physical access.
 """
 
 from __future__ import annotations

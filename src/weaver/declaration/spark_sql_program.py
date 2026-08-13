@@ -10,14 +10,11 @@ is one here rather than one each:
     repository parsing     refuses a body that cannot mean anything
     the deployed primitive executes what the body says, in order
 
-**Setup and query, and the difference is the top-level statement.** Spark
-executes one statement per call and returns a DataFrame for every one of them,
-so "did this produce rows" cannot be answered by running it. It is answered
-lexically, from what the statement *starts* with — which is why a
-``CREATE VIEW … AS SELECT`` is setup despite containing a ``SELECT``, and a
-``WITH … SELECT`` is a query despite not starting with one.
-
-**One query is staging; two are staging and explicit deletes.**
+Setup and query are told apart lexically, by what the statement starts with.
+Spark returns a DataFrame for every statement, so running one cannot answer
+whether it produced rows — which is why ``CREATE VIEW … AS SELECT`` is setup
+despite containing a ``SELECT``, and ``WITH … SELECT`` is a query despite not
+starting with one.
 
 .. code-block:: text
 
@@ -26,22 +23,16 @@ lexically, from what the statement *starts* with — which is why a
     2 queries       the staging rows, then the keys to delete
     3 or more       ambiguous, and refused
 
-That maps exactly onto what ``read()`` returns everywhere else in Weaver —
-``(staging, deletes)`` — so a SQL-authored table reaches
-:func:`weaver.runtime.table_load.load_table` through the same door a
-Python-authored one does, and inherits validation, rejection, fault tolerance,
-stability thresholds and static behaviour rather than reimplementing them.
+That is what ``read()`` returns everywhere else — ``(staging, deletes)`` — so a
+SQL-authored table reaches :func:`weaver.runtime.table_load.load_table` through
+the same door a Python-authored one does.
 
-**A delete query is a claim only an incremental keyed table may make.** A
-non-incremental source is the whole truth, so absence from staging is what
-retires a row and a second statement of the same thing would be applied on top
-of a reconciliation that already accounted for it. The refusal is the table
-load's own rule, repeated at parse time so it is met before a build rather than
-during a load.
+Only an incremental keyed table may name deletes: a non-incremental source is
+the whole truth, so absence from staging is what retires a row. The table load
+enforces the same rule; it is repeated at parse time so a build meets it first.
 
 Nothing here parses Spark SQL grammar. Statement boundaries come from
-:mod:`weaver.sql_statements`, and every statement is still handed to Spark,
-which remains the only authority on whether it is valid.
+:mod:`weaver.sql_statements`, and Spark remains the authority on validity.
 """
 
 from __future__ import annotations

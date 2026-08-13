@@ -18,19 +18,15 @@ Three artefacts, from three kinds of source:
 Views produce nothing on either side. A view's definition *is* its query, so
 there is no work to schedule and nothing for a load to do.
 
-**Nothing here inspects a target.** The current repository contents determine the
-complete set of claims, which is what lets a deleted or renamed source produce an
-ordinary prune through catalogue reconciliation rather than needing a scan to
-notice its artefact has been orphaned.
+Nothing here inspects a target: the repository's current contents are the
+complete set of claims, so a deleted or renamed source is pruned through
+catalogue reconciliation rather than found by a scan.
 
-**Nothing here generates a payload.** A T-SQL or Spark SQL load's bytes come
-from :meth:`weaver.declaration.source.SourceDocument.create_load`, and deployed
-Python is its own authored source. This module asks for a payload and carries
-what it gets, so the question of *what a load does* stays with the generator
-that knows the language, and the question of *which loads exist and how they are
-signed* stays here. Each generated payload arrives with its generator's version,
-which salts the signature — so a change to load generation invalidates exactly
-the artefacts it changed, and leaves deployed Python untouched.
+Nothing here generates a payload either. A T-SQL or Spark SQL load's bytes come
+from :meth:`weaver.declaration.source.SourceDocument.create_load`; this module
+carries what it gets. Each generated payload arrives with its generator's
+version, which salts the signature, so a change to load generation invalidates
+exactly the artefacts it changed and leaves deployed Python untouched.
 """
 
 from __future__ import annotations

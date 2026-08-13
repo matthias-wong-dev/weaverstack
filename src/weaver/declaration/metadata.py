@@ -659,10 +659,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     dependencies = _parse_dependencies(loaded.get("Dependencies"), object_id)
     if language == SPARK_SQL and not declares_dependencies:
         raise MetadataError(
-            "a Spark SQL object must declare Dependencies. Its query may read by "
-            "path, which cannot be resolved back to a managed object, so the graph "
-            "is declared rather than discovered. Write `Dependencies: []` if it "
-            "genuinely depends on nothing."
+            "a Spark SQL object must declare Dependencies, because a query may "
+            "read by path and a path cannot be resolved back to a managed "
+            "object. Write `Dependencies: []` if it depends on nothing."
         )
 
     description = _parse_text(loaded, "Description")
@@ -682,9 +681,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     declared_columns = _parse_schema(loaded.get("Schema"))
     if kind == TABLE and language == PYTHON and not declared_columns:
         raise MetadataError(
-            "a Python-backed Delta table must declare Schema — it has no query to "
-            "infer a shape from, is created before it is loaded, and the declared "
-            "shape is what lets every column guard run up front"
+            "a Python-backed Delta table must declare Schema: it has no query "
+            "to infer a shape from, and is created before it is loaded."
         )
 
     primary_key = _parse_column_set(loaded.get("Primary key"), "Primary key")
@@ -770,9 +768,8 @@ def _parse_validation(
 
     if kind == ASSUMPTION and "Primary key" in raw:
         raise MetadataError(
-            "an Assumption must not declare a Primary key. A key correlates the two "
-            "sides of a Test's symmetric difference, and an Assumption has one side: "
-            "it returns violation rows directly and succeeds when there are none"
+            "an Assumption must not declare a Primary key. A key correlates "
+            "the two sides of a Test; an Assumption has one side."
         )
 
     _reject_unknown_keys(raw, kind)
@@ -1451,9 +1448,8 @@ def _validate_columns(
     if identity is not None and identity in primary_key:
         raise MetadataError(
             f"Primary key names the Identity column {identity!r}. The engine "
-            "assigns the identity on insert, so a load can never match on it — "
-            "key on the business column that identifies a row across loads, and "
-            "let the identity be the surrogate beside it."
+            "assigns an identity on insert, so a load cannot match on it. Key "
+            "on the business column that identifies a row across loads."
         )
 
     if not declared_columns:
