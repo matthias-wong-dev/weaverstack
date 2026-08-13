@@ -5,19 +5,15 @@ folder run on different engines and return through different transports — a
 T-SQL result set, a Spark ``DataFrame``, a Python object. What they *mean* is
 the same, and this module is where that meaning is written down once.
 
-The field names are the contract, not just the dataclass. :data:`RESULT_COLUMNS`
-names them in order, and the generated Warehouse procedure declares its output
-parameters from the same list
-(:data:`weaver.declaration.tsql_load.RESULT_PARAMETERS`), so a field added here
-reaches every transport instead of two spellings drifting apart. That is the
-whole reason the names live beside the dataclass rather than inside the
-generator.
+The field names are the contract. :data:`RESULT_COLUMNS` names them in order
+and the generated Warehouse procedure declares its output parameters from the
+same list (:data:`weaver.declaration.tsql_load.RESULT_PARAMETERS`), so a field
+added here reaches every transport.
 
-**Success is not "nothing raised".** A load that rejected rows reports
-``succeeded=False`` even when it was asked to tolerate them and did — the rows
-did not arrive, and a caller that only checked for an exception would call that a
-clean load. What ``fault_tolerant`` changes is whether the valid rows are still
-written, never whether the run is reported as good (see
+Success is not "nothing raised": a load that rejected rows reports
+``succeeded=False`` even when it was asked to tolerate them and did.
+``fault_tolerant`` changes whether the valid rows are still written, never
+whether the run is reported as good (see
 :mod:`weaver.runtime.load_contract`).
 """
 
