@@ -150,12 +150,8 @@ def render_source(table: CatalogueTable) -> str:
 def render_log_file() -> str:
     """The declaration for ``Files/_/Log`` — where task evidence is written.
 
-    An ordinary Folder document, and that is the whole point. A task log could
-    have been a path the logger alone knew about, but then its creation, its
-    registration, its survival through a prune and its removal would each need a
-    rule of their own. Declared here it is claimed, projected, inventoried,
-    installed, converged and protected by the machinery that already exists, and
-    the logger asks the *folder* where to write rather than composing a path.
+    The folder is declared so normal build, inventory, and prune behaviour owns
+    its lifecycle. The logger resolves the folder rather than composing a path.
 
     ``Static: true`` because nothing loads into it: a task writes its own
     evidence beneath it, exactly as a Folder object's authored code writes files
