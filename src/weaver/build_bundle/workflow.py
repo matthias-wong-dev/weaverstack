@@ -181,10 +181,9 @@ def read_build_state(
 ) -> BuildState:
     """Read only the authoritative state a source-independent planner needs.
 
-    The boundary between the physical estate and the Builder: two reads — the
-    catalogue and every selected target — assembled into one Python handover
-    that a Builder can be given directly, and that a test can construct without
-    an estate at all.
+    The boundary between the physical estate and the Builder: the catalogue and
+    every selected target, assembled into one handover a Builder takes directly
+    and a test can construct without an estate.
     """
 
     workspace = workspace if workspace is not None else session.workspace
@@ -245,9 +244,9 @@ def materialise_tree(
 ) -> Iterator[MaterialisedTree]:
     """Copy a store tree once to a temporary local directory.
 
-    FabricStore uses one recursive ``notebookutils.fs.cp`` operation. A generic
-    Store falls back to one listing and exactly one read per file, which makes the
-    same contract testable without Fabric.
+    FabricStore uses one recursive ``notebookutils.fs.cp``. A generic Store
+    falls back to one listing and one read per file, so the same contract is
+    testable without Fabric.
     """
 
     if not store.exists(source):
@@ -272,13 +271,11 @@ def materialise_tree(
 def _snapshot_name(source: Location) -> str:
     """A usable directory name for the snapshot of ``source``.
 
-    ``.`` and ``..`` are ordinary ways to name a repository on a desktop and
-    neither can name a directory: joining either onto the temporary root would
-    address the root itself, and the copy would fail or land in the wrong place.
-    A filesystem source is therefore resolved first, so the snapshot is named for
-    the directory it actually copies rather than for the way the caller spelled
-    it. A filesystem root, and anything else that leaves no final segment, falls
-    back to a fixed name — the snapshot's identity is its contents, not its name.
+    ``.`` and ``..`` are ordinary ways to name a repository and neither can name
+    a directory: joined onto the temporary root, either addresses the root
+    itself. A filesystem source is resolved first, so the snapshot is named for
+    the directory it copies. Anything leaving no final segment falls back to a
+    fixed name; a snapshot's identity is its contents.
     """
 
     name = source.name if source.is_url else source.path.resolve().name
@@ -418,13 +415,12 @@ def build_item_repository(
 
         Repository + BuildState → Builder → BuildBundle → Installer
 
-    Both halves are separately callable and separately testable; this exists so
-    the common case reads as one call. It adds no decisions of its own, which is
-    what stops it becoming a hidden third architecture.
+    Both halves are separately callable and testable; this exists so the common
+    case reads as one call, and adds no decisions of its own.
 
     ``output`` places the generated bundle tree somewhere durable instead of the
-    temporary directory this otherwise uses. Only a caller that wants the bundle
-    afterwards passes it; the build itself does not care where it sat.
+    temporary directory. Only a caller that wants the bundle afterwards passes
+    it.
     """
 
     builder = Builder(

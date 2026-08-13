@@ -34,8 +34,7 @@ from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
 class BuildFailure:
     """One action that failed, described the way a developer needs to read it.
 
-    ``artefact`` is the Weaver thing that failed —
-    ``Warehouse/Reporting/Sales.CustomerRevenue`` — and ``source_path`` is the
+    ``artefact`` is the Weaver thing that failed and ``source_path`` the
     repository file to open. Both are carried from the build rather than
     recovered from ``action_id``, which by this point spells a slug.
     """
@@ -58,10 +57,8 @@ class BuildFailure:
     def describe(self) -> str:
         """The failure as the plan's error shape: what, where, then why.
 
-        The Weaver operation leads. A developer whose stored procedure has a
-        syntax error is not helped by being told first that TDS raised
-        something — the infrastructure is how it was found out, not what went
-        wrong, and it comes last.
+        The Weaver operation leads and the infrastructure comes last: TDS
+        raising something is how the syntax error was found, not what it was.
         """
 
         subject = self.artefact or self.action_id
@@ -267,11 +264,9 @@ def wipe(
 ) -> WipeResult:
     """Empty one or more whole Lakehouse or Warehouse items.
 
-    Takes a Session for the same reason the other operations do: a wipe resolves
-    the same item names, reaches the same OneLake paths and opens the same
-    Warehouse connections as the build that precedes it, and paying for those
-    twice in one console session is the cost this architecture removes. Wipe
-    needs no Builder and no Runner.
+    Takes a Session as the other operations do: a wipe resolves the same item
+    names, reaches the same OneLake paths and opens the same Warehouse
+    connections as the build before it. It needs no Builder and no Runner.
     """
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
@@ -380,15 +375,12 @@ def _operation_workspace(*, workspace, workspace_config, session=None) -> Worksp
 def current_workspace() -> Workspace:
     """The workspace this code is running in, discovered rather than named.
 
-    Inside a Fabric notebook there is exactly one right answer and the session
-    already knows it, so making a caller repeat it is asking them to restate a
-    fact that cannot differ. This is the discovery every operation already does
-    for ``workspace=None``, made reachable on its own for the case that needs a
-    *resolver* rather than an operation — reaching a Lakehouse the notebook is
-    not attached to, for instance.
+    Inside a Fabric notebook the session already knows the answer. This is the
+    discovery every operation does for ``workspace=None``, reachable on its own
+    for a caller that needs a resolver rather than an operation.
 
     Outside a session there is nothing to discover, and this says so rather than
-    guessing: a desktop caller names its workspace or its configuration file.
+    guessing.
     """
 
     return _with_inferred_control_lakehouse(
@@ -512,9 +504,8 @@ def _build_in_process(
 ) -> BuildResult:
     """One build, where this process is already where the data is.
 
-    The emulator and a Fabric notebook run the same code; what differed between
-    them — which Spark, which store, which resolver — is what the Session
-    answers, so there is one path here rather than two.
+    The emulator and a Fabric notebook run the same code: which Spark, which
+    store and which resolver are the Session's answers, so there is one path.
     """
 
     if isinstance(workspace, LocalWorkspace):
@@ -585,9 +576,8 @@ def _build_desktop_fabric(
     inventory over TDS, a Lakehouse's objects from storage, the catalogue and
     its views as Spark SQL — and each is timed as its own Step.
 
-    Nothing is packed to install. The archive survives only where it was always
-    the point: ``--bundle`` keeps a build record, written after the install and
-    read by nobody in this path.
+    Nothing is packed to install. ``--bundle`` keeps a build record, written
+    after the install and read by nobody in this path.
     """
 
     if not workspace.environment:
@@ -763,10 +753,9 @@ def unbind_catalogue_claims(
 ) -> dict:
     """Remove catalogue claims for named physical targets.
 
-    Two callers want it — ``weaver unbind``, and the tail of a ``wipe`` that
-    emptied a target the catalogue still claims. Reading the claims and deleting
-    them are both Spark SQL, so the statements go through the Session and the
-    decisions stay here.
+    Two callers want it: ``weaver unbind``, and the tail of a ``wipe`` that
+    emptied a target the catalogue still claims. Reading and deleting are both
+    Spark SQL, so the statements go through the Session.
     """
 
     from .build_bundle.workflow import session_catalogue
