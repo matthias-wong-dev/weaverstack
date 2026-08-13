@@ -46,9 +46,8 @@ TABLES_AREA = "Tables"
 class LocalResolver:
     """Resolves level-three identities against a local workspace root.
 
-    Checkpoint 7 adds a Fabric resolver with the same surface, returning URL
-    locations. No shared protocol is declared yet: one implementation is a
-    guess at the shape, two make it visible.
+    The Fabric resolver has the same surface, returning URL locations. No
+    shared protocol is declared between them.
     """
 
     def __init__(self, workspace: LocalWorkspace) -> None:
@@ -86,8 +85,8 @@ class LocalResolver:
         """The root Spark writes through, for a Lakehouse.
 
         The local counterpart of the Fabric ``abfss://`` root: same contract,
-        filesystem transport, and the same reason for existing — a destination is
-        addressed explicitly rather than by attaching the session to it.
+        filesystem transport, and a destination addressed explicitly rather than
+        by attaching the session to it.
         """
 
         return self.lakehouse(item).value
