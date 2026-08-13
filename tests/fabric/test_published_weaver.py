@@ -249,7 +249,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
         # The capabilities the Installer supplies in either position. A Spark
         # action runs a statement now rather than holding a session, so the
         # context has to carry the way to run one.
-        "context = InstallationContext(spark=spark, resolver=resolver, store=store,\n"
+        "context = InstallationContext(resolver=resolver, store=store,\n"
         " spark_sql=installer.spark_sql(), spark_sql_batch=installer.spark_sql_batch(),\n"
         " target=target, targets={'lh': target})\n"
         "action = InstallAction(id='parity', kind='create_schema', "

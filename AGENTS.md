@@ -187,15 +187,15 @@ desktop**, with Fabric reached only through Livy, TDS, OneLake and REST, each
 crossing carrying a small clear script rather than an operation. Not two products
 — one, in two positions, because the doers do not know which one they are in.
 
-Installing is there. Every build action runs in the `Installer` wherever that is,
-reaching for the capability its work needs — storage, REST, TDS, or the Session's
-Spark SQL — so no action is classified by where it has to run and nothing on the
-far side of an install imports Weaver.
+Build is there. Every build action runs in the `Installer` wherever that is, and
+the state a build plans against is read the same way — the catalogue and a
+Lakehouse's views are Spark SQL, a Lakehouse's objects are storage, a Warehouse
+is TDS. So a desktop `weaver build` needs no published wheel: nothing it submits
+imports Weaver.
 
-What still crosses as a program is the state a build reads before it plans (the
-catalogue and the target inventories) and a run's Python primitives, which are
-deployed modules imported where Spark is. So `weaver load` requires the published
-wheel, and so does a Fabric `weaver build` — for the reading, not the installing.
+What still crosses as a program is a run's Python primitives, which are deployed
+modules imported where Spark is. `weaver load` therefore requires the published
+wheel, and that is the remaining gap.
 
 **A Fabric test that runs Weaver on the laptop tests the desktop position, not
 the in-Fabric one** — that is what the `remote` and `hosted` markers are for, and

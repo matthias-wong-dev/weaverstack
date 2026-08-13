@@ -41,12 +41,9 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
-#: Where a Session's data engineering happens, relative to this process.
-#:
-#: One consumer: choosing which run scope to open. A run's deployed modules are
-#: imported where Spark is, so this is the one decision that genuinely turns on
-#: position — everything else asks a Session for a capability and lets it decide
-#: what performing it means.
+#: Where a Session's data engineering happens, relative to this process. One
+#: consumer: choosing which run scope to open, because a run's deployed modules
+#: are imported where Spark is. Everything else asks for a capability instead.
 
 #: Weaver is running where the data is: a notebook, or the local emulator.
 IN_SESSION = "in_session"
@@ -168,11 +165,9 @@ class Session(ABC):
     def position(self, workspace: Workspace | None = None) -> str:
         """Where this Session's data engineering happens, as a named value.
 
-        Derived from what a host already answers rather than declared twice:
-        ``executes_here`` says whether the work happens in this process, and a
-        Session that cannot place itself against a workspace has nothing to
-        reach into either. Both answers are the Session's, so a caller choosing
-        between them never has to interpret a failure to find one.
+        Derived from ``executes_here`` rather than declared twice. A Session
+        that cannot place itself against a workspace has nothing to reach into,
+        so that is an answer here rather than an error for a caller to read.
         """
 
         try:
@@ -280,19 +275,15 @@ class Session(ABC):
     ) -> Any:
         """Run ordered Spark SQL statements together, and return the last one's rows.
 
-        One submission wherever the statements have to cross, because several
-        statements that belong to one action are one piece of work: a setup that
-        registers a temporary view and the query that reads it only mean anything
-        in the same session, in this order.
+        One submission wherever they cross, because statements belonging to one
+        action are one piece of work: a setup that registers a temporary view
+        and the query reading it only mean anything in the same session.
 
-        ``exact_case`` carries Weaver's identifier-case scope across with them.
-        It travels with the statements rather than being arranged by the caller,
-        because on a desktop the caller has no Spark to set a conf on — and a
-        statement analysed under the host's default case is a different
-        statement.
+        ``exact_case`` travels with the statements because a desktop caller has
+        no Spark to set a conf on, and a statement analysed under the host's
+        default case is a different statement.
 
-        Only the last statement's rows come back. The others are run for their
-        effect, as they are in a session.
+        The other statements are run for their effect, as they are in a session.
         """
 
     def execute_spark_sql(
@@ -623,9 +614,8 @@ class WorkspaceScope:
 def run_spark_statements(spark: Any, statements: Sequence[str]) -> list[dict]:
     """Run each statement in order against a live session; collect only the last.
 
-    The earlier statements are run for their effect, and Spark executes a command
-    when it is asked for. Collecting each one would materialise a result nothing
-    reads.
+    Spark executes a command when it is asked for, so collecting the earlier
+    results would materialise what nothing reads.
     """
 
     for statement in statements[:-1]:

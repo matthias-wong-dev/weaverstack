@@ -1,21 +1,13 @@
-"""Named entry points a submitted statement calls, and the arguments they take.
+"""What a submitted statement calls: the far side of a decomposed run.
 
-A run orchestrated from a desktop still has to import its deployed Python
-primitives where Spark is, so a statement is submitted per node and these are
-what it calls. Each one unpacks flat arguments into the values an in-session run
-already holds, and then calls the same function that run calls: nothing here
-reimplements what a primitive does.
+A deployed Python primitive is imported where Spark is, so a run orchestrated
+elsewhere submits a statement per node and these are what it calls. Each unpacks
+flat arguments into the values an in-session run already holds and calls the same
+function that run calls.
 
-The arguments are flat and small on purpose. A ``RunNode`` carries typed Weaver
-identities and an opaque description of what is installed, none of which this
-side needs — so what crosses is the handful of strings the import and the
-construction actually use, rather than a serialisation of the Runner's model
-that would then have to be kept in step with it.
-
-These are functions rather than text inside a submitted body because the wheel
-and the desktop are two independently versioned halves of one contract, and a
-named function is versioned, testable and greppable. Widening this surface is the
-coupling that has caused Fabric failures, so it stays two functions.
+This is the surface the published wheel exports, so it stays two named functions:
+the wheel and the desktop are independently versioned, and widening the surface
+between them is what has caused Fabric failures.
 """
 
 from __future__ import annotations
@@ -66,10 +58,8 @@ def run_validation_primitive(
 ) -> dict:
     """Run one installed Lakehouse validation in a named scope.
 
-    A validation crosses as the description the estate gave of it, because that
-    is what a validation *is* here — the Registry row saying where the primitive
-    lives and what it compares. Reconstructed on this side into the same value an
-    in-session run holds, and handed to the same runtime.
+    It crosses as the estate's own description of it — the Registry row saying
+    where the primitive lives and what it compares.
     """
 
     from ..test_execution import run_installed_validation
@@ -89,15 +79,11 @@ def run_validation_primitive(
 
 
 def _session(session, workspace):
-    """The Session these entry points run against.
+    """The Session these run against.
 
-    Given one, that is the answer: the submitted body constructs a
-    :class:`~weaver.session.notebook.NotebookSession` around the interpreter's
-    own ``spark`` global, exactly as every other crossing does, because a Session
-    built in here would have to go looking for an active Spark session rather
-    than being handed the one this statement is running in.
-
-    Absent — a notebook calling these directly — the host decides.
+    The submitted body builds one around the interpreter's own ``spark`` global;
+    one built here would have to go looking for an active session instead. A
+    notebook calling these directly supplies none, and the host decides.
     """
 
     if session is not None:

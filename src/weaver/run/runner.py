@@ -196,8 +196,8 @@ class Runner:
     def runtime_scope(self, session=None):
         """This run's deployed-module scope, held unopened until something imports.
 
-        A Warehouse-only run never calls ``get()``, so it opens no scope and, on
-        a desktop, submits no ``begin_run``.
+        A Warehouse-only run never calls ``get()``, so it opens no scope and,
+        on a desktop, submits nothing to open one.
         """
 
         if self._runtime_scope is None:

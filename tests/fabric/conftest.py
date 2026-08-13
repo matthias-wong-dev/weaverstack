@@ -724,8 +724,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
             ),
         )
         context = InstallationContext(
-            spark=None,
-            resolver=None,
+                resolver=None,
             store=None,
             target=target,
             sql=disposable_warehouse.executor,

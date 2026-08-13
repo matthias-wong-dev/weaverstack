@@ -1,32 +1,25 @@
-"""Spark SQL table build — inference and creation in one self-contained action.
+"""Spark SQL table build — shape inference and creation in one action.
 
-A Spark SQL table's shape is only settled by asking Spark about its query, so its
-payload is not finished SQL. It is a JSON instruction (built by
-:func:`weaver.declaration.ddl._spark_table_ddl`) that this executor completes in a
-single pass, the Spark counterpart of the old T-SQL self-contained script
-(how-does-build-work §2):
+A Spark SQL table's shape is settled by asking Spark about its query, so the
+payload is a JSON instruction rather than finished SQL
+(:func:`weaver.declaration.ddl._spark_table_ddl`). This executor completes it:
 
-1. ask Spark for the query's shape with ``DESCRIBE QUERY``, after whatever setup
-   the body needs — one piece of work, so the temporary views a query reads are
-   registered in the session that describes it;
-2. validate the columns with the same guards a declared schema passes at parse
-   (:func:`weaver.declaration.columns.validate_build_columns`), driven entirely by
-   the frozen payload — the Weaver document source is never reopened;
+1. ``DESCRIBE QUERY``, after whatever setup the body needs — one piece of work,
+   so a temporary view the query reads is registered in the session describing it;
+2. validate the columns with the guards a declared schema passes at parse
+   (:func:`weaver.declaration.columns.validate_build_columns`);
 3. choose the physical business columns — declared types when declared, the
-   query's inferred types otherwise;
+   query's otherwise;
 4. append Weaver's audit columns;
 5. create the table with strict ``CREATE TABLE``.
 
-Only steps 1 and 5 need Spark, and each is a statement rather than a session, so
-this runs wherever the Installer does. ``DESCRIBE QUERY`` answers exactly what
-reading the ``DataFrame`` schema used to: the output column names, in order, and
-each type as ``dataType.simpleString()`` spells it. Neither form reads a row.
+Only 1 and 5 reach Spark, and each is a statement, so this runs wherever the
+Installer does. ``DESCRIBE QUERY`` answers what reading the ``DataFrame`` schema
+used to — the output columns in order and each type as ``simpleString`` spells
+it — and neither reads a row.
 
-A Delta table has no identity column, so nothing here handles one. Native
-identity is what makes the column worth having, and no Delta version Weaver
-runs on generates it, so the ``Identity`` header is a Warehouse-only
-declaration the parser refuses elsewhere (:data:`weaver.declaration.metadata.IDENTITY_LANGUAGES`)
-rather than something accepted here and quietly not materialised.
+A Delta table has no identity column, so the ``Identity`` header is a
+Warehouse-only declaration the parser refuses elsewhere.
 """
 
 from __future__ import annotations
@@ -72,16 +65,13 @@ class SparkTableExecutor:
         qualified = names.expand(instruction["object"])
         query = names.expand(instruction["source_query"])
 
-        # Fabric defaults case-sensitive analysis off. Weaver identities are exact,
-        # so the source query and the resulting DDL must share one exact-case scope:
-        # otherwise a table created as ``CustomerEnriched`` cannot be consumed by
-        # the next action in the same coordinated build. Each statement carries the
-        # scope, so both halves are analysed the same way wherever they run.
+        # Fabric defaults case-sensitive analysis off, and Weaver identities are
+        # exact, so the query and the DDL must share one scope — or a table
+        # created as ``CustomerEnriched`` cannot be read by the next action.
         exact_case = names.exact_case
 
-        # An authored body may build a temporary view before selecting from it, so
-        # the setup and the describe are one piece of work: a view registered in a
-        # different session is a view the query cannot see.
+        # The setup and the describe are one piece of work: a view registered in
+        # a different session is one the query cannot see.
         setup = [names.expand(statement) for statement in instruction.get("setup") or ()]
         query_columns, query_types = self._query_shape(
             [*setup, f"DESCRIBE QUERY {query}"],
@@ -136,8 +126,7 @@ class SparkTableExecutor:
         """The query's output columns, in order, with each column's type.
 
         A query that does not resolve fails here rather than at the create, so
-        the failure names the action and carries Spark's own message — which is
-        the part that says which column or relation was missing.
+        the failure names the action and carries Spark's message.
         """
 
         try:

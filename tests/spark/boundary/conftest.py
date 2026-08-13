@@ -53,7 +53,6 @@ def context_for(
     target = resolved_for(lakehouses, item, target_id=target_id)
     one, many = spark_sql_capability(spark)
     return InstallationContext(
-        spark=spark,
         resolver=lakehouses.resolver,
         store=lakehouses.store,
         target=target,

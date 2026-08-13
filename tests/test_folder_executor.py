@@ -32,7 +32,6 @@ def _context(tmp_path):
         item_id=lakehouse.name,
     )
     return InstallationContext(
-        spark=None,
         resolver=resolver,
         store=store,
         target=ResolvedTarget(bound=bound, lakehouse=lakehouse),

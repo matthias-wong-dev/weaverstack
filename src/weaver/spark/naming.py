@@ -1,11 +1,9 @@
-"""Statement text against one Spark destination, with no session behind it.
+"""Statement text against one Spark destination.
 
-Naming and execution are separate needs. Qualifying an object, expanding a
-payload's tokens and rendering a ``CREATE SCHEMA`` are all decided by the
-destination alone, and an installer running on a desktop has a destination but no
-Spark session of its own. :class:`SparkNaming` is that half;
-:class:`~weaver.spark.catalogue.SparkCatalogue` is the half that needs a session,
-and delegates its naming here.
+Qualifying an object, expanding a payload's tokens and rendering a
+``CREATE SCHEMA`` are decided by the destination alone.
+:class:`~weaver.spark.catalogue.SparkCatalogue` delegates its naming here and
+adds the operations that run.
 """
 
 from __future__ import annotations
@@ -39,17 +37,32 @@ class SparkNaming:
 
         return tokens.expand(statement, self.destination)
 
+    def register_external_table_statements(
+        self, schema: str, name: str, location: str
+    ) -> tuple[str, str]:
+        """Name a table whose storage this destination does not own.
+
+        For an alias in the local emulator: Fabric discovers a shortcut under
+        ``Tables/`` by itself, local Spark discovers nothing. Dropped first
+        because re-pointing an alias is not destructive — dropping an *external*
+        table removes the registration and never the storage.
+        """
+
+        qualified = self.qualify(schema, name)
+        return (
+            f"DROP TABLE IF EXISTS {qualified}",
+            f"CREATE TABLE {qualified} USING DELTA LOCATION '{escaped(location)}'",
+        )
+
     def create_schema_statement(
         self, schema: str, *, if_not_exists: bool = True
     ) -> str:
         """The ``CREATE SCHEMA`` this destination needs, ready to run.
 
-        The ``LOCATION`` clause is the destination's business, not the planner's:
-        local Spark needs one so a managed table lands under the Lakehouse's
-        ``Tables`` area, and a schema-enabled Fabric Lakehouse pins it natively and
-        must not be given one. It is also a resolved path, so it could not have
-        been frozen into a payload without tying the bundle to the machine that
-        generated it (how-does-build-work §15).
+        The ``LOCATION`` clause is the destination's business: local Spark needs
+        one so a managed table lands under the Lakehouse's ``Tables`` area, and
+        a schema-enabled Fabric Lakehouse must not be given one. It is a
+        resolved path, so it cannot be frozen into a payload.
         """
 
         qualifier = " IF NOT EXISTS" if if_not_exists else ""

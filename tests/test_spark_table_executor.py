@@ -129,7 +129,6 @@ def _context(capability, destination):
         destination=destination,
     )
     return InstallationContext(
-        spark=None,
         resolver=None,
         store=None,
         target=target,

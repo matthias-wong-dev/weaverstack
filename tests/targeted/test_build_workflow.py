@@ -364,12 +364,11 @@ def test_installing_through_fake_executors_never_starts_spark(estate, monkeypatc
     assert result.report.status == "succeeded"
 
 
-def test_a_real_spark_executor_still_gets_the_sessions_own_spark(estate):
+def test_a_real_spark_executor_still_reaches_the_sessions_own_spark(estate):
     """The other half: deferring acquisition must not stop it happening.
 
-    An executor that asks for Spark gets the Session's — the same resource a
-    second executor would get — rather than a proxy that quietly stands in for
-    one.
+    An executor runs its statement through the Session, so what it reaches is
+    the session's own Spark rather than a proxy standing in for one.
     """
 
     seen = []
@@ -378,12 +377,17 @@ def test_a_real_spark_executor_still_gets_the_sessions_own_spark(estate):
         name = "spark_sql"
 
         def execute(self, action, payload, context):
-            # Touching it is what acquires it, which is the point.
-            seen.append(context.spark.sparkVersionOrSomething)
+            # Running one is what acquires the session, which is the point.
+            seen.append(context.spark_sql("SELECT 1"))
             return {"ran": action.id}
 
+    ran = []
+
     class Marker:
-        sparkVersionOrSomething = "the session's own"
+        @staticmethod
+        def sql(statement):
+            ran.append(statement)
+            return type("Frame", (), {"collect": staticmethod(list)})()
 
     estate["session"].scope(estate["session"].workspace).local_spark = type(
         "R", (), {"get": staticmethod(lambda: (Marker(), None))}
@@ -391,4 +395,6 @@ def test_a_real_spark_executor_still_gets_the_sessions_own_spark(estate):
 
     build(estate, executors={**estate["executors"], "spark_sql": Asking()})
 
-    assert seen and all(value == "the session's own" for value in seen)
+    assert seen, "no executor ran"
+    assert ran == ["SELECT 1"] * len(seen)
+    assert not any(isinstance(one, BaseException) for one in seen), seen

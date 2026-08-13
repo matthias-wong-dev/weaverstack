@@ -280,22 +280,17 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     assert asked == [], "a Spark session was started for a batch that never used one"
 
 
-def test_a_host_with_no_spark_still_says_so_without_starting_anything():
-    """``None`` means *this host has no Spark*, which executors read to skip
-    Lakehouse work rather than fail it. That answer must not cost a session."""
+def test_a_context_carries_no_spark_session_for_an_executor_to_find():
+    """The last "does this host have Spark?" question, and it is gone.
 
-    from weaver.build_bundle.installer import Installer
+    An executor that could ask would be classifying itself by position again.
+    What it gets instead is a way to run statements, which every host has.
+    """
 
-    class Elsewhere:
-        workspace = None
+    from weaver.build_bundle.executors.base import InstallationContext
 
-        def executes_here(self, workspace=None):
-            return False
-
-        def spark(self, workspace=None):
-            raise AssertionError("a host that executes elsewhere was asked for Spark")
-
-    assert Installer(Elsewhere()).spark_when_needed() is None
+    assert not hasattr(InstallationContext, "spark")
+    assert "spark" not in InstallationContext.__dataclass_fields__
 
 
 # --- concurrency within a batch -----------------------------------------------

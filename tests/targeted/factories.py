@@ -1127,7 +1127,6 @@ def installation_context(
 
     one, many = (None, None) if spark is None else spark_sql_capability(spark)
     return InstallationContext(
-        spark=spark,
         resolver=resolver,
         store=store,
         target=target if target is not None else resolved_target(),

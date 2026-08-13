@@ -162,8 +162,7 @@ def run_from_here(
         action,
         payload,
         context=InstallationContext(
-            spark=None,
-            # From the Installer, as every production context gets them. An
+                # From the Installer, as every production context gets them. An
             # executor stays on the desktop and only its statements cross — a
             # table alias asking whether it has become readable, a table build
             # asking what shape its query has.

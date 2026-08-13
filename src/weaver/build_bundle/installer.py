@@ -13,16 +13,12 @@ executes an object's code, and it has no route back to the source repository at
 all, because a bundle carries its outputs rather than a second copy of its
 inputs.
 
-**Everything here runs one at a time.** Sequences are serial because a sequence
-is a barrier and that is what it is for. The actions within a batch are serial
-too — see :data:`_WHY_SERIAL`, which records the attempt to run T-SQL
-concurrently and the deadlocks a real Warehouse answered with.
+Everything runs one at a time. Sequences are serial because a sequence is a
+barrier; the actions within a batch are serial too — see :data:`_WHY_SERIAL`.
 
-**Every action runs here**, whichever position this is. An executor reaches for
-the capability its work needs — storage, REST, TDS, or the Session's Spark SQL —
-and the Session knows whether that means doing it in this process or submitting
-it. So an action is never routed anywhere, and there is no class of action that
-travels differently from the rest.
+Every action runs here, whichever position this is. An executor reaches for the
+capability its work needs — storage, REST, TDS, or the Session's Spark SQL — and
+the Session decides what performing it means.
 """
 
 from __future__ import annotations
@@ -57,17 +53,11 @@ REPORT_FILENAME = "install-report.yml"
 
 
 class _Deferred:
-    """A capability acquired by the first executor that uses it.
+    """A Warehouse connection opened by the first executor that uses it.
 
-    A batch is handed its capabilities up front, and the expensive ones — a
-    Spark session, a Warehouse connection — should not be paid for by actions
-    that never touch them. This exists so that "this host has one" and "this
-    host has *started* one" stop being the same question: the first is what a
-    batch needs to know when it is assembled, the second is answerable later.
-
-    Deliberately not a general lazy proxy. Everything is forwarded, so an
-    executor writes ``context.spark.sql(...)`` or ``context.sql.execute(...)``
-    exactly as before and cannot tell the difference.
+    Separates "this batch has one" — which it needs when it is assembled — from
+    "one is open", which can wait. Everything is forwarded, so an executor
+    cannot tell.
     """
 
     __slots__ = ("_acquire", "_session")
@@ -92,24 +82,17 @@ class _Deferred:
 class Installer:
     """Execute an already-decided bundle against a Session.
 
-    One of Weaver's four doers, and the one with no opinions. It validates the
-    bundle, resolves its targets, walks the sequences as barriers and records one
-    result per action. It never reopens the repository, resolves a dependency,
-    chooses a target, inspects the estate to check whether the Builder was right,
-    or replans anything: every such decision is already in the bundle, and an
-    installer that could second-guess it would make "who decided?" unanswerable.
+    It validates the bundle, resolves its targets, walks the sequences as
+    barriers and records one result per action. It never reopens the repository,
+    resolves a dependency, chooses a target or replans anything — every such
+    decision is already in the bundle.
 
-    Its runtime services come from the Session — the Spark it runs in, the store
-    it reads payloads from, the resolver that turns a target into paths, the
-    connection each Warehouse is reached over. It closes none of them, because it
-    opened none of them.
+    Its runtime services come from the Session, and it closes none of them
+    because it opened none of them.
 
     .. code-block:: python
 
         report = Installer(session).install(bundle)
-
-    This runs where the data is. A console addressing Fabric crosses first, once,
-    with the whole bundle; the Installer on the far side is this same object.
     """
 
     def __init__(
@@ -137,34 +120,8 @@ class Installer:
     def spark(self) -> Any:
         return self.session.spark(self.workspace)
 
-    def spark_when_needed(self) -> Any:
-        """Spark for this host, acquired only if an action actually asks for it.
-
-        A batch is given its capabilities up front, and a Spark session is the
-        one that costs seconds to start and that a JVM permits exactly one of.
-        Building it eagerly meant a bundle of nothing but file writes, T-SQL and
-        an endpoint refresh still started one — paying for a capability none of
-        its actions would touch, and, in a process that already had a session,
-        failing outright with *Only one SparkContext should be running in this
-        JVM*.
-
-        ``None`` still means *this host has no Spark*, which several executors
-        read to skip Lakehouse work rather than fail it. That answer is given
-        without acquiring anything: whether a host executes here is a property
-        of the host, not of having started a session.
-        """
-
-        if not self.session.executes_here(self.workspace):
-            return None
-        return _Deferred(lambda: self.session.spark(self.workspace))
-
     def spark_sql(self):
-        """Run one Spark SQL statement, from wherever this is running.
-
-        The capability an executor needs when its work is a *statement* rather
-        than something that needs a real DataFrame. Supplying it is what lets an
-        action stay where the Installer is while only the statement crosses.
-        """
+        """Run one Spark SQL statement, from wherever this is running."""
 
         session = self.session
         workspace = self.workspace
@@ -177,11 +134,9 @@ class Installer:
         return run
 
     def spark_sql_batch(self):
-        """Run several Spark SQL statements together, as one piece of work.
+        """Run several Spark SQL statements as one piece of work.
 
-        Ordered, in one submission where they cross, under one identifier-case
-        scope. That is what a setup and the query reading it need, and it is why
-        an action carrying several statements does not become several trips.
+        Ordered, one submission where they cross, one identifier-case scope.
         """
 
         session = self.session
@@ -195,13 +150,8 @@ class Installer:
         return run
 
     def sql_for(self, bound: BoundTarget) -> Any:
-        """The Warehouse connection for a batch, from the Session that owns it.
-
-        Deferred for the reason Spark is: a connection is opened by the first
-        action that runs a statement, not by assembling the batch that might.
-        ``None`` still means *this target is not a Warehouse*, which is a
-        structural fact and costs nothing to answer.
-        """
+        """The Warehouse connection for a batch, opened by the first action
+        that runs a statement. ``None`` means this target is not a Warehouse."""
 
         if bound.kind != WAREHOUSE_TARGET:
             return None
@@ -396,7 +346,6 @@ def _run_sequence(
         for batch in sequence.batches:
             target = resolved[batch.target_id]
             context = InstallationContext(
-                spark=installer.spark_when_needed(),
                 spark_sql=installer.spark_sql(),
                 spark_sql_batch=installer.spark_sql_batch(),
                 resolver=installer.resolver,

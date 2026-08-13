@@ -2,20 +2,12 @@
 
 The payload is the single executable unit ``create_ddl`` produced: a ``CREATE OR
 REPLACE VIEW``/``TABLE``, or a frozen prune ``DROP``. It names its objects
-logically — ``{{object:Sales.Customer}}`` — and this resolves those names against
-the destination the batch is bound to before running the statement.
+logically — ``{{object:Sales.Customer}}`` — and this resolves them against the
+batch's destination before running the statement.
 
-That resolution is the whole difference between a build that works and one that
-looks like it does. A two-part name resolves through the session's *current*
-catalogue, and the session is attached to the Weaver Lakehouse, so every
-destination statement would have landed in the control plane. On Fabric the
-object would have been created in the wrong Lakehouse and then read back from the
-wrong Lakehouse, and the assertion would have passed.
-
-The same session runs every sequence, so a view registered earlier is in the
-catalogue for a later one — now under a name that says which Lakehouse it is in.
-The SQL analytics endpoint is never used; Spark views are Spark-catalogue objects
-and resolve there.
+Resolution matters here: a two-part name resolves through the session's current
+catalogue, which is the Weaver Lakehouse, so an unresolved statement would create
+the object in the control plane and read it back from there.
 """
 
 from __future__ import annotations

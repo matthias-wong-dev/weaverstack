@@ -265,14 +265,13 @@ from a desktop    Weaver runs on your machine. Fabric is reached only through
 
 Both positions use the same code and support complete workflows.
 
-Every build executor works in both positions. What crosses is a statement, so an
-install imports nothing on the far side.
+A whole build works in both positions. Its actions and the state it plans
+against are all statements, storage or TDS, so nothing it submits imports Weaver
+and a desktop build needs no published wheel.
 
-Two things still cross as programs, and both import the published wheel:
-`weaver.run.entry` for a Python primitive, and the catalogue and inventory reads
-a build performs before it plans. A desktop build or load therefore requires
-`weaver install` to have published the current wheel; the version check reports
-when it has not:
+One thing still crosses as a program: `weaver.run.entry`, for a run's deployed
+Python primitives. A desktop `weaver load` therefore requires `weaver install` to
+have published the current wheel; the version check reports when it has not:
 
 ```text
 the Weaver published in <workspace> is older than this console ...

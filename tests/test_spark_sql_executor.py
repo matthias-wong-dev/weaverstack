@@ -48,7 +48,6 @@ class _Capability:
 
 def _context(capability, destination, *, epoch=None, item="Sales"):
     return InstallationContext(
-        spark=None,
         resolver=None,
         store=None,
         target=ResolvedTarget(
@@ -118,7 +117,7 @@ def test_a_view_without_a_way_to_run_a_statement_says_so():
     capability = _Capability()
     context = _context(capability, fabric_destination(workspace="A", lakehouse="Sales"))
     context = InstallationContext(
-        spark=None, resolver=None, store=None, target=context.target
+        resolver=None, store=None, target=context.target
     )
 
     with pytest.raises(InstallError, match="no Spark SQL capability"):
@@ -236,7 +235,7 @@ def test_a_batch_without_a_way_to_run_statements_says_so():
     capability = _Capability()
     bare = _batch_context(capability)
     bare = InstallationContext(
-        spark=None, resolver=None, store=None, target=bare.target
+        resolver=None, store=None, target=bare.target
     )
 
     with pytest.raises(InstallError, match="no Spark SQL capability"):

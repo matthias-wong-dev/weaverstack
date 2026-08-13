@@ -1,20 +1,12 @@
 """Runtime scopes held by name, for the life of one interpreter.
 
-A deployed Python primitive is a *module imported inside the session*, and the
-object owning those imports — :class:`~weaver.runtime.python_context.RuntimeScope`
-— cannot cross a process boundary. So a run orchestrated from elsewhere opens a
-scope here, dispatches against it by name, and closes it when it is done.
+A run orchestrated from elsewhere opens a scope here, dispatches against it by
+name, and closes it when it is done.
 
-**A registry rather than one scope.** Two runs can overlap — a notebook and a
-desktop against one session, or a retry begun before its predecessor was cleaned
-up — and a shared scope would let the second run use modules the first had
-already imported. Across runs nothing is shared at all, which is what makes a
-rebuilt module take effect on the next run rather than the next session.
-
-**A leaked scope dies with the interpreter.** If whoever opened one never closes
-it, the entry survives until the session ends and then goes with it. That is the
-right failure mode, and the reason this is module state rather than anything
-durable: a scope's lifetime is at most the interpreter's.
+A registry rather than one scope, because two runs can overlap and a shared one
+would let the second use modules the first imported. Module state rather than
+anything durable, because a scope's lifetime is at most the interpreter's: a
+leaked one dies with the session.
 """
 
 from __future__ import annotations
@@ -31,9 +23,8 @@ _LOCK = threading.Lock()
 def open_scope(run_id: str) -> str:
     """Open a runtime scope under one name, and return the name.
 
-    Idempotent deliberately: a resubmitted statement — a dropped response, a
-    retried call — must not replace a scope whose modules are already imported
-    and in use by the run that is still going.
+    Idempotent: a resubmitted statement must not replace a scope whose modules
+    are in use by the run that is still going.
     """
 
     from .python_context import RuntimeScope

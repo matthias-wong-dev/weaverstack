@@ -22,10 +22,10 @@ It is read off the desktop's own telemetry rather than by asking Fabric what it
 holds, because the counts are exactly the claim: one begin, one end, and more
 dispatches than either.
 
-``hosted``, because the primitives run as the installed wheel: the remote scope
-lives in :mod:`weaver.run.remote` inside the Fabric session. The *orchestration*
-is here, which is the whole point, but the thing being imported over there is
-the published package.
+``hosted``, because the primitives run as the installed wheel: the scope registry
+and the entry points a submission calls are :mod:`weaver.runtime.session_scopes`
+and :mod:`weaver.run.entry` inside the Fabric session. The orchestration is here;
+what is imported over there is the published package.
 """
 
 from __future__ import annotations

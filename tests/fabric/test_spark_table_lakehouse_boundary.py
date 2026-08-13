@@ -70,7 +70,6 @@ def spark_table_estate(
         destination=destination,
     )
     context = InstallationContext(
-        spark=None,
         # From the Installer, as every production context gets them. The executor
         # stays here and only its statements cross.
         spark_sql=installer.spark_sql(),

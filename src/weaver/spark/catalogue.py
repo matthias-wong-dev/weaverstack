@@ -17,7 +17,7 @@ from typing import Any
 
 from ..errors import InstallError
 from .destination import SparkDestination
-from .naming import SparkNaming, escaped as _escaped
+from .naming import SparkNaming
 
 
 class SparkCatalogue:
@@ -88,26 +88,6 @@ class SparkCatalogue:
 
         statement = self.names.create_schema_statement(
             schema, if_not_exists=if_not_exists
-        )
-        self._run(statement)
-        return statement
-
-    def register_external_table(self, schema: str, name: str, location: str) -> str:
-        """Name a table in this destination whose storage it does not own.
-
-        This exists for an alias in the local emulator. Fabric discovers a
-        OneLake shortcut under a Lakehouse's ``Tables`` area by itself; local
-        Spark discovers nothing, so the emulator says what Fabric infers.
-
-        Dropped first because an alias is a pointer and re-pointing one is not
-        destructive: dropping an *external* table removes the registration and
-        never the storage.
-        """
-
-        qualified = self.qualify(schema, name)
-        self._run(f"DROP TABLE IF EXISTS {qualified}")
-        statement = (
-            f"CREATE TABLE {qualified} USING DELTA LOCATION '{_escaped(location)}'"
         )
         self._run(statement)
         return statement
