@@ -597,12 +597,7 @@ def _child_dirs(store: Store, root) -> list:
 
 
 def _catalogue_for(resolver, lakehouse: ItemRef, spark) -> "SparkCatalogue | None":
-    """Catalogue operations against the Lakehouse being reconciled.
-
-    None without a session — prune still reconciles tables, folders and schemas
-    from storage, and simply cannot see views, which is the documented cost of
-    generating without one.
-    """
+    """Return catalogue operations, or ``None`` when no Spark session is available."""
 
     if spark is None:
         return None

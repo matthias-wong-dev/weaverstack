@@ -355,13 +355,7 @@ def _full_replace_body(names: dict) -> str:
 def _prospective_deletes(
     names: dict, contract: LoadContract, claims_deletes: bool
 ) -> str:
-    """Count what the load is about to delete, before it deletes any of it.
-
-    A number obtained by deleting would be a report rather than a check, and the
-    whole point of the guard is to decide *not* to. Two ways to arrive at the
-    number, because there are two ways a row is retired — the source stopped
-    producing it, or the author named it — and one object never uses both.
-    """
+    """Count prospective deletes before the load applies them."""
 
     if claims_deletes:
         return (
