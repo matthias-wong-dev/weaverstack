@@ -112,12 +112,10 @@ DEFAULT_STABILITY_ROWS = 1_000_000
 
 # Keys accepted per kind. Anything else is a typo and is refused by name.
 #
-# The groups below are semantic rather than convenient: each says what a set of
-# keys is *about*, and each kind then composes the groups that make sense for it.
-# There is deliberately no single set that every document gets. A Test is a
-# Weaver declaration with a description, notes and dependencies, and it is not a
-# materialised object — so `Lineage`, `Static` and the aliases are not "common
-# keys it happens not to use", they are keys that could not mean anything on it.
+# The groups are semantic: each says what a set of keys is about, and each kind
+# composes the groups that apply to it. There is no set every document gets — a
+# Test has a description, notes and dependencies and materialises nothing, so
+# `Lineage`, `Static` and the aliases could not mean anything on it.
 
 #: What any Weaver declaration says about itself.
 DOCUMENT_KEYS = frozenset({"Description", "Notes", "Revision notes"})
@@ -228,15 +226,8 @@ AUDIT_COLUMNS = (AUDIT_INSERT, AUDIT_UPDATE, AUDIT_DELETE)
 _AUDIT_TYPES = {PYTHON: "timestamp", SPARK_SQL: "timestamp", SQL: "datetime2(6)"}
 
 #: The delete datetime of a row that is still live. All three audit columns are
-#: physically not null — there is no valid null state for any of them — so a live
-#: row carries a sentinel maximum rather than an absence. That makes "as at" a
-#: single range predicate instead of a null check, which is why the SQL Server
-#: original chose it.
-#:
-#: Load will populate these columns for ordinary rows and is not yet written;
-#: this constant exists now because the catalogue's own DML must satisfy the
-#: not-null constraint today. It is the row convention, not a catalogue detail,
-#: which is why it lives here.
+#: physically not null, so a live row carries a sentinel maximum rather than an
+#: absence — which makes "as at" one range predicate instead of a null check.
 AUDIT_LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
 
 #: The identity column is a surrogate the *engine* generates: build declares it
@@ -245,13 +236,10 @@ AUDIT_LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
 #: business schema or a query's output, and a load never inserts into it.
 IDENTITY_TYPE = "bigint"
 
-#: Which representations can carry an identity column, and it is the Warehouse
-#: alone. Native identity is what makes the column trustworthy — a value Weaver
-#: computed would have to be unique across concurrent writers, which is the
-#: guarantee an engine's identity exists to provide, and neither Delta 3.2 (this
-#: repository's floor) nor Fabric's Spark runtime offers one to generate it with.
-#: So a Delta table declares no identity at all rather than carrying a column
-#: whose contents Weaver could not honestly promise.
+#: Which representations can carry an identity column: the Warehouse alone. A
+#: value Weaver computed would have to be unique across concurrent writers,
+#: which is what an engine's identity provides and neither Delta 3.2 nor
+#: Fabric's Spark runtime offers. So a Delta table declares no identity at all.
 IDENTITY_LANGUAGES = frozenset({SQL})
 
 _IDENTITY_UNSUPPORTED = (
@@ -362,9 +350,8 @@ class Reference:
 class MetadataText:
     """Either literal prose or exactly one reference — never a mix.
 
-    ``See $Sales.Order`` is refused. Mixed content cannot be resolved
-    mechanically, and a contract that is only sometimes machine-readable is not
-    a contract. Write ``$$`` for a literal dollar sign.
+    ``See $Sales.Order`` is refused: mixed content cannot be resolved
+    mechanically. Write ``$$`` for a literal dollar sign.
     """
 
     literal: str | None = None
@@ -393,14 +380,10 @@ class Revision:
 class ForeignKey:
     """One declared relationship to a parent object.
 
-    Semantic rather than physical — closer to an ER diagram than to a database
-    constraint. Nothing is enforced by the engine and no index follows; the
-    declaration records that these columns mean the parent's columns.
-
-    Consequently a key has no name, two objects may be related several times
-    over, and an object may reference itself (a parent-child hierarchy in one
-    table). The parent is a two-part ``Schema.Object``: it is a logical name in
-    the same repository, not a physical one.
+    Semantic rather than physical: nothing is enforced by the engine and no
+    index follows, so a key has no name, two objects may be related several
+    times over, and an object may reference itself. The parent is a two-part
+    ``Schema.Object`` — a logical name in the same repository.
     """
 
     columns: tuple[str, ...]
@@ -516,10 +499,9 @@ class WeaverDocument:
         """The engine-generated surrogate column, when Identity names one.
 
         A not-null ``bigint`` the Warehouse generates: build declares it
-        ``identity`` and every insert leaves it out so the engine assigns
-        it. It is Weaver's own column, so it stands outside the business schema
-        (declared or inferred); the primary key may name it when the surrogate is
-        the key. Only a Warehouse table has one — see :data:`IDENTITY_LANGUAGES`.
+        ``identity`` and every insert leaves it out. Weaver's own column, so it
+        stands outside the business schema, though the primary key may name it.
+        Only a Warehouse table has one — see :data:`IDENTITY_LANGUAGES`.
         """
 
         if self.identity is None or self.kind != TABLE:
@@ -532,9 +514,8 @@ class WeaverDocument:
     def effective_schema(self) -> tuple[Column, ...]:
         """The full physical shape of a declared table: identity, business, audit.
 
-        ``schema`` stays exactly what the author wrote; this is what gets
-        materialised. The Weaver-managed identity column leads, the audit columns
-        trail. Both forms are available because either can be the one you need.
+        ``schema`` stays what the author wrote; this is what gets materialised,
+        with the identity column leading and the audit columns trailing.
         """
 
         identity = (self.identity_column,) if self.identity_column else ()
@@ -758,12 +739,10 @@ def _parse_validation(
 ) -> WeaverDocument:
     """Parse a Test or Assumption header.
 
-    A separate path rather than a branch through the object parser, because
-    almost nothing the object parser does applies: a validation has no schema to
-    check columns against, no lineage, no build behaviour and no alias. What it
-    shares — description, notes, revisions, dependencies — is parsed by the same
-    helpers, so the two contracts cannot drift in how they read the keys they
-    both have.
+    A separate path rather than a branch through the object parser: a validation
+    has no schema, lineage, build behaviour or alias. What the two share —
+    description, notes, revisions, dependencies — goes through the same helpers,
+    so they cannot drift.
     """
 
     if kind == ASSUMPTION and "Primary key" in raw:
@@ -774,17 +753,12 @@ def _parse_validation(
 
     _reject_unknown_keys(raw, kind)
 
-    # No language is required to declare its dependencies here, including Spark
-    # SQL, which is required to on an object.
-    #
-    # What the header *means* is the same for both, and is the rule every kind
-    # uses: declared replaces inferred, and `Dependencies: []` is a declaration,
-    # so an explicit none means none. What differs is only whether declaring is
-    # compulsory. A Spark SQL object must, because its query may read by path
-    # and a load ordered by a half-known graph builds things in the wrong order;
-    # a validation need not, because it installs last and nothing depends on it,
-    # so an edge inference missed costs an ordering nicety rather than a wrong
-    # estate. See :func:`weaver.declaration.repository.effective_dependencies`.
+    # No language is required to declare dependencies here, though Spark SQL is
+    # on an object. The header means the same either way — declared replaces
+    # inferred, and `Dependencies: []` means none — and only the obligation
+    # differs: a Spark SQL object may read by path, while a validation installs
+    # last and nothing depends on it. See
+    # :func:`weaver.declaration.repository.effective_dependencies`.
     declares_dependencies = "Dependencies" in raw
     dependencies = _parse_dependencies(raw.get("Dependencies"), object_id)
 
@@ -942,9 +916,9 @@ def _parse_logical_reference(
 def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]:
     """Objects this one depends on, declared rather than discovered.
 
-    Additive: whatever discovery finds is added to these, never replaced by
-    them. A missing dependency is a wrong build order, which is silent data
-    corruption, so the declared set can only ever widen the graph.
+    Additive: what discovery finds is added to these, never replaced. A missing
+    dependency is a wrong build order, so the declared set can only widen the
+    graph.
     """
 
     if value is None:
@@ -982,12 +956,11 @@ def _parse_aliases(
 ) -> tuple[ObjectId | None, ObjectId | None]:
     """The cross-engine aliases this object publishes, checked for eligibility.
 
-    A Lakehouse object (a Delta table or Spark view) may publish a
-    ``Warehouse alias``; a Warehouse object (a SQL table or view) may publish a
-    ``Lakehouse alias``. Neither belongs on a Folder, and neither belongs on the
-    opposite engine. The alias may name a different Schema.Object from the
-    native one — a Staging table can surface as Sales.Customer — so it is parsed
-    through the same two-part model rather than assumed equal.
+    A Lakehouse object may publish a ``Warehouse alias`` and a Warehouse object
+    a ``Lakehouse alias``; neither belongs on a Folder or on the opposite
+    engine. The alias may name a different ``Schema.Object`` from the native one
+    — a Staging table can surface as Sales.Customer — so it is parsed through
+    the same two-part model.
     """
 
     target = target_kind_for(language, kind)
@@ -1170,9 +1143,9 @@ def _parse_unique_keys(
 ) -> tuple[tuple[str, ...], ...]:
     """Alternate keys — a YAML list, one comma-separated column *set* per entry.
 
-    The two levels are deliberate and match ``Primary key``: independent things
-    are a list, and one key's columns are a comma-separated set whose order is
-    preserved. A key has no name, because nothing physical is created from it::
+    Two levels, matching ``Primary key``: independent keys are a list, and one
+    key's columns are a comma-separated set whose order is preserved. A key has
+    no name, because nothing physical is created from it::
 
         Unique keys:
           - Order number
@@ -1228,7 +1201,7 @@ def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ..
           - Parent order id: Sales.Order[Order id]
 
     Several entries may name the same parent, and the parent may be this object
-    itself — a hierarchy in one table is an ordinary shape.
+    itself: a hierarchy in one table is an ordinary shape.
     """
 
     if value is None:
@@ -1439,12 +1412,10 @@ def _validate_columns(
         raise MetadataError(
             f"Identity {identity} collides with a Weaver audit column name"
         )
-    # The primary key must not *be* the identity column, and the reason is a load
-    # one rather than a modelling preference. The engine assigns the identity on
-    # insert, so a source never produces it; a load matching on it could never
-    # find an existing row, and every run would insert duplicates. Caught here
-    # because the alternative is an "Invalid column name" from the engine at
-    # install, which says nothing about what the declaration got wrong.
+    # The primary key must not be the identity column: the engine assigns it on
+    # insert, so a source never produces it and a load matching on it would
+    # insert duplicates every run. Caught here because the engine's "Invalid
+    # column name" at install says nothing about the declaration.
     if identity is not None and identity in primary_key:
         raise MetadataError(
             f"Primary key names the Identity column {identity!r}. The engine "

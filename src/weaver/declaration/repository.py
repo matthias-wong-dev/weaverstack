@@ -506,11 +506,10 @@ def _with_build_signatures(
 ) -> dict[WeaverDocumentId, SourceDocument]:
     """Attach each document's own, statically reachable implementation hash.
 
-    ``lib/`` is item-owned source code, but hashing the whole directory into
-    every object would make an unrelated helper rebuild the item.  Instead each
-    Python document carries the transitive closure of the helper modules it can
-    import.  Discovery remains static: helper modules are parsed, never imported
-    or executed.
+    ``lib/`` is item-owned source, but hashing the whole directory into every
+    object would let an unrelated helper rebuild the item. Each Python document
+    carries the transitive closure of the helpers it can import instead, found
+    statically: helper modules are parsed, never imported.
     """
 
     from .source import PYTHON, content_hash
