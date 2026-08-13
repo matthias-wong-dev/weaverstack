@@ -1,8 +1,9 @@
 # Desktop build, and explicit contracts
 
-Planned work, not implemented behaviour. This document is the agreed sequence
-for five related changes and is expected to be deleted once they land. Nothing
-here describes how Weaver currently works; for that, read
+The agreed sequence for five related changes. **A1, B0 to B5, C1 to C6 and E1
+have landed**; what remains is E2 and E3, which were separate work from the
+start. This document is expected to be deleted once those are planned in their
+own right. For how Weaver works now, read
 [code-architecture.md](../code-architecture.md).
 
 The five:
@@ -256,6 +257,11 @@ report views and a reconciliation test. Add a `SesFixture` for it in
 and the endpoint-refresh barrier, and parametrise the Fabric journey on it.
 
 That gives a Lakehouse to Warehouse journey with an alias between them.
+
+Its Lakehouse half is byte for byte `lakehouse-journey`, so the Lakehouse claims
+are the same claims and only the composition is new. The estate has no emulator
+twin — a `LocalWorkspace` has no Warehouse — so the ordering it must produce is
+asserted without an engine and the rest on Fabric.
 
 **E2. Warehouse to Lakehouse alias.** Needed for a third hop, and not yet built.
 The declaration layer models both directions: a `Warehouse alias` publishes a

@@ -1095,6 +1095,13 @@ def _fabric_build_context(
             "resolver = resolver_for(workspace)\n"
             "store = store_for(workspace)\n"
             f"target = ItemRef({target.name!r})\n"
+            # Bound only where the estate has one, so a body that names it is a
+            # body that could not have run against a Lakehouse-only estate.
+            + (
+                f"warehouse = ItemRef({warehouse_name!r})\n"
+                if warehouse_name is not None
+                else ""
+            )
         )
         return _timed_session_run(session, label, preamble + body).payload
 
@@ -1458,6 +1465,31 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
         weaver_repo_fixture,
     ) as env:
         yield Journey(env, "lakehouse")
+
+
+@pytest.fixture(scope="module")
+def fabric_cross_item_journey(request, weaver_repo_fixture):
+    """One Fabric estate spanning a Lakehouse and a Warehouse, for a journey.
+
+    The same arrangement as :func:`fabric_mixed_estate` — one bundle installing
+    both halves, so the ordering the build gives them is the ordering a real
+    estate has — but handed over untouched, because a journey's transitions are
+    its subject and a fixture that had already taken them would leave every
+    assertion reading the final estate.
+    """
+
+    warehouse = request.getfixturevalue("clean_disposable_warehouse")
+    with _fabric_build_context(
+        request.getfixturevalue("fabric_workspace_item"),
+        request.getfixturevalue("fabric_client"),
+        request.getfixturevalue("fabric_workspace"),
+        request.getfixturevalue("fabric_target_lakehouse"),
+        request.getfixturevalue("livy_session"),
+        weaver_repo_fixture,
+        warehouse=warehouse,
+    ) as env:
+        env.warehouse = warehouse
+        yield Journey(env, "cross-item")
 
 
 @pytest.fixture(scope="module")
