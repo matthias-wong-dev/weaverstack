@@ -1,67 +1,8 @@
-"""Importing one estate's deployed modules without meeting another's.
+"""Isolate deployed Python modules by target and run.
 
-Authored code says what it has always said::
-
-    from lib.dates import parse_date
-    from Files.Sales__Seed import Sales__Seed
-
-Those names are *process-global*. Two Lakehouses may each deploy a
-``lib/dates.py``, and Python consults ``sys.modules`` before it searches
-anything — so putting a different tree on ``sys.path`` does not help: the second
-import finds the first tree's module and returns it, silently, with no error
-anywhere. One estate per process is the normal case and an orchestrated run is
-not it.
-
-**The context has to be part of the key, not merely of the search.** So every
-deployed module is imported under a name that carries the tree it came from:
-
-.. code-block:: text
-
-    lib.dates          ->  _weaver_runtime.c7f3e1….lib.dates
-    Files.Sales__Seed  ->  _weaver_runtime.c7f3e1….Files.Sales__Seed
-
-    the same file in another target
-                       ->  _weaver_runtime.c91a04….lib.dates
-
-Two entries, two modules, no collision — and both importable at once, which a
-scheme that deleted ``lib.*`` between loads could not offer. That scheme would
-also need a global lock and would make parallel dispatch impossible.
-
-**The identity is opaque, and it lasts one run.** Both properties are there to
-stop the module table telling a lie.
-
-*Opaque*, because deriving the package name from Weaver names means normalising
-them, and normalisation is not injective: two distinct valid identities can
-reduce to one Python package and then quietly share modules. A UUID cannot.
-
-*One run*, because a deployed file is not immutable. An ordinary rebuild
-rewrites ``Files/_/Load/Sales__Customer.py`` in place, and a Fabric session
-outlives it:
-
-.. code-block:: text
-
-    load 1   imports Sales__Customer, version A
-    build    rewrites the same path with version B
-    load 2   must execute version B
-
-A context that survived between orchestrations would find version A in
-``sys.modules`` and never look at the file. So each :class:`RuntimeScope` mints
-fresh ids and drops its whole namespace when the run ends — no
-deployment-generation tracking, no staleness to detect, because nothing is
-carried across the boundary in the first place.
-
-**Nothing about the authored surface changes.** The rewriting happens in one
-place: each deployed module executes with its own ``__import__``, which redirects
-exactly the names its own tree defines and passes everything else — ``weaver``,
-``pyspark``, ``json`` — straight through. A module outside the runtime tree is
-untouched, so a developer importing an object by hand in a notebook gets
-ordinary Python.
-
-**One context per logical item and physical target, within a run.** Objects
-deployed together share a tree, because they were authored to:
-``Sales__Customer`` and ``Sales__Order`` in one item read the same
-``lib/dates``, and giving them separate copies would break the sharing the
-author intended. Different targets share nothing, which is the whole point.
+RuntimeScope imports each deployed tree under a unique package namespace. This
+prevents ``sys.modules`` collisions across targets and stale modules after a
+rebuild while preserving authored import names inside each tree.
 """
 
 from __future__ import annotations

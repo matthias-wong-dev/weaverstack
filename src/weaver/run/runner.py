@@ -1,48 +1,7 @@
-"""Runner — what runs next, and what happened.
+"""Plan and execute a RunGraph through an injected primitive dispatcher.
 
-The fourth doer, and the owner of every piece of state that changes during a
-run:
-
-.. code-block:: text
-
-    RunState + RunRequest
-             ↓
-          Runner
-        ┌────┴────┐
-    RunGraph   node state
-        └────┬────┘
-       dispatch one primitive
-             ↓
-         RunResult
-
-**Planning needs no Session.** A Runner is constructed from a Catalogue and some
-observed inventories — ordinary Python — so the whole of what a run *decides*
-can be proven without Fabric, without Spark and without an estate:
-
-.. code-block:: python
-
-    runner = Runner(state, RunRequest.load(targets))
-    assert [node.node_id for node in runner.graph.order()] == [...]
-
-**Execution crosses outward at exactly one point.** ``dispatch`` is a callable,
-not another doer: give it the real one and nodes run against the installed
-estate; give it a controlled one and the whole state machine — readiness,
-blocking, fail-fast, aggregation — is provable in milliseconds.
-
-.. code-block:: python
-
-    result = runner.run(session=session, dispatch=dispatch_primitive)
-    result = runner.run(dispatch=controlled)          # no session at all
-
-The Runner never learns which it got. That is what makes a fixture runtime
-artefact indistinguishable from a production one, and it is why there is no
-``test_mode`` anywhere in this file: the Registry indirection already points
-nodes wherever the estate says, so a trivial fixture artefact is simply an
-installed artefact that happens to be trivial.
-
-One Runner serves load, test and whatever runtime work comes next. What differs
-between them is which nodes are selected and which primitive runs — not how a
-run behaves when one of them fails.
+Runner owns readiness, blocking, fail-fast behaviour, and outcome aggregation.
+Its planning has no Session dependency; Session crossing remains in dispatch.
 """
 
 from __future__ import annotations

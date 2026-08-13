@@ -1,25 +1,8 @@
-"""Spark catalogue operations, against a *named* destination.
+"""Spark catalogue operations against an explicit destination.
 
-Everything Weaver does to a Lakehouse through Spark goes through here, and the
-one thing this type refuses to do is assume the session is pointed at the right
-place. The session is attached to the Weaver Lakehouse — the fixed control plane
-— so a destination is never the current catalogue, and an operation that did not
-name one would land in the control plane instead. That is the failure this
-exists to make impossible, not merely unlikely.
-
-A build has at least two of these open at once: one for the Lakehouse being
-built, one for the Weaver Lakehouse the catalogue is written to. They differ only
-in their :class:`~weaver.spark.destination.SparkDestination`, which is the claim
-being made — that once a name is right, the operation is the same one.
-
-**Enumerating a destination's schemas is not here, and that is deliberate.** On
-Fabric it cannot be: a schema is a three-level name under ``spark_catalog``, and
-``SHOW SCHEMAS IN `workspace`.`lakehouse``` is refused — a bare ``SHOW SCHEMAS``
-lists the *attached* Lakehouse and nothing else. Schema discovery therefore reads
-the destination's ``Tables/`` area through the store, which works across
-Lakehouses on both workspaces and is what prune already does. Offering a
-``list_schemas`` here that silently answered for the wrong Lakehouse would be the
-ambient-context mistake wearing an abstraction (how-does-build-work §4).
+Each operation qualifies the destination rather than relying on the attached
+catalogue. Schema discovery reads the destination's ``Tables/`` area because
+Fabric cannot list schemas for an arbitrary Lakehouse.
 """
 
 from __future__ import annotations
