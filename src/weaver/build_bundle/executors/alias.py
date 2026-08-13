@@ -11,16 +11,13 @@ The *form* the pointer takes is transport:
     a OneLake shortcut in the destination Lakehouse, created through the
     workspace's own API.
 ``the local emulator``
-    a filesystem link beside the destination's other tables, which is what makes
-    the emulator's ``Tables/`` area keep mirroring what a shortcut looks like in
-    OneLake — plus the catalogue registration Fabric performs for itself, because
-    a link no statement could name would not be an alias at all.
+    a filesystem link beside the destination's other tables, so the emulator's
+    ``Tables/`` area keeps mirroring OneLake — plus the catalogue registration
+    Fabric performs for itself.
 
-That is the same split :mod:`weaver.build_bundle.executors.spark_schema`
-documents: which alias, over what, is settled and in the manifest; how a name is
-made to point somewhere is the environment's business. An alias holds no data, so
-an existing one is replaced rather than treated as an unexpected collision — a
-build has to be able to run twice.
+Which alias, over what, is settled in the manifest; how a name is made to point
+somewhere is the environment's business. An alias holds no data, so an existing
+one is replaced rather than treated as a collision: a build has to run twice.
 
 **The action is not finished until the alias can be read.** Fabric creates a
 shortcut synchronously and discovers it asynchronously, so for a few seconds the

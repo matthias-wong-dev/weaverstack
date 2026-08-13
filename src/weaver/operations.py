@@ -179,26 +179,20 @@ def build(
 ) -> BuildResult:
     """Build an authored repository using simple notebook-facing values.
 
-    Every value resolves the same way: an explicit argument first, then an
+    Every value resolves the same way: an explicit argument, then an
     already-resolved typed ``Workspace``, then workspace configuration, then —
-    inside a Fabric notebook only — the session's own context. What is still
-    unresolved after that is an error, stated as one sentence rather than left
-    to fail later as a Fabric, Py4J or Spark traceback.
+    inside a Fabric notebook only — the session's own context. Anything still
+    unresolved is an error stated in one sentence.
 
     ``workspace=None`` means the current Fabric session. A typed ``Workspace``
-    remains accepted as an advanced/testing seam and is what the CLI supplies
-    after applying its explicit ``--workspace-type`` flags; it arrives already
-    resolved, so configuration is never layered over it.
+    arrives already resolved, so configuration is never layered over it.
 
-    ``weaver_lakehouse`` names the Weaver control Lakehouse. Inside a notebook
-    it defaults to the attached default Lakehouse — which is the control
-    Lakehouse only, and does not become an authored target unless a binding
-    says so.
+    ``weaver_lakehouse`` names the Weaver control Lakehouse. Inside a notebook it
+    defaults to the attached Lakehouse, which is the control Lakehouse only and
+    becomes an authored target only if a binding says so.
 
-    ``session`` is a Session to run in. Supplied — by ``weaver session``, or by
-    a test holding one open — its credential, resolver, item cache and Spark
-    session are reused and it is left open afterwards. Omitted, this operation
-    creates one for itself and closes it on the way out.
+    ``session`` is a Session to run in. Supplied, its resources are reused and it
+    is left open; omitted, this operation creates and closes one.
     """
 
     resolved_workspace = _operation_workspace(

@@ -80,23 +80,17 @@ class LoadFileExecutor:
     ) -> bytes:
         """Finish a generated load, and address it, on the way down.
 
-        The bundle stays destination-free, which is what lets one repository
-        generate the same bytes everywhere and two bundles be diffed for what
-        actually differs. The *installed file* cannot be: it has to be runnable
-        by anyone who opens it, and by then the destination is known, so this is
-        the moment the two requirements stop conflicting.
+        The bundle stays destination-free so one repository generates the same
+        bytes everywhere; the installed file has to be runnable by whoever opens
+        it, and by then the destination is known.
 
-        Deployed Python is left exactly as authored. A module is source code, not
-        a statement, and it addresses its target through the resolved Lakehouse
-        it is constructed with — so only a *generated* module has anything to
-        resolve.
+        Deployed Python is left exactly as authored: a module addresses its
+        target through the resolved Lakehouse it is constructed with, so only a
+        generated module has anything to resolve.
 
-        **Decided by what the payload is, not by what it is called.** An authored
-        module and a generated one are both ``.py`` in one tree, so the name
-        cannot tell them apart; a generated module says what it is on its first
-        line, which is a fact about the file. (Keying on a name was tried in the
-        design this replaced, and shipped every installed program with its tokens
-        intact.)
+        Told apart by what the payload is rather than what it is called. Both
+        are ``.py`` in one tree, so the name cannot say; a generated module
+        declares itself on its first line.
         """
 
         if not path.endswith(MODULE_EXTENSION):

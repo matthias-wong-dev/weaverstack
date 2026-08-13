@@ -13,11 +13,9 @@ Operations take a Session and never open one twice:
         with use_or_create_session(session, workspace=workspace) as session:
             ...
 
-A Session that was passed in is **borrowed**: it belongs to the caller —
-``weaver session``, or a pytest fixture holding one open for a whole suite — and
-is not closed here. One created for a standalone command is owned, and closes
-with the command. That distinction is the whole of the difference between a
-console that starts Livy once and a console that starts it per command.
+A Session that was passed in is borrowed and not closed here; one created for a
+standalone command is owned and closes with it. That is the difference between a
+console that starts Livy once and one that starts it per command.
 """
 
 from __future__ import annotations

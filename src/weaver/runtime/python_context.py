@@ -229,21 +229,14 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
 class _ContextLoader:
     """Runs a deployed module with its context's builtins, from source.
 
-    **From source, and that is not an optimisation in reverse.** Python caches
-    compiled bytecode beside the file and decides whether the cache is current
-    from the source's size and its mtime *to the second*. A deployed module is
-    rewritten in place by builds, so a rebuild that changes a module without
-    changing its length — the generated ``SparkSqlTable`` wrapper, whose length
-    moves only if the embedded SQL does — can land inside the same second and be
-    indistinguishable from no change at all. The next load then runs the
-    previous build's code, silently.
+    From source, because Python decides whether its bytecode cache is current
+    from the source's size and its mtime to the second. A build rewrites a
+    deployed module in place, so a rebuild that changes it without changing its
+    length can land inside the same second and be taken for no change at all —
+    and the next load runs the previous build's code.
 
-    Compiling from source each time removes the question. It also stops
-    ``__pycache__`` directories appearing inside the deployed tree, which in
-    Fabric means inside OneLake, inside a folder Weaver manages and prunes.
-
-    The cost is a compile per module per run, against modules that are a few
-    dozen lines and a load that is about to touch a warehouse.
+    It also keeps ``__pycache__`` out of the deployed tree, which in Fabric is a
+    folder Weaver manages and prunes.
     """
 
     def __init__(self, inner, builtins_mapping: dict) -> None:

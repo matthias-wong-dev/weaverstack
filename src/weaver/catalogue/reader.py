@@ -110,21 +110,13 @@ def read_installations(
 ) -> dict[str, tuple[Row, ...]]:
     """Every catalogue table, read **once** for every installation at issue.
 
-    The read a build wants. A build is pointed at several items and they share
-    the same physical catalogue tables, so reading per item would cost
-
-    .. code-block:: text
-
-        catalogue tables × bound items
-
-    round trips to answer what one predicate per table already answers. More
-    items make the predicate longer and the result larger; they do not make it
-    another read. That is the whole difference, and it is why this returns rows
-    for all scopes together and leaves the grouping to Python — see
+    Bound items share the same physical tables, so reading per item would cost
+    ``catalogue tables × bound items`` round trips to answer what one predicate
+    per table already answers. Rows come back for every scope together and the
+    grouping is done in Python — see
     :func:`weaver.catalogue.state.read_catalogue_state`.
 
-    Still scoped, and returns nothing outside ``scopes``: a build has no more
-    business seeing an unrelated installation's rows than it had before.
+    Still scoped: nothing outside ``scopes`` is returned.
     """
 
     from .tables import CATALOGUE_TABLES

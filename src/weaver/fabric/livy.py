@@ -273,20 +273,16 @@ class LivySession:
         a body that wants Weaver can still import it — but the *session* no
         longer depends on the wheel being current.
 
-        That distinction is worth having. Submitting Spark to a workspace and
-        running the installed package are two different things, and conflating
-        them put a wheel publish in front of every test that merely needed a
-        session to read a table back.
+        Submitting Spark to a workspace and running the installed package are
+        two different things, and conflating them puts a wheel publish in front
+        of a session that only needs to read a table back.
 
-        The session is created against the Weaver Lakehouse (its default), and
-        the workspace's ``environment`` is attached so a plain ``import
-        weaver`` finds the installed package — put there by ``weaver install``.
-        Nothing is copied into the workspace.
+        The session is created against the Weaver Lakehouse, with the
+        workspace's ``environment`` attached so a plain ``import weaver`` finds
+        what ``weaver install`` published. Nothing is copied into the workspace.
 
-        The Environment is required: a workspace without one, or an unresolvable one,
-        is an error rather than a silent fall back to copied source. The
-        bootstrap runs once when the session starts, so callers submit their
-        work and nothing else.
+        The Environment is required: a workspace without one is an error rather
+        than a silent fall back to copied source.
         """
 
         from ..errors import CommandError

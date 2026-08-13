@@ -1,23 +1,19 @@
 """What one dispatch produced, and *how* it produced it.
 
-The second part is the whole reason this exists. A primitive that refuses rows
-raises when it was told not to tolerate them, and the exception carries a result
-whose counts include the rejections — so a reader looking only at the result
-cannot tell a refusal from a tolerated load. Both have ``succeeded=False`` and
-``rows_rejected > 0``, and they mean opposite things:
+The second part is why this exists. A primitive that refuses rows raises when
+it was told not to tolerate them, and the exception carries counts that include
+the rejections — so the result alone cannot tell a refusal from a tolerated
+load. Both have ``succeeded=False`` and ``rows_rejected > 0``:
 
 .. code-block:: text
 
     tolerated   the valid rows were written, and the refusal was reported
     raised      nothing was written
 
-Keeping the exception is what lets the status be decided without inferring
-anything from the counts — and inferring from the counts is exactly how a run
-that wrote nothing comes to report "succeeded with rejects".
-
-Everything an exception becomes is *data* here, unconditionally, whatever
-fault tolerance says: the run has to record what happened before it decides what
-to do about it. Deciding is the operation's, once the whole graph is recorded.
+Keeping the exception is what decides the status without inferring it from the
+counts. An exception becomes data here unconditionally: the run records what
+happened, and the operation decides what to do about it once the whole graph is
+recorded.
 """
 
 from __future__ import annotations

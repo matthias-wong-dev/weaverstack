@@ -243,15 +243,11 @@ def render_merge(
     advances ``row_update_datetime``. That is what makes a rebuild of unchanged
     Weaver document leave the catalogue alone.
 
-    **A published column is set on insert and never on update.** That is not an
-    optimisation, it is what makes the value mean what it claims. Every object a
-    build actually rebuilds reaches this statement as an *insert*: it is either
-    new, or its Registry claim was deleted before any physical work began. So an
-    update can only be a row whose projection changed while the object itself was
-    left alone — a document that forbids rebuilding is the case that exists — and
-    dating such a row to this build would say it was rebuilt when it was not.
-    Leaving published columns out of ``UPDATE SET`` keeps the old value, which is
-    the true one.
+    A published column is set on insert and never on update. Every object a
+    build rebuilds reaches this statement as an insert — it is new, or its
+    Registry claim was deleted before any physical work began — so an update can
+    only be a row whose projection changed while the object was left alone.
+    Dating such a row to this build would say it was rebuilt when it was not.
     """
 
     rows = sorted_rows(table, rows)

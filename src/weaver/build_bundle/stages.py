@@ -1,22 +1,17 @@
 """Logical stages, and the one place a sequence number is chosen.
 
-A planning component answers *what* has to happen and in what order relative to
-its own siblings. It does not answer *which sequence number* that is, because a
-number is a property of the finished plan and nothing else: with one alias, one
-schema and one endpoint-refresh stage per item, arithmetic over reserved regions
-stops describing the plan and starts constraining it.
+A planning component says what has to happen and in what order relative to its
+siblings, never which sequence number that is: a number is a property of the
+finished plan, and reserved regions constrain the plan rather than describe it.
 
-So each component returns :class:`PlannedStage` values — a phase, a description,
-target-bound batches, and the payloads those batches need, keyed by bare
-filename. The top-level planner concatenates the stages in execution order and
-:func:`enumerate_stages` turns them into :class:`~weaver.build_bundle.models.BuildSequence`
-values, numbering them 1, 2, 3 … and rewriting each payload into
-``payload/<number>-<slug>/<filename>`` so the bundle directory still reads top to
-bottom in deployment order.
+Each component returns :class:`PlannedStage` values — a phase, a description,
+target-bound batches, and the payloads those batches need. The planner
+concatenates them in execution order and :func:`enumerate_stages` numbers them,
+rewriting each payload into ``payload/<number>-<slug>/<filename>`` so the bundle
+directory reads top to bottom in deployment order.
 
-Numbering last also means a stage cannot collide with another stage's region, and
-there is no headroom to run out of: the number *describes* the order the plan
-already has.
+Numbering last means no stage can collide with another's region, and there is no
+headroom to run out of.
 """
 
 from __future__ import annotations

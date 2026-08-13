@@ -159,21 +159,17 @@ def python_primitive(
 ):
     """Import the deployed module, construct its object, and load it.
 
-    Host-neutral: everything that differs between a notebook and a Livy
-    interpreter is already answered by the Session it is given. Both sides of a
-    decomposed run call this, which keeps *what a primitive does* one
-    implementation while *where it is decided from* became two.
+    Host-neutral: what differs between a notebook and a Livy interpreter is
+    answered by the Session it is given, so both sides of a decomposed run call
+    this one implementation.
 
-    The destination is resolved *here* and handed in, never inferred: an authored
+    The destination is resolved here and handed in, never inferred: an authored
     object with no Lakehouse falls back to the session's attachment, which in an
-    orchestrated run is the Weaver control plane. Orchestration runs detached
-    from every destination it writes to, so it must always say which one it
-    means.
+    orchestrated run is the control plane.
 
-    The import goes through a runtime *context* rather than through ``sys.path``,
-    because two Lakehouses may each deploy a ``lib/dates.py`` and ``sys.modules``
-    is consulted before any path is searched — so the second estate would
-    silently receive the first one's helper.
+    The import goes through a runtime context rather than ``sys.path``, because
+    two Lakehouses may each deploy a ``lib/dates.py`` and ``sys.modules`` is
+    consulted before any path is searched.
     """
 
     from ..etl import LOAD_ROOT

@@ -119,25 +119,21 @@ def stale_alias_destinations(
 ) -> tuple[WeaverDocumentId, ...]:
     """Aliases whose source has been rebuilt since the alias was last published.
 
-    This is the half of cross-item freshness the graph cannot answer, and it is
-    needed *whether or not* the producer is in this build. The descendant walk
-    only carries impact from a producer whose declaration changed; a producer
-    rebuilt by some earlier build is, to this one, entirely unchanged. Nothing in
-    the repository records that it moved — the only surviving evidence is in the
-    catalogue.
+    The half of cross-item freshness the graph cannot answer. A descendant walk
+    carries impact only from a producer whose declaration changed; a producer
+    rebuilt by an earlier build looks unchanged to this one, and the only
+    surviving evidence is in the catalogue.
 
-    So the catalogue is asked directly: the producer's Registry row and the
-    alias's Registry row each carry the build that published them, and a producer
-    published later than the alias over it means the alias's consumers were built
-    against something that has since moved on. Naming it here lets it join the
-    ordinary changed roots, and its consumers are picked up by the ordinary walk.
+    So the Registry rows are compared: each carries the build that published it,
+    and a producer published later than the alias over it means the alias's
+    consumers were built against something that has moved on. Naming it here
+    joins it to the ordinary changed roots.
 
-    ``bound_items`` scopes it to aliases this build could act on. A consumer item
-    that is not being built keeps its stale alias — that is the deferral, and it
-    is why the comparison is worth recording rather than acting on immediately.
+    ``bound_items`` scopes it to aliases this build could act on; a consumer item
+    that is not being built keeps its stale alias.
 
-    Deliberately silent when either row is absent: that is not staleness but a
-    missing installation, which signature classification already calls new.
+    Silent when either row is absent: that is a missing installation, which
+    signature classification already calls new.
     """
 
     bound = set(bound_items)
