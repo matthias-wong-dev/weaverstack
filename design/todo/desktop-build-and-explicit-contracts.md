@@ -1,10 +1,15 @@
 # Desktop build, and explicit contracts
 
-The agreed sequence for five related changes. **A1, B0 to B5, C1 to C6 and E1
+The agreed sequence for five related changes. **A1, B0 to B5, C1 to C7 and E1
 have landed**; what remains is E2 and E3, which were separate work from the
 start. This document is expected to be deleted once those are planned in their
 own right. For how Weaver works now, read
 [code-architecture.md](../code-architecture.md).
+
+C7 was not in the original plan. It was added when finishing C5 showed that
+install was not `build`'s last crossing: the state a build plans against was
+still read by a program that imported Weaver, so the fourth goal below was not
+met until that was decomposed too.
 
 The five:
 
@@ -212,13 +217,19 @@ query that shaped it.
 `tests/test_public_api.py` nor `tests/test_remote_program_invariant.py` names
 `install_actions`, so it is not a pinned symbol.
 
-`require_weaver` was to become conditional on the operation, and does not: the
-premise was that install was `build`'s last far-side import, and it is not.
-`read_build_state` reads the catalogue and the Lakehouse inventories through
-`execute_python`, so a Fabric build still imports the published wheel — before
-installing anything, and by design, because both phases decide against the
-target's real state. Installing needs no wheel; building does. Decomposing the
-two reads into Spark SQL and storage would change that, and is separate work.
+**C7. Decompose the state a build reads.** Install stopped crossing and `build`
+still needed the wheel, because `read_build_state` read the catalogue and the
+Lakehouse inventories through `execute_python`. Both are primitives:
+`SparkCatalogue` takes a way to run Spark SQL rather than a session, so one
+construction serves both positions; a Lakehouse inventory is storage plus
+`SHOW VIEWS`; a Warehouse inventory was already TDS. The same construction
+retires the run's two state crossings and `unbind`'s.
+
+A desktop `weaver build` now needs no published wheel, and
+`tests/fabric/test_desktop_build_state_boundary.py` holds it to that by
+inspecting every statement the read submits. `weaver load` still needs one: a
+deployed Python primitive is imported where Spark is, and `weaver.run.entry` is
+what a submission calls.
 
 `context.spark` stays. The emulator's alias path registers an external table
 through it, and there it is always present. What is removed is the claim that
