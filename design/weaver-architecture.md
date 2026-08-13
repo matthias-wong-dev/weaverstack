@@ -225,7 +225,7 @@ The Build Bundle may contain:
 
 Nothing is deployed during build.
 
-The Build Bundle is simply the deployment plan.
+The Build Bundle is the deployment plan.
 
 Because every deployment action exists explicitly within the bundle:
 
@@ -242,7 +242,7 @@ Installation executes the Build Bundle.
 
 Unlike the build stage, installation performs no generation or discovery.
 
-Its responsibility is simply to apply the generated artefacts to the target Fabric workspace.
+Its responsibility is to apply the generated artefacts to the target Fabric workspace.
 
 ```
 Repository
@@ -426,6 +426,9 @@ This separation allows Weaver to provide deterministic deployment, dependency ma
 
 
 # Command-Line Lifecycle
+
+This section describes command responsibilities. Command syntax, options, and
+interactive behaviour are documented in [CLI usage](cli-usage.md).
 
 The Weaver CLI exposes the lifecycle of a declared workspace.
 
@@ -736,8 +739,8 @@ weaver load Warehouse/Curated \
     --name DWG.Order
 ```
 
-Name selection runs only those objects. It deliberately does not expand or
-order them through declared dependencies.
+Name selection runs only those objects. It does not expand or order them through
+declared dependencies.
 
 Conceptually, load operates on logical Weaver Documents rather than requiring developers to execute generated stored procedures or notebooks directly.
 
@@ -795,7 +798,7 @@ weaver load \
 
 For day-to-day development, wipe is usually unnecessary.
 
-The normal workflow is simply:
+The normal workflow is:
 
 ```bash
 weaver build \

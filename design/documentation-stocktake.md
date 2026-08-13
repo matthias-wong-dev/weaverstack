@@ -9,7 +9,7 @@ migration; this repository does not build a documentation site yet.
 
 | Document | Type | Status | Action |
 | --- | --- | --- | --- |
-| [weaver-architecture.md](weaver-architecture.md) | Overview | Update | Product authority. Keep behaviour and command lifecycle; defer a final removal of command-reference detail until the CLI reference is stable. |
+| [weaver-architecture.md](weaver-architecture.md) | Overview | Update | Product authority. It retains command responsibilities and now directs syntax and interactive detail to CLI usage. |
 | [code-architecture.md](code-architecture.md) | Architecture | Update | Four-doer and handoff authority. Source modules now link here instead of carrying layer essays. |
 | [build-philosophy.md](build-philosophy.md) | Contract | Update | Kept the invariants and review checklist; removed duplicated rationale from the lifecycle guide. |
 | [how-does-build-work.md](how-does-build-work.md) | Lifecycle | Update | Retained the operational sequence and replaced its repeated principles with a link to the contract. |
