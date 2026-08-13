@@ -1036,6 +1036,14 @@ class FakeSql:
             raise self._error
 
 
+def lakehouse_catalogue(spark, resolver, item: str):
+    """Catalogue operations against one Lakehouse, as a caller with Spark builds them."""
+
+    from weaver.spark import SparkCatalogue
+
+    return SparkCatalogue(spark, resolver.spark_destination(ItemRef(item)))
+
+
 def spark_destination(
     item: str = "Sales_LH", *, schema_prefix: str = "sales_lh__", **extra
 ):

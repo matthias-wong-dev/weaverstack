@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..spark.catalogue import is_absent
 from .render import (
     InstallationScope,
     InstallationScopes,
@@ -16,32 +17,6 @@ from .render import (
     qualified_name,
 )
 from .tables import CatalogueTable
-
-#: Spark's error class for a table or view that is not registered. A missing
-#: *schema* reports the same class, which is what we want — an installation whose
-#: schema `_` has never been created is as absent as one whose table has not.
-_ABSENT = frozenset({"TABLE_OR_VIEW_NOT_FOUND"})
-
-
-def _is_absent(exception: Exception) -> bool:
-    """Whether this exception means "not created yet" rather than "went wrong".
-
-    Keyed on Spark's error class rather than on message text, so a reworded
-    message cannot silently turn an infrastructure failure into an empty read. The
-    message is consulted only when no class is available, which is the case for a
-    session or connector that raises a plain error.
-    """
-
-    error_class = getattr(exception, "getErrorClass", None)
-    if callable(error_class):
-        try:
-            found = error_class()
-        except Exception:  # pragma: no cover - defensive; a broken accessor is not absence
-            found = None
-        if found:
-            return found in _ABSENT
-    return False
-
 
 def read_table(
     catalogue: Any,
@@ -72,9 +47,9 @@ def read_table(
 
     name = catalogue.expand(qualified_name(table))
     try:
-        existing = catalogue.spark.table(name).columns
+        existing = catalogue.columns_of(name)
     except Exception as exception:
-        if _is_absent(exception):
+        if is_absent(exception):
             return ()
         raise
 
@@ -90,8 +65,7 @@ def read_table(
     if scope is not None:
         where = f" WHERE {scope.predicate}"
 
-    rows = catalogue.spark.sql(f"SELECT {projected} FROM {name}{where}").collect()
-    return tuple(row.asDict() for row in rows)
+    return tuple(catalogue.rows(f"SELECT {projected} FROM {name}{where}"))
 
 
 def _projected_column(column, actual: str | None) -> str:

@@ -21,7 +21,8 @@ from ..declaration.model import (
 from ..errors import BuildError
 from ..spark.tokens import object_token
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
-from .reader import _is_absent, read_installations, read_table
+from ..spark.catalogue import is_absent
+from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
     BUILD_EPOCH,
@@ -518,9 +519,9 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     for table in CATALOGUE_TABLES:
         name = catalogue.expand(object_token("_", table.name))
         try:
-            columns = catalogue.spark.table(name).columns
+            columns = catalogue.columns_of(name)
         except Exception as exc:
-            if _is_absent(exc):
+            if is_absent(exc):
                 missing.add(table.name)
                 continue
             raise

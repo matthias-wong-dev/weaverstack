@@ -782,36 +782,17 @@ def _unbind_physical_targets(
 def unbind_catalogue_claims(
     workspace: Workspace, *, lakehouses, warehouses, session=None
 ) -> dict:
-    """Remove catalogue claims for named physical targets, where the catalogue is.
+    """Remove catalogue claims for named physical targets.
 
-    One implementation for the two callers that want it — ``weaver unbind``, and
-    the tail of a ``wipe`` that emptied a target the catalogue still claims. They
-    were two, each with its own program text and its own Livy session, and the
-    pair had already drifted: the same operation named its resolver differently
-    on the two sides and only one of them checked for a configured Environment.
-
-    Both spellings live on one :class:`~weaver.session.program.RemoteProgram`,
-    so where this runs is the Session's decision rather than another
-    ``isinstance`` ladder here.
+    Two callers want it — ``weaver unbind``, and the tail of a ``wipe`` that
+    emptied a target the catalogue still claims. Reading the claims and deleting
+    them are both Spark SQL, so the statements go through the Session and the
+    decisions stay here.
     """
 
+    from .build_bundle.workflow import session_catalogue
     from .session.host import use_or_create_session
-    from .session.program import RemoteProgram
-
-    body = (
-        "from weaver.workspaces import FabricWorkspace\n"
-        "from weaver.targets import ItemRef\n"
-        "from weaver.unbind import unbind_targets\n"
-        "from weaver.resolution import resolver_for\n"
-        "from weaver.spark import SparkCatalogue\n"
-        f"workspace = FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"environment={workspace.environment!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r})\n"
-        "catalogue = SparkCatalogue(spark, resolver_for(workspace).spark_destination("
-        "ItemRef(workspace.weaver_lakehouse)))\n"
-        f"emit(unbind_targets(catalogue, lakehouses={tuple(lakehouses)!r}, "
-        f"warehouses={tuple(warehouses)!r}).to_mapping())\n"
-    )
+    from .unbind import unbind_targets
 
     with use_or_create_session(session, workspace=workspace) as opened:
         if not opened.executes_here(workspace) and not workspace.environment:
@@ -819,33 +800,9 @@ def unbind_catalogue_claims(
                 "Fabric catalogue unbind requires an Environment in workspace "
                 "configuration"
             )
-        return opened.execute_python(
-            RemoteProgram(
-                name="unbind",
-                call=lambda: _unbind_here(
-                    workspace,
-                    session=opened,
-                    lakehouses=lakehouses,
-                    warehouses=warehouses,
-                ),
-                source=body,
-                detail=", ".join([*lakehouses, *warehouses]),
-            ),
-            workspace=workspace,
+        catalogue = session_catalogue(
+            opened, workspace, ItemRef(workspace.weaver_lakehouse)
         )
-
-
-def _unbind_here(workspace, *, session, lakehouses, warehouses) -> dict:
-    """The unbind a host already standing where the catalogue is can just do."""
-
-    from .resolution import resolver_for
-    from .spark import SparkCatalogue
-    from .unbind import unbind_targets
-
-    catalogue = SparkCatalogue(
-        session.spark(workspace),
-        resolver_for(workspace).spark_destination(ItemRef(workspace.weaver_lakehouse)),
-    )
-    return unbind_targets(
-        catalogue, lakehouses=lakehouses, warehouses=warehouses
-    ).to_mapping()
+        return unbind_targets(
+            catalogue, lakehouses=lakehouses, warehouses=warehouses
+        ).to_mapping()

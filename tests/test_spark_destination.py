@@ -217,6 +217,16 @@ class _Spark:
             return _Frame(self._listings[statement])
         if statement.startswith(("SHOW VIEWS", "SHOW TABLES")):
             raise RuntimeError("[SCHEMA_NOT_FOUND] no such schema")
+        if statement.startswith("DESCRIBE SCHEMA"):
+            name = statement.split(None, 2)[2]
+            if name not in self.catalog.databases:
+                raise RuntimeError("[SCHEMA_NOT_FOUND] no such schema")
+            return _Frame([])
+        if statement.startswith("DESCRIBE TABLE"):
+            name = statement.split(None, 2)[2]
+            if name not in self.catalog.tables:
+                raise RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] no such table")
+            return _Frame([])
         return None
 
 

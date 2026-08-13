@@ -266,7 +266,7 @@ def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
         store.make_directory(location)
 
     inventory = read_lakehouse_inventory(
-        target, resolver=resolver, store=store, spark=None
+        target, resolver=resolver, store=store
     )
 
     assert "cli" not in inventory.folder_schemas

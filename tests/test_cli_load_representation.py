@@ -364,6 +364,11 @@ class _FakeLivy:
             answer = __version__
         else:
             type(self).submitted.append(code)
+            if answer is not None and "_statements" in code:
+                # The estate is read as Spark SQL, and an empty answer is an
+                # empty catalogue — which these tests are content with, because
+                # what they assert is which targets were resolved and when.
+                answer = []
 
         class Result:
             # ``returned`` is whether the program called ``emit`` at all, which
@@ -392,6 +397,11 @@ class _FakeResolver:
 
     def __init__(self, workspace, **kwargs) -> None:
         self.workspace = workspace
+
+    def spark_destination(self, item):
+        from weaver.spark import fabric_destination
+
+        return fabric_destination(workspace="My Workspace", lakehouse=item.name)
 
     def resolve(self, item, *, item_type):
         from weaver.fabric import ItemNotFoundError

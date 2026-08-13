@@ -138,8 +138,8 @@ def test_two_lakehouses_declaring_one_schema_get_two_tables(
         "SELECT 1, 'Only in the first', true, "
         "current_timestamp(), current_timestamp(), current_timestamp()"
     )
-    assert first.sql("SELECT count(*) AS n FROM {{object:DWG.Customer}}").collect()[0][0] == 1
-    assert second.sql("SELECT count(*) AS n FROM {{object:DWG.Customer}}").collect()[0][0] == 0
+    assert first.sql("SELECT count(*) AS n FROM {{object:DWG.Customer}}")[0]["n"] == 1
+    assert second.sql("SELECT count(*) AS n FROM {{object:DWG.Customer}}")[0]["n"] == 0
 
 
 def test_each_destination_keeps_its_own_storage(estate, spark):

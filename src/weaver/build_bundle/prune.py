@@ -12,7 +12,7 @@ from typing import Iterable, Mapping
 from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..etl import LOAD_ROOT
 from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
-from ..spark import SparkCatalogue, object_token, schema_token
+from ..spark import object_token, schema_token
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
@@ -174,9 +174,14 @@ def _holds(values: Iterable[str], qualified: str) -> bool:
 
 
 def read_lakehouse_inventory(
-    target: BoundTarget, *, resolver, store: Store, spark=None
+    target: BoundTarget, *, resolver, store: Store, catalogue=None
 ) -> TargetInventory:
-    """Read every Weaver-manageable object in one Lakehouse."""
+    """Read every Weaver-manageable object in one Lakehouse.
+
+    Storage answers everything but the views, which exist only in the
+    catalogue — so ``catalogue`` is optional and its absence means the views
+    cannot be listed, not that there are none.
+    """
 
     lakehouse = ItemRef(target.item_id)
     tables_root = resolver.tables_root(lakehouse)
@@ -194,7 +199,6 @@ def read_lakehouse_inventory(
             else entry.name.casefold() not in reserved_schemas
         )
     )
-    catalogue = _catalogue_for(resolver, lakehouse, spark)
     if (
         control_item
         and catalogue is not None
@@ -578,17 +582,6 @@ def _child_dirs(store: Store, root) -> list:
     return sorted(
         (entry for entry in store.list(root) if entry.is_directory), key=lambda e: e.name
     )
-
-
-def _catalogue_for(resolver, lakehouse: ItemRef, spark) -> "SparkCatalogue | None":
-    """Return catalogue operations, or ``None`` when no Spark session is available."""
-
-    if spark is None:
-        return None
-    resolve = getattr(resolver, "spark_destination", None)
-    if resolve is None:  # pragma: no cover - both shipped resolvers provide it
-        return None
-    return SparkCatalogue(spark, resolve(lakehouse))
 
 
 def _tsql_ident(name: str) -> str:

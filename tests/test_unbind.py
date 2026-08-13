@@ -6,41 +6,19 @@ from weaver.catalogue.tables import INSTALLATION
 from weaver.unbind import plan_unbind, unbind_targets
 
 
-class _Row(dict):
-    def asDict(self):
-        return dict(self)
-
-
-class _Frame:
-    columns = list(INSTALLATION.column_names)
-
-
-class _Query:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def collect(self):
-        return [_Row(row) for row in self._rows]
-
-
-class _Spark:
-    def __init__(self, rows):
-        self.rows = rows
-
-    def table(self, _name):
-        return _Frame()
-
-    def sql(self, _statement):
-        return _Query(self.rows)
-
-
 class _Catalogue:
     def __init__(self, rows):
-        self.spark = _Spark(rows)
+        self._rows = rows
         self.executed = []
 
     def expand(self, name):
         return name
+
+    def columns_of(self, _name):
+        return tuple(INSTALLATION.physical_columns)
+
+    def rows(self, _statement):
+        return [dict(row) for row in self._rows]
 
     def sql(self, statement):
         self.executed.append(statement)
