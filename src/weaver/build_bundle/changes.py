@@ -40,9 +40,7 @@ ADD = "add"
 REMOVE = "remove"
 EFFECTS = (ADD, REMOVE)
 
-#: What is being changed, in the vocabulary a ``TargetInventory`` holds. Every
-#: name here is one of that class's collections, because the whole point is to
-#: land on it — a kind with nowhere to go would be a change nothing could apply.
+#: Change kinds map directly to ``TargetInventory`` collections.
 SCHEMA = "schema"
 TABLE = "table"
 VIEW = "view"

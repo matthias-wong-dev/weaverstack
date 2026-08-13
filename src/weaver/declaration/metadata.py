@@ -139,14 +139,9 @@ WAREHOUSE_ALIAS = "Warehouse alias"
 LAKEHOUSE_ALIAS = "Lakehouse alias"
 _ALIAS_KEYS = {WAREHOUSE_ALIAS, LAKEHOUSE_ALIAS}
 
-#: Stability thresholds — the guard against a load that is *technically* correct
-#: and obviously wrong. A source that broke overnight and returned a tenth of its
-#: rows produces a load Weaver would otherwise carry out faithfully.
-#:
-#: The percentages are of the target's row count *before* the load, and the row
-#: threshold is the size below which neither applies: on a small table a single
-#: row is a large percentage, and tripping on that would teach everyone to turn
-#: the guard off.
+#: Stability thresholds compare changed rows with the target before the load.
+#: The row threshold excludes small targets where a single row can dominate the
+#: percentage.
 DELETE_THRESHOLD = "Delete percentage threshold"
 UPDATE_THRESHOLD = "Update percentage threshold"
 STABILITY_ROWS = "Stability row threshold"

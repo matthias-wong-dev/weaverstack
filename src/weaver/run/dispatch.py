@@ -1,25 +1,7 @@
-"""dispatch_primitive — the one place a run crosses into a real engine.
+"""Dispatch an installed runtime primitive through Session capabilities.
 
-.. code-block:: text
-
-    RunNode
-       ↓
-    primitive kind / runtime reference
-       ↓
-    Session capability
-       ↓
-    the installed runtime artefact
-
-A narrow function, deliberately, and not a fifth doer. Everything about *when* a
-node runs belongs to the Runner; everything about *how* to reach an engine
-belongs to the Session. What is left here is the translation between them, which
-is small enough that giving it a lifecycle would be inventing one.
-
-It is also the seam a run-cycle test replaces. Nothing here is aware of that: the
-Runner calls whatever callable it was given, and a controlled outcome and a real
-one arrive by the same route. Which is why a deliberately trivial fixture
-artefact needs no special case — the Registry already points a node wherever the
-estate says, and a trivial artefact is simply an installed one that does little.
+Runner controls scheduling and Session controls engine access. This module maps
+the installed primitive reference to the appropriate Session operation.
 """
 
 from __future__ import annotations
@@ -47,12 +29,8 @@ def dispatch_primitive(
 ):
     """Run one installed primitive and return what it reported.
 
-    ``open_runtime`` is a *callable*, not a scope, and that is the whole of what
-    keeps a Warehouse-only run away from Spark. A scope handed in would have to
-    exist before anybody knew whether a node wanted one — and on a desktop
-    creating it means a Livy session and a ``begin_run`` crossing. Only the two
-    branches below that import a deployed module ask for it, so a run of nothing
-    but stored procedures never opens one.
+    ``open_runtime`` is called only by branches that import a deployed module.
+    Warehouse-only runs therefore do not open a Spark runtime.
     """
 
     if session is None:

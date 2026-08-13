@@ -10,8 +10,7 @@ Where a claim belongs, and why. The organising rule is one sentence:
 > **Prove a claim at the cheapest layer that can answer it, and use the
 > expensive layers only for what only they can answer.**
 
-Everything below is that rule applied. It is a description of how the suite is
-arranged, not a list of work outstanding.
+The rest of this document applies that rule to the repository test suite.
 
 ## The layers
 

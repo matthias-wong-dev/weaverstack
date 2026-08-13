@@ -1,21 +1,8 @@
-"""Weaver executing inside the Fabric host itself.
+"""Session implementation for Weaver running inside a Fabric host.
 
-The product's own position. There is no transport here and nothing to cross: the
-Spark session is the notebook's, SQL authenticates from the session identity, and
-a name resolves through NotebookUtils rather than REST. A
-:class:`~weaver.session.program.RemoteProgram` is simply *called*.
-
-So this class is short, and that is the point. Everything that made
-:class:`~weaver.session.console.ConsoleSession` long — credentials, Livy
-lifetime, a workspace that arrives per command — is absent when Weaver is
-already where the data is. What both share is the contract above them: the same
-``execute_python``, ``execute_spark_sql`` and ``execute_tsql`` a Builder,
-Installer or Runner asks for, so nothing above a Session knows which host it
-got.
-
-One notebook is attached to one workspace, so a notebook Session has exactly one
-context. A caller naming a different workspace is asking for something this host
-cannot do, and is told so rather than quietly served the attached one.
+The session uses notebook-provided Spark, storage, and resolution resources for
+its attached Workspace. It exposes the same host-neutral capabilities as a
+console Session.
 """
 
 from __future__ import annotations
@@ -42,11 +29,8 @@ class NotebookSession(Session):
     ) -> None:
         super().__init__(**kwargs)
         if self.workspace is None:
-            raise CommandError("a notebook session needs the workspace it is attached to")
-        # Given the same way a console is given them, and for the same reason: a
-        # notebook body already holds a Spark session, a store and a resolver,
-        # and a Session that acquired its own would be opening a second of each
-        # beside the ones its caller is using.
+            raise CommandError("A NotebookSession requires its attached Workspace.")
+        # Reuse resources supplied by the notebook host.
         self._spark = spark
         self._given_store = store
         self._given_resolver = resolver

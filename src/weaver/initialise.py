@@ -1,37 +1,8 @@
-"""Preparing a Weaver Lakehouse, and the compatibility wrapper that fills one.
+"""Prepare a Weaver Lakehouse and run the compatibility initialisation path.
 
-There is deliberately no second "create the control tables" path. If the
-catalogue needed privileged machinery to exist, the claim that a catalogue table
-is an ordinary Weaver object would be false, and every later assumption resting
-on that claim would be resting on nothing.
-
-So the catalogue is built the way everything else is: the package-owned
-``Lakehouse/_weaver`` item is composed into every parsed repository and bound to
-the configured Weaver Lakehouse, and *ordinary build* creates the catalogue
-tables through ordinary planned actions. Nothing here runs before a build.
-
-The bootstrap looks circular and is not. One bundle does the whole of it, because
-the barriers already order it correctly:
-
-.. code-block:: text
-
-    create schema `_` and the catalogue tables
-    publish dictionaries and Installation as one batch
-    certify them in Registry last
-
-The catalogue's own DML runs after the tables it writes to exist, so no special
-first-run mode is needed.
-
-The built-in ``_weaver`` item's inventory is scoped to the reserved ``_`` schema,
-so the ordinary authoritative prune cannot touch application schemas that happen
-to share the control Lakehouse.
-
-**What is left here is environment setup, not build.** A Fabric Lakehouse is a
-workspace item, and creating one is provisioning rather than building — so
-:func:`prepare_weaver_lakehouse` is called by an operator or a test harness, and
-a build against a missing Weaver Lakehouse fails preflight instead of quietly
-provisioning one. In the local emulator the same function makes the directory
-skeleton that stands in for the Fabric item.
+The package-owned ``_weaver`` item creates catalogue tables through ordinary
+build actions. This module provisions a missing Fabric item or local emulator
+skeleton; it does not create catalogue tables directly.
 """
 
 from __future__ import annotations

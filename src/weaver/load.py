@@ -402,14 +402,7 @@ def _step_type(report: LoadNodeReport) -> str:
 
 
 def _plan_document(graph, state, requested, names, dry_run: bool) -> dict:
-    """The complete intended task, written once before anything runs.
-
-    Enough on its own to answer what was requested, what Weaver intended to run,
-    in what order, against which physical targets and through which installed
-    primitives — which is the whole point of writing it before rather than
-    after. Every existence answer comes from the snapshot the run was planned
-    against, so the record and the decision cannot disagree.
-    """
+    """Record the requested load task and its resolved execution plan."""
 
     from . import __version__
     from .run.resolution import resolve

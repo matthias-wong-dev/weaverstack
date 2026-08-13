@@ -1,15 +1,8 @@
-"""Fabric workspace resolution — names to OneLake locations.
+"""Resolve typed Fabric item names to OneLake locations.
 
-The twin of :class:`~weaver.resolution.LocalResolver`, and deliberately the same
-surface, so everything above resolution is written once and neither build nor
-wipe learns which workspace it is talking to.
-
-The difference is that a Fabric name has to be *asked about* — a name maps to a
-GUID only by consulting the workspace. It is asked about **with its type**:
-identity is ``workspace + type + name``, so a Lakehouse and a Warehouse may share a
-display name (indeed a Lakehouse grows a same-named SQL endpoint), and the
-caller always knows the type from the slot. Answers are cached, because asking
-costs an API call.
+Fabric item identity is workspace, type, and name. Resolution uses the declared
+item type, caches REST lookups, and presents the same interface as local
+resolution.
 """
 
 from __future__ import annotations
@@ -248,8 +241,8 @@ class FabricResolver:
         name = self.configuration.weaver_lakehouse
         if name is None:
             raise CommandError(
-                "no Weaver Lakehouse for this Workspace — set weaver_lakehouse on the Workspace "
-                "or supply it explicitly"
+                "A Weaver Lakehouse is required for this Workspace. "
+                "Set weaver_lakehouse on the Workspace or supply it explicitly."
             )
         return ItemRef(name)
 

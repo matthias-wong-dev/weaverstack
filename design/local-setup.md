@@ -187,30 +187,18 @@ CI runs both: the core suite on macOS, Linux and Windows across Python 3.11 and
 a workspace and a running capacity, so they stay opt-in and local — see
 [fabric-testing.md](fabric-testing.md).
 
-## Why the fixtures are scoped as they are
+## Fixture scope and cache cleanup
 
-Measured on an M-series Mac:
-
-| | cost |
-|---|---|
-| Spark session start | 1.24 s |
-| first Delta write and read (JVM warm-up) | 4.31 s |
-| later Delta write and read | ~0.75 s |
-| a local Lakehouse skeleton | 0.0002 s |
-
-So `spark` is **session-scoped** — built once for the whole run — and
-`lakehouses` is **per-test**. Only one `SparkSession` may be active in a process
-anyway, and the warm-up is not worth paying twice. Lakehouse directories are
-free enough that reusing them would only invite cross-test contamination.
+`spark` is session-scoped because Spark startup and JVM warm-up are expensive.
+`lakehouses` is per-test because isolated local directories are cheap. Only one
+`SparkSession` may be active in a process.
 
 Isolation comes from each test's own `tmp_path`, and one shared session needs help
 with that. Delta caches a `DeltaLog` per table **path** — and through it a
 `Snapshot`, a query execution and its encoder — so a suite that builds every table
 under a fresh directory keeps the retained state of every Lakehouse it has already
-deleted. Measured, that is about 5.6 MB of live heap per test, which exhausted the
-default 1 GB driver heap partway through the run. An autouse fixture clears Delta's
-log cache and Spark's plan cache after each test; both are caches, so the cost is
-re-reading a transaction log.
+deleted. An autouse fixture clears Delta's log cache and Spark's plan cache after
+each test to prevent the driver from retaining those paths.
 
 A test that registers a *schema* still has to drop it, because a schema is not a
 cache: two tests present different temporary directories under the same logical

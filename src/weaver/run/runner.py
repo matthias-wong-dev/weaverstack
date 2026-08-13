@@ -103,12 +103,7 @@ def node_label(node) -> str:
 
 @contextmanager
 def _node_substep(session, node):
-    """One node's timing frame, where there is a Session to record it on.
-
-    A run-cycle test constructs a Runner with no Session at all — that is the
-    whole point of the dispatch seam — so this yields ``None`` rather than
-    making the Runner's timing depend on having crossed anything.
-    """
+    """Return a node timing frame when the Runner has a Session."""
 
     if session is None or not hasattr(session, "substep"):
         yield None

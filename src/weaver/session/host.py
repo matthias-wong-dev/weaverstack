@@ -59,10 +59,10 @@ def active_spark():
 
         SparkSession = import_module("pyspark.sql").SparkSession
     except ImportError as exc:
-        raise CommandError("this operation needs an active Spark session") from exc
+        raise CommandError("An active Spark session is required for this operation.") from exc
     spark = SparkSession.getActiveSession()
     if spark is None:
-        raise CommandError("this operation needs an active Spark session")
+        raise CommandError("An active Spark session is required for this operation.")
     return spark
 
 
@@ -92,7 +92,7 @@ def use_or_create_session(
 
     if session is not None:
         if session.closed:
-            raise CommandError("this session is closed")
+            raise CommandError("The Session is closed.")
         yield session
         return
     created = session_for(workspace)

@@ -87,8 +87,7 @@ def compare(
     )
 
     if key:
-        # dense_rank over the declared key: the two sides of one changed entity
-        # share a key and therefore a rank, which is the whole point.
+        # Pair rows from the same changed entity under one diagnostic key.
         ordering = ", ".join(_quoted(column) for column in key)
         rank = f"dense_rank() OVER (ORDER BY {ordering})"
     else:

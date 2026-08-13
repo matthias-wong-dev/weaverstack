@@ -102,21 +102,11 @@ class LoadContract:
         return bool(self.primary_key) and not self.incremental
 
     def breaches(self, *, target_rows: int, deleting: int, updating: int) -> str | None:
-        """Why this load looks wrong, or ``None`` if it does not.
+        """Return a stability-threshold breach, or ``None``.
 
-        The guard against a load that is *technically* correct and obviously
-        wrong: a source that broke overnight and returned a tenth of its rows
-        produces a change Weaver would otherwise carry out faithfully.
-
-        Both percentages are of the target as it stands *before* the load, which
-        is the number an operator means by "5% of the table". Neither applies
-        below the row threshold, because on a small table one row is a large
-        percentage and tripping on that would teach everyone to disable the
-        guard.
-
-        An unkeyed load is exempt: with no key there is nothing to match, so
-        replacing every row is what the declaration asked for rather than a
-        symptom of anything.
+        Percentages apply to the target row count before the load. Small and
+        unkeyed targets are excluded because their change percentages do not
+        indicate a comparable replacement risk.
         """
 
         # An empty target has no proportion to be a percentage of, and a first
@@ -179,10 +169,7 @@ class FolderLoadContract:
     object_id: ObjectId
     file_keys: tuple[str, ...] = ()
     incremental: bool = False
-    #: Materialised once and never again — see :attr:`LoadContract.static`.
-    #: Checked before staging is issued and before ``read()`` is invoked,
-    #: which is the whole point for a folder: a populated static folder must
-    #: not download anything, create a staging directory or reconcile files.
+    #: Materialised once; checked before staging or ``read()``.
     static: bool = False
 
     @property

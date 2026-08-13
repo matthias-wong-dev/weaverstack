@@ -7,10 +7,8 @@ bundle. Build invariants are defined in [Build philosophy](build-philosophy.md).
 
 ## Status
 
-This document describes the implemented Weaver build system. It combines the
-mechanics of incremental planning with the architectural constraints that make a
-bundle safe to inspect, move, and execute in both the local emulator and
-Microsoft Fabric.
+This document describes the implemented build lifecycle. The contract-level
+reasoning belongs in [Build philosophy](build-philosophy.md).
 
 ## 1. What Weaver build does
 
@@ -724,29 +722,8 @@ what was interpreted
 = what is executed
 ```
 
-## 16. Why Weaver works this way
+## 16. Related design
 
-Weaver is Fabric-first and keeps resource location separate from execution
-location. Core code operates inside its environment: locally against the
-emulator, or in a Fabric session against session-native stores and catalogues.
-The same planned semantics are tested in both places.
-
-The design condenses to these rules:
-
-1. Build creates structure; load moves data.
-2. Interpret the repository once and statically.
-3. Prepare catalogue and target state before planning.
-4. Make incremental selection visible in the plan.
-5. Distinguish prune from a managed rebuild.
-6. Remove certification before deliberate physical removal.
-7. Use strict state transitions where the planner knows the expected state.
-8. Bind every physical target explicitly.
-9. Order items by the repository's item graph, and work within an item by its
-   document graph.
-10. Complete a mutated Lakehouse before anything depends on it.
-11. Keep installation mechanical and unable to broaden scope.
-12. Certify successful desired state last.
-
-These constraints move risk earlier. They make consequential actions visible,
-keep environment behavior comparable, and turn unexpected state into a clear
-failure instead of a silent partial deployment.
+This document describes the build lifecycle. The invariants that constrain that
+lifecycle, including frozen bundles, explicit binding, and prune behaviour, are
+defined in [Build philosophy](build-philosophy.md).

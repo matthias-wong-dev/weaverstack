@@ -1,20 +1,7 @@
-"""What a validation run reports.
+"""Serializable reports for validation runs.
 
-The sibling of :mod:`weaver.load_report`, and shaped like it so a reader who
-knows one knows the other: a node report per validation, a run report over them,
-and everything serialisable because the CLI prints it and the task log persists
-it.
-
-**Counts, never rows.** A node carries its scalar result and, only when a caller
-explicitly asked for one validation, the diagnostic rows alongside it — held on
-the report object for that caller and excluded from every mapping. Diagnostic
-rows may be large and may carry sensitive business data; they are interactive
-evidence, not a record.
-
-**Failing and unrunnable are different statuses.** A Test that found
-discrepancies did its job. A Test whose key repeats, or whose primitive was
-never installed, did not run at all, and reporting the two alike would let a
-broken estate read as a passing one.
+Mappings retain counts and statuses. Targeted diagnostics remain local to the
+report object because they may be large or contain sensitive data.
 """
 
 from __future__ import annotations
@@ -50,7 +37,7 @@ class ValidationNodeReport:
     started_at: str | None = None
     finished_at: str | None = None
     #: The rows, when a caller asked for one validation by name or by file.
-    #: Deliberately absent from :meth:`to_mapping` — see the module docstring.
+    #: Excluded from :meth:`to_mapping`; diagnostics are not durable report data.
     diagnostics: Any = field(default=None, compare=False, repr=False)
 
     @property

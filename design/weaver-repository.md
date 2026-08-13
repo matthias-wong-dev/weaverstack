@@ -145,7 +145,7 @@ would make physical deployment history part of logical identity.
 ## See also
 
 - [CLI usage](cli-usage.md) — workspaces, build, wipe and capacity
-- [Master CLI plan](weaver_master_cli_plan.md) — the authoritative current model
+- [Weaver architecture](weaver-architecture.md) — product behaviour and command lifecycle
 - [Agent guide](../AGENTS.md) — implementation invariants
 
 ## Generated declarations

@@ -38,7 +38,7 @@ boundaries covered by the writing uplift.
 
 ## Historical notes
 
-[Interactivity baseline](todo/interactivity-baseline.md) records measurements
+[Interactivity baseline](history/interactivity-baseline.md) records measurements
 and decisions from the Run and Build decomposition. It is historical context,
 not a current implementation contract.
 

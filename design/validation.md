@@ -7,13 +7,9 @@ installed, run, and recorded. It owns validation architecture; command use is
 documented in [CLI usage](cli-usage.md).
 
 Weaver validates an estate with two kinds of authored declaration. Both are
-ordinary Weaver declarations — schema-qualified, dependency-resolved, compiled to
-independently runnable primitives, installed by an ordinary build — and neither
-is a data object. That last clause is what this document is mostly about,
-because it is the thing the rest of the system was not previously shaped for.
-
-This is the authoritative design for validation. Where it and the code disagree,
-the code is wrong.
+schema-qualified, dependency-resolved, compiled to independently runnable
+primitives, and installed by an ordinary build. Neither materialises a data
+object.
 
 ## The two kinds
 

@@ -1,42 +1,8 @@
-"""Turning a catalogue difference into the statements a build appends.
+"""Render catalogue changes for a build bundle.
 
-**The statements are driven by the difference between what is persisted and what
-the build certifies.** A table whose rows are all unchanged produces nothing at
-all: no delete, no merge, no action in the bundle. That is what makes an
-identical second build a genuine no-op rather than one that rewrites the whole
-catalogue to the same values.
-
-This reverses an earlier design, deliberately, and the trade is worth stating
-because the old argument was a good one. Statements used to be rendered from the
-desired side alone — the delete kept exactly the keys the projection claimed, the
-merge was idempotent — so the pair was correct against *any* prior state,
-including a state the planner had misread. A bad read cost a misleading report
-and could not corrupt anything.
-
-The cost of that safety was that a build could never do nothing. Every build
-rewrote every catalogue table it touched, so "an unchanged estate produces no
-work" was false at the catalogue, and the endpoint refresh that follows catalogue
-DML ran every time.
-
-What makes the reversal safe is that the read is now authoritative rather than
-advisory: :func:`~weaver.catalogue.state.read_catalogue_state` validates each
-table's shape, distinguishes a bootstrap absence from a damaged catalogue, and
-refuses rows outside the scopes it asked for. An incomplete or unreadable
-catalogue stops the build *before* planning, so the case the old design defended
-against — deriving deletes from a read that silently returned too little — is now
-a failure rather than a diff. Any authoritative scoped replacement belongs in an
-explicit repair mode, not in ordinary build.
-
-**Publication is oriented by physical table, not by logical item.** The write
-unit is one catalogue table across every changed scope, because that is what the
-engine actually does work for. Per-item statements meant a ten-item build wrote
-each table ten times to achieve what one predicate achieves once.
-
-**Ordering is the one strict invariant.** Dictionaries describe, Installation
-records the binding, Registry certifies. Registry is written last, so a row in it
-cannot outrun the work it attests to; the installer's barriers do the rest. Prune
-runs the order backwards — uncertify first, so nothing is left certified while its
-description is being removed.
+Only changed catalogue rows produce statements. Catalogue reads are validated
+before planning. Dictionaries describe, Installation records bindings, and
+Registry certification is written last. See ``design/catalogue.md``.
 """
 
 from __future__ import annotations

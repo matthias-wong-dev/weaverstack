@@ -309,7 +309,7 @@ and once drop policy lands, that is a licence to remove an estate. So absence is
 recognised only by Spark's own `TABLE_OR_VIEW_NOT_FOUND` error class, never by
 message text.
 
-## The execution model
+## Target addressing during catalogue work
 
 **The Spark session is attached to the Weaver Lakehouse.** That is the fixed
 control-plane context: it is where the session lives, and it is a useful execution
@@ -333,9 +333,8 @@ Build targets                      data plane, named explicitly
 └── Lakehouse C
 ```
 
-That is what makes one invocation building several Lakehouses possible. Relying on
-the current catalogue would make `Sales` in Lakehouse A indistinguishable from
-`Sales` in Lakehouse B.
+One invocation can therefore build several Lakehouses without conflating objects
+with the same schema and name.
 
 ### A Lakehouse has two addresses, and a build needs both
 
@@ -376,11 +375,8 @@ them: Fabric refuses `SHOW SCHEMAS IN `workspace`.`lakehouse``, and a bare
 `SHOW SCHEMAS` answers for the attached Lakehouse only, so schema discovery reads
 the destination's `Tables/` area through the store instead.
 
-Responsibilities stay separated. `ItemRef` identifies the logical item; the workspace
-adapter resolves both addresses; the plan carries the item; the installation
-context resolves it once per target; the executor uses it. An executor deriving
-either for itself would be re-deciding where an action lands, which is a planning
-decision.
+`ItemRef` identifies the logical item. The workspace adapter resolves both
+addresses, the plan carries the item, and the executor uses the resolved target.
 
 Two things worth knowing:
 
@@ -406,8 +402,7 @@ collision fails rather than being hidden.
 
 ## See also
 
-- [How Weaver Build Works](how-does-build-work.md) — the mechanics and governing properties every
-  build implementation must preserve.
-- [weaver-repository.md](weaver-repository.md) — where a repository lives and how it is
-  installed.
-- [weaver_master_cli_plan.md](weaver_master_cli_plan.md) — the authoritative lifecycle plan.
+- [How Weaver Build Works](how-does-build-work.md) — build lifecycle and
+  catalogue reconciliation.
+- [Build philosophy](build-philosophy.md) — planning and installation invariants.
+- [Weaver repository sources](weaver-repository.md) — repository declarations.

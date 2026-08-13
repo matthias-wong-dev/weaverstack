@@ -5,9 +5,8 @@
 This document explains the real-Fabric test environment, marker selection, and
 the evidence each test tier provides.
 
-These touch a real workspace and a running capacity. They are **deselected by
-default** and skip unless a workspace is named, so nobody runs them by accident
-and nobody without a tenant is blocked.
+These tests use a real workspace and running capacity. They are deselected by
+default and skip unless a workspace is configured.
 
 ## Once
 
@@ -357,6 +356,10 @@ A Spark body that does not import Weaver needs a session, not a published
 package.
 
 ## The test tiers
+
+The test-layer selection rule and directory conventions are defined in
+[Test architecture](test-architecture.md). This section records the Fabric
+preconditions for those tiers.
 
 | | command | needs |
 |---|---|---|

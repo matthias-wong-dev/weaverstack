@@ -1,12 +1,4 @@
-"""The installation report — one result per action, faithfully.
-
-An install is judged by its report, so the report must be exact: every planned
-action gets exactly one result, with its status, timing and — on failure — the
-error, and a sequence that never started is recorded as skipped rather than
-omitted. The whole thing serialises so a local run can drop an
-``install-report.yml`` beside the plan; on Fabric the same structure can move to
-control tables later.
-"""
+"""Serializable installation results, with one result per planned action."""
 
 from __future__ import annotations
 

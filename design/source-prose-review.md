@@ -1,17 +1,29 @@
 # Source prose review
 
-This review covers the Python source tree as part of the writing uplift. It is
-an editorial guide for ongoing maintenance, not a prose linter specification.
+This is a progress record for the Python source prose uplift. It is not a claim
+that every module has completed editorial review, and it is not a prose-linter
+specification.
+
+## Status
+
+Completed: `weaver_cli.main`, `weaver_cli.compose`, and `weaver_cli.shell`,
+including their user-facing help, prompts, and rendering. The Fabric and Session
+modules are reviewed for user-facing failures and their highest-volume module
+essays. The build, catalogue, run, runtime, and validation execution boundaries
+also received a targeted module-prose review. The remaining declaration, SQL,
+Spark, storage, and test-support modules still need a full comments and
+docstrings pass.
 
 ## User-facing boundaries
 
-| Area | Surfaces reviewed | Owning modules |
+| Area | Status | Surfaces | Owning modules |
 | --- | --- | --- |
-| CLI commands | Help, option help, summaries, confirmations, retry prompts | `weaver_cli.main`, `weaver_cli.compose`, `weaver_cli.shell` |
-| Sessions | Warnings, resource start state, timings | `weaver.session` |
-| Build, load, and test | Reports, status labels, log links, targeted diagnostics | `weaver.build_bundle.report`, `weaver.load_report`, `weaver.test_report`, `weaver_cli.main` |
-| Fabric | Notebook, capacity, resource lookup, environment, Livy, and OneLake failures | `weaver.fabric` |
-| Configuration | Workspace configuration failures | `weaver.config` |
+| CLI commands | Complete | Help, option help, summaries, confirmations, retry prompts | `weaver_cli.main`, `weaver_cli.compose`, `weaver_cli.shell` |
+| Configuration | In progress | Workspace configuration failures | `weaver.config` |
+| Sessions | Reviewed boundary | Warnings, resource start state, timings | `weaver.session` |
+| Build, load, and test | Partial | Reports, status labels, log links, targeted diagnostics | `weaver.build_bundle.report`, `weaver.load_report`, `weaver.test_report`, `weaver_cli.main` |
+| Fabric | Reviewed boundary | Notebook, capacity, resource lookup, environment, Livy, and OneLake failures | `weaver.fabric` |
+| Remaining core | Partial | Comments, docstrings, and module prose | `build_bundle`, `catalogue`, `declaration`, `run`, `runtime`, `spark`, `sql`, storage |
 
 Runtime wording reports the detected state first. It gives a next step only
 when the code has determined one. JSON output remains a data contract and is
@@ -19,11 +31,12 @@ not reformatted as part of editorial changes.
 
 ## Source prose conventions
 
-The source tree was reviewed for narrative comments, reviewer-facing arguments,
-and implementation history. Comments remain where they explain a platform
-constraint, invariant, cache boundary, or failure mode that code cannot show.
-Docstrings state a callable or module contract. System-wide reasoning belongs in
-the relevant document under `design/`.
+Completed modules were reviewed for narrative comments, reviewer-facing
+arguments, and implementation history. The same review remains pending for the
+modules marked above. Comments should explain a platform constraint, invariant,
+cache boundary, or failure mode that code cannot show. Docstrings should state a
+callable or module contract. System-wide reasoning belongs in the relevant
+document under `design/`.
 
 For ongoing review, search changed Python code for rhetorical language and then
 read the surrounding paragraph. The advisory Claude tripwire checks the most
