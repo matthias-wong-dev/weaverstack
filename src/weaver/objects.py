@@ -303,9 +303,7 @@ class Folder(WeaverObject):
         from .runtime.load_result import LoadResult
 
         contract = FolderLoadContract.from_document(self._document())
-        # Before staging and before read(), which is the whole point for a
-        # folder: a populated static folder must not create a staging directory,
-        # must not run the author's download and must not reconcile files.
+        # Static folders bypass staging, source reads, and file reconciliation.
         #
         # `static` first, and the order is not style: Python evaluates arguments
         # eagerly, so asking whether the folder is populated *inside* the call

@@ -9,10 +9,10 @@ specification.
 Completed: `weaver_cli.main`, `weaver_cli.compose`, and `weaver_cli.shell`,
 including their user-facing help, prompts, and rendering. The Fabric and Session
 modules are reviewed for user-facing failures and their highest-volume module
-essays. The build, catalogue, run, runtime, and validation execution boundaries
-also received a targeted module-prose review. The remaining declaration, SQL,
-Spark, storage, and test-support modules still need a full comments and
-docstrings pass.
+essays. The build, catalogue, run, runtime, validation, declaration metadata,
+reference resolution, folder runtime, and wipe boundaries also received targeted
+module-prose review. The remaining declaration, SQL, Spark, storage, and
+test-support modules still need a full comments and docstrings pass.
 
 ## User-facing boundaries
 

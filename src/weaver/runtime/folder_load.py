@@ -1,38 +1,8 @@
-"""Loading a Python-defined folder — the mechanics behind ``Folder.load()``.
+"""Reconcile a Python-defined folder into its destination.
 
-The folder counterpart of :mod:`weaver.runtime.table_load`, and the same
-division holds: ``read()`` writes into the staging directory Weaver issued and
-returns ``(staging_folder, files_to_delete)``; everything that reaches the
-destination happens here.
-
-Ported from ``weaver_runtime.dbrep.runtime.folders``. Almost all of it is
-validation, and that is the point rather than an accident — a folder load is the
-one primitive that can delete a file nobody declared, so what it is *entitled*
-to touch has to be established before it touches anything.
-
-**The file key is the whole safety argument.** It says which files inside the
-destination are Weaver's, and it is matched segment by segment with ``**``
-support, not as a flat string. That distinction is load-bearing: with a key of
-``*.csv``, ``a.csv`` is managed and ``archive/old.csv`` is not, so a replacement
-removes the first and leaves the second. Matching the key against a whole path
-instead would quietly claim — and then delete — every nested file beneath the
-folder.
-
-**Staging is Weaver's to issue and the object's to fill.** It is emptied and
-recreated before ``read()``, must be a sibling of the destination named
-``<destination>_Staging``, and is consumed exactly once. An object that returns
-some other directory, or the same folder twice, is refused rather than trusted.
-
-**Everything is checked before anything is copied.** Staged files must match the
-file key, deletes must be exact relative paths inside the folder, and nothing
-may be both staged and deleted. The first violation raises, with the target
-untouched.
-
-Two departures from the reference, both narrow. Weaver has no ``load_mode``, so
-the append/replace distinction is simply the ``Incremental`` policy. And
-``fault_tolerant`` is Weaver's addition: it governs recognised row-level
-rejections, of which a folder has exactly one — a staged file the key does not
-claim.
+Object code fills a Weaver-issued staging folder and returns files to delete.
+Validation confirms staged and deleted paths are within the declared file key
+before publishing changes.
 """
 
 from __future__ import annotations
@@ -119,26 +89,10 @@ def load_folder(
 
 @dataclass(frozen=True)
 class StagingFolder:
-    """The directory Weaver issued for one load, and the object's to fill.
+    """The staging directory issued for one folder load.
 
-    A value rather than a string, and a context manager rather than a value,
-    because both are how authored code actually uses it::
-
-        def read(self):
-            with self.staging_folder() as staging:
-                download_files(staging.path)
-
-            return staging, ()
-
-    The ``with`` block is a scope for the author's own work — Weaver publishes
-    from the same directory after ``read()`` returns, so leaving the block does
-    not remove anything. What it buys is that the download and the staging
-    directory are visibly one thing.
-
-    **Identity is the contract.** ``load()`` checks that what ``read()`` returned
-    *is* the object it issued, not merely one that compares equal. A path can be
-    reconstructed, a dataclass can be copied, and either would mean Weaver
-    publishing a directory it never issued and never reset.
+    Folder loading accepts only this instance, preventing object code from
+    returning an unprepared directory.
     """
 
     path: Path
@@ -151,37 +105,20 @@ class StagingFolder:
 
 
 def folder_is_populated(destination: str | Path, patterns) -> bool:
-    """Whether the destination already holds a file this folder manages.
-
-    Scoped by the file key deliberately. A folder may sit beside files nobody
-    declared — an archive subdirectory the key does not claim — and those say
-    nothing about whether *this* folder has been materialised. A directory that
-    exists but holds nothing the key claims is not populated: existing is what a
-    build guarantees, and a static load's job is to put the first files in it.
-    """
+    """Whether the destination contains a file matching this folder's file key."""
 
     return bool(managed_relative_files(Path(destination), patterns))
 
 
 def new_staging_folder(destination: str | Path, staging: str | Path) -> StagingFolder:
-    """Reset and create the object-local staging directory, and issue it.
-
-    Reset rather than reused: a run must begin from nothing it did not itself
-    produce, or the previous run's files are published again and a replacement
-    concludes that nothing was retired.
-    """
+    """Reset and issue the object-local staging directory."""
 
     _destination_path, staging_path = _validate_paths(destination, staging)
     reset_staging(staging_path)
     return StagingFolder(path=staging_path)
 
 
-#: How many times a transient remote-filesystem failure is tolerated, and how
-#: long between tries. The mount fronts object storage rather than a local disk,
-#: so a delete that has been acknowledged may not yet be reflected in a listing —
-#: brief, but not instantaneous. Small numbers deliberately: this is defensive
-#: handling for a race, not a wait for something slow, and a reset that needs
-#: thirty seconds is a fault rather than a race.
+#: Retry a brief remote-filesystem propagation delay during staging cleanup.
 RESET_ATTEMPTS = 5
 RESET_PAUSE = 0.5
 
@@ -189,25 +126,8 @@ RESET_PAUSE = 0.5
 def reset_staging(path: Path) -> None:
     """Empty and recreate the fixed staging directory.
 
-    Zero-cache mounting is the real repair for a mount that disagrees with the
-    storage behind it (see :data:`weaver.lakehouse.MOUNT_OPTIONS`); this is the
-    defensive half, and measuring what Fabric actually does showed it is
-    required rather than merely prudent. Deleting a staging directory over DFS
-    and then looking at it through a zero-cache mount in the same session gives:
-
-    .. code-block:: text
-
-        exists()     still true — the directory outlives its storage
-        iterdir()    empty, but only once propagation settles; for a moment
-                     after the delete it still names the file that is gone
-
-    So the removal cannot be skipped on the strength of a listing, and it cannot
-    be trusted to succeed first time either. It is retried; the recreate that
-    follows is deliberately *not*, because it happens once removal is known to
-    have worked, and a directory that reappears after that is a fault rather
-    than something to paper over.
-
-    ``tests/fabric/test_onelake_mount_contract.py`` holds both observations.
+    OneLake mount state can lag DFS deletion, so removal is retried before the
+    path is reused.
     """
 
     _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)

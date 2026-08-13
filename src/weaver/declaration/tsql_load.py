@@ -42,8 +42,8 @@ the reference implementation, joined by ``_Delete`` when an incremental table's
 author names the keys to retire. Real tables are what make a failed load
 inspectable: when rows are rejected the evidence is still there afterwards,
 addressable by anyone with a query tool. They are dropped at the start of every
-run and again at the end, but only when the run was clean — the whole point of
-keeping a reject table is that a run which rejected rows leaves it behind.
+run and again at the end only when the run was clean. A run with rejected rows
+leaves the reject table available for inspection.
 
 **Absence retires a row; so, for an incremental table, does naming it.** A
 non-incremental source is the whole truth, so a row it stopped producing is

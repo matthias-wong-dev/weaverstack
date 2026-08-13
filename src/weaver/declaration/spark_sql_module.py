@@ -7,9 +7,8 @@ A Spark SQL table is *authored* as SQL and *installed* as Python::
 
 and the second is an ordinary Weaver primitive: importable, constructible,
 ``read()``-able and ``load()``-able, indistinguishable to orchestration from a
-module somebody wrote by hand. That is the whole point of compiling rather than
-interpreting. There is no installed ``.sql`` load program and nothing that runs
-one, so a SQL-authored table inherits the Delta load lifecycle — validation,
+module somebody wrote by hand. Compilation gives a SQL-authored table the same
+Delta load lifecycle — validation,
 rejection, fault tolerance, stability thresholds, static behaviour — instead of
 having a second implementation of it generated in SQL.
 

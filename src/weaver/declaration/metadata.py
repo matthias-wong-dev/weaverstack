@@ -1,43 +1,7 @@
-"""The Weaver document document contract.
+"""Parse and validate the YAML contract at the top of a Weaver source file.
 
-This is the basic unit of work in Weaver: a Folder, a Delta table, or a
-Warehouse table or view, declared as YAML at the top of its source file — a
-Python module docstring, or the opening ``/* … */`` of a SQL file.
-
-The contract is validated to exhaustion up front. Every key is known, every
-column reference is checked against the declared schema where one exists, and
-every contradiction is refused before anything physical happens. A mistyped
-``Primary Key`` must not parse as "no primary key" and silently become a full
-replacement at load time.
-
-Where validation cannot happen here it is recorded rather than skipped: a SQL
-object infers its shape from its query, so its column references are parsed but
-resolved at build. :attr:`SesDocument.defers_column_validation` says so.
-
-Nothing here imports the module it describes, reads a file, or resolves a
-reference to another object. Reference resolution needs sibling documents and
-belongs with the repository reader.
-
-**Layout convention.** Separate each subsection with a blank line. This is not
-enforced — YAML does not care — but the header is the contract a reader meets
-first, and a wall of keys is a worse contract than a legible one::
-
-    Table ID: Sales.Order
-
-    Description: One row per confirmed customer order.
-
-    Lineage: $Sales.OrderExport
-
-    Primary key: Order id
-
-    Schema:
-      Order id: string
-      Order date: date
-
-    Revision notes:
-      - 2026-07-23 Added the amount column.
-
-Fixtures and examples follow it so the convention is learned by reading.
+Known keys, declared columns, and incompatible settings are validated before
+build. Query-derived SQL shapes defer column validation until build.
 """
 
 from __future__ import annotations
