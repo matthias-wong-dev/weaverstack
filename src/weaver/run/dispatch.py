@@ -67,52 +67,26 @@ def _validation(node, session, workspace, open_runtime, collect: bool):
 
     installed = node.installed
     # Only a Lakehouse validation is a deployed module, so only it needs the
-    # run's scope — and a Warehouse one must not cause it to be opened.
-    needs_import = primitive_kind(installed) == PYTHON_VALIDATION
-    runtime_scope = _opened(open_runtime) if needs_import else None
-    if needs_import and hasattr(runtime_scope, "dispatch_validation"):
-        # A Lakehouse validation *is* a deployed module, so it belongs where the
-        # imports are, exactly as a load primitive does. A Warehouse one is a
-        # procedure, and TDS reaches it from here.
-        return _carried(
-            runtime_scope.dispatch_validation(
-                installed=installed.to_mapping(), collect=collect
-            ),
+    # run's scope, and a Warehouse one must not cause it to be opened. A
+    # Warehouse validation is a procedure, and TDS reaches it from here.
+    if primitive_kind(installed) != PYTHON_VALIDATION:
+        return run_installed_validation(
             installed,
+            session=session,
+            workspace=workspace,
+            runtime_scope=None,
+            collect_diagnostics=collect,
         )
 
-    return run_installed_validation(
-        installed,
-        session=session,
-        workspace=workspace,
-        runtime_scope=runtime_scope,
-        collect_diagnostics=collect,
-    )
+    return _scope(open_runtime, node).dispatch_validation(installed, collect=collect)
 
 
-def _opened(open_runtime):
-    """This run's scope, opened now because something is about to import.
+def _scope(open_runtime, node):
+    """This run's scope, opened now because something is about to import."""
 
-    Accepts a scope directly as well as a callable, so a test that holds one can
-    hand it over without wrapping — the laziness is what matters, not the shape.
-    """
-
-    if open_runtime is None or not callable(open_runtime):
-        return open_runtime
-    return open_runtime()
-
-
-def _carried(payload, installed):
-    """A remote validation's judgement, rebuilt as the value a run settles on."""
-
-    from ..declaration.metadata import ASSUMPTION
-    from ..runtime.validation_result import AssumptionResult, TestResult
-    from ..test_execution import _WithDiagnostics
-
-    shape = AssumptionResult if installed.kind == ASSUMPTION else TestResult
-    return _WithDiagnostics(
-        shape.from_mapping(payload["result"]), tuple(payload.get("diagnostics") or ())
-    )
+    if open_runtime is None:
+        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
+    return open_runtime.get()
 
 
 def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
@@ -158,36 +132,15 @@ def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runti
             f"{node.node_id} names a deployed module whose expected class is unknown"
         )
 
-    runtime_scope = _opened(open_runtime)
-    if runtime_scope is None:
-        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
+    from ..runtime.load_result import LoadResult
 
-    if hasattr(runtime_scope, "dispatch_python"):
-        from ..runtime.load_result import LoadResult
-
-        return LoadResult.from_row(
-            runtime_scope.dispatch_python(
-                node_id=node.node_id,
-                item=str(node.logical_id.item),
-                target=node.physical_target.name,
-                schema=node.primitive_object.schema,
-                object=node.primitive_object.object,
-                expected_class=expected,
-                fault_tolerant=fault_tolerant,
-            )
+    # The scope answers with the row the primitive reported, in either position.
+    # What that row means is settled here, which is the one module a load's
+    # vocabulary belongs in.
+    return LoadResult.from_row(
+        _scope(open_runtime, node).dispatch_python(
+            node, expected_class=expected, fault_tolerant=fault_tolerant
         )
-
-    return python_primitive(
-        node_id=node.node_id,
-        logical_item=node.logical_id.item,
-        physical_target=node.physical_target,
-        schema=node.primitive_object.schema,
-        object=node.primitive_object.object,
-        expected_class=expected,
-        fault_tolerant=fault_tolerant,
-        runtime_scope=runtime_scope,
-        session=session,
-        workspace=workspace,
     )
 
 

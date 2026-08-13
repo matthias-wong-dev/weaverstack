@@ -1,8 +1,8 @@
-"""One RuntimeScope per run, living where the imports have to happen.
+"""One run scope per run, living where the imports have to happen.
 
 A Python primitive is a deployed module, imported inside the Fabric session
 against that session's Spark. So when the Runner moves to the desktop, the scope
-that owns those imports cannot move with it — it stays remote, and only its name
+that owns those imports cannot move with it: it stays remote, and only its name
 crosses:
 
 .. code-block:: text
@@ -17,6 +17,10 @@ Fabric interpreter does with a name; the **handle** is what the desktop submits.
 Neither needs Fabric: the registry is ordinary Python, and the handle is asserted
 against the programs it would send.
 
+Both handles answer the same :class:`~weaver.run.runtime_boundary.RunScope`, so
+the tests below assert what dispatch does with either rather than which one it
+was given.
+
 What only Fabric can prove — that two Python nodes really share imports, that a
 rebuild is really picked up by the next run — belongs in `tests/fabric`.
 """
@@ -28,7 +32,12 @@ import ast
 import pytest
 
 from weaver.run import remote
-from weaver.run.runtime_boundary import RemoteScope, open_runtime_scope
+from weaver.run.runtime_boundary import (
+    DirectRunScope,
+    FabricRunScope,
+    LazyRunScope,
+    open_runtime_scope,
+)
 from weaver.workspaces import FabricWorkspace, LocalWorkspace
 
 
@@ -100,7 +109,12 @@ def test_dispatching_into_a_run_with_no_scope_is_diagnosed():
 
 
 class _Recording:
-    """A Session that records the programs it is asked to run."""
+    """A Session that records the programs it is asked to run.
+
+    Answers by program name unless a test supplies one, because the two
+    dispatchers convert what comes back into different values: a load row for
+    one, a validation judgement for the other.
+    """
 
     def __init__(self, answer=None):
         self.submitted = []
@@ -111,7 +125,22 @@ class _Recording:
 
     def execute_python(self, program, *, workspace=None, timeout=None):
         self.submitted.append(program)
-        return self.answer
+        if self.answer is not None:
+            return self.answer
+        return _answer_for(program.name)
+
+
+def _answer_for(name: str):
+    """What the far side would have returned for one entry point."""
+
+    from weaver.runtime.load_result import LoadResult
+    from weaver.runtime.validation_result import TestResult
+
+    if name == "dispatch_python":
+        return LoadResult(succeeded=True).as_row()
+    if name == "dispatch_validation":
+        return {"result": TestResult().to_mapping(), "diagnostics": []}
+    return True
 
 
 def _fabric():
@@ -124,15 +153,69 @@ def _sources(session):
     return {program.name: program.source for program in session.submitted}
 
 
+def _row():
+    """A full load row, which is what a dispatch answers with.
+
+    ``from_row`` is the inverse of ``as_row`` and takes every column, so a
+    partial mapping here would fail in the scope rather than in the test.
+    """
+
+    from weaver.runtime.load_result import LoadResult
+
+    return LoadResult(succeeded=True).as_row()
+
+
+def _node():
+    """One deployed-module node, as the Runner hands it to a scope."""
+
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+    from weaver.load_plan import LAKEHOUSE_TARGET, PhysicalObjectRef, PhysicalTargetRef
+    from weaver.run.graph import RunNode
+
+    return RunNode(
+        node_id="load:Lakehouse/Sales/Sales.Customer",
+        physical_target=PhysicalTargetRef(kind=LAKEHOUSE_TARGET, name="Sales"),
+        primitive_kind="python_table",
+        logical_id=WeaverDocumentId(
+            WeaverItemId("Lakehouse", "Sales"),
+            ObjectId(schema="Sales", object="Customer"),
+        ),
+        primitive_object=PhysicalObjectRef(
+            target_id="Lakehouse/Sales",
+            target_kind="lakehouse",
+            schema="_/Load",
+            object="Sales__Customer.py",
+            object_type="file",
+        ),
+    )
+
+
+def _validation():
+    """One Lakehouse validation, as the Runner hands it to a scope."""
+
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import WeaverItemId, WeaverDocumentId
+    from weaver.etl import validation_artefact_id
+    from weaver.load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
+    from weaver.test_plan import InstalledValidation
+
+    item = WeaverItemId("Lakehouse", "Sales")
+    source = ObjectId(schema="Sales", object="Customer")
+    return InstalledValidation(
+        logical=WeaverDocumentId(item, source),
+        kind="Test",
+        target=PhysicalTargetRef(kind=LAKEHOUSE_TARGET, name="Sales"),
+        # Through the one function that computes it, so this fixture cannot
+        # describe an artefact a build would never claim.
+        artefact=validation_artefact_id(item, "Test", source),
+        object_type="file",
+    )
+
+
 def _dispatch(scope):
     scope.dispatch_python(
-        node_id="load:Lakehouse/Sales/Sales.Customer",
-        item="Lakehouse/Sales",
-        target="Sales",
-        schema="_/Load",
-        object="Sales__Customer.py",
-        expected_class="Sales__Customer",
-        fault_tolerant=False,
+        _node(), expected_class="Sales__Customer", fault_tolerant=False
     )
 
 
@@ -144,7 +227,8 @@ def test_opening_a_scope_where_execution_is_local_needs_no_crossing():
 
     scope = open_runtime_scope(session, workspace=LocalWorkspace(workspace="/tmp/x"))
 
-    assert isinstance(scope, RuntimeScope)
+    assert isinstance(scope, DirectRunScope)
+    assert isinstance(scope.runtime_scope, RuntimeScope)
     assert session.submitted == []
     scope.close()
 
@@ -154,7 +238,7 @@ def test_opening_a_scope_where_execution_is_remote_begins_one_over_there():
 
     scope = open_runtime_scope(session, workspace=_fabric())
 
-    assert isinstance(scope, RemoteScope)
+    assert isinstance(scope, FabricRunScope)
     assert scope.run_id in _sources(session)["begin_run"]
 
 
@@ -172,7 +256,8 @@ def test_a_session_with_no_workspace_at_all_keeps_the_imports_here():
     session = Unplaceable()
     scope = open_runtime_scope(session, workspace=None)
 
-    assert isinstance(scope, RuntimeScope)
+    assert isinstance(scope, DirectRunScope)
+    assert isinstance(scope.runtime_scope, RuntimeScope)
     assert session.submitted == []
     scope.close()
 
@@ -200,7 +285,7 @@ def test_a_configuration_failure_is_not_mistaken_for_running_locally():
 
 
 def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
-    session = _Recording(answer={"succeeded": True})
+    session = _Recording(answer=_row())
     scope = open_runtime_scope(session, workspace=_fabric())
 
     _dispatch(scope)
@@ -215,7 +300,7 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
     the call would have to go looking for an active Spark session rather than
     being handed the one the statement is running in."""
 
-    session = _Recording(answer={})
+    session = _Recording(answer=_row())
     scope = open_runtime_scope(session, workspace=_fabric())
     _dispatch(scope)
 
@@ -233,10 +318,10 @@ def test_every_submitted_program_is_valid_python(name):
     """A typo here is invisible to every local test and would ship a run that
     cannot reach Fabric at all."""
 
-    session = _Recording(answer={})
+    session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
     _dispatch(scope)
-    scope.dispatch_validation(installed={"logical": "Lakehouse/Sales/S.C"}, collect=True)
+    scope.dispatch_validation(_validation(), collect=True)
     scope.close()
 
     ast.parse(_sources(session)[name])
@@ -279,55 +364,34 @@ def test_a_cleanup_that_cannot_reach_the_session_does_not_fail_the_run():
 # --- what dispatch does with each kind of scope -------------------------------
 
 
-def test_a_remote_scope_is_what_sends_a_python_node_across():
-    """Which of the two happens is the scope's to answer, not dispatch's."""
+def test_the_scope_is_what_runs_a_python_node():
+    """Dispatch hands the node to the scope and does not decide where it runs.
 
-    from weaver.declaration.metadata import ObjectId
-    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-    from weaver.load_plan import LAKEHOUSE_TARGET, PhysicalObjectRef, PhysicalTargetRef
+    It used to look for a ``dispatch_python`` attribute and fall through to
+    importing here when it was absent, so a scope that did not quite conform
+    silently imported a deployed module into the console.
+    """
+
     from weaver.run.dispatch import dispatch_primitive
-    from weaver.run.graph import RunNode
     from weaver.runtime.load_result import LoadResult
 
     sent = []
 
     class Scope:
-        def dispatch_python(self, **arguments):
-            sent.append(arguments)
-            # The row a LoadResult crosses as, in full: `from_row` is the
-            # inverse of `as_row` and takes every column, not a subset.
+        def dispatch_python(self, node, *, expected_class, fault_tolerant):
+            sent.append((node, expected_class, fault_tolerant))
+            # A row, which is what a scope answers with in either position.
             return LoadResult(succeeded=True, rows_read=3).as_row()
 
-    target = PhysicalTargetRef(kind=LAKEHOUSE_TARGET, name="Sales")
-    node = RunNode(
-        node_id="load:Lakehouse/Sales/Sales.Customer",
-        physical_target=target,
-        primitive_kind="python_table",
-        logical_id=WeaverDocumentId(
-            WeaverItemId("Lakehouse", "Sales"),
-            ObjectId(schema="Sales", object="Customer"),
-        ),
-        primitive_object=PhysicalObjectRef(
-            target_id="Lakehouse/Sales",
-            target_kind="lakehouse",
-            schema="_/Load",
-            object="Sales__Customer.py",
-            object_type="file",
-        ),
-    )
-
+    node = _node()
     result = dispatch_primitive(
         node,
         session=_Recording(),
         resolved=type("R", (), {"expected_class": "Sales__Customer"})(),
-        open_runtime=Scope,
+        open_runtime=LazyRunScope(Scope),
     )
 
-    (arguments,) = sent
-    assert arguments["item"] == "Lakehouse/Sales"
-    assert arguments["target"] == "Sales"
-    assert arguments["object"] == "Sales__Customer.py"
-    assert arguments["expected_class"] == "Sales__Customer"
+    assert sent == [(node, "Sales__Customer", False)]
     assert result.rows_read == 3
 
 
@@ -372,7 +436,7 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
         node,
         session=Session(),
         resolved=type("R", (), {"expected_class": None})(),
-        open_runtime=lambda: opened.append(True),
+        open_runtime=LazyRunScope(lambda: opened.append(True) or object()),
     )
 
     assert opened == [], "a Warehouse-only run opened a runtime scope"
@@ -426,7 +490,9 @@ def test_a_warehouse_validation_opens_no_scope_either():
     )
 
     dispatch_primitive(
-        node, session=Session(), open_runtime=lambda: opened.append(True)
+        node,
+        session=Session(),
+        open_runtime=LazyRunScope(lambda: opened.append(True) or object()),
     )
 
     assert opened == []
@@ -436,7 +502,7 @@ def test_a_warehouse_validation_opens_no_scope_either():
 
 
 def _remote_scope(session):
-    """One RemoteScope over a recording Session, already begun."""
+    """One FabricRunScope over a recording Session, already begun."""
 
     return open_runtime_scope(session, workspace=_fabric())
 

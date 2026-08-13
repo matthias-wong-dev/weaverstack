@@ -1,19 +1,24 @@
 """A run's runtime scope, wherever the imports for it have to happen.
 
-One concept, two implementations, and the Runner is told neither:
+One declared interface, two implementations, and the Runner is told neither:
 
 .. code-block:: text
 
-    this process is where the data is    → RuntimeScope, in memory
-    a desktop reaching into Fabric       → RemoteScope, naming one over there
+    this process is where the data is    → DirectRunScope, importing here
+    a desktop reaching into Fabric       → FabricRunScope, naming one over there
 
-Both answer ``close()``, and both are what ``dispatch`` asks to run a Python
-primitive. That is what keeps "one scope per logical run, closed at the end of
-it" a single rule rather than a rule and an exception — the guarantee the
-decomposition most had to preserve, because a scope outliving its run would let
-a rebuilt module go unnoticed until the Spark session was replaced.
+Both answer the whole of :class:`RunScope`, so a caller dispatches without
+asking which it holds. That is what keeps "one scope per logical run, closed at
+the end of it" a single rule rather than a rule and an exception: a scope
+outliving its run would let a rebuilt module go unnoticed until the Spark
+session was replaced.
 
-The remote one holds nothing but a name. Everything it does is a statement
+:class:`DirectRunScope` wraps a :class:`~weaver.runtime.python_context.RuntimeScope`
+rather than extending it. A `RuntimeScope` owns imported-module state; dispatching
+a primitive is a different job, and giving it one would point `weaver.runtime` at
+`weaver.run`, which imports it.
+
+The Fabric one holds nothing but a name. Everything it does is a statement
 submitted through the Session, and its ``close()`` is the ``end_run`` that
 releases the far side's imports.
 """
@@ -21,6 +26,7 @@ releases the far side's imports.
 from __future__ import annotations
 
 import uuid
+from typing import Any, Protocol
 
 from ..session.program import RemoteProgram
 
@@ -51,10 +57,77 @@ def _interpreter_is_gone(exc: BaseException) -> bool:
     return False
 
 
-def open_runtime_scope(session, *, workspace=None):
+class RunScope(Protocol):
+    """What a run asks of the place its deployed modules are imported.
+
+    Three methods, because three is what a run needs: dispatch a load primitive,
+    dispatch a validation, and release the imports at the end.
+    """
+
+    def dispatch_python(
+        self, node, *, expected_class: str, fault_tolerant: bool
+    ) -> dict:
+        """Run one deployed module and answer with the row it reported.
+
+        A row rather than a load result, because that is the representation both
+        positions produce without either of them depending on a load's
+        vocabulary. What the row *means* is settled in
+        :mod:`weaver.run.dispatch`, which is where a load primitive is reached.
+        """
+
+    def dispatch_validation(self, installed, *, collect: bool) -> Any: ...
+
+    def close(self) -> None: ...
+
+
+class DirectRunScope:
+    """Imports that happen in this process, against the Spark it is running in.
+
+    Holds the `RuntimeScope` the modules land in, and the Session and workspace
+    a primitive is constructed against, so that dispatching takes the same
+    arguments here as it does across a boundary.
+    """
+
+    def __init__(self, runtime_scope, session=None, workspace=None) -> None:
+        self.runtime_scope = runtime_scope
+        self._session = session
+        self._workspace = workspace
+
+    def dispatch_python(self, node, *, expected_class: str, fault_tolerant: bool):
+        from .dispatch import python_primitive
+
+        return python_primitive(
+            node_id=node.node_id,
+            logical_item=node.logical_id.item,
+            physical_target=node.physical_target,
+            schema=node.primitive_object.schema,
+            object=node.primitive_object.object,
+            expected_class=expected_class,
+            fault_tolerant=fault_tolerant,
+            runtime_scope=self.runtime_scope,
+            session=self._session,
+            workspace=self._workspace,
+        ).as_row()
+
+    def dispatch_validation(self, installed, *, collect: bool):
+        from ..test_execution import run_installed_validation
+
+        return run_installed_validation(
+            installed,
+            session=self._session,
+            workspace=self._workspace,
+            runtime_scope=self.runtime_scope,
+            collect_diagnostics=collect,
+        )
+
+    def close(self) -> None:
+        self.runtime_scope.close()
+
+
+def open_runtime_scope(session, *, workspace=None) -> RunScope:
     """The scope this run's Python primitives will be imported into.
 
-    Created lazily by the Runner, once, and closed when the run finishes —
+    Created lazily by the Runner, once, and closed when the run finishes,
     including when it fails, because a scope left open is a scope the next run
     would inherit.
     """
@@ -63,7 +136,7 @@ def open_runtime_scope(session, *, workspace=None):
     from ..runtime.python_context import RuntimeScope
 
     if session is None:
-        return RuntimeScope.new()
+        return DirectRunScope(RuntimeScope.new())
 
     # A Session with no workspace to place itself against has no remote to reach
     # into either, so the imports happen here. That is the *only* answer worth
@@ -77,21 +150,19 @@ def open_runtime_scope(session, *, workspace=None):
         try:
             placed(workspace)
         except CommandError:
-            return RuntimeScope.new()
+            return DirectRunScope(RuntimeScope.new(), session, workspace)
 
     if session.executes_here(workspace):
-        return RuntimeScope.new()
-    return RemoteScope.begin(session, workspace=workspace)
+        return DirectRunScope(RuntimeScope.new(), session, workspace)
+    return FabricRunScope.begin(session, workspace=workspace)
 
 
-class RemoteScope:
+class FabricRunScope:
     """One run's imports, living in the Fabric session that can perform them.
 
-    Not a :class:`~weaver.runtime.python_context.RuntimeScope` and deliberately
-    not pretending to be one: it has no ``context_for``, because a context is a
-    set of loaded modules and those cannot cross a process boundary. What it has
-    is the two things a caller on this side can actually use — dispatch, and
-    close.
+    It holds a name and no modules: a context is a set of loaded module objects
+    and those cannot cross a process boundary. Everything it does is a statement
+    submitted through the Session.
     """
 
     def __init__(self, session, workspace, run_id: str) -> None:
@@ -101,7 +172,7 @@ class RemoteScope:
         self._closed = False
 
     @classmethod
-    def begin(cls, session, *, workspace=None) -> "RemoteScope":
+    def begin(cls, session, *, workspace=None) -> "FabricRunScope":
         run_id = uuid.uuid4().hex
         scope = cls(session, workspace, run_id)
         scope._submit("begin_run", {"run_id": run_id}, addressed=False)
@@ -109,23 +180,42 @@ class RemoteScope:
 
     # --- what dispatch asks of it -------------------------------------------
 
-    def dispatch_python(self, **arguments) -> dict:
-        """One deployed Python primitive, run in this scope."""
+    def dispatch_python(self, node, *, expected_class: str, fault_tolerant: bool):
+        """One deployed Python primitive, run in this scope.
+
+        The node is flattened here rather than serialised. What crosses is the
+        handful of strings the import and the construction use, so the far side
+        never has to be kept in step with the Runner's own model.
+        """
 
         return self._submit(
             "dispatch_python",
-            {"run_id": self.run_id, **arguments},
-            detail=arguments.get("node_id"),
+            {
+                "run_id": self.run_id,
+                "node_id": node.node_id,
+                "item": str(node.logical_id.item),
+                "target": node.physical_target.name,
+                "schema": node.primitive_object.schema,
+                "object": node.primitive_object.object,
+                "expected_class": expected_class,
+                "fault_tolerant": fault_tolerant,
+            },
+            detail=node.node_id,
         )
 
-    def dispatch_validation(self, *, installed: dict, collect: bool) -> dict:
+    def dispatch_validation(self, installed, *, collect: bool):
         """One installed Lakehouse validation, run in this scope."""
 
-        return self._submit(
+        carried = self._submit(
             "dispatch_validation",
-            {"run_id": self.run_id, "installed": installed, "collect": collect},
-            detail=installed.get("logical"),
+            {
+                "run_id": self.run_id,
+                "installed": installed.to_mapping(),
+                "collect": collect,
+            },
+            detail=str(getattr(installed, "logical", "")) or None,
         )
+        return _carried(carried, installed)
 
     def close(self) -> None:
         """Release the far side's imports. Never fails a run that has finished.
@@ -223,6 +313,19 @@ class RemoteScope:
         )
 
 
+def _carried(payload, installed):
+    """A remote validation's judgement, rebuilt as the value a run settles on."""
+
+    from ..declaration.metadata import ASSUMPTION
+    from ..runtime.validation_result import AssumptionResult, TestResult
+    from ..test_execution import _WithDiagnostics
+
+    shape = AssumptionResult if installed.kind == ASSUMPTION else TestResult
+    return _WithDiagnostics(
+        shape.from_mapping(payload["result"]), tuple(payload.get("diagnostics") or ())
+    )
+
+
 def _workspace_literal(workspace) -> str:
     if workspace is None:
         return "None"
@@ -233,4 +336,38 @@ def _workspace_literal(workspace) -> str:
     )
 
 
-__all__ = ["RemoteScope", "open_runtime_scope"]
+class LazyRunScope:
+    """A run's scope, opened only if something actually imports.
+
+    One object with an explicit lifecycle, so a Warehouse-only run opening no
+    scope is a property of this class rather than an invariant maintained
+    across two methods on the Runner. ``close()`` never opens, and is safe to
+    call whether or not ``get()` ever was.
+    """
+
+    def __init__(self, open_scope) -> None:
+        self._open = open_scope
+        self._scope: RunScope | None = None
+
+    def get(self) -> RunScope:
+        if self._scope is None:
+            self._scope = self._open()
+        return self._scope
+
+    @property
+    def opened(self) -> bool:
+        return self._scope is not None
+
+    def close(self) -> None:
+        scope, self._scope = self._scope, None
+        if scope is not None:
+            scope.close()
+
+
+__all__ = [
+    "DirectRunScope",
+    "FabricRunScope",
+    "LazyRunScope",
+    "RunScope",
+    "open_runtime_scope",
+]
