@@ -17,13 +17,13 @@ layers and plans each item as one coherent group of stages:
     final batched catalogue publication
     Weaver Lakehouse SQL endpoint refresh
 
-Items in the same layer share their barriers — one batch each — because nothing
-orders them against each other. Items in different layers never do, which is the
-one invariant multi-item build rests on: a consumer's aliases and documents
-cannot begin until every item it reaches into has finished, endpoint included.
+Items in the same layer share their barriers, one batch each, because nothing
+orders them against each other. Items in different layers never do: a consumer's
+aliases and documents cannot begin until every item it reaches into has
+finished, endpoint included.
 
-Inside an item the document dependency graph still decides everything. The item
-graph is the outer boundary, not a replacement for it.
+Inside an item the document dependency graph decides everything; the item graph
+is the outer boundary rather than a replacement.
 """
 
 from __future__ import annotations
@@ -87,20 +87,17 @@ def generate_item_build_bundle(
             + ", ".join(sorted(map(str, unknown)))
         )
 
-    # Four kinds of node are selectable, and most of what follows needs exactly
-    # one of them. Documents are what prune, schemas and the physical build
-    # pipelines are about; alias destinations are registered objects too — so
-    # they take part in selection and certification — but they are materialised
-    # by the alias executor rather than by any document stage. Load artefacts are
-    # the third, and are kept out of everything that assumes a selected identity
-    # maps to a parsed declaration: they are signed from their own content and
-    # installed by the item's final layer.
+    # Four kinds of node are selectable, and most of what follows needs one of
+    # them. Documents drive prune, schemas and the physical build pipelines.
+    # Alias destinations are registered objects, so they take part in selection
+    # and certification, but the alias executor materialises them. Load
+    # artefacts are signed from their own content and installed by the item's
+    # final layer, so they stay out of anything assuming a parsed declaration.
     #
-    # Validations are the fourth, and are the only kind that is *entirely*
-    # logical. They are selected so their catalogue rows publish, and they never
-    # reach a physical stage: nothing is materialised under a Test ID, so there
-    # is no DDL to generate and nothing to prune. What a validation compiles to
-    # is a runtime artefact with an identity of its own.
+    # Validations are entirely logical: selected so their catalogue rows
+    # publish, and never reaching a physical stage, because nothing is
+    # materialised under a Test ID. What one compiles to is a runtime artefact
+    # with an identity of its own.
     (
         selected_documents,
         selected_aliases,
@@ -151,11 +148,10 @@ def generate_item_build_bundle(
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
 
-    # Collected once and used twice, and the second use is the important one.
-    # These rows are deleted before any physical work; publication must
-    # therefore compare against the catalogue *without* them, or an object
-    # dropped and rebuilt whose projection did not change would compare equal,
-    # produce no merge, and stay deleted.
+    # Collected once and used twice. These rows are deleted before any physical
+    # work, so publication compares against the catalogue without them — an
+    # object dropped and rebuilt whose projection did not change would otherwise
+    # compare equal, produce no merge, and stay deleted.
     deleted_claims = collect_claims(
         catalogue, removed | selected_for_drop, stale_claims=stale_claims
     )
@@ -272,16 +268,12 @@ def _selectable(
 def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> set:
     """Every object a build of these items could certify.
 
-    Everything a bound item owns, whatever this particular build decides to do
-    about it — an object left alone because nothing changed is still certified,
-    and still belongs in the catalogue afterwards. What a build *did* is
-    narrowed later, by the planner's uncertified set.
+    Everything a bound item owns, whatever this build decides to do about it:
+    an object left alone because nothing changed is still certified. What a
+    build did is narrowed later, by the planner's uncertified set.
 
-    Named because the fixed point needs it: what the catalogue should already
-    hold when nothing has changed is derived from this, so a test that restated
-    the rule could agree with a broken planner. It shares ``_selectable`` with
-    the planner rather than re-deriving the same three sets, so the two cannot
-    drift into disagreeing about what a build certifies.
+    Shares ``_selectable`` with the planner rather than re-deriving the same
+    three sets, so the two cannot disagree about what a build certifies.
     """
 
     documents, aliases, loads, validations = _selectable(repository, by_item)
@@ -350,16 +342,13 @@ def plan_item_build(
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
-    The seam between deciding *what* to build and arranging a whole bundle. It
-    takes a selection that has already been made and an inventory that has
-    already been read, and answers only: for this one item against this one
-    target, which stages run and in what order.
+    The seam between deciding what to build and arranging a bundle: given a
+    selection already made and an inventory already read, which stages run for
+    this item against this target, and in what order.
 
-    Everything above it stays out — item layers, catalogue publication, the
-    control-plane target, bundle identity, writing. So a claim about one item's
-    prune-then-drop-then-schema-then-build ordering can be made without
-    generating a bundle to see it, which is what kept such claims in the
-    integration suite.
+    Item layers, catalogue publication, the control-plane target, bundle
+    identity and writing all stay above it, so an ordering claim can be made
+    without generating a bundle.
     """
 
     aliases = plan_item_aliases(

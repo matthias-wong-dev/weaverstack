@@ -96,9 +96,8 @@ def _as_instant(value) -> datetime | None:
     """One build epoch as something comparable, whatever the reader returned.
 
     Spark hands back a ``datetime``; a hand-built catalogue or a JSON round trip
-    may hand back the string that was written. Anything else is treated as no
-    epoch at all rather than guessed at — a wrong comparison here would rebuild
-    the estate or fail to.
+    hands back the string that was written. Anything else reads as no epoch
+    rather than being guessed at.
     """
 
     if isinstance(value, datetime):
@@ -160,14 +159,12 @@ def declared_signatures(
 ) -> dict[WeaverDocumentId, str]:
     """What each selected node's Registry signature should be, from the source.
 
-    Three kinds of node are selectable and they are signed differently. A
-    document is signed by its source file. An alias destination is signed by the
-    pair it declares — this destination, that source — because that is the whole
-    of what an alias *is* (see
+    Three kinds of node are selectable, signed differently. A document is signed
+    by its source file. An alias destination by the pair it declares — this
+    destination, that source (see
     :attr:`~weaver.declaration.model.RepositoryAlias.signature`). A load artefact
-    is signed by what it is rendered from: a deployed module by its own bytes, a
-    generated body by the document it renders plus the version of the generator
-    that rendered it (see :mod:`weaver.etl`).
+    by what it is rendered from: a deployed module by its own bytes, a generated
+    body by its document plus the generator's version (see :mod:`weaver.etl`).
     """
 
     from ..etl import artefacts_by_identity, runtime_artefacts
@@ -194,11 +191,10 @@ def runtime_artefact_identities(
 ) -> frozenset[WeaverDocumentId]:
     """Everything this repository installs to be *run* rather than to hold rows.
 
-    Derived from the repository, because during a build that is where the answer
-    is: the artefacts have been claimed from the declaration and nothing has been
-    installed yet. Reading installed state instead asks
-    :attr:`~weaver.catalogue.state.RegisteredDocument.object_role`, which is the
-    same question answered from the other side of the boundary.
+    Derived from the repository, because during a build the artefacts have been
+    claimed from the declaration and nothing is installed yet. The same question
+    from the other side is
+    :attr:`~weaver.catalogue.state.RegisteredDocument.object_role`.
     """
 
     from ..etl import runtime_artefacts
@@ -217,18 +213,15 @@ def determine_impact(
 ) -> Impact:
     """Classify bound nodes and expand changed roots across the whole graph.
 
-    Propagation is no longer confined to one item. The graph carries alias
-    destinations as nodes, so the path from a producer to another item's consumer
-    is an ordinary walk — ``source → alias destination → consumer`` — and a
-    coordinated bundle that binds both items propagates across it exactly as it
-    does within one. Items *not* in the build are still deferred, but by
-    construction rather than by rule: they are not in ``selected``, so nothing
-    reaches them.
+    Propagation is not confined to one item: the graph carries alias
+    destinations as nodes, so ``source → alias destination → consumer`` is an
+    ordinary walk. Items not in the build are deferred by construction — they
+    are not in ``selected``, so nothing reaches them.
 
-    ``stale_aliases`` are destinations the catalogue already proved out of date —
-    their source was rebuilt by some earlier build that did not include this item
-    (see :func:`weaver.build_bundle.workflow.stale_alias_destinations`). They join
-    the changed roots, so their consumers are picked up by the same walk.
+    ``stale_aliases`` are destinations the catalogue already proved out of date,
+    their source rebuilt by an earlier build (see
+    :func:`weaver.build_bundle.workflow.stale_alias_destinations`). They join the
+    changed roots and their consumers are picked up by the same walk.
     """
 
     selected_set = set(selected)
@@ -258,15 +251,14 @@ def determine_impact(
         by_text = {str(identity): identity for identity in selected_set}
         runtime = runtime_artefact_identities(repository)
         for root in changed:
-            # A runtime artefact is not a node in the authored graph, and that
-            # is the design rather than an omission: nothing depends on a
-            # deployed module, and it depends on nothing — its signature is its
-            # own content. So a changed one is the end of a walk, not the start.
+            # A runtime artefact is not a node in the authored graph: nothing
+            # depends on a deployed module and it depends on nothing, its
+            # signature being its own content, so a changed one ends a walk
+            # rather than starting one.
             #
-            # Membership is asked of the repository, not of the identity's
-            # shape. A file or a procedure used to be a load artefact by
-            # definition; it stopped being one when a Test compiled to a module
-            # and a procedure of its own.
+            # Membership is asked of the repository rather than read from the
+            # identity's shape, which stopped answering when a Test began
+            # compiling to a module and a procedure of its own.
             if root in runtime:
                 continue
             for node in graph.descendants(str(root)):
