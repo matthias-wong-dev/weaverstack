@@ -78,18 +78,17 @@ TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
 #: by ``fault_tolerant`` exactly as row rejection is: refused outright at 0, gone
 #: ahead with but still reported as a failure at 1.
 #: A breach never mutates. ``fault_tolerant`` decides only how the refusal is
-#: surfaced — raised, or returned as a failed result — because a change this
-#: large being *tolerated* is what ``ignore_stability_threshold`` is for.
+#: surfaced, raised or returned; tolerating a change this large is what
+#: ``ignore_stability_threshold`` is for.
 BREACH_MESSAGE = "{reason}; the target was not modified"
 
 
 def table_is_populated(spark, *, contract: LoadContract, lakehouse) -> bool:
     """Whether the target already holds a row.
 
-    One row is the whole question — a static object's load is *has this been
-    seeded* — so the query stops at one rather than counting. An empty table is
-    not populated: the table existing is what a build guarantees, and a static
-    load's job is to put the first rows in it.
+    A static object's load asks whether it has been seeded, so the query stops
+    at one row rather than counting. An empty table is not populated: a build
+    guarantees the table exists, and a static load puts the first rows in it.
     """
 
     target = lakehouse.qualify(contract.object_id.schema, contract.object_id.object)
@@ -202,9 +201,8 @@ def load_table(
 def _materialise_staging(spark, names, frame, contract: LoadContract, columns) -> None:
     """Put what ``read()`` produced into a real table, ranked for duplicates.
 
-    Materialised before anything else happens, and that ordering is the point:
-    the authored query runs exactly once, and a source that fails does so before
-    the target has been touched.
+    Materialised first, so the authored query runs exactly once and a source
+    that fails does so before the target is touched.
     """
 
     view = _register(spark, frame, names["target"], "staged")
@@ -226,9 +224,9 @@ def _materialise_staging(spark, names, frame, contract: LoadContract, columns) -
 def _reject_invalid_keys(spark, names, contract: LoadContract, columns) -> int:
     """Move rows Weaver will not load into the reject table, with the reason.
 
-    A count alone says something went wrong and nothing about what, so the rows
-    are kept. They are then removed from staging, which from here on is the
-    *valid* staging every later phase reads.
+    A count alone says nothing about what went wrong, so the rows are kept.
+    They are then removed from staging, which from here on is the valid staging
+    every later phase reads.
     """
 
     blank = blank_key_predicate(contract.primary_key, alias="s")
@@ -255,9 +253,8 @@ def _reject_invalid_keys(spark, names, contract: LoadContract, columns) -> int:
 def _derive_upserts(spark, names, contract: LoadContract, columns) -> None:
     """Record what this load has decided to change, before it changes anything.
 
-    A table rather than a subquery, so what Weaver decided is inspectable
-    afterwards — and so the stability check can read the size of the change
-    before a single row has moved.
+    A table rather than a subquery, so the decision is inspectable afterwards
+    and the stability check can read the size of the change before a row moves.
     """
 
     join = key_join("s", "t", contract.primary_key)
@@ -316,11 +313,10 @@ def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, 
 def _delete_driver(contract: LoadContract, deletes):
     """Which delete claim this object makes, refusing the one it may not.
 
-    ``Incremental`` decides, and it decides exclusively. A non-incremental table
-    that also returns explicit deletes is stating twice, in two ways, and the
-    second statement would be applied on top of a reconciliation that already
-    accounted for it — so it is refused rather than ignored, exactly as a
-    non-incremental folder's explicit deletes are.
+    ``Incremental`` decides exclusively. A non-incremental table returning
+    explicit deletes states the same thing twice, and the second would be
+    applied on top of a reconciliation that already accounted for it, so it is
+    refused rather than ignored.
     """
 
     if contract.incremental:
@@ -338,10 +334,9 @@ def _delete_driver(contract: LoadContract, deletes):
 def _derive_deletes(spark, names, contract: LoadContract, deletes) -> None:
     """Materialise the keys this load will remove, before it removes any.
 
-    One relation from one driver. A number obtained by deleting would be a
-    report rather than a check, and the guard's whole purpose is to decide *not*
-    to — so the keys are settled first and the same set is then both counted and
-    applied.
+    One relation from one driver, settled before anything is removed: a number
+    obtained by deleting would be a report rather than a check, and the guard
+    exists to decide not to delete.
     """
 
     keys = ", ".join(f"`{c}`" for c in contract.primary_key)
@@ -387,10 +382,9 @@ def _apply_deletes(spark, names, contract) -> None:
 def _full_replace(spark, names, columns, rows_read: int) -> LoadResult:
     """No key, so no row can be matched: the target's contents become these.
 
-    Staging is materialised first and the target emptied only afterwards, which
-    is the whole reason staging is a table. Clearing the target and *then*
-    evaluating the authored source would leave nothing behind if the source
-    failed.
+    Staging is materialised first and the target emptied afterwards, which is
+    why staging is a table: clearing the target and then evaluating the source
+    would leave nothing behind if it failed.
     """
 
     audit = delta_audit_names()
@@ -425,9 +419,9 @@ def _clear(spark, names) -> None:
 def _count(spark, relation: str, *, where: str | None = None) -> int:
     """How many rows. Unfiltered, Delta answers this from its transaction log.
 
-    Which is why the target's own count is affordable: it is the ``sys.partitions``
-    equivalent rather than a scan. A filtered count does read, so the filtered
-    ones here are over the upsert set, never over the target.
+    So the target's own count is affordable — the ``sys.partitions`` equivalent
+    rather than a scan. A filtered count does read, so the filtered ones here
+    are over the upsert set, never the target.
     """
 
     clause = f" WHERE {where}" if where else ""
@@ -439,10 +433,9 @@ def _count(spark, relation: str, *, where: str | None = None) -> int:
 def _business_columns(spark, target: str) -> tuple[str, ...]:
     """The target's own columns, less the audit ones the load supplies itself.
 
-    Read from the table rather than from the declaration, for the reason the
-    Warehouse installer reads sys.columns: the physical table is what is being
-    written to, and a declaration that had drifted from it would produce a
-    statement naming a column that is not there.
+    Read from the table rather than the declaration, as the Warehouse installer
+    reads ``sys.columns``: a declaration that had drifted would name a column
+    that is not there.
     """
 
     audit = set(delta_audit_names())
@@ -456,9 +449,9 @@ def _business_columns(spark, target: str) -> tuple[str, ...]:
 def _require_columns(frame, contract: LoadContract, columns) -> None:
     """Every column the target needs must be present, by exact name.
 
-    Checked before anything is written, and by name rather than by position: a
-    frame whose columns happen to line up today would silently load the wrong
-    values the day an author reorders a select.
+    Checked before anything is written, and by name rather than position: a
+    frame whose columns line up today would load the wrong values the day an
+    author reorders a select.
     """
 
     produced = set(frame.columns)
@@ -481,9 +474,9 @@ def _require_columns(frame, contract: LoadContract, columns) -> None:
 def _register(spark, frame, target: str, role: str) -> str:
     """A temporary view over one frame, so SQL can name it.
 
-    The one legitimate use of a temp view here: it names an in-flight
-    ``DataFrame`` for a single statement. It is never where a phase's result
-    lives — those are tables, because they have to outlive the session.
+    A temp view names an in-flight ``DataFrame`` for a single statement. No
+    phase's result lives in one; those are tables, because they outlive the
+    session.
     """
 
     name = "weaver_" + role + "_" + _clean(target)
