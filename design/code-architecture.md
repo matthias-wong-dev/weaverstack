@@ -196,38 +196,48 @@ running:
 | | notebook / emulator | desktop → Fabric |
 |---|---|---|
 | `execute_python` | call it | submit over Livy |
-| `execute_spark_sql` | `spark.sql(...)` | submit over Livy |
+| `execute_spark_sql`, `execute_spark_sql_batch` | `spark.sql(...)` | submit over Livy |
 | `execute_tsql` | TDS | TDS |
 | `store` | filesystem / `notebookutils` | OneLake over HTTPS |
 | `resolver` | local | Fabric REST |
 
-So an install routes each action to the cheapest thing that can do it:
+Every install action runs in the `Installer`, in whichever position that is. An
+executor reaches for the capability its work needs and the Session decides what
+performing it means:
 
 ```text
 write_file            → OneLake        (the deployed Python tree; the bulk)
 build_procedure       → TDS
 refresh_sql_endpoint  → REST
-build_table, alias    → Livy           (genuine Spark, or a Spark read probe)
+create_schema, build_table, build_view, alias
+                      → Session Spark SQL
 ```
 
-Only actions that need Spark use the Spark crossing. When several actions in one
-batch need Spark, one submission carries them while each action retains its own
-status, duration, and failure result.
+So an action is not classified by where it has to run, and nothing on the far
+side of an install imports Weaver. Statements belonging to *one* action travel
+together — a `spark_sql_batch` payload, or the setup a `DESCRIBE QUERY` needs —
+because they are one piece of work rather than because a submission is expensive.
 
-### Remote runtime scope
+### Runtime scopes held by name
 
 A deployed Python primitive is a *module imported inside the Fabric session*, and
 the object owning those imports — `RuntimeScope` — has to live where the imports
-do. So it stays remote and only its name crosses:
+do. So it stays there and only its name crosses:
 
 ```text
 desktop                        Fabric session
 
-begin_run(run_id)      ──►     RuntimeScope.new(), stored under run_id
+open_scope(run_id)     ──►     RuntimeScope.new(), stored under run_id
 dispatch(run_id, A)    ──►     same scope → existing import path
 dispatch(run_id, B)    ──►     same scope
-end_run(run_id)        ──►     scope.close(), forgotten
+close_scope(run_id)    ──►     scope.close(), forgotten
 ```
+
+The registry is `weaver.runtime.session_scopes`, beside `RuntimeScope`, because a
+scope's lifetime is the interpreter's. The two entry points a submitted statement
+calls — `run_python_primitive` and `run_validation_primitive` — are named
+functions in `weaver.run.entry`, so the wheel and the desktop name one thing and
+a rename is an ordinary rename.
 
 Each run has one scope, closed when the run ends or fails. Retaining a scope after
 its run could let a later run import modules that a rebuild replaced.
@@ -255,22 +265,23 @@ from a desktop    Weaver runs on your machine. Fabric is reached only through
 
 Both positions use the same code and support complete workflows.
 
-Executor parity remains incomplete. An executor is complete when it works in both
-positions. `alias` is the current exception: shortcut creation uses REST from
-either position, but its readability wait still runs across the boundary.
+Every build executor works in both positions. What crosses is a statement, so an
+install imports nothing on the far side.
 
-Remote entry points import the published wheel — `weaver.run.remote` for a Python
-primitive and `weaver.build_bundle.remote` for a Spark install action. A desktop
-build or load therefore requires `weaver install` to have published the current
-wheel; the version check reports when it has not:
+Two things still cross as programs, and both import the published wheel:
+`weaver.run.entry` for a Python primitive, and the catalogue and inventory reads
+a build performs before it plans. A desktop build or load therefore requires
+`weaver install` to have published the current wheel; the version check reports
+when it has not:
 
 ```text
 the Weaver published in <workspace> is older than this console ...
 Publish the current wheel with `weaver install ...`
 ```
 
-Remote entry points remain few and stable: one entry point runs the executor
-named by the bundle instead of exposing an API shaped like the executor registry.
+The entry points are few and stable, and each is a named function rather than
+text inside a submitted body: a name is versioned, testable and greppable, and
+widening this surface is the coupling that has caused Fabric failures.
 
 ### Testing lands where the logic is
 

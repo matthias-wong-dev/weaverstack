@@ -187,11 +187,15 @@ desktop**, with Fabric reached only through Livy, TDS, OneLake and REST, each
 crossing carrying a small clear script rather than an operation. Not two products
 — one, in two positions, because the doers do not know which one they are in.
 
-We are close and not there. Executor parity is the measure: an action whose
-executor works in both positions is done, one that still has to cross whole is
-not. `alias` is the current example, and its executor says so in a comment. The
-honest statement of the gap is that the desktop position needs `weaver install`
-to have been run, because the far side of a crossing imports the published wheel.
+Installing is there. Every build action runs in the `Installer` wherever that is,
+reaching for the capability its work needs — storage, REST, TDS, or the Session's
+Spark SQL — so no action is classified by where it has to run and nothing on the
+far side of an install imports Weaver.
+
+What still crosses as a program is the state a build reads before it plans (the
+catalogue and the target inventories) and a run's Python primitives, which are
+deployed modules imported where Spark is. So `weaver load` requires the published
+wheel, and so does a Fabric `weaver build` — for the reading, not the installing.
 
 **A Fabric test that runs Weaver on the laptop tests the desktop position, not
 the in-Fabric one** — that is what the `remote` and `hosted` markers are for, and

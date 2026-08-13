@@ -41,6 +41,20 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
+#: Where a Session's data engineering happens, relative to this process.
+#:
+#: One consumer: choosing which run scope to open. A run's deployed modules are
+#: imported where Spark is, so this is the one decision that genuinely turns on
+#: position — everything else asks a Session for a capability and lets it decide
+#: what performing it means.
+
+#: Weaver is running where the data is: a notebook, or the local emulator.
+IN_SESSION = "in_session"
+#: This process reaches into a workspace it is not running inside.
+ACROSS_BOUNDARY = "across_boundary"
+#: No workspace is named, so there is nothing to reach into.
+UNPLACED = "unplaced"
+
 #: The reporting hierarchy: task, step, then physical sub-step. Failures attach
 #: to the reporting frame that failed.
 TASK = "task"
@@ -150,6 +164,26 @@ class Session(ABC):
                 "one in a workspace configuration file."
             )
         return resolved
+
+    def position(self, workspace: Workspace | None = None) -> str:
+        """Where this Session's data engineering happens, as a named value.
+
+        Derived from what a host already answers rather than declared twice:
+        ``executes_here`` says whether the work happens in this process, and a
+        Session that cannot place itself against a workspace has nothing to
+        reach into either. Both answers are the Session's, so a caller choosing
+        between them never has to interpret a failure to find one.
+        """
+
+        try:
+            self.workspace_or_default(workspace)
+        except CommandError:
+            return UNPLACED
+        return IN_SESSION if self.executes_here(workspace) else ACROSS_BOUNDARY
+
+    @abstractmethod
+    def executes_here(self, workspace: Workspace | None = None) -> bool:
+        """Whether this process is already where the data engineering happens."""
 
     def scope(self, workspace: Workspace | None = None) -> "WorkspaceScope":
         """The cached resources for one workspace context, created on demand."""
@@ -608,9 +642,12 @@ def is_local(workspace: Workspace) -> bool:
 
 
 __all__ = [
+    "ACROSS_BOUNDARY",
+    "IN_SESSION",
     "STEP",
     "SUBSTEP",
     "TASK",
+    "UNPLACED",
     "ReportingFrame",
     "Session",
     "WorkspaceScope",

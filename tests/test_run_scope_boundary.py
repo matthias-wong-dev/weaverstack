@@ -7,10 +7,10 @@ crosses:
 
 .. code-block:: text
 
-    begin_run(run_id)        ──►  RuntimeScope.new(), stored under run_id
+    open_scope(run_id)       ──►  RuntimeScope.new(), stored under run_id
     dispatch(run_id, node A) ──►  same scope
     dispatch(run_id, node B) ──►  same scope
-    end_run(run_id)          ──►  scope.close(), forgotten
+    close_scope(run_id)      ──►  scope.close(), forgotten
 
 Two halves, tested apart because they fail apart. The **registry** is what the
 Fabric interpreter does with a name; the **handle** is what the desktop submits.
@@ -31,7 +31,9 @@ import ast
 
 import pytest
 
-from weaver.run import remote
+from weaver.errors import CommandError
+from weaver.runtime import session_scopes
+from weaver.session.base import Session
 from weaver.run.runtime_boundary import (
     DirectRunScope,
     FabricRunScope,
@@ -46,63 +48,63 @@ def no_leaked_scopes():
     """The registry is module state, so a test that left one would poison the next."""
 
     yield
-    for run_id in remote.open_runs():
-        remote.end_run(run_id)
+    for run_id in session_scopes.open_scopes():
+        session_scopes.close_scope(run_id)
 
 
 # --- the registry, as the Fabric interpreter sees it --------------------------
 
 
 def test_a_run_gets_a_scope_and_is_named_by_it():
-    assert remote.begin_run("run-a") == "run-a"
-    assert remote.open_runs() == ("run-a",)
+    assert session_scopes.open_scope("run-a") == "run-a"
+    assert session_scopes.open_scopes() == ("run-a",)
 
 
 def test_beginning_the_same_run_twice_keeps_the_first_scope():
     """A resubmitted statement must not replace a scope whose modules are
     already imported and in use."""
 
-    remote.begin_run("run-a")
-    first = remote.scope_for("run-a")
-    remote.begin_run("run-a")
+    session_scopes.open_scope("run-a")
+    first = session_scopes.get_scope("run-a")
+    session_scopes.open_scope("run-a")
 
-    assert remote.scope_for("run-a") is first
+    assert session_scopes.get_scope("run-a") is first
 
 
 def test_two_runs_never_share_a_scope():
     """Across runs nothing is shared at all: that is what makes a rebuilt module
     take effect on the next load rather than the next session."""
 
-    remote.begin_run("run-a")
-    remote.begin_run("run-b")
+    session_scopes.open_scope("run-a")
+    session_scopes.open_scope("run-b")
 
-    assert remote.scope_for("run-a") is not remote.scope_for("run-b")
+    assert session_scopes.get_scope("run-a") is not session_scopes.get_scope("run-b")
 
 
 def test_ending_a_run_closes_its_scope_and_forgets_it():
-    remote.begin_run("run-a")
+    session_scopes.open_scope("run-a")
     closed = []
-    remote.scope_for("run-a").close = lambda: closed.append(True)
+    session_scopes.get_scope("run-a").close = lambda: closed.append(True)
 
-    assert remote.end_run("run-a") is True
+    assert session_scopes.close_scope("run-a") is True
     assert closed == [True]
-    assert remote.open_runs() == ()
+    assert session_scopes.open_scopes() == ()
 
 
 def test_ending_a_run_that_was_never_begun_says_so_rather_than_failing():
     """Cleanup that raised would turn a finished run into a failed one."""
 
-    assert remote.end_run("never-started") is False
+    assert session_scopes.close_scope("never-started") is False
 
 
 def test_dispatching_into_a_run_with_no_scope_is_diagnosed():
-    from weaver.run.result import RunError
+    from weaver.errors import RuntimeScopeError
 
-    with pytest.raises(RunError) as raised:
-        remote.scope_for("run-a")
+    with pytest.raises(RuntimeScopeError) as raised:
+        session_scopes.get_scope("run-a")
 
     assert "run-a" in str(raised.value)
-    assert "begin_run" in str(raised.value)
+    assert "open_scope" in str(raised.value)
 
 
 # --- the handle, as the desktop submits it -----------------------------------
@@ -114,11 +116,22 @@ class _Recording:
     Answers by program name unless a test supplies one, because the two
     dispatchers convert what comes back into different values: a load row for
     one, a validation judgement for the other.
+
+    ``position`` is the real Session's, not a stand-in: it is derived from the
+    two facts a host supplies, and a fake that answered it directly could report
+    a position its own answers contradict.
     """
+
+    position = Session.position
 
     def __init__(self, answer=None):
         self.submitted = []
         self.answer = answer
+
+    def workspace_or_default(self, workspace=None):
+        if workspace is None:
+            raise CommandError("this command needs a workspace")
+        return workspace
 
     def executes_here(self, workspace=None):
         return False
@@ -136,9 +149,9 @@ def _answer_for(name: str):
     from weaver.runtime.load_result import LoadResult
     from weaver.runtime.validation_result import TestResult
 
-    if name == "dispatch_python":
+    if name == "run_python_primitive":
         return LoadResult(succeeded=True).as_row()
-    if name == "dispatch_validation":
+    if name == "run_validation_primitive":
         return {"result": TestResult().to_mapping(), "diagnostics": []}
     return True
 
@@ -239,21 +252,16 @@ def test_opening_a_scope_where_execution_is_remote_begins_one_over_there():
     scope = open_runtime_scope(session, workspace=_fabric())
 
     assert isinstance(scope, FabricRunScope)
-    assert scope.run_id in _sources(session)["begin_run"]
+    assert scope.run_id in _sources(session)["open_scope"]
 
 
 def test_a_session_with_no_workspace_at_all_keeps_the_imports_here():
     """Positive knowledge is required to go remote: a scope opened over there by
     mistake would run the primitive somewhere the caller never named."""
 
-    from weaver.errors import CommandError
     from weaver.runtime.python_context import RuntimeScope
 
-    class Unplaceable(_Recording):
-        def workspace_or_default(self, workspace=None):
-            raise CommandError("this command needs a workspace")
-
-    session = Unplaceable()
+    session = _Recording()
     scope = open_runtime_scope(session, workspace=None)
 
     assert isinstance(scope, DirectRunScope)
@@ -271,12 +279,7 @@ def test_a_configuration_failure_is_not_mistaken_for_running_locally():
     success against an estate it had never reached.
     """
 
-    from weaver.errors import CommandError
-
     class Broken(_Recording):
-        def workspace_or_default(self, workspace=None):
-            return workspace
-
         def executes_here(self, workspace=None):
             raise CommandError("this session is closed")
 
@@ -290,7 +293,7 @@ def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
 
     _dispatch(scope)
 
-    submitted = _sources(session)["dispatch_python"]
+    submitted = _sources(session)["run_python_primitive"]
     assert scope.run_id in submitted
     assert "Sales__Customer" in submitted
 
@@ -304,7 +307,7 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
     scope = open_runtime_scope(session, workspace=_fabric())
     _dispatch(scope)
 
-    submitted = _sources(session)["dispatch_python"]
+    submitted = _sources(session)["run_python_primitive"]
     assert "NotebookSession(workspace=workspace, spark=spark)" in submitted
     assert submitted.index("workspace = FabricWorkspace") < submitted.index(
         "NotebookSession"
@@ -312,7 +315,13 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
 
 
 @pytest.mark.parametrize(
-    "name", ["begin_run", "dispatch_python", "dispatch_validation", "end_run"]
+    "name",
+    [
+        "open_scope",
+        "run_python_primitive",
+        "run_validation_primitive",
+        "close_scope",
+    ],
 )
 def test_every_submitted_program_is_valid_python(name):
     """A typo here is invisible to every local test and would ship a run that
@@ -333,7 +342,7 @@ def test_closing_the_handle_ends_the_run_over_there():
 
     scope.close()
 
-    assert scope.run_id in _sources(session)["end_run"]
+    assert scope.run_id in _sources(session)["close_scope"]
 
 
 def test_closing_twice_ends_the_run_once():
@@ -343,12 +352,12 @@ def test_closing_twice_ends_the_run_once():
     scope.close()
     scope.close()
 
-    assert [one.name for one in session.submitted].count("end_run") == 1
+    assert [one.name for one in session.submitted].count("close_scope") == 1
 
 
 def test_a_cleanup_that_cannot_reach_the_session_does_not_fail_the_run():
     """If the Livy session is already gone, so is the scope — which is the
-    outcome `end_run` exists to reach."""
+    outcome closing the scope exists to reach."""
 
     session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
@@ -403,7 +412,7 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
 
     A run of nothing but stored procedures reaches no deployed module, so it
     needs no scope — and on a desktop, opening one means a Livy session and a
-    `begin_run` crossing for work that is entirely T-SQL.
+    scope-opening crossing for work that is entirely T-SQL.
     """
 
     from weaver.load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
@@ -508,7 +517,7 @@ def _remote_scope(session):
 
 
 def test_a_dead_interpreter_takes_its_scope_with_it_and_says_nothing():
-    """There is nothing to report: end_run's whole purpose is already achieved."""
+    """There is nothing to report: closing the scope has already happened."""
 
     from weaver.fabric.livy import LivyError
 
@@ -520,7 +529,7 @@ def test_a_dead_interpreter_takes_its_scope_with_it_and_says_nothing():
 
         def execute_python(self, program, *, workspace=None, timeout=None):
             self.submitted.append(program)
-            if program.name == "end_run":
+            if program.name == "close_scope":
                 raise LivyError("Livy session entered state 'dead'")
             return None
 
@@ -551,8 +560,8 @@ def test_a_live_session_that_could_not_release_a_scope_is_reported():
 
         def execute_python(self, program, *, workspace=None, timeout=None):
             self.submitted.append(program)
-            if program.name == "end_run":
-                raise TypeError("end_run() got an unexpected keyword argument")
+            if program.name == "close_scope":
+                raise TypeError("close_scope() got an unexpected keyword argument")
             return None
 
         def warn(self, message):

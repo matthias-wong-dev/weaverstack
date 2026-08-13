@@ -19,8 +19,8 @@ a primitive is a different job, and giving it one would point `weaver.runtime` a
 `weaver.run`, which imports it.
 
 The Fabric one holds nothing but a name. Everything it does is a statement
-submitted through the Session, and its ``close()`` is the ``end_run`` that
-releases the far side's imports.
+submitted through the Session, and its ``close()`` releases the far side's
+imports by closing the scope that holds them.
 """
 
 from __future__ import annotations
@@ -132,29 +132,23 @@ def open_runtime_scope(session, *, workspace=None) -> RunScope:
     would inherit.
     """
 
-    from ..errors import CommandError
     from ..runtime.python_context import RuntimeScope
+    from ..session.base import ACROSS_BOUNDARY
 
     if session is None:
         return DirectRunScope(RuntimeScope.new())
 
-    # A Session with no workspace to place itself against has no remote to reach
-    # into either, so the imports happen here. That is the *only* answer worth
-    # guessing at, and it is asked as its own question rather than inferred from
-    # whatever executes_here raises: catching every CommandError from that call
-    # turned a bad configuration or a closed Session into a local RuntimeScope,
-    # so a run that should have stopped instead started importing primitives in
-    # the console — reporting success against nothing the caller had named.
-    placed = getattr(session, "workspace_or_default", None)
-    if placed is not None:
-        try:
-            placed(workspace)
-        except CommandError:
-            return DirectRunScope(RuntimeScope.new(), session, workspace)
-
-    if session.executes_here(workspace):
-        return DirectRunScope(RuntimeScope.new(), session, workspace)
-    return FabricRunScope.begin(session, workspace=workspace)
+    # The Session says where it is; this decides what to build from that. A
+    # Session that cannot place itself against a workspace answers ``UNPLACED``
+    # and the imports happen here, because there is nothing to reach into. That
+    # judgement belongs to the Session: reading it out of whatever
+    # ``executes_here`` raised turned a bad configuration, or a Session someone
+    # had closed, into a local RuntimeScope — and the run then imported
+    # primitives into the console and reported success against an estate it had
+    # never reached.
+    if session.position(workspace) == ACROSS_BOUNDARY:
+        return FabricRunScope.begin(session, workspace=workspace)
+    return DirectRunScope(RuntimeScope.new(), session, workspace)
 
 
 class FabricRunScope:
@@ -173,9 +167,11 @@ class FabricRunScope:
 
     @classmethod
     def begin(cls, session, *, workspace=None) -> "FabricRunScope":
+        from ..runtime.session_scopes import open_scope
+
         run_id = uuid.uuid4().hex
         scope = cls(session, workspace, run_id)
-        scope._submit("begin_run", {"run_id": run_id}, addressed=False)
+        scope._submit(open_scope, {"run_id": run_id}, addressed=False)
         return scope
 
     # --- what dispatch asks of it -------------------------------------------
@@ -188,8 +184,10 @@ class FabricRunScope:
         never has to be kept in step with the Runner's own model.
         """
 
+        from .entry import run_python_primitive
+
         return self._submit(
-            "dispatch_python",
+            run_python_primitive,
             {
                 "run_id": self.run_id,
                 "node_id": node.node_id,
@@ -206,8 +204,10 @@ class FabricRunScope:
     def dispatch_validation(self, installed, *, collect: bool):
         """One installed Lakehouse validation, run in this scope."""
 
+        from .entry import run_validation_primitive
+
         carried = self._submit(
-            "dispatch_validation",
+            run_validation_primitive,
             {
                 "run_id": self.run_id,
                 "installed": installed.to_mapping(),
@@ -224,7 +224,7 @@ class FabricRunScope:
         mean opposite things:
 
         **The interpreter is gone** — a dead or killed Livy session. The scope
-        went with it, which is the outcome ``end_run`` exists to reach, so there
+        went with it, which is the outcome closing it exists to reach, so there
         is nothing to report and nothing to fix. Silence is right.
 
         **The interpreter is alive and the call failed** — a serialisation
@@ -239,11 +239,13 @@ class FabricRunScope:
         its own cleanup.
         """
 
+        from ..runtime.session_scopes import close_scope
+
         if self._closed:
             return
         self._closed = True
         try:
-            self._submit("end_run", {"run_id": self.run_id}, addressed=False)
+            self._submit(close_scope, {"run_id": self.run_id}, addressed=False)
         except Exception as exc:  # noqa: BLE001 - never fails a finished run
             if _interpreter_is_gone(exc):
                 return
@@ -266,18 +268,21 @@ class FabricRunScope:
 
     # --- the crossing --------------------------------------------------------
 
-    def _submit(self, name: str, arguments: dict, *, addressed=True, detail=None):
-        """One call to :mod:`weaver.run.remote`, spelled for both sides.
+    def _submit(self, here, arguments: dict, *, addressed=True, detail=None):
+        """One named function, spelled for both sides.
+
+        The function itself is passed rather than looked up, so the import the
+        submitted body carries is written from the thing this side would have
+        called. The two halves cannot name different functions, and a rename is
+        an ordinary rename.
 
         ``addressed`` says whether the call takes a workspace and a Session.
-        ``begin_run`` and ``end_run`` name a scope and touch no estate; the
+        Opening and closing a scope names one and touches no estate; the
         dispatchers need to know which workspace they are reaching into.
         """
 
-        from . import remote
-
         workspace = self._workspace
-        here = getattr(remote, name)
+        name = here.__name__
         if addressed:
             # The Session is built in the submitted body, around the
             # interpreter's own ``spark`` global — the construction every other
@@ -302,7 +307,7 @@ class FabricRunScope:
 
         source = (
             "from weaver.workspaces import FabricWorkspace\n"
-            f"from weaver.run.remote import {name}\n"
+            f"from {here.__module__} import {name}\n"
             f"workspace = {_workspace_literal(workspace)}\n"
             f"{preamble}"
             f"emit({name}({passed}))\n"

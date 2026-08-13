@@ -101,3 +101,7 @@ class BuildError(WeaverError):
 
 class InstallError(WeaverError):
     """Raised when a build bundle cannot be installed."""
+
+
+class RuntimeScopeError(WeaverError):
+    """Raised when this interpreter holds no runtime scope under a given name."""
