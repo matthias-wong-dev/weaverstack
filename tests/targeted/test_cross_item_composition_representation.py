@@ -11,10 +11,10 @@ a value and no engine is needed. What that leaves for Fabric is whether the
 statements this order produces are accepted, which is a different claim in a
 different place.
 
-The order is the whole subject. A Warehouse reads a Lakehouse table across a SQL
+The order is the subject. A Warehouse reads a Lakehouse table across a SQL
 analytics endpoint, and an endpoint that has not caught up reports the table as
 missing or stale — so the Lakehouse's objects, the refresh, and the Warehouse's
-objects have to fall in that sequence rather than merely all be present.
+objects have to fall in that sequence. Being present is not enough.
 """
 
 from __future__ import annotations

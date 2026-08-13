@@ -10,8 +10,8 @@ Three claims, and none of them can be made anywhere else:
 .. code-block:: text
 
     the decomposed path runs at all      against a real installed estate
-    one scope serves every Python node   begin_run once, dispatch many
-    the scope is closed at the end       end_run once, whatever happened
+    one scope serves every Python node   open_scope once, dispatch many
+    the scope is closed at the end       close_scope once, whatever happened
 
 The middle one is the guarantee the decomposition most had to preserve. A run
 that opened a scope per node would still pass every local test — the nodes would
@@ -98,8 +98,8 @@ def test_every_python_node_shared_one_runtime_scope(loaded):
 
     _, spent = loaded
 
-    assert spent.get("livy.begin_run") == 1
-    assert spent.get("livy.dispatch_python", 0) > 1, (
+    assert spent.get("livy.open_scope") == 1
+    assert spent.get("livy.run_python_primitive", 0) > 1, (
         "this estate should have more than one Python node, or the claim is vacuous"
     )
 
@@ -110,7 +110,7 @@ def test_the_scope_is_closed_when_the_run_ends(loaded):
 
     _, spent = loaded
 
-    assert spent.get("livy.end_run") == 1
+    assert spent.get("livy.close_scope") == 1
 
 
 def test_the_run_read_the_estate_rather_than_shipping_itself(loaded):
