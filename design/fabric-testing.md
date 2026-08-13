@@ -93,25 +93,28 @@ work is whether a **wheel publish** is one of those things:
 
 ```bash
 pytest -m fabric            # every test against a real Fabric workspace
-pytest -m "fabric and remote" # Weaver runs from this checkout — no publish
-pytest -m "fabric and hosted" # the installed package is the subject
+pytest -m "fabric and remote" # no publish
+pytest -m "fabric and hosted" # needs the published wheel
 pytest -m full_integration  # the Fabric lifecycle journey
 pytest -m provision         # Fabric creating and deleting items
 ```
 
-Every Fabric test carries `fabric` and exactly one position. `remote` versus
-`hosted` is about **where Weaver runs**, not about whether Livy is involved.
-Creating a OneLake shortcut is a REST call, refreshing an
-endpoint is another, wiping a Lakehouse is directory removal, and a Warehouse is
-reached over TDS — all of which work perfectly well from this checkout against a
-real workspace. Even a Spark body is `remote` if it does not import Weaver, which
-is why `LivySession.for_workspace` takes `require_weaver`.
+Every Fabric test carries `fabric` and exactly one of the two. `remote` versus
+`hosted` is about **whether a publish is required**, not about whether Livy is
+involved and not about where the orchestration runs. Creating a OneLake shortcut
+is a REST call, refreshing an endpoint is another, wiping a Lakehouse is
+directory removal, and a Warehouse is reached over TDS, all of which work from
+this checkout against a real workspace. Even a Spark body is `remote` if it does
+not import Weaver, which is why `LivySession.for_workspace` takes
+`require_weaver`.
 
-What earns `hosted` is being *about* the installed package: that it
-acquires its own capabilities from the session's identity, that the Environment
-carries it, that it bootstraps its own catalogue. Those are proven once, per
-capability, in `tests/fabric/test_published_weaver.py` — so no feature has to
-re-prove them, and the ordinary loop never waits on a publish.
+What earns `hosted` is needing the installed package. That covers tests whose
+subject *is* the wheel: that it acquires its own capabilities from the
+session's identity, that the Environment carries it, that it bootstraps its own
+catalogue, proven once per capability in
+`tests/fabric/test_published_weaver.py`. It also covers a decomposed operation
+that orchestrates from this checkout and imports the wheel on the far side,
+because the publish is what such a test costs whoever runs it.
 
 Item **lifecycle** tests — creating and deleting Lakehouses — are separated for a
 different reason.
@@ -336,9 +339,11 @@ the ones the build produces; then only the part that must be remote is run — a
 action through `execute_action`, a wipe, a REST call. A change to Weaver Python
 is exercised there immediately, with no publish.
 
-The distinction to hold on to is **where Weaver runs**, not whether Livy is involved.
-A Spark body that does not import Weaver needs a session, not a published
-package.
+The distinction to hold on to is **whether a published wheel is required**, not
+whether Livy is involved and not where the orchestration runs. A Spark body that
+does not import Weaver needs a session, not a published package. An operation
+that orchestrates from this checkout and imports the wheel on the far side is
+`hosted`, because the publish is what it costs.
 
 ## The test tiers
 

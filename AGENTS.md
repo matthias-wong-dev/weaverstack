@@ -408,8 +408,8 @@ Each marker is opted into by name, and none implies another.
 pytest                      # pure Python, under a second
 pytest -m spark             # local Spark/Delta, needs a JDK
 pytest -m fabric            # every test against a real Fabric workspace
-pytest -m "fabric and remote" # Weaver runs here; no published wheel
-pytest -m "fabric and hosted" # Weaver runs as the installed wheel
+pytest -m "fabric and remote" # no published wheel needed
+pytest -m "fabric and hosted" # needs the wheel published to the Environment
 pytest -m full_integration  # the comprehensive Fabric lifecycle journey
 pytest -m provision         # Fabric item lifecycle
 ```
@@ -420,18 +420,22 @@ Every marker says *what a test needs*:
 |---|---|
 | `spark` | a JDK |
 | `fabric` | a workspace; carried by every Fabric test |
-| `remote` | Weaver runs on this machine and reaches into Fabric |
-| `hosted` | Weaver runs inside Fabric as the wheel in the Environment |
+| `remote` | a workspace, and no published wheel |
+| `hosted` | a workspace **and** the wheel published to the Environment |
 | `full_integration` | the composed lifecycle journey |
 | `provision` | creates and deletes Fabric items |
 
 `remote` and `hosted` are the distinction that keeps the loop legible, and they
-are about *where Weaver runs*, not about whether Livy is involved. A Spark body
-that does not import Weaver needs a session, not a published package — which is
-why `LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
+say whether a published wheel is required. Not whether Livy is involved, and not
+where the orchestration runs: a decomposed desktop operation orchestrates here
+*and* imports the wheel on the far side, so it is `hosted`. A Spark body that
+does not import Weaver needs a session, not a published package, which is why
+`LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
 refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
-run from the checkout against the real workspace. What is `hosted` is about the
-wheel: the installed package acquires its own capabilities inside the session.
+run from the checkout against the real workspace and stay `remote`.
+
+Position is worth recording, but it belongs in a test's docstring. A marker says
+what a run costs, and the cost of `hosted` is a five-minute publish.
 
 `full_integration` is the Fabric lifecycle journey alone — one test, no JDK. Its
 local twin lives in `tests/spark` under `spark`, because that is what it needs.

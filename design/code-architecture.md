@@ -280,12 +280,14 @@ testable without a tenant:
 ```text
 pytest                             pure Python, about a second, no JDK, no cloud
 pytest -m spark                    local Spark and Delta, needs a JDK
-pytest -m "fabric and remote"      real workspace, Weaver on this machine
-pytest -m "fabric and hosted"      real workspace, Weaver as the published wheel
+pytest -m "fabric and remote"      real workspace, no published wheel
+pytest -m "fabric and hosted"      real workspace and the published wheel
 ```
 
-The `remote` and `hosted` markers identify the execution position of each Fabric
-test. A capability requires coverage in both positions.
+The `remote` and `hosted` markers say whether a Fabric test needs the wheel
+published to the Environment. A capability that behaves differently in the two
+execution positions requires coverage in both, which the test states in its
+docstring rather than in its marker.
 
 Planning tests construct a `BuildState` and assert a `BuildBundle`. Fabric tests
 cover behaviour that requires a real estate, including alias readability, bundle

@@ -18,7 +18,7 @@ The rest of this document applies that rule to the repository test suite.
 |---|---|---|---|
 | `pytest` | nothing | ~2040 | contracts, rendering, planning, binding — the development loop |
 | `pytest -m spark` | a JDK | ~250 | Delta, the Spark catalogue, deployed-module execution |
-| `pytest -m "fabric and remote"` | a workspace | ~80 | one narrow question a real Fabric can answer, Weaver running here |
+| `pytest -m "fabric and remote"` | a workspace | ~80 | one narrow question a real Fabric can answer, with nothing published |
 | `pytest -m "fabric and hosted"` | a workspace **and a published wheel** | ~30 | Weaver running *inside* Fabric — the product's own position |
 | `pytest -m full_integration` | a workspace and a published wheel | 1 | composition only |
 | `pytest -m provision` | permission to create and delete items | 4 | Fabric's resource management, not Weaver's |
