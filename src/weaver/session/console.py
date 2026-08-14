@@ -752,10 +752,6 @@ class ConsoleScope(WorkspaceScope):
     def sql_for(self, target: Any):
         """The TDS capability for one Warehouse, acquired once per Session."""
 
-        if not self.workspace.supports_sql:
-            raise CommandError(
-                f"{type(self.workspace).__name__} has no SQL capability"
-            )
         warehouse = target if isinstance(target, WarehouseTarget) else WarehouseTarget(
             target if isinstance(target, ItemRef) else ItemRef(str(target))
         )

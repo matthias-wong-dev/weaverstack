@@ -83,14 +83,16 @@ def spark_table_estate(
     def run(action, payload):
         return execute_install_action(action, payload, context=context)
 
-    results = {"schema": run(cases.schema_action(), cases.SCHEMA_PAYLOAD)}
+    results = {"schema": run(cases.schema_action(), cases.schema_payload(destination))}
     for case in cases.BUILDING:
-        results[case.name] = run(cases.install_action(case), case.payload)
+        results[case.name] = run(
+            cases.install_action(case), case.payload(destination)
+        )
     results[cases.EXACT_CASE_READER] = run(
-        cases.view_action(), cases.EXACT_CASE_VIEW_SQL
+        cases.view_action(), cases.view_sql(destination)
     )
     unresolved = run(
-        cases.install_action(cases.UNRESOLVED), cases.UNRESOLVED.payload
+        cases.install_action(cases.UNRESOLVED), cases.UNRESOLVED.payload(destination)
     )
 
     built = {
