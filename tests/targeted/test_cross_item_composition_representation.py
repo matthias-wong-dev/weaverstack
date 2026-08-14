@@ -32,6 +32,7 @@ from weaver.declaration import parse_item_repository
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
+from support.workspaces import WORKSPACE
 
 LAKEHOUSE = "Sales_LH"
 WAREHOUSE = "Reporting_WH"
@@ -51,6 +52,7 @@ def plan(repository, tmp_path_factory):
             ("Lakehouse/Sales", LAKEHOUSE), ("Warehouse/Reporting", WAREHOUSE)
         ),
         weaver_lakehouse="Weaver",
+        workspace_name=WORKSPACE,
     )
     inventories = {}
     for binding in bindings.entries:

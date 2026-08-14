@@ -148,6 +148,9 @@ class Lakehouses:
     weaver: ItemRef
     target: ItemRef
     root: Path
+    #: A Session over the two, because that is how a desktop caller hands an
+    #: operation the resolver and store it reaches a workspace with.
+    session: object
 
 
 def _lakehouses(root: Path, *, weaver: str, target: str) -> Lakehouses:
@@ -164,6 +167,8 @@ def _lakehouses(root: Path, *, weaver: str, target: str) -> Lakehouses:
     for item in (weaver_ref, target_ref):
         store.make_directory(resolver.files_root(item))
         store.make_directory(resolver.tables_root(item))
+    from support.sessions import given_session
+
     return Lakehouses(
         workspace=workspace,
         resolver=resolver,
@@ -171,6 +176,9 @@ def _lakehouses(root: Path, *, weaver: str, target: str) -> Lakehouses:
         weaver=weaver_ref,
         target=target_ref,
         root=root,
+        session=given_session(
+            workspace=workspace, resolver=resolver, store=store
+        ),
     )
 
 
@@ -179,3 +187,11 @@ def lakehouses(tmp_path: Path) -> Lakehouses:
     """One workspace per test, because a test's own tree costs almost nothing."""
 
     return _lakehouses(tmp_path, weaver=WEAVER_LAKEHOUSE, target=TARGET_LAKEHOUSE)
+
+
+@pytest.fixture
+def populated_folders(lakehouses) -> Lakehouses:
+    """One Lakehouse holding folder objects, so a wipe has something to take."""
+
+    _populate_folder_files(lakehouses.store, lakehouses.resolver, lakehouses.target)
+    return lakehouses

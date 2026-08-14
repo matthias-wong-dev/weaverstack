@@ -10,12 +10,39 @@ That join is where the drift lives — a renamed constructor argument, a result
 type nobody serialises, a runtime root computed one folder too high. Every one
 of those passes a mock and costs a Spark run to discover. Here they cost 0.1
 seconds, because the artefacts do nothing and there is no estate to build.
+
+Moved out of the core tier with the emulator. A thin run imports a *deployed*
+module and dispatches to it, and a deployed module lives in the Lakehouse's
+Files area — which on a desktop is OneLake, not a filesystem. The old file
+worked because the emulator's storage was a directory; nothing about that was
+Fabric's behaviour.
+
+``hosted``: the modules are imported where Spark is, as the installed wheel.
+
+Currently skipped. The bodies below are the claims, unchanged; what they still
+need is the Fabric harness that deploys these artefacts into a real Lakehouse,
+which is the acceptance work later in this plan. Recorded as a known gap rather
+than deleted, because dispatch and result settlement are worth proving and are
+proven nowhere else.
+
 """
 
 from __future__ import annotations
 
 import pytest
-from support.thin import JUDGEMENTS, OUTCOMES, thin_estate
+
+pytestmark = [
+    pytest.mark.fabric,
+    pytest.mark.hosted,
+    pytest.mark.skip(
+        reason=(
+            "moved from the deleted local Spark tier; needs the Fabric harness "
+            "to deploy its artefacts — see Milestone 1 in the Fabric-only "
+            "runtime PR"
+        )
+    ),
+]
+from support.thin import OUTCOMES, thin_estate
 
 from weaver.errors import LoadError
 from weaver.load import run_load
@@ -176,60 +203,6 @@ def test_every_node_serialises_whatever_kind_of_result_it_carried(thin):
         assert result.to_mapping()["node_id"] == result.node_id
 
 
-# --- the same boundary, for a validation --------------------------------------
-
-
-@pytest.fixture(scope="module")
-def judged(tmp_path_factory, spark):
-    """One thin estate with Tests in it, shared — nothing here mutates data."""
-
-    estate = thin_estate(
-        tmp_path_factory.mktemp("judged"), spark, outcomes=(), judgements=JUDGEMENTS
-    )
-    yield estate
-    estate.session.close()
-
-
-@pytest.mark.spark
-def test_a_validation_reaches_its_artefact_the_same_way_a_load_does(judged):
-    """The same import, the same runtime context, a different engine call."""
-
-    report = run_test(
-        judged.session,
-        workspace=judged.workspace,
-        requested=[judged.target],
-        state=judged.state,
-    )
-
-    assert judged.judgement(report, "Agrees").status == "passed"
-
-
-@pytest.mark.spark
-def test_a_disagreement_is_a_failure_carrying_what_it_found(judged):
-    report = run_test(
-        judged.session,
-        workspace=judged.workspace,
-        requested=[judged.target],
-        state=judged.state,
-    )
-
-    failed = judged.judgement(report, "Disagrees")
-    assert failed.status == "failed"
-    assert failed.result.missing_count == 1
-    assert failed.result.unexpected_count == 2
-
-
-@pytest.mark.spark
-def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(judged):
-    """The one answer a validation must never give is "found nothing"."""
-
-    report = run_test(
-        judged.session,
-        workspace=judged.workspace,
-        requested=[judged.target],
-        state=judged.state,
-    )
-
-    unreadable = judged.judgement(report, "Unreadable")
-    assert unreadable.status == "invalid"
-    assert not unreadable.succeeded
+# The validation half of this boundary moved to
+# ``tests/fabric/test_validation_dispatch.py``: a Test's artefact returns a
+# Spark frame and the comparison reads it, so the claim needs a real session.

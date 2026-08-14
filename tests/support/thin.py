@@ -61,6 +61,7 @@ from weaver.load_plan import PhysicalTargetRef
 from weaver.run import RunState
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
+from support.workspaces import given_resolver, given_workspace
 
 #: The schema these artefacts are declared in, so a thin node is recognisable in
 #: a report as trivial rather than mistaken for an estate someone cared about.
@@ -152,70 +153,6 @@ class {name}:
 
 OUTCOMES = tuple(ARTEFACTS)
 
-#: A Test's deployed artefact is read rather than called, and what it returns is
-#: a real Spark frame of sides — so these need a Spark session where a load's do
-#: not. They still build no estate and load no data: two literal rows are enough
-#: to make a Test pass or fail, and what a Test *means* is proven elsewhere.
-VALIDATIONS = {
-    "Agrees": '''\
-from pyspark.sql.types import StringType, StructField, StructType
-
-SIDES = StructType([StructField("_weaver_side", StringType())])
-
-
-class {name}:
-    """Both sides agree: no rows, so nothing missing and nothing unexpected."""
-
-    def __init__(self, spark, lakehouse=None):
-        self.spark = spark
-
-    def read(self):
-        return self.spark.createDataFrame([], SIDES)
-''',
-    "Disagrees": '''\
-from pyspark.sql.types import StringType, StructField, StructType
-
-SIDES = StructType([StructField("_weaver_side", StringType())])
-
-
-class {name}:
-    """One row expected and never seen, one seen and never expected."""
-
-    def __init__(self, spark, lakehouse=None):
-        self.spark = spark
-
-    def read(self):
-        return self.spark.createDataFrame(
-            [("expected",), ("actual",), ("actual",)], SIDES
-        )
-''',
-    "Unreadable": '''\
-class {name}:
-    """Cannot be evaluated at all — which is not the same as finding nothing."""
-
-    def __init__(self, spark, lakehouse=None):
-        self.spark = spark
-
-    def read(self):
-        raise RuntimeError("the table this Test reads does not exist")
-''',
-}
-
-JUDGEMENTS = tuple(VALIDATIONS)
-
-
-class NoSpark:
-    """The Spark session a thin artefact is handed and never uses.
-
-    Not a mock of Spark — nothing here calls it, and anything that did would be
-    making a claim about data that a thin run has no business making. It exists
-    so a Session can be complete without a JVM, which is what keeps a thin run
-    in the pure suite: the whole dispatch path runs, and none of it costs
-    seconds.
-    """
-
-    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
-        return "<no spark: a thin run does not touch data>"
 
 
 @dataclass(frozen=True)
@@ -261,10 +198,8 @@ class ThinEstate:
 
 def thin_estate(
     root: Path,
-    spark: Any = None,
     *,
     outcomes: tuple[str, ...] = OUTCOMES,
-    judgements: tuple[str, ...] = (),
     lakehouse: str = "Thin_LH",
 ) -> ThinEstate:
     """A Session, a RunState and deployed artefacts for what was named.
@@ -273,29 +208,24 @@ def thin_estate(
     a real estate, so what a thin run plans against is the shape a build
     publishes. Only the artefacts it points at are trivial.
 
-    ``judgements`` adds Tests, which need a real Spark session because a Test's
-    artefact returns a frame — so a caller asking for them passes one.
+    A thin run reaches a primitive and settles what comes back; it never
+    touches data. Tests are not built here, because a Test's artefact returns a
+    Spark frame — see ``tests/fabric/test_validation_dispatch.py``.
     """
 
     documents = {
         f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}")
         for name in outcomes
     }
-    documents.update(
-        {
-            # Under ``tests/``, which is where a repository declares one — the
-            # folder is what makes it a validation rather than another table.
-            f"tests/{SCHEMA}__{name}.py": lakehouse_test(f"{SCHEMA}.{name}")
-            for name in judgements
-        }
-    )
     repository = single_document_repository(
         root / "repository", schemas=(SCHEMA,), documents=documents
     )
     bindings = item_bindings(("Lakehouse/Sales", lakehouse))
 
     workspace = given_workspace(weaver_lakehouse="Weaver_LH")
-    resolver = given_resolver(workspace=workspace)
+    resolver = given_resolver(
+        workspace=workspace, lakehouses=("Weaver_LH", lakehouse), root=root
+    )
 
     # Written where the *build* would have written them, asked of the build's own
     # enumerator rather than assembled from a path this module believes in. A
@@ -306,7 +236,6 @@ def thin_estate(
         f"{SCHEMA}__{name}": source
         for name, source in (
             *((name, ARTEFACTS[name]) for name in outcomes),
-            *((name, VALIDATIONS[name]) for name in judgements),
         )
     }
     for artefact in item_runtime_artefacts(repository, item=item_id("Lakehouse/Sales")):
@@ -322,9 +251,12 @@ def thin_estate(
     return ThinEstate(
         session=given_session(
             workspace=workspace,
-            spark=spark if spark is not None else NoSpark(),
             store=FilesystemStore(),
             resolver=resolver,
+            # A thin run reaches its primitive in this process, which is what
+            # makes it thin: the whole dispatch path runs and none of it costs
+            # a crossing.
+            executes_here=True,
         ),
         workspace=workspace,
         state=RunState(
@@ -333,10 +265,7 @@ def thin_estate(
         ),
         target=target,
         root=root,
-        nodes={
-            **{name: f"load:{target}/{SCHEMA}.{name}" for name in outcomes},
-            **{name: f"{target}/{SCHEMA}.{name}" for name in judgements},
-        },
+        nodes={name: f"load:{target}/{SCHEMA}.{name}" for name in outcomes},
     )
 
 

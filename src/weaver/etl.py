@@ -247,9 +247,11 @@ def item_validation_artefacts(
         from .declaration.validation import validation_identity
 
         object_type, template_version = validation_identity(source)
+        # Only a Spark body names a destination. A Warehouse validation compiles
+        # to T-SQL, which the connection addresses, so it renders either way.
         generated = (
             source.create_validation(destination=destination)
-            if destination is not None
+            if destination is not None or source.language != SPARK_SQL
             else None
         )
         artefacts.append(

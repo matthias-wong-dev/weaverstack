@@ -230,6 +230,7 @@ def wipe(
     store: Store | None = None,
     sql=None,
     dry_run: bool = False,
+    session=None,
 ) -> tuple[WipeReport, ...]:
     """Wipe each supplied target. At least one is required.
 
@@ -243,14 +244,26 @@ def wipe(
     reports: list[WipeReport] = []
     storage = store
     if folder_target is not None:
-        storage = storage or store_for(workspace)
+        storage = storage or _store_for(workspace, session)
         reports.append(
-            wipe_folder_target(folder_target, workspace, store=storage, dry_run=dry_run)
+            wipe_folder_target(
+                folder_target,
+                workspace,
+                store=storage,
+                dry_run=dry_run,
+                session=session,
+            )
         )
     if delta_target is not None:
-        storage = storage or store_for(workspace)
+        storage = storage or _store_for(workspace, session)
         reports.append(
-            wipe_delta_target(delta_target, workspace, store=storage, dry_run=dry_run)
+            wipe_delta_target(
+                delta_target,
+                workspace,
+                store=storage,
+                dry_run=dry_run,
+                session=session,
+            )
         )
     if sql_target is not None:
         if dry_run:

@@ -69,6 +69,10 @@ class InventoryClient:
                 for kind, name in self.items
                 if wanted is None or kind == wanted
             ]
+        if route.endswith("/shortcuts"):
+            # A test that means to hold shortcuts wraps this resolver; an
+            # inventory on its own holds none.
+            return []
         raise AssertionError(f"this inventory was not asked to answer {path!r}")
 
     def get(self, path: str, **_):

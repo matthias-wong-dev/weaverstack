@@ -24,6 +24,9 @@ from weaver.declaration.validation import (
     generate_validation,
     has_generated_validation,
 )
+from weaver.spark import FabricSparkTarget
+
+SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 
 TEST_SOURCE = """/*
 Test ID: Sales.OrdersReconcile
@@ -54,7 +57,9 @@ def _document(source: str, path: str):
 
 
 def _module(source: str, path: str) -> str:
-    return generate_validation(_document(source, path)).payload.decode("utf-8")
+    return generate_validation(
+        _document(source, path), destination=SALES
+    ).payload.decode("utf-8")
 
 
 @pytest.fixture
@@ -126,13 +131,13 @@ def test_the_authored_program_travels_whole(test_module):
     assert namespace["SQL"].count("select") == 3
 
 
-def test_managed_references_are_addressed_as_tokens(test_module):
-    """Destination-free bytes; the installer resolves them on the way down."""
+def test_managed_references_name_the_lakehouse_they_read(test_module):
+    """Addressed when the bundle is generated, like every other payload."""
 
     program = test_module.split('"""', 2)[2]
 
-    assert "{{object:Sales.Order}}" in program
-    assert "{{object:Sales.OrderLine}}" in program
+    assert "`Demo`.`Sales_LH`.`Sales`.`Order`" in program
+    assert "`Demo`.`Sales_LH`.`Sales`.`OrderLine`" in program
     assert "from Sales.Order" not in program
 
 
@@ -174,7 +179,8 @@ class Sales__OrdersReconcile(Test):
 
 def test_the_generator_version_salts_the_artefact(test_module):
     generated = generate_validation(
-        _document(TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql")
+        _document(TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql"),
+        destination=SALES,
     )
 
     assert generated.template_version == SPARK_VALIDATION_VERSION

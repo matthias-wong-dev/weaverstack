@@ -279,7 +279,7 @@ def real_session(tmp_path):
     workspace = given_workspace(weaver_lakehouse="Weaver_LH")
     # The failure under test happens inside the inventory reader. Supplying an
     # inert Spark value keeps this pure test from acquiring a real JVM first.
-    return given_session(workspace=workspace, spark=object())
+    return given_session(workspace=workspace)
 
 
 def _failing_reader(monkeypatch, exc):

@@ -335,15 +335,18 @@ def test_an_archive_is_persisted_where_it_was_asked_for(estate, tmp_path):
 # --- a capability offered is not a capability acquired -------------------------
 
 
-def test_installing_through_executors_that_need_no_spark_asks_for_none(estate):
+def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
     """A capability offered is not a capability acquired.
 
-    A build whose work needs no Spark must not open a Livy session for it: the
-    Installer used to evaluate the session's Spark while assembling every
-    batch's context, so a build through recording executors reached for one it
-    never used. Asserted by watching what the Session was asked for, because a
-    build that quietly acquired a session would still pass an assertion about
-    its result.
+    Scoped to the Installer and this action set, not to builds in general: the
+    catalogue lives in the Weaver Lakehouse and is published with Spark SQL, so
+    an ordinary complete build does cross to Spark. What is guarded here is
+    narrower and still worth guarding — the Installer used to evaluate the
+    Session's Spark while assembling every batch's context, so an action set
+    whose executors never run a statement reached for a session anyway.
+
+    Asserted by watching what the Session was asked for, because a build that
+    quietly acquired one would still pass an assertion about its result.
     """
 
     result = build(estate)

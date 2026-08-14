@@ -40,6 +40,7 @@ from weaver.declaration.model import WeaverItemId
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 from support.workspaces import given_resolver, given_workspace
+from support.workspaces import WORKSPACE
 
 BUILTIN = WeaverItemId.parse("Lakehouse/_weaver")
 
@@ -67,7 +68,7 @@ def estate(tmp_path):
 
     workspace = given_workspace(weaver_lakehouse="Weaver")
     store = FilesystemStore()
-    resolver = given_resolver(workspace=workspace)
+    resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
@@ -103,6 +104,7 @@ def _build(estate):
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
         weaver_lakehouse="Weaver",
+        workspace_name=WORKSPACE,
     )
     inventories = {
         binding.item: target_inventory(
@@ -138,7 +140,9 @@ def test_the_repository_carries_the_builtin_item_without_it_being_authored(estat
 
 def test_the_builtin_item_is_bound_to_the_control_lakehouse_automatically():
     bindings = effective_item_bindings(
-        item_bindings(("Lakehouse/Sales", "Sales_LH")), weaver_lakehouse="Weaver"
+        item_bindings(("Lakehouse/Sales", "Sales_LH")),
+        weaver_lakehouse="Weaver",
+        workspace_name=WORKSPACE,
     )
 
     binding = bindings.by_item[BUILTIN]
