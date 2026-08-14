@@ -97,13 +97,11 @@ class LakehouseSparkLocation:
     schema name indistinguishable.
 
     Roots are plain strings rather than :class:`Location` values because this is
-    what Spark addresses — an ``abfss://`` URL on Fabric, a filesystem path
-    locally.
+    what Spark addresses: an ``abfss://`` URL.
 
     A resolved location is never carried in a build bundle. It embeds workspace
-    and item ids on Fabric and a temporary directory locally, so a bundle
-    carrying one would not be comparable between environments
-    (how-does-build-work §15).
+    and item ids, which the installer resolves for itself, so a bundle names the
+    item and lets resolution answer where it is (how-does-build-work §15).
     """
 
     #: The Lakehouse this resolves, by its logical name.

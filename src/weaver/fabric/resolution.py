@@ -1,8 +1,8 @@
 """Resolve typed Fabric item names to OneLake locations.
 
 Fabric item identity is workspace, type, and name. Resolution uses the declared
-item type, caches REST lookups, and presents the same interface as local
-resolution.
+item type and caches REST lookups, so a Session's resolver answers a repeated
+name without asking the workspace again.
 """
 
 from __future__ import annotations
@@ -159,10 +159,10 @@ class FabricResolver:
     #
     # Two operations an installed bundle needs that are neither path arithmetic
     # nor a SQL statement: pointing one Lakehouse at another's data, and asking a
-    # Lakehouse's SQL analytics endpoint to catch up. Both belong here because
-    # this is the adapter that already knows how to reach this workspace, and the
-    # local resolver deliberately offers neither — the emulator links files, and
-    # has no SQL endpoint at all.
+    # Lakehouse's SQL analytics endpoint to catch up. Both are REST, so they
+    # belong to the adapter that already knows how to reach this workspace. A
+    # resolver inside a Fabric session offers neither, and an action that needs
+    # one is recorded as skipped rather than failed.
 
     def create_onelake_shortcut(
         self,

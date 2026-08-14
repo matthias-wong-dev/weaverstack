@@ -166,43 +166,6 @@ class FilesystemStore:
         else:
             shutil.copy2(source, destination_path)
 
-    def link(self, source: Location, destination: Location) -> None:
-        """Make ``destination`` refer to ``source`` without copying it.
-
-        The emulator's counterpart of a OneLake shortcut, and the reason it is a
-        link rather than a copy: a shortcut has no bytes of its own, so a copy
-        would drift the moment the source was rebuilt and would make the emulator
-        stop reproducing what Fabric does.
-
-        Not part of the :class:`Store` protocol. A shortcut in Fabric is made
-        through the workspace API, not through file transport, so an environment
-        either offers this or offers that — see
-        :mod:`weaver.build_bundle.executors.alias`.
-        """
-
-        source_path = self._local(source)
-        if not source_path.exists():
-            raise StoreError(f"cannot link to something that does not exist: {source.value}")
-        destination_path = self._local(destination)
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        if _is_link(destination_path):
-            if _is_junction(destination_path):
-                destination_path.rmdir()
-            else:
-                destination_path.unlink()
-        try:
-            destination_path.symlink_to(source_path, target_is_directory=source_path.is_dir())
-        except OSError as exc:
-            # Creating a Windows symlink normally needs Developer Mode or an
-            # elevated process. A directory junction has the shortcut semantics
-            # the emulator needs without either privilege: it follows the live
-            # source, resolves to it, and removing it leaves the source alone.
-            if _create_junction(source_path, destination_path, exc):
-                return
-            raise StoreError(
-                f"cannot link {destination.value} to {source.value}: {exc}"
-            ) from exc
-
 
 def _is_junction(path: Path) -> bool:
     check = getattr(path, "is_junction", None)
@@ -213,23 +176,3 @@ def _is_link(path: Path) -> bool:
     return path.is_symlink() or _is_junction(path)
 
 
-def _create_junction(source: Path, destination: Path, symlink_error: OSError) -> bool:
-    """Use a privilege-free Windows directory link when symlinks are denied."""
-
-    import os
-
-    if os.name != "nt" or not source.is_dir():
-        return False
-    try:
-        import _winapi
-
-        create = getattr(_winapi, "CreateJunction", None)
-        if create is None:
-            return False
-        create(str(source.resolve()), str(destination))
-        return True
-    except OSError as junction_error:
-        raise StoreError(
-            f"cannot link {destination} to {source}: symlink failed with "
-            f"{symlink_error}; junction failed with {junction_error}"
-        ) from junction_error

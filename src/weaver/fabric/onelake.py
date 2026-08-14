@@ -104,7 +104,7 @@ def browsable_url(location: Location, *, base_url: str = ONELAKE_DFS) -> str:
         https://app.fabric.microsoft.com/groups/<ws>/lakehouses/<item>
             ?selectedPath=Files%2F_%2FLog%2Fx.json
 
-    Anything that is not a OneLake location — the local emulator's filesystem
+    Anything that is not a OneLake location — an ordinary filesystem
     path — is returned unchanged, because a path is already the most useful
     thing a reader can be handed there.
     """

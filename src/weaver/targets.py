@@ -6,17 +6,14 @@ Weaver names things the way SQL does::
 
     4         3          2        1
 
-+-------+-------------------+-------------------------------+
-| Level | Fabric            | Local                         |
-+=======+===================+===============================+
-| 4     | workspace         | root directory                |
-| 3     | Lakehouse,        | subdirectory                  |
-|       | Warehouse,        |                               |
-|       | Environment       |                               |
-| 2     | schema            | schema directory              |
-| 1     | table, view,      | table or folder               |
-|       | folder, procedure |                               |
-+-------+-------------------+-------------------------------+
++-------+------------------------------------+
+| Level | Fabric                             |
++=======+====================================+
+| 4     | workspace                          |
+| 3     | Lakehouse, Warehouse, Environment  |
+| 2     | schema                             |
+| 1     | table, view, folder, procedure     |
++-------+------------------------------------+
 
 Level 4 is the only level written down in Workspace configuration. A level-3
 item is unique within its workspace, so it is named directly rather than
@@ -27,7 +24,7 @@ Levels 2 and 1 come from the object's own metadata (``Schema.Object``) and do
 not appear here.
 
 This module is pure identity. Nothing here resolves an item to a path, an ID or
-an endpoint — that is the local or Fabric resolver's job.
+an endpoint — that is the resolver's job.
 """
 
 from __future__ import annotations
