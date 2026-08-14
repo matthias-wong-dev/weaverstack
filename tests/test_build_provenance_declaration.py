@@ -48,6 +48,7 @@ from weaver.build_bundle import (
     plan_from_yaml,
     plan_to_yaml,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 PAYLOAD = b"create or alter procedure [_].[Load Sales.CustomerRevenue] as\nselect 1\n"
 SOURCE = "Warehouse/Reporting/Sales.CustomerRevenue.sql"
@@ -96,7 +97,7 @@ def test_the_key_is_absent_rather_than_null_when_there_is_no_source():
 def _plan(action: InstallAction) -> BuildPlan:
     target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
     return BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig-abc",

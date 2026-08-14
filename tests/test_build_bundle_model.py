@@ -34,6 +34,7 @@ from weaver.build_bundle import (
     write_bundle,
 )
 from weaver.errors import BuildError
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 
@@ -78,7 +79,7 @@ def _plan(bundle_id: str = "") -> BuildPlan:
         ),
     )
     return BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id=bundle_id,
         repository_name="MyRepo",
         repository_signature="sig-abc",

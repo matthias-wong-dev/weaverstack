@@ -26,6 +26,8 @@ TARGET_LAKEHOUSE = "Sales_LH"
 
 LAKEHOUSE_TYPE = "Lakehouse"
 WAREHOUSE_TYPE = "Warehouse"
+#: Fabric generates one of these per Lakehouse, sharing its display name.
+SQL_ENDPOINT_TYPE = "SQLEndpoint"
 
 
 def _identifier(kind: str, name: str) -> str:
@@ -79,6 +81,29 @@ class InventoryClient:
         self.requested.append(path)
         raise AssertionError(f"this inventory was not asked to answer {path!r}")
 
+    def request(self, method: str, path: str, **_):
+        """A write this inventory accepts and records, rather than performs.
+
+        The shape matches what the REST client returns — a response carrying
+        headers — because the caller reads an operation id off it.
+        """
+
+        self.requested.append(f"{method} {path}")
+        return _Response()
+
+    def wait_for_operation(self, response, **_):
+        return {"status": "Succeeded"}
+
+
+class _Response:
+    """The little of a REST response the resolver reads."""
+
+    status_code = 202
+    headers = {"x-ms-operation-id": "operation-for-a-test"}
+
+    def json(self):
+        return {"status": "Succeeded"}
+
 
 def given_workspace(
     *,
@@ -118,6 +143,9 @@ def given_resolver(
         else given_workspace(workspace=workspace)
     )
     items = [(LAKEHOUSE_TYPE, name) for name in lakehouses]
+    # A Lakehouse's generated endpoint shares its display name, which is why
+    # resolution is typed: the two are different items.
+    items += [(SQL_ENDPOINT_TYPE, name) for name in lakehouses]
     items += [(WAREHOUSE_TYPE, name) for name in warehouses]
     client = InventoryClient(configuration.workspace, items)
     if root is None:

@@ -21,6 +21,8 @@ from typing import Any
 from weaver.session import TestSession
 from weaver.workspaces import FabricWorkspace
 
+from .workspaces import TARGET_LAKEHOUSE, WEAVER_LAKEHOUSE
+
 #: Somewhere for a Session that will never reach a workspace to call home. Used
 #: where the claim is about installer semantics and the workspace is incidental.
 NOWHERE = FabricWorkspace(workspace="Demo", weaver_lakehouse="Weaver")
@@ -31,17 +33,37 @@ def given_session(
     workspace: Any = None,
     store: Any = None,
     resolver: Any = None,
+    lakehouses: Any = None,
+    warehouses: Any = (),
     spark_rows: Any = None,
     executes_here: bool = False,
 ) -> TestSession:
     """A Session around resources the caller owns and will close itself.
 
+    Without a resolver, one is built over an inventory this test declares —
+    never the real one, which would reach a tenant. ``lakehouses`` and
+    ``warehouses`` name what the workspace holds; a name outside them resolves
+    to nothing, exactly as it would in a workspace that does not hold it.
+
     ``spark_rows`` configures the rows one statement answers with, as
     ``{statement: rows}``, for the reads a build makes before it decides.
     """
 
+    resolved_workspace = workspace if workspace is not None else NOWHERE
+    if resolver is None:
+        from .workspaces import given_resolver
+
+        resolver = given_resolver(
+            workspace=resolved_workspace,
+            lakehouses=(
+                lakehouses
+                if lakehouses is not None
+                else (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE)
+            ),
+            warehouses=warehouses,
+        )
     session = TestSession(
-        workspace=workspace if workspace is not None else NOWHERE,
+        workspace=resolved_workspace,
         store=store,
         resolver=resolver,
         executes_here=executes_here,
@@ -57,6 +79,8 @@ def given_installer(
     store: Any = None,
     resolver: Any = None,
     executors: Any = None,
+    lakehouses: Any = None,
+    warehouses: Any = (),
     spark_rows: Any = None,
 ):
     """An Installer over :func:`given_session`, for an installer-semantics test."""
@@ -68,6 +92,8 @@ def given_installer(
             workspace=workspace,
             store=store,
             resolver=resolver,
+            lakehouses=lakehouses,
+            warehouses=warehouses,
             spark_rows=spark_rows,
         ),
         executors=executors,

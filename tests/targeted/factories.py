@@ -49,6 +49,7 @@ from weaver.etl import (
     load_schemas,
 )
 from support.workspaces import WORKSPACE
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 #: Neutral names, per the environment-neutrality rule: no product, workspace or
 #: tenant may be inferable from a fixture.
@@ -946,7 +947,7 @@ def single_action_bundle(
     if payload is not None and action.payload is not None:
         payloads[action.payload] = payload
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="weaver_items",
         repository_signature="repository-signature",
