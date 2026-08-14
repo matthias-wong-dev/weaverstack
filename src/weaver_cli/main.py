@@ -106,12 +106,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subcommands = parser.add_subparsers(dest="command", metavar="command")
 
-    doctor = subcommands.add_parser(
-        "doctor", help="Check whether this machine can run local Spark and Delta."
-    )
-    doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
-    doctor.set_defaults(handler=handle_doctor)
-
     shell = subcommands.add_parser(
         "session",
         help="Run multiple Weaver commands in one persistent session.",
@@ -280,7 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     # `--workspace-type local` that this command rejects two lines later is a
     # choice offered in order to refuse it.
     _add_workspace_args(
-        install, include_weaver_lakehouse=False, include_workspace_type=False
+        install, include_weaver_lakehouse=False
     )
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
@@ -477,31 +471,11 @@ def _add_workspace_args(
     parser: argparse.ArgumentParser,
     *,
     include_weaver_lakehouse: bool = True,
-    include_workspace_type: bool = True,
 ) -> None:
-    """Add the explicit values that a Workspace configuration can abbreviate.
+    """Add the explicit values that a Workspace configuration can abbreviate."""
 
-    ``include_workspace_type`` is off for commands that only mean anything
-    against Fabric. Offering a choice the handler rejects is worse than not
-    offering it: argparse accepts it, and the failure arrives later and reads
-    like a bug rather than a flag that was never applicable.
-    """
-
-    parser.add_argument(
-        "--workspace",
-        help=(
-            "Fabric Workspace name or local folder path"
-            if include_workspace_type
-            else "Fabric Workspace name"
-        ),
-    )
+    parser.add_argument("--workspace", help="Fabric Workspace name.")
     parser.add_argument("--workspace-config", help="Workspace configuration file.")
-    if include_workspace_type:
-        parser.add_argument(
-            "--workspace-type",
-            choices=("fabric", "local"),
-            help="Resource environment. Defaults to fabric.",
-        )
     parser.add_argument("--environment", help="Fabric Environment name.")
     if include_weaver_lakehouse:
         parser.add_argument("--weaver-lakehouse", help="Weaver Lakehouse name.")
@@ -550,15 +524,10 @@ def _prefer_desktop_credential() -> None:
 def _desktop_store(workspace):
     """The store a desktop command uses to reach a workspace.
 
-    Local is within-workspace; Fabric is cross-boundary, so the CLI constructs the
+    Reaching into Fabric is a crossing, so the CLI constructs the
     OneLakeDfsClient here — core never turns a FabricWorkspace into a DFS client.
     """
 
-    from weaver.workspaces import LocalWorkspace
-    from weaver.store import FilesystemStore
-
-    if isinstance(workspace, LocalWorkspace):
-        return FilesystemStore()
     from weaver.fabric import OneLakeDfsClient
 
     return OneLakeDfsClient()
@@ -579,7 +548,6 @@ def _resolve_workspace(args: argparse.Namespace):
     """
 
     from weaver.config import resolve_workspace
-    from weaver.workspaces import LocalWorkspace
 
     inherited = getattr(getattr(args, "session", None), "workspace", None)
     if inherited is not None and args.workspace is None and args.workspace_config is None:
@@ -587,14 +555,12 @@ def _resolve_workspace(args: argparse.Namespace):
     else:
         workspace = resolve_workspace(
             workspace=args.workspace,
-            workspace_type=getattr(args, "workspace_type", None),
             environment=args.environment,
             weaver_lakehouse=getattr(args, "weaver_lakehouse", None),
             workspace_config=args.workspace_config,
         )
 
-    if not isinstance(workspace, LocalWorkspace):
-        _prefer_desktop_credential()
+    _prefer_desktop_credential()
     return workspace
 
 
@@ -606,12 +572,6 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
     from weaver.errors import CommandError
     from weaver.targets import ItemRef
 
-    wanted_type = getattr(args, "workspace_type", None)
-    if wanted_type is not None and wanted_type != workspace.workspace_type:
-        raise CommandError(
-            f"this session addresses a {workspace.workspace_type} workspace; "
-            f"name a --workspace to use a {wanted_type} one"
-        )
 
     overrides = {}
     if getattr(args, "environment", None) is not None:
@@ -879,12 +839,9 @@ def _run_load(
     """
 
     from weaver.session.host import use_or_create_session
-    from weaver.workspaces import LocalWorkspace
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not isinstance(workspace, LocalWorkspace) and not opened.executes_here(
-            workspace
-        ):
+        if not opened.executes_here(workspace):
             _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.load(
             list(targets),
@@ -1021,12 +978,9 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
     """
 
     from weaver.session.host import use_or_create_session
-    from weaver.workspaces import LocalWorkspace
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not isinstance(workspace, LocalWorkspace) and not opened.executes_here(
-            workspace
-        ):
+        if not opened.executes_here(workspace):
             _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.test(
             list(targets),
@@ -1175,43 +1129,6 @@ def _build_once(args: argparse.Namespace) -> int:
 def _indented(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line if line else line for line in text.splitlines())
 
-
-def handle_doctor(args: argparse.Namespace) -> int:
-    """Report what a local build and load needs, and what is missing.
-
-    None of it is required to use Weaver on Fabric. It matters for local
-    development, where a missing JDK otherwise surfaces as a Java stack trace.
-    """
-
-    from weaver.diagnostics import check_local_spark, platform_summary
-
-    report = check_local_spark()
-
-    if args.json:
-        import json
-
-        print(json.dumps(report.as_dict(), indent=2))
-        return 0 if report.ok else 1
-
-    print(f"local Spark and Delta on {platform_summary()}\n")
-    for check in report.checks:
-        print(f"  {check}")
-    if report.ok:
-        print("\nReady. Run the local tests with:  pytest -m spark")
-        return 0
-    print()
-    for hint in report.hints:
-        # Keep diagnostics printable by legacy Windows consoles whose default
-        # CP-1252 encoding cannot represent the Unicode arrow.
-        print(f"  -> {hint}")
-    # A non-zero status keeps this usable as a gate in a script, but on its own
-    # it reads as "your installation is broken" to someone who never wanted
-    # local Spark. Say plainly that it is optional.
-    print(
-        "\nThis reports local Spark only. Weaver on Fabric needs none of it —\n"
-        "wipe, install and capacity work without a JVM."
-    )
-    return 1
 
 
 def main(argv: list[str] | None = None) -> int:

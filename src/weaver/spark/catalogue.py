@@ -1,14 +1,12 @@
-"""Catalogue operations against one Spark destination.
+"""Catalogue operations against one Fabric Lakehouse.
 
 Every operation is a statement returning rows, so this needs a way to run Spark
-SQL rather than a session of its own. In a session that is ``spark.sql``; from a
-desktop it is the Session's Spark SQL capability, and the statements cross while
-the reading stays here.
+SQL rather than a session of its own. In a Fabric session that is ``spark.sql``;
+from a desktop it is the Session's Spark SQL capability, and the statements
+cross while the reading stays here.
 
-Each operation qualifies the destination rather than relying on the attached
-catalogue. Schema discovery reads the destination's ``Tables/`` area because
-Fabric cannot list schemas for an arbitrary Lakehouse. Naming alone is
-:class:`~weaver.spark.naming.SparkNaming`, which needs neither.
+Each operation names its target in full rather than relying on the attached
+catalogue.
 """
 
 from __future__ import annotations
@@ -16,14 +14,13 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InstallError
-from .destination import SparkDestination
-from .naming import SparkNaming
+from .target import FabricSparkTarget
 
 
 class SparkCatalogue:
     """Catalogue operations against one logical Spark destination."""
 
-    def __init__(self, spark: Any, destination: SparkDestination) -> None:
+    def __init__(self, spark: Any, destination: FabricSparkTarget) -> None:
         if spark is None:
             raise InstallError(
                 f"a Spark session is needed to reach {destination.item!r}, "
@@ -31,17 +28,10 @@ class SparkCatalogue:
             )
         self.spark = spark
         self.destination = destination
-        self.names = SparkNaming(destination)
         self._run = _session_runner(spark)
-        if destination.case_sensitive_analysis:
-            # A session that was not built as an emulator session still needs
-            # the emulator's policy.
-            from .session import apply_emulator_analysis_policy
-
-            apply_emulator_analysis_policy(spark)
 
     @classmethod
-    def over_sql(cls, run_sql, destination: SparkDestination) -> "SparkCatalogue":
+    def over_sql(cls, run_sql, destination: FabricSparkTarget) -> "SparkCatalogue":
         """A catalogue reached by running statements, with no session here.
 
         ``run_sql(statement)`` returns the statement's rows as dictionaries —
@@ -52,29 +42,23 @@ class SparkCatalogue:
         catalogue = cls.__new__(cls)
         catalogue.spark = None
         catalogue.destination = destination
-        catalogue.names = SparkNaming(destination)
         catalogue._run = run_sql
         return catalogue
 
     # --- naming -----------------------------------------------------------
 
     def qualify(self, schema: str, name: str) -> str:
-        return self.names.qualify(schema, name)
+        return self.destination.qualify(schema, name)
 
     def qualified_schema(self, schema: str) -> str:
-        return self.names.qualified_schema(schema)
-
-    def expand(self, statement: str) -> str:
-        """One payload's object tokens, resolved to this destination."""
-
-        return self.names.expand(statement)
+        return self.destination.qualified_schema(schema)
 
     # --- execution ---------------------------------------------------------
 
     def sql(self, statement: str) -> list[dict]:
-        """Run one statement here, with its object tokens resolved first."""
+        """Run one statement already addressed to this target."""
 
-        return self._run(self.expand(statement))
+        return self._run(statement)
 
     def rows(self, statement: str) -> list[dict]:
         """Run one statement already addressed to this destination."""
@@ -86,7 +70,7 @@ class SparkCatalogue:
     def create_schema(self, schema: str, *, if_not_exists: bool = True) -> str:
         """Create a schema in this destination, and return the statement run."""
 
-        statement = self.names.create_schema_statement(
+        statement = self.destination.create_schema_statement(
             schema, if_not_exists=if_not_exists
         )
         self._run(statement)
@@ -218,32 +202,3 @@ def is_absent(exception: Exception) -> bool:
         or "NoSuchTableException" in type(exception).__name__
     )
 
-
-def drop_local_destination_catalogue(
-    spark: Any, destination: SparkDestination
-) -> tuple[str, ...]:
-    """Forget every namespace folded beneath one emulated Lakehouse.
-
-    Local CLI sessions use a persistent metastore so a later process can see
-    what ``initialise`` and ``build`` registered. A local wipe must therefore
-    clear catalogue registrations as well as the Fabric-shaped filesystem tree;
-    Fabric performs that bookkeeping itself when its Lakehouse storage is
-    emptied and never calls this emulator-only primitive.
-    """
-
-    if destination.namespace or not destination.schema_prefix:
-        raise InstallError("local catalogue cleanup needs a folded local destination")
-    rows = spark.sql("SHOW DATABASES").collect()
-    prefix = destination.schema_prefix.casefold()
-    schemas = []
-    for row in rows:
-        data = row.asDict() if hasattr(row, "asDict") else {}
-        name = data.get("namespace") or data.get("databaseName") or data.get("schemaName")
-        if name and str(name).casefold().startswith(prefix):
-            schemas.append(str(name))
-    statements = []
-    for schema in sorted(schemas, key=str.casefold):
-        statement = f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema[len(destination.schema_prefix):])} CASCADE"
-        spark.sql(statement)
-        statements.append(statement)
-    return tuple(statements)

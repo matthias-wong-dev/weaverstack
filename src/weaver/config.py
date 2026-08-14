@@ -8,19 +8,14 @@ from typing import Any
 from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .workspaces import (
-    FABRIC,
-    LOCAL,
-    WORKSPACE_TYPES,
     ExecutionSettings,
     FabricWorkspace,
-    LocalWorkspace,
     TargetDeclaration,
     Workspace,
 )
 
 _KEYS = {
     "workspace",
-    "workspace_type",
     "environment",
     "weaver_lakehouse",
     "execution",
@@ -30,7 +25,7 @@ _KEYS = {
 
 
 def load_workspace(path: str | Path) -> Workspace:
-    """Load one Workspace file; local paths resolve beside that file."""
+    """Load one Workspace file."""
 
     import yaml
 
@@ -54,36 +49,23 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
     if "workspace" not in payload:
         raise ConfigError("Workspace configuration must define 'workspace'")
 
-    workspace_type = payload.get("workspace_type", FABRIC)
-    if workspace_type not in WORKSPACE_TYPES:
-        raise ConfigError(
-            "workspace_type must be one of "
-            f"{', '.join(WORKSPACE_TYPES)}, got {workspace_type!r}"
-        )
-
-    workspace_value = payload["workspace"]
-    if workspace_type == LOCAL:
-        workspace_value = _local_path(workspace_value, base_dir)
-
     common = {
-        "workspace": workspace_value,
+        "workspace": payload["workspace"],
         "environment": payload.get("environment"),
         "weaver_lakehouse": payload.get("weaver_lakehouse"),
         "execution": _execution(payload.get("execution"), where="execution"),
         "lakehouses": _targets(payload.get("lakehouses"), item_type=LAKEHOUSE),
         "warehouses": _targets(payload.get("warehouses"), item_type=WAREHOUSE),
     }
-    workspace_class = LocalWorkspace if workspace_type == LOCAL else FabricWorkspace
     try:
-        return workspace_class(**common)
+        return FabricWorkspace(**common)
     except TypeError as exc:
         raise ConfigError(f"Workspace configuration is incomplete: {exc}") from exc
 
 
 def resolve_workspace(
     *,
-    workspace: str | Path | None = None,
-    workspace_type: str | None = None,
+    workspace: str | None = None,
     environment: str | None = None,
     weaver_lakehouse: str | None = None,
     workspace_config: str | Path | None = None,
@@ -91,14 +73,6 @@ def resolve_workspace(
     """Apply CLI-over-configuration precedence and return one Workspace."""
 
     configured = load_workspace(workspace_config) if workspace_config else None
-    resolved_type = workspace_type or (
-        configured.workspace_type if configured is not None else FABRIC
-    )
-    if resolved_type not in WORKSPACE_TYPES:
-        raise ConfigError(
-            "workspace_type must be one of "
-            f"{', '.join(WORKSPACE_TYPES)}, got {resolved_type!r}"
-        )
     resolved_identity = workspace if workspace is not None else (
         configured.workspace if configured is not None else None
     )
@@ -121,16 +95,8 @@ def resolve_workspace(
         "lakehouses": configured.lakehouses if configured is not None else {},
         "warehouses": configured.warehouses if configured is not None else {},
     }
-    return (LocalWorkspace if resolved_type == LOCAL else FabricWorkspace)(**common)
+    return FabricWorkspace(**common)
 
-
-def _local_path(value: Any, base_dir: str | Path | None) -> Path:
-    if not isinstance(value, (str, Path)) or not str(value).strip():
-        raise ConfigError("A local Workspace must be a non-empty folder path.")
-    path = Path(str(value).strip()).expanduser()
-    if not path.is_absolute() and base_dir is not None:
-        path = Path(base_dir) / path
-    return path
 
 
 def _execution(raw: Any, *, where: str) -> ExecutionSettings:

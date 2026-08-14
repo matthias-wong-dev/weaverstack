@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
-from ..workspaces import FabricWorkspace, LocalWorkspace, Workspace
+from ..workspaces import FabricWorkspace, Workspace
 from .base import TASK, Session, WorkspaceScope, run_spark_statements
 from .program import RemoteProgram
 from .resources import Resource
@@ -483,18 +483,6 @@ class ConsoleScope(WorkspaceScope):
                     release=lambda session: session.close(),
                 )
             )
-            self.local_spark: Resource | None = None
-        elif isinstance(workspace, LocalWorkspace):
-            self.auth = None
-            self.livy = None
-            self.local_spark = self.track(
-                self._given_or_acquired(
-                    "spark",
-                    None if spark is None else (spark, lambda *exc: None),
-                    self._acquire_local_spark,
-                    release=lambda opened: opened[1](None, None, None),
-                )
-            )
         else:
             raise CommandError(
                 f"a console session cannot address a {type(workspace).__name__}"
@@ -526,11 +514,10 @@ class ConsoleScope(WorkspaceScope):
     def executes_here(self) -> bool:
         """Whether the data engineering happens in this process.
 
-        True for the local emulator, where the console *is* the host. False for
-        Fabric, where the console prepares and crosses.
+        Always False for a console: it prepares work and crosses into Fabric.
         """
 
-        return self.local_spark is not None
+        return False
 
     def warm(self, required=None) -> "WarmUp":
         """Start acquiring what the next command will probably want, and say what.
@@ -569,14 +556,6 @@ class ConsoleScope(WorkspaceScope):
                         "--environment, or set one in workspace configuration",
                     )
                 )
-        if self.local_spark is not None and asked(LIVY):
-            # The JVM is the largest fixed cost of every local command, so the
-            # emulator gets the same treatment as Livy. Declared as Livy too:
-            # what a command needs is *Spark*, and which one it gets is the
-            # host's business rather than the caller's.
-            self.local_spark.start(speculative=True)
-            started.append("local Spark session")
-
         return WarmUp(started=tuple(started), skipped=tuple(skipped))
 
     # --- resolution ---------------------------------------------------------
@@ -654,18 +633,10 @@ class ConsoleScope(WorkspaceScope):
     # --- Spark --------------------------------------------------------------
 
     def spark(self):
-        if self.local_spark is None:
-            raise CommandError(
-                "a console reaching into Fabric has no Spark session of its "
-                "own; cross with execute_python instead"
-            )
-        return self.local_spark.get()[0]
-
-    def _acquire_local_spark(self):
-        from ..spark import local_delta_session
-
-        opened = local_delta_session(self.workspace)
-        return (opened.__enter__(), opened.__exit__)
+        raise CommandError(
+            "a console reaching into Fabric has no Spark session of its own; "
+            "cross with execute_spark_sql or execute_python instead"
+        )
 
     # --- Livy ---------------------------------------------------------------
 

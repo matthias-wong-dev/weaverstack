@@ -18,7 +18,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 from ..errors import CommandError
 from ..targets import ItemRef
-from ..workspaces import FabricWorkspace, LocalWorkspace, Workspace
+from ..workspaces import FabricWorkspace, Workspace
 from .resources import Resource
 from .telemetry import SessionTelemetry
 
@@ -32,7 +32,6 @@ def workspace_context(workspace: Workspace) -> tuple:
     """
 
     return (
-        workspace.workspace_type,
         str(workspace.workspace),
         workspace.weaver_lakehouse,
         workspace.environment,
@@ -614,10 +613,6 @@ def is_fabric(workspace: Workspace) -> bool:
     return isinstance(workspace, FabricWorkspace)
 
 
-def is_local(workspace: Workspace) -> bool:
-    return isinstance(workspace, LocalWorkspace)
-
-
 __all__ = [
     "ACROSS_BOUNDARY",
     "IN_SESSION",
@@ -629,7 +624,6 @@ __all__ = [
     "Session",
     "WorkspaceScope",
     "is_fabric",
-    "is_local",
     "run_spark_statements",
     "workspace_context",
 ]

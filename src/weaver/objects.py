@@ -169,7 +169,7 @@ class Folder(WeaverObject):
     def _staging_path(self) -> Path:
         """Where staging goes: the destination's own path, with a suffix.
 
-        The same sibling :meth:`weaver.resolution.LocalResolver.folder_staging`
+        The same sibling ``folder_staging`` the resolver exposes
         issues.
         """
 

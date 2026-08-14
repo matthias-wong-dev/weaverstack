@@ -204,6 +204,24 @@ def rewrite_sql_references(sql_text: str, rewrite) -> str:
     return sql_text
 
 
+def address_managed_references(sql_text: str, destination) -> str:
+    """One body with every managed reference named as ``destination`` spells it.
+
+    Only ordinary two-part references are rewritten, and that is exactly the set
+    the reader guarantees resolves inside the repository. What is left over is
+    outside it — a physically-qualified name, or a table-valued function — and
+    is the author naming something Weaver does not manage.
+    """
+
+    def rewrite(reference):
+        object_id = reference.object_id
+        if object_id is None:
+            return None
+        return destination.qualify(object_id.schema, object_id.object)
+
+    return rewrite_sql_references(sql_text, rewrite)
+
+
 def locate_sql_references(sql_text: str) -> tuple[LocatedReference, ...]:
     """Every relation reference in a SQL body, in order, with its span.
 

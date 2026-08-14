@@ -45,17 +45,16 @@ class SparkSqlBatchExecutor:
             raise InstallError(
                 f"spark_sql_batch action {action.id!r} must contain SQL strings"
             )
-        names = context.names
         # The epoch first: it is scoped to this installation rather than to a
         # destination, and ``expand`` rejects every token it does not itself
         # resolve — so one left behind here would be reported as an unresolvable
         # name instead of quietly reaching the engine.
         resolved = [
-            names.expand(substitute_epoch(statement.strip(), context.epoch))
+            substitute_epoch(statement.strip(), context.epoch)
             for statement in statements
         ]
-        context.spark_sql_batch(resolved, exact_case=names.exact_case)
+        context.spark_sql_batch(resolved, exact_case=True)
         return {
-            "destination": names.destination.item,
+            "destination": context.destination.item,
             "statement_count": len(statements),
         }

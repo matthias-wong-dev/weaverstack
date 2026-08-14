@@ -64,7 +64,7 @@ class GeneratedLoad:
     extension: str
 
 
-def generate_load(document: "SourceDocument") -> GeneratedLoad:
+def generate_load(document: "SourceDocument", *, destination=None) -> GeneratedLoad:
     """The installable load payload for one validated source.
 
     Only a table has one. A Folder's load is its authored module and a View has
@@ -79,7 +79,7 @@ def generate_load(document: "SourceDocument") -> GeneratedLoad:
     if document.language == SQL:
         return _tsql_load(document)
     if document.language == SPARK_SQL:
-        return _spark_load(document)
+        return _spark_load(document, destination)
     raise NotImplementedError(
         f"{document.relative_path}: a {document.language} table's load is its "
         "authored module, which is deployed rather than generated"
@@ -109,7 +109,7 @@ def _tsql_load(document: "SourceDocument") -> GeneratedLoad:
     )
 
 
-def _spark_load(document: "SourceDocument") -> GeneratedLoad:
+def _spark_load(document: "SourceDocument", destination) -> GeneratedLoad:
     from .metadata import extract_sql_metadata_and_body
     from .spark_sql_module import addressed, render_spark_sql_module
 
@@ -121,7 +121,7 @@ def _spark_load(document: "SourceDocument") -> GeneratedLoad:
     content = render_spark_sql_module(
         document.document,
         header=header,
-        body=addressed((document.sql_body or "").strip()),
+        body=addressed((document.sql_body or "").strip(), destination),
         source_name=document.relative_path.rpartition("/")[2],
     )
     return GeneratedLoad(

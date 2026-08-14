@@ -23,7 +23,7 @@ from .locations import Location
 from .resolution import resolver_for
 from .store import FilesystemStore, Store
 from .targets import ItemRef
-from .workspaces import FabricWorkspace, LocalWorkspace
+from .workspaces import FabricWorkspace
 
 
 @dataclass(frozen=True)
@@ -74,20 +74,6 @@ def prepare_weaver_lakehouse(
     if not workspace.weaver_lakehouse:
         raise CommandError("initialise requires a configured Weaver Lakehouse")
     name = workspace.weaver_lakehouse
-    if isinstance(workspace, LocalWorkspace):
-        from .store import FilesystemStore
-
-        store = store or FilesystemStore()
-        resolver = resolver_for(workspace)
-        existed = store.exists(resolver.weaver_lakehouse)
-        if existed and not exists_ok:
-            raise CommandError(
-                f"Weaver Lakehouse {name!r} already exists; pass --exists-ok"
-            )
-        store.make_directory(resolver.files_root(ItemRef(name)))
-        store.make_directory(resolver.tables_root(ItemRef(name)))
-        return PreparedWeaverLakehouse(str(workspace.workspace), name, not existed)
-
     if isinstance(workspace, FabricWorkspace):
         from .fabric.resources import (
             LAKEHOUSE,

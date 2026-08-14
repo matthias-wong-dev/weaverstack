@@ -7,8 +7,7 @@ Delta load or validation runtime.
 from __future__ import annotations
 
 from ..objects import CLASS_ID_SEPARATOR
-from ..spark.tokens import object_token
-from .dependencies import rewrite_sql_references
+from .dependencies import address_managed_references
 from .metadata import ASSUMPTION, TABLE, TEST, ObjectId, SesDocument
 
 #: The first line of every generated module. A comment, so it sits above the
@@ -86,21 +85,14 @@ def render_spark_sql_module(
     )
 
 
-def addressed(body: str) -> str:
+def addressed(body: str, destination) -> str:
     """Name every managed reference in the program, as the build payloads do.
 
-    A token rather than a resolved name, because a bundle must generate the same
-    bytes wherever it is built. The installer resolves them as it writes the
-    module down, which is the moment the destination is known.
+    The deployed module carries final Fabric names, so opening it shows exactly
+    what it reads and writes.
     """
 
-    def rewrite(reference):
-        object_id = reference.object_id
-        if object_id is None:
-            return None
-        return object_token(object_id.schema, object_id.object)
-
-    return rewrite_sql_references(body, rewrite)
+    return address_managed_references(body, destination)
 
 
 def python_string(text: str) -> str:

@@ -37,7 +37,7 @@ from .targets import (
     parse_physical_target,
     physical_item,
 )
-from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
+from .workspaces import FabricWorkspace, Workspace
 
 #: The task type this operation writes evidence under.
 TASK_TYPE = "load"
@@ -105,12 +105,6 @@ def load(
             "load needs a Weaver control Lakehouse: pass weaver_lakehouse=, "
             "give one in workspace configuration, or run inside a Fabric "
             "notebook with one attached as the default Lakehouse"
-        )
-    if isinstance(resolved_workspace, LocalWorkspace) and any(
-        isinstance(target, WarehouseTarget) for target in requested
-    ):
-        raise CommandError(
-            "Warehouse targets require a Fabric Workspace; the local emulator has no SQL"
         )
 
     from .session.host import use_or_create_session

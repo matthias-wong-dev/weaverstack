@@ -11,13 +11,13 @@ from ..catalogue.reconcile import publish
 from ..catalogue.render import InstallationScope, identifier, literal
 from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.tables import (
+    CATALOGUE_SCHEMA,
     DICTIONARY_TABLES,
     INSTALLATION,
     REGISTRY,
     CatalogueTable,
 )
 from ..declaration.model import WeaverDocumentId
-from ..spark.tokens import object_token
 from .models import (
     DELETE_CATALOGUE_CLAIMS,
     PUBLISH_CATALOGUE,
@@ -57,7 +57,9 @@ def collect_claims(
     return tuple(dict.fromkeys(claims))
 
 
-def _claim_statements(claims: Iterable[CatalogueClaim]) -> tuple[str, ...]:
+def _claim_statements(
+    claims: Iterable[CatalogueClaim], destination
+) -> tuple[str, ...]:
     grouped: dict[tuple[CatalogueTable, object], set[WeaverDocumentId]] = defaultdict(set)
     for claim in claims:
         grouped[(claim.rule.table, claim.identity.item)].add(claim.identity)
@@ -94,7 +96,8 @@ def _claim_statements(claims: Iterable[CatalogueClaim]) -> tuple[str, ...]:
                     + ")"
                 )
             statements.append(
-                f"DELETE FROM {object_token('_', table.name)}\n"
+                f"DELETE FROM "
+                f"{destination.qualify(CATALOGUE_SCHEMA, table.name)}\n"
                 f"WHERE {scope.predicate}\n  AND ("
                 + "\n    OR ".join(predicates)
                 + ")"
@@ -147,6 +150,7 @@ def render_catalogue_before_build(
     identities: Iterable[WeaverDocumentId],
     *,
     control_target,
+    control_destination,
     stale_claims: Iterable[CatalogueClaim] = (),
 ) -> PlannedStage | None:
     claims = collect_claims(catalogue, identities, stale_claims=stale_claims)
@@ -155,7 +159,7 @@ def render_catalogue_before_build(
         slug="catalogue-before-build",
         description="reconcile and remove catalogue claims before physical work",
         kind=DELETE_CATALOGUE_CLAIMS,
-        statements=_claim_statements(claims),
+        statements=_claim_statements(claims, control_destination),
         control_target=control_target,
     )
 
@@ -240,6 +244,7 @@ def render_catalogue_after_build(
     target_by_item: Mapping,
     *,
     control_target,
+    control_destination,
     current: Catalogue | None = None,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
@@ -256,7 +261,9 @@ def render_catalogue_after_build(
     # The publication is a genuine diff against what is persisted: a table whose
     # rows are all unchanged produces no statement, so an identical second build
     # appends nothing here and the endpoint refresh below is not reached.
-    publication = publish(current or Catalogue(rows={}), desired)
+    publication = publish(
+        current or Catalogue(rows={}), desired, destination=control_destination
+    )
 
     # Registry last, in its own barrier — taken from the structure rather than
     # recovered from the SQL, so the ordering invariant is carried by the type

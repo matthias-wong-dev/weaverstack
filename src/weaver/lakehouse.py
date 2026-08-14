@@ -13,7 +13,7 @@ from typing import Any
 from .errors import LoadError
 from .locations import LakehouseSparkLocation
 from .resolution import TABLES_AREA
-from .spark.destination import SparkDestination
+from .spark import FabricSparkTarget, identifier
 from .targets import FILES_AREA, ItemRef
 
 #: The Spark-facing root of a Fabric item. The same template as
@@ -50,7 +50,7 @@ class Lakehouse:
 
     name: str
     spark_root: str
-    destination: SparkDestination | None = None
+    destination: "FabricSparkTarget | AttachedLakehouse | None" = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "spark_root", _root(self.spark_root, what="root"))
@@ -131,6 +131,29 @@ class Lakehouse:
         return f"{self.name} ({self.spark_root})"
 
 
+@dataclass(frozen=True)
+class AttachedLakehouse:
+    """Two-part naming for the Lakehouse this session already has attached.
+
+    The one exception to naming every destination in full, and it is bounded by
+    the same rule: here the session's catalogue *is* the destination, so
+    ``Schema.Object`` resolves to this Lakehouse and nowhere else. Every other
+    destination carries a :class:`~weaver.spark.FabricSparkTarget`.
+    """
+
+    lakehouse: str
+
+    @property
+    def item(self) -> str:
+        return self.lakehouse
+
+    def qualified_schema(self, schema: str) -> str:
+        return identifier(schema)
+
+    def qualify(self, schema: str, name: str) -> str:
+        return f"{identifier(schema)}.{identifier(name)}"
+
+
 def lakehouse_for(resolver: Any, item: ItemRef | str) -> Lakehouse:
     """Resolve a Lakehouse by name, through a workspace resolver.
 
@@ -185,7 +208,7 @@ def default_lakehouse(spark: Any) -> Lakehouse:
         spark_root=_ABFSS_ROOT.format(workspace=workspace, item=item),
         # The one place plain two-part naming is correct: this Lakehouse *is* what
         # the session is attached to, so its catalogue is the session's own.
-        destination=SparkDestination(item=name or item),
+        destination=AttachedLakehouse(lakehouse=name or item),
     )
 
 

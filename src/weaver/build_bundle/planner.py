@@ -142,6 +142,7 @@ def generate_item_build_bundle(
     removed = set(registered) - selected_ids
 
     control_target = _control_target(control_lakehouse, targets)
+    control_destination = control_target.spark_target
     if all(target.id != control_target.id for target in targets):
         targets = targets + (control_target,)
 
@@ -161,6 +162,7 @@ def generate_item_build_bundle(
         catalogue,
         removed | selected_for_drop,
         control_target=control_target,
+        control_destination=control_destination,
         stale_claims=stale_claims,
     )
     if catalogue_before is not None:
@@ -199,6 +201,7 @@ def generate_item_build_bundle(
             selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
+            control_destination=control_destination,
             # The catalogue as the claim deletions above will leave it, not as
             # it was read — see `without_claims`.
             current=catalogue_after_deletions,
@@ -367,7 +370,11 @@ def plan_item_build(
     # selection just chose to keep. Load artefacts are treated the same way, and
     # the stage derives them itself.
     prune = item_prune_stage(
-        repository, selected_documents, item=item, target=target, inventory=inventory
+        repository,
+        selected_documents,
+        item=item,
+        target=target,
+        inventory=inventory,
     )
     if prune is not None:
         stages.append(prune)

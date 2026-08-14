@@ -54,7 +54,11 @@ def plan_unbind(
     # pass per installation: a DELETE costs a Delta transaction whether it
     # removes one row or all of them, so the statement count is the cost.
     statements = (
-        prune_installation(InstallationScopes(tuple(scopes))) if scopes else ()
+        prune_installation(
+            InstallationScopes(tuple(scopes)), destination=catalogue.destination
+        )
+        if scopes
+        else ()
     )
     targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
     return UnbindResult(

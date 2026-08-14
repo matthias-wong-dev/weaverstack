@@ -152,13 +152,19 @@ def runtime_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ..
 
 
 def item_runtime_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
-    """One item's runnable artefacts, loads and validations alike."""
+    """One item's runnable artefacts, loads and validations alike.
 
-    return item_load_artefacts(repository, item=item) + item_validation_artefacts(
-        repository, item=item
-    )
+    ``destination`` addresses the managed names inside a generated module, and
+    is needed only where the payload is used. An identity or a signature is the
+    same whatever the item is bound to, so a caller reading those alone passes
+    none.
+    """
+
+    return item_load_artefacts(
+        repository, item=item, destination=destination
+    ) + item_validation_artefacts(repository, item=item, destination=destination)
 
 
 def load_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ...]:
@@ -180,7 +186,7 @@ def validation_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact,
 
 
 def item_validation_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's validation artefacts, derived from what it declares.
 
@@ -222,7 +228,7 @@ def item_validation_artefacts(
             )
             continue
 
-        generated = source.create_validation()
+        generated = source.create_validation(destination=destination)
         artefacts.append(
             RuntimeArtefact(
                 identity=validation_artefact_id(item, kind, identity.object_id),
@@ -240,7 +246,7 @@ def item_validation_artefacts(
 
 
 def item_load_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's load artefacts, derived from what it declares.
 
@@ -253,7 +259,7 @@ def item_load_artefacts(
         return ()
     if item.item_type == WAREHOUSE:
         return _warehouse_artefacts(repository, item=item)
-    return _lakehouse_artefacts(repository, item=item)
+    return _lakehouse_artefacts(repository, item=item, destination=destination)
 
 
 def _warehouse_artefacts(
@@ -282,7 +288,7 @@ def _warehouse_artefacts(
 
 
 def _lakehouse_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
     """The deployed Python tree, plus one generated file per Spark SQL table."""
 
@@ -311,7 +317,7 @@ def _lakehouse_artefacts(
                 )
             )
         elif source.language == SPARK_SQL and source.kind == TABLE:
-            generated = source.create_load()
+            generated = source.create_load(destination=destination)
             artefacts.append(
                 _file_artefact(
                     item,

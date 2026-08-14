@@ -37,14 +37,13 @@ from ..store import Store
 from .models import DELETE_FILE, OMISSION_REASONS, BuildPlan
 
 #: The only bundle format this code writes and accepts.
-SUPPORTED_FORMAT_VERSION = 1
+SUPPORTED_FORMAT_VERSION = 2
 
 PLAN_FILENAME = "plan.yml"
 PAYLOAD_DIR = "payload"
 
 SPARK_SQL_EXECUTOR = "spark_sql"
 SPARK_SQL_BATCH_EXECUTOR = "spark_sql_batch"
-SPARK_SCHEMA_EXECUTOR = "spark_schema"
 SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
 TSQL_BATCH_EXECUTOR = "tsql_batch"
@@ -52,10 +51,9 @@ FOLDER_EXECUTOR = "folder"
 ALIAS_EXECUTOR = "alias"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 LOAD_FILE_EXECUTOR = "load_file"
-#: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
-#: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
-#: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
-#: is a resolved path and so cannot be frozen; ``spark_table`` completes a Spark
+#: Executors a bundle may carry. ``spark_sql`` runs one finished statement — a
+#: create, a ``CREATE SCHEMA`` or a frozen prune ``DROP``; ``spark_sql_batch``
+#: runs ordered catalogue DML as one action; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
 #: ordered array of them, each as its own batch; ``folder`` makes or removes a
@@ -64,7 +62,6 @@ VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
         SPARK_SQL_BATCH_EXECUTOR,
-        SPARK_SCHEMA_EXECUTOR,
         SPARK_TABLE_EXECUTOR,
         TSQL_EXECUTOR,
         TSQL_BATCH_EXECUTOR,
@@ -80,7 +77,6 @@ VALID_EXECUTORS = frozenset(
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
-    SPARK_SCHEMA_EXECUTOR: ".schema.json",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",

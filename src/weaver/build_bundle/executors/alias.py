@@ -64,28 +64,25 @@ class AliasExecutor:
             return {"aliases": []}
 
         shortcut = getattr(context.resolver, "create_onelake_shortcut", None)
-        link = getattr(context.store, "link", None)
-        if shortcut is None and link is None:
+        if shortcut is None:
             raise InstallError(
                 f"alias action {action.id!r} cannot be materialised here: this "
-                "environment offers neither a OneLake shortcut nor a store link"
+                "environment offers no way to create a OneLake shortcut"
             )
 
-        made = []
-        for each in frozen:
-            source = context.resolved(each["source_target_id"])
-            if shortcut is not None:
-                made.append(self._shortcut(shortcut, each, context, source))
-            else:
-                made.append(self._link(link, each, context, source))
+        made = [
+            self._shortcut(
+                shortcut, each, context, context.resolved(each["source_target_id"])
+            )
+            for each in frozen
+        ]
 
         details: dict[str, Any] = {"aliases": made}
         # Every shortcut is created before anything waits, so the cost is one
         # discovery window rather than one per alias.
-        if shortcut is not None:
-            waited = self._await_addressable(context, frozen)
-            if waited is not None:
-                details["addressable_after_seconds"] = waited
+        waited = self._await_addressable(context, frozen)
+        if waited is not None:
+            details["addressable_after_seconds"] = waited
         return details
 
     def _shortcut(self, shortcut, frozen: dict, context, source) -> dict:
@@ -102,33 +99,6 @@ class AliasExecutor:
         )
         return {"alias": frozen["alias"], "source": frozen["source"], **(made or {})}
 
-    def _link(self, link, frozen: dict, context, source) -> dict:
-        destination = _location(context.target, frozen, context, source=False)
-        producer = _location(source, frozen, context, source=True)
-        if not context.store.exists(producer):
-            raise InstallError(
-                f"alias {frozen['alias']} has no source to point at: "
-                f"{producer.value} does not exist"
-            )
-        if context.store.exists(destination):
-            context.store.delete(destination, recursive=True)
-        link(producer, destination)
-        made = {
-            "alias": frozen["alias"],
-            "source": frozen["source"],
-            "linked": destination.value,
-            "to": producer.value,
-        }
-        if frozen["area"] != FILES_AREA:
-            # A link the catalogue does not know about is a name no statement
-            # could reach, so the emulator registers what Fabric discovers.
-            names = context.names
-            statements = names.register_external_table_statements(
-                frozen["schema"], frozen["object"], destination.value
-            )
-            context.spark_sql_batch(statements, exact_case=names.exact_case)
-            made["registered"] = statements[-1]
-        return made
 
     def _await_addressable(self, context: InstallationContext, frozen: list) -> float | None:
         """Wait until every table alias just created can actually be read.
@@ -171,8 +141,7 @@ class AliasExecutor:
                 try:
                     # The probe crosses; the waiting does not.
                     context.spark_sql(
-                        f"SELECT * FROM {qualified} LIMIT 0",
-                        exact_case=destination.preserve_table_identifier_case,
+                        f"SELECT * FROM {qualified} LIMIT 0", exact_case=True
                     )
                     del pending[alias]
                 except Exception as exc:  # not discovered yet — or never will be

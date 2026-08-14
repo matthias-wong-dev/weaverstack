@@ -27,7 +27,7 @@ class Location:
         if not value:
             raise IdentityError("location must not be empty")
         # One separator, everywhere. A Windows caller reaches this with
-        # backslashes — `LocalWorkspace` normalises its root through `Path`, and
+        # backslashes — a filesystem root normalises through `Path`, and
         # `str()` of a `WindowsPath` uses them — while everything downstream
         # treats "/" as the only separator: `join`, `name`, and the segment
         # splitting in the Weaver document reader. Left alone, a repository read from a

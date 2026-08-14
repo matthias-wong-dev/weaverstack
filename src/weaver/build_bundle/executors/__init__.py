@@ -1,9 +1,10 @@
 """Executor dispatch for InstallActions.
 
-``spark_sql`` runs one create or frozen ``DROP``; ``spark_sql_batch`` runs an
-ordered catalogue payload as one reported action. ``spark_schema`` makes one
-schema, ``spark_table`` completes a table whose shape only the session knows,
-and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse SQL path.
+``spark_sql`` runs one finished statement — a create, a ``CREATE SCHEMA`` or a
+frozen ``DROP``; ``spark_sql_batch`` runs an ordered catalogue payload as one
+reported action. ``spark_table`` completes a table whose shape only the session
+knows, and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse
+SQL path.
 ``alias`` points one Lakehouse name at another item's object, and ``sql_endpoint``
 syncs a Lakehouse's SQL analytics endpoint.
 
@@ -24,7 +25,6 @@ from .alias import AliasExecutor
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
-from .spark_schema import SparkSchemaExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
@@ -38,7 +38,6 @@ def default_executors() -> dict[str, ActionExecutor]:
     return {
         SparkSqlExecutor.name: SparkSqlExecutor(),
         SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
-        SparkSchemaExecutor.name: SparkSchemaExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
         LoadFileExecutor.name: LoadFileExecutor(),
@@ -55,7 +54,6 @@ __all__ = [
     "ResolvedTarget",
     "AliasExecutor",
     "SkippedExecution",
-    "SparkSchemaExecutor",
     "SparkSqlExecutor",
     "SparkSqlBatchExecutor",
     "SparkTableExecutor",

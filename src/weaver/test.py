@@ -22,7 +22,7 @@ from .test_report import (
     ValidationRunReport,
     run_status,
 )
-from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
+from .workspaces import FabricWorkspace, Workspace
 
 TASK_TYPE = "test"
 
@@ -332,12 +332,6 @@ def _resolve_workspace(
             "test needs a Weaver control Lakehouse: pass weaver_lakehouse=, give "
             "one in workspace configuration, or run inside a Fabric notebook "
             "with one attached as the default Lakehouse"
-        )
-    if isinstance(resolved, LocalWorkspace) and any(
-        isinstance(target, WarehouseTarget) for target in requested
-    ):
-        raise CommandError(
-            "Warehouse targets require a Fabric Workspace; the local emulator has no SQL"
         )
     return resolved
 

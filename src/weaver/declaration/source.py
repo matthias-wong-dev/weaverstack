@@ -309,19 +309,19 @@ class SourceDocument:
             return None
         return self.relative_path[: -len(PYTHON_SUFFIX)]
 
-    def create_ddl(self) -> "GeneratedDdl":
+    def create_ddl(self, *, destination=None) -> "GeneratedDdl":
         """The generated, installable create definition for this source.
 
         Delegates to :mod:`weaver.ses.ddl`. The source owns it because it knows
-        its language, kind, ID and validated body; a planner calls it and never
-        re-derives create syntax.
+        its language, kind, ID and validated body; a planner calls it with the
+        destination the object is bound to and never re-derives create syntax.
         """
 
         from .ddl import generate_ddl
 
-        return generate_ddl(self)
+        return generate_ddl(self, destination=destination)
 
-    def create_load(self) -> "GeneratedLoad":
+    def create_load(self, *, destination=None) -> "GeneratedLoad":
         """The generated, installable load definition for this source.
 
         The sibling of :meth:`create_ddl`, and owned here for the same reason:
@@ -332,9 +332,9 @@ class SourceDocument:
 
         from .load import generate_load
 
-        return generate_load(self)
+        return generate_load(self, destination=destination)
 
-    def create_validation(self) -> "GeneratedValidation":
+    def create_validation(self, *, destination=None) -> "GeneratedValidation":
         """The generated, installable primitive for this validation declaration.
 
         The third sibling of :meth:`create_ddl` and :meth:`create_load`, owned
@@ -344,7 +344,7 @@ class SourceDocument:
 
         from .validation import generate_validation
 
-        return generate_validation(self)
+        return generate_validation(self, destination=destination)
 
 
 def read_source_document(

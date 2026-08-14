@@ -14,7 +14,6 @@ from typing import Mapping
 from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
-from ..spark.tokens import object_token
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
 from .changes import (
     FILE as FILE_KIND,
@@ -240,7 +239,7 @@ def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
         executor, extension = "tsql", ".sql"
     else:
         keyword = "VIEW" if installed_kind == VIEW else "TABLE"
-        statement = f"DROP {keyword} {object_token(schema, name)}\n"
+        statement = f"DROP {keyword} {_qualified(destination, schema, name)}\n"
         executor, extension = "spark_sql", ".spark.sql"
     content = statement.encode("utf-8")
     filename = f"drop-{action_slug}{extension}"
@@ -295,8 +294,13 @@ def item_schema_stage(
             content = f"create schema [{schema.replace(']', ']]')}];\n".encode("utf-8")
             executor, extension = "tsql", ".sql"
         else:
-            content = (json.dumps({"schema": schema}, sort_keys=True) + "\n").encode()
-            executor, extension = "spark_schema", ".schema.json"
+            if destination is None:
+                raise BuildError(
+                    f"schema {schema} needs the destination its item is bound to "
+                    "before its CREATE SCHEMA can be rendered"
+                )
+            content = (destination.create_schema_statement(schema) + "\n").encode()
+            executor, extension = "spark_sql", ".spark.sql"
         filename = f"create-{item_slug}-{schema}{extension}"
         payloads[filename] = content
         action_id = f"schema-{item_slug}-{schema}"
@@ -338,12 +342,13 @@ class RenderedAction:
     payloads: Mapping[str, bytes]
 
 
-def render_document_build_action(identity, source) -> RenderedAction:
+def render_document_build_action(identity, source, *, target) -> RenderedAction:
     """The InstallAction and payload one declared document renders to.
 
     Where ``source.create_ddl()`` becomes something a bundle can carry: the DDL
     says what statement, and this says what action runs it, under what id, with
-    which executor and against which frozen bytes.
+    which executor and against which frozen bytes. Every managed name in the
+    payload is rendered against the target the document's item is bound to.
     """
 
     action_slug = _slug(identity)
@@ -362,7 +367,11 @@ def render_document_build_action(identity, source) -> RenderedAction:
             ),
             payloads={},
         )
-    ddl = source.create_ddl()
+    ddl = source.create_ddl(
+        destination=None
+        if target.kind == WAREHOUSE_TARGET
+        else target.spark_target
+    )
     filename = f"{action_slug}{ddl.extension}"
     content = ddl.content.encode("utf-8")
     return RenderedAction(
@@ -587,7 +596,9 @@ def item_build_stages(
         for node in sorted(layer):
             identity = identities[node]
             source = repository.source_documents[identity]
-            rendered = render_document_build_action(identity, source)
+            rendered = render_document_build_action(
+                identity, source, target=target
+            )
             payloads.update(rendered.payloads)
             actions.append(rendered.action)
             changes.append(

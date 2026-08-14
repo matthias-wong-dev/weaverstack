@@ -41,7 +41,7 @@ class GeneratedValidation:
     extension: str
 
 
-def generate_validation(document: "SourceDocument") -> GeneratedValidation:
+def generate_validation(document: "SourceDocument", *, destination=None) -> GeneratedValidation:
     """The installable primitive for one validated validation declaration.
 
     :func:`has_generated_validation` is the question to ask first — a Python
@@ -53,7 +53,7 @@ def generate_validation(document: "SourceDocument") -> GeneratedValidation:
             f"{document.relative_path}: a {document.kind} is not a validation"
         )
     if document.language == SPARK_SQL:
-        return _spark_validation(document)
+        return _spark_validation(document, destination)
     if document.language == SQL:
         return _tsql_validation(document)
     raise NotImplementedError(
@@ -68,7 +68,7 @@ def has_generated_validation(document: "SourceDocument") -> bool:
     return document.is_validation and document.language != PYTHON
 
 
-def _spark_validation(document: "SourceDocument") -> GeneratedValidation:
+def _spark_validation(document: "SourceDocument", destination) -> GeneratedValidation:
     from .metadata import extract_sql_metadata_and_body
     from .spark_sql_module import addressed, render_spark_sql_module
 
@@ -76,7 +76,7 @@ def _spark_validation(document: "SourceDocument") -> GeneratedValidation:
     content = render_spark_sql_module(
         document.document,
         header=header,
-        body=addressed((document.sql_body or "").strip()),
+        body=addressed((document.sql_body or "").strip(), destination),
         source_name=document.relative_path.rpartition("/")[2],
     )
     return GeneratedValidation(

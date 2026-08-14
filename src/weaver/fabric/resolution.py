@@ -11,7 +11,7 @@ from ..errors import CommandError
 from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricWorkspace
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
-from ..spark import SparkDestination, fabric_destination
+from ..spark import FabricSparkTarget
 from ..targets import (
     FILES_AREA,
     DeltaTarget,
@@ -280,7 +280,7 @@ class FabricResolver:
             files_root=f"{root}/{FILES_AREA}",
         )
 
-    def spark_destination(self, item: ItemRef) -> SparkDestination:
+    def spark_destination(self, item: ItemRef) -> FabricSparkTarget:
         """One Lakehouse, as Fabric's Spark catalogue names it.
 
         Fabric's namespace is the fundamental representation:
@@ -293,7 +293,7 @@ class FabricResolver:
         ids stay in resolution and in the bundle's target block.
         """
 
-        return fabric_destination(
+        return FabricSparkTarget(
             workspace=self.workspace.name,
             lakehouse=self.resolve(item, item_type=LAKEHOUSE).name,
         )

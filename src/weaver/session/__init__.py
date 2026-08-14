@@ -26,6 +26,7 @@ from .host import (
 from .notebook import NotebookScope, NotebookSession
 from .program import RemoteProgram
 from .resources import Resource, ResourceError, ResourceState
+from .testing import RecordedCall, TestSession
 from .telemetry import Measure, SessionTelemetry
 
 __all__ = [
@@ -36,11 +37,13 @@ __all__ = [
     "NotebookSession",
     "RemoteProgram",
     "ReportingFrame",
+    "RecordedCall",
     "Resource",
     "ResourceError",
     "ResourceState",
     "Session",
     "SessionTelemetry",
+    "TestSession",
     "WorkspaceScope",
     "active_spark",
     "inside_fabric_session",

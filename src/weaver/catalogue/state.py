@@ -19,13 +19,13 @@ from ..declaration.model import (
     WeaverItemId,
 )
 from ..errors import BuildError
-from ..spark.tokens import object_token
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from ..spark.catalogue import is_absent
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
     BUILD_EPOCH,
+    CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     INSTALLATION,
     OBJECT_ROLES,
@@ -461,7 +461,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     missing: set[str] = set()
     incompatible: list[str] = []
     for table in CATALOGUE_TABLES:
-        name = catalogue.expand(object_token("_", table.name))
+        name = catalogue.qualify(CATALOGUE_SCHEMA, table.name)
         try:
             columns = catalogue.columns_of(name)
         except Exception as exc:

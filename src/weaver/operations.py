@@ -27,7 +27,7 @@ from .targets import (
     physical_item,
     physical_kind,
 )
-from .workspaces import FabricWorkspace, LocalWorkspace, Workspace
+from .workspaces import FabricWorkspace, Workspace
 
 
 @dataclass(frozen=True)
@@ -214,10 +214,15 @@ def build(
     selected = _item_bindings(bind, resolved_workspace)
     from .build_bundle.targets import LakehouseBinding, effective_item_bindings
 
+    workspace_name = getattr(resolved_workspace, "workspace", None)
     bindings = effective_item_bindings(
-        selected, weaver_lakehouse=resolved_workspace.weaver_lakehouse
+        selected,
+        weaver_lakehouse=resolved_workspace.weaver_lakehouse,
+        workspace_name=workspace_name,
     )
-    control = LakehouseBinding(ItemRef(resolved_workspace.weaver_lakehouse))
+    control = LakehouseBinding(
+        ItemRef(resolved_workspace.weaver_lakehouse), workspace_name=workspace_name
+    )
     source_location, source_store = _repository_source(source, resolved_workspace)
 
     # This complete parse and pure request validation is deliberately above all
@@ -276,13 +281,6 @@ def wipe(
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session
     )
-    if isinstance(resolved_workspace, LocalWorkspace) and any(
-        target.item_type == "Warehouse" for target in parsed
-    ):
-        raise CommandError(
-            "Warehouse targets require a Fabric Workspace; the local emulator has no SQL"
-        )
-
     from .session.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
@@ -293,10 +291,6 @@ def wipe(
             storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
             store = opened.store(resolved_workspace) if storage_targets else None
             reports: list[WipeReport] = []
-            if not dry_run:
-                _drop_local_catalogue(
-                    resolved_workspace, storage_targets, session=opened
-                )
             for target in parsed:
                 with opened.step(str(target)):
                     reports.extend(
@@ -504,21 +498,9 @@ def _build_in_process(
 ) -> BuildResult:
     """One build, where this process is already where the data is.
 
-    The emulator and a Fabric notebook run the same code: which Spark, which
-    store and which resolver are the Session's answers, so there is one path.
+    Which Spark, which store and which resolver are the Session's answers, so a
+    notebook build takes the same path a desktop build does.
     """
-
-    if isinstance(workspace, LocalWorkspace):
-        warehouse_items = [
-            str(binding.item)
-            for binding in bindings.entries
-            if binding.item.item_type == "Warehouse"
-        ]
-        if warehouse_items:
-            raise CommandError(
-                "local Workspace builds cannot target Warehouses: "
-                + ", ".join(warehouse_items)
-            )
 
     from .build_bundle import (
         build_item_repository,
@@ -706,21 +688,6 @@ def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
     )
     return (report,)
 
-
-def _drop_local_catalogue(workspace, targets: Sequence[WipeTarget], *, session) -> None:
-    if not isinstance(workspace, LocalWorkspace):
-        return
-    lakehouses = {target.item for target in targets}
-    if not lakehouses:
-        return
-    from .spark import drop_local_destination_catalogue
-
-    resolver = session.resolver(workspace)
-    spark = session.spark(workspace)
-    for lakehouse in lakehouses:
-        drop_local_destination_catalogue(
-            spark, resolver.spark_destination(lakehouse)
-        )
 
 
 def _unbind_physical_targets(

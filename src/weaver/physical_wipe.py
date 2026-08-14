@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .errors import CommandError
-from .workspaces import Workspace, LocalWorkspace
+from .workspaces import Workspace
 from .locations import Location
-from .resolution import TABLES_AREA, LocalResolver, resolver_for, store_for
-from .store import FilesystemStore, Store
+from .resolution import TABLES_AREA, resolver_for, store_for
+from .store import Store
 from .targets import FILES_AREA, DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 
 

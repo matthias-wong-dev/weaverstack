@@ -12,7 +12,6 @@ from typing import Iterable, Mapping
 from ..catalogue.tables import CATALOGUE_SCHEMA
 from ..etl import LOAD_ROOT
 from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
-from ..spark import object_token, schema_token
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
@@ -435,7 +434,7 @@ def render_inventory_prune(
                         PRUNE_VIEW,
                         "view",
                         qualified,
-                        f"DROP VIEW IF EXISTS {object_token(schema, name)}",
+                        f"DROP VIEW IF EXISTS {target.spark_target.qualify(schema, name)}",
                         payloads,
                     )
                 )
@@ -452,7 +451,7 @@ def render_inventory_prune(
                         PRUNE_TABLE,
                         "table",
                         qualified,
-                        f"DROP TABLE IF EXISTS {object_token(schema, name)}",
+                        f"DROP TABLE IF EXISTS {target.spark_target.qualify(schema, name)}",
                         payloads,
                     )
                 )
@@ -477,7 +476,8 @@ def render_inventory_prune(
                         PRUNE_SCHEMA,
                         "schema",
                         schema,
-                        f"DROP SCHEMA IF EXISTS {schema_token(schema)} CASCADE",
+                        f"DROP SCHEMA IF EXISTS "
+                        f"{target.spark_target.qualified_schema(schema)} CASCADE",
                         payloads,
                     )
                 )
@@ -580,3 +580,4 @@ def _tsql_ident(name: str) -> str:
     """A bracket-quoted T-SQL identifier."""
 
     return "[" + name.replace("]", "]]") + "]"
+

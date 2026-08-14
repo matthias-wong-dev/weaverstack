@@ -1,14 +1,13 @@
-"""Workspace configuration and the two execution environments Weaver supports.
+"""Workspace configuration.
 
-A Workspace identifies where resources live.  For Fabric that identity is a
-Microsoft Fabric workspace name; for the local emulator it is the path to the
-folder that stands in for one.  It does not say where Weaver code executes.
+A Workspace identifies where resources live: one Microsoft Fabric workspace, by
+name. It does not say where Weaver code executes — desktop or notebook is a
+Session question.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
@@ -19,9 +18,6 @@ from .targets import validate_name
 WEAVER_ITEMS_AREA = "weaver_items"
 BUILD_BUNDLES_AREA = "build_bundles"
 CLI_AREA = "cli"
-FABRIC = "fabric"
-LOCAL = "local"
-WORKSPACE_TYPES = (FABRIC, LOCAL)
 
 
 @dataclass(frozen=True)
@@ -65,7 +61,7 @@ def _target_declarations(
 
 @dataclass(frozen=True, kw_only=True)
 class Workspace:
-    """The common configuration for one Fabric workspace or local emulator."""
+    """The configuration one workspace carries, whatever it is addressed for."""
 
     environment: str | None = None
     weaver_lakehouse: str | None = None
@@ -103,14 +99,6 @@ class Workspace:
             ),
         )
 
-    @property
-    def workspace_type(self) -> str:
-        raise NotImplementedError
-
-    @property
-    def supports_sql(self) -> bool:
-        raise NotImplementedError
-
     def declaration_for(self, item_type: str, physical_name: str) -> TargetDeclaration:
         declarations = self.lakehouses if item_type == LAKEHOUSE else self.warehouses
         try:
@@ -134,42 +122,7 @@ class FabricWorkspace(Workspace):
             self, "workspace", validate_name(self.workspace, what="workspace")
         )
 
-    @property
-    def workspace_type(self) -> str:
-        return FABRIC
-
-    @property
-    def supports_sql(self) -> bool:
-        return True
-
     def settings_for_warehouse(self, name: str) -> ExecutionSettings:
         declaration = self.warehouses.get(name)
         return declaration.execution if declaration else self.execution
 
-
-@dataclass(frozen=True, kw_only=True)
-class LocalWorkspace(Workspace):
-    """A filesystem folder standing in for one Fabric workspace."""
-
-    workspace: Path
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        value = self.workspace
-        if isinstance(value, str):
-            if not value.strip():
-                raise ConfigError("workspace path must not be empty")
-            value = Path(value.strip())
-        elif not isinstance(value, Path):
-            raise ConfigError(
-                f"workspace must be a path, got {type(value).__name__}"
-            )
-        object.__setattr__(self, "workspace", value.expanduser())
-
-    @property
-    def workspace_type(self) -> str:
-        return LOCAL
-
-    @property
-    def supports_sql(self) -> bool:
-        return False
