@@ -75,11 +75,15 @@ def test_the_log_folder_reaches_the_catalogue_like_any_other_folder(tmp_path):
 
 
 def test_the_log_folder_is_resolved_through_its_declared_identity():
-    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver_LH"))
+    """Under the Weaver Lakehouse's own Files area, wherever that resolves."""
 
-    assert log_folder(resolver, ItemRef("Weaver_LH")).value == (
-        ".local/Weaver_LH/Files/_/Log"
+    resolver = given_resolver(
+        lakehouses=("Weaver_LH", "Sales_LH"),
+        workspace=given_workspace(weaver_lakehouse="Weaver_LH"),
     )
+    files = resolver.files_root(ItemRef("Weaver_LH")).value
+
+    assert log_folder(resolver, ItemRef("Weaver_LH")).value == f"{files}/_/Log"
 
 
 # --- the writer ---------------------------------------------------------------

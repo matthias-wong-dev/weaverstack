@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 TSQL_LOAD_VERSION = 8
 #: 8 replaced the generated SQL load program with a deployed ``SparkSqlTable``
 #: module, so every previously installed Spark load artefact is stale.
-SPARK_LOAD_VERSION = 8
+SPARK_LOAD_VERSION = 9
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
 #: Warehouse load is a stored procedure; a Lakehouse load is a file in the

@@ -102,9 +102,17 @@ def test_every_command_that_reaches_a_workspace_asks_for_a_credential():
 
 
 def test_a_command_that_declares_nothing_asks_for_nothing():
-    """`doctor` reports on this machine. It must not warm a workspace."""
+    """`capacity` manages the capacity itself, not anything inside a workspace,
+    so it must not warm one."""
 
-    assert _declared("doctor") == set()
+    assert _declared(
+        "capacity",
+        "status",
+        "--resource-group",
+        "rg",
+        "--capacity-name",
+        "cap",
+    ) == set()
 
 
 # --- what the Session does with it --------------------------------------------

@@ -367,7 +367,9 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     document = read_source_document(
         "Sales.OrderSummary.sql", _SPARK_LOAD_SOURCE.encode("utf-8"), LAKEHOUSE
     )
-    payload = document.create_load().payload
+    payload = document.create_load(
+        destination=resolved_target().destination
+    ).payload
 
     context = _load_context(
         tmp_path,

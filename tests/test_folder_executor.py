@@ -66,6 +66,6 @@ def test_managed_folder_create_and_drop_are_strict(tmp_path):
 def test_folder_prune_remains_idempotent(tmp_path):
     context = _context(tmp_path)
     result = FolderExecutor().execute(_action(PRUNE_FOLDER), None, context)
-    assert result == {
-        "pruned": (tmp_path / "Sales" / "Files" / "Sales" / "Export").as_posix()
-    }
+    # Named by where it resolved to, which is keyed by item id rather than by
+    # the display name the caller typed.
+    assert result["pruned"].endswith("/Files/Sales/Export")

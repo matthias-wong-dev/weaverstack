@@ -16,6 +16,9 @@ from weaver.catalogue.claims import CatalogueClaim, CatalogueClaimRule
 from weaver.catalogue.state import Catalogue, reconcile_catalogue_state
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import BuildError
+from weaver.spark import FabricSparkTarget
+
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 ITEM = WeaverItemId.parse("Lakehouse/Sales")
@@ -155,7 +158,7 @@ def test_claim_deletion_uses_the_rule_predicate_columns():
         predicate_columns=("owned_schema", "owned_object"),
     )
 
-    statement = _claim_statements((CatalogueClaim(identity, rule),))[0]
+    statement = _claim_statements((CatalogueClaim(identity, rule),), WEAVER)[0]
 
     assert "`owned_schema` = 'Sales'" in statement
     assert "`owned_object` = 'Customer'" in statement

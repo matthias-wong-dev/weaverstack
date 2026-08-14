@@ -63,20 +63,18 @@ LEGACY_ROOT_CLAIMS = {
         tests/test_declaration_references.py
         tests/test_declaration_reserved_schema.py
         tests/test_declaration_schemas.py
-        tests/test_diagnostics.py
         tests/test_environment_definition.py
         tests/test_fabric_item_creation.py
         tests/test_fabric_session.py
+        tests/test_fabric_spark_target.py
         tests/test_fabric_tokens.py
         tests/test_item_dependencies.py
         tests/test_item_graph.py
         tests/test_item_repository.py
         tests/test_lakehouse.py
         tests/test_livy_environment.py
-        tests/test_local_session.py
         tests/test_locations.py
         tests/test_objects.py
-        tests/test_resolution.py
         tests/test_sql_authentication.py
         tests/test_sql_pool.py
         tests/test_sql_resolution.py
@@ -108,7 +106,6 @@ LEGACY_ROOT_CLAIMS = {
         tests/test_lakehouse_spark_location.py
         tests/test_livy_plumbing.py
         tests/test_onelake_pagination.py
-        tests/test_spark_destination.py
         tests/test_spark_sql_executor.py
         tests/test_spark_table_executor.py
         tests/test_sql_endpoint_refresh.py
@@ -160,7 +157,6 @@ LEGACY_NESTED_CLAIMS = {
         "declaration",
         """
         tests/fabric/test_livy_protocol.py
-        tests/spark/test_local_lakehouses.py
         tests/targeted/test_load_contract.py
         tests/targeted/test_load_result.py
         """,
@@ -180,9 +176,6 @@ LEGACY_NESTED_CLAIMS = {
         """
         tests/fabric/test_alias_discovery.py
         tests/fabric/test_item_catalogue_fabric.py
-        tests/spark/boundary/test_catalogue_fidelity.py
-        tests/spark/boundary/test_inventory_fidelity.py
-        tests/spark/test_cross_item_alias_incremental.py
         """,
     ),
     **_classified(
@@ -207,24 +200,12 @@ LEGACY_NESTED_CLAIMS = {
         tests/fabric/test_published_weaver.py
         tests/fabric/test_shared_wipe.py
         tests/fabric/test_warehouse_wipe.py
-        tests/spark/boundary/test_actions_delta.py
-        tests/spark/test_authored_objects.py
-        tests/spark/test_diagnostics_session.py
-        tests/spark/test_local_aliases.py
-        tests/spark/test_local_wipe.py
-        tests/spark/test_sql_table_build.py
-        tests/spark/test_wipe_delta.py
         """,
     ),
     **_classified(
         "cycle",
         """
         tests/fabric/test_fabric_resources.py
-        tests/spark/test_catalogue_builtin_build.py
-        tests/spark/test_catalogue_initialise.py
-        tests/spark/test_item_catalogue_build.py
-        tests/spark/test_mixed_estate.py
-        tests/spark/test_multi_destination.py
         tests/targeted/test_build_workflow.py
         """,
     ),

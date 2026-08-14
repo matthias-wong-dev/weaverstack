@@ -134,7 +134,7 @@ def test_a_console_reaching_into_fabric_does_not_execute_here(console):
 
 
 def test_a_console_reaching_into_fabric_has_no_spark_of_its_own(console):
-    with pytest.raises(CommandError, match="cross with execute_python"):
+    with pytest.raises(CommandError, match="cross with execute_spark_sql or execute_python"):
         console.spark(_fabric())
 
 

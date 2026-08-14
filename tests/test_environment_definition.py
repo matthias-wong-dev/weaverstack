@@ -31,3 +31,16 @@ def test_runtime_dependencies_are_declared():
     # A guard on the guard: if the parse returned nothing, the drift check above
     # would pass vacuously.
     assert runtime_dependencies()
+
+
+def test_no_desktop_package_is_installed_into_the_environment():
+    """The exclusion is a decision, so it is checked in both directions.
+
+    A package named desktop-only must actually be absent from the Environment;
+    otherwise the exclusion list is describing something that is not true.
+    """
+
+    from weaver.fabric.environment import DESKTOP_ONLY
+
+    staged = {name.lower() for name in environment_dependencies()}
+    assert not staged & {name.lower() for name in DESKTOP_ONLY}

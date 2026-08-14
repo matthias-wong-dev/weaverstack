@@ -224,7 +224,7 @@ def test_load_rejects_a_missing_manifest(tmp_path):
 def test_load_rejects_an_unsupported_format_version(tmp_path):
     store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
-    plan = replace(_identified_plan(), format_version=2)
+    plan = replace(_identified_plan(), format_version=SUPPORTED_FORMAT_VERSION + 1)
     store.write(location.join("plan.yml"), plan_to_yaml(plan).encode("utf-8"))
     with pytest.raises(BuildError, match="format version"):
         load_bundle(location, store=store)

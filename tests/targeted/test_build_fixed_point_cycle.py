@@ -44,6 +44,9 @@ from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 from support.workspaces import WORKSPACE
+from weaver.spark import FabricSparkTarget
+
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 LAKEHOUSE_TARGET_NAME = "Sales_LH"
 WAREHOUSE_TARGET_NAME = "Reporting_WH"
@@ -266,7 +269,7 @@ def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     # And publishing against that state re-merges them.
     from weaver.catalogue.reconcile import publish
 
-    result = publish(remaining, state)
+    result = publish(remaining, state, destination=WEAVER)
 
     assert result.registry.merge, "a dropped object must be certified again"
 

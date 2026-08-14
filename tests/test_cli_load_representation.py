@@ -207,7 +207,7 @@ def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded):
 def test_workspace_configuration_is_still_supported(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
-        f"workspace: {tmp_path}\nworkspace_type: local\nweaver_lakehouse: Configured\n",
+        "workspace: Demo\nweaver_lakehouse: Configured\n",
         encoding="utf-8",
     )
 
@@ -219,7 +219,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
 def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
-        f"workspace: {tmp_path}\nworkspace_type: local\nweaver_lakehouse: Configured\n",
+        "workspace: Demo\nweaver_lakehouse: Configured\n",
         encoding="utf-8",
     )
 

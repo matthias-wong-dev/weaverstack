@@ -80,11 +80,21 @@ def environment_dependencies(root: Path | None = None) -> list[str]:
     return pip
 
 
+#: Packages a desktop needs to reach Fabric, and Fabric itself never imports.
+#: They are ordinary runtime dependencies — `pip install weaverstack` gives you
+#: a working CLI — but installing them *into* a Fabric Environment would ship
+#: an HTTP stack, a build frontend and a readline shim to a Spark image that
+#: has no use for any of them.
+DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "pyreadline3"})
+
+
 def missing_from_environment(root: Path | None = None) -> list[str]:
     """Runtime dependencies that ``environment.yml`` fails to install.
 
     The check that keeps the two definitions from drifting: a package added to
     ``pyproject.toml`` but not to the Environment would be absent in Fabric.
+    Desktop-only packages are excluded by name rather than by guesswork, so
+    adding one to that set is a visible decision.
     """
 
     root = root or project_root()
@@ -93,6 +103,7 @@ def missing_from_environment(root: Path | None = None) -> list[str]:
         dependency
         for dependency in runtime_dependencies(root)
         if _normalise(dependency) not in staged
+        and _normalise(dependency) not in {_normalise(n) for n in DESKTOP_ONLY}
     ]
 
 
