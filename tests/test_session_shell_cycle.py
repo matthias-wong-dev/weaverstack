@@ -53,7 +53,6 @@ def _run(script: str, factory, workspace=None, environment="weaver") -> int:
     args = argparse.Namespace(
         workspace=workspace,
         workspace_config=None,
-        workspace_type=None,
         environment=environment,
         weaver_lakehouse=None,
     )
@@ -248,7 +247,6 @@ def _args(session=None, **overrides):
     values = dict(
         workspace=None,
         workspace_config=None,
-        workspace_type=None,
         environment=None,
         weaver_lakehouse=None,
         session=session,
@@ -272,9 +270,9 @@ def test_a_command_may_override_the_control_lakehouse_it_inherits():
 
 
 def test_a_command_naming_its_own_workspace_does_not_inherit():
-    with ConsoleSession(workspace=_local("./one")) as session:
+    with ConsoleSession(workspace=_local("First_Workspace")) as session:
         resolved = _resolve_workspace(
-            _args(session, workspace="./two", workspace_type="local")
+            _args(session, workspace="Second_Workspace", workspace_type="local")
         )
 
         assert resolved.workspace == Path("two")

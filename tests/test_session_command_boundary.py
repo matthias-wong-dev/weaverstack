@@ -84,9 +84,9 @@ class _PresentResolver:
         return SimpleNamespace(id="00000000-0000-0000-0000-000000000000")
 
     def spark_destination(self, item):
-        from weaver.spark import fabric_destination
+        from weaver.spark import FabricSparkTarget
 
-        return fabric_destination(workspace="My Workspace", lakehouse=item.name)
+        return FabricSparkTarget(workspace="My Workspace", lakehouse=item.name)
 
 
 @pytest.fixture
