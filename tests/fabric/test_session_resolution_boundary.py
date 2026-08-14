@@ -15,7 +15,7 @@ import pytest
 
 from weaver.errors import CommandError
 from weaver.fabric.resources import LAKEHOUSE
-from weaver.session import ConsoleSession
+from weaver.sessions import ConsoleSession
 from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]

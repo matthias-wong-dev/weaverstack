@@ -14,8 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from weaver.session.resources import Resource, ResourceError, ResourceState
-from weaver.session.telemetry import SessionTelemetry
+from weaver.sessions.resources import Resource, ResourceError, ResourceState
+from weaver.sessions.telemetry import SessionTelemetry
 
 
 @pytest.fixture

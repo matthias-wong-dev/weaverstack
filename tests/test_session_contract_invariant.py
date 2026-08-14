@@ -13,10 +13,10 @@ import inspect
 
 import pytest
 
-from weaver.session.base import Session
-from weaver.session.console import ConsoleSession
-from weaver.session.notebook import NotebookSession
-from weaver.session.testing import TestSession
+from weaver.sessions.base import Session
+from weaver.sessions.console import ConsoleSession
+from weaver.sessions.notebook import NotebookSession
+from weaver.sessions.testing import TestSession
 
 HOSTS = (ConsoleSession, NotebookSession, TestSession)
 

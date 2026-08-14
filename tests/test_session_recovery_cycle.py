@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.session.resources import Resource, ResourceError, ResourceState
+from weaver.sessions.resources import Resource, ResourceError, ResourceState
 
 
 class _Flaky:
@@ -52,7 +52,7 @@ class _Session:
     """A Session holding one scope, with the frame machinery under test."""
 
     def __init__(self, resource):
-        from weaver.session.console import ConsoleSession
+        from weaver.sessions.console import ConsoleSession
 
         self.session = ConsoleSession(progress=False)
         self.scope = _Scope(resource)
@@ -64,7 +64,7 @@ class _Scope:
         self._resources = [resource]
 
     def recover(self):
-        from weaver.session.base import WorkspaceScope
+        from weaver.sessions.base import WorkspaceScope
 
         WorkspaceScope.recover(self)
 

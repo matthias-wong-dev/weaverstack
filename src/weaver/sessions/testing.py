@@ -1,7 +1,7 @@
 """A Session that records what a host would have been asked to do.
 
 The substrate the fast suite decides against. It implements the same
-:class:`~weaver.session.base.Session` contract the console and the notebook do,
+:class:`~weaver.sessions.base.Session` contract the console and the notebook do,
 so a test drives the real operations rather than a copy of them, and every
 crossing is captured instead of made.
 

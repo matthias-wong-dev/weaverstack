@@ -25,6 +25,7 @@ from .host import (
 )
 from .notebook import NotebookScope, NotebookSession
 from .program import RemoteProgram
+from .public import session
 from .resources import Resource, ResourceError, ResourceState
 from .testing import RecordedCall, TestSession
 from .telemetry import Measure, SessionTelemetry
@@ -36,6 +37,7 @@ __all__ = [
     "NotebookScope",
     "NotebookSession",
     "RemoteProgram",
+    "session",
     "ReportingFrame",
     "RecordedCall",
     "Resource",

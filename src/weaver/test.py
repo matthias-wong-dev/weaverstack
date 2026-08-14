@@ -63,7 +63,7 @@ def test(
     )
     refs = tuple(_physical_ref(target) for target in requested)
 
-    from .session.host import use_or_create_session
+    from .sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
         with opened.task(

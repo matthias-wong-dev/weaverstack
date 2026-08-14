@@ -16,8 +16,8 @@ import pytest
 
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
-from weaver.session import ConsoleSession, workspace_context
-from weaver.session.console import ConsoleScope
+from weaver.sessions import ConsoleSession, workspace_context
+from weaver.sessions.console import ConsoleScope
 from weaver.workspaces import FabricWorkspace, TargetDeclaration
 from support.workspaces import given_resolver, given_workspace
 
@@ -343,7 +343,7 @@ def test_a_failed_statement_leaves_the_spark_session_up():
     """One bad command must not cost the next one a minute of startup."""
 
     from weaver.fabric import LivyStatementError
-    from weaver.session.resources import ResourceState
+    from weaver.sessions.resources import ResourceState
 
     livy = _Livy(raises=LivyStatementError("boom", ename="ValueError", evalue="boom"))
     session, scope = _scope_with(livy)
@@ -357,7 +357,7 @@ def test_a_failed_statement_leaves_the_spark_session_up():
 
 def test_a_session_that_died_is_marked_failed():
     from weaver.fabric import LivyError
-    from weaver.session.resources import ResourceState
+    from weaver.sessions.resources import ResourceState
 
     session, scope = _scope_with(_Livy(raises=LivyError("the session is dead")))
 

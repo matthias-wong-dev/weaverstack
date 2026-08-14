@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from weaver.fabric.resources import LAKEHOUSE
-from weaver.session.resources import ResourceState
+from weaver.sessions.resources import ResourceState
 from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]

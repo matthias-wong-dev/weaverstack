@@ -1,7 +1,7 @@
 """Shared fixtures for the whole suite.
 
 The core tier runs pure Python: it renders, plans and reconciles against a
-:class:`~weaver.session.testing.TestSession`, which records what a host would
+:class:`~weaver.sessions.testing.TestSession`, which records what a host would
 have been asked to do. Nothing here starts a JVM, holds a Spark session or
 reaches a workspace — the tests that need a real one carry the ``fabric``
 marker and build their own in ``tests/fabric``.

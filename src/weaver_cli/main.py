@@ -35,7 +35,7 @@ COMPOSE_DEFAULT_FILE = "compose.yml"
 def _target_requirements(targets) -> set[str]:
     """What the named physical targets imply, by their type alone."""
 
-    from weaver.session.requirements import LIVY, ONELAKE, TDS
+    from weaver.sessions.requirements import LIVY, ONELAKE, TDS
 
     wanted: set[str] = set()
     for value in targets or ():
@@ -49,7 +49,7 @@ def _target_requirements(targets) -> set[str]:
 
 
 def _requires_targets(args) -> frozenset[str]:
-    from weaver.session.requirements import AUTH, RESOLVER, requirements
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(
         AUTH, RESOLVER, *_target_requirements(getattr(args, "targets", ()))
@@ -59,7 +59,7 @@ def _requires_targets(args) -> frozenset[str]:
 def _requires_build(args) -> frozenset[str]:
     """A build may touch everything: it writes files, DDL and the catalogue."""
 
-    from weaver.session.requirements import (
+    from weaver.sessions.requirements import (
         AUTH,
         LIVY,
         ONELAKE,
@@ -74,7 +74,7 @@ def _requires_build(args) -> frozenset[str]:
 def _requires_control(args) -> frozenset[str]:
     """The catalogue lives in Delta in the Weaver Lakehouse, so Spark reaches it."""
 
-    from weaver.session.requirements import AUTH, LIVY, RESOLVER, requirements
+    from weaver.sessions.requirements import AUTH, LIVY, RESOLVER, requirements
 
     return requirements(AUTH, RESOLVER, LIVY)
 
@@ -82,7 +82,7 @@ def _requires_control(args) -> frozenset[str]:
 def _requires_rest(args) -> frozenset[str]:
     """Fabric control-plane work: a credential and the resolver, nothing more."""
 
-    from weaver.session.requirements import AUTH, RESOLVER, requirements
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(AUTH, RESOLVER)
 
@@ -415,7 +415,7 @@ def handle_install(args: argparse.Namespace) -> int:
     import json
 
     from weaver.errors import CommandError
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
     from weaver.workspaces import FabricWorkspace
 
     workspace = _resolve_workspace(args)
@@ -625,7 +625,7 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
     if not _can_ask():
         return attempt()
 
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(
         _session(args), workspace=_resolve_workspace(args)
@@ -838,7 +838,7 @@ def _run_load(
     over one REST call, before anything expensive is acquired.
     """
 
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=workspace) as opened:
         if not opened.executes_here(workspace):
@@ -977,7 +977,7 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
     one is a deployed module that belongs where the imports happen.
     """
 
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=workspace) as opened:
         if not opened.executes_here(workspace):

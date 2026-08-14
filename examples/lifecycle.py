@@ -16,9 +16,8 @@ demonstrating: a Session holds the credential, the resolved items, the Livy
 session and the Warehouse connections, so four operations pay for them once. A
 script that called each operation without one would work and would open four.
 
-``ConsoleSession`` is what a desktop opens today. The public ``weaver.session()``
-callable that replaces this import is a later milestone of the Fabric-only
-refactor; nothing else in this file changes when it lands.
+Nothing here reaches into Weaver's internals. If this file needed an import from
+below :mod:`weaver`, the public surface would be missing something.
 """
 
 from __future__ import annotations
@@ -28,9 +27,6 @@ import sys
 from pathlib import Path
 
 import weaver
-from weaver.config import resolve_workspace
-from weaver.fabric.auth import prefer_cli_credential
-from weaver.session import ConsoleSession
 
 #: The repository this example builds, relative to the repository root.
 ESTATE = (
@@ -76,16 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     lakehouse = f"Lakehouse/{options.lakehouse}"
     warehouse = f"Warehouse/{options.warehouse}"
 
-    # Credential choice is a caller's policy, not the core's: a desktop script
-    # prefers the Azure CLI sign-in, exactly as `weaver` itself does.
-    prefer_cli_credential()
-    workspace = resolve_workspace(
+    with weaver.session(
         workspace=options.workspace,
         weaver_lakehouse=options.catalogue,
         environment=options.environment,
-    )
-
-    with ConsoleSession(workspace=workspace) as session:
+    ) as session:
         # Everything from empty, unless the caller asked to keep what is there.
         # The control Lakehouse goes too: wipe skips the catalogue unbind
         # entirely when the catalogue itself is going, because deleting rows

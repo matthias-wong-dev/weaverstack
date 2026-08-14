@@ -409,7 +409,7 @@ LOADED = '''
 from weaver.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import NotebookSession
+from weaver.sessions import NotebookSession
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
@@ -644,7 +644,7 @@ def _corrupt(env, bundle):
 VALIDATED = '''
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import NotebookSession
+from weaver.sessions import NotebookSession
 from weaver.test import run_test
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
@@ -805,7 +805,7 @@ CROSS_ITEM_LOADED = '''
 from weaver.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import NotebookSession
+from weaver.sessions import NotebookSession
 
 requested = (
     PhysicalTargetRef("lakehouse", target.name),
@@ -830,7 +830,7 @@ emit({"dry": dry, "real": real})
 #: the claim neither side can make alone.
 CROSS_ITEM_VALIDATED = '''
 from weaver.load_plan import PhysicalTargetRef
-from weaver.session import NotebookSession
+from weaver.sessions import NotebookSession
 from weaver.test import run_test
 
 requested = (

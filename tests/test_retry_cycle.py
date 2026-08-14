@@ -284,7 +284,7 @@ def test_a_task_failure_is_not_a_resource_failure(args, monkeypatch):
     _Terminal(monkeypatch, keys=[ENTER])
     opened = []
 
-    from weaver.session.console import ConsoleSession
+    from weaver.sessions.console import ConsoleSession
 
     original = ConsoleSession.__init__
 

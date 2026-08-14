@@ -31,7 +31,7 @@ from types import SimpleNamespace
 import pytest
 
 from weaver.errors import WeaverError
-from weaver.session.console import ConsoleScope, ConsoleSession
+from weaver.sessions.console import ConsoleScope, ConsoleSession
 from weaver.workspaces import FabricWorkspace
 from weaver_cli.main import build_parser
 
@@ -254,7 +254,7 @@ def test_only_the_session_opens_a_livy_session():
     root = Path(__file__).resolve().parents[1] / "src"
     allowed = {
         # Where a Livy session is legitimately acquired and owned.
-        root / "weaver" / "session" / "console.py",
+        root / "weaver" / "sessions" / "console.py",
         # The module that defines it, and the package that exports it.
         root / "weaver" / "fabric" / "livy.py",
         root / "weaver" / "fabric" / "__init__.py",

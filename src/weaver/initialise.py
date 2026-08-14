@@ -109,7 +109,7 @@ def _session_around(workspace, *, spark, store):
     second one.
     """
 
-    from .session import ConsoleSession
+    from .sessions import ConsoleSession
 
     return ConsoleSession(workspace=workspace, spark=spark, store=store)
 
@@ -149,7 +149,7 @@ def initialise_weaver_lakehouse(
             ),
         )
     )
-    from .session.host import use_or_create_session
+    from .sessions.host import use_or_create_session
 
     # A Session built around what this caller already holds: the Spark it is
     # running in and the store it reads through are given, so nothing here

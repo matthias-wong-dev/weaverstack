@@ -28,8 +28,8 @@ CLI = SOURCE / "weaver_cli"
 HOSTED_MODULES = frozenset(
     {
         "weaver/runtime",
-        "weaver/session/notebook.py",
-        "weaver/session/host.py",
+        "weaver/sessions/notebook.py",
+        "weaver/sessions/host.py",
         "weaver/build_bundle/executors/spark_case.py",
     }
 )

@@ -52,7 +52,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "from weaver.build_bundle import (ItemBinding, ItemBindings, "
         "LakehouseBinding, build_uploaded_item_repository, "
         "effective_item_bindings)\n"
-        "from weaver.session import NotebookSession\n"
+        "from weaver.sessions import NotebookSession\n"
         "from weaver.catalogue.tables import CATALOGUE_TABLES, INSTALLATION, REGISTRY\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.spark import SparkCatalogue\n"

@@ -8,7 +8,7 @@ That is why the suite needs no test-only installer: there is one Installer, it
 takes a Session, and a test gives that Session whatever it already has.
 
 Outside ``tests/fabric`` that Session is a
-:class:`~weaver.session.testing.TestSession`, which records every statement it
+:class:`~weaver.sessions.testing.TestSession`, which records every statement it
 is asked to run and answers from what the test configured. What a statement
 *does* is proven against a real workspace; what Weaver *renders* is proven by
 reading it back here.
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from weaver.session import TestSession
+from weaver.sessions import TestSession
 from weaver.workspaces import FabricWorkspace
 
 from .workspaces import TARGET_LAKEHOUSE, WEAVER_LAKEHOUSE

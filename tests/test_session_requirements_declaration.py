@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.session.requirements import (
+from weaver.sessions.requirements import (
     AUTH,
     LIVY,
     ONELAKE,
@@ -127,7 +127,7 @@ class _Resource:
 
 
 def _scope(monkeypatch):
-    from weaver.session.console import ConsoleScope
+    from weaver.sessions.console import ConsoleScope
     from weaver.workspaces import FabricWorkspace
 
     monkeypatch.setattr(

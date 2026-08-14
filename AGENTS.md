@@ -70,7 +70,7 @@ Session in a notebook   → call it here: native Spark, notebookutils, TDS
 Session on a desktop    → cross for it: Livy, OneLake over HTTPS, TDS, REST
 ```
 
-`use_or_create_session` in `weaver.session.host` picks the host once, per
+`use_or_create_session` in `weaver.sessions.host` picks the host once, per
 workspace. Above that, `build`, `load`, `test` and `wipe` are the same code in
 both, which is the property the whole arrangement exists to keep.
 

@@ -374,7 +374,7 @@ class ConsoleSession(Session):
 
         One Livy submission when they have to cross, so statements belonging to
         one action share a trip and a session. See
-        :meth:`weaver.session.base.Session.execute_spark_sql_batch`.
+        :meth:`weaver.sessions.base.Session.execute_spark_sql_batch`.
         """
 
         ordered = list(statements)

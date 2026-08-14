@@ -14,7 +14,7 @@ for it would mean a reader had to know whether a failure was a place in the
 tree or a thing that happened at one.
 
 Two ledgers, deliberately, and neither derivable from the other. This one says
-a Step took eight seconds. :class:`~weaver.session.telemetry.SessionTelemetry`
+a Step took eight seconds. :class:`~weaver.sessions.telemetry.SessionTelemetry`
 says the eight seconds were four Livy submissions and a token acquisition. A
 suite that spent nine minutes in Livy startup and one in execution has a
 different problem from one that spent ten in execution, and a single number
@@ -31,8 +31,8 @@ import os
 
 import pytest
 
-from weaver.session import ConsoleSession
-from weaver.session.base import STEP, SUBSTEP, TASK
+from weaver.sessions import ConsoleSession
+from weaver.sessions.base import STEP, SUBSTEP, TASK
 
 
 @pytest.fixture

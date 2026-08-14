@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver.session.console import ConsoleScope, ConsoleSession
-from weaver.session.notebook import NotebookSession
+from weaver.sessions.console import ConsoleScope, ConsoleSession
+from weaver.sessions.notebook import NotebookSession
 from weaver.workspaces import FabricWorkspace
 from support.workspaces import given_resolver, given_workspace
 

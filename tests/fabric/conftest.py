@@ -407,7 +407,7 @@ def livy_session(fabric_workspace, fabric_client):
 
 @pytest.fixture(scope="session")
 def weaver_session(fabric_workspace, livy_session):
-    """The suite's one :class:`~weaver.session.console.ConsoleSession`.
+    """The suite's one :class:`~weaver.sessions.console.ConsoleSession`.
 
     The canonical Fabric fixture: one credential, one REST client, one resolver
     with one item cache, one Livy session and one TDS connection per Warehouse,
@@ -421,7 +421,7 @@ def weaver_session(fabric_workspace, livy_session):
     given resource is not closed by the Session that borrowed it.
     """
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(
         workspace=fabric_workspace, livy=livy_session, require_weaver=False
@@ -439,7 +439,7 @@ def fresh_weaver_session(fabric_workspace):
     test needing a clean target and nothing more should keep this Session.
     """
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=fabric_workspace, require_weaver=False) as session:
         yield session
@@ -989,7 +989,7 @@ def _fabric_build_context(
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
             "LakehouseBinding, WarehouseBinding, effective_item_bindings\n"
-            "from weaver.session import NotebookSession\n"
+            "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
@@ -1037,7 +1037,7 @@ def _fabric_build_context(
             "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.build_bundle import Installer, load_bundle\n"
-            "from weaver.session import NotebookSession\n"
+            "from weaver.sessions import NotebookSession\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
@@ -1295,7 +1295,7 @@ def _warehouse_build_env(
             "from weaver.declaration import parse_item_repository\n"
             "from weaver.build_bundle import ItemBinding, ItemBindings, "
             "WarehouseBinding, LakehouseBinding, effective_item_bindings\n"
-            "from weaver.session import NotebookSession\n"
+            "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
@@ -1340,7 +1340,7 @@ def _warehouse_build_env(
             "from weaver.workspaces import FabricWorkspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.build_bundle import Installer, load_bundle\n"
-            "from weaver.session import NotebookSession\n"
+            "from weaver.sessions import NotebookSession\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"

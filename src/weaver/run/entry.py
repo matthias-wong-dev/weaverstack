@@ -88,7 +88,7 @@ def _session(session, workspace):
 
     if session is not None:
         return session
-    from ..session.host import session_for
+    from ..sessions.host import session_for
 
     return session_for(workspace)
 

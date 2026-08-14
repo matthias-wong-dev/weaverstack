@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from weaver.errors import CommandError, WeaverError
-from weaver.session.requirements import union
+from weaver.sessions.requirements import union
 
 #: Default composition file in the current directory.
 DEFAULT_FILE = "compose.yml"
@@ -103,7 +103,7 @@ def command_words(entry: str) -> list[str]:
 def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> int:
     """Show the sequence, ask once, then run it in one Session."""
 
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
 
     if parser_factory is None:
         from .main import build_parser

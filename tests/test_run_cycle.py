@@ -624,7 +624,7 @@ def test_a_result_that_describes_itself_no_further_still_serializes():
 
 
 def test_each_dispatched_node_is_timed_as_a_substep():
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(progress=False) as session:
         runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
@@ -640,7 +640,7 @@ def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
     """A failed node is a *result* here — the run records what happened before
     it decides what to do about it — and the timing has to agree."""
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(progress=False) as session:
         runner(nodes=[node("a"), node("b")], fault_tolerant=True).run(
@@ -654,7 +654,7 @@ def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
 def test_a_node_that_was_never_dispatched_is_never_timed():
     """Blocked, skipped and pending nodes waited on nothing of their own."""
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(progress=False) as session:
         runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(

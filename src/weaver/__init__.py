@@ -25,6 +25,7 @@ from .operations import (
     wipe,
 )
 from .load import load
+from .sessions.public import session
 from .test import test
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .test_report import ValidationNodeReport, ValidationRunReport
@@ -70,6 +71,8 @@ __all__ = [
     "LoadResult",
     "test",
     "ValidationRunReport",
+    # the reusable context every operation accepts
+    "session",
     "ValidationNodeReport",
     # authored objects
     "WeaverObject",

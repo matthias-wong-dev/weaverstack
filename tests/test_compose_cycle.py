@@ -269,7 +269,7 @@ def test_a_composition_inside_a_session_joins_the_one_already_open(
 ):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=None) as session:
         run_composition(
@@ -352,7 +352,7 @@ def test_a_composition_warms_the_union_before_the_first_command(
     build in front of it. The resources are shared, so warming the maximum set
     once is warming it correctly."""
 
-    from weaver.session.requirements import AUTH, LIVY, ONELAKE, RESOLVER, TDS
+    from weaver.sessions.requirements import AUTH, LIVY, ONELAKE, RESOLVER, TDS
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)

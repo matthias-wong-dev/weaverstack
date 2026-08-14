@@ -107,7 +107,7 @@ def load(
             "notebook with one attached as the default Lakehouse"
         )
 
-    from .session.host import use_or_create_session
+    from .sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
         with opened.task(

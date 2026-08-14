@@ -35,7 +35,7 @@ class SparkCatalogue:
         """A catalogue reached by running statements, with no session here.
 
         ``run_sql(statement)`` returns the statement's rows as dictionaries —
-        :meth:`weaver.session.base.Session.execute_spark_sql`. Wherever that runs
+        :meth:`weaver.sessions.base.Session.execute_spark_sql`. Wherever that runs
         is where the catalogue is.
         """
 

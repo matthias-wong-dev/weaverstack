@@ -97,9 +97,9 @@ class ReportingFrame:
 class Session(ABC):
     """A reusable execution scope: resolution, resources and host capabilities.
 
-    Concrete hosts are :class:`~weaver.session.console.ConsoleSession` — Weaver
+    Concrete hosts are :class:`~weaver.sessions.console.ConsoleSession` — Weaver
     driven from a console process, against either a local emulator or a Fabric
-    workspace — and :class:`~weaver.session.notebook.NotebookSession`, where
+    workspace — and :class:`~weaver.sessions.notebook.NotebookSession`, where
     Weaver is itself executing inside the Fabric host.
     """
 

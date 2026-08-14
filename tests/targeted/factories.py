@@ -1095,7 +1095,7 @@ def spark_sql_capability(spark):
     """
 
     from weaver.build_bundle.executors.spark_case import exact_identifier_case
-    from weaver.session.base import run_spark_statements
+    from weaver.sessions.base import run_spark_statements
 
     def many(statements, *, exact_case: bool = False):
         ordered = list(statements)

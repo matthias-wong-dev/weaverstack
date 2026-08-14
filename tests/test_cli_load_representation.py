@@ -331,7 +331,7 @@ def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
 class _FakeLivy:
     """A Livy session that records the program and answers with a payload.
 
-    Reached through a real :class:`~weaver.session.console.ConsoleSession`,
+    Reached through a real :class:`~weaver.sessions.console.ConsoleSession`,
     because that is how the command reaches it: the double is the *transport*,
     not the Session, so what these tests exercise is the crossing the product
     performs rather than one arranged for them.
@@ -425,7 +425,7 @@ def livy(monkeypatch):
     leaves the original in place and the credential is asked for anyway.
     """
 
-    from weaver.session.console import ConsoleScope
+    from weaver.sessions.console import ConsoleScope
 
     _FakeLivy.submitted = []
     _FakeLivy.started = 0

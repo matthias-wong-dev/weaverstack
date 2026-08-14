@@ -33,7 +33,7 @@ import pytest
 
 from weaver.errors import CommandError
 from weaver.runtime import session_scopes
-from weaver.session.base import Session
+from weaver.sessions.base import Session
 from weaver.run.runtime_boundary import (
     DirectRunScope,
     FabricRunScope,

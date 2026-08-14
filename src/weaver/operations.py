@@ -17,8 +17,8 @@ from .locations import Location
 # Position — whether this process is inside the Fabric session it addresses, and
 # what Spark it would use if it were — is the first half of "where am I
 # running", so a Session owns it. Kept under the names this module already uses.
-from .session.host import active_spark as _active_spark
-from .session.host import inside_fabric_session as _inside_fabric_session
+from .sessions.host import active_spark as _active_spark
+from .sessions.host import inside_fabric_session as _inside_fabric_session
 from .store import FilesystemStore, Store
 from .targets import (
     ItemRef,
@@ -229,7 +229,7 @@ def build(
     # control-plane creation, Spark start, REST item resolution, and Livy work.
     from .build_bundle.workflow import prepare_repository, validate_build_request
 
-    from .session.host import use_or_create_session
+    from .sessions.host import use_or_create_session
 
     with prepare_repository(
         source_location, source_store=source_store
@@ -281,7 +281,7 @@ def wipe(
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session
     )
-    from .session.host import use_or_create_session
+    from .sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
         # Named for what it is. A dry run reads the estate and decides, which
@@ -726,7 +726,7 @@ def unbind_catalogue_claims(
     """
 
     from .build_bundle.workflow import session_catalogue
-    from .session.host import use_or_create_session
+    from .sessions.host import use_or_create_session
     from .unbind import unbind_targets
 
     with use_or_create_session(session, workspace=workspace) as opened:

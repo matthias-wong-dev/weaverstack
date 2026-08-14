@@ -68,9 +68,9 @@ def session_for(workspace: Workspace | None, **kwargs) -> Session:
     """The Session this host would use for ``workspace``.
 
     Inside the Fabric session being addressed, that is a
-    :class:`~weaver.session.notebook.NotebookSession`; everywhere else — a
+    :class:`~weaver.sessions.notebook.NotebookSession`; everywhere else — a
     desktop reaching into Fabric, and the local emulator alike — it is a
-    :class:`~weaver.session.console.ConsoleSession`.
+    :class:`~weaver.sessions.console.ConsoleSession`.
     """
 
     if workspace is not None and inside_fabric_session(workspace):

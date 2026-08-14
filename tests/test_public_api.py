@@ -18,6 +18,9 @@ def test_error_hierarchy_has_one_root():
 def test_the_top_level_is_the_ordinary_notebook_surface_only():
     assert set(weaver.__all__) == {
         "__version__",
+        # The reusable context every operation accepts. A callable rather than
+        # the session package, which is why that package is `weaver.sessions`.
+        "session",
         "build",
         "BuildResult",
         "wipe",
