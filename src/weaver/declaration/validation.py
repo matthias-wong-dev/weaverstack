@@ -62,6 +62,18 @@ def generate_validation(document: "SourceDocument", *, destination=None) -> Gene
     )
 
 
+def validation_identity(document: "SourceDocument") -> tuple[str, int]:
+    """One generated validation's object type and template version, unrendered.
+
+    The sibling of :func:`weaver.declaration.load.load_identity`, and there for
+    the same reason: identity and signature are destination-free.
+    """
+
+    if document.language == SQL:
+        return PROCEDURE_OBJECT, TSQL_VALIDATION_VERSION
+    return FILE_OBJECT, SPARK_VALIDATION_VERSION
+
+
 def has_generated_validation(document: "SourceDocument") -> bool:
     """Whether this validation is compiled rather than deployed verbatim."""
 

@@ -174,9 +174,6 @@ def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     operations = __import__("weaver.operations", fromlist=["operations"])
     workspace = given_workspace()
     monkeypatch.setattr(
-        operations, "_drop_local_catalogue", lambda *_args, **_kwargs: None
-    )
-    monkeypatch.setattr(
         operations,
         "_wipe_one",
         lambda target, *_args, **kwargs: (
@@ -202,9 +199,6 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     operations = __import__("weaver.operations", fromlist=["operations"])
     workspace = given_workspace(weaver_lakehouse="Control")
     calls = []
-    monkeypatch.setattr(
-        operations, "_drop_local_catalogue", lambda *_args, **_kwargs: None
-    )
     monkeypatch.setattr(
         operations,
         "_wipe_one",

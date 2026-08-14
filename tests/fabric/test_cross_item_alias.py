@@ -88,7 +88,9 @@ def generate(
     from weaver.build_bundle.targets import WAREHOUSE_TARGET
 
     bindings = effective_item_bindings(
-        bindings, weaver_lakehouse=workspace.weaver_lakehouse
+        bindings,
+        weaver_lakehouse=workspace.weaver_lakehouse,
+        workspace_name=workspace.workspace,
     )
     inventories = {}
     for binding in bindings.entries:

@@ -388,7 +388,9 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     from weaver.build_bundle import LakehouseBinding, effective_item_bindings
 
     bindings = effective_item_bindings(
-        bindings, weaver_lakehouse=fabric_workspace.weaver_lakehouse
+        bindings,
+        weaver_lakehouse=fabric_workspace.weaver_lakehouse,
+        workspace_name=fabric_workspace.workspace,
     )
     inventory = read_warehouse_inventory(
         warehouse_target(warehouse).bound, sql=warehouse.executor

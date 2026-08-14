@@ -48,6 +48,7 @@ from weaver.etl import (
     item_runtime_artefacts,
     load_schemas,
 )
+from support.workspaces import WORKSPACE
 
 #: Neutral names, per the environment-neutrality rule: no product, workspace or
 #: tenant may be inferable from a fixture.
@@ -1157,10 +1158,12 @@ def item_bindings(*pairs: tuple[str, str]) -> ItemBindings:
     bindings = []
     for logical, physical in pairs:
         item = WeaverItemId.parse(logical)
+        # Four-part Spark naming is spelled with the workspace's display name,
+        # so a binding that carried none could not name what it builds.
         binding = (
-            LakehouseBinding(ItemRef(physical))
+            LakehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
             if item.item_type == "Lakehouse"
-            else WarehouseBinding(ItemRef(physical))
+            else WarehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
         )
         bindings.append(ItemBinding(item, binding))
     return ItemBindings(tuple(bindings))

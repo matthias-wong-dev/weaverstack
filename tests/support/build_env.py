@@ -25,6 +25,7 @@ from .observation import Observation, observation_from, observe_body
 
 from weaver.targets import ItemRef
 from weaver.store import Store
+from .workspaces import WORKSPACE
 
 
 @dataclass(frozen=True)
@@ -429,11 +430,23 @@ def _bindings_for(
             bound = by_item.get(item, lakehouse)
             if bound is None:
                 raise AssertionError(f"{item} needs a Lakehouse this env does not have")
-            entries.append(ItemBinding(item, LakehouseBinding(lakehouse=bound)))
+            entries.append(
+                ItemBinding(
+                    item,
+                    LakehouseBinding(lakehouse=bound, workspace_name=WORKSPACE),
+                )
+            )
         else:
             if warehouse is None:
                 raise AssertionError(f"{item} needs a Warehouse this env does not have")
-            entries.append(ItemBinding(item, WarehouseBinding(warehouse=warehouse)))
+            entries.append(
+                ItemBinding(
+                    item,
+                    WarehouseBinding(
+                        warehouse=warehouse, workspace_name=WORKSPACE
+                    ),
+                )
+            )
     return ItemBindings(tuple(entries))
 
 

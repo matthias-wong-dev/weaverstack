@@ -86,6 +86,20 @@ def generate_load(document: "SourceDocument", *, destination=None) -> GeneratedL
     )
 
 
+def load_identity(document: "SourceDocument") -> tuple[str, int]:
+    """One generated load's object type and template version, without rendering.
+
+    What an artefact *is* does not depend on where it is bound, so a caller
+    listing identities and signatures asks this instead of generating a payload
+    it would throw away — and, for a Spark load, could not render at all
+    without a destination.
+    """
+
+    if document.language == SQL:
+        return PROCEDURE_OBJECT, TSQL_LOAD_VERSION
+    return FILE_OBJECT, SPARK_LOAD_VERSION
+
+
 def has_generated_load(document: "SourceDocument") -> bool:
     """Whether this source's load is generated rather than deployed verbatim."""
 
@@ -134,6 +148,7 @@ def _spark_load(document: "SourceDocument", destination) -> GeneratedLoad:
 
 __all__ = [
     "FILE_OBJECT",
+    "load_identity",
     "PROCEDURE_OBJECT",
     "SPARK_LOAD_VERSION",
     "TSQL_LOAD_VERSION",

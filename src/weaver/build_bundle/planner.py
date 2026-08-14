@@ -58,7 +58,7 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
-from .targets import ItemBindings, LakehouseBinding
+from .targets import WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
 
 
 def generate_item_build_bundle(
@@ -361,7 +361,14 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_aliases,
     )
-    artefacts = item_runtime_artefacts(repository, item=item)
+    artefacts = item_runtime_artefacts(
+        repository,
+        item=item,
+        # The load layer installs these, so their bodies are rendered here
+        # against the target this item is bound to. A Warehouse names its
+        # objects over TDS and has no Spark destination.
+        destination=None if target.kind == WAREHOUSE_TARGET else target.spark_target,
+    )
     stages: list[PlannedStage] = []
 
     # Prune is given every *declared* alias destination, never only the selected

@@ -294,12 +294,9 @@ def item_schema_stage(
             content = f"create schema [{schema.replace(']', ']]')}];\n".encode("utf-8")
             executor, extension = "tsql", ".sql"
         else:
-            if destination is None:
-                raise BuildError(
-                    f"schema {schema} needs the destination its item is bound to "
-                    "before its CREATE SCHEMA can be rendered"
-                )
-            content = (destination.create_schema_statement(schema) + "\n").encode()
+            content = (
+                target.spark_target.create_schema_statement(schema) + "\n"
+            ).encode()
             executor, extension = "spark_sql", ".spark.sql"
         filename = f"create-{item_slug}-{schema}{extension}"
         payloads[filename] = content
@@ -410,10 +407,10 @@ def render_load_build_action(artefact) -> RenderedAction:
             resource_node_id=str(artefact.identity),
             executor=executor,
             payload=filename,
-            payload_sha256=sha256_hex(artefact.payload),
+            payload_sha256=sha256_hex(artefact.installed_bytes),
             source_path=artefact.source_path,
         ),
-        payloads={filename: artefact.payload},
+        payloads={filename: artefact.installed_bytes},
     )
 
 

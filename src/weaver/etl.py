@@ -43,6 +43,7 @@ from .declaration.model import (
     WeaverRepository,
 )
 from .declaration.source import content_hash
+from .errors import BuildError
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
 #: gets a schema named ``_`` holding the load procedures; the Lakehouse gets a
@@ -115,10 +116,25 @@ class RuntimeArtefact:
     identity: WeaverDocumentId
     object_type: str
     signature: str
-    payload: bytes
+    #: The installed bytes. None where this listing was made without a
+    #: destination: an identity and a signature are the same whatever an item
+    #: is bound to, but a generated module's body names the Lakehouse it reads.
+    payload: bytes | None
     role: str = ROLE_LOAD
     origin: WeaverDocumentId | None = None
     source_path: str | None = None
+
+    @property
+    def installed_bytes(self) -> bytes:
+        """The installed content, or a failure naming what was never rendered."""
+
+        if self.payload is None:
+            raise BuildError(
+                f"{self.identity} was listed without a destination, so its "
+                "installed content was not rendered — list it again with the "
+                "destination its item is bound to"
+            )
+        return self.payload
 
     @property
     def is_validation(self) -> bool:
@@ -228,15 +244,20 @@ def item_validation_artefacts(
             )
             continue
 
-        generated = source.create_validation(destination=destination)
+        from .declaration.validation import validation_identity
+
+        object_type, template_version = validation_identity(source)
+        generated = (
+            source.create_validation(destination=destination)
+            if destination is not None
+            else None
+        )
         artefacts.append(
             RuntimeArtefact(
                 identity=validation_artefact_id(item, kind, identity.object_id),
-                object_type=generated.object_type,
-                signature=_salted(
-                    source.effective_signature, generated.template_version
-                ),
-                payload=generated.payload,
+                object_type=object_type,
+                signature=_salted(source.effective_signature, template_version),
+                payload=None if generated is None else generated.payload,
                 role=role,
                 origin=identity,
                 source_path=source.relative_path,
@@ -317,7 +338,14 @@ def _lakehouse_artefacts(
                 )
             )
         elif source.language == SPARK_SQL and source.kind == TABLE:
-            generated = source.create_load(destination=destination)
+            from .declaration.load import load_identity
+
+            _object_type, template_version = load_identity(source)
+            generated = (
+                source.create_load(destination=destination)
+                if destination is not None
+                else None
+            )
             artefacts.append(
                 _file_artefact(
                     item,
@@ -326,10 +354,8 @@ def _lakehouse_artefacts(
                     # the name a module is imported by — which is what lets
                     # orchestration stop caring which language it was authored in.
                     _deployed_module_relative(relative, identity.object_id),
-                    payload=generated.payload,
-                    signature=_salted(
-                        source.effective_signature, generated.template_version
-                    ),
+                    payload=None if generated is None else generated.payload,
+                    signature=_salted(source.effective_signature, template_version),
                     origin=identity,
                     source_path=source.relative_path,
                 )
