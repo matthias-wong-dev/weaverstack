@@ -268,6 +268,7 @@ def test_a_binding_naming_an_unknown_item_is_refused(estate):
             bindings=effective_item_bindings(
                 item_bindings(("Lakehouse/Absent", "Sales_LH")),
                 weaver_lakehouse="Weaver",
+                workspace_name=WORKSPACE,
             ),
         )
 

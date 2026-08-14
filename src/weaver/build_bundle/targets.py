@@ -279,9 +279,21 @@ class ItemBindings:
 
 
 def effective_item_bindings(
-    bindings: ItemBindings, *, weaver_lakehouse: str, workspace_name: str | None = None
+    bindings: ItemBindings, *, weaver_lakehouse: str, workspace_name: str
 ) -> ItemBindings:
-    """Add the mandatory package-owned control item binding."""
+    """Add the mandatory package-owned control item binding.
+
+    ``workspace_name`` is required rather than optional, because the binding
+    this adds is the one every build renders its catalogue statements against.
+    A caller that omitted it produced a control target that could not name an
+    object, and the failure surfaced inside Fabric several steps later.
+    """
+
+    if not workspace_name:
+        raise BuildError(
+            "the control-plane binding needs the workspace's display name, "
+            "which four-part Spark naming is spelled with"
+        )
 
     builtin = WeaverItemId(LAKEHOUSE, "_weaver")
     if builtin in bindings.by_item:
