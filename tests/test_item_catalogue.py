@@ -26,6 +26,10 @@ from weaver.catalogue.tables import (
 
 from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate
+from weaver.spark import FabricSparkTarget
+
+#: The Weaver Lakehouse every catalogue statement is addressed to.
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"):
@@ -113,8 +117,8 @@ def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
     raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     curated = _project(repository, "Lakehouse/Curated", "Curated_Dev")
 
-    raw_sql = "\n".join(reconcile(raw).statements)
-    curated_sql = "\n".join(reconcile(curated).statements)
+    raw_sql = "\n".join(reconcile(raw, destination=WEAVER).statements)
+    curated_sql = "\n".join(reconcile(curated, destination=WEAVER).statements)
     assert "`item_name` = 'Raw'" in raw_sql
     assert "`item_name` = 'Curated'" not in raw_sql
     assert "`item_name` = 'Curated'" in curated_sql
@@ -243,7 +247,7 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
-    reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
+    reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"), destination=WEAVER)
 
     assert reconciliation.registry.table is REGISTRY
     assert reconciliation.statements[-1] == reconciliation.registry.merge
@@ -270,11 +274,11 @@ class _FakeCatalogue:
     def __init__(self, columns_by_table):
         self._columns = columns_by_table
 
-    def expand(self, token: str) -> str:
-        return token.strip("{}").replace("object:", "")
+    def qualify(self, schema: str, name: str) -> str:
+        return f"`{schema}`.`{name}`"
 
     def columns_of(self, name: str) -> tuple[str, ...]:
-        table = name.split(".", 1)[1]
+        table = name.rsplit(".", 1)[1].strip("`")
         if table not in self._columns:
             raise _Absent(name)
         return ()
@@ -285,7 +289,7 @@ class _FakeCatalogue:
 
 class _Shaped(_FakeCatalogue):
     def columns_of(self, name: str) -> tuple[str, ...]:
-        table = name.split(".", 1)[1]
+        table = name.rsplit(".", 1)[1].strip("`")
         if table not in self._columns:
             raise _Absent(name)
         return tuple(self._columns[table])

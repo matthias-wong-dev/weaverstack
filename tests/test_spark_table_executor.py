@@ -87,22 +87,23 @@ AUDIT = [
 ]
 
 
-#: The destination every case here builds into. Local, so the qualified name is
-#: the folded database name — and the executor has to be *given* one, which is
-#: the whole point: an action with no destination has nowhere to go.
+#: The destination every case here builds into. The payload arrives already
+#: addressed to it, and this executor discovers the query's *shape* — never
+#: where the table goes.
 DESTINATION = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 FABRIC_DESTINATION = FabricSparkTarget(workspace="Analytics", lakehouse="Sales_LH")
 
 #: What `Sales.Customer` is called there.
-CUSTOMER = "`sales_lh__sales`.`Customer`"
+CUSTOMER = "`Demo`.`Sales_LH`.`Sales`.`Customer`"
+RAW = "`Demo`.`Sales_LH`.`Sales`.`Raw`"
 
 
 def _payload(**overrides) -> bytes:
     payload = {
-        "object": "{{object:Sales.Customer}}",
+        "object": CUSTOMER,
         "schema_mode": "inferred",
         "declared_columns": None,
-        "source_query": "select CustomerId, CustomerName from {{object:Sales.Raw}}",
+        "source_query": f"select CustomerId, CustomerName from {RAW}",
         "references": [["Primary key", "CustomerId"]],
         "audit_columns": AUDIT,
         "column_mapping": True,
@@ -157,8 +158,7 @@ def test_the_shape_is_asked_for_rather_than_the_query_being_run():
     _run(capability, _payload())
 
     assert capability.described == (
-        "DESCRIBE QUERY select CustomerId, CustomerName from "
-        "`sales_lh__sales`.`Raw`"
+        f"DESCRIBE QUERY select CustomerId, CustomerName from {RAW}"
     )
 
 
@@ -170,14 +170,14 @@ def test_setup_and_describe_travel_as_one_piece_of_work():
     _run(
         capability,
         _payload(
-            setup=["CREATE OR REPLACE TEMPORARY VIEW staged AS SELECT * FROM {{object:Sales.Raw}}"],
+            setup=[f"CREATE OR REPLACE TEMPORARY VIEW staged AS SELECT * FROM {RAW}"],
             source_query="select CustomerId, CustomerName from staged",
         ),
     )
 
     shape, _case = capability.calls[0]
     assert shape == [
-        "CREATE OR REPLACE TEMPORARY VIEW staged AS SELECT * FROM `sales_lh__sales`.`Raw`",
+        f"CREATE OR REPLACE TEMPORARY VIEW staged AS SELECT * FROM {RAW}",
         "DESCRIBE QUERY select CustomerId, CustomerName from staged",
     ]
 
@@ -236,11 +236,11 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
-def test_local_creation_uses_the_registered_folded_schema_and_pascal_table_name():
+def test_creation_names_the_destination_the_payload_was_addressed_to():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload())
 
-    assert capability.created.startswith("CREATE TABLE `sales_lh__sales`.`Customer`")
+    assert capability.created.startswith(f"CREATE TABLE {CUSTOMER}")
 
 
 def test_a_complex_query_type_reaches_the_created_table_unchanged():
@@ -393,7 +393,7 @@ def test_a_query_that_does_not_resolve_names_the_action_and_carries_spark():
 
     message = str(raised.value)
     assert "build-delta-Sales.Customer" in message
-    assert "`sales_lh__sales`.`Customer`" in message
+    assert CUSTOMER in message
     assert "UNRESOLVED_COLUMN" in message
     assert not any(one.lstrip().upper().startswith("CREATE") for one in capability.statements)
 

@@ -9,6 +9,7 @@ marker and build their own in ``tests/fabric``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -126,3 +127,55 @@ def populate_folder_files():
     """Shared fixture setup through FilesystemStore or desktop OneLake access."""
 
     return _populate_folder_files
+
+
+# --- one workspace, resolved onto a temporary filesystem ---------------------
+
+
+@dataclass(frozen=True)
+class Lakehouses:
+    """A Weaver Lakehouse and a destination Lakehouse in one workspace.
+
+    Resolution is the production :class:`~weaver.fabric.resolution.FabricResolver`
+    over an inventory declared here; ``root`` puts what it resolves on this
+    test's own filesystem, so a store operation is real. Nothing emulates
+    Fabric: the arithmetic is Fabric's, and only the base URL differs.
+    """
+
+    workspace: object
+    resolver: object
+    store: object
+    weaver: ItemRef
+    target: ItemRef
+    root: Path
+
+
+def _lakehouses(root: Path, *, weaver: str, target: str) -> Lakehouses:
+    from weaver.store import FilesystemStore
+
+    from support.workspaces import given_resolver, given_workspace
+
+    workspace = given_workspace(weaver_lakehouse=weaver)
+    resolver = given_resolver(
+        workspace=workspace, lakehouses=(weaver, target), root=root
+    )
+    store = FilesystemStore()
+    weaver_ref, target_ref = ItemRef(weaver), ItemRef(target)
+    for item in (weaver_ref, target_ref):
+        store.make_directory(resolver.files_root(item))
+        store.make_directory(resolver.tables_root(item))
+    return Lakehouses(
+        workspace=workspace,
+        resolver=resolver,
+        store=store,
+        weaver=weaver_ref,
+        target=target_ref,
+        root=root,
+    )
+
+
+@pytest.fixture
+def lakehouses(tmp_path: Path) -> Lakehouses:
+    """One workspace per test, because a test's own tree costs almost nothing."""
+
+    return _lakehouses(tmp_path, weaver=WEAVER_LAKEHOUSE, target=TARGET_LAKEHOUSE)

@@ -76,7 +76,6 @@ class SparkTableExecutor:
             context,
             action=action,
             qualified=qualified,
-            exact_case=True,
         )
 
         declared = instruction["declared_columns"]

@@ -75,16 +75,22 @@ def _view_action():
     )
 
 
-def _run(capability, destination):
+def _run(capability, destination, payload=None):
     return SparkSqlExecutor().execute(
         _view_action(),
-        b"CREATE OR REPLACE VIEW {{object:Sales.ActiveCustomer}} AS "
-        b"SELECT * FROM {{object:Sales.CustomerEnriched}}",
+        payload
+        or (
+            b"CREATE OR REPLACE VIEW `Analytics`.`Sales`.`Sales`.`ActiveCustomer` AS "
+            b"SELECT * FROM `Analytics`.`Sales`.`Sales`.`CustomerEnriched`"
+        ),
         _context(capability, destination),
     )
 
 
-def test_a_view_is_resolved_against_the_batchs_destination():
+def test_a_finished_statement_is_run_exactly_as_the_build_froze_it():
+    """The names were decided when the bundle was generated, so nothing here
+    resolves anything: what was frozen is what runs."""
+
     capability = _Capability()
     destination = FabricSparkTarget(workspace="Analytics", lakehouse="Sales")
 
@@ -102,7 +108,7 @@ def test_a_view_is_resolved_against_the_batchs_destination():
         FabricSparkTarget(workspace="Analytics", lakehouse="Sales"),
         FabricSparkTarget(workspace="Demo", lakehouse="Sales"),
     ],
-    ids=["fabric", "local"],
+    ids=["one-workspace", "another"],
 )
 def test_a_view_carries_the_destinations_case_scope(destination):
     """Weaver identities are exact, so the statement says which case it needs."""
@@ -165,7 +171,7 @@ def test_a_batch_is_one_piece_of_work_in_payload_order():
 
     details = SparkSqlBatchExecutor().execute(
         _batch_action(),
-        b'["DELETE FROM {{object:_.Registry}}", "MERGE INTO {{object:_.Registry}}"]',
+        b'["DELETE FROM `Demo`.`Weaver`.`_`.`Registry`", "MERGE INTO `Demo`.`Weaver`.`_`.`Registry`"]',
         _batch_context(capability),
     )
 
@@ -188,8 +194,8 @@ def test_every_statement_in_a_batch_gets_the_same_epoch():
 
     capability = _Capability()
     payload = (
-        b'["INSERT INTO {{object:_.Registry}} VALUES (CAST(\'{{epoch}}\' AS TIMESTAMP))",'
-        b' "INSERT INTO {{object:_.Registry}} VALUES (CAST(\'{{epoch}}\' AS TIMESTAMP))"]'
+        b'["INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST(\'{{epoch}}\' AS TIMESTAMP))",'
+        b' "INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST(\'{{epoch}}\' AS TIMESTAMP))"]'
     )
 
     SparkSqlBatchExecutor().execute(
@@ -212,7 +218,7 @@ def test_a_statement_needing_an_epoch_without_one_says_so():
     with pytest.raises(InstallError, match="supplied none"):
         SparkSqlBatchExecutor().execute(
             _batch_action(),
-            b'["INSERT INTO {{object:_.Registry}} VALUES (\'{{epoch}}\')"]',
+            b'["INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (\'{{epoch}}\')"]',
             _batch_context(capability, epoch=None),
         )
 
@@ -225,7 +231,7 @@ def test_a_batch_naming_no_epoch_runs_without_one():
 
     capability = _Capability()
     SparkSqlBatchExecutor().execute(
-        _batch_action(), b'["DELETE FROM {{object:_.Registry}}"]', _batch_context(capability)
+        _batch_action(), b'["DELETE FROM `Demo`.`Weaver`.`_`.`Registry`"]', _batch_context(capability)
     )
 
     assert [statement.split()[0] for statement in capability.statements] == ["DELETE"]

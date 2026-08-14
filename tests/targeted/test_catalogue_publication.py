@@ -37,6 +37,10 @@ from weaver.build_bundle.catalogue_actions import (
     render_catalogue_before_build,
 )
 from weaver.catalogue.state import reconcile_catalogue_state
+from weaver.spark import FabricSparkTarget
+
+#: The Weaver Lakehouse every catalogue statement is addressed to.
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 CUSTOMER = "DWG.Customer"
 
@@ -76,6 +80,7 @@ def after(repository, *names, current=None):
         {document_id(name) for name in names},
         {item: target},
         control_target=target,
+        control_destination=WEAVER,
         current=current,
     )
 
@@ -91,7 +96,8 @@ def test_a_build_that_removes_nothing_writes_no_deletes(repository):
     """
 
     stage = render_catalogue_before_build(
-        FixtureCatalogue.from_registry_rows(), (), control_target=bound_target()
+        FixtureCatalogue.from_registry_rows(), (), control_target=bound_target(),
+        control_destination=WEAVER,
     )
 
     assert stage is None
@@ -103,7 +109,8 @@ def test_an_objects_claims_are_deleted_when_it_is_being_dropped(repository):
     catalogue = FixtureCatalogue.from_registry_rows(registry_row(CUSTOMER))
 
     stage = render_catalogue_before_build(
-        catalogue, {document_id(CUSTOMER)}, control_target=bound_target()
+        catalogue, {document_id(CUSTOMER)}, control_target=bound_target(),
+        control_destination=WEAVER,
     )
 
     assert stage is not None
@@ -128,7 +135,8 @@ def test_the_registry_claim_is_deleted_before_the_dictionaries(repository):
 
     lines = statements(
         render_catalogue_before_build(
-            catalogue, {document_id(CUSTOMER)}, control_target=bound_target()
+            catalogue, {document_id(CUSTOMER)}, control_target=bound_target(),
+            control_destination=WEAVER,
         )
     )
 
@@ -144,6 +152,7 @@ def test_a_claim_the_catalogue_never_held_produces_no_delete(repository):
         FixtureCatalogue.from_registry_rows(),
         {document_id(CUSTOMER)},
         control_target=bound_target(),
+        control_destination=WEAVER,
     )
 
     assert stage is None
@@ -167,6 +176,7 @@ def test_claims_disproved_by_reconciliation_are_deleted_too(repository):
         reconciled.catalogue,
         (),  # this build drops nothing itself
         control_target=bound_target(),
+        control_destination=WEAVER,
         stale_claims=reconciled.stale_claims,
     )
 

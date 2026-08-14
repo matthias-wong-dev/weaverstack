@@ -6,12 +6,11 @@ VIEW`` over its query body. A Folder has no DDL (it is a directory). T-SQL
 generation has its own test module (``test_declaration_tsql_ddl``); here we only assert a
 SQL object routes to the ``tsql`` executor. Nothing here runs ``read()``.
 
-Every Spark object is named ``{{object:Schema.Name}}``, and so is every managed
-reference in a body. That is not decoration: a bare two-part name resolves
-through whatever catalogue the session is attached to, and the session is
-attached to the Weaver Lakehouse rather than to the destination being built. The
-payload names the object and the installer resolves it against the Lakehouse the
-batch is bound to.
+Every Spark object is named in full, and so is every managed reference in a
+body. That is not decoration: a bare two-part name resolves through whatever
+catalogue the session is attached to, and the session is attached to the Weaver
+Lakehouse rather than to the destination being built. The generated payload
+names the Lakehouse it means, so the installer runs it as written.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ import textwrap
 import pytest
 
 from weaver.declaration import read_source_document
+from weaver.spark import FabricSparkTarget
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
 from weaver.declaration.ddl import (
     SPARK_SQL_EXECUTOR,
@@ -40,13 +40,18 @@ def _doc(relative_path: str, text: str, item_type: str = LAKEHOUSE):
     )
 
 
+#: The Lakehouse these documents are bound to. Naming is per destination, so a
+#: generated statement cannot be read without saying which one.
+SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
+
+
 # --- Spark SQL views ---------------------------------------------------------
 
 VIEW_BODY = "select\n    CustomerId,\n    CustomerName\nfrom DWG.Customer\nwhere IsActive = true"
 
 #: The same body as it is frozen: the reference addressed, everything else as the
 #: author wrote it.
-ADDRESSED_BODY = VIEW_BODY.replace("DWG.Customer", "{{object:DWG.Customer}}")
+ADDRESSED_BODY = VIEW_BODY.replace("DWG.Customer", "`Demo`.`Sales_LH`.`DWG`.`Customer`")
 
 VIEW_SOURCE = f"""
 /*
@@ -64,22 +69,22 @@ Dependencies:
 
 
 def test_view_wraps_body_in_strict_create_view():
-    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl(destination=SALES)
 
     assert isinstance(ddl, GeneratedDdl)
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
     assert ddl.content.startswith(
-        "CREATE VIEW {{object:DWG.ActiveCustomer}} AS\n"
+        "CREATE VIEW `Demo`.`Sales_LH`.`DWG`.`ActiveCustomer` AS\n"
     )
 
 
 def test_view_name_is_the_validated_object_id():
-    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
-    assert "VIEW {{object:DWG.ActiveCustomer}} AS" in ddl.content
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl(destination=SALES)
+    assert "VIEW `Demo`.`Sales_LH`.`DWG`.`ActiveCustomer` AS" in ddl.content
 
 
 def test_view_preserves_the_body_apart_from_addressing_its_references():
-    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl(destination=SALES)
     assert ADDRESSED_BODY in ddl.content
     # Only the reference moved. Line breaks, indentation and casing are the
     # author's, because a build freezes text it is going to execute and must not
@@ -103,22 +108,22 @@ def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
     */
     select CustomerId from Other_LH.DWG.Customer where IsActive = true
     """
-    ddl = _doc("DWG.ActiveCustomer.sql", source).create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", source).create_ddl(destination=SALES)
     assert "from Other_LH.DWG.Customer" in ddl.content
-    assert "{{object:Other_LH" not in ddl.content
+    assert "`Other_LH`" not in ddl.content
 
 
 def test_view_normalises_only_trailing_whitespace():
-    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl()
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl(destination=SALES)
     assert ddl.content == (
-        "CREATE VIEW {{object:DWG.ActiveCustomer}} AS\n"
+        "CREATE VIEW `Demo`.`Sales_LH`.`DWG`.`ActiveCustomer` AS\n"
         f"{ADDRESSED_BODY}\n"
     )
 
 
 def test_view_has_exactly_one_create_and_none_in_the_source():
     doc = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE)
-    ddl = doc.create_ddl()
+    ddl = doc.create_ddl(destination=SALES)
     assert ddl.content.count("CREATE VIEW") == 1
     assert "create" not in (doc.sql_body or "").lower()
 
@@ -165,11 +170,11 @@ select count(*) as CustomerCount from DWG.Customer;
 
 
 def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
-    ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl()
+    ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl(destination=SALES)
 
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
     assert ddl.content.startswith(
-        "CREATE TABLE {{object:DWG.Customer}} (\n"
+        "CREATE TABLE `Demo`.`Sales_LH`.`DWG`.`Customer` (\n"
     )
     assert "`CustomerId` integer" in ddl.content
     assert "`CustomerName` string" in ddl.content
@@ -190,20 +195,20 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     at install — not finished SQL (how-does-build-work §2). The query therefore
     *does* belong in the payload; it is executed at install, not at build."""
 
-    ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl()
+    ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl(destination=SALES)
 
     assert (ddl.executor, ddl.extension) == (
         SPARK_TABLE_EXECUTOR,
         SPARK_TABLE_EXTENSION,
     )
     payload = json.loads(ddl.content)
-    assert payload["object"] == "{{object:DWG.CustomerCount}}"
+    assert payload["object"] == "`Demo`.`Sales_LH`.`DWG`.`CustomerCount`"
     assert payload["schema_mode"] == "declared"
     # [name, type, not_null]; CustomerCount has no primary key here, so it is
     # nullable, while every audit column is not null.
     assert payload["declared_columns"] == [["CustomerCount", "bigint", False]]
     assert payload["source_query"] == (
-        "select count(*) as CustomerCount from {{object:DWG.Customer}}"
+        "select count(*) as CustomerCount from `Demo`.`Sales_LH`.`DWG`.`Customer`"
     )
     # Audit columns are frozen into the instruction so the executor never reopens
     # the Weaver document source to learn them.
@@ -230,11 +235,11 @@ def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
         "select count(*) as CustomerCount from live;",
     )
 
-    payload = json.loads(_doc("DWG.CustomerCount.sql", source).create_ddl().content)
+    payload = json.loads(_doc("DWG.CustomerCount.sql", source).create_ddl(destination=SALES).content)
 
     assert payload["setup"] == [
         "create or replace temporary view live as\n"
-        "select * from {{object:DWG.Customer}} where IsActive"
+        "select * from `Demo`.`Sales_LH`.`DWG`.`Customer` where IsActive"
     ]
     assert payload["source_query"] == "select count(*) as CustomerCount from live"
 
@@ -243,7 +248,7 @@ def test_an_inferred_spark_sql_table_carries_no_declared_columns():
     source = SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip() + "\n*/\n" + (
         "select count(*) as CustomerCount from DWG.Customer;\n"
     )
-    ddl = _doc("DWG.CustomerCount.sql", source).create_ddl()
+    ddl = _doc("DWG.CustomerCount.sql", source).create_ddl(destination=SALES)
 
     payload = json.loads(ddl.content)
     assert payload["schema_mode"] == "inferred"
@@ -284,7 +289,7 @@ select CustomerId from DWG.Customer
 
 def test_folder_has_no_create_ddl():
     with pytest.raises(NotImplementedError, match="Folder"):
-        _doc("Raw__CustomerCsv.py", FOLDER_SOURCE).create_ddl()
+        _doc("Raw__CustomerCsv.py", FOLDER_SOURCE).create_ddl(destination=SALES)
 
 
 def test_tsql_object_routes_to_the_tsql_executor():
@@ -306,4 +311,4 @@ def test_tsql_object_routes_to_the_tsql_executor():
     ],
 )
 def test_create_ddl_is_deterministic(path, source):
-    assert _doc(path, source).create_ddl() == _doc(path, source).create_ddl()
+    assert _doc(path, source).create_ddl(destination=SALES) == _doc(path, source).create_ddl(destination=SALES)

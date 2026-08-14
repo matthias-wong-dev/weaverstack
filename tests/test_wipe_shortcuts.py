@@ -3,11 +3,9 @@
 A shortcut is the one thing in a Lakehouse that is not the Lakehouse's own data:
 it is a name this item holds for data another item owns. So the interesting
 assertion is not that the shortcut goes — it is that the thing it pointed at
-*stays*. A wipe of one Lakehouse must never reach through a pointer into another.
-
-The two environments reach that guarantee differently, which is why both are
-tested here: Fabric removes the shortcut through the workspace before any storage
-is swept, and the emulator's link is unlinked rather than followed.
+*stays*. A wipe of one Lakehouse must never reach through a pointer into
+another, which is why the shortcut is taken away through the workspace before
+any storage is swept.
 """
 
 from __future__ import annotations
@@ -23,64 +21,14 @@ from weaver.physical_wipe import wipe_delta_target, wipe_folder_target, wipe_lak
 WIPE_MODULE = sys.modules["weaver.physical_wipe"]
 
 
-# --- the emulator: a link is unlinked, never followed --------------------------
-
-
-def _linked_table(lakehouses, *, producer="Producer_LH"):
-    """A Delta table in one Lakehouse, aliased into the target's Tables area."""
-
-    store, resolver = lakehouses.store, lakehouses.resolver
-    produced = resolver.tables_root(ItemRef(producer)) / "Sales" / "Customer"
-    store.write(produced / "part.parquet", b"rows")
-    aliased = resolver.tables_root(lakehouses.target) / "Sales" / "Portable"
-    store.link(produced, aliased)
-    return produced, aliased
-
-
-def test_wiping_tables_removes_the_link_and_not_what_it_points_at(lakehouses):
-    produced, aliased = _linked_table(lakehouses)
-
-    report = wipe_delta_target(
-        DeltaTarget(lakehouse=lakehouses.target), lakehouses.workspace
-    )
-
-    assert not aliased.path.exists()
-    assert report.count == 1  # the Sales schema directory that held the link
-    assert lakehouses.store.read(produced / "part.parquet") == b"rows"
-
-
-def test_wiping_files_removes_a_folder_link_and_not_its_source(lakehouses):
-    store, resolver = lakehouses.store, lakehouses.resolver
-    produced = resolver.files_root(ItemRef("Producer_LH")) / "Sales" / "Export"
-    store.write(produced / "orders.csv", b"id\n1\n")
-    aliased = resolver.files_root(lakehouses.target) / "Sales" / "Portable"
-    store.link(produced, aliased)
-
-    wipe_folder_target(
-        FolderTarget(lakehouse=lakehouses.target), lakehouses.workspace
-    )
-
-    assert not aliased.path.exists()
-    assert store.read(produced / "orders.csv") == b"id\n1\n"
-
-
-def test_a_whole_lakehouse_wipe_leaves_every_producer_intact(lakehouses):
-    produced, _aliased = _linked_table(lakehouses)
-
-    wipe_lakehouse(lakehouses.target, lakehouses.workspace)
-
-    assert lakehouses.store.read(produced / "part.parquet") == b"rows"
-    assert lakehouses.resolver.tables_root(lakehouses.target).path.is_dir()
-
-
-# --- Fabric: the shortcut is taken away through the workspace ------------------
+# --- the shortcut is taken away through the workspace -------------------------
 
 
 class _ShortcutResolver:
-    """A resolver that holds shortcuts, as the Fabric ones do.
+    """A resolver that holds shortcuts, and records what a wipe takes away.
 
-    Wraps the local resolver so paths still resolve, and records what a wipe asks
-    it to take away.
+    Wraps the resolver the test already has, so every path still resolves the
+    way Fabric resolves it.
     """
 
     def __init__(self, inner, shortcuts):
@@ -105,7 +53,7 @@ class _ShortcutResolver:
 
 @pytest.fixture
 def shortcut_workspace(lakehouses, monkeypatch):
-    """The local workspace, answering as though it held Fabric shortcuts."""
+    """The workspace, answering as though it held two Fabric shortcuts."""
 
     shortcuts = (
         Shortcut(path="Tables/Sales", name="Portable", target_item_id="producer"),
@@ -113,6 +61,7 @@ def shortcut_workspace(lakehouses, monkeypatch):
     )
     resolver = _ShortcutResolver(lakehouses.resolver, shortcuts)
     monkeypatch.setattr(WIPE_MODULE, "resolver_for", lambda workspace: resolver)
+    monkeypatch.setattr(WIPE_MODULE, "store_for", lambda workspace: lakehouses.store)
     return resolver
 
 
