@@ -1,15 +1,10 @@
 """A Test reaches its artefact the way a load does, and its outcome is settled.
 
-Moved here from the local Spark tier rather than deleted with it. The claim is
-about *dispatch* — one import, one runtime context, a different engine call —
-but a Test's deployed artefact returns a Spark frame and Weaver's comparison
-reads it, so the claim cannot be made without a real Spark session. A double
-returning a frame-shaped object would be this suite modelling Spark, which is
-the one thing the test substrate must never do.
-
-``hosted``, because the artefacts run as the installed wheel: the runtime
-context and the comparison are :mod:`weaver.runtime.test_compare` inside the
-Fabric session.
+The same boundary as ``test_run_dispatch_boundary``, for the other half of the
+run: one import, one runtime context, a different engine call. What makes this
+its own file is that a Test's artefact returns a Spark frame and Weaver's
+comparison reads it — so the claim cannot be made without a real session, and a
+double returning a frame-shaped object would be this suite modelling Spark.
 
 Three outcomes, chosen because each is settled by a different rule:
 
@@ -19,87 +14,126 @@ Three outcomes, chosen because each is settled by a different rule:
     Disagrees    a discrepancy on both sides, reported with its counts
     Unreadable   could not be evaluated at all, which is not "found nothing"
 
-The last is the one that matters most: the answer a validation must never give
-is "found nothing" when what happened is that it could not look. Its Warehouse
-twin is ``test_warehouse_validation_primitive``; if the two disagree, one set of
-validation semantics has become two.
+The last is the one that matters most. The answer a validation must never give
+is "found nothing" when what happened is that it could not look, and *invalid*
+rather than *failed* is how the report says so.
+
+``hosted``, because the comparison is :mod:`weaver.runtime.test_compare` running
+inside the Fabric session as the installed wheel.
+
+Its Warehouse twin is ``test_warehouse_validation_primitive``. Two engines, one
+set of validation semantics; if the two files disagree, the semantics have
+become two.
 """
 
 from __future__ import annotations
 
 import pytest
+from support.thin import JUDGEMENTS, thin_estate
 
-pytestmark = [
-    pytest.mark.fabric,
-    pytest.mark.hosted,
-]
+from weaver.test import run_test
 
+pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
-#: A Test's deployed artefact is read rather than called, and what it returns is
-#: a real Spark frame of sides. Two literal rows are enough to settle each
-#: outcome: what a Test *means* is proven by the comparison's own tests, and
-#: what is proven here is that the run reaches it and settles what comes back.
-VALIDATIONS = {
-    "Agrees": '''\
-from pyspark.sql.types import StringType, StructField, StructType
-
-SIDES = StructType([StructField("_weaver_side", StringType())])
+#: The Lakehouse the artefacts are deployed into. Emptied first, because a run
+#: that found a previous run's modules would prove nothing about this one.
+LAKEHOUSE = "PYTEST_LH_1"
 
 
-class {name}:
-    """Both sides agree: no rows, so nothing missing and nothing unexpected."""
+@pytest.fixture(scope="module")
+def judged(
+    fabric_workspace,
+    fabric_client,
+    weaver_session,
+    fabric_empty_lakehouse,
+    tmp_path_factory,
+):
+    """Tests with controlled outcomes, deployed into a real Lakehouse."""
 
-    def __init__(self, spark, lakehouse=None):
-        self.spark = spark
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
 
-    def read(self):
-        return self.spark.createDataFrame([], SIDES)
-''',
-    "Disagrees": '''\
-from pyspark.sql.types import StringType, StructField, StructType
+    fabric_empty_lakehouse(LAKEHOUSE)
 
-SIDES = StructType([StructField("_weaver_side", StringType())])
-
-
-class {name}:
-    """One row expected and never seen, one seen and never expected."""
-
-    def __init__(self, spark, lakehouse=None):
-        self.spark = spark
-
-    def read(self):
-        return self.spark.createDataFrame(
-            [("expected",), ("actual",), ("actual",)], SIDES
-        )
-''',
-    "Unreadable": '''\
-class {name}:
-    """Cannot be evaluated at all — which is not the same as finding nothing."""
-
-    def __init__(self, spark, lakehouse=None):
-        self.spark = spark
-
-    def read(self):
-        raise RuntimeError("the table this Test reads does not exist")
-''',
-}
-
-
-@pytest.mark.skip(
-    reason=(
-        "moved from the deleted local Spark tier and not yet wired to the "
-        "Fabric harness — see Milestone 1 in the Fabric-only runtime PR"
+    return thin_estate(
+        tmp_path_factory.mktemp("judged"),
+        outcomes=(),
+        judgements=JUDGEMENTS,
+        lakehouse=LAKEHOUSE,
+        workspace=fabric_workspace,
+        resolver=FabricResolver(fabric_workspace, client=fabric_client),
+        store=OneLakeDfsClient(),
+        session=weaver_session,
     )
-)
-def test_a_validation_reaches_its_artefact_the_same_way_a_load_does():
-    """The same import, the same runtime context, a different engine call."""
 
 
-@pytest.mark.skip(reason="see above")
-def test_a_disagreement_is_a_failure_carrying_what_it_found():
-    """One missing and two unexpected, reported rather than summarised away."""
+@pytest.fixture(scope="module")
+def report(judged):
+    """One run over every judgement, so one crossing serves them all."""
+
+    return run_test(
+        judged.session,
+        workspace=judged.workspace,
+        requested=[judged.target],
+        state=judged.state,
+    )
 
 
-@pytest.mark.skip(reason="see above")
-def test_a_validation_that_could_not_run_is_invalid_rather_than_failed():
-    """The one answer a validation must never give is "found nothing"."""
+def test_every_declared_validation_is_reached(report):
+    """Dispatch found and imported all three, whatever each then reported."""
+
+    reached = {node.logical_id.rsplit(".", 1)[1] for node in report.nodes}
+
+    assert reached == set(JUDGEMENTS), (
+        "dispatch did not reach every deployed validation: a Test the catalogue "
+        "claims is installed was not imported where Spark is"
+    )
+
+
+def test_a_validation_that_agrees_passes(report):
+    """Both sides empty, so there is nothing missing and nothing unexpected."""
+
+    node = _node(report, "Agrees")
+
+    assert node.status == "passed"
+    assert node.result.missing_count == 0
+    assert node.result.unexpected_count == 0
+
+
+def test_a_disagreement_is_a_failure_carrying_what_it_found(report):
+    """Counted on both sides, because which side differs is what a reader acts on."""
+
+    node = _node(report, "Disagrees")
+
+    assert node.status == "failed"
+    assert node.result.missing_count == 1
+    assert node.result.unexpected_count == 2
+
+
+def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(report):
+    """The distinction the whole report rests on.
+
+    A Test that could not be evaluated has found nothing *and proved nothing*.
+    Reporting it as failed would be wrong in one direction and reporting it as
+    passed wrong in the other, so it is neither.
+    """
+
+    node = _node(report, "Unreadable")
+
+    assert node.status == "invalid"
+    assert node.status != "failed"
+
+
+def test_one_unreadable_validation_does_not_invalidate_the_others(report):
+    """Each node is settled on its own evidence."""
+
+    assert _node(report, "Agrees").status == "passed"
+    assert _node(report, "Disagrees").status == "failed"
+
+
+def _node(report, outcome: str):
+    for node in report.nodes:
+        if node.logical_id.endswith(f".{outcome}"):
+            return node
+    raise AssertionError(
+        f"{outcome} is not in {[node.logical_id for node in report.nodes]}"
+    )

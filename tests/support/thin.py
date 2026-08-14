@@ -152,6 +152,54 @@ class {name}:
 
 OUTCOMES = tuple(ARTEFACTS)
 
+#: A Test's deployed artefact is read rather than called, and what it returns is
+#: a real Spark frame of sides — so these need a session where a load's do not.
+#: Two literal rows are enough to settle each outcome: what a Test *means* is the
+#: comparison's own claim, and what these settle is how the run reports it.
+VALIDATIONS = {
+    "Agrees": '''from pyspark.sql.types import StringType, StructField, StructType
+
+SIDES = StructType([StructField("_weaver_side", StringType())])
+
+
+class {name}:
+    """Both sides agree: no rows, so nothing missing and nothing unexpected."""
+
+    def __init__(self, spark, lakehouse=None):
+        self.spark = spark
+
+    def read(self):
+        return self.spark.createDataFrame([], SIDES)
+''',
+    "Disagrees": '''from pyspark.sql.types import StringType, StructField, StructType
+
+SIDES = StructType([StructField("_weaver_side", StringType())])
+
+
+class {name}:
+    """One row expected and never seen, one seen and never expected."""
+
+    def __init__(self, spark, lakehouse=None):
+        self.spark = spark
+
+    def read(self):
+        return self.spark.createDataFrame(
+            [("expected",), ("actual",), ("actual",)], SIDES
+        )
+''',
+    "Unreadable": '''class {name}:
+    """Cannot be evaluated at all — which is not the same as finding nothing."""
+
+    def __init__(self, spark, lakehouse=None):
+        self.spark = spark
+
+    def read(self):
+        raise RuntimeError("the table this Test reads does not exist")
+''',
+}
+
+JUDGEMENTS = tuple(VALIDATIONS)
+
 
 
 @dataclass(frozen=True)
@@ -199,6 +247,7 @@ def thin_estate(
     root: Path,
     *,
     outcomes: tuple[str, ...] = OUTCOMES,
+    judgements: tuple[str, ...] = (),
     lakehouse: str = "Thin_LH",
     session=None,
     resolver=None,
@@ -223,6 +272,14 @@ def thin_estate(
         f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}")
         for name in outcomes
     }
+    # Under ``tests/``, which is where a repository declares one: the folder is
+    # what makes it a validation rather than another table.
+    documents.update(
+        {
+            f"tests/{SCHEMA}__{name}.py": lakehouse_test(f"{SCHEMA}.{name}")
+            for name in judgements
+        }
+    )
     repository = single_document_repository(
         root / "repository", schemas=(SCHEMA,), documents=documents
     )
@@ -242,6 +299,7 @@ def thin_estate(
     # guessed would only be pinning the guess.
     files_root = resolver.files_root(ItemRef(lakehouse))
     sources = {f"{SCHEMA}__{name}": ARTEFACTS[name] for name in outcomes}
+    sources.update({f"{SCHEMA}__{name}": VALIDATIONS[name] for name in judgements})
     for artefact in item_runtime_artefacts(repository, item=item_id("Lakehouse/Sales")):
         module = artefact.identity.object_id.object.removesuffix(".py")
         source = sources.get(module)
@@ -273,7 +331,10 @@ def thin_estate(
         ),
         target=target,
         root=root,
-        nodes={name: f"load:{target}/{SCHEMA}.{name}" for name in outcomes},
+        nodes={
+            **{name: f"load:{target}/{SCHEMA}.{name}" for name in outcomes},
+            **{name: f"{target}/{SCHEMA}.{name}" for name in judgements},
+        },
     )
 
 
