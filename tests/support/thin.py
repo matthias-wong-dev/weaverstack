@@ -117,7 +117,6 @@ class {name}:
 ''',
     "Failure": '''\
 from weaver.runtime.load_result import LoadResult
-from .workspaces import given_resolver, given_workspace
 
 
 class {name}:
