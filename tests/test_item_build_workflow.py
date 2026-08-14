@@ -153,7 +153,10 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
     result = build_uploaded_item_repository(
         root,
         bindings=_bindings(),
-        session=given_session(store=remote),
+        session=given_session(
+            store=remote,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         control_lakehouse=_control(),
         executors=_executors(),
     )
@@ -175,7 +178,10 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
         root,
         source_store=FilesystemStore(),
         bindings=_bindings(),
-        session=given_session(store=target_store),
+        session=given_session(
+            store=target_store,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         control_lakehouse=_control(),
         executors=_executors(),
     )
@@ -206,7 +212,10 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
             Location(str(_estate(tmp_path))),
             source_store=FilesystemStore(),
             bindings=unknown,
-            session=given_session(store=FilesystemStore()),
+            session=given_session(
+            store=FilesystemStore(),
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
             control_lakehouse=_control(),
             executors=_executors(),
         )
@@ -250,7 +259,9 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
 def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
         
     workspace = given_workspace(weaver_lakehouse="Control")
-    resolver = given_resolver(workspace=workspace)
+    resolver = given_resolver(
+        workspace=workspace, lakehouses=("Weaver", "Raw_Dev", "Sales_LH", "Curated_Dev"), root=tmp_path
+    )
     store = FilesystemStore()
     target = _bindings().entries[0].to_bound_target()
     files = resolver.files_root(ItemRef("Raw_Dev"))
@@ -288,7 +299,10 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     result = build_uploaded_item_repository(
         root,
         bindings=_bindings(),
-        session=given_session(store=remote),
+        session=given_session(
+            store=remote,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         control_lakehouse=_control(),
         archive=archive,
         executors=_executors(),
@@ -352,7 +366,10 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
     report = install_bundle_archive(
         archive,
         archive_store=store,
-        session=given_session(store=target),
+        session=given_session(
+            store=target,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         executors=_executors(),
     )
 

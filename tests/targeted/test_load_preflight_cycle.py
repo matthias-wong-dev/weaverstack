@@ -54,6 +54,7 @@ from factories import (
     load_estate,
     load_estate_bindings,
 )
+from weaver.store import FilesystemStore
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -101,7 +102,18 @@ def session(tmp_path):
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        session=given_session(workspace=workspace, resolver=Refreshing(workspace)),
+        session=given_session(
+            workspace=workspace,
+            resolver=Refreshing(
+                workspace,
+                client=InventoryClient(
+                    workspace.workspace,
+                    [("Lakehouse", name) for name in ("Weaver_LH", "Raw_LH")],
+                ),
+                base_url=Path(tmp_path).as_posix(),
+            ),
+            store=FilesystemStore(),
+        ),
     )
 
 
@@ -213,7 +225,18 @@ def empty_estate(tmp_path):
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        session=given_session(workspace=workspace, resolver=Refreshing(workspace)),
+        session=given_session(
+            workspace=workspace,
+            resolver=Refreshing(
+                workspace,
+                client=InventoryClient(
+                    workspace.workspace,
+                    [("Lakehouse", name) for name in ("Weaver_LH", "Raw_LH")],
+                ),
+                base_url=Path(tmp_path).as_posix(),
+            ),
+            store=FilesystemStore(),
+        ),
     )
 
 
@@ -277,9 +300,13 @@ def real_session(tmp_path):
     from support.sessions import given_session
 
     workspace = given_workspace(weaver_lakehouse="Weaver_LH")
-    # The failure under test happens inside the inventory reader. Supplying an
-    # inert Spark value keeps this pure test from acquiring a real JVM first.
-    return given_session(workspace=workspace)
+    # The failure under test happens inside the inventory reader, so what this
+    # Session needs is a store and a resolver rather than a way to reach Fabric.
+    return given_session(
+        workspace=workspace,
+        lakehouses=("Weaver_LH", "Raw_LH"),
+        store=FilesystemStore(),
+    )
 
 
 def _failing_reader(monkeypatch, exc):

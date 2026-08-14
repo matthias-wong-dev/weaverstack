@@ -21,8 +21,8 @@ from weaver_cli.main import _resolve_workspace, _with_command_overrides
 from weaver_cli.shell import run_shell
 
 
-def _local(root="./emulator", **kwargs) -> LocalWorkspace:
-    return given_workspace()
+def _workspace(name: str = "Demo", **kwargs):
+    return given_workspace(workspace=name, **kwargs)
 
 
 @pytest.fixture
@@ -256,32 +256,25 @@ def _args(session=None, **overrides):
 
 
 def test_a_command_naming_nothing_inherits_the_session_workspace():
-    with ConsoleSession(workspace=_local(weaver_lakehouse="Weaver")) as session:
-        assert _resolve_workspace(_args(session)).workspace == Path("emulator")
+    with ConsoleSession(workspace=_workspace(weaver_lakehouse="Weaver")) as session:
+        assert _resolve_workspace(_args(session)).workspace == "Demo"
 
 
 def test_a_command_may_override_the_control_lakehouse_it_inherits():
-    with ConsoleSession(workspace=_local(weaver_lakehouse="Weaver")) as session:
+    with ConsoleSession(workspace=_workspace(weaver_lakehouse="Weaver")) as session:
         resolved = _resolve_workspace(_args(session, weaver_lakehouse="Other"))
 
         assert resolved.weaver_lakehouse == "Other"
-        assert resolved.workspace == Path("emulator")
+        assert resolved.workspace == "Demo"
         assert session.workspace.weaver_lakehouse == "Weaver", "the session is unchanged"
 
 
 def test_a_command_naming_its_own_workspace_does_not_inherit():
-    with ConsoleSession(workspace=_local("First_Workspace")) as session:
-        resolved = _resolve_workspace(
-            _args(session, workspace="Second_Workspace", workspace_type="local")
-        )
+    with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
+        resolved = _resolve_workspace(_args(session, workspace="Second_Workspace"))
 
-        assert resolved.workspace == Path("two")
+        assert resolved.workspace == "Second_Workspace"
 
-
-def test_a_workspace_type_that_disagrees_needs_its_own_workspace():
-    with ConsoleSession(workspace=_local()) as session:
-        with pytest.raises(CommandError, match="name a --workspace"):
-            _resolve_workspace(_args(session, workspace_type="fabric"))
 
 
 def test_without_a_session_nothing_is_inherited():
@@ -300,7 +293,7 @@ def test_a_session_started_without_a_workspace_inherits_nothing():
 
 
 def test_overrides_do_not_mutate_the_workspace_they_are_applied_to():
-    original = _local(weaver_lakehouse="Weaver")
+    original = _workspace(weaver_lakehouse="Weaver")
     overridden = _with_command_overrides(
         original, _args(weaver_lakehouse="Other", environment="dev")
     )

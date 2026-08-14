@@ -74,7 +74,11 @@ def test_the_payload_is_the_documents_own_ddl(lakehouse_customer):
     rendered = _render(lakehouse_customer, "DWG.Customer")
 
     filename = rendered.action.payload
-    assert rendered.payloads[filename] == document.create_ddl().content.encode("utf-8")
+    assert rendered.payloads[filename] == (
+        document.create_ddl(destination=bound_target().spark_target).content.encode(
+            "utf-8"
+        )
+    )
 
 
 def test_the_payload_filename_carries_the_ddls_extension(lakehouse_customer):
@@ -163,7 +167,7 @@ def test_a_warehouse_view_renders_a_tsql_build_view_action(tmp_path):
     identity = document_id("Warehouse/Reporting/DWG.ActiveCustomer")
 
     rendered = render_document_build_action(
-        identity, repository.source_documents[identity]
+        identity, repository.source_documents[identity], target=bound_target()
     )
 
     assert rendered.action.kind == "build_view"
@@ -186,7 +190,7 @@ def test_a_folder_renders_an_action_with_no_payload_at_all(tmp_path):
     identity = document_id("Lakehouse/Sales/Files/Raw.CustomerCsv")
 
     rendered = render_document_build_action(
-        identity, repository.source_documents[identity]
+        identity, repository.source_documents[identity], target=bound_target()
     )
 
     assert rendered.action.kind == "build_folder"

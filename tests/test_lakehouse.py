@@ -237,7 +237,9 @@ def test_a_supplied_destination_is_what_names_objects():
         destination=FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH"),
     )
 
-    assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
+    assert lakehouse.qualify("Sales", "Order") == (
+        "`Demo`.`Sales_LH`.`Sales`.`Order`"
+    )
 
 
 # --- resolved by name, through a resolver -----------------------------------
@@ -249,8 +251,11 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.name == "Sales_LH"
-    assert lakehouse.spark_root == (tmp_path / "Sales_LH").as_posix()
-    assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
+    # Storage is OneLake, keyed by item id; the catalogue is named in full.
+    assert lakehouse.spark_root == resolver.spark_root(ItemRef("Sales_LH"))
+    assert lakehouse.qualify("Sales", "Order") == (
+        "`Demo`.`Sales_LH`.`Sales`.`Order`"
+    )
 
 
 def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
@@ -260,15 +265,28 @@ def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
 
 
 def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Path):
-    """One layout, whichever type is asked — the emulator mirrors OneLake."""
+    """One layout, reached by the two transports a Lakehouse has.
+
+    Spark writes through ``abfss://`` and the store lists through the DFS
+    ``https://`` endpoint. Both address the same object, and they are not the
+    same string — conflating them would have a write going through a transport
+    that cannot perform it.
+    """
 
     resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.location == resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
-    assert lakehouse.table_path("Sales", "Order") == resolver.delta_table(
+
+    spark_path = lakehouse.table_path("Sales", "Order")
+    store_path = resolver.delta_table(
         DeltaTarget.parse("Sales_LH"), "Sales", "Order"
     ).value
+
+    assert spark_path.startswith("abfss://")
+    assert store_path.startswith("https://")
+    assert spark_path.endswith("/Tables/Sales/Order")
+    assert store_path.endswith("/Tables/Sales/Order")
 
 
 def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path):
@@ -276,13 +294,16 @@ def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path)
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 
-    assert (
-        lakehouse.folder_path("Sales", "Export").as_posix()
-        == resolver.folder_object(target, "Sales", "Export").value
+    # A Folder's files are reached as a filesystem, which outside a Fabric
+    # session there is no way to do — so what agrees here is the *address*.
+    assert lakehouse.location.folder_path("Sales", "Export").endswith(
+        "/Files/Sales/Export"
     )
-    assert (
-        f"{lakehouse.folder_path('Sales', 'Export').as_posix()}_Staging"
-        == resolver.folder_staging(target, "Sales", "Export").value
+    assert resolver.folder_object(target, "Sales", "Export").value.endswith(
+        "/Files/Sales/Export"
+    )
+    assert resolver.folder_staging(target, "Sales", "Export").value.endswith(
+        "/Files/Sales/Export_Staging"
     )
 
 

@@ -22,7 +22,9 @@ from support.workspaces import given_resolver, given_workspace
 
 def _context(tmp_path):
     workspace = given_workspace(weaver_lakehouse="Control")
-    resolver = given_resolver(workspace=workspace)
+    resolver = given_resolver(
+        workspace=workspace, lakehouses=("Control", "Sales"), root=tmp_path
+    )
     store = FilesystemStore()
     lakehouse = ItemRef("Sales")
     bound = BoundTarget(
