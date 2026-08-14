@@ -20,7 +20,7 @@ from weaver.build_bundle.executors.spark_sql_batch import SparkSqlBatchExecutor
 from weaver.build_bundle.models import InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
-from weaver.spark import fabric_destination, local_destination
+from weaver.spark import FabricSparkTarget
 from weaver.targets import ItemRef
 
 
@@ -86,7 +86,7 @@ def _run(capability, destination):
 
 def test_a_view_is_resolved_against_the_batchs_destination():
     capability = _Capability()
-    destination = fabric_destination(workspace="Analytics", lakehouse="Sales")
+    destination = FabricSparkTarget(workspace="Analytics", lakehouse="Sales")
 
     details = _run(capability, destination)
 
@@ -99,8 +99,8 @@ def test_a_view_is_resolved_against_the_batchs_destination():
 @pytest.mark.parametrize(
     "destination",
     [
-        fabric_destination(workspace="Analytics", lakehouse="Sales"),
-        local_destination(item="Sales", tables_root="/tmp/Sales/Tables"),
+        FabricSparkTarget(workspace="Analytics", lakehouse="Sales"),
+        FabricSparkTarget(workspace="Demo", lakehouse="Sales"),
     ],
     ids=["fabric", "local"],
 )
@@ -115,7 +115,7 @@ def test_a_view_carries_the_destinations_case_scope(destination):
 
 def test_a_view_without_a_way_to_run_a_statement_says_so():
     capability = _Capability()
-    context = _context(capability, fabric_destination(workspace="A", lakehouse="Sales"))
+    context = _context(capability, FabricSparkTarget(workspace="A", lakehouse="Sales"))
     context = InstallationContext(
         resolver=None, store=None, target=context.target
     )
@@ -128,7 +128,7 @@ def test_a_failing_statement_is_not_swallowed():
     capability = _Capability(fail=True)
 
     with pytest.raises(RuntimeError, match="view failed"):
-        _run(capability, fabric_destination(workspace="Analytics", lakehouse="Sales"))
+        _run(capability, FabricSparkTarget(workspace="Analytics", lakehouse="Sales"))
 
 
 # --- a batch of statements ------------------------------------------------------
@@ -148,7 +148,7 @@ def _batch_action():
 def _batch_context(capability, *, epoch=None):
     return _context(
         capability,
-        fabric_destination(workspace="Analytics", lakehouse="Control"),
+        FabricSparkTarget(workspace="Analytics", lakehouse="Control"),
         epoch=epoch,
         item="Control",
     )

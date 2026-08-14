@@ -14,10 +14,10 @@ from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarg
 from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
-from weaver.resolution import LocalResolver
 from weaver.store import Entry, FilesystemStore
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
+from weaver.spark import FabricSparkTarget
+from support.workspaces import given_resolver, given_workspace
 
 SOURCE_TARGET_ID = "Lakehouse-Raw--lakehouse-Raw_Dev"
 DESTINATION_TARGET_ID = "Lakehouse-Curated--lakehouse-Curated_Dev"
@@ -60,21 +60,16 @@ def _action() -> InstallAction:
 
 
 def _local_context(tmp_path, *, resolver=None, store=None):
-    from weaver.spark import local_destination
 
     # With a Spark destination, as a real Lakehouse target resolves to. Without
     # one an alias in it cannot even be *named*, which used to go unnoticed
     # because the discovery wait was skipped whenever there was no Spark session.
     destination = replace(
         _target(DESTINATION_TARGET_ID, "Curated_Dev"),
-        destination=local_destination(
-            item="Curated_Dev", tables_root=str(tmp_path / "Curated_Dev" / "Tables")
-        ),
+        destination=FabricSparkTarget(workspace="Demo", lakehouse="Curated_Dev"),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
-    local_resolver = LocalResolver(
-        LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
-    )
+    local_resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
     if resolver is not None and hasattr(resolver, "inner"):
         resolver.inner = local_resolver
     chosen_store = store or FilesystemStore()
@@ -269,7 +264,6 @@ class _LateSpark:
 
 
 def _addressable_context(tmp_path, spark, resolver):
-    from weaver.spark import local_destination
 
     destination = ResolvedTarget(
         bound=BoundTarget(
@@ -279,14 +273,10 @@ def _addressable_context(tmp_path, spark, resolver):
             item_name="Curated_Dev",
         ),
         lakehouse=ItemRef("Curated_Dev"),
-        destination=local_destination(
-            item="Curated_Dev", tables_root=str(tmp_path / "Curated_Dev" / "Tables")
-        ),
+        destination=FabricSparkTarget(workspace="Demo", lakehouse="Curated_Dev"),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
-    local_resolver = LocalResolver(
-        LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
-    )
+    local_resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
     resolver.inner = local_resolver
     store = FilesystemStore()
     store.make_directory(

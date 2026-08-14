@@ -12,9 +12,7 @@ from dataclasses import replace
 
 import pytest
 
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
@@ -32,6 +30,7 @@ from support.sessions import given_installer
 
 from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
 from weaver.errors import BuildError
+from support.workspaces import given_resolver, given_workspace
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 
@@ -208,12 +207,10 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
     bundle = write_bundle(
         location, plan=plan, payloads={}, store=store
     )
-    workspace = LocalWorkspace(
-        workspace=tmp_path / "local", weaver_lakehouse="Weaver"
-    )
+    workspace = given_workspace(weaver_lakehouse="Weaver")
 
     report = given_installer(
-        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+        workspace=workspace, store=store, resolver=given_resolver(workspace=workspace)
     ).install(bundle)
 
     assert report.status == SUCCEEDED
@@ -266,10 +263,10 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     bundle = write_bundle(
         Location(str(tmp_path / "refresh-bundle")), plan=plan, payloads={}, store=store
     )
-    workspace = LocalWorkspace(workspace=tmp_path / "local", weaver_lakehouse="Weaver")
+    workspace = given_workspace(weaver_lakehouse="Weaver")
 
     installer = given_installer(
-        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+        workspace=workspace, store=store, resolver=given_resolver(workspace=workspace)
     )
     asked = []
     installer.session.spark = lambda *a, **k: asked.append(True)

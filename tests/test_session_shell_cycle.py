@@ -16,13 +16,13 @@ import pytest
 
 from weaver.errors import BuildError, CommandError
 from weaver.session import ConsoleSession
-from weaver.workspaces import LocalWorkspace
+from support.workspaces import given_resolver, given_workspace
 from weaver_cli.main import _resolve_workspace, _with_command_overrides
 from weaver_cli.shell import run_shell
 
 
 def _local(root="./emulator", **kwargs) -> LocalWorkspace:
-    return LocalWorkspace(workspace=Path(root), **kwargs)
+    return given_workspace()
 
 
 @pytest.fixture

@@ -58,11 +58,9 @@ from support.sessions import given_session
 
 from weaver.etl import item_runtime_artefacts
 from weaver.load_plan import PhysicalTargetRef
-from weaver.resolution import LocalResolver
 from weaver.run import RunState
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
 
 #: The schema these artefacts are declared in, so a thin node is recognisable in
 #: a report as trivial rather than mistaken for an estate someone cared about.
@@ -118,6 +116,7 @@ class {name}:
 ''',
     "Failure": '''\
 from weaver.runtime.load_result import LoadResult
+from .workspaces import given_resolver, given_workspace
 
 
 class {name}:
@@ -295,10 +294,8 @@ def thin_estate(
     )
     bindings = item_bindings(("Lakehouse/Sales", lakehouse))
 
-    workspace = LocalWorkspace(
-        workspace=str(root / "estate"), weaver_lakehouse="Weaver_LH"
-    )
-    resolver = LocalResolver(workspace)
+    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    resolver = given_resolver(workspace=workspace)
 
     # Written where the *build* would have written them, asked of the build's own
     # enumerator rather than assembled from a path this module believes in. A

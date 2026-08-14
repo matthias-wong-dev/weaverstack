@@ -27,9 +27,7 @@ from factories import (
 )
 
 from weaver.targets import ItemRef
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle import (
     LakehouseBinding,
@@ -38,6 +36,7 @@ from weaver.build_bundle import (
 )
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue as RealCatalogue
+from support.workspaces import given_resolver, given_workspace
 
 
 class RecordingExecutor:
@@ -66,9 +65,9 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Weaver")
+    workspace = given_workspace(weaver_lakehouse="Weaver")
     store = FilesystemStore()
-    resolver = LocalResolver(workspace)
+    resolver = given_resolver(workspace=workspace)
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))

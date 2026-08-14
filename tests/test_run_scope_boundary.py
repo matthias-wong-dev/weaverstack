@@ -40,7 +40,8 @@ from weaver.run.runtime_boundary import (
     LazyRunScope,
     open_runtime_scope,
 )
-from weaver.workspaces import FabricWorkspace, LocalWorkspace
+from weaver.workspaces import FabricWorkspace
+from support.workspaces import given_resolver, given_workspace
 
 
 @pytest.fixture(autouse=True)
@@ -238,7 +239,7 @@ def test_opening_a_scope_where_execution_is_local_needs_no_crossing():
     session = _Recording()
     session.executes_here = lambda workspace=None: True
 
-    scope = open_runtime_scope(session, workspace=LocalWorkspace(workspace="/tmp/x"))
+    scope = open_runtime_scope(session, workspace=given_workspace())
 
     assert isinstance(scope, DirectRunScope)
     assert isinstance(scope.runtime_scope, RuntimeScope)

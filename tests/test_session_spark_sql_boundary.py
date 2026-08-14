@@ -22,7 +22,8 @@ import pytest
 
 from weaver.session.console import ConsoleScope, ConsoleSession
 from weaver.session.notebook import NotebookSession
-from weaver.workspaces import FabricWorkspace, LocalWorkspace
+from weaver.workspaces import FabricWorkspace
+from support.workspaces import given_resolver, given_workspace
 
 CASE_KEY = "spark.sql.caseSensitive"
 
@@ -127,7 +128,7 @@ def emulator():
 
     def make(spark):
         return ConsoleSession(
-            workspace=LocalWorkspace(workspace="/root"), spark=spark, resolver=object()
+            workspace=given_workspace(), spark=spark, resolver=object()
         )
 
     return make

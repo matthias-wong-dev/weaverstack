@@ -17,7 +17,7 @@ import pytest
 
 from weaver import Assumption, Folder, Lakehouse, Table, Test, View, WeaverObject
 from weaver.errors import LoadError
-from weaver.spark import fabric_destination
+from weaver.spark import FabricSparkTarget
 
 
 @dataclass
@@ -66,7 +66,7 @@ class FakeSpark:
 LAKEHOUSE = Lakehouse(
     name="Sales_LH",
     spark_root="abfss://ws@onelake.dfs.fabric.microsoft.com/lh",
-    destination=fabric_destination(workspace="Weaver", lakehouse="Sales_LH"),
+    destination=FabricSparkTarget(workspace="Weaver", lakehouse="Sales_LH"),
 )
 
 

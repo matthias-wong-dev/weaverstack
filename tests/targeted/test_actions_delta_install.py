@@ -33,6 +33,7 @@ from factories import (
 from weaver.locations import Location
 from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.executors import default_executors
+from support.workspaces import given_resolver, given_workspace
 
 VIEW_SQL = b"CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS SELECT 1\n"
 
@@ -308,14 +309,12 @@ AUDIT = ("row_insert_datetime", "row_update_datetime", "row_delete_datetime")
 def _load_context(tmp_path, columns=("Customer id", "Customer name")):
     """A real store and resolver, because placement is the claim being made."""
 
-    from weaver.resolution import LocalResolver
     from weaver.store import FilesystemStore
-    from weaver.workspaces import LocalWorkspace
 
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    workspace = given_workspace(weaver_lakehouse="Weaver")
     return installation_context(
         store=FilesystemStore(),
-        resolver=LocalResolver(workspace),
+        resolver=given_resolver(workspace=workspace),
         target=resolved_target(),
         spark=_TableSpark(tuple(columns) + AUDIT),
     )

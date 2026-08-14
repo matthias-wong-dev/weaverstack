@@ -5,9 +5,7 @@ from __future__ import annotations
 import pytest
 
 from weaver.targets import ItemRef
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.folder import FolderExecutor
@@ -19,11 +17,12 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
+from support.workspaces import given_resolver, given_workspace
 
 
 def _context(tmp_path):
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
-    resolver = LocalResolver(workspace)
+    workspace = given_workspace(weaver_lakehouse="Control")
+    resolver = given_resolver(workspace=workspace)
     store = FilesystemStore()
     lakehouse = ItemRef("Sales")
     bound = BoundTarget(

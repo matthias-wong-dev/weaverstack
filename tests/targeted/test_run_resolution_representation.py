@@ -25,8 +25,7 @@ from weaver.load_report import (
     VALIDATED,
 )
 from weaver.run import RunRequest, RunState, Runner
-from weaver.resolution import LocalResolver
-from weaver.workspaces import LocalWorkspace
+from support.workspaces import given_resolver, given_workspace
 
 from factories import (
     installed_catalogue,
@@ -47,7 +46,7 @@ SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
 
 def local_resolver() -> LocalResolver:
     return LocalResolver(
-        LocalWorkspace(workspace=".local", weaver_lakehouse="Weaver_LH")
+        given_workspace(weaver_lakehouse="Weaver_LH")
     )
 
 

@@ -18,7 +18,8 @@ from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.session import ConsoleSession, workspace_context
 from weaver.session.console import ConsoleScope
-from weaver.workspaces import FabricWorkspace, LocalWorkspace, TargetDeclaration
+from weaver.workspaces import FabricWorkspace, TargetDeclaration
+from support.workspaces import given_resolver, given_workspace
 
 
 @pytest.fixture
@@ -28,8 +29,10 @@ def console():
             yield session
 
 
-def _local(root="./emulator") -> LocalWorkspace:
-    return LocalWorkspace(workspace=Path(root), weaver_lakehouse="Weaver")
+def _other(name="B_Workspace") -> FabricWorkspace:
+    """A second workspace, so a scope claim is about two of them."""
+
+    return _fabric(name)
 
 
 def _fabric(name="A_Workspace") -> FabricWorkspace:
@@ -51,26 +54,26 @@ def test_a_command_without_a_workspace_says_what_is_missing(console):
 
 
 def test_a_command_may_name_a_workspace_the_session_did_not(console):
-    scope = console.scope(_local())
+    scope = console.scope(_other())
 
-    assert scope.workspace == _local()
+    assert scope.workspace == _other()
 
 
 def test_two_commands_naming_one_workspace_share_its_resources(console):
-    first = console.scope(_local())
-    second = console.scope(_local())
+    first = console.scope(_other())
+    second = console.scope(_other())
 
     assert first is second
 
 
 def test_two_workspaces_are_two_contexts(console):
-    assert console.scope(_local("./one")) is not console.scope(_local("./two"))
+    assert console.scope(_other("one")) is not console.scope(_other("two"))
 
 
 def test_a_default_workspace_is_a_default_and_not_an_identity():
-    with ConsoleSession(workspace=_local("./default")) as session:
-        assert session.scope(None).workspace == _local("./default")
-        assert session.scope(_local("./other")).workspace == _local("./other")
+    with ConsoleSession(workspace=_other("default")) as session:
+        assert session.scope(None).workspace == _other("default")
+        assert session.scope(_other("other")).workspace == _other("other")
 
 
 def test_the_default_is_what_the_session_started_with_and_never_accumulates():
@@ -82,16 +85,16 @@ def test_the_default_is_what_the_session_started_with_and_never_accumulates():
     Lakehouse — a plausible-looking build into the wrong place.
     """
 
-    with ConsoleSession(workspace=_local("./default")) as session:
-        session.scope(_local("./elsewhere"))
+    with ConsoleSession(workspace=_other("default")) as session:
+        session.scope(_other("elsewhere"))
 
-        assert session.workspace == _local("./default")
-        assert session.scope(None).workspace == _local("./default")
+        assert session.workspace == _other("default")
+        assert session.scope(None).workspace == _other("default")
 
 
 def test_a_session_started_without_a_workspace_never_gains_one():
     with ConsoleSession() as session:
-        session.scope(_local("./named-by-a-command"))
+        session.scope(_other("named-by-a-command"))
 
         assert session.workspace is None
         with pytest.raises(CommandError, match="A Workspace is required for this command"):
@@ -124,9 +127,6 @@ def test_a_different_control_lakehouse_is_a_different_context():
 
 # --- position ---------------------------------------------------------------
 
-
-def test_a_console_against_the_emulator_executes_here(console):
-    assert console.executes_here(_local()) is True
 
 
 def test_a_console_reaching_into_fabric_does_not_execute_here(console):
@@ -180,11 +180,11 @@ def test_completing_a_task_unwinds_the_steps_beneath_it(console):
 
 def test_a_closed_session_serves_no_further_commands():
     session = ConsoleSession()
-    session.scope(_local())
+    session.scope(_other())
     session.close()
 
     with pytest.raises(CommandError, match="closed"):
-        session.scope(_local())
+        session.scope(_other())
 
 
 def test_closing_twice_is_not_an_error():

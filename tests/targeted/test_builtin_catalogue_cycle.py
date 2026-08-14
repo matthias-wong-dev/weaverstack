@@ -37,10 +37,9 @@ from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.model import WeaverItemId
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
+from support.workspaces import given_resolver, given_workspace
 
 BUILTIN = WeaverItemId.parse("Lakehouse/_weaver")
 
@@ -66,9 +65,9 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Weaver")
+    workspace = given_workspace(weaver_lakehouse="Weaver")
     store = FilesystemStore()
-    resolver = LocalResolver(workspace)
+    resolver = given_resolver(workspace=workspace)
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))

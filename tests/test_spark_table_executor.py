@@ -23,7 +23,7 @@ from weaver.build_bundle.executors.spark_table import SparkTableExecutor
 from weaver.build_bundle.models import InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import BuildError, InstallError
-from weaver.spark import fabric_destination, local_destination
+from weaver.spark import FabricSparkTarget
 from weaver.targets import ItemRef
 
 DESCRIBE = "DESCRIBE QUERY "
@@ -90,8 +90,8 @@ AUDIT = [
 #: The destination every case here builds into. Local, so the qualified name is
 #: the folded database name — and the executor has to be *given* one, which is
 #: the whole point: an action with no destination has nowhere to go.
-DESTINATION = local_destination(item="Sales_LH", tables_root="/tmp/Sales_LH/Tables")
-FABRIC_DESTINATION = fabric_destination(workspace="Analytics", lakehouse="Sales_LH")
+DESTINATION = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
+FABRIC_DESTINATION = FabricSparkTarget(workspace="Analytics", lakehouse="Sales_LH")
 
 #: What `Sales.Customer` is called there.
 CUSTOMER = "`sales_lh__sales`.`Customer`"

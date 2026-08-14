@@ -4,24 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from weaver.workspaces import FabricWorkspace, LocalWorkspace
+from weaver.workspaces import FabricWorkspace
 from weaver.config import load_workspace, parse_workspace
 from weaver.errors import ConfigError
 
 
-def test_fabric_is_the_default_workspace_type():
+def test_a_workspace_is_named_and_nothing_else_is_required():
     workspace = parse_workspace({"workspace": "Analytics"})
     assert isinstance(workspace, FabricWorkspace)
     assert workspace.workspace == "Analytics"
-    assert workspace.workspace_type == "fabric"
 
-
-def test_local_workspace_value_is_its_folder_path():
-    workspace = parse_workspace(
-        {"workspace": ".local", "workspace_type": "local"}
-    )
-    assert isinstance(workspace, LocalWorkspace)
-    assert workspace.workspace == Path(".local")
 
 
 def test_typical_configuration_parses_physical_defaults():
@@ -89,14 +81,6 @@ def test_parallel_workers_must_be_positive():
             {"workspace": "Analytics", "execution": {"parallel_workers": 0}}
         )
 
-
-def test_relative_local_workspace_resolves_against_file(tmp_path: Path):
-    config = tmp_path / "workspace.yml"
-    config.write_text(
-        "workspace: .local\nworkspace_type: local\nweaver_lakehouse: Weaver\n",
-        encoding="utf-8",
-    )
-    assert load_workspace(config).workspace == tmp_path / ".local"
 
 
 def test_missing_file_is_reported(tmp_path: Path):

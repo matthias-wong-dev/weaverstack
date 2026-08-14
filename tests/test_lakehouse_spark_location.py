@@ -17,15 +17,14 @@ from __future__ import annotations
 import pytest
 
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
-from weaver.resolution import LocalResolver
 from weaver.errors import IdentityError
 from weaver.locations import LakehouseSparkLocation
+from support.workspaces import given_resolver, given_workspace
 
 
 @pytest.fixture
 def resolver(tmp_path):
-    return LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    return given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
 
 
 def test_a_target_resolves_to_its_two_roots(resolver, tmp_path):
@@ -136,8 +135,8 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
 
     from weaver.build_bundle.targets import BoundTarget
 
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
-    installer = given_installer(workspace=workspace, resolver=LocalResolver(workspace))
+    workspace = given_workspace(weaver_lakehouse="Weaver")
+    installer = given_installer(workspace=workspace, resolver=given_resolver(workspace=workspace))
     resolved = installer.resolve_target(
         BoundTarget(
             id="lakehouse-Sales_LH",
@@ -156,8 +155,8 @@ def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
 
     from weaver.build_bundle.targets import BoundTarget
 
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
-    installer = given_installer(workspace=workspace, resolver=LocalResolver(workspace))
+    workspace = given_workspace(weaver_lakehouse="Weaver")
+    installer = given_installer(workspace=workspace, resolver=given_resolver(workspace=workspace))
     resolved = installer.resolve_target(
         BoundTarget(id="warehouse-Sales_WH", kind="warehouse", item_id="Sales_WH")
     )

@@ -26,7 +26,7 @@ import pytest
 
 import weaver
 from weaver.errors import BuildError, CommandError
-from weaver.workspaces import FabricWorkspace, LocalWorkspace
+from weaver.workspaces import FabricWorkspace
 
 
 @pytest.fixture
@@ -152,7 +152,7 @@ def test_an_explicit_weaver_lakehouse_overrides_a_typed_workspace(
 ):
     """A typed Workspace is already resolved; an argument still outranks it."""
 
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Configured")
+    workspace = FabricWorkspace(workspace="Demo", weaver_lakehouse="Configured")
 
     with pytest.raises(Halt):
         _build(repository, workspace=workspace, weaver_lakehouse="Chosen")
@@ -163,7 +163,7 @@ def test_an_explicit_weaver_lakehouse_overrides_a_typed_workspace(
 def test_a_typed_workspace_supplies_the_weaver_lakehouse_when_no_argument_does(
     captured, repository, tmp_path
 ):
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Configured")
+    workspace = FabricWorkspace(workspace="Demo", weaver_lakehouse="Configured")
 
     with pytest.raises(Halt):
         _build(repository, workspace=workspace)
@@ -202,7 +202,7 @@ def test_no_context_outside_fabric_names_what_to_supply(repository, monkeypatch)
 def test_a_workspace_without_a_weaver_lakehouse_says_all_three_ways_to_give_one(
     repository, tmp_path
 ):
-    workspace = LocalWorkspace(workspace=tmp_path / "ws")
+    workspace = FabricWorkspace(workspace="Demo")
 
     with pytest.raises(CommandError) as raised:
         _build(repository, workspace=workspace)
@@ -216,7 +216,7 @@ def test_a_workspace_without_a_weaver_lakehouse_says_all_three_ways_to_give_one(
 def test_configuration_cannot_be_layered_over_an_already_resolved_workspace(
     repository, tmp_path
 ):
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Weaver")
+    workspace = FabricWorkspace(workspace="Demo", weaver_lakehouse="Weaver")
 
     with pytest.raises(CommandError, match="already resolved Workspace"):
         _build(repository, workspace=workspace, workspace_config=tmp_path / "ws.yml")

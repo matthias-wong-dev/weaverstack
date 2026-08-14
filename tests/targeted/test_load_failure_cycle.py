@@ -25,6 +25,8 @@ engines.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 from dataclasses import dataclass
 
@@ -47,10 +49,11 @@ from weaver.load_report import (
 )
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.task_logging import COMPLETE_STEP, PLAN_FILE, open_task_log
-from weaver.workspaces import LocalWorkspace
+from weaver.fabric.resolution import FabricResolver
+from support.workspaces import InventoryClient
+from support.workspaces import given_resolver, given_workspace
 
 from factories import (
     installed_catalogue,
@@ -97,7 +100,7 @@ class Prepared:
     log_root: Location
 
 
-class Refreshing(LocalResolver):
+class Refreshing(FabricResolver):
     def refresh_sql_endpoint(self, item):
         return None
 
@@ -106,14 +109,19 @@ class Refreshing(LocalResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
     from support.sessions import given_session
     from weaver.targets import ItemRef
     from weaver.task_logging import log_folder
 
-    resolver = Refreshing(workspace)
+    resolver = Refreshing(
+        workspace,
+        client=InventoryClient(
+            workspace.workspace,
+            [("Lakehouse", name) for name in ("Weaver_LH", "Raw_LH")],
+        ),
+        base_url=Path(tmp_path).as_posix(),
+    )
     store = FilesystemStore()
     root = log_folder(resolver, ItemRef(workspace.weaver_lakehouse))
     store.make_directory(root)

@@ -29,9 +29,9 @@ from weaver.declaration.metadata import FOLDER
 from weaver.declaration.model import WeaverDocumentId
 from weaver.errors import CommandError
 from weaver.locations import Location
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
+from support.workspaces import given_resolver, given_workspace
 from weaver.task_logging import (
     COMPLETE_STEP,
     DATE_PARTITION,
@@ -40,7 +40,6 @@ from weaver.task_logging import (
     log_folder,
     open_task_log,
 )
-from weaver.workspaces import LocalWorkspace
 
 from factories import full_estate
 
@@ -76,9 +75,7 @@ def test_the_log_folder_reaches_the_catalogue_like_any_other_folder(tmp_path):
 
 
 def test_the_log_folder_is_resolved_through_its_declared_identity():
-    resolver = LocalResolver(
-        LocalWorkspace(workspace=".local", weaver_lakehouse="Weaver_LH")
-    )
+    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver_LH"))
 
     assert log_folder(resolver, ItemRef("Weaver_LH")).value == (
         ".local/Weaver_LH/Files/_/Log"

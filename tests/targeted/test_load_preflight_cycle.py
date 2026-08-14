@@ -31,6 +31,8 @@ being flattened into a guess. That is the last section below.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dataclasses import dataclass
 
 import pytest
@@ -42,8 +44,9 @@ from weaver.run.state import read_target_inventories
 from weaver.run import RunState
 from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED
-from weaver.resolution import LocalResolver
-from weaver.workspaces import LocalWorkspace
+from weaver.fabric.resolution import FabricResolver
+from support.workspaces import InventoryClient
+from support.workspaces import given_resolver, given_workspace
 
 from factories import (
     installed_catalogue,
@@ -82,7 +85,7 @@ class Prepared:
     session: object
 
 
-class Refreshing(LocalResolver):
+class Refreshing(FabricResolver):
     def refresh_sql_endpoint(self, item):
         return None
 
@@ -91,9 +94,7 @@ class Refreshing(LocalResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
     from support.sessions import given_session
 
     return Prepared(
@@ -203,9 +204,7 @@ def empty_estate(tmp_path):
         tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
     )
     bindings = item_bindings((ITEM, "Views_LH"))
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
     from support.sessions import given_session
 
     # A real Session over a real estate root, so the run writes its evidence
@@ -277,9 +276,7 @@ def real_session(tmp_path):
 
     from support.sessions import given_session
 
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
     # The failure under test happens inside the inventory reader. Supplying an
     # inert Spark value keeps this pure test from acquiring a real JVM first.
     return given_session(workspace=workspace, spark=object())

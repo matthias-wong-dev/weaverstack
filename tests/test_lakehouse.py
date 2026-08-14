@@ -9,11 +9,10 @@ import pytest
 
 from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 from weaver import Lakehouse, lakehouse_for
-from weaver.resolution import LocalResolver
-from weaver.workspaces import LocalWorkspace
 from weaver.errors import LoadError
 from weaver.lakehouse import MOUNT_OPTIONS, default_lakehouse
-from weaver.spark import local_destination
+from weaver.spark import FabricSparkTarget
+from support.workspaces import given_resolver, given_workspace
 
 
 @dataclass
@@ -235,7 +234,7 @@ def test_a_supplied_destination_is_what_names_objects():
     lakehouse = Lakehouse(
         name="Sales_LH",
         spark_root="/srv/.local/Sales_LH",
-        destination=local_destination(item="Sales_LH", tables_root="/srv/.local/Sales_LH/Tables"),
+        destination=FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH"),
     )
 
     assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
@@ -245,7 +244,7 @@ def test_a_supplied_destination_is_what_names_objects():
 
 
 def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
 
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
@@ -255,7 +254,7 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
 
 
 def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
 
     assert lakehouse_for(resolver, "Sales_LH") == lakehouse_for(resolver, ItemRef("Sales_LH"))
 
@@ -263,7 +262,7 @@ def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
 def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Path):
     """One layout, whichever type is asked — the emulator mirrors OneLake."""
 
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.location == resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
@@ -273,7 +272,7 @@ def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Pa
 
 
 def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path):
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 

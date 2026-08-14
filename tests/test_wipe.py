@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 
 from weaver.targets import DeltaTarget, FolderTarget, WarehouseTarget
-from weaver.workspaces import LocalWorkspace
 from weaver.locations import Location
 from weaver import wipe as public_wipe
 from weaver.operations import WipeReport as PublicWipeReport, WipeTarget
 from weaver.physical_wipe import wipe, wipe_folder_target
 from weaver.errors import CommandError
 from weaver.sql import SqlExecutionError
+from support.workspaces import given_resolver, given_workspace
 
 
 def folder_target(name: str = "Sales_LH/Files") -> FolderTarget:
@@ -172,7 +172,7 @@ def test_public_wipe_rejects_partial_lakehouse_targets(value):
 
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     operations = __import__("weaver.operations", fromlist=["operations"])
-    workspace = LocalWorkspace(workspace="/tmp/local")
+    workspace = given_workspace()
     monkeypatch.setattr(
         operations, "_drop_local_catalogue", lambda *_args, **_kwargs: None
     )
@@ -200,7 +200,7 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     monkeypatch,
 ):
     operations = __import__("weaver.operations", fromlist=["operations"])
-    workspace = LocalWorkspace(workspace="/tmp/local", weaver_lakehouse="Control")
+    workspace = given_workspace(weaver_lakehouse="Control")
     calls = []
     monkeypatch.setattr(
         operations, "_drop_local_catalogue", lambda *_args, **_kwargs: None

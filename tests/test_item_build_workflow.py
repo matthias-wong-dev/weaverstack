@@ -32,6 +32,7 @@ from weaver.declaration.model import WeaverItemId
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.prune import read_lakehouse_inventory
 from weaver.catalogue.state import Catalogue, Reconciliation
+from support.workspaces import given_resolver, given_workspace
 
 from test_item_repository import _estate
 
@@ -246,11 +247,9 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
 
 
 def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
-    from weaver.resolution import LocalResolver
-    from weaver.workspaces import LocalWorkspace
-
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
-    resolver = LocalResolver(workspace)
+        
+    workspace = given_workspace(weaver_lakehouse="Control")
+    resolver = given_resolver(workspace=workspace)
     store = FilesystemStore()
     target = _bindings().entries[0].to_bound_target()
     files = resolver.files_root(ItemRef("Raw_Dev"))

@@ -17,6 +17,8 @@ them changes anything about the orchestration this module is about.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dataclasses import dataclass
 
 import pytest
@@ -31,9 +33,10 @@ from weaver.load_report import (
     TASK_SUCCEEDED,
     VALIDATED,
 )
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
+from weaver.fabric.resolution import FabricResolver
+from support.workspaces import InventoryClient
+from support.workspaces import given_resolver, given_workspace
 
 from factories import (
     installed_catalogue,
@@ -84,7 +87,7 @@ class Prepared:
     session: object
 
 
-class Refreshing(LocalResolver):
+class Refreshing(FabricResolver):
     def refresh_sql_endpoint(self, item):
         raise AssertionError("a dry run must not refresh an endpoint")
 
@@ -95,9 +98,7 @@ def session(tmp_path):
     bindings = load_estate_bindings()
     from support.sessions import given_session
 
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
 
     class Refuses:
         """Any write here is a dry run that wrote something."""
