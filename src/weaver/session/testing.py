@@ -22,7 +22,7 @@ answered by reading the recorded statement.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Sequence
 
 from ..errors import CommandError
 from ..workspaces import Workspace
@@ -45,6 +45,10 @@ class TestSession(Session):
     ``resolver`` and ``store`` are supplied by the test, because they are the
     two seams a doubled host still has to have. Everything else is recorded.
     """
+
+    #: Its name begins with ``Test``, so pytest would otherwise try to collect
+    #: it as a test class wherever it is imported.
+    __test__ = False
 
     def __init__(
         self,
@@ -135,7 +139,7 @@ class TestSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        self._record("python", program, workspace)
+        self._record("python", program, workspace, timeout=timeout)
         if not self._python_answers:
             raise CommandError(
                 "this TestSession was asked to run a Python program and no "
@@ -145,34 +149,50 @@ class TestSession(Session):
 
     def execute_spark_sql_batch(
         self,
-        statements,
+        statements: Sequence[str],
         *,
         exact_case: bool = False,
         workspace: Workspace | None = None,
-    ):
+        timeout: float | None = None,
+    ) -> Any:
         body = [str(statement) for statement in statements]
-        self._record("spark_sql", body, workspace, exact_case=exact_case)
+        self._record(
+            "spark_sql", body, workspace, exact_case=exact_case, timeout=timeout
+        )
         return self._answer(self._spark_answers, body)
 
     def execute_tsql(
         self,
-        statements,
+        statement: str,
         *,
+        target: Any,
         workspace: Workspace | None = None,
-        target=None,
-    ):
-        body = [str(statement) for statement in statements]
-        self._record("tsql", body, workspace, target=target)
+        parameters: Sequence[Any] | None = None,
+    ) -> None:
+        self._record(
+            "tsql",
+            [statement],
+            workspace,
+            target=target,
+            parameters=None if parameters is None else list(parameters),
+        )
         return None
 
     def query_tsql(
         self,
         statement: str,
         *,
+        target: Any,
         workspace: Workspace | None = None,
-        target=None,
-    ):
-        self._record("tsql", [statement], workspace, target=target)
+        parameters: Sequence[Any] | None = None,
+    ) -> Any:
+        self._record(
+            "tsql",
+            [statement],
+            workspace,
+            target=target,
+            parameters=None if parameters is None else list(parameters),
+        )
         return self._answer(self._tsql_answers, [statement])
 
     # --- recording -----------------------------------------------------------

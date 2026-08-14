@@ -91,10 +91,19 @@ class FabricSparkTarget:
 
 
 def _checked(value: object, *, what: str) -> str:
-    """One name part, checked rather than trusted.
+    """One name part, checked for what rendering here actually requires.
 
-    These strings are concatenated into identifiers, so a part carrying a
-    delimiter would name something other than what it says.
+    Only that it is a non-empty string. Every part is back-tick quoted by
+    :func:`identifier`, which doubles any back-tick, so a dot or a space inside
+    a name is unambiguous — and a Fabric workspace name may contain both.
+    Path-unsafe characters are refused where they matter, by
+    :func:`weaver.targets.validate_name`, before a name reaches this.
+
+    Fabric's own rule for a *new* Lakehouse is stricter still: begin with a
+    letter, then alphanumerics and underscores, up to 123 characters
+    (Microsoft 2026). It is not repeated here, because this names Lakehouses
+    that already exist and refusing to address one Fabric is serving would be
+    worse than rendering it.
     """
 
     if not isinstance(value, str):
@@ -102,8 +111,6 @@ def _checked(value: object, *, what: str) -> str:
     name = value.strip()
     if not name:
         raise IdentityError(f"{what} must not be empty")
-    if "." in name or "/" in name or "\\" in name:
-        raise IdentityError(f"{what} must not contain a separator: {value!r}")
     return name
 
 
