@@ -67,7 +67,7 @@ def test_unbind_uses_the_same_whole_target_grammar():
 def test_wipe_requires_a_typed_target():
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["wipe", "--workspace", "/tmp/local", "--workspace-type", "local"]
+            ["wipe", "--workspace", "Demo"]
         )
 
 

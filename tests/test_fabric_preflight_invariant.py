@@ -30,6 +30,7 @@ from weaver.fabric.preflight import (
     required_items,
 )
 from weaver.targets import ItemRef
+from support.workspaces import WORKSPACE
 
 WORKSPACE = "Analytics"
 
@@ -61,9 +62,9 @@ def _bindings(*targets):
     entries = []
     for item_name, physical, kind in targets:
         binding = (
-            LakehouseBinding(ItemRef(physical))
+            LakehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
             if kind == "Lakehouse"
-            else WarehouseBinding(ItemRef(physical))
+            else WarehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
         )
         entries.append(
             ItemBinding(WeaverItemId.parse(f"{kind}/{item_name}"), binding)

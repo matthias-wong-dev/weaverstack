@@ -26,7 +26,7 @@ def _parse(*words):
 # --- the surface --------------------------------------------------------------
 
 
-@pytest.mark.parametrize("flag", ["--json", "--no-publish", "--workspace-type"])
+@pytest.mark.parametrize("flag", ["--json", "--no-publish"])
 def test_install_offers_no_flag_for_a_decision_it_has_already_made(flag, capsys):
     """Each of these was a way to ask for a half-finished or silent install."""
 

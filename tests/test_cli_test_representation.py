@@ -12,6 +12,8 @@ The verdict is the exit code and the evidence is the output, which is what makes
 
 from __future__ import annotations
 
+import importlib
+
 import json
 
 import pytest
@@ -44,7 +46,7 @@ def _node(name, kind, status, result=None, diagnostics=None):
 
 
 @pytest.fixture
-def captured(monkeypatch):
+def captured(monkeypatch, desktop_credential):
     """Whatever the CLI asked the operation for, and a report to give back."""
 
     seen: dict = {}
@@ -59,21 +61,26 @@ def captured(monkeypatch):
         return seen.get("report", report)
 
     monkeypatch.setattr(weaver, "test", fake)
+    # The desktop preflight resolves each named target over REST before the
+    # operation runs. What this file claims is what the CLI *parses* and hands
+    # on, so the crossing is stubbed rather than made.
+    # `weaver_cli.main` is also the name of the entry point function, so the
+    # module is imported rather than reached by dotted string.
     monkeypatch.setattr(
-        "weaver.operations._inside_fabric_session", lambda _workspace: True
+        importlib.import_module("weaver_cli.main"),
+        "_refuse_absent_targets",
+        lambda *_a, **_k: None,
     )
     return seen
 
 
-def _run(*args, workspace="/tmp/weaver-cli"):
+def _run(*args, workspace="Demo"):
     return main(
         [
             "test",
             *args,
             "--workspace",
             workspace,
-            "--workspace-type",
-            "local",
             "--weaver-lakehouse",
             "Weaver",
         ]

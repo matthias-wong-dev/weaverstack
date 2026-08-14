@@ -32,6 +32,7 @@ from weaver.catalogue.state import Catalogue
 
 from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate, _folder, _schema, _write
+from support.workspaces import WORKSPACE
 
 
 class _AliasInventory:
@@ -53,9 +54,9 @@ class _AliasInventory:
 def _binding(logical: str, physical: str):
     item = WeaverItemId.parse(logical)
     if item.item_type == "Lakehouse":
-        target = LakehouseBinding(ItemRef(physical))
+        target = LakehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
     else:
-        target = WarehouseBinding(ItemRef(physical))
+        target = WarehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
     return ItemBinding(item, target)
 
 
@@ -124,7 +125,7 @@ def generate_item_build_bundle(repository, **kwargs):
     kwargs.setdefault("target_inventories", inventories)
     kwargs.setdefault("catalogue", Catalogue({}))
     kwargs.setdefault(
-        "control_lakehouse", LakehouseBinding(ItemRef("Weaver_Control"))
+        "control_lakehouse", LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
     )
     return _generate_item_build_bundle(repository, **kwargs)
 
@@ -516,7 +517,8 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
     assert not any(action.kind.startswith("prune") for _s, _b, action in jammed.plan.actions())
 
 
-def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses):
+def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakehouses):
+    lakehouses = more_lakehouses("Curated_Dev")
     repository = _repository(_estate(tmp_path))
     second = ItemRef("Curated_Dev")
     for target, orphan in ((lakehouses.target, "RawGhost"), (second, "CuratedGhost")):
@@ -549,7 +551,10 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, lakehouses
     )
 
 
-def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(tmp_path, lakehouses):
+def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(
+    tmp_path, more_lakehouses
+):
+    lakehouses = more_lakehouses("Raw_Old", "Raw_New")
     repository = _repository(_estate(tmp_path))
     old = ItemRef("Raw_Old")
     new = ItemRef("Raw_New")
@@ -752,7 +757,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
 
     assert [sequence.description for sequence in bundle.plan.sequences[-3:]] == [
@@ -868,7 +873,7 @@ def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
 
 def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     repository = _repository(_estate(tmp_path))
-    control = LakehouseBinding(ItemRef("Weaver_Control"))
+    control = LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
     bundle = generate_item_build_bundle(
         repository,
         bindings=ItemBindings(

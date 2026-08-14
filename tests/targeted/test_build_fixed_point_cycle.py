@@ -43,6 +43,7 @@ from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
+from support.workspaces import WORKSPACE
 
 LAKEHOUSE_TARGET_NAME = "Sales_LH"
 WAREHOUSE_TARGET_NAME = "Reporting_WH"
@@ -119,7 +120,7 @@ def build(repository, tmp_path, *, catalogue):
         store=FilesystemStore(),
         target_inventories=_inventories(repository, bound),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
 
 

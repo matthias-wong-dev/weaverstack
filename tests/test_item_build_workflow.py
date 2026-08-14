@@ -35,6 +35,7 @@ from weaver.catalogue.state import Catalogue, Reconciliation
 from support.workspaces import given_resolver, given_workspace
 
 from test_item_repository import _estate
+from support.workspaces import WORKSPACE
 
 
 class CountingStore:
@@ -100,14 +101,14 @@ def _bindings():
         (
             ItemBinding(
                 WeaverItemId.parse("Lakehouse/Raw"),
-                LakehouseBinding(ItemRef("Raw_Dev")),
+                LakehouseBinding(ItemRef("Raw_Dev"), workspace_name=WORKSPACE),
             ),
         )
     )
 
 
 def _control():
-    return LakehouseBinding(ItemRef("Weaver_Control"))
+    return LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
 
 
 def _inventories(bindings=None):
@@ -191,7 +192,7 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
         (
             ItemBinding(
                 WeaverItemId.parse("Lakehouse/Missing"),
-                LakehouseBinding(ItemRef("Missing_Dev")),
+                LakehouseBinding(ItemRef("Missing_Dev"), workspace_name=WORKSPACE),
             ),
         )
     )

@@ -40,6 +40,7 @@ from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 
 from test_item_dependencies import _dependency_estate
 from test_item_repository import _estate, _folder, _table, _write
+from support.workspaces import WORKSPACE
 
 
 def _repository(root):
@@ -95,7 +96,7 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
 
 def _raw_binding(target="Raw_Target"):
     item = WeaverItemId.parse("Lakehouse/Raw")
-    return ItemBindings((ItemBinding(item, LakehouseBinding(ItemRef(target))),))
+    return ItemBindings((ItemBinding(item, LakehouseBinding(ItemRef(target), workspace_name=WORKSPACE)),))
 
 
 def _raw_inventory(repository, target="Raw_Target"):
@@ -282,7 +283,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         store=store,
         target_inventories=_raw_inventory(repository),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     customer_actions = [
         action
@@ -330,11 +331,11 @@ def _alias_bindings():
         (
             ItemBinding(
                 WeaverItemId.parse("Lakehouse/Curated"),
-                LakehouseBinding(ItemRef("Curated_Target")),
+                LakehouseBinding(ItemRef("Curated_Target"), workspace_name=WORKSPACE),
             ),
             ItemBinding(
                 WeaverItemId.parse("Warehouse/Reporting"),
-                WarehouseBinding(ItemRef("Reporting_Target")),
+                WarehouseBinding(ItemRef("Reporting_Target"), workspace_name=WORKSPACE),
             ),
         )
     )
@@ -389,7 +390,7 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
             repository, alias_installed=alias_installed
         ),
         catalogue=Catalogue(rows),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
 
 
@@ -684,7 +685,7 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
         store=store,
         target_inventories=_raw_inventory(repository),
         catalogue=_catalogue(repository, "Lakehouse/Raw"),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     physical = {
         BUILD_FOLDER,
@@ -719,7 +720,7 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         catalogue=_catalogue(
             repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
         ),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     actions = [
         (sequence.number, action.kind, action.resource_node_id)
@@ -776,7 +777,7 @@ select 1 as Id
         store=store,
         target_inventories=_raw_inventory(installed),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     actions = [action for _sequence, _batch, action in bundle.plan.actions()]
     customer = "Lakehouse/Raw/Sales.Customer"
@@ -824,7 +825,7 @@ def test_registered_document_removed_from_repository_is_uncertified_before_prune
         store=store,
         target_inventories=inventories,
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     actions = [
         (sequence.number, action.kind, action.resource_node_id)

@@ -124,7 +124,7 @@ def _build(estate):
         session=estate["session"],
         executors=estate["executors"],
         source_store=estate["store"],
-        control_lakehouse=LakehouseBinding(lakehouse=ItemRef("Weaver")),
+        control_lakehouse=LakehouseBinding(lakehouse=ItemRef("Weaver"), workspace_name=WORKSPACE),
     )
     return bindings, result
 

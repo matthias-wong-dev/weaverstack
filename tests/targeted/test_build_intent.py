@@ -34,6 +34,7 @@ from weaver.locations import Location
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE, TargetChange
 from weaver.catalogue.state import Catalogue
+from support.workspaces import WORKSPACE
 
 #: Actions that change a target. Anything here must be accounted for by a
 #: change; anything not here is either catalogue work, which does not touch the
@@ -77,7 +78,7 @@ def build(repository, tmp_path, *, inventories=None, catalogue=None):
         if inventories is not None
         else estate_inventories(repository, empty=True),
         catalogue=catalogue if catalogue is not None else Catalogue({}),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
 
 

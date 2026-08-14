@@ -67,7 +67,7 @@ def plan(repository, tmp_path_factory):
         store=FilesystemStore(),
         target_inventories=inventories,
         catalogue=FixtureCatalogue.from_registry_rows(),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver")),
+        control_lakehouse=LakehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE),
     )
     return bundle.plan
 

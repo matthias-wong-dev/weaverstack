@@ -153,18 +153,18 @@ class Lakehouses:
     session: object
 
 
-def _lakehouses(root: Path, *, weaver: str, target: str) -> Lakehouses:
+def _lakehouses(root: Path, *, weaver: str, target: str, extra=()) -> Lakehouses:
     from weaver.store import FilesystemStore
 
     from support.workspaces import given_resolver, given_workspace
 
     workspace = given_workspace(weaver_lakehouse=weaver)
     resolver = given_resolver(
-        workspace=workspace, lakehouses=(weaver, target), root=root
+        workspace=workspace, lakehouses=(weaver, target, *extra), root=root
     )
     store = FilesystemStore()
     weaver_ref, target_ref = ItemRef(weaver), ItemRef(target)
-    for item in (weaver_ref, target_ref):
+    for item in (weaver_ref, target_ref, *(ItemRef(name) for name in extra)):
         store.make_directory(resolver.files_root(item))
         store.make_directory(resolver.tables_root(item))
     from support.sessions import given_session
@@ -195,3 +195,61 @@ def populated_folders(lakehouses) -> Lakehouses:
 
     _populate_folder_files(lakehouses.store, lakehouses.resolver, lakehouses.target)
     return lakehouses
+
+
+@pytest.fixture
+def more_lakehouses(tmp_path: Path):
+    """The same workspace, holding whichever further Lakehouses a test names.
+
+    A workspace answers for the items it holds and not for others, so a test
+    reaching a second Lakehouse says which one rather than relying on the
+    inventory to invent it.
+    """
+
+    def build(*names: str) -> Lakehouses:
+        return _lakehouses(
+            tmp_path, weaver=WEAVER_LAKEHOUSE, target=TARGET_LAKEHOUSE, extra=names
+        )
+
+    return build
+
+
+@pytest.fixture
+def desktop_credential(monkeypatch):
+    """A credential a desktop command can acquire without a tenant.
+
+    The sanctioned way past :func:`no_credentials_outside_fabric`: the CLI does
+    prefer a real credential, and a test about what it *parses* should not need
+    one. Replaced before any Session is constructed, because a Resource binds
+    its acquisition then.
+    """
+
+    class _Token:
+        token = "test-token"
+        expires_on = 4102444800  # well beyond any test run
+
+    class _Credential:
+        def get_token(self, *scopes, **_):
+            return _Token()
+
+    monkeypatch.setattr("weaver.fabric.auth.credential", lambda *a, **k: _Credential())
+    return _Credential()
+
+
+@pytest.fixture
+def no_target_preflight(monkeypatch):
+    """Skip the CLI's desktop check that each named target exists.
+
+    It resolves every target over REST before the operation runs. A test about
+    what the CLI parses and renders is not about that crossing, so it is
+    stubbed rather than made. ``weaver_cli.main`` is also the name of the entry
+    point function, so the module is imported rather than reached by string.
+    """
+
+    import importlib
+
+    monkeypatch.setattr(
+        importlib.import_module("weaver_cli.main"),
+        "_refuse_absent_targets",
+        lambda *_a, **_k: None,
+    )

@@ -20,6 +20,8 @@ of the boundary is what was submitted and what was made of the answer.
 
 from __future__ import annotations
 
+import importlib
+
 import json
 
 import pytest
@@ -54,7 +56,7 @@ def _cli_module():
 
 
 @pytest.fixture
-def recorded(monkeypatch):
+def recorded(monkeypatch, desktop_credential):
     """Capture the call ``weaver load`` makes, and answer it with a report."""
 
     calls: list[dict] = []
@@ -64,6 +66,15 @@ def recorded(monkeypatch):
         return _report()
 
     monkeypatch.setattr(weaver, "load", fake_load)
+    # The desktop preflight resolves each named target over REST before the
+    # operation runs. What this file claims is what the CLI parses and hands
+    # on, so the crossing is stubbed rather than made. `weaver_cli.main` is
+    # also the entry point function's name, so the module is imported.
+    monkeypatch.setattr(
+        importlib.import_module("weaver_cli.main"),
+        "_refuse_absent_targets",
+        lambda *_a, **_k: None,
+    )
     return calls
 
 
@@ -91,16 +102,8 @@ def _report(
     )
 
 
-def _local(tmp_path, *args: str) -> list[str]:
-    return [
-        "load",
-        "Lakehouse/Sales",
-        "--workspace-type",
-        "local",
-        "--workspace",
-        str(tmp_path),
-        *args,
-    ]
+def _command(*args: str) -> list[str]:
+    return ["load", "Lakehouse/Sales", "--workspace", "Demo", *args]
 
 
 # --- the options the contract names -------------------------------------------
@@ -154,23 +157,22 @@ def test_targets_are_required():
 # --- what reaches the API -----------------------------------------------------
 
 
-def test_the_targets_reach_the_api_as_written(recorded, tmp_path):
-    main(_local(tmp_path))
+def test_the_targets_reach_the_api_as_written(recorded):
+    main(_command())
 
     assert recorded[0]["targets"] == ["Lakehouse/Sales"]
 
 
-def test_fault_tolerance_and_dry_run_reach_the_api(recorded, tmp_path):
-    main(_local(tmp_path, "--fault-tolerant", "--dry-run"))
+def test_fault_tolerance_and_dry_run_reach_the_api(recorded):
+    main(_command("--fault-tolerant", "--dry-run"))
 
     assert recorded[0]["fault_tolerant"] is True
     assert recorded[0]["dry_run"] is True
 
 
-def test_repeated_names_reach_the_api_as_one_exact_selection(recorded, tmp_path):
+def test_repeated_names_reach_the_api_as_one_exact_selection(recorded):
     main(
-        _local(
-            tmp_path,
+        _command(
             "--name",
             "Sales.Customer",
             "--name",
@@ -181,15 +183,15 @@ def test_repeated_names_reach_the_api_as_one_exact_selection(recorded, tmp_path)
     assert recorded[0]["names"] == ["Sales.Customer", "Sales.Order"]
 
 
-def test_the_cautious_answers_are_the_defaults(recorded, tmp_path):
-    main(_local(tmp_path))
+def test_the_cautious_answers_are_the_defaults(recorded):
+    main(_command())
 
     assert recorded[0]["fault_tolerant"] is False
     assert recorded[0]["dry_run"] is False
     assert recorded[0]["names"] is None
 
 
-def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded, tmp_path):
+def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded):
     """The case the CLI must not require ceremony for.
 
     Naming both the workspace and its control Lakehouse is a complete request.
@@ -197,7 +199,7 @@ def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded, tmp_
     argument useless.
     """
 
-    main(_local(tmp_path, "--weaver-lakehouse", "Weaver"))
+    main(_command("--weaver-lakehouse", "Weaver"))
 
     assert recorded[0]["workspace"].weaver_lakehouse == "Weaver"
 
@@ -246,8 +248,8 @@ def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
 # --- what is made of the answer -----------------------------------------------
 
 
-def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, tmp_path, capsys):
-    exit_code = main(_local(tmp_path))
+def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
+    exit_code = main(_command())
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -255,8 +257,8 @@ def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, tmp_path, c
     assert "succeeded" in captured.out
 
 
-def test_json_renders_the_whole_report(recorded, tmp_path, capsys):
-    main(_local(tmp_path, "--json"))
+def test_json_renders_the_whole_report(recorded, capsys):
+    main(_command("--json"))
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["status"] == TASK_SUCCEEDED
@@ -264,7 +266,7 @@ def test_json_renders_the_whole_report(recorded, tmp_path, capsys):
 
 
 def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, capsys, desktop_credential, no_target_preflight
 ):
     """Tolerance returns a report; a report of failure is still a failure.
 
@@ -278,14 +280,14 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
         lambda targets, **kwargs: _report(status=TASK_FAILED, node_status=FAILED),
     )
 
-    exit_code = main(_local(tmp_path, "--fault-tolerant"))
+    exit_code = main(_command("--fault-tolerant"))
 
     assert exit_code == 1
     assert "failed" in capsys.readouterr().out
 
 
 def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, capsys, desktop_credential, no_target_preflight
 ):
     partial = _report(status=TASK_FAILED, node_status=FAILED, task_log="Files/_/Log/x")
 
@@ -298,7 +300,7 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
 
     monkeypatch.setattr(weaver, "load", raising)
 
-    exit_code = main(_local(tmp_path))
+    exit_code = main(_command())
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -310,14 +312,14 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
 
 
 def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, capsys, desktop_credential, no_target_preflight
 ):
     def raising(targets, **kwargs):
         raise CommandError("load needs a Weaver control Lakehouse")
 
     monkeypatch.setattr(weaver, "load", raising)
 
-    exit_code = main(_local(tmp_path))
+    exit_code = main(_command())
 
     assert exit_code == 1
     assert "control Lakehouse" in capsys.readouterr().err
@@ -399,9 +401,9 @@ class _FakeResolver:
         self.workspace = workspace
 
     def spark_destination(self, item):
-        from weaver.spark import fabric_destination
+        from weaver.spark import FabricSparkTarget
 
-        return fabric_destination(workspace="My Workspace", lakehouse=item.name)
+        return FabricSparkTarget(workspace="My Workspace", lakehouse=item.name)
 
     def resolve(self, item, *, item_type):
         from weaver.fabric import ItemNotFoundError
