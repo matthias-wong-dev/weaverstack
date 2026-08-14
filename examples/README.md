@@ -103,6 +103,20 @@ uploads the build bundle, and executes it in Fabric.
 
 The resulting Fabric estate is identical to Notebook mode.
 
+## The same lifecycle from Python
+
+The CLI is a thin adapter over the Python API, so a desktop script does what
+`weaver compose dev` does. [`lifecycle.py`](lifecycle.py) is that script — wipe,
+build, load and test, through one Session:
+
+``` bash
+python examples/lifecycle.py   --workspace "Weaver Example"   --catalogue Weaver   --environment weaver   --lakehouse Sales   --warehouse Reporting
+```
+
+One Session is opened and passed to each operation, which is what makes this
+worth writing down: the credential, the resolved items, the Livy session and the
+Warehouse connections are paid for once rather than four times.
+
 ------------------------------------------------------------------------
 
 # Loading the estate
