@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import pytest
 
 from weaver.run import RunState
-from weaver.load import run_load
+from weaver.operations.load import run_load
 from weaver.load_plan import ENDPOINT_REFRESH, PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,

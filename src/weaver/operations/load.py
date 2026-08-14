@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .errors import CommandError, LoadError
-from .load_plan import (
+from ..errors import CommandError, LoadError
+from ..load_plan import (
     ENDPOINT_REFRESH,
     LAKEHOUSE_TARGET,
     WAREHOUSE_TARGET,
@@ -20,7 +20,7 @@ from .load_plan import (
     PhysicalTargetRef,
     load_dag,
 )
-from .load_report import (
+from ..load_report import (
     BLOCKED,
     FAILED,
     LoadNodeReport,
@@ -30,14 +30,14 @@ from .load_report import (
     SUCCEEDED_WITH_REJECTS,
     final_status,
 )
-from .targets import (
+from ..targets import (
     DeltaTarget,
     ItemRef,
     WarehouseTarget,
     parse_physical_target,
     physical_item,
 )
-from .workspaces import FabricWorkspace, Workspace
+from ..workspaces import FabricWorkspace, Workspace
 
 #: The task type this operation writes evidence under.
 TASK_TYPE = "load"
@@ -86,7 +86,7 @@ def load(
 
     from dataclasses import replace
 
-    from .operations import _operation_workspace, _with_inferred_control_lakehouse
+    from .workspace import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session
@@ -107,7 +107,7 @@ def load(
             "notebook with one attached as the default Lakehouse"
         )
 
-    from .sessions.host import use_or_create_session
+    from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
         with opened.task(
@@ -149,7 +149,7 @@ def run_load(
     snapshot. Omitted, this reads one.
     """
 
-    from .run import (
+    from ..run import (
         RunRequest,
         Runner,
         RunState,
@@ -157,7 +157,7 @@ def run_load(
         dispatch_primitive,
         open_run_log,
     )
-    from .run.state import read_installed_catalogue, read_target_inventories
+    from ..run.state import read_installed_catalogue, read_target_inventories
 
     started = datetime.now(timezone.utc)
     # Where this run's frames begin in the Session's ledger. A Session outlives
@@ -345,8 +345,8 @@ def _step_type(report: LoadNodeReport) -> str:
 def _plan_document(graph, state, requested, names, dry_run: bool) -> dict:
     """Record the requested load task and its resolved execution plan."""
 
-    from . import __version__
-    from .run.resolution import resolve
+    from .. import __version__
+    from ..run.resolution import resolve
 
     ordered = graph.order()
     resolutions = {node.node_id: resolve(node, state) for node in ordered}

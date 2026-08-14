@@ -31,7 +31,7 @@ from __future__ import annotations
 import pytest
 from support.thin import JUDGEMENTS, thin_estate
 
-from weaver.test import run_test
+from weaver.operations.test import run_test
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 

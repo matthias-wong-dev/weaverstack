@@ -11,18 +11,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .errors import CommandError, ValidationError
-from .load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
-from .targets import ItemRef, WarehouseTarget, parse_physical_target
-from .test_plan import InstalledValidation, ValidationEstate, validation_order
-from .test_report import (
+from ..errors import CommandError, ValidationError
+from ..load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
+from ..targets import ItemRef, WarehouseTarget, parse_physical_target
+from ..test_plan import InstalledValidation, ValidationEstate, validation_order
+from ..test_report import (
     FAILED,
     INVALID,
     ValidationNodeReport,
     ValidationRunReport,
     run_status,
 )
-from .workspaces import FabricWorkspace, Workspace
+from ..workspaces import FabricWorkspace, Workspace
 
 TASK_TYPE = "test"
 
@@ -63,7 +63,7 @@ def test(
     )
     refs = tuple(_physical_ref(target) for target in requested)
 
-    from .sessions.host import use_or_create_session
+    from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
         with opened.task(
@@ -93,18 +93,18 @@ def run_test(
 ) -> ValidationRunReport:
     """The whole orchestration path, over a prepared session.
 
-    Separated from :func:`test` as :func:`weaver.load.run_load` is: workspace
+    Separated from :func:`test` as :func:`weaver.operations.load.run_load` is: workspace
     resolution and capability acquisition differ between positions, and none of
     them changes the orchestration.
 
-    ``state`` is the same preflight snapshot :func:`weaver.load.run_load` takes,
+    ``state`` is the same preflight snapshot :func:`weaver.operations.load.run_load` takes,
     so a caller that has already read the estate is not made to read it twice.
     """
 
     started = datetime.now(timezone.utc)
 
     if file is not None:
-        from .test_file import source_file_node
+        from ..test_file import source_file_node
 
         node = source_file_node(
             session,
@@ -128,9 +128,9 @@ def run_test(
             durable=False,
         )
 
-    from .run import RunRequest, Runner, RunState
+    from ..run import RunRequest, Runner, RunState
 
-    from .run.state import read_installed_catalogue
+    from ..run.state import read_installed_catalogue
 
     with session.step("Read catalogue"):
         if state is None:
@@ -175,7 +175,7 @@ def run_test(
 def _dispatch_collecting(*, collect: bool):
     """The one crossing, told whether this run was asked to show its evidence."""
 
-    from .run import dispatch_primitive
+    from ..run import dispatch_primitive
 
     def dispatch(node, **asked):
         return dispatch_primitive(node, collect=collect, **asked)
@@ -190,9 +190,9 @@ def _as_validation_node(node) -> ValidationNodeReport:
     rather than about work. One internal model, two public shapes.
     """
 
-    from .run.result import INVALID as RUN_INVALID
-    from .run.result import SUCCEEDED, VALIDATED
-    from .test_report import PASSED, PLANNED
+    from ..run.result import INVALID as RUN_INVALID
+    from ..run.result import SUCCEEDED, VALIDATED
+    from ..test_report import PASSED, PLANNED
 
     if node.status == VALIDATED:
         status = PLANNED
@@ -246,7 +246,7 @@ def _reported(
     """
 
     status = run_status(nodes)
-    from .run import open_run_log
+    from ..run import open_run_log
 
     log = (
         None
@@ -316,7 +316,7 @@ def _resolve_workspace(
 ) -> Workspace:
     from dataclasses import replace
 
-    from .operations import _operation_workspace, _with_inferred_control_lakehouse
+    from .workspace import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session

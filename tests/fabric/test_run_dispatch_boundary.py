@@ -45,7 +45,7 @@ import pytest
 from support.thin import OUTCOMES, thin_estate
 
 from weaver.errors import LoadError
-from weaver.load import run_load
+from weaver.operations.load import run_load
 from weaver.load_report import FAILED, SUCCEEDED
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]

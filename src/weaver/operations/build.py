@@ -12,22 +12,27 @@ import tempfile
 import uuid
 from typing import Iterable, Mapping, Sequence
 
-from .errors import BuildError, CommandError, WeaverError
-from .locations import Location
+from ..errors import BuildError, CommandError, WeaverError
+from ..locations import Location
 # Position — whether this process is inside the Fabric session it addresses, and
 # what Spark it would use if it were — is the first half of "where am I
 # running", so a Session owns it. Kept under the names this module already uses.
-from .sessions.host import active_spark as _active_spark
-from .sessions.host import inside_fabric_session as _inside_fabric_session
-from .store import FilesystemStore, Store
-from .targets import (
+from ..sessions.host import inside_fabric_session as _inside_fabric_session
+from ..store import FilesystemStore, Store
+from ..targets import (
     ItemRef,
     WarehouseTarget,
     parse_physical_target,
     physical_item,
     physical_kind,
 )
-from .workspaces import FabricWorkspace, Workspace
+from ..workspaces import FabricWorkspace, Workspace
+from .workspace import (
+    _current_fabric_workspace,
+    _operation_workspace,
+    _with_inferred_control_lakehouse,
+    current_workspace,
+)
 
 
 @dataclass(frozen=True)
@@ -94,76 +99,6 @@ class BuildResult:
         }
 
 
-@dataclass(frozen=True)
-class WipeTarget:
-    item_type: str
-    item: ItemRef
-
-    @classmethod
-    def parse(cls, text: str) -> "WipeTarget":
-        target = parse_physical_target(
-            text, what="wipe target", error=CommandError
-        )
-        return cls(item_type=physical_kind(target), item=physical_item(target))
-
-    @property
-    def physical_name(self) -> str:
-        return self.item.name
-
-    def __str__(self) -> str:
-        return f"{self.item_type}/{self.item}"
-
-
-def _unbind_target_names(targets: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Parse unbind selection through the same typed grammar used by wipe."""
-
-    parsed = tuple(WipeTarget.parse(target) for target in targets)
-    return (
-        tuple(target.physical_name for target in parsed if target.item_type == "Lakehouse"),
-        tuple(target.physical_name for target in parsed if target.item_type == "Warehouse"),
-    )
-
-
-@dataclass(frozen=True)
-class WipeReport:
-    target: str
-    location: Location
-    removed: tuple[str, ...]
-    dry_run: bool = False
-
-    @property
-    def count(self) -> int:
-        return len(self.removed)
-
-    def to_mapping(self) -> dict:
-        return {
-            "target": self.target,
-            "location": self.location.value,
-            "removed": list(self.removed),
-            "dry_run": self.dry_run,
-        }
-
-
-@dataclass(frozen=True)
-class WipeResult:
-    workspace: str
-    reports: tuple[WipeReport, ...]
-    unbound: Mapping | None = None
-    dry_run: bool = False
-
-    @property
-    def count(self) -> int:
-        return sum(report.count for report in self.reports)
-
-    def to_mapping(self) -> dict:
-        return {
-            "workspace": self.workspace,
-            "reports": [report.to_mapping() for report in self.reports],
-            "unbound": dict(self.unbound) if self.unbound is not None else None,
-            "dry_run": self.dry_run,
-        }
-
-
 def build(
     source=None,
     *,
@@ -212,7 +147,7 @@ def build(
         )
 
     selected = _item_bindings(bind, resolved_workspace)
-    from .build_bundle.targets import LakehouseBinding, effective_item_bindings
+    from ..build_bundle.targets import LakehouseBinding, effective_item_bindings
 
     workspace_name = getattr(resolved_workspace, "workspace", None)
     bindings = effective_item_bindings(
@@ -227,9 +162,9 @@ def build(
 
     # This complete parse and pure request validation is deliberately above all
     # control-plane creation, Spark start, REST item resolution, and Livy work.
-    from .build_bundle.workflow import prepare_repository, validate_build_request
+    from ..build_bundle.workflow import prepare_repository, validate_build_request
 
-    from .sessions.host import use_or_create_session
+    from ..sessions.host import use_or_create_session
 
     with prepare_repository(
         source_location, source_store=source_store
@@ -258,161 +193,6 @@ def build(
                 )
 
 
-def wipe(
-    targets: str | Iterable[str],
-    *,
-    workspace: str | Path | Workspace | None = None,
-    workspace_config: str | Path | None = None,
-    unbind_from: str | None = None,
-    dry_run: bool = False,
-    session=None,
-) -> WipeResult:
-    """Empty one or more whole Lakehouse or Warehouse items.
-
-    Takes a Session as the other operations do: a wipe resolves the same item
-    names, reaches the same OneLake paths and opens the same Warehouse
-    connections as the build before it. It needs no Builder and no Runner.
-    """
-
-    values = (targets,) if isinstance(targets, str) else tuple(targets)
-    parsed = tuple(WipeTarget.parse(value) for value in values)
-    if not parsed:
-        raise CommandError("wipe needs at least one target")
-    resolved_workspace = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config, session=session
-    )
-    from .sessions.host import use_or_create_session
-
-    with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        # Named for what it is. A dry run reads the estate and decides, which
-        # takes real time and is worth seeing; what it must not do is present
-        # itself as the removal.
-        with opened.task("Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, parsed))):
-            storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
-            store = opened.store(resolved_workspace) if storage_targets else None
-            reports: list[WipeReport] = []
-            for target in parsed:
-                with opened.step(str(target)):
-                    reports.extend(
-                        _wipe_one(
-                            target,
-                            resolved_workspace,
-                            store=store,
-                            dry_run=dry_run,
-                            session=opened,
-                        )
-                    )
-
-            unbound = None
-            control = unbind_from or resolved_workspace.weaver_lakehouse
-            whole_lakehouses = {
-                target.physical_name
-                for target in parsed
-                if target.item_type == "Lakehouse"
-            }
-            if not dry_run and control and control not in whole_lakehouses:
-                catalogue_workspace = replace(
-                    resolved_workspace, weaver_lakehouse=ItemRef.parse(control).name
-                )
-                with opened.step("Unbind catalogue claims"):
-                    unbound = _unbind_physical_targets(
-                        catalogue_workspace, parsed, session=opened
-                    )
-
-            return WipeResult(
-                workspace=str(resolved_workspace.workspace),
-                reports=tuple(reports),
-                unbound=unbound,
-                dry_run=dry_run,
-            )
-
-
-def _operation_workspace(*, workspace, workspace_config, session=None) -> Workspace:
-    """Which workspace this operation means.
-
-    .. code-block:: text
-
-        an explicit workspace argument
-          → a workspace configuration file
-            → the Session's default context
-              → what the notebook is attached to
-                → a configuration error naming what is missing
-
-    The Session's default context lets a command inside ``weaver session`` omit
-    what the session already knows:
-
-    .. code-block:: text
-
-        weaver session --workspace "Weaver Example"
-        weaver> build .
-        weaver> load Lakehouse/Sales
-
-    It is a default, so an explicit argument still outranks it.
-    """
-
-    if isinstance(workspace, Workspace):
-        if workspace_config is not None:
-            raise CommandError(
-                "workspace_config cannot be combined with an already resolved Workspace"
-            )
-        return workspace
-    if workspace is None and workspace_config is None:
-        inherited = getattr(session, "workspace", None)
-        if inherited is not None:
-            return inherited
-        return _current_fabric_workspace()
-    from .config import resolve_workspace
-
-    return resolve_workspace(workspace=workspace, workspace_config=workspace_config)
-
-
-def current_workspace() -> Workspace:
-    """The workspace this code is running in, discovered rather than named.
-
-    Inside a Fabric notebook the session already knows the answer. This is the
-    discovery every operation does for ``workspace=None``, reachable on its own
-    for a caller that needs a resolver rather than an operation.
-
-    Outside a session there is nothing to discover, and this says so rather than
-    guessing.
-    """
-
-    return _with_inferred_control_lakehouse(
-        _operation_workspace(workspace=None, workspace_config=None)
-    )
-
-
-def _current_fabric_workspace() -> FabricWorkspace:
-    try:
-        from notebookutils import runtime
-    except ImportError as exc:
-        raise CommandError(
-            "give workspace or workspace_config outside a Fabric notebook"
-        ) from exc
-    context = runtime.context
-    if callable(context):
-        context = context()
-    if not isinstance(context, Mapping):
-        raise CommandError("Fabric runtime context is not a mapping")
-    name = context.get("currentWorkspaceName")
-    if not name:
-        raise CommandError("Fabric runtime context carries no current workspace")
-    return FabricWorkspace(workspace=str(name))
-
-
-def _with_inferred_control_lakehouse(workspace: Workspace) -> Workspace:
-    if workspace.weaver_lakehouse or not isinstance(workspace, FabricWorkspace):
-        return workspace
-    if not _inside_fabric_session(workspace):
-        return workspace
-    from .lakehouse import default_lakehouse
-
-    spark = _active_spark()
-    return replace(workspace, weaver_lakehouse=default_lakehouse(spark).name)
-
-
-
-
 def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
     if source is None:
         if not isinstance(workspace, FabricWorkspace) or not _inside_fabric_session(workspace):
@@ -427,14 +207,14 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
             raise CommandError(
                 "an abfss repository source can be read only inside a Fabric session"
             )
-        from .fabric.store import FabricStore
+        from ..fabric.store import FabricStore
 
         return location, FabricStore()
     return location, FilesystemStore()
 
 
 def _item_bindings(bind, workspace: Workspace):
-    from .build_bundle.targets import ItemBindings, parse_item_binding
+    from ..build_bundle.targets import ItemBindings, parse_item_binding
 
     if bind is None:
         values = [f"Lakehouse/{name}" for name in workspace.lakehouses]
@@ -455,7 +235,7 @@ def _item_bindings(bind, workspace: Workspace):
 def _archive_location(resolver, bundle_name: str | None):
     if bundle_name is None:
         return None
-    from .build_bundle.workflow import timestamped_archive_name
+    from ..build_bundle.workflow import timestamped_archive_name
 
     name = bundle_name or timestamped_archive_name()
     if not name.endswith(".weaver.zip"):
@@ -502,7 +282,7 @@ def _build_in_process(
     notebook build takes the same path a desktop build does.
     """
 
-    from .build_bundle import (
+    from ..build_bundle import (
         build_item_repository,
         catalogue_items_for_build,
         read_build_state,
@@ -566,15 +346,15 @@ def _build_desktop_fabric(
         raise CommandError(
             "Fabric build requires an Environment in workspace configuration"
         )
-    from .build_bundle import (
+    from ..build_bundle import (
         Installer,
         catalogue_items_for_build,
         generate_item_build_bundle,
         persist_bundle_archive,
         read_build_state,
     )
-    from .catalogue.state import reconcile_catalogue_state
-    from .fabric.preflight import preflight_fabric_targets
+    from ..catalogue.state import reconcile_catalogue_state
+    from ..fabric.preflight import preflight_fabric_targets
     # Above the session, deliberately. Every item this build needs is proved to
     # exist from one workspace listing, so a missing target costs a REST call
     # rather than a Livy session and a Spark traceback about a catalogue.
@@ -654,90 +434,3 @@ def _binding_text(binding) -> str:
     return f"{binding.target.physical_kind}/{binding.target.item.name}={binding.item}"
 
 
-def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
-    from .physical_wipe import wipe_lakehouse, wipe_sql_target
-
-    if target.item_type == "Lakehouse":
-        low = wipe_lakehouse(
-            target.item, workspace, store=store, dry_run=dry_run, session=session
-        )
-        return tuple(
-            WipeReport(
-                target=str(target),
-                location=report.location,
-                removed=report.removed,
-                dry_run=dry_run,
-            )
-            for report in low
-        )
-
-    report = WipeReport(
-        target=str(target),
-        location=Location(f"warehouse://{target.item.name}"),
-        removed=("all user-created SQL objects",),
-        dry_run=dry_run,
-    )
-    if dry_run:
-        return (report,)
-    warehouse = WarehouseTarget(target.item)
-    # The Session's connection, reused and closed with the Session. A wipe that
-    # opened its own would pay for a Warehouse the build before it had already
-    # connected to — and would close it before the load after it connects again.
-    wipe_sql_target(
-        warehouse, workspace, sql=session.sql_executor(warehouse, workspace=workspace)
-    )
-    return (report,)
-
-
-
-def _unbind_physical_targets(
-    workspace: Workspace, targets: Sequence[WipeTarget], *, session=None
-):
-    """The catalogue claims a set of wiped targets leaves behind."""
-
-    return unbind_catalogue_claims(
-        workspace,
-        lakehouses=sorted(
-            {
-                target.physical_name
-                for target in targets
-                if target.item_type == "Lakehouse"
-            }
-        ),
-        warehouses=sorted(
-            {
-                target.physical_name
-                for target in targets
-                if target.item_type == "Warehouse"
-            }
-        ),
-        session=session,
-    )
-
-
-def unbind_catalogue_claims(
-    workspace: Workspace, *, lakehouses, warehouses, session=None
-) -> dict:
-    """Remove catalogue claims for named physical targets.
-
-    Two callers want it: ``weaver unbind``, and the tail of a ``wipe`` that
-    emptied a target the catalogue still claims. Reading and deleting are both
-    Spark SQL, so the statements go through the Session.
-    """
-
-    from .build_bundle.workflow import session_catalogue
-    from .sessions.host import use_or_create_session
-    from .unbind import unbind_targets
-
-    with use_or_create_session(session, workspace=workspace) as opened:
-        if not opened.executes_here(workspace) and not workspace.environment:
-            raise CommandError(
-                "Fabric catalogue unbind requires an Environment in workspace "
-                "configuration"
-            )
-        catalogue = session_catalogue(
-            opened, workspace, ItemRef(workspace.weaver_lakehouse)
-        )
-        return unbind_targets(
-            catalogue, lakehouses=lakehouses, warehouses=warehouses
-        ).to_mapping()

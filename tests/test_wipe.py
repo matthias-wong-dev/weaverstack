@@ -7,7 +7,10 @@ import pytest
 from weaver.targets import DeltaTarget, FolderTarget, WarehouseTarget
 from weaver.locations import Location
 from weaver import wipe as public_wipe
-from weaver.operations import WipeReport as PublicWipeReport, WipeTarget
+from weaver.operations.wipe import (
+    WipeReport as PublicWipeReport,
+    WipeTarget,
+)
 from weaver.physical_wipe import wipe, wipe_folder_target
 from weaver.errors import CommandError
 from weaver.sql import SqlExecutionError
@@ -189,7 +192,7 @@ def test_public_wipe_rejects_partial_lakehouse_targets(value):
 
 
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
-    operations = __import__("weaver.operations", fromlist=["operations"])
+    operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
     workspace = given_workspace(weaver_lakehouse=None)
     monkeypatch.setattr(
         operations,
@@ -214,7 +217,7 @@ def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
 def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     monkeypatch,
 ):
-    operations = __import__("weaver.operations", fromlist=["operations"])
+    operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
     workspace = given_workspace(weaver_lakehouse="Control")
     calls = []
     monkeypatch.setattr(

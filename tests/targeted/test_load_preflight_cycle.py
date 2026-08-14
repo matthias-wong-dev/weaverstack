@@ -39,7 +39,7 @@ import pytest
 
 from weaver.errors import CommandError
 from weaver.run.result import RunError
-from weaver.load import run_load
+from weaver.operations.load import run_load
 from weaver.run.state import read_target_inventories
 from weaver.run import RunState
 from weaver.load_plan import PhysicalTargetRef

@@ -25,6 +25,8 @@ import types
 import pytest
 
 import weaver
+import weaver.operations.build
+import weaver.operations.workspace
 from weaver.errors import BuildError, CommandError
 from weaver.workspaces import FabricWorkspace
 
@@ -68,8 +70,12 @@ def captured(monkeypatch):
     # Two seams rather than three: the emulator and a Fabric notebook are both
     # "this process is already where the data is", and the Session is what makes
     # them one path.
-    monkeypatch.setattr(weaver.operations, "_build_in_process", capture("in_process"))
-    monkeypatch.setattr(weaver.operations, "_build_desktop_fabric", capture("desktop"))
+    monkeypatch.setattr(
+        weaver.operations.build, "_build_in_process", capture("in_process")
+    )
+    monkeypatch.setattr(
+        weaver.operations.build, "_build_desktop_fabric", capture("desktop")
+    )
     return seen
 
 
@@ -103,7 +109,7 @@ def test_a_notebook_infers_the_attached_lakehouse_as_the_weaver_lakehouse(
     in_notebook, captured, repository, monkeypatch
 ):
     monkeypatch.setattr(
-        weaver.operations, "_active_spark", lambda: object()
+        weaver.operations.workspace, "_active_spark", lambda: object()
     )
 
     with pytest.raises(Halt):
@@ -117,7 +123,9 @@ def test_the_inferred_lakehouse_is_the_control_plane_and_not_an_authored_target(
 ):
     """The attachment names where the catalogue lives, not what to build into."""
 
-    monkeypatch.setattr(weaver.operations, "_active_spark", lambda: object())
+    monkeypatch.setattr(
+        weaver.operations.workspace, "_active_spark", lambda: object()
+    )
 
     with pytest.raises(Halt):
         _build(repository)
@@ -139,7 +147,9 @@ def test_the_inferred_lakehouse_is_the_control_plane_and_not_an_authored_target(
 def test_an_explicit_weaver_lakehouse_overrides_the_attached_default(
     in_notebook, captured, repository, monkeypatch
 ):
-    monkeypatch.setattr(weaver.operations, "_active_spark", lambda: object())
+    monkeypatch.setattr(
+        weaver.operations.workspace, "_active_spark", lambda: object()
+    )
 
     with pytest.raises(Halt):
         _build(repository, weaver_lakehouse="ChosenWeaver")
@@ -188,7 +198,7 @@ def test_a_desktop_caller_needs_no_workspace_object(captured, repository, tmp_pa
 def test_no_context_outside_fabric_names_what_to_supply(repository, monkeypatch):
     monkeypatch.delitem(sys.modules, "notebookutils", raising=False)
     monkeypatch.setattr(
-        weaver.operations,
+        weaver.operations.workspace,
         "_current_fabric_workspace",
         lambda: (_ for _ in ()).throw(
             CommandError("give workspace or workspace_config outside a Fabric notebook")

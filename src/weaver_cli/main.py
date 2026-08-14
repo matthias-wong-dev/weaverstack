@@ -739,7 +739,7 @@ def handle_push(args: argparse.Namespace) -> int:
 def handle_unbind(args: argparse.Namespace) -> int:
     import json
 
-    from weaver.operations import _unbind_target_names
+    from weaver.operations.wipe import _unbind_target_names
     from weaver.errors import CommandError
 
     lakehouses, warehouses = _unbind_target_names(args.targets)
@@ -764,7 +764,7 @@ def handle_unbind(args: argparse.Namespace) -> int:
 def _run_unbind(workspace, *, lakehouses, warehouses, session=None) -> dict:
     """The core operation. The CLI's job here is the arguments, not the crossing."""
 
-    from weaver.operations import unbind_catalogue_claims
+    from weaver.operations.wipe import unbind_catalogue_claims
 
     return unbind_catalogue_claims(
         workspace, lakehouses=lakehouses, warehouses=warehouses, session=session

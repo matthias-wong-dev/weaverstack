@@ -136,7 +136,7 @@ def _ran(validation, executor=None, *, collect=False):
     from types import SimpleNamespace
 
     from weaver.run.outcome import settle
-    from weaver.test import _as_validation_node
+    from weaver.operations.test import _as_validation_node
 
     node = SimpleNamespace(
         node_id=str(validation.logical),
@@ -449,7 +449,7 @@ def test_a_dry_run_dispatches_nothing():
     )
     runner._graph = _graph_of(validation)
 
-    from weaver.test import _as_validation_node
+    from weaver.operations.test import _as_validation_node
 
     result = runner.run()
     node = _as_validation_node(result.nodes[0])

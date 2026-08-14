@@ -210,7 +210,10 @@ def test_no_build_module_reaches_the_initialisation_wrapper():
     """
 
     core = Path(__file__).resolve().parents[2] / "src" / "weaver"
-    build_modules = [core / "operations.py", *sorted((core / "build_bundle").rglob("*.py"))]
+    build_modules = [
+        *sorted((core / "operations").rglob("*.py")),
+        *sorted((core / "build_bundle").rglob("*.py")),
+    ]
 
     offenders = [
         module.name

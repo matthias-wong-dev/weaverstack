@@ -406,7 +406,7 @@ def _assert_pruned(env, step) -> None:
 # the caller may fudge; it is the whole distinction the two classes make.
 
 LOADED = '''
-from weaver.load import run_load
+from weaver.operations.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
 from weaver.sessions import NotebookSession
@@ -645,7 +645,7 @@ VALIDATED = '''
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
 from weaver.sessions import NotebookSession
-from weaver.test import run_test
+from weaver.operations.test import run_test
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
@@ -802,7 +802,7 @@ CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
 #: generated load procedure of its own, so the run graph has work either side of
 #: the endpoint and a real ordering constraint between them.
 CROSS_ITEM_LOADED = '''
-from weaver.load import run_load
+from weaver.operations.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
 from weaver.sessions import NotebookSession
@@ -831,7 +831,7 @@ emit({"dry": dry, "real": real})
 CROSS_ITEM_VALIDATED = '''
 from weaver.load_plan import PhysicalTargetRef
 from weaver.sessions import NotebookSession
-from weaver.test import run_test
+from weaver.operations.test import run_test
 
 requested = (
     PhysicalTargetRef("lakehouse", target.name),

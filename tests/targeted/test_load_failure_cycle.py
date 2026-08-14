@@ -34,7 +34,7 @@ import pytest
 
 from weaver.errors import LoadError
 from weaver.run import RunState
-from weaver.load import run_load
+from weaver.operations.load import run_load
 from weaver.load_report import (
     BLOCKED,
     FAILED,

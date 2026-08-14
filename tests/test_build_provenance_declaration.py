@@ -173,7 +173,7 @@ def test_a_failure_names_the_operation_then_the_file_then_the_reason():
     found out, not what went wrong, so it comes last or not at all.
     """
 
-    from weaver.operations import BuildFailure
+    from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
         action_id="object-warehouse-reporting-sales-customerrevenue",
@@ -191,7 +191,7 @@ def test_a_failure_names_the_operation_then_the_file_then_the_reason():
 
 
 def test_a_failure_with_no_authored_source_still_names_what_failed():
-    from weaver.operations import BuildFailure
+    from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
         action_id="alias-Lakehouse-Reporting-DWG.Customer",
@@ -205,7 +205,7 @@ def test_a_failure_with_no_authored_source_still_names_what_failed():
 
 
 def test_a_failure_falls_back_to_the_action_id_when_it_has_no_artefact():
-    from weaver.operations import BuildFailure
+    from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
         action_id="publish-registry", error_type="BuildError", message="no"
