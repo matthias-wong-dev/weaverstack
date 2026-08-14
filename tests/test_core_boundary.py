@@ -78,9 +78,9 @@ def test_the_cli_source_never_names_spark():
 def test_the_cli_builds_and_runs_with_spark_unimportable():
     """The CLI parses and dispatches on a machine where PySpark cannot import.
 
-    Blocking the import is stronger than merely not installing it: absence has
-    to be simulated wherever the package happens to be present. What it proves
-    is that no command path reaches for the module.
+    Blocking the import is stronger than leaving the package uninstalled:
+    absence has to be simulated wherever it happens to be present. What this
+    proves is that no command path reaches for the module.
     """
 
     probe = (

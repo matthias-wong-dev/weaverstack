@@ -51,29 +51,16 @@ new part.
 This is the thing that is hard to hold in your head, and the thing most likely
 to be got wrong by someone reading only the code in front of them.
 
-**Weaver is a system that runs inside Microsoft Fabric.** Fabric is its one real
-workspace. We develop it on a laptop against a local emulator, and test it at both
-levels. Resource location and code execution are separate axes:
+**Weaver is a system that runs inside Microsoft Fabric.** Fabric is its one
+workspace. What varies is not where the resources are — they are always in
+Fabric — but where Weaver's own code runs:
 
-```text
-    WHERE RESOURCES ARE              WHERE THE CODE RUNS
+| | code runs | what it is |
+|---|---|---|
+| 1 | on a desktop | **the desktop position** — Weaver here, reaching in over Livy, TDS, OneLake and REST |
+| 2 | **in Fabric** | **the in-Fabric position** — `pip install weaverstack` in a notebook |
 
-    local emulator root              in-process, on a laptop
-    Fabric workspace                 in-process, inside a Fabric session
-                                     submitted from outside, over Livy
-```
-
-These give three useful execution paths:
-
-| | resources | code runs | what it is |
-|---|---|---|---|
-| 1 | local emulator | laptop | development, and most of the test suite |
-| 2 | Fabric | laptop | **the desktop position** — Weaver here, reaching in over Livy, TDS, OneLake and REST |
-| 3 | Fabric | **in Fabric** | **the in-Fabric position** — `pip install weaverstack` in a notebook |
-
-Rows 2 and 3 are both meant to be complete ways to work, not a fast loop and a
-real one. Row 1 is neither: it is an emulator, and it exists to make the first
-two cheap to develop against.
+Both are meant to be complete ways to work, not a fast loop and a real one.
 
 **The foundational rule:** *an operation never works out where it is. It asks a
 Session for a capability, and the Session knows.*
@@ -81,12 +68,18 @@ Session for a capability, and the Session knows.*
 ```text
 Session in a notebook   → call it here: native Spark, notebookutils, TDS
 Session on a desktop    → cross for it: Livy, OneLake over HTTPS, TDS, REST
-Session on the emulator → the local filesystem and an in-process Spark
 ```
 
 `use_or_create_session` in `weaver.session.host` picks the host once, per
 workspace. Above that, `build`, `load`, `test` and `wipe` are the same code in
-all three, which is the property the whole arrangement exists to keep.
+both, which is the property the whole arrangement exists to keep.
+
+There was a third position once: a filesystem emulator standing in for a
+workspace on a laptop. It was removed, because a payload now carries the final
+four-part Fabric name a build decided, and nothing but Fabric can execute one of
+those. The fast suite decides against a `TestSession` instead — a real
+implementation of the Session contract that records what a host was asked to do
+and never interprets it.
 
 The older form of this rule said core must operate only within the environment
 it executes in, and that only the CLI and test infrastructure may cross. The
@@ -96,22 +89,19 @@ operation can be *given* one that reaches into Fabric without knowing that it
 does.
 
 A `FabricWorkspace` identifies the workspace the resources live in. It does **not**
-say whether access happens through desktop HTTP clients or inside a session.
-`LocalWorkspace` remains the name of the in-process emulator configuration in Python;
-it is not a second deployment workspace and must not leak into durable contracts.
-In particular, a build bundle binds target kind and item identifiers, never a
-deployment-kind discriminator.
+say whether access happens through desktop HTTP clients or inside a session. A
+build bundle binds target kind, item identifiers and the display names four-part
+Spark naming is spelled with — never a discriminator for where Weaver is running.
 
 So the storage picture has two parts, and they must not be conflated:
 
-*In-environment execution* — the store Weaver uses where it runs:
+*In-session execution* — the store Weaver uses where it runs:
 
-| execution | environment configuration | store |
-|---|---|---|
-| local process | `LocalWorkspace` emulator | `FilesystemStore` |
-| Fabric session | `FabricWorkspace` | `FabricStore` over `notebookutils.fs` |
+| execution | store |
+|---|---|
+| Fabric session | `FabricStore` over `notebookutils.fs` |
 
-*Cross-boundary access* — a local caller reaching into a workspace:
+*Cross-boundary access* — a desktop caller reaching into a workspace:
 
 | caller | destination | client |
 |---|---|---|
@@ -124,14 +114,14 @@ caller that crosses. Inside Fabric, `store_for(FabricWorkspace)` returns the
 session-native `FabricStore`; from a desktop that construction fails rather
 than silently substituting DFS.
 
-`FilesystemStore` is named for the transport it is, not for the workspace it
-usually serves: a build reads its repository through one whatever environment it
-runs in, because every incoming source tree is copied to a temporary filesystem
-snapshot before it is parsed. That copy is unconditional — see `_temp_copy` in
+`FilesystemStore` is named for the transport it is, and it survived the emulator
+because it was never part of it: a build reads its repository through one
+wherever it runs, because every incoming source tree is copied to a temporary
+filesystem snapshot before it is parsed. That copy is unconditional — see `_temp_copy` in
 `weaver.build_bundle.workflow`. A source already on this filesystem is copied
 too, so a build never reads a tree the caller can still edit underneath it.
 
-Above resolution and the store, nothing knows which environment it is using. An
+Above resolution and the store, nothing knows which host it is running on. An
 `if isinstance(workspace, …)` in core operation code means the abstraction is being
 broken; the fix belongs in the factories, or in the CLI that does the crossing.
 
@@ -140,22 +130,15 @@ injected credential and otherwise uses the library default without pinning the
 chain. The CLI and the Fabric test infrastructure call `prefer_cli_credential()`
 themselves; importing or using the core imposes no credential choice.
 
-### The local environment is an emulator, not a peer workspace
 
-`.local/Sales_LH/Files` and `.local/Sales_LH/Tables` mirror the shape a Fabric
-Lakehouse presents through OneLake, deliberately, so the same resolution
-arithmetic serves both. It exists so that most development and most of the test
-suite need no tenant, no capacity and no credentials.
+### Fabric is the reference, and now the only one
 
-### Fabric is the reference; local emulates it — never the reverse
-
-This is the direction of the whole system, and the mistake most worth naming
-because it has already been made once. **Weaver is Fabric-first.** The behaviour
-that must be right is the behaviour *inside* Fabric; the local emulator exists so
-that behaviour can be developed and tested quickly on a laptop. Design against
-what Fabric does, then make local reproduce it. Do not design against what is
-convenient locally and then contort Fabric to fit — if local and Fabric disagree,
-Fabric is right and local is the thing to fix.
+**Weaver is Fabric-first.** The behaviour that must be right is the behaviour
+*inside* Fabric. This used to be a warning against contorting Fabric to match
+what was convenient in an emulator; with the emulator gone the rule reads more
+simply, but the direction it protects is the same. What the fast suite may do
+without a tenant is *decide* — render, plan, reconcile — and what it must never
+do is model what Fabric would answer.
 
 Concretely, for anything with two phases (as the build bundle has *generate* then
 *install*): **both phases decide against the target environment's real state.**
@@ -213,8 +196,8 @@ the same version and the install skips the republish.
 
 Ask, in order:
 
-1. Does it work in the `LocalWorkspace` emulator, with a test that needs no tenant?
-2. Does it work against a `FabricWorkspace` from the laptop?
+1. Can what it *decides* be tested without a tenant, against a `TestSession`?
+2. Does it work against a Fabric workspace from the desktop?
 3. Does it work with Weaver *running inside* Fabric?
 
 Answer all three, and answer them with tests that call the real function —
@@ -255,11 +238,11 @@ These become enforceable as the corresponding code lands:
   the strength of it having an identity.
 - **Every target is named, not inherited.** No destination Lakehouse is assumed to
   be attached to the notebook, and that covers *names* as well as paths: a
-  generated statement says which Lakehouse it means. On Fabric that is the native
-  four-part `workspace.lakehouse.schema.object`; the local emulator folds the
-  Lakehouse into its one namespace level. A bare `Schema.Object` resolves through
-  whatever the session is attached to — which is the Weaver Lakehouse — so it is
-  the ambient-context anti-pattern in disguise.
+  generated statement says which Lakehouse it means, as the native four-part
+  `workspace.lakehouse.schema.object`, rendered when the bundle is generated. A
+  bare `Schema.Object` resolves through whatever the session is attached to —
+  which is the Weaver Lakehouse — so it is the ambient-context anti-pattern in
+  disguise.
 
   There is one narrow exception, and it is bounded by the same rule.
   `weaver.lakehouse.default_lakehouse` reads a notebook's *own* attachment, so a
@@ -409,8 +392,7 @@ the summary already puts a regression in front of whoever caused it.
 Each marker is opted into by name, and none implies another.
 
 ```bash
-pytest                      # pure Python, under a second
-pytest -m spark             # local Spark/Delta, needs a JDK
+pytest                      # pure Python, no JVM and no tenant
 pytest -m fabric            # every test against a real Fabric workspace
 pytest -m "fabric and remote" # no published wheel needed
 pytest -m "fabric and hosted" # needs the wheel published to the Environment
@@ -422,7 +404,6 @@ Every marker says *what a test needs*:
 
 | marker | needs |
 |---|---|
-| `spark` | a JDK |
 | `fabric` | a workspace; carried by every Fabric test |
 | `remote` | a workspace, and no published wheel |
 | `hosted` | a workspace **and** the wheel published to the Environment |
@@ -441,21 +422,16 @@ run from the checkout against the real workspace and stay `remote`.
 Position is worth recording, but it belongs in a test's docstring. A marker says
 what a run costs, and the cost of `hosted` is a five-minute publish.
 
-`full_integration` is the Fabric lifecycle journey alone — one test, no JDK. Its
-local twin lives in `tests/spark` under `spark`, because that is what it needs.
-The journey is the most expensive thing in the suite and should **rarely be where
+`full_integration` is the Fabric lifecycle journey alone — one test. The
+journey is the most expensive thing in the suite and should **rarely be where
 a defect is found for the first time**: syntax, selection, planning, action
 rendering, execution and reconciliation are all meant to be proven below it.
 Making it run by exception keeps the routine Fabric run about components.
 
 Isolation therefore comes from **emptying** an item rather than from having a new
 one. That is not a weaker guarantee, but it is a different one, so the cleaning
-path is load-bearing and asserted rather than assumed: residue is possible in
-Fabric in a way it never is locally, where a target is a fresh `tmp_path`
-directory costing a fraction of a millisecond. Local stays disposable for exactly
-that reason — copying the Fabric arrangement there would import a workaround for
-a provisioning cost that does not exist, which is contorting the emulator to
-match Fabric's *mechanics* rather than its *behaviour*.
+path is load-bearing and asserted rather than assumed: residue is possible in a
+real workspace in a way it never was on a fresh `tmp_path`.
 
 Weaver also has no opinion about data architecture: Folder, Delta and SQL are
 materialisation forms, not tiers. `T0`/`T1`/`T2` naming is house jargon and is
@@ -533,67 +509,12 @@ that first needs it lands, not in advance. See the comment in `pyproject.toml`.
 ```bash
 python3.11 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest              # core only — no JVM, under a second
-.venv/bin/python -m pytest -m spark     # local Spark/Delta, needs a JDK
+.venv/bin/python -m pytest              # core only — no JVM, no tenant
 .venv/bin/weaver --help
 ```
 
-### Codex cloud: run Spark without rediscovering the setup
+`pip install weaverstack` installs the CLI and the Fabric transports. It does
+not install PySpark and needs no JDK: Fabric supplies Spark where authored
+runtime code executes, and a desktop reaches Spark through the Session.
 
-Codex cloud workspaces usually already have `.venv` and a supported JDK, but
-the virtual environment may contain only the core test dependencies. The JVM
-also does not automatically use the HTTP proxy variables that `pip` and
-`curl` understand. Use this sequence rather than diagnosing Spark from
-scratch:
 
-```bash
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/weaver doctor
-JAVA_TOOL_OPTIONS="$(.venv/bin/python - <<'PY'
-import os
-from urllib.parse import urlparse
-
-proxy = urlparse(os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy", ""))
-if proxy.hostname:
-    print(
-        f"-Dhttp.proxyHost={proxy.hostname} -Dhttp.proxyPort={proxy.port or 80} "
-        f"-Dhttps.proxyHost={proxy.hostname} -Dhttps.proxyPort={proxy.port or 80}"
-    )
-PY
-)" .venv/bin/python -m pytest -m spark
-```
-
-Why the third command matters: `delta-spark` asks Spark's Ivy resolver to fetch
-Delta JVM artefacts from Maven on the first session start. Without Java proxy
-properties, a proxied cloud workspace can report an unresolved
-`io.delta#delta-spark_2.12` dependency followed by `JAVA_GATEWAY_EXITED`, even
-though `pip install` worked. Ivy caches the download under `~/.ivy2`, so later
-runs in the same workspace normally start without another download. See
-[the cloud-workspace notes](design/local-setup.md#codex-cloud-workspaces) for
-individual commands and troubleshooting.
-
-Spark tests are deselected by default (`addopts = ["-m", "not spark"]`) and skip
-themselves if PySpark or a supported JDK is missing, so a contributor without a
-JVM is never blocked. `weaver doctor` reports what is present and what to
-install; see [design/local-setup.md](design/local-setup.md).
-
-Versions are declared as ranges, not pins — Spark 3.5.x with delta-spark 3.2.x,
-on Java 11 or 17 — so an existing local install is not disturbed.
-
-The `spark` fixture is **session-scoped** and the `lakehouses` fixture is
-**per-test**, because those costs differ by four orders of magnitude: a session
-takes ~1.2 s plus ~4.3 s of JVM warm-up on its first Delta operation, while a
-local Lakehouse skeleton takes 0.2 ms. Only one `SparkSession` may be active per
-process in any case. Tests stay isolated through their own `tmp_path`, not their
-own session.
-
-One shared session does need help with that, and the reason is worth knowing
-before you add a Spark test. Delta caches a `DeltaLog` — and through it a
-`Snapshot`, a query execution and its encoder — per table *path*, so a suite that
-builds every table under a fresh `tmp_path` accumulates the retained state of
-every Lakehouse it has already deleted. Left alone that exhausted the default 1 GB
-driver heap partway through a combined `-m spark` run, and the failure surfaced as
-an unreadable `Py4JJavaError` blamed on whichever test was running. An autouse
-fixture in `tests/conftest.py` clears Delta's log cache and Spark's plan cache
-after each test; a test that registers a *schema* still has to drop it, because
-a schema is not a cache.

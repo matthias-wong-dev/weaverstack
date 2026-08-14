@@ -25,23 +25,9 @@ pip install 'weaverstack[cli]' # plus the optional desktop CLI
 Requires Python 3.11 or later. Tested on macOS, Linux and Windows across Python
 3.11 and 3.12.
 
-Local Spark development additionally needs a JDK, and on Windows runs under
-[WSL](https://learn.microsoft.com/windows/wsl/install) — Spark's local writes
-need a `winutils.exe` that Windows does not carry. Everything else, including
-the CLI and the whole Fabric path, runs natively on all three.
-
-## Local development
-
-Weaver runs against a local filesystem standing in for Lakehouses, so build and
-load can be developed without touching a workspace. It needs a JDK and a matched
-Spark/Delta pair — all optional, none of it required to use Weaver on Fabric.
-
-```bash
-weaver doctor
-```
-
-reports what is present and what to install. See
-[design/local-setup.md](design/local-setup.md).
+No JDK and no Spark install: Fabric supplies Spark where authored runtime code
+executes, and a desktop reaches it through the Session. The CLI and the whole
+Fabric path run natively on all three platforms.
 
 ## CLI lifecycle
 
@@ -52,10 +38,8 @@ weaver install     --workspace-config workspace.yml
 weaver build ./estate --workspace-config workspace.yml --bind Lakehouse/Sales_Dev
 ```
 
-The same commands work against a local folder with `--workspace-type local`,
-except Warehouse work, which remains Fabric-only. See
-[CLI usage](design/cli-usage.md) for repository sources, physical-first bindings, wipe and
-unbind.
+See [CLI usage](design/cli-usage.md) for repository sources, physical-first
+bindings, wipe and unbind.
 
 ## Documentation
 
@@ -63,7 +47,6 @@ unbind.
 - [How Weaver build works](design/how-does-build-work.md) — incremental selection, bundle order and certification
 - [Where your Weaver document repository lives](design/weaver-repository.md) — a folder of files, and how it reaches Fabric
 - [CLI usage](design/cli-usage.md) — signing in, workspaces, capacity, wipe
-- [Local development setup](design/local-setup.md)
 - [Fabric integration tests](design/fabric-testing.md)
 - [Agent guide](AGENTS.md)
 
