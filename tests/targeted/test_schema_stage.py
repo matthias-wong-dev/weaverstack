@@ -126,13 +126,18 @@ def test_schemas_are_ordered_so_the_payload_is_stable():
 # --- what a create looks like on each side ------------------------------------
 
 
-def test_a_lakehouse_schema_is_a_spark_schema_payload():
+def test_a_lakehouse_schema_is_finished_spark_sql():
+    """No instruction for the installer to complete: a Fabric Lakehouse pins
+    its own storage, so the statement is known when the bundle is generated."""
+
     planned = stage(CUSTOMER)
     (action,) = actions(planned)
 
-    assert action.executor == "spark_schema"
-    assert action.payload.endswith(".schema.json")
-    assert json.loads(payload_of(planned, action)) == {"schema": "DWG"}
+    assert action.executor == "spark_sql"
+    assert action.payload.endswith(".spark.sql")
+    assert payload_of(planned, action).decode() == (
+        "CREATE SCHEMA IF NOT EXISTS `Demo`.`Sales_LH`.`DWG`\n"
+    )
 
 
 def test_a_warehouse_schema_is_t_sql():

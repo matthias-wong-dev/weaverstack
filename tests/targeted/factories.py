@@ -497,14 +497,21 @@ def bound_target(
     id: str = "target-1",
     kind: str = "lakehouse",
     item_id: str = "Sales_LH",
+    item_name: str | None = None,
+    workspace_name: str = WORKSPACE,
     logical_item_name: str | None = "Sales",
     logical_item_type: str | None = "Lakehouse",
     **extra,
 ) -> BoundTarget:
+    # Both halves of the physical identity, as a real one carries: the id
+    # resolves the item, and the display names are what four-part Spark naming
+    # is spelled with.
     return BoundTarget(
         id=id,
         kind=kind,
         item_id=item_id,
+        item_name=item_name if item_name is not None else item_id,
+        workspace_name=workspace_name,
         logical_item_name=logical_item_name,
         logical_item_type=logical_item_type,
         **extra,
@@ -1046,12 +1053,12 @@ def lakehouse_catalogue(spark, resolver, item: str):
     return SparkCatalogue(spark, resolver.spark_destination(ItemRef(item)))
 
 
-def spark_destination(
-    item: str = "Sales_LH", *, schema_prefix: str = "sales_lh__", **extra
-):
-    from weaver.spark import SparkDestination
+def spark_destination(item: str = "Sales_LH", *, workspace: str = WORKSPACE):
+    """How Fabric Spark addresses one Lakehouse."""
 
-    return SparkDestination(item=item, schema_prefix=schema_prefix, **extra)
+    from weaver.spark import FabricSparkTarget
+
+    return FabricSparkTarget(workspace=workspace, lakehouse=item)
 
 
 #: Distinguishes "caller said nothing, give the usual one" from "caller means

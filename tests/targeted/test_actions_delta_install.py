@@ -171,8 +171,7 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     )
 
     (statement,) = spark.statements
-    assert "{{object:" not in statement
-    assert "sales_lh__DWG" in statement
+    assert statement == VIEW_SQL.decode().strip()
 
 
 def test_a_spark_action_with_no_way_to_run_a_statement_fails_saying_so():
@@ -314,7 +313,9 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
     workspace = given_workspace(weaver_lakehouse="Weaver")
     return installation_context(
         store=FilesystemStore(),
-        resolver=given_resolver(workspace=workspace),
+        # Rooted on this test's own filesystem, so what the resolver names is
+        # somewhere the store can actually write.
+        resolver=given_resolver(workspace=workspace, root=tmp_path),
         target=resolved_target(),
         spark=_TableSpark(tuple(columns) + AUDIT),
     )
@@ -385,11 +386,10 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     result = execute_install_action(action, payload, context=context)
     written = context.store.read(Location(result.details["written"])).decode()
 
-    assert b"{{object:" in payload, "the bundle payload is destination-free"
     assert written.lstrip().startswith("# Weaver generated load")
     assert "Total amount" in written
-    assert "{{" not in written, "the installed file names its destination"
-    assert "Sales_LH" in written or "sales_lh" in written
+    assert "{{" not in written, "a generated module carries no unresolved token"
+    assert "`Sales_LH`" in written, "and names the Lakehouse it reads"
 
 
 def test_a_deployed_python_module_is_left_exactly_as_authored(tmp_path):

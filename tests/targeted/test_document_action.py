@@ -25,12 +25,13 @@ from factories import (
 )
 
 from weaver.build_bundle import render_document_build_action
+from factories import bound_target
 
 
 def _render(repository, identity: str):
     document = document_id(identity)
     return render_document_build_action(
-        document, repository.source_documents[document]
+        document, repository.source_documents[document], target=bound_target()
     )
 
 
@@ -121,6 +122,7 @@ def test_a_warehouse_table_renders_a_tsql_action(tmp_path):
     rendered = render_document_build_action(
         document_id("Warehouse/Reporting/DWG.Customer"),
         repository.source_documents[document_id("Warehouse/Reporting/DWG.Customer")],
+        target=bound_target(kind="warehouse", item_id="Reporting_WH"),
     )
 
     assert rendered.action.kind == "build_table"

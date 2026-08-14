@@ -239,7 +239,7 @@ def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
         executor, extension = "tsql", ".sql"
     else:
         keyword = "VIEW" if installed_kind == VIEW else "TABLE"
-        statement = f"DROP {keyword} {_qualified(destination, schema, name)}\n"
+        statement = f"DROP {keyword} {target.spark_target.qualify(schema, name)}\n"
         executor, extension = "spark_sql", ".spark.sql"
     content = statement.encode("utf-8")
     filename = f"drop-{action_slug}{extension}"

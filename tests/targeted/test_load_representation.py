@@ -30,6 +30,9 @@ from weaver.declaration.load import (
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
 from weaver.runtime.load_contract import REASON_BLANK_PK, REASON_DUPLICATE_PK
 from weaver.runtime.load_result import RESULT_COLUMNS
+from weaver.spark import FabricSparkTarget
+
+SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 
 WAREHOUSE_TABLE = """/*
 Table ID: Sales.Customer
@@ -100,7 +103,7 @@ def test_a_spark_sql_table_generates_a_deployed_module():
     ``test_spark_sql_module_representation.py``'s.
     """
 
-    load = _spark().create_load()
+    load = _spark().create_load(destination=SALES)
 
     assert load.object_type == FILE_OBJECT
     assert load.template_version == SPARK_LOAD_VERSION
@@ -150,7 +153,7 @@ def test_a_change_to_generation_must_move_its_template_version():
         ),
         "spark": (
             SPARK_LOAD_VERSION,
-            hashlib.sha256(_spark().create_load().payload).hexdigest(),
+            hashlib.sha256(_spark().create_load(destination=SALES).payload).hexdigest(),
         ),
     }
 
@@ -162,7 +165,7 @@ def test_a_change_to_generation_must_move_its_template_version():
 
 def test_generation_is_deterministic():
     assert _warehouse().create_load() == _warehouse().create_load()
-    assert _spark().create_load() == _spark().create_load()
+    assert _spark().create_load(destination=SALES) == _spark().create_load(destination=SALES)
 
 
 # --- the Warehouse procedure --------------------------------------------------
