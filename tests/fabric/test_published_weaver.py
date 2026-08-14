@@ -431,7 +431,8 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
             repository, item="Lakehouse/_weaver"
         ),
         control_lakehouse=LakehouseBinding(
-            lakehouse=ItemRef(fabric_workspace.weaver_lakehouse)
+            lakehouse=ItemRef(fabric_workspace.weaver_lakehouse),
+            workspace_name=fabric_workspace.workspace,
         ),
     )
 

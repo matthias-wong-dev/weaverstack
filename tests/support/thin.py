@@ -200,16 +200,23 @@ def thin_estate(
     *,
     outcomes: tuple[str, ...] = OUTCOMES,
     lakehouse: str = "Thin_LH",
+    session=None,
+    resolver=None,
+    store=None,
+    workspace=None,
 ) -> ThinEstate:
-    """A Session, a RunState and deployed artefacts for what was named.
+    """A RunState and deployed artefacts for what was named, and a Session.
 
     The catalogue is composed by the same production constructors that describe
     a real estate, so what a thin run plans against is the shape a build
     publishes. Only the artefacts it points at are trivial.
 
-    A thin run reaches a primitive and settles what comes back; it never
-    touches data. Tests are not built here, because a Test's artefact returns a
-    Spark frame — see ``tests/fabric/test_validation_dispatch.py``.
+    A thin run reaches a primitive and settles what comes back; it never touches
+    data. What varies is *where* the artefacts are deployed and who dispatches
+    to them, which is why the store, resolver and Session are injectable: given
+    a real workspace's resolver and a OneLake store, the same builder deploys
+    into Fabric and the same claims are made against the session that imports
+    them there.
     """
 
     documents = {
@@ -221,40 +228,42 @@ def thin_estate(
     )
     bindings = item_bindings(("Lakehouse/Sales", lakehouse))
 
-    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
-    resolver = given_resolver(
-        workspace=workspace, lakehouses=("Weaver_LH", lakehouse), root=root
-    )
+    if workspace is None:
+        workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    if resolver is None:
+        resolver = given_resolver(
+            workspace=workspace, lakehouses=("Weaver_LH", lakehouse), root=root
+        )
+    deployed = store if store is not None else FilesystemStore()
 
     # Written where the *build* would have written them, asked of the build's own
     # enumerator rather than assembled from a path this module believes in. A
     # load module and a Test module do not share a directory, and a fixture that
     # guessed would only be pinning the guess.
-    files_root = Path(resolver.files_root(ItemRef(lakehouse)).value)
-    sources = {
-        f"{SCHEMA}__{name}": source
-        for name, source in (
-            *((name, ARTEFACTS[name]) for name in outcomes),
-        )
-    }
+    files_root = resolver.files_root(ItemRef(lakehouse))
+    sources = {f"{SCHEMA}__{name}": ARTEFACTS[name] for name in outcomes}
     for artefact in item_runtime_artefacts(repository, item=item_id("Lakehouse/Sales")):
         module = artefact.identity.object_id.object.removesuffix(".py")
         source = sources.get(module)
         if source is None:
             continue
-        path = files_root / artefact.target_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source.format(name=module), encoding="utf-8")
+        # Written through a Store rather than a Path, because the store is what
+        # differs between a temporary directory and OneLake.
+        deployed.write(
+            files_root / artefact.target_path,
+            source.format(name=module).encode("utf-8"),
+        )
 
     target = PhysicalTargetRef("lakehouse", lakehouse)
     return ThinEstate(
-        session=given_session(
+        session=session
+        if session is not None
+        else given_session(
             workspace=workspace,
-            store=FilesystemStore(),
+            store=deployed,
             resolver=resolver,
-            # A thin run reaches its primitive in this process, which is what
-            # makes it thin: the whole dispatch path runs and none of it costs
-            # a crossing.
+            # Without a Session of its own a thin run reaches its primitive in
+            # this process, which is what made it thin.
             executes_here=True,
         ),
         workspace=workspace,

@@ -972,10 +972,12 @@ def _fabric_build_context(
         binds = ", ".join(
             (
                 f"ItemBinding(WeaverItemId.parse({item!r}), "
-                f"WarehouseBinding(warehouse=ItemRef({warehouse_name!r})))"
+                f"WarehouseBinding(warehouse=ItemRef({warehouse_name!r}), "
+                f"workspace_name=workspace.workspace))"
                 if item.startswith("Warehouse/")
                 else f"ItemBinding(WeaverItemId.parse({item!r}), "
-                f"LakehouseBinding(lakehouse=ItemRef({target.name!r})))"
+                f"LakehouseBinding(lakehouse=ItemRef({target.name!r}), "
+                f"workspace_name=workspace.workspace))"
             )
             for item in weaver_repo_fixture.items
         )
@@ -997,7 +999,8 @@ def _fabric_build_context(
             f"repository_root = resolver.files_root(ItemRef({weaver.name!r})).join"
             f"(*{repository_relative!r})\n"
             "repository = parse_item_repository(repository_root, store=store)\n"
-            f"control = LakehouseBinding(lakehouse=ItemRef({weaver.name!r}))\n"
+            f"control = LakehouseBinding(lakehouse=ItemRef({weaver.name!r}), "
+            f"workspace_name=workspace.workspace)\n"
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
             "selected, weaver_lakehouse=workspace.weaver_lakehouse)\n"
@@ -1279,7 +1282,8 @@ def _warehouse_build_env(
         # through its own Fabric-native SQL — no sql= injection.
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
-            f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r})))"
+            f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r}), "
+            f"workspace_name=workspace.workspace))"
             for item in weaver_repo_fixture.items
         )
         body = (
@@ -1303,7 +1307,8 @@ def _warehouse_build_env(
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
             "selected, weaver_lakehouse=workspace.weaver_lakehouse)\n"
-            "control = LakehouseBinding(ItemRef(workspace.weaver_lakehouse))\n"
+            "control = LakehouseBinding(ItemRef(workspace.weaver_lakehouse), "
+            "workspace_name=workspace.workspace)\n"
             "session = NotebookSession(workspace=workspace, spark=spark)\n"
             "inventories = read_target_inventories(bindings, session=session)\n"
             "reconciled = read_reconciled_catalogue("

@@ -25,18 +25,6 @@ TESTS = Path(__file__).resolve().parent
 
 #: Each gap: the module, the tests it owes, and what closing it requires.
 DEBT = {
-    "fabric/test_run_dispatch_boundary.py": {
-        "tests": (
-            "test_an_all_succeeding_run_says_so",
-            "test_one_broken_node_does_not_stop_the_others_from_running",
-            "test_the_run_reports_failure_when_any_node_failed",
-        ),
-        "closes_with": (
-            "a Fabric harness that deploys the thin artefacts into a real "
-            "Lakehouse, so dispatch reaching a primitive and settling its "
-            "result is proven where the modules are actually imported"
-        ),
-    },
     "fabric/test_validation_dispatch_boundary.py": {
         "tests": (
             "test_a_validation_reaches_its_artefact_the_same_way_a_load_does",

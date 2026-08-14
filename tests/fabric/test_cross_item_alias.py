@@ -108,7 +108,8 @@ def generate(
         target_inventories=inventories,
         catalogue=catalogue,
         control_lakehouse=LakehouseBinding(
-            lakehouse=ItemRef(workspace.weaver_lakehouse)
+            lakehouse=ItemRef(workspace.weaver_lakehouse),
+            workspace_name=workspace.workspace,
         ),
     )
 
