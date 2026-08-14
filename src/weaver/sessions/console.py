@@ -61,10 +61,17 @@ class ConsoleSession(Session):
         store: Any = None,
         resolver: Any = None,
         progress: Any = None,
+        credential: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.require_weaver = require_weaver
+        from ..fabric.auth import checked_credential
+
+        # Checked here, where it was supplied. A Session acquires its token
+        # lazily, so a wrong object would otherwise surface during whichever
+        # operation first reached Fabric.
+        self._given_credential = checked_credential(credential)
         self._given_livy = livy
         self._given_spark = spark
         self._given_store = store
@@ -295,6 +302,7 @@ class ConsoleSession(Session):
             spark=self._given_spark,
             store=self._given_store,
             resolver=self._given_resolver,
+            credential=self._given_credential,
         )
 
     # --- readiness ----------------------------------------------------------
@@ -456,13 +464,17 @@ class ConsoleScope(WorkspaceScope):
         require_weaver: bool = True,
         livy: Any = None,
         spark: Any = None,
+        credential: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(workspace, **kwargs)
         self.require_weaver = require_weaver
         self.name = str(getattr(workspace, "workspace", workspace))
         self._sql: dict[str, Resource] = {}
-        self._credential = None
+        #: The credential this scope authenticates with. None means the library
+        #: default, chosen when it is first needed rather than now: acquiring a
+        #: token is a network call, and opening a Session must not make one.
+        self._credential = credential
         self._transport_store = None
         self._version_checked = False
 

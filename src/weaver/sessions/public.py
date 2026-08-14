@@ -42,6 +42,7 @@ def session(
     weaver_lakehouse: str | None = None,
     environment: str | None = None,
     workspace_config: Any = None,
+    credential: Any = None,
 ):
     """One reusable Session for a workspace named the way a caller names it.
 
@@ -50,8 +51,15 @@ def session(
     ``workspace_config`` reads the same file the CLI's ``--workspace-config``
     does, and explicit arguments win over it.
 
-    Host-specific options are deliberately absent. Whether a Livy session needs
-    the published wheel, and where a timing tree is drawn, are a console's
+    ``credential`` accepts anything offering a callable ``get_token``, which is
+    the ``azure.core`` ``TokenCredential`` shape. Without one the library
+    default is used and no chain is pinned: which credential to authenticate
+    with is a caller's policy, never the core's. It is validated here and
+    acquired later, so a wrong object is refused at the call that supplied it
+    rather than during whichever operation first reaches Fabric.
+
+    Other host-specific options are deliberately absent. Whether a Livy session
+    needs the published wheel, and where a timing tree is drawn, are a console's
     business; a caller who needs to set them constructs that host directly.
     """
 
@@ -74,7 +82,7 @@ def session(
             workspace_config=workspace_config,
         )
 
-    return session_for(resolved)
+    return session_for(resolved, credential=credential)
 
 
 __all__ = ["session"]

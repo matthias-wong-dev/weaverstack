@@ -76,6 +76,10 @@ def session_for(workspace: Workspace | None, **kwargs) -> Session:
     if workspace is not None and inside_fabric_session(workspace):
         from .notebook import NotebookSession
 
+        # A notebook is already authenticated by the host it runs in, so a
+        # credential has nothing to do there. Dropped explicitly rather than
+        # passed and ignored, so the difference is stated once here.
+        kwargs.pop("credential", None)
         return NotebookSession(workspace=workspace, **kwargs)
     from .console import ConsoleSession
 
