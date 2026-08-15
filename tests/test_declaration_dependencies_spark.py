@@ -15,7 +15,9 @@ from weaver.declaration import extract_sql_references
 
 
 def refs(sql: str) -> set[str]:
-    return {str(reference) for reference in extract_sql_references(textwrap.dedent(sql))}
+    return {
+        str(reference) for reference in extract_sql_references(textwrap.dedent(sql))
+    }
 
 
 # --- backtick-delimited relations -------------------------------------------
@@ -29,7 +31,9 @@ def test_backticked_schema_and_relation():
 
 
 def test_backticked_three_part_name():
-    assert refs("select * from `Bronze LH`.`Sales`.`Order`") == {"Bronze LH.Sales.Order"}
+    assert refs("select * from `Bronze LH`.`Sales`.`Order`") == {
+        "Bronze LH.Sales.Order"
+    }
 
 
 def test_mixed_backticked_and_bare_parts():
@@ -140,7 +144,12 @@ def test_lateral_view_explode_is_not_a_relation():
 
 @pytest.mark.parametrize("fmt", ["delta", "parquet", "csv", "json", "orc", "avro"])
 def test_a_path_read_is_a_format_and_a_path_not_an_object(fmt):
-    assert refs(f"select * from {fmt}.`abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/x`") == set()
+    assert (
+        refs(
+            f"select * from {fmt}.`abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files/x`"
+        )
+        == set()
+    )
 
 
 def test_a_path_read_beside_a_real_relation():
@@ -199,7 +208,8 @@ def test_merge_from_a_temp_view_extracts_only_the_target():
 
 def test_insert_into_extracts_target_and_source():
     assert refs("insert into Sales.Archive select * from Sales.Order") == {
-        "Sales.Archive", "Sales.Order",
+        "Sales.Archive",
+        "Sales.Order",
     }
 
 
@@ -294,6 +304,12 @@ def test_a_realistic_spark_file_extracts_exactly_its_relations():
 def test_the_realistic_file_invents_nothing():
     """No temp views, no CTE, no alias, no path, nothing from comments or strings."""
     found = refs(REALISTIC)
-    for invented in ("raw_orders", "enriched", "regional", "Legacy.OrderSummary",
-                     "Legacy.Customer", "delta"):
+    for invented in (
+        "raw_orders",
+        "enriched",
+        "regional",
+        "Legacy.OrderSummary",
+        "Legacy.Customer",
+        "delta",
+    ):
         assert not any(invented in name for name in found)

@@ -77,9 +77,8 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
     """Whether this node's target and primitive are present in the snapshot.
 
     ``can_refresh`` is the one host capability resolution needs, and it is
-    passed in rather than discovered: the emulator has no SQL analytics endpoint
-    at all, which is an honest absence rather than a fault, and the caller is
-    the only thing that knows which host it is on.
+    passed in rather than discovered: only the caller knows whether the target
+    it is resolving against has an endpoint to refresh.
     """
 
     inventory = state.inventory(node.physical_target)
@@ -212,7 +211,9 @@ def _where(node) -> str | None:
 
         if node.logical_id is None:
             return None
-        return f"{node.physical_target}/{load_procedure_name(node.logical_id.object_id)}"
+        return (
+            f"{node.physical_target}/{load_procedure_name(node.logical_id.object_id)}"
+        )
     if node.primitive_kind in PYTHON_KINDS and node.primitive_object is not None:
         return (
             f"{node.physical_target}/{node.primitive_object.schema}/"

@@ -11,8 +11,9 @@ Resources directory, or an accessible OneLake location. Remote trees are copied
 to driver-local temporary storage before static parsing.
 
 The control Lakehouse holds catalogue state and build transport, not authored
-repository state. The legacy `weaver push` utility may still copy a tree to
-`Files/weaver_items`, but build does not read that location implicitly.
+repository state. A tree can be copied to `Files/weaver_items` through
+`weaver.push.push_item_repository`, which the Fabric suite uses to stage a
+repository; build does not read that location implicitly.
 
 ## Item-owned layout
 
@@ -110,10 +111,10 @@ From the CLI:
 ```bash
 weaver build \
   ./estate \
-  --bind Lakehouse/Raw_Dev=Lakehouse/Raw \
-  --bind Warehouse/Reporting_Dev=Warehouse/Reporting \
+  --bind Lakehouse/Raw_Dev=Raw \
+  --bind Warehouse/Reporting_Dev=Reporting \
   --workspace Analytics --environment Runtime \
-  --weaver-lakehouse Control
+  --catalogue Lakehouse/Control
 ```
 
 From Python inside the target environment, `weaver.build(source, bind=...)` is

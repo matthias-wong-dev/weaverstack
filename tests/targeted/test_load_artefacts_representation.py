@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 from factories import (
-    FixtureCatalogue,
     ITEM,
     WAREHOUSE_ITEM,
+    FixtureCatalogue,
     folder_document,
     item_id,
     lakehouse_table,
@@ -28,7 +28,6 @@ from factories import (
     warehouse_view,
 )
 
-from weaver.locations import Location
 from weaver.build_bundle.incremental import select_build
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
@@ -39,6 +38,7 @@ from weaver.etl import (
     item_load_artefacts,
     load_artefacts,
 )
+from weaver.locations import Location
 
 CUSTOMER = "DWG.Customer"
 SUMMARY = "DWG.Summary"
@@ -90,11 +90,15 @@ def estate(tmp_path):
     # module that reads a data file beside it finds one.
     _write(root, f"{ITEM}/lib/data/holidays.csv", "date,name\n2026-01-01,New Year\n")
     _write(root, f"{WAREHOUSE_ITEM}/schemas/Sales.yml", schema_document("Sales"))
-    _write(root, f"{WAREHOUSE_ITEM}/Sales.Customer.sql", warehouse_table("Sales.Customer"))
+    _write(
+        root, f"{WAREHOUSE_ITEM}/Sales.Customer.sql", warehouse_table("Sales.Customer")
+    )
     _write(
         root,
         f"{WAREHOUSE_ITEM}/Sales.Live.sql",
-        warehouse_view("Sales.Live", select="select 1 as CustomerId", depends_on="Sales.Customer"),
+        warehouse_view(
+            "Sales.Live", select="select 1 as CustomerId", depends_on="Sales.Customer"
+        ),
     )
     return parse_item_repository(Location(str(root)))
 
@@ -155,9 +159,7 @@ def test_the_authored_files_segment_is_preserved(estate):
 def test_the_generated_folder_document_does_not_deploy_itself(estate):
     """It is infrastructure, not authored source, so it owns no artefact."""
 
-    assert not any(
-        "___Load" in name for name in identities(load_artefacts(estate))
-    )
+    assert not any("___Load" in name for name in identities(load_artefacts(estate)))
 
 
 def test_the_builtin_catalogue_item_has_no_load_layer(estate):
@@ -287,9 +289,7 @@ def test_the_template_versions_do_not_reach_the_repository_signature(
 
     monkeypatch.setattr(weaver.declaration.load, "TSQL_LOAD_VERSION", 99)
 
-    assert (
-        parse_item_repository(estate.root).signature == estate.signature
-    )
+    assert parse_item_repository(estate.root).signature == estate.signature
 
 
 def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
@@ -302,7 +302,8 @@ def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
     """
 
     deployed = {
-        str(artefact.identity) for artefact in item_load_artefacts(estate, item=item_id())
+        str(artefact.identity)
+        for artefact in item_load_artefacts(estate, item=item_id())
     }
 
     assert f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py" in deployed
@@ -313,7 +314,8 @@ def test_an_alias_declaration_is_not_runtime_source(estate):
     """It declares where a name points; nothing imports it at load time."""
 
     deployed = {
-        str(artefact.identity) for artefact in item_load_artefacts(estate, item=item_id())
+        str(artefact.identity)
+        for artefact in item_load_artefacts(estate, item=item_id())
     }
 
     assert not any(name.endswith("alias.yml") for name in deployed)
@@ -388,9 +390,12 @@ def test_a_changed_upstream_document_does_not_rebuild_an_unchanged_artefact(tmp_
 
     wanted = {key for key in after.source_documents if key.item == item_id()}
     wanted |= {a.identity for a in item_load_artefacts(after, item=item_id())}
-    rebuilt = {str(value) for value in select_build(
-        after, catalogue.registered, selected=wanted
-    ).selected_for_build}
+    rebuilt = {
+        str(value)
+        for value in select_build(
+            after, catalogue.registered, selected=wanted
+        ).selected_for_build
+    }
 
     # The table changed, so the view over it is rebuilt, and the table's own
     # deployed copy is rebuilt because its bytes changed.

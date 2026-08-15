@@ -158,9 +158,10 @@ def test_narrowing_is_a_later_step_not_an_input(repository):
 def test_it_is_stable_across_calls(repository):
     """Two derivations of one repository must agree, or a diff is meaningless."""
 
-    assert derived(repository, CUSTOMER, VIEW).rows == derived(
-        repository, CUSTOMER, VIEW
-    ).rows
+    assert (
+        derived(repository, CUSTOMER, VIEW).rows
+        == derived(repository, CUSTOMER, VIEW).rows
+    )
 
 
 # --- it carries no binding ----------------------------------------------------
@@ -195,6 +196,7 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
     """
 
     from factories import alias_repository
+
     from weaver.catalogue.tables import ALIAS
 
     repository = alias_repository(tmp_path / "repo")
@@ -256,9 +258,7 @@ def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     )
 
     assert set(published.rows) == {producer}
-    assert not any(
-        identity.item == consumer for identity in published.registered
-    )
+    assert not any(identity.item == consumer for identity in published.registered)
 
 
 # --- more than one item -------------------------------------------------------
@@ -331,14 +331,15 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     """
 
     from factories import full_estate
+
     from weaver.catalogue.tables import OBJECT_TYPES
 
     repository = full_estate(tmp_path / "repo")
     catalogue = Catalogue.from_repository(repository)
 
-    assert {
-        document.object_type for document in catalogue.registered.values()
-    } == set(OBJECT_TYPES)
+    assert {document.object_type for document in catalogue.registered.values()} == set(
+        OBJECT_TYPES
+    )
 
 
 def test_every_declared_object_and_artefact_is_registered(tmp_path):
@@ -350,6 +351,7 @@ def test_every_declared_object_and_artefact_is_registered(tmp_path):
     """
 
     from factories import ITEM, WAREHOUSE_ITEM, full_estate, item_id
+
     from weaver.etl import item_load_artefacts
 
     repository = full_estate(tmp_path / "repo")

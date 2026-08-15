@@ -28,7 +28,6 @@ from ..declaration.metadata import (
     TABLE,
     TEST,
     VIEW,
-    ObjectId,
     Reference,
 )
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
@@ -44,7 +43,6 @@ from .tables import (
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     INDEX_DICTIONARY,
-    INSTALLATION,
     KEY_PRIMARY,
     KEY_UNIQUE,
     REGISTRY,
@@ -186,7 +184,9 @@ def project_item_catalogue(
                     "primary_key": column_set(source.document.primary_key),
                     "not_null_columns": column_set(source.document.declared_not_null),
                     "identity_column": source.document.identity,
-                    "comparison_columns": column_set(source.document.comparison_columns),
+                    "comparison_columns": column_set(
+                        source.document.comparison_columns
+                    ),
                     **_behaviour(source),
                     "signature": signature,
                 }
@@ -464,7 +464,9 @@ def _foreign_keys(source, identity, common, signature) -> list[dict]:
                 "reference_item_type": parent_item.item_type,
                 "reference_item_name": parent_item.item_name,
                 "reference_schema_name": (
-                    f"Files/{reference.schema}" if reference.is_files else reference.schema
+                    f"Files/{reference.schema}"
+                    if reference.is_files
+                    else reference.schema
                 ),
                 "reference_object_name": reference.object,
                 "reference_column_set": column_set(key.reference_columns),

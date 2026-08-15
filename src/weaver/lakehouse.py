@@ -13,14 +13,14 @@ from typing import Any
 from .errors import LoadError
 from .locations import LakehouseSparkLocation
 from .resolution import TABLES_AREA
-from .spark.destination import SparkDestination
+from .spark import FabricSparkTarget, identifier
 from .targets import FILES_AREA, ItemRef
 
 #: The Spark-facing root of a Fabric item. The same template as
-#: :func:`weaver.fabric.onelake.abfss_root`, repeated because the core imports
-#: without the optional ``fabric`` extra and a notebook must be able to infer its
-#: own Lakehouse with nothing installed beyond Weaver. ``test_lakehouse`` asserts
-#: the two stay identical.
+#: :func:`weaver.fabric.onelake.abfss_root`, repeated so that inferring an
+#: attached Lakehouse needs no import from ``weaver.fabric`` — this module is
+#: reached by authored object code, which should pull in no transport.
+#: ``test_lakehouse`` asserts the two stay identical.
 _ABFSS_ROOT = "abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}"
 
 #: Session settings Fabric sets for the attached Lakehouse. Read in order; the
@@ -50,7 +50,7 @@ class Lakehouse:
 
     name: str
     spark_root: str
-    destination: SparkDestination | None = None
+    destination: "FabricSparkTarget | AttachedLakehouse | None" = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "spark_root", _root(self.spark_root, what="root"))
@@ -79,26 +79,23 @@ class Lakehouse:
 
         Two roots, because Spark takes ``abfss://`` while ``open()`` and
         ``pathlib`` cannot parse a URL — and a Folder's authored code is
-        ordinary Python that writes files.
-
-        Locally the two are the same directory. In Fabric, Weaver mounts its own
-        root and returns the mount path; a write through it is a write to
-        OneLake, visible at once at the ``abfss://`` address.
+        ordinary Python that writes files. Weaver mounts its own root and
+        returns the mount path; a write through it is a write to OneLake,
+        visible at once at the ``abfss://`` address.
 
         Session-scoped and never to be stored: Fabric spells it
         ``/synfs/notebook/<session id>/…``, valid only inside the session that
         made it. Durable identity is ``spark_root``.
         """
 
-        return _files_root(self.name, self.spark_root)
+        return _join(_mounted(self.name, self.spark_root), FILES_AREA)
 
     def folder_path(self, schema: str, name: str) -> Path:
         """Where one folder object's files live, as *Python* addresses them.
 
         A real :class:`pathlib.Path`, because a Folder's authored code globs,
-        opens and writes files. Locally the directory itself; in OneLake,
-        Weaver's mount of the resolved root, so a write through it is a write to
-        OneLake.
+        opens and writes files: Weaver's mount of the resolved OneLake root, so
+        a write through it is a write to OneLake.
 
         Session-scoped like :meth:`files_root`, and never to be stored.
         """
@@ -129,6 +126,29 @@ class Lakehouse:
 
     def __str__(self) -> str:
         return f"{self.name} ({self.spark_root})"
+
+
+@dataclass(frozen=True)
+class AttachedLakehouse:
+    """Two-part naming for the Lakehouse this session already has attached.
+
+    The one exception to naming every destination in full, and it is bounded by
+    the same rule: here the session's catalogue *is* the destination, so
+    ``Schema.Object`` resolves to this Lakehouse and nowhere else. Every other
+    destination carries a :class:`~weaver.spark.FabricSparkTarget`.
+    """
+
+    lakehouse: str
+
+    @property
+    def item(self) -> str:
+        return self.lakehouse
+
+    def qualified_schema(self, schema: str) -> str:
+        return identifier(schema)
+
+    def qualify(self, schema: str, name: str) -> str:
+        return f"{identifier(schema)}.{identifier(name)}"
 
 
 def lakehouse_for(resolver: Any, item: ItemRef | str) -> Lakehouse:
@@ -185,7 +205,7 @@ def default_lakehouse(spark: Any) -> Lakehouse:
         spark_root=_ABFSS_ROOT.format(workspace=workspace, item=item),
         # The one place plain two-part naming is correct: this Lakehouse *is* what
         # the session is attached to, so its catalogue is the session's own.
-        destination=SparkDestination(item=name or item),
+        destination=AttachedLakehouse(lakehouse=name or item),
     )
 
 
@@ -211,16 +231,6 @@ _MOUNT_POINT = "/weaver/{item}"
 #: Invalidating afterwards does not work: dropping Weaver's record of the mount
 #: leaves the host's in place, and asking again recovers the same stale view.
 MOUNT_OPTIONS = {"fileCacheTimeout": 0}
-
-
-def _files_root(name: str, spark_root: str) -> str:
-    """``Files`` as a path ``open()`` understands, for whichever host this is."""
-
-    if not spark_root.startswith("abfss://"):
-        # The emulator: storage already *is* a filesystem, so the two roots are
-        # the same directory and there is nothing to mount.
-        return _join(spark_root, FILES_AREA)
-    return _join(_mounted(name, spark_root), FILES_AREA)
 
 
 def _mounted(name: str, spark_root: str) -> str:
@@ -347,9 +357,21 @@ def _text(value: Any) -> str:
 
 
 def _root(value: Any, *, what: str) -> str:
+    """A Lakehouse root is a OneLake address, because a Lakehouse is in OneLake.
+
+    Checked here so a path that looks like storage cannot stand in for
+    one: everything below assumes a mount is available for the Files area and an
+    ``abfss://`` URL is what Spark reads.
+    """
+
     if not isinstance(value, str) or not value.strip():
         raise LoadError(f"a Lakehouse {what} must be a non-empty string, got {value!r}")
-    return value.strip().replace("\\", "/").rstrip("/")
+    cleaned = value.strip().replace("\\", "/").rstrip("/")
+    if not cleaned.startswith("abfss://"):
+        raise LoadError(
+            f"a Lakehouse {what} must be a OneLake abfss:// address, got {value!r}"
+        )
+    return cleaned
 
 
 def _areas(name: str, root: str) -> LakehouseSparkLocation:

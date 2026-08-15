@@ -28,9 +28,9 @@ HELP = {"help", "?"}
 
 
 def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> int:
-    """Hold one :class:`~weaver.session.console.ConsoleSession` open for a REPL."""
+    """Hold one :class:`~weaver.sessions.console.ConsoleSession` open for a REPL."""
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     if parser_factory is None:
         from .main import build_parser

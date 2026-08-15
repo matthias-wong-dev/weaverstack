@@ -21,10 +21,10 @@ out of generation carrying the check.
 from __future__ import annotations
 
 import pytest
+from support.workspaces import mounted_lakehouse
 
 from weaver import Table
 from weaver.declaration import read_source_document
-from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
 from weaver.runtime.load_contract import FolderLoadContract, LoadContract
 from weaver.runtime.load_result import RESULT_COLUMNS
@@ -216,8 +216,6 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
 ):
     """The cost this ordering removes from every ordinary load in an estate."""
 
-    from weaver import Lakehouse
-
     calls = _counting(
         monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
     )
@@ -225,9 +223,7 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
     class Sales__Country(_TableUnderTest):
         static = False
 
-    table = Sales__Country(
-        _Session(), lakehouse=Lakehouse(name="LH", spark_root=str(tmp_path))
-    )
+    table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
     # It goes on to read(), which this double refuses — the point is only that
     # it got there without asking the target anything.
     with pytest.raises(AssertionError, match="read\\(\\) must not run"):
@@ -237,7 +233,6 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
 
 
 def test_a_static_table_does_ask(monkeypatch, tmp_path):
-    from weaver import Lakehouse
 
     calls = _counting(
         monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
@@ -247,7 +242,7 @@ def test_a_static_table_does_ask(monkeypatch, tmp_path):
         static = True
 
     result = Sales__Country(
-        _Session(), lakehouse=Lakehouse(name="LH", spark_root=str(tmp_path))
+        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path)
     ).load()
 
     assert calls == [True]

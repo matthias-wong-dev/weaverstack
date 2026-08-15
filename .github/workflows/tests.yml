@@ -1,7 +1,7 @@
 # CI checks the supported Python environment.
 #
-# Fabric and local Spark tests are run explicitly when relevant rather than on
-# every pull request.
+# Fabric tests are run explicitly when relevant rather than on every pull
+# request: they need a workspace, a running capacity and a credential.
 name: tests
 
 on:
@@ -34,8 +34,14 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
       - run: pip install -e . --no-deps
+
+      # Mechanical hygiene first: it is seconds, and a lint failure should not
+      # wait behind three minutes of tests to be reported.
+      - run: ruff check src tests examples
+      - run: ruff format --check src tests examples
+
       # No -m: the marker expression lives in pyproject's addopts, and repeating
-      # it here let the two drift — CI's copy omitted `not provisioning`, so it
+      # it here let the two drift — CI's copy omitted `not provision`, so it
       # selected tests that need a Fabric workspace and only stayed green because
       # a fixture happened to skip them.
       - run: pytest

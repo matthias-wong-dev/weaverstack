@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.run import RunRequest, Runner, RunState
+from weaver.run import Runner, RunRequest, RunState
 from weaver.run.graph import RunGraph, RunNode
 from weaver.run.result import (
     BLOCKED,
     FAILED,
+    INVALID,
     PENDING,
     RUN_FAILED,
     RUN_PARTIALLY_SUCCEEDED,
     RUN_SUCCEEDED,
-    INVALID,
     RUN_SUCCEEDED_WITH_REJECTS,
     SKIPPED,
     SUCCEEDED,
@@ -105,7 +105,9 @@ def node(node_id: str, **kwargs) -> RunNode:
     )
 
 
-def runner(*, nodes, edges=(), present=(str(SALES),), installed=True, **policy) -> Runner:
+def runner(
+    *, nodes, edges=(), present=(str(SALES),), installed=True, **policy
+) -> Runner:
     """A Runner over a stated graph and a stated estate. No engine anywhere.
 
     The inventory holds exactly what the nodes name, so resolution passes for a
@@ -116,11 +118,15 @@ def runner(*, nodes, edges=(), present=(str(SALES),), installed=True, **policy) 
     from weaver.build_bundle.prune import TargetInventory
     from weaver.catalogue.state import Catalogue
 
-    files = tuple(
-        f"{one.primitive_object.schema}/{one.primitive_object.object}"
-        for one in nodes
-        if one.primitive_object is not None
-    ) if installed else ()
+    files = (
+        tuple(
+            f"{one.primitive_object.schema}/{one.primitive_object.object}"
+            for one in nodes
+            if one.primitive_object is not None
+        )
+        if installed
+        else ()
+    )
     state = RunState(
         catalogue=Catalogue(rows={}),
         target_inventories={
@@ -162,7 +168,11 @@ def test_planning_needs_no_session_and_no_dispatch():
 
 def test_the_order_is_deterministic_rather_than_incidental():
     made = runner(
-        nodes=[node("c", logical_id="C"), node("a", logical_id="A"), node("b", logical_id="B")]
+        nodes=[
+            node("c", logical_id="C"),
+            node("a", logical_id="A"),
+            node("b", logical_id="B"),
+        ]
     )
 
     assert [one.node_id for one in made.graph.order()] == ["a", "b", "c"]
@@ -295,10 +305,12 @@ def test_an_artefact_that_was_never_installed_fails_before_it_is_dispatched():
 
 
 def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
-    """The emulator has no SQL analytics endpoint. That is an absence, not a fault."""
+    """A target with no SQL analytics endpoint is an absence, not a fault."""
 
     made = runner(
-        nodes=[node("refresh", primitive_kind="endpoint_refresh", primitive_object=None)]
+        nodes=[
+            node("refresh", primitive_kind="endpoint_refresh", primitive_object=None)
+        ]
     )
     made.can_refresh = False
 
@@ -361,9 +373,7 @@ def test_the_worst_node_decides_the_run_status():
 
 
 def test_a_run_where_everything_failed_is_failed_not_partial():
-    dispatch = controlled(
-        {"a": Outcome(status=FAILED), "b": Outcome(status=FAILED)}
-    )
+    dispatch = controlled({"a": Outcome(status=FAILED), "b": Outcome(status=FAILED)})
 
     result = runner(nodes=[node("a"), node("b")], fault_tolerant=True).run(
         dispatch=dispatch
@@ -413,7 +423,7 @@ def test_a_run_needs_no_storage_to_be_correct():
 
 
 def test_a_dry_run_still_says_what_could_not_run():
-    """"Everything validated except what depends on the one thing that did not."
+    """ "Everything validated except what depends on the one thing that did not."
 
     A dry run that reported only "validated" for a node whose upstream is
     missing would answer the question a dry run exists to ask incorrectly.
@@ -535,7 +545,9 @@ def test_a_run_state_round_trips_through_its_mapping():
         catalogue=Catalogue(rows={}),
         target_inventories={
             str(SALES): TargetInventory(
-                target_id="t", kind="lakehouse", target_name="Sales_LH",
+                target_id="t",
+                kind="lakehouse",
+                target_name="Sales_LH",
                 files=("_/Load/a.py",),
             )
         },
@@ -624,7 +636,7 @@ def test_a_result_that_describes_itself_no_further_still_serializes():
 
 
 def test_each_dispatched_node_is_timed_as_a_substep():
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(progress=False) as session:
         runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
@@ -640,7 +652,7 @@ def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
     """A failed node is a *result* here — the run records what happened before
     it decides what to do about it — and the timing has to agree."""
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(progress=False) as session:
         runner(nodes=[node("a"), node("b")], fault_tolerant=True).run(
@@ -654,7 +666,7 @@ def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
 def test_a_node_that_was_never_dispatched_is_never_timed():
     """Blocked, skipped and pending nodes waited on nothing of their own."""
 
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(progress=False) as session:
         runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
@@ -706,8 +718,8 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
     """``node_id`` is an identifier and reads like one. This is the line
     somebody watches go past, so it is a verb and a physical id."""
 
-    from weaver.run.runner import node_label
     from weaver.run.resolution import ENDPOINT_REFRESH
+    from weaver.run.runner import node_label
 
     load = RunNode(
         node_id="load:Lakehouse/Sales/Sales.Customer",
@@ -731,7 +743,9 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
 
     assert node_label(load) == "Load Lakehouse/Sales/Sales.Customer"
     assert node_label(refresh) == "Refresh Lakehouse/Sales SQL endpoint"
-    assert node_label(check) == "Test Warehouse/Reporting/Reporting.CustomerRevenuePresent"
+    assert (
+        node_label(check) == "Test Warehouse/Reporting/Reporting.CustomerRevenuePresent"
+    )
 
 
 def test_a_node_with_nothing_logical_to_name_keeps_its_id():

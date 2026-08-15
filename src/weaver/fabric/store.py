@@ -76,9 +76,7 @@ class FabricStore:
             directory = pending.pop()
             children = self._list_once(directory)
             found.extend(children)
-            pending.extend(
-                child.location for child in children if child.is_directory
-            )
+            pending.extend(child.location for child in children if child.is_directory)
         return found
 
     def _list_once(self, location: Location) -> list[Entry]:
@@ -151,9 +149,7 @@ class FabricStore:
         destination.parent.mkdir(parents=True, exist_ok=True)
         target = f"file:{destination.as_posix()}"
         try:
-            copied = self.fs.cp(
-                self._path(source), target, source_is_directory
-            )
+            copied = self.fs.cp(self._path(source), target, source_is_directory)
         except Exception as exc:
             raise StoreError(
                 f"cannot materialise {source.value} at {destination}: {exc}"

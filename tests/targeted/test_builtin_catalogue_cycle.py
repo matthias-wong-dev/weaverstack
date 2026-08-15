@@ -6,7 +6,7 @@ privileged path that ran first, the ordinary path would never be exercised on an
 empty estate and the claim would be decorative.
 
 Build used to run a whole nested build before its own — `_ensure_control_plane`
-called `initialise_weaver_lakehouse`, which read state, planned and installed a
+called `initialise_catalogue`, which read state, planned and installed a
 bundle of its own, before the real build read anything. So every build built the
 catalogue twice, and the second build's plan was never the one that created it.
 
@@ -20,13 +20,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from support.sessions import given_session
 from factories import (
     item_bindings,
     lakehouse_table,
     single_document_repository,
     target_inventory,
 )
+from support.sessions import given_session
+from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
     LakehouseBinding,
@@ -37,10 +38,8 @@ from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.model import WeaverItemId
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
 
 BUILTIN = WeaverItemId.parse("Lakehouse/_weaver")
 
@@ -66,9 +65,9 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     store = FilesystemStore()
-    resolver = LocalResolver(workspace)
+    resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
@@ -92,9 +91,7 @@ def estate(tmp_path):
         "repository": repository,
         "store": store,
         "executors": executors,
-        "session": given_session(
-            workspace=workspace, store=store, resolver=resolver
-        ),
+        "session": given_session(workspace=workspace, store=store, resolver=resolver),
     }
 
 
@@ -103,7 +100,8 @@ def _build(estate):
 
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
     )
     inventories = {
         binding.item: target_inventory(
@@ -117,13 +115,13 @@ def _build(estate):
         bindings=bindings,
         # Nothing persisted, nothing present: the bootstrap state, stated as
         # state rather than arranged by a privileged step.
-        state=BuildState(
-            catalogue=Catalogue(rows={}), target_inventories=inventories
-        ),
+        state=BuildState(catalogue=Catalogue(rows={}), target_inventories=inventories),
         session=estate["session"],
         executors=estate["executors"],
         source_store=estate["store"],
-        control_lakehouse=LakehouseBinding(lakehouse=ItemRef("Weaver")),
+        control_lakehouse=LakehouseBinding(
+            lakehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
+        ),
     )
     return bindings, result
 
@@ -139,7 +137,9 @@ def test_the_repository_carries_the_builtin_item_without_it_being_authored(estat
 
 def test_the_builtin_item_is_bound_to_the_control_lakehouse_automatically():
     bindings = effective_item_bindings(
-        item_bindings(("Lakehouse/Sales", "Sales_LH")), weaver_lakehouse="Weaver"
+        item_bindings(("Lakehouse/Sales", "Sales_LH")),
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
     )
 
     binding = bindings.by_item[BUILTIN]
@@ -176,8 +176,7 @@ def test_the_catalogue_tables_are_built_by_the_same_executors_as_authored_object
     catalogue_actions = [
         action
         for _sequence, _batch, action in result.plan.actions()
-        if action.resource_node_id
-        and action.resource_node_id.startswith(f"{BUILTIN}/")
+        if action.resource_node_id and action.resource_node_id.startswith(f"{BUILTIN}/")
     ]
     assert catalogue_actions
     used = {action.executor for action in catalogue_actions}
@@ -207,13 +206,16 @@ def test_no_build_module_reaches_the_initialisation_wrapper():
     """
 
     core = Path(__file__).resolve().parents[2] / "src" / "weaver"
-    build_modules = [core / "operations.py", *sorted((core / "build_bundle").rglob("*.py"))]
+    build_modules = [
+        *sorted((core / "operations").rglob("*.py")),
+        *sorted((core / "build_bundle").rglob("*.py")),
+    ]
 
     offenders = [
         module.name
         for module in build_modules
-        if "initialise_weaver_lakehouse" in module.read_text(encoding="utf-8")
-        or "prepare_weaver_lakehouse" in module.read_text(encoding="utf-8")
+        if "initialise_catalogue" in module.read_text(encoding="utf-8")
+        or "prepare_catalogue" in module.read_text(encoding="utf-8")
     ]
 
     assert not offenders, (

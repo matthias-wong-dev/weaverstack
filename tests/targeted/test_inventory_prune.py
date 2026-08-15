@@ -15,15 +15,12 @@ Prune is the destructive direction, so most of what is asserted is what it
 
 from __future__ import annotations
 
-import pytest
 from factories import bound_target, target_inventory
-
-from weaver.build_bundle.prune import render_inventory_prune
 
 #: What `managed_sets` produces: the keep-set, folded for comparison. Built by
 #: hand here so the diff is tested against a stated desired state rather than
 #: against whatever a repository happened to declare.
-from weaver.build_bundle.prune import _Managed
+from weaver.build_bundle.prune import _Managed, render_inventory_prune
 
 
 def keep(*, tables=(), views=(), folders=(), schemas=(), folder_schemas=()):

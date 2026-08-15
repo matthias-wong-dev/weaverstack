@@ -9,9 +9,9 @@ preserve. For the product lifecycle, see
 
 ## Status
 
-This document defines the build invariants across local Spark, Microsoft Fabric
-Lakehouses, and Warehouses. It is a contract, not an implementation diary or a
-step-by-step build guide.
+This document defines the build invariants across Microsoft Fabric Lakehouses
+and Warehouses. It is a contract, not an implementation diary or a step-by-step
+build guide.
 
 An implementation that conflicts with these invariants requires an explicit
 architectural decision.
@@ -571,13 +571,12 @@ installer deciding at runtime whether to replace is not.
 
 ## 14. Local and Fabric execution share semantics
 
-Local execution is not a separate product with approximately similar
-behaviour. It is an implementation of the same build contract.
+Where Weaver's code runs is not a separate product with approximately similar
+behaviour. Each position is an implementation of the same build contract.
 
 The same bundle model should support:
 
-- local Spark installation;
-- Fabric Spark through Livy;
+- Fabric Spark through Livy, from a desktop;
 - Fabric notebook execution;
 - Warehouse execution through the supported SQL transport.
 
@@ -661,9 +660,9 @@ Cause an action to fail and prove dependent later sequences do not execute.
 Install equivalent logical names into distinct targets and prove that neither
 installation can mutate the other.
 
-Tests should exercise Fabric behavior through the local emulator and in Fabric
-wherever the capability exists. The behavioural assertion should remain the
-same; only the fixture and transport should differ.
+Tests should exercise the behaviour from a desktop and with Weaver running
+inside Fabric wherever the capability exists. The behavioural assertion should
+remain the same; only the fixture and transport should differ.
 
 ---
 
@@ -722,10 +721,10 @@ CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS
 SELECT * FROM {{object:DWG.Customer}} WHERE IsActive
 ```
 
-On Fabric that resolves to the native four-part name,
-`workspace.lakehouse.schema.object`; the local emulator folds the Lakehouse into
-its one namespace level. Either way the destination is stated, not inherited, and
-one session can build several Lakehouses without switching what it is attached to.
+That resolves to the native four-part name,
+`workspace.lakehouse.schema.object`, rendered when the bundle is generated. The
+destination is stated, not inherited, so one session can build several
+Lakehouses without switching what it is attached to.
 
 ### Collapsing item ownership into target kind
 

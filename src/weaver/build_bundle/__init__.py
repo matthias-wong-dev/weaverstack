@@ -12,6 +12,7 @@ dependency or selects a target.
 
 from __future__ import annotations
 
+from .builder import Builder
 from .bundle import (
     BuildBundle,
     compute_bundle_id,
@@ -20,43 +21,41 @@ from .bundle import (
     plan_to_yaml,
     write_bundle,
 )
+from .incremental import BuildSelection, Impact, determine_impact
+from .installer import Installer, execute_install_action
 from .models import (
-    InstallAction,
     BuildBatch,
     BuildPlan,
     BuildSequence,
+    InstallAction,
     OmittedNode,
 )
-from .builder import Builder
-from .installer import Installer, execute_install_action
-from .incremental import BuildSelection, Impact, determine_impact
 from .physical import RenderedAction, render_document_build_action
 from .planner import PlannedItem, generate_item_build_bundle, plan_item_build
 from .report import InstallationReport
+from .targets import (
+    BoundTarget,
+    ItemBinding,
+    ItemBindings,
+    LakehouseBinding,
+    WarehouseBinding,
+    effective_item_bindings,
+    parse_item_binding,
+)
 from .workflow import (
     BuildState,
     ItemBuildResult,
     build_item_repository,
     build_item_repository_source,
-    build_uploaded_item_repository,
     catalogue_items_for_build,
     install_bundle_archive,
     materialise_bundle_archive,
     materialise_tree,
-    prepare_repository,
     persist_bundle_archive,
-    timestamped_archive_name,
+    prepare_repository,
     read_build_state,
+    timestamped_archive_name,
     validate_build_request,
-)
-from .targets import (
-    BoundTarget,
-    LakehouseBinding,
-    ItemBinding,
-    ItemBindings,
-    parse_item_binding,
-    effective_item_bindings,
-    WarehouseBinding,
 )
 
 __all__ = [
@@ -97,7 +96,6 @@ __all__ = [
     "BuildState",
     "build_item_repository",
     "build_item_repository_source",
-    "build_uploaded_item_repository",
     "materialise_tree",
     "prepare_repository",
     "catalogue_items_for_build",

@@ -34,9 +34,7 @@ def desktop_sql_pool(
 
     resolver = resolver or resolver_for(workspace)
     endpoint = resolver.sql_endpoint(target)
-    authentication = AccessTokenAuthentication(
-        lambda: get_token(SQL_SCOPE, credential)
-    )
+    authentication = AccessTokenAuthentication(lambda: get_token(SQL_SCOPE, credential))
     return SqlConnectionPool(
         endpoint,
         authentication,

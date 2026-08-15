@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from weaver.locations import Location
-from weaver.errors import DiscoveryError
 from weaver.declaration import (
     SchemaSes,
     is_schema_file,
-    parse_schema_document,
     parse_item_repository,
+    parse_schema_document,
     read_schema_document,
 )
+from weaver.errors import DiscoveryError
+from weaver.locations import Location
 
 
 def parse(text: str, path: str = "_schemas/Sales.yml") -> SchemaSes:
@@ -127,7 +127,9 @@ def build(tmp_path: Path, *, schemas: list[str], objects: dict[str, str]) -> Loc
     directory = tmp_path / ITEM / "schemas"
     directory.mkdir(parents=True)
     for schema in schemas:
-        (directory / f"{schema}.yml").write_text(f"Schema ID: {schema}\n", encoding="utf-8")
+        (directory / f"{schema}.yml").write_text(
+            f"Schema ID: {schema}\n", encoding="utf-8"
+        )
     for name, text in objects.items():
         (tmp_path / ITEM / name).write_text(textwrap.dedent(text), encoding="utf-8")
     return Location(str(tmp_path))
@@ -189,4 +191,3 @@ class _StubStore:
             if location.value.endswith(relative):
                 return data
         raise KeyError(location.value)
-

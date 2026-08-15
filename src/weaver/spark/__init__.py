@@ -1,33 +1,17 @@
-"""Named Spark destination addressing, token expansion, and catalogue operations.
+"""Fabric Spark identifier rendering and catalogue operations.
 
-The package remains importable without PySpark; callers supply a Spark session.
+The package remains importable without PySpark: callers supply a way to run
+statements, and nothing here holds a Spark session of its own.
 """
 
 from __future__ import annotations
 
-from .catalogue import SparkCatalogue, drop_local_destination_catalogue
-from .destination import (
-    LOCAL_SEPARATOR,
-    SparkDestination,
-    fabric_destination,
-    identifier,
-    local_destination,
-)
-from .naming import SparkNaming
-from .tokens import expand, object_token, schema_token
-from .session import local_delta_session
+from .catalogue import SparkCatalogue
+from .target import FabricSparkTarget, escaped, identifier
 
 __all__ = [
-    "LOCAL_SEPARATOR",
+    "FabricSparkTarget",
     "SparkCatalogue",
-    "SparkDestination",
-    "SparkNaming",
-    "drop_local_destination_catalogue",
-    "expand",
-    "fabric_destination",
+    "escaped",
     "identifier",
-    "local_destination",
-    "local_delta_session",
-    "object_token",
-    "schema_token",
 ]

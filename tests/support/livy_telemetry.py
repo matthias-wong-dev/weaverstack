@@ -54,13 +54,22 @@ class LivyLedger:
     startup_seconds: float = 0.0
 
     def record(
-        self, *, label: str, seconds: float, code_bytes: int,
-        returned_bytes: int, failed: bool = False,
+        self,
+        *,
+        label: str,
+        seconds: float,
+        code_bytes: int,
+        returned_bytes: int,
+        failed: bool = False,
     ) -> None:
         self.calls.append(
             LivyCall(
-                nodeid=self.nodeid, label=label, seconds=seconds,
-                code_bytes=code_bytes, returned_bytes=returned_bytes, failed=failed,
+                nodeid=self.nodeid,
+                label=label,
+                seconds=seconds,
+                code_bytes=code_bytes,
+                returned_bytes=returned_bytes,
+                failed=failed,
             )
         )
 

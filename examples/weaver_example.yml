@@ -1,7 +1,7 @@
-# One file describes one Workspace. workspace_type defaults to fabric.
+# One file describes one Workspace. Fabric is the only workspace there is.
 workspace: Weaver Example
 environment: weaver
-weaver_lakehouse: Weaver
+catalogue: Lakehouse/Weaver
 
 execution:
   parallel_workers: 4

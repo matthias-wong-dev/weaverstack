@@ -13,8 +13,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Protocol
 
-from ..session.program import RemoteProgram
-
+from ..sessions.program import RemoteProgram
 
 #: How a dead interpreter announces itself. The Livy states Weaver already
 #: treats as "this session is finished" (``LivySession.active``), plus the
@@ -32,7 +31,7 @@ def _interpreter_is_gone(exc: BaseException) -> bool:
     """
 
     from ..fabric.livy import LivyError
-    from ..session.resources import ResourceError
+    from ..sessions.resources import ResourceError
 
     if isinstance(exc, ResourceError):
         return True
@@ -108,7 +107,7 @@ def open_runtime_scope(session, *, workspace=None) -> RunScope:
     """The scope this run's Python primitives will be imported into."""
 
     from ..runtime.python_context import RuntimeScope
-    from ..session.base import ACROSS_BOUNDARY
+    from ..sessions.base import ACROSS_BOUNDARY
 
     if session is None:
         return DirectRunScope(RuntimeScope.new())
@@ -244,7 +243,7 @@ class FabricRunScope:
             # looking for an active Spark session rather than being handed the
             # one the statement is running in.
             preamble = (
-                "from weaver.session import NotebookSession\n"
+                "from weaver.sessions import NotebookSession\n"
                 "session = NotebookSession(workspace=workspace, spark=spark)\n"
             )
             passed = f"session=session, workspace=workspace, **{arguments!r}"
@@ -260,7 +259,7 @@ class FabricRunScope:
                 return here(**arguments)
 
         source = (
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             f"from {here.__module__} import {name}\n"
             f"workspace = {_workspace_literal(workspace)}\n"
             f"{preamble}"
@@ -289,8 +288,8 @@ def _workspace_literal(workspace) -> str:
     if workspace is None:
         return "None"
     return (
-        f"FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"Workspace(workspace={workspace.workspace!r}, "
+        f"catalogue={workspace.catalogue!r}, "
         f"environment={workspace.environment!r})"
     )
 

@@ -72,9 +72,14 @@ def capacity_command(
         raise CapacityError("A capacity name is required.")
 
     command = [
-        "az", "fabric", "capacity", verb,
-        "--resource-group", resource_group,
-        "--capacity-name", capacity_name,
+        "az",
+        "fabric",
+        "capacity",
+        verb,
+        "--resource-group",
+        resource_group,
+        "--capacity-name",
+        capacity_name,
     ]
     if subscription_id:
         command.extend(["--subscription", subscription_id])
@@ -93,10 +98,9 @@ def run_capacity_action(
     """Run a capacity action and report the resulting state."""
 
     if shutil.which("az") is None:
-        from ..diagnostics import install_command
-
         raise CapacityError(
-            f"Azure CLI is required for capacity commands. Install it: {install_command('azure-cli')}"
+            "Azure CLI is required for capacity commands. See "
+            "https://learn.microsoft.com/cli/azure/install-azure-cli"
         )
 
     command = capacity_command(

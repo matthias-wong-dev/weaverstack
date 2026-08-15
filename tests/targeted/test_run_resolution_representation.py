@@ -15,8 +15,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from factories import (
+    installed_catalogue,
+    installed_inventories,
+    load_estate,
+    load_estate_bindings,
+)
 
-from weaver.load_plan import LoadDag, PhysicalTargetRef
+from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
     DISPATCH_LOCATION_MISSING,
@@ -24,16 +30,7 @@ from weaver.load_report import (
     TARGET_MISSING,
     VALIDATED,
 )
-from weaver.run import RunRequest, RunState, Runner
-from weaver.resolution import LocalResolver
-from weaver.workspaces import LocalWorkspace
-
-from factories import (
-    installed_catalogue,
-    installed_inventories,
-    load_estate,
-    load_estate_bindings,
-)
+from weaver.run import Runner, RunRequest, RunState
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -43,12 +40,6 @@ DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"
 EXPORT = "load:Lakehouse/Raw_LH/Sales.Export"
 REFRESH = "refresh:Lakehouse/Raw_LH"
 SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
-
-
-def local_resolver() -> LocalResolver:
-    return LocalResolver(
-        LocalWorkspace(workspace=".local", weaver_lakehouse="Weaver_LH")
-    )
 
 
 class Resolutions:
@@ -91,7 +82,9 @@ def _runner(estate, *, inventories=None, can_refresh=True, dry_run=False):
 def resolve(estate, *, inventories=None, can_refresh=True):
     """Resolution, asked of the snapshot and of nothing else."""
 
-    return Resolutions(_runner(estate, inventories=inventories, can_refresh=can_refresh))
+    return Resolutions(
+        _runner(estate, inventories=inventories, can_refresh=can_refresh)
+    )
 
 
 def without(inventories, target: str, **fields):
@@ -154,7 +147,7 @@ def test_load_resolution_resolves_an_endpoint_refresh_target(estate):
 
 
 def test_load_resolution_reports_a_refresh_the_host_cannot_perform(estate):
-    """An emulator has no endpoint. That is an absence, not a fault."""
+    """A target with no endpoint is an absence, not a fault."""
 
     resolved = resolve(estate, can_refresh=False).by_id[REFRESH]
 
@@ -223,9 +216,7 @@ def test_load_resolution_reports_a_missing_target_table(estate):
     trimmed = without(inventories, "Warehouse/Reporting_WH", tables=())
     resolved = resolve((catalogue, trimmed)).by_id[SUMMARY]
 
-    assert [message.code for message in resolved.messages] == [
-        TARGET_MISSING
-    ]
+    assert [message.code for message in resolved.messages] == [TARGET_MISSING]
 
 
 def test_load_resolution_reports_a_missing_target(estate):
@@ -238,9 +229,7 @@ def test_load_resolution_reports_a_missing_target(estate):
     resolved = resolve((catalogue, without_warehouse)).by_id[SUMMARY]
 
     assert not resolved.target_present
-    assert [message.code for message in resolved.messages] == [
-        TARGET_MISSING
-    ]
+    assert [message.code for message in resolved.messages] == [TARGET_MISSING]
 
 
 # --- and what that does to everything downstream ------------------------------

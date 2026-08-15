@@ -43,6 +43,7 @@ from .declaration.model import (
     WeaverRepository,
 )
 from .declaration.source import content_hash
+from .errors import BuildError
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
 #: gets a schema named ``_`` holding the load procedures; the Lakehouse gets a
@@ -115,10 +116,25 @@ class RuntimeArtefact:
     identity: WeaverDocumentId
     object_type: str
     signature: str
-    payload: bytes
+    #: The installed bytes. None where this listing was made without a
+    #: destination: an identity and a signature are the same whatever an item
+    #: is bound to, but a generated module's body names the Lakehouse it reads.
+    payload: bytes | None
     role: str = ROLE_LOAD
     origin: WeaverDocumentId | None = None
     source_path: str | None = None
+
+    @property
+    def installed_bytes(self) -> bytes:
+        """The installed content, or a failure naming what was never rendered."""
+
+        if self.payload is None:
+            raise BuildError(
+                f"{self.identity} was listed without a destination, so its "
+                "installed content was not rendered — list it again with the "
+                "destination its item is bound to"
+            )
+        return self.payload
 
     @property
     def is_validation(self) -> bool:
@@ -152,13 +168,19 @@ def runtime_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ..
 
 
 def item_runtime_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
-    """One item's runnable artefacts, loads and validations alike."""
+    """One item's runnable artefacts, loads and validations alike.
 
-    return item_load_artefacts(repository, item=item) + item_validation_artefacts(
-        repository, item=item
-    )
+    ``destination`` addresses the managed names inside a generated module, and
+    is needed only where the payload is used. An identity or a signature is the
+    same whatever the item is bound to, so a caller reading those alone passes
+    none.
+    """
+
+    return item_load_artefacts(
+        repository, item=item, destination=destination
+    ) + item_validation_artefacts(repository, item=item, destination=destination)
 
 
 def load_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ...]:
@@ -180,7 +202,7 @@ def validation_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact,
 
 
 def item_validation_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's validation artefacts, derived from what it declares.
 
@@ -193,9 +215,7 @@ def item_validation_artefacts(
 
     if _is_builtin(item):
         return ()
-    model = next(
-        (each for each in repository.items if each.identity == item), None
-    )
+    model = next((each for each in repository.items if each.identity == item), None)
     if model is None:
         return ()
 
@@ -222,15 +242,22 @@ def item_validation_artefacts(
             )
             continue
 
-        generated = source.create_validation()
+        from .declaration.validation import validation_identity
+
+        object_type, template_version = validation_identity(source)
+        # Only a Spark body names a destination. A Warehouse validation compiles
+        # to T-SQL, which the connection addresses, so it renders either way.
+        generated = (
+            source.create_validation(destination=destination)
+            if destination is not None or source.language != SPARK_SQL
+            else None
+        )
         artefacts.append(
             RuntimeArtefact(
                 identity=validation_artefact_id(item, kind, identity.object_id),
-                object_type=generated.object_type,
-                signature=_salted(
-                    source.effective_signature, generated.template_version
-                ),
-                payload=generated.payload,
+                object_type=object_type,
+                signature=_salted(source.effective_signature, template_version),
+                payload=None if generated is None else generated.payload,
                 role=role,
                 origin=identity,
                 source_path=source.relative_path,
@@ -240,7 +267,7 @@ def item_validation_artefacts(
 
 
 def item_load_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's load artefacts, derived from what it declares.
 
@@ -253,7 +280,7 @@ def item_load_artefacts(
         return ()
     if item.item_type == WAREHOUSE:
         return _warehouse_artefacts(repository, item=item)
-    return _lakehouse_artefacts(repository, item=item)
+    return _lakehouse_artefacts(repository, item=item, destination=destination)
 
 
 def _warehouse_artefacts(
@@ -282,7 +309,7 @@ def _warehouse_artefacts(
 
 
 def _lakehouse_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
+    repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
     """The deployed Python tree, plus one generated file per Spark SQL table."""
 
@@ -311,7 +338,14 @@ def _lakehouse_artefacts(
                 )
             )
         elif source.language == SPARK_SQL and source.kind == TABLE:
-            generated = source.create_load()
+            from .declaration.load import load_identity
+
+            _object_type, template_version = load_identity(source)
+            generated = (
+                source.create_load(destination=destination)
+                if destination is not None
+                else None
+            )
             artefacts.append(
                 _file_artefact(
                     item,
@@ -320,10 +354,8 @@ def _lakehouse_artefacts(
                     # the name a module is imported by — which is what lets
                     # orchestration stop caring which language it was authored in.
                     _deployed_module_relative(relative, identity.object_id),
-                    payload=generated.payload,
-                    signature=_salted(
-                        source.effective_signature, generated.template_version
-                    ),
+                    payload=None if generated is None else generated.payload,
+                    signature=_salted(source.effective_signature, template_version),
                     origin=identity,
                     source_path=source.relative_path,
                 )
@@ -452,9 +484,7 @@ def validation_procedure_name(kind: str, source: ObjectId) -> str:
     """
 
     schema = _tsql_ident(ETL_SCHEMA)
-    procedure = _tsql_ident(
-        f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}"
-    )
+    procedure = _tsql_ident(f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}")
     return f"{schema}.{procedure}"
 
 
@@ -636,7 +666,9 @@ def generated_item_files(
             if any(source.kind == TABLE or source.is_validation for source in documents)
             else {}
         )
-    if not has_deployable_source(item, documents=documents, support_paths=support_paths):
+    if not has_deployable_source(
+        item, documents=documents, support_paths=support_paths
+    ):
         return {}
     return {
         **schema,

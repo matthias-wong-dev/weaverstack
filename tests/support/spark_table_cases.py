@@ -6,10 +6,10 @@ It asks with ``DESCRIBE QUERY``, in the same submission as whatever setup the
 query needs, and then renders the ``CREATE TABLE`` here and sends that.
 
 The cases below are what makes that answer trustworthy, and they are held in one
-place because both positions have to agree about them: the emulator running the
-executor in process, and a desktop running it against a real Lakehouse with only
-the statements crossing. A type that survived one and not the other would be a
-difference between environments rather than a property of the build.
+place because both positions have to agree about them: Weaver running the
+executor inside Fabric, and a desktop running it with only the statements
+crossing. A type that survived one and not the other would be a difference
+between positions rather than a property of the build.
 
 Each case is a frozen instruction, exactly as ``weaver.declaration.ddl`` writes
 one, plus what the built table must then look like.
@@ -40,7 +40,9 @@ class TableCase:
 
     #: The object name within :data:`SCHEMA`.
     name: str
-    #: What the table's rows come from, in payload spelling.
+    #: What the table's rows come from. ``{reads}`` is filled with the managed
+    #: object named by :attr:`reads`, addressed to the destination — because a
+    #: build renders that name rather than deferring it.
     source_query: str
     #: Business column name to the type the built table must carry, in order.
     expected: dict
@@ -49,24 +51,35 @@ class TableCase:
     #: Header references, as the payload carries them.
     references: tuple = ()
     declared_columns: list | None = None
+    #: The object within :data:`SCHEMA` this query reads, where it reads one.
+    reads: str | None = None
 
-    @property
-    def object_token(self) -> str:
-        return f"{{{{object:{SCHEMA}.{self.name}}}}}"
+    def qualified(self, destination) -> str:
+        """This table, named as the destination it is built into spells it."""
 
-    @property
-    def payload(self) -> bytes:
+        return destination.qualify(SCHEMA, self.name)
+
+    def addressed_query(self, destination) -> str:
+        if self.reads is None:
+            return self.source_query
+        return self.source_query.format(reads=destination.qualify(SCHEMA, self.reads))
+
+    def payload(self, destination) -> bytes:
+        """The instruction a build freezes, addressed to one destination."""
+
         instruction = {
-            "object": self.object_token,
+            "object": self.qualified(destination),
             "schema_mode": "declared" if self.declared_columns else "inferred",
             "declared_columns": self.declared_columns,
             "setup": list(self.setup),
-            "source_query": self.source_query,
+            "source_query": self.addressed_query(destination),
             "references": [list(pair) for pair in self.references],
             "audit_columns": AUDIT_COLUMNS,
             "column_mapping": True,
         }
-        return (json.dumps(instruction, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        return (json.dumps(instruction, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
 
 
 #: Every type a Weaver document can declare that Spark spells structurally.
@@ -124,17 +137,13 @@ EXACT_CASE = TableCase(
 #: the table is readable under the name it was declared with.
 EXACT_CASE_READER = f"{EXACT_CASE.name}Reader"
 
-EXACT_CASE_VIEW_SQL = (
-    f"CREATE OR REPLACE VIEW {{{{object:{SCHEMA}.{EXACT_CASE_READER}}}}} AS\n"
-    f"SELECT CustomerId, CustomerRegion FROM {EXACT_CASE.object_token}"
-).encode("utf-8")
-
 #: A query naming a column that is not there. It fails during the describe now
 #: rather than when the query ran, and the failure has to keep saying which
 #: action and what Spark objected to.
 UNRESOLVED = TableCase(
     name="Unresolved",
-    source_query=f"select NoSuchColumn from {EXACT_CASE.object_token}",
+    source_query="select NoSuchColumn from {reads}",
+    reads=EXACT_CASE.name,
     references=(),
     expected={},
 )
@@ -175,7 +184,11 @@ def view_action():
 
 
 def schema_action():
-    """The ``spark_schema`` action that makes :data:`SCHEMA`."""
+    """The action that makes :data:`SCHEMA`.
+
+    Ordinary finished Spark SQL: a Fabric Lakehouse pins its own storage, so
+    there is nothing for an installer to complete.
+    """
 
     from weaver.build_bundle.models import InstallAction
 
@@ -183,13 +196,27 @@ def schema_action():
         id=f"schema-{SCHEMA}",
         kind="create_schema",
         resource_node_id=None,
-        executor="spark_schema",
-        payload=f"payload/{SCHEMA}.spark-schema.json",
+        executor="spark_sql",
+        payload=f"payload/{SCHEMA}.spark.sql",
         payload_sha256="unused",
     )
 
 
-SCHEMA_PAYLOAD = json.dumps({"schema": SCHEMA}).encode("utf-8")
+def schema_payload(destination) -> bytes:
+    """The ``CREATE SCHEMA`` this destination needs, as the build freezes it."""
+
+    return (destination.create_schema_statement(SCHEMA) + "\n").encode("utf-8")
+
+
+def view_sql(destination) -> bytes:
+    """The view over :data:`EXACT_CASE`, addressed as the build renders it."""
+
+    return (
+        f"CREATE OR REPLACE VIEW "
+        f"{destination.qualify(SCHEMA, EXACT_CASE_READER)} AS\n"
+        f"SELECT CustomerId, CustomerRegion FROM "
+        f"{EXACT_CASE.qualified(destination)}"
+    ).encode("utf-8")
 
 
 def describe_queries(destination) -> dict:
@@ -228,8 +255,7 @@ def assert_case_built(case: TableCase, rows) -> None:
     business = [name for name in types if name not in AUDIT_NAMES]
 
     assert business == list(case.expected), (
-        f"{case.name} carries {business}, and its query declares "
-        f"{list(case.expected)}"
+        f"{case.name} carries {business}, and its query declares {list(case.expected)}"
     )
     for name, expected in case.expected.items():
         assert types[name] == expected, (

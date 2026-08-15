@@ -11,18 +11,25 @@ that fail the test if anything reaches them, which is the only way to assert
 "nothing ran" rather than "nothing appeared to run".
 
 The session is prepared rather than acquired. Workspace resolution, Spark and TDS
-are what differ between the emulator, a desktop and a Fabric session, and none of
+are what differ between a desktop and a Fabric session, and none of
 them changes anything about the orchestration this module is about.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
+from factories import (
+    installed_catalogue,
+    installed_inventories,
+    load_estate,
+    load_estate_bindings,
+)
+from support.workspaces import given_workspace
 
-from weaver.run import RunState
-from weaver.load import run_load
+from weaver.fabric.resolution import FabricResolver
 from weaver.load_plan import ENDPOINT_REFRESH, PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
@@ -31,16 +38,11 @@ from weaver.load_report import (
     TASK_SUCCEEDED,
     VALIDATED,
 )
-from weaver.resolution import LocalResolver
-from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
+from weaver.operations.load import run_load
+from weaver.run import RunState
 
-from factories import (
-    installed_catalogue,
-    installed_inventories,
-    load_estate,
-    load_estate_bindings,
-)
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -78,13 +80,13 @@ class Prepared:
     through — a stronger claim than a flag nobody checks.
     """
 
-    catalogue: object
+    catalogue: Lakehouse / object
     inventories: dict
     workspace: object
     session: object
 
 
-class Refreshing(LocalResolver):
+class Refreshing(FabricResolver):
     def refresh_sql_endpoint(self, item):
         raise AssertionError("a dry run must not refresh an endpoint")
 
@@ -95,9 +97,7 @@ def session(tmp_path):
     bindings = load_estate_bindings()
     from support.sessions import given_session
 
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
 
     class Refuses:
         """Any write here is a dry run that wrote something."""
@@ -116,7 +116,6 @@ def session(tmp_path):
             workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
         ),
     )
-
 
 
 def dry_run(session, *targets, names=(), fault_tolerant=False):

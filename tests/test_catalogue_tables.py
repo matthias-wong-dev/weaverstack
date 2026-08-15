@@ -317,12 +317,6 @@ def test_an_unknown_table_name_lists_the_real_ones():
         table("Nonexistent")
 
 
-
-
-
-
-
-
 # --- the definition guards itself -------------------------------------------
 
 

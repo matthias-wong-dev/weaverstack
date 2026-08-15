@@ -7,7 +7,7 @@ failed validation does not prevent the remaining validations from running.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any
 
 from .declaration.metadata import ASSUMPTION
 from .errors import ValidationError
@@ -16,7 +16,6 @@ from .load_plan import LAKEHOUSE_TARGET
 from .runtime.test_compare import ACTUAL, EXPECTED, SIDE_COLUMN
 from .runtime.validation_result import AssumptionResult, TestResult
 from .test_plan import InstalledValidation
-from .test_report import FAILED, INVALID, PASSED, PLANNED, ValidationNodeReport
 
 #: Runtime primitives used to dispatch installed validations.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
@@ -187,9 +186,7 @@ def _result_from(validation: InstalledValidation, row):
 # --- Lakehouse ----------------------------------------------------------------
 
 
-def _dispatch_python(
-    validation: InstalledValidation, environment: Any, collect: bool
-):
+def _dispatch_python(validation: InstalledValidation, environment: Any, collect: bool):
     """Import the deployed module, construct it, and read it.
 
     The same import machinery a load uses, in the same isolated context: a
@@ -261,7 +258,9 @@ def _count(frame: Any) -> int:
 
 
 def _collected(frame: Any) -> tuple:
-    return tuple(row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect())
+    return tuple(
+        row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect()
+    )
 
 
 def _class_name(validation: InstalledValidation) -> str:

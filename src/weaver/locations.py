@@ -22,12 +22,14 @@ class Location:
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, str):
-            raise IdentityError(f"location must be a string, got {type(self.value).__name__}")
+            raise IdentityError(
+                f"location must be a string, got {type(self.value).__name__}"
+            )
         value = self.value.strip()
         if not value:
             raise IdentityError("location must not be empty")
         # One separator, everywhere. A Windows caller reaches this with
-        # backslashes — `LocalWorkspace` normalises its root through `Path`, and
+        # backslashes — a filesystem root normalises through `Path`, and
         # `str()` of a `WindowsPath` uses them — while everything downstream
         # treats "/" as the only separator: `join`, `name`, and the segment
         # splitting in the Weaver document reader. Left alone, a repository read from a
@@ -97,13 +99,11 @@ class LakehouseSparkLocation:
     schema name indistinguishable.
 
     Roots are plain strings rather than :class:`Location` values because this is
-    what Spark addresses — an ``abfss://`` URL on Fabric, a filesystem path
-    locally.
+    what Spark addresses: an ``abfss://`` URL.
 
     A resolved location is never carried in a build bundle. It embeds workspace
-    and item ids on Fabric and a temporary directory locally, so a bundle
-    carrying one would not be comparable between environments
-    (how-does-build-work §15).
+    and item ids, which the installer resolves for itself, so a bundle names the
+    item and lets resolution answer where it is (how-does-build-work §15).
     """
 
     #: The Lakehouse this resolves, by its logical name.
@@ -124,9 +124,7 @@ class LakehouseSparkLocation:
     def folder_path(self, schema: str, name: str) -> str:
         """Where one managed folder lives, under the Files area."""
 
-        return (
-            f"{self.files_root.rstrip('/')}/{_segment(schema)}/{_segment(name)}"
-        )
+        return f"{self.files_root.rstrip('/')}/{_segment(schema)}/{_segment(name)}"
 
     def __str__(self) -> str:
         return f"{self.item} (tables={self.tables_root}, files={self.files_root})"

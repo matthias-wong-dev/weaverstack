@@ -11,11 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-from pathlib import Path
-
-from weaver.store import FilesystemStore
-from weaver.locations import Location
-from weaver.errors import DiscoveryError
 from weaver.declaration import (
     IDENTITY_COLUMN_NOTE,
     declared_column_notes,
@@ -23,6 +18,9 @@ from weaver.declaration import (
     resolve_text,
 )
 from weaver.declaration.model import WeaverDocumentId
+from weaver.errors import DiscoveryError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 ITEM = "Lakehouse/Raw"
 
@@ -96,12 +94,13 @@ def test_literal_prose_resolves_to_itself_with_no_reference(tmp_path):
 
 
 def test_a_reference_copies_the_target_s_description(tmp_path):
-    child = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.OrderCopy").replace(
-        "Description: One row per confirmed customer order.", "Description: $Sales.Order"
+    child = PARENT.replace(
+        "Table ID: Sales.Order", "Table ID: Sales.OrderCopy"
+    ).replace(
+        "Description: One row per confirmed customer order.",
+        "Description: $Sales.Order",
     )
-    repo = _repo(
-        tmp_path, {"Sales.Order.sql": PARENT, "Sales.OrderCopy.sql": child}
-    )
+    repo = _repo(tmp_path, {"Sales.Order.sql": PARENT, "Sales.OrderCopy.sql": child})
     document = repo["Sales.OrderCopy"]
     resolved = resolve_text(
         document.document.description, owner=document, documents=repo.documents
@@ -111,13 +110,13 @@ def test_a_reference_copies_the_target_s_description(tmp_path):
 
 
 def test_a_column_reference_copies_that_column_s_note(tmp_path):
-    child = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.OrderCopy").replace(
+    child = PARENT.replace(
+        "Table ID: Sales.Order", "Table ID: Sales.OrderCopy"
+    ).replace(
         "Description: One row per confirmed customer order.",
         "Description: $Sales.Order[Amount]",
     )
-    repo = _repo(
-        tmp_path, {"Sales.Order.sql": PARENT, "Sales.OrderCopy.sql": child}
-    )
+    repo = _repo(tmp_path, {"Sales.Order.sql": PARENT, "Sales.OrderCopy.sql": child})
     document = repo["Sales.OrderCopy"]
     resolved = resolve_text(
         document.document.description, owner=document, documents=repo.documents
@@ -127,10 +126,12 @@ def test_a_column_reference_copies_that_column_s_note(tmp_path):
 
 def test_a_chain_is_followed_to_the_literal_at_its_end(tmp_path):
     middle = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Middle").replace(
-        "Description: One row per confirmed customer order.", "Description: $Sales.Order"
+        "Description: One row per confirmed customer order.",
+        "Description: $Sales.Order",
     )
     last = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Last").replace(
-        "Description: One row per confirmed customer order.", "Description: $Sales.Middle"
+        "Description: One row per confirmed customer order.",
+        "Description: $Sales.Middle",
     )
     repo = _repo(
         tmp_path,
@@ -151,7 +152,8 @@ def test_a_chain_is_followed_to_the_literal_at_its_end(tmp_path):
 
 def test_a_cycle_is_an_error_because_it_has_no_text_to_copy(tmp_path):
     left = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Left").replace(
-        "Description: One row per confirmed customer order.", "Description: $Sales.Right"
+        "Description: One row per confirmed customer order.",
+        "Description: $Sales.Right",
     )
     right = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Right").replace(
         "Description: One row per confirmed customer order.", "Description: $Sales.Left"
@@ -169,8 +171,11 @@ def test_a_reference_that_names_nothing_is_rejected_when_read(tmp_path):
     a mistake in the declaration.
     """
 
-    child = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.OrderCopy").replace(
-        "Description: One row per confirmed customer order.", "Description: $Sales.Elsewhere"
+    child = PARENT.replace(
+        "Table ID: Sales.Order", "Table ID: Sales.OrderCopy"
+    ).replace(
+        "Description: One row per confirmed customer order.",
+        "Description: $Sales.Elsewhere",
     )
     with pytest.raises(DiscoveryError, match="does not resolve exactly"):
         _repo(tmp_path, {"Sales.OrderCopy.sql": child})
@@ -194,7 +199,9 @@ def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
     ).replace("Dependencies: []\n\n", "")
     _write(root, "Warehouse/Reporting/Sales.Order.sql", warehouse_source)
 
-    repository = parse_item_repository(Location(value=str(root)), store=FilesystemStore())
+    repository = parse_item_repository(
+        Location(value=str(root)), store=FilesystemStore()
+    )
     warehouse = repository.source_documents[
         WeaverDocumentId.parse("Warehouse/Reporting/Sales.Order")
     ]
@@ -221,9 +228,7 @@ def test_declared_column_notes_are_the_columns_an_author_described(tmp_path):
 
 def test_the_identity_column_gets_a_generic_note_no_author_writes(tmp_path):
     # A Warehouse item, because only a Warehouse table may declare Identity.
-    source = PARENT.replace(
-        "Schema:", "Identity: Order key\n\nSchema:"
-    )
+    source = PARENT.replace("Schema:", "Identity: Order key\n\nSchema:")
     repo = _repo(tmp_path, {"Sales.Order.sql": source}, item="Warehouse/Reporting")
     notes = declared_column_notes(repo["Sales.Order"])
     assert notes[0] == ("Order key", notes[0][1])

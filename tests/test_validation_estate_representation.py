@@ -39,7 +39,15 @@ def _installation(item: WeaverItemId, target: str):
     }
 
 
-def _dictionary(item, schema, name, *, test_type="test", primary_key=None, description="A validation."):
+def _dictionary(
+    item,
+    schema,
+    name,
+    *,
+    test_type="test",
+    primary_key=None,
+    description="A validation.",
+):
     return {
         "item_type": item.item_type,
         "item_name": item.item_name,
@@ -96,35 +104,41 @@ def catalogue():
     house_id, house_row = _artefact_row(
         WAREHOUSE, "Assumption", "Sales", "OrdersHaveCustomers", "stored_procedure"
     )
-    return Catalogue(
-        {
-            LAKEHOUSE: {
-                INSTALLATION.name: (_installation(LAKEHOUSE, "Sales_LH"),),
-                TEST_DICTIONARY.name: (
-                    _dictionary(
-                        LAKEHOUSE, "Sales", "OrdersReconcile", primary_key="OrderId"
+    return (
+        Catalogue(
+            {
+                LAKEHOUSE: {
+                    INSTALLATION.name: (_installation(LAKEHOUSE, "Sales_LH"),),
+                    TEST_DICTIONARY.name: (
+                        _dictionary(
+                            LAKEHOUSE, "Sales", "OrdersReconcile", primary_key="OrderId"
+                        ),
                     ),
-                ),
-                DEPENDENCY.name: (
-                    _dependency(LAKEHOUSE, "Sales", "OrdersReconcile", "Sales__Order"),
-                ),
-                REGISTRY.name: (lake_row,),
-            },
-            WAREHOUSE: {
-                INSTALLATION.name: (_installation(WAREHOUSE, "Reporting_WH"),),
-                TEST_DICTIONARY.name: (
-                    _dictionary(
-                        WAREHOUSE,
-                        "Sales",
-                        "OrdersHaveCustomers",
-                        test_type="assumption",
-                        description="Every order carries a customer.",
+                    DEPENDENCY.name: (
+                        _dependency(
+                            LAKEHOUSE, "Sales", "OrdersReconcile", "Sales__Order"
+                        ),
                     ),
-                ),
-                REGISTRY.name: (house_row,),
-            },
-        }
-    ), lake_id, house_id
+                    REGISTRY.name: (lake_row,),
+                },
+                WAREHOUSE: {
+                    INSTALLATION.name: (_installation(WAREHOUSE, "Reporting_WH"),),
+                    TEST_DICTIONARY.name: (
+                        _dictionary(
+                            WAREHOUSE,
+                            "Sales",
+                            "OrdersHaveCustomers",
+                            test_type="assumption",
+                            description="Every order carries a customer.",
+                        ),
+                    ),
+                    REGISTRY.name: (house_row,),
+                },
+            }
+        ),
+        lake_id,
+        house_id,
+    )
 
 
 # --- what the estate holds ----------------------------------------------------
@@ -197,9 +211,7 @@ def test_dependencies_are_associated_with_the_logical_validation(catalogue):
     estate = ValidationEstate.from_catalogue(rows)
 
     test = next(
-        validation
-        for validation in estate.validations.values()
-        if validation.is_test
+        validation for validation in estate.validations.values() if validation.is_test
     )
     assert test.dependencies == ("Sales__Order",)
 
@@ -281,7 +293,9 @@ def test_a_request_names_a_target_and_means_everything_installed_there(catalogue
 
     selected = estate.for_targets([LAKEHOUSE_TARGET])
 
-    assert [validation.qualified for validation in selected] == ["Sales.OrdersReconcile"]
+    assert [validation.qualified for validation in selected] == [
+        "Sales.OrdersReconcile"
+    ]
 
 
 def test_both_targets_select_both(catalogue):

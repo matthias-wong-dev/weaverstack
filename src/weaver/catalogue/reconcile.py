@@ -29,6 +29,7 @@ from .tables import (
     CatalogueTable,
 )
 
+
 @dataclass(frozen=True)
 class TableChanges:
     """What reconciling one table would do. Reporting only — see the module note."""
@@ -75,7 +76,9 @@ class TableReconciliation:
     @property
     def statements(self) -> tuple[str, ...]:
         return tuple(
-            statement for statement in (self.delete, self.merge) if statement is not None
+            statement
+            for statement in (self.delete, self.merge)
+            if statement is not None
         )
 
 
@@ -114,7 +117,9 @@ class CatalogueReconciliation:
         )
 
 
-def reconcile(projection: CatalogueProjection) -> CatalogueReconciliation:
+def reconcile(
+    projection: CatalogueProjection, *, destination
+) -> CatalogueReconciliation:
     """Authoritative scoped replacement of one installation, from its projection.
 
     Not the build path: a build publishes a difference (:func:`publish`), so an
@@ -131,23 +136,30 @@ def reconcile(projection: CatalogueProjection) -> CatalogueReconciliation:
     return CatalogueReconciliation(
         scope=scope,
         dictionaries=tuple(
-            _for_table(table, projection.for_table(table), scope)
+            _for_table(table, projection.for_table(table), scope, destination)
             for table in DICTIONARY_TABLES
         ),
         installation=_for_table(
-            INSTALLATION, projection.for_table(INSTALLATION), scope
+            INSTALLATION, projection.for_table(INSTALLATION), scope, destination
         ),
-        registry=_for_table(REGISTRY, projection.for_table(REGISTRY), scope),
+        registry=_for_table(
+            REGISTRY, projection.for_table(REGISTRY), scope, destination
+        ),
     )
 
 
 def _for_table(
-    table: CatalogueTable, rows: Sequence[Row], scope: InstallationScope
+    table: CatalogueTable,
+    rows: Sequence[Row],
+    scope: InstallationScope,
+    destination,
 ) -> TableReconciliation:
     return TableReconciliation(
         table=table,
-        delete=render_delete_obsolete(table, rows, scope=scope),
-        merge=render_merge(table, rows, scope=scope),
+        delete=render_delete_obsolete(
+            table, rows, scope=scope, destination=destination
+        ),
+        merge=render_merge(table, rows, scope=scope, destination=destination),
     )
 
 
@@ -212,7 +224,7 @@ class CataloguePublication:
         return not self.statements
 
 
-def publish(current, desired) -> CataloguePublication:
+def publish(current, desired, *, destination) -> CataloguePublication:
     """The statements that move ``current`` to ``desired``, table by table.
 
     Read it as *persisted* → *certified*. Only the items ``desired`` names are
@@ -222,15 +234,23 @@ def publish(current, desired) -> CataloguePublication:
 
     return CataloguePublication(
         dictionaries=tuple(
-            _publish_table(table, current=current, desired=desired)
+            _publish_table(
+                table, current=current, desired=desired, destination=destination
+            )
             for table in DICTIONARY_TABLES
         ),
-        installation=_publish_table(INSTALLATION, current=current, desired=desired),
-        registry=_publish_table(REGISTRY, current=current, desired=desired),
+        installation=_publish_table(
+            INSTALLATION, current=current, desired=desired, destination=destination
+        ),
+        registry=_publish_table(
+            REGISTRY, current=current, desired=desired, destination=destination
+        ),
     )
 
 
-def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublication:
+def _publish_table(
+    table: CatalogueTable, *, current, desired, destination
+) -> TablePublication:
     """One table's delete and merge, across every scope that needs them.
 
     The two take different row sets, and conflating them loses data. The merge
@@ -251,8 +271,7 @@ def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublicati
         for key, row in wanted.items():
             existing = found.get(key)
             if existing is None or any(
-                row.get(name) != existing.get(name)
-                for name in table.comparison_columns
+                row.get(name) != existing.get(name) for name in table.comparison_columns
             ):
                 changed.append(row)
 
@@ -263,12 +282,17 @@ def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublicati
     delete = None
     if delete_scopes:
         delete = render_delete_obsolete(
-            table, keep, scope=InstallationScopes(tuple(delete_scopes))
+            table,
+            keep,
+            scope=InstallationScopes(tuple(delete_scopes)),
+            destination=destination,
         )
 
     merge = None
     if changed:
-        merge = render_merge(table, changed, scope=_scopes_of(changed))
+        merge = render_merge(
+            table, changed, scope=_scopes_of(changed), destination=destination
+        )
 
     return TablePublication(table=table, delete=delete, merge=merge)
 
@@ -340,7 +364,9 @@ def summarise(
 # --- the explicit prune scopes -----------------------------------------------
 
 
-def prune_installation(scope: InstallationScope | InstallationScopes) -> tuple[str, ...]:
+def prune_installation(
+    scope: InstallationScope | InstallationScopes, *, destination
+) -> tuple[str, ...]:
     """Remove whole installations, in dependency-safe order.
 
     What decommissioning a target does, and never what a build does: a build
@@ -359,4 +385,7 @@ def prune_installation(scope: InstallationScope | InstallationScopes) -> tuple[s
     # installation root last. Delta does not enforce foreign keys, so this is
     # the explicit ordered equivalent of ON DELETE CASCADE.
     ordered = (REGISTRY, *reversed(DICTIONARY_TABLES), INSTALLATION)
-    return tuple(render_delete_scope(table, scope=scope) for table in ordered)
+    return tuple(
+        render_delete_scope(table, scope=scope, destination=destination)
+        for table in ordered
+    )

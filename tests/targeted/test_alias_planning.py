@@ -19,14 +19,11 @@ from __future__ import annotations
 
 import pytest
 from factories import (
-    FixtureCatalogue,
     alias_repository,
     bound_target,
     document_id,
-    item_bindings,
     item_id,
     registered_document,
-    registry_row,
     target_inventory,
 )
 
@@ -75,9 +72,7 @@ def test_a_selected_alias_is_planned_as_one_action(estate):
     planned = plan_aliases(estate)
 
     assert planned.stage is not None
-    kinds = [
-        action.kind for batch in planned.stage.batches for action in batch.actions
-    ]
+    kinds = [action.kind for batch in planned.stage.batches for action in batch.actions]
     assert kinds == ["create_alias"]
 
 
@@ -218,9 +213,7 @@ def certified(repository, *names, epoch=None):
     wrong.
     """
 
-    signatures = declared_signatures(
-        repository, {document_id(name) for name in names}
-    )
+    signatures = declared_signatures(repository, {document_id(name) for name in names})
     return {
         document_id(name): registered_document(
             name, signature=signatures[document_id(name)], build_epoch=epoch
@@ -307,12 +300,8 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     """
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(ALIAS)}
-    registered = certified(
-        estate, SOURCE, VIEW, ALIAS, epoch="2026-01-01T00:00:00"
-    )
-    stale = stale_alias_destinations(
-        estate, registered, bound_items=set(targets())
-    )
+    registered = certified(estate, SOURCE, VIEW, ALIAS, epoch="2026-01-01T00:00:00")
+    stale = stale_alias_destinations(estate, registered, bound_items=set(targets()))
 
     selection = select_build(
         estate, registered, selected=everything, stale_aliases=stale

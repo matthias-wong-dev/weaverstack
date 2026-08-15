@@ -94,7 +94,9 @@ def test_an_object_whose_signature_differs_is_changed(chain):
     assert impact.new == ()
 
 
-def test_a_signature_is_derived_from_the_declaration_not_stored_anywhere(chain, tmp_path):
+def test_a_signature_is_derived_from_the_declaration_not_stored_anywhere(
+    chain, tmp_path
+):
     """Two identical declarations must produce the same signature.
 
     This is what makes "unchanged" mean unchanged. If a signature carried a path,
@@ -175,7 +177,9 @@ def test_a_changed_object_is_dropped_and_rebuilt(chain):
 
 
 def test_an_unchanged_object_is_neither_dropped_nor_rebuilt(chain):
-    selection = select_build(chain, certified(chain, TABLE), selected={document_id(TABLE)})
+    selection = select_build(
+        chain, certified(chain, TABLE), selected={document_id(TABLE)}
+    )
 
     assert selection.selected_for_drop == ()
     assert selection.selected_for_build == ()

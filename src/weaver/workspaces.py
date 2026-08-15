@@ -1,27 +1,47 @@
-"""Workspace configuration and the two execution environments Weaver supports.
+"""Workspace configuration.
 
-A Workspace identifies where resources live.  For Fabric that identity is a
-Microsoft Fabric workspace name; for the local emulator it is the path to the
-folder that stands in for one.  It does not say where Weaver code executes.
+A Workspace identifies where resources live: one Microsoft Fabric workspace, by
+name. It does not say where Weaver code executes — desktop or notebook is a
+Session question.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
 
+if TYPE_CHECKING:  # names used only in annotations
+    from .targets import ItemRef
+
+#: The one item type a catalogue may name today. Typed values are accepted for
+#: both so the grammar is stable, and a Warehouse catalogue is refused with the
+#: reason rather than an error about parsing.
+CATALOGUE_KIND = "Lakehouse"
+
 WEAVER_ITEMS_AREA = "weaver_items"
 BUILD_BUNDLES_AREA = "build_bundles"
 CLI_AREA = "cli"
-FABRIC = "fabric"
-LOCAL = "local"
-WORKSPACE_TYPES = (FABRIC, LOCAL)
+
+
+def _catalogue_value(value: object) -> str:
+    """One ``Lakehouse/Name`` catalogue, checked and returned as written."""
+
+    if not isinstance(value, str) or "/" not in value:
+        raise ConfigError(
+            f"catalogue must be typed as '{CATALOGUE_KIND}/Name', got {value!r}"
+        )
+    kind, _, name = value.partition("/")
+    if kind != CATALOGUE_KIND:
+        raise ConfigError(
+            f"catalogue must name a {CATALOGUE_KIND}, for example "
+            f"{CATALOGUE_KIND}/Weaver; got {value!r}"
+        )
+    return f"{CATALOGUE_KIND}/{validate_name(name, what='catalogue')}"
 
 
 @dataclass(frozen=True)
@@ -65,27 +85,34 @@ def _target_declarations(
 
 @dataclass(frozen=True, kw_only=True)
 class Workspace:
-    """The common configuration for one Fabric workspace or local emulator."""
+    """One Microsoft Fabric workspace, and the configuration it carries.
 
+    Identifies where the resources are. It does not say where Weaver's own code
+    runs — desktop or notebook is a Session question.
+    """
+
+    workspace: str
     environment: str | None = None
-    weaver_lakehouse: str | None = None
+    #: Where the control plane lives, typed: ``Lakehouse/Weaver``. Typed so the
+    #: value says which kind of item it names rather than relying on the field's
+    #: name to imply it.
+    catalogue: str | None = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     lakehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
     warehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "workspace", validate_name(self.workspace, what="workspace")
+        )
         if self.environment is not None:
             object.__setattr__(
                 self,
                 "environment",
                 validate_name(self.environment, what="environment"),
             )
-        if self.weaver_lakehouse is not None:
-            object.__setattr__(
-                self,
-                "weaver_lakehouse",
-                validate_name(self.weaver_lakehouse, what="weaver_lakehouse"),
-            )
+        if self.catalogue is not None:
+            object.__setattr__(self, "catalogue", _catalogue_value(self.catalogue))
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(
@@ -104,12 +131,21 @@ class Workspace:
         )
 
     @property
-    def workspace_type(self) -> str:
-        raise NotImplementedError
+    def catalogue_item(self) -> "ItemRef":
+        """The catalogue as a resolvable item, or a failure saying it is unset.
 
-    @property
-    def supports_sql(self) -> bool:
-        raise NotImplementedError
+        Callers name the item rather than re-parsing the typed string, so where
+        the control plane lives is read in one place.
+        """
+
+        from .targets import ItemRef
+
+        if not self.catalogue:
+            raise ConfigError(
+                "this Workspace names no catalogue; pass catalogue="
+                "'Lakehouse/Weaver' or set it in workspace configuration"
+            )
+        return ItemRef(self.catalogue.split("/", 1)[1])
 
     def declaration_for(self, item_type: str, physical_name: str) -> TargetDeclaration:
         declarations = self.lakehouses if item_type == LAKEHOUSE else self.warehouses
@@ -121,55 +157,6 @@ class Workspace:
                 f"physical target {plural}/{physical_name} is not configured"
             ) from exc
 
-
-@dataclass(frozen=True, kw_only=True)
-class FabricWorkspace(Workspace):
-    """One Microsoft Fabric workspace."""
-
-    workspace: str
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        object.__setattr__(
-            self, "workspace", validate_name(self.workspace, what="workspace")
-        )
-
-    @property
-    def workspace_type(self) -> str:
-        return FABRIC
-
-    @property
-    def supports_sql(self) -> bool:
-        return True
-
     def settings_for_warehouse(self, name: str) -> ExecutionSettings:
         declaration = self.warehouses.get(name)
         return declaration.execution if declaration else self.execution
-
-
-@dataclass(frozen=True, kw_only=True)
-class LocalWorkspace(Workspace):
-    """A filesystem folder standing in for one Fabric workspace."""
-
-    workspace: Path
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        value = self.workspace
-        if isinstance(value, str):
-            if not value.strip():
-                raise ConfigError("workspace path must not be empty")
-            value = Path(value.strip())
-        elif not isinstance(value, Path):
-            raise ConfigError(
-                f"workspace must be a path, got {type(value).__name__}"
-            )
-        object.__setattr__(self, "workspace", value.expanduser())
-
-    @property
-    def workspace_type(self) -> str:
-        return LOCAL
-
-    @property
-    def supports_sql(self) -> bool:
-        return False

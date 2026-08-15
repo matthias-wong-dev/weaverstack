@@ -48,6 +48,7 @@ from weaver.build_bundle import (
     plan_item_build,
     write_bundle,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.incremental import BuildSelection, Impact
 from weaver.build_bundle.stages import enumerate_stages
 from weaver.declaration.metadata import DELTA_TARGET
@@ -102,7 +103,9 @@ def estate_repository(root: Path):
     )
 
 
-def physical_bundle(repository, *, target_name: str, resolver, store):
+def physical_bundle(
+    repository, *, target_name: str, workspace_name: str, resolver, store
+):
     """A bundle of physical stages and nothing else.
 
     Built from `plan_item_build`, which returns exactly the stages that touch a
@@ -112,7 +115,12 @@ def physical_bundle(repository, *, target_name: str, resolver, store):
     """
 
     item = item_id(ITEM)
-    target = bound_target(id="target-1", item_id=target_name)
+    # The real workspace's display name, because four-part naming is spelled
+    # with it: a plan built with the fixture default would ask Fabric for a
+    # workspace that does not exist, and Fabric would rightly refuse it.
+    target = bound_target(
+        id="target-1", item_id=target_name, workspace_name=workspace_name
+    )
     selected = {key for key in repository.source_documents if key.item == item}
     loads = _load_identities(repository, item)
     planned = plan_item_build(
@@ -134,7 +142,7 @@ def physical_bundle(repository, *, target_name: str, resolver, store):
     )
     sequences, payloads, target_changes = enumerate_stages(list(planned.stages))
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name=repository.name,
         repository_signature=repository.signature,
@@ -157,11 +165,16 @@ def _load_identities(repository, item):
         from weaver.etl import item_load_artefacts
     except ImportError:  # pragma: no cover - Weaver without a load layer
         return set()
-    return {artefact.identity for artefact in item_load_artefacts(repository, item=item)}
+    return {
+        artefact.identity for artefact in item_load_artefacts(repository, item=item)
+    }
 
 
 def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
-    tmp_path, fabric_workspace, fabric_alias_lakehouses, fabric_empty_lakehouse,
+    tmp_path,
+    fabric_workspace,
+    fabric_alias_lakehouses,
+    fabric_empty_lakehouse,
     livy_session,
 ):
     """The one claim a session is worth paying for, made once.
@@ -184,21 +197,25 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
 
     repository = estate_repository(tmp_path / "repo")
     bundle = physical_bundle(
-        repository, target_name=lakehouse.name, resolver=resolver, store=store
+        repository,
+        target_name=lakehouse.name,
+        workspace_name=fabric_workspace.workspace,
+        resolver=resolver,
+        store=store,
     )
     planned_order = [action.id for _s, _b, action in bundle.plan.actions()]
     assert planned_order, "the bundle planned no physical work to install"
 
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import Installer, load_bundle\n"
-        "from weaver.session import NotebookSession\n"
+        "from weaver.sessions import NotebookSession\n"
         "from weaver.build_bundle.prune import read_lakehouse_inventory\n"
         "from weaver.build_bundle.workflow import session_catalogue\n"
         "from weaver.targets import ItemRef\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"

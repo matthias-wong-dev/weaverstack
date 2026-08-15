@@ -35,7 +35,7 @@ from .result import (
     reports_outcome,
     run_status,
 )
-from .runner import LOAD, TEST, RunRequest, Runner
+from .runner import LOAD, TEST, Runner, RunRequest
 from .state import RunState, open_run_log, read_run_state
 
 __all__ = [

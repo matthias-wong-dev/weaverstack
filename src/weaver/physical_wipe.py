@@ -11,11 +11,11 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .errors import CommandError
-from .workspaces import Workspace, LocalWorkspace
 from .locations import Location
-from .resolution import TABLES_AREA, LocalResolver, resolver_for, store_for
-from .store import FilesystemStore, Store
+from .resolution import TABLES_AREA, resolver_for, store_for
+from .store import Store
 from .targets import FILES_AREA, DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
+from .workspaces import Workspace
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,9 @@ def _clear(
         return ()
     kept = {name.casefold() for name in keep}
     entries = [
-        entry for entry in store.list(location) if entry.location.name.casefold() not in kept
+        entry
+        for entry in store.list(location)
+        if entry.location.name.casefold() not in kept
     ]
     removed = tuple(sorted(entry.location.name for entry in entries))
     if not dry_run:
@@ -88,9 +90,6 @@ def _remove_shortcuts(
     being taken away from a directory being deleted — they are not the same act,
     and only one of them destroys data.
 
-    An environment with no shortcuts to remove offers no capability and this
-    answers nothing: the emulator's links are removed by the storage sweep, which
-    unlinks rather than follows.
     """
 
     enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)
@@ -180,9 +179,7 @@ def wipe_delta_target(
         target=f"delta:{target}",
         location=location,
         removed=shortcuts
-        + _clear(
-            store, location, resolver.root, dry_run=dry_run, keep=_KEPT_SCHEMAS
-        ),
+        + _clear(store, location, resolver.root, dry_run=dry_run, keep=_KEPT_SCHEMAS),
         dry_run=dry_run,
     )
 
@@ -230,6 +227,7 @@ def wipe(
     store: Store | None = None,
     sql=None,
     dry_run: bool = False,
+    session=None,
 ) -> tuple[WipeReport, ...]:
     """Wipe each supplied target. At least one is required.
 
@@ -243,14 +241,26 @@ def wipe(
     reports: list[WipeReport] = []
     storage = store
     if folder_target is not None:
-        storage = storage or store_for(workspace)
+        storage = storage or _store_for(workspace, session)
         reports.append(
-            wipe_folder_target(folder_target, workspace, store=storage, dry_run=dry_run)
+            wipe_folder_target(
+                folder_target,
+                workspace,
+                store=storage,
+                dry_run=dry_run,
+                session=session,
+            )
         )
     if delta_target is not None:
-        storage = storage or store_for(workspace)
+        storage = storage or _store_for(workspace, session)
         reports.append(
-            wipe_delta_target(delta_target, workspace, store=storage, dry_run=dry_run)
+            wipe_delta_target(
+                delta_target,
+                workspace,
+                store=storage,
+                dry_run=dry_run,
+                session=session,
+            )
         )
     if sql_target is not None:
         if dry_run:
@@ -305,12 +315,10 @@ def wipe_lakehouse(
 def _lakehouse_exists(resolver, lakehouse: ItemRef) -> bool:
     """Whether the Lakehouse is there, resolved as a Lakehouse.
 
-    Locally that is a directory check; on Fabric, resolving it as a Lakehouse
-    both proves it exists and refuses a same-named Warehouse.
+    Resolving it by type both proves it exists and refuses a same-named
+    Warehouse, which matters here because the caller is about to delete.
     """
 
-    if hasattr(resolver, "lakehouse_exists"):
-        return resolver.lakehouse_exists(lakehouse)
     from .errors import CommandError as _CommandError
 
     try:
@@ -350,6 +358,8 @@ def wipe_selection(
             )
         else:
             reports.extend(
-                wipe_lakehouse(ItemRef.parse(name), workspace, store=store, dry_run=dry_run)
+                wipe_lakehouse(
+                    ItemRef.parse(name), workspace, store=store, dry_run=dry_run
+                )
             )
     return tuple(reports)

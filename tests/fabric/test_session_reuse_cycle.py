@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from weaver.fabric.resources import LAKEHOUSE
-from weaver.session.resources import ResourceState
+from weaver.sessions.resources import ResourceState
 from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
@@ -123,7 +123,7 @@ def test_a_failed_statement_leaves_the_connection_healthy(
 
 def test_the_session_records_what_it_spent(weaver_session, fabric_workspace):
     weaver_session.resolve_item(
-        ItemRef(fabric_workspace.weaver_lakehouse),
+        fabric_workspace.catalogue_item,
         item_type=LAKEHOUSE,
         workspace=fabric_workspace,
     )

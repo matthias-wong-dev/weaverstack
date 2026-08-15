@@ -10,19 +10,18 @@ from __future__ import annotations
 
 import argparse
 import io
-from pathlib import Path
 
 import pytest
+from support.workspaces import given_workspace
 
-from weaver.errors import BuildError, CommandError
-from weaver.session import ConsoleSession
-from weaver.workspaces import LocalWorkspace
+from weaver.errors import BuildError
+from weaver.sessions import ConsoleSession
 from weaver_cli.main import _resolve_workspace, _with_command_overrides
 from weaver_cli.shell import run_shell
 
 
-def _local(root="./emulator", **kwargs) -> LocalWorkspace:
-    return LocalWorkspace(workspace=Path(root), **kwargs)
+def _workspace(name: str = "Demo", **kwargs):
+    return given_workspace(workspace=name, **kwargs)
 
 
 @pytest.fixture
@@ -53,9 +52,8 @@ def _run(script: str, factory, workspace=None, environment="weaver") -> int:
     args = argparse.Namespace(
         workspace=workspace,
         workspace_config=None,
-        workspace_type=None,
         environment=environment,
-        weaver_lakehouse=None,
+        catalogue=None,
     )
     return run_shell(args, parser_factory=factory, stdin=io.StringIO(script))
 
@@ -248,9 +246,8 @@ def _args(session=None, **overrides):
     values = dict(
         workspace=None,
         workspace_config=None,
-        workspace_type=None,
         environment=None,
-        weaver_lakehouse=None,
+        catalogue=None,
         session=session,
     )
     values.update(overrides)
@@ -258,32 +255,26 @@ def _args(session=None, **overrides):
 
 
 def test_a_command_naming_nothing_inherits_the_session_workspace():
-    with ConsoleSession(workspace=_local(weaver_lakehouse="Weaver")) as session:
-        assert _resolve_workspace(_args(session)).workspace == Path("emulator")
+    with ConsoleSession(workspace=_workspace(catalogue="Lakehouse/Weaver")) as session:
+        assert _resolve_workspace(_args(session)).workspace == "Demo"
 
 
 def test_a_command_may_override_the_control_lakehouse_it_inherits():
-    with ConsoleSession(workspace=_local(weaver_lakehouse="Weaver")) as session:
-        resolved = _resolve_workspace(_args(session, weaver_lakehouse="Other"))
+    with ConsoleSession(workspace=_workspace(catalogue="Lakehouse/Weaver")) as session:
+        resolved = _resolve_workspace(_args(session, catalogue="Lakehouse/Other"))
 
-        assert resolved.weaver_lakehouse == "Other"
-        assert resolved.workspace == Path("emulator")
-        assert session.workspace.weaver_lakehouse == "Weaver", "the session is unchanged"
+        assert resolved.catalogue == "Lakehouse/Other"
+        assert resolved.workspace == "Demo"
+        assert session.workspace.catalogue == "Lakehouse/Weaver", (
+            "the session is unchanged"
+        )
 
 
 def test_a_command_naming_its_own_workspace_does_not_inherit():
-    with ConsoleSession(workspace=_local("./one")) as session:
-        resolved = _resolve_workspace(
-            _args(session, workspace="./two", workspace_type="local")
-        )
+    with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
+        resolved = _resolve_workspace(_args(session, workspace="Second_Workspace"))
 
-        assert resolved.workspace == Path("two")
-
-
-def test_a_workspace_type_that_disagrees_needs_its_own_workspace():
-    with ConsoleSession(workspace=_local()) as session:
-        with pytest.raises(CommandError, match="name a --workspace"):
-            _resolve_workspace(_args(session, workspace_type="fabric"))
+        assert resolved.workspace == "Second_Workspace"
 
 
 def test_without_a_session_nothing_is_inherited():
@@ -302,11 +293,11 @@ def test_a_session_started_without_a_workspace_inherits_nothing():
 
 
 def test_overrides_do_not_mutate_the_workspace_they_are_applied_to():
-    original = _local(weaver_lakehouse="Weaver")
+    original = _workspace(catalogue="Lakehouse/Weaver")
     overridden = _with_command_overrides(
-        original, _args(weaver_lakehouse="Other", environment="dev")
+        original, _args(catalogue="Lakehouse/Other", environment="dev")
     )
 
-    assert original.weaver_lakehouse == "Weaver"
-    assert overridden.weaver_lakehouse == "Other"
+    assert original.catalogue == "Lakehouse/Weaver"
+    assert overridden.catalogue == "Lakehouse/Other"
     assert overridden.environment == "dev"

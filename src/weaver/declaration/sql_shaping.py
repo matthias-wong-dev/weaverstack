@@ -19,17 +19,16 @@ answer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from string import Template
 
 from sqlparse import tokens as T
 
 from ..sql_statements import SqlToken as _FlatToken
 from ..sql_statements import flatten_with_offsets as _flatten_with_offsets
-
 
 SQL_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -149,7 +148,9 @@ def render_sql_template(template_name: str, **values: object) -> str:
 
 
 def _sql_template_path(template_name: str) -> Path:
-    normalised_name = template_name if template_name.endswith(".sql") else f"{template_name}.sql"
+    normalised_name = (
+        template_name if template_name.endswith(".sql") else f"{template_name}.sql"
+    )
     candidate = (SQL_TEMPLATE_DIR / normalised_name).resolve()
     template_root = SQL_TEMPLATE_DIR.resolve()
     if template_root not in candidate.parents:
@@ -357,7 +358,10 @@ def _find_cte_body_select(tokens: list[_FlatToken], with_index: int) -> int | No
             return index
         if token.value == ";" or _keyword_head(token) == "GO":
             return None
-        if _is_statement_starter(token) and _keyword_head(token) not in {"WITH", "SELECT"}:
+        if _is_statement_starter(token) and _keyword_head(token) not in {
+            "WITH",
+            "SELECT",
+        }:
             return None
     return None
 
@@ -372,7 +376,11 @@ def _find_query_end(tokens: list[_FlatToken], select_index: int) -> int:
         if token.depth != select_token.depth:
             continue
         if token.value == ";" or _keyword_head(token) == "GO":
-            return token.end if token.value == ";" else _end_before_trivia(tokens, select_index, index)
+            return (
+                token.end
+                if token.value == ";"
+                else _end_before_trivia(tokens, select_index, index)
+            )
         if _is_statement_starter(token) and not _is_set_operator_select(tokens, index):
             return _end_before_trivia(tokens, select_index, index)
 
@@ -473,7 +481,9 @@ def _replacement_for_select(
 ) -> _Replacement | None:
     select_token = tokens[select_index]
     scope_end_index = _find_scope_end(tokens, select_index)
-    where_index = _find_where(tokens, select_index + 1, scope_end_index, select_token.depth)
+    where_index = _find_where(
+        tokens, select_index + 1, scope_end_index, select_token.depth
+    )
 
     if where_index is None:
         insert_at = _find_insert_position(
@@ -486,7 +496,9 @@ def _replacement_for_select(
         tokens, where_index + 1, scope_end_index, select_token.depth
     )
     condition = sql_text[condition_start:condition_end].strip()
-    transformed_condition = insert_where_one_eq_zero(condition) if condition else condition
+    transformed_condition = (
+        insert_where_one_eq_zero(condition) if condition else condition
+    )
     return _Replacement(
         condition_start,
         condition_end,
@@ -569,9 +581,11 @@ def _is_scope_terminator(token: _FlatToken) -> bool:
         return True
 
     keyword = _keyword_head(token)
-    return keyword in {"GO", "UNION", "EXCEPT", "INTERSECT"} or (
-        _is_statement_starter(token) and keyword != "SELECT"
-    ) or _is_select(token)
+    return (
+        keyword in {"GO", "UNION", "EXCEPT", "INTERSECT"}
+        or (_is_statement_starter(token) and keyword != "SELECT")
+        or _is_select(token)
+    )
 
 
 def _is_statement_starter(token: _FlatToken) -> bool:
@@ -592,6 +606,7 @@ def _previous_significant_index(
             continue
         return previous
     return None
+
 
 def _is_trivia(token: _FlatToken) -> bool:
     return token.ttype in T.Whitespace or token.ttype in T.Comment

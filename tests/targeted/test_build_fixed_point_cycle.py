@@ -33,6 +33,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.catalogue_actions import desired_catalogue
@@ -41,8 +42,11 @@ from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
+from weaver.spark import FabricSparkTarget
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
+
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 LAKEHOUSE_TARGET_NAME = "Sales_LH"
 WAREHOUSE_TARGET_NAME = "Reporting_WH"
@@ -119,7 +123,9 @@ def build(repository, tmp_path, *, catalogue):
         store=FilesystemStore(),
         target_inventories=_inventories(repository, bound),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
 
 
@@ -265,7 +271,7 @@ def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     # And publishing against that state re-merges them.
     from weaver.catalogue.reconcile import publish
 
-    result = publish(remaining, state)
+    result = publish(remaining, state, destination=WEAVER)
 
     assert result.registry.merge, "a dropped object must be certified again"
 

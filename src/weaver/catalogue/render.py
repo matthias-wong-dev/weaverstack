@@ -11,7 +11,7 @@ from typing import Iterable, Mapping, Sequence
 
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..errors import BuildError
-from ..spark.tokens import EPOCH_TOKEN, object_token
+from ..spark.tokens import EPOCH_TOKEN
 from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,
@@ -149,18 +149,17 @@ def identifier(name: str) -> str:
     return "`" + name.replace("`", "``") + "`"
 
 
-def qualified_name(table: CatalogueTable) -> str:
+def qualified_name(table: CatalogueTable, destination) -> str:
     """How a rendered statement names one catalogue table.
 
     Not ``_.Registry``: the catalogue is in the Weaver Lakehouse while a build's
     other statements are aimed at a destination, so a name resolved through the
     session's current catalogue would record the build wherever the session
-    happened to point. The statement names the object, the batch names the
-    Weaver Lakehouse, and the executor combines them
-    (:mod:`weaver.spark.tokens`).
+    happened to point. The Weaver Lakehouse's own destination names it here, so
+    the statement carries the address it runs against.
     """
 
-    return object_token(CATALOGUE_SCHEMA, table.name)
+    return destination.qualify(CATALOGUE_SCHEMA, table.name)
 
 
 def literal(value: object) -> str:
@@ -226,6 +225,7 @@ def render_merge(
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
+    destination,
 ) -> str | None:
     """A scoped ``MERGE`` that inserts new rows and updates changed ones.
 
@@ -249,7 +249,6 @@ def render_merge(
     _check_scope(table, rows, scope)
     _check_unique_keys(table, rows)
 
-    columns = table.column_names
     source = _source_relation(table, rows)
 
     on = " AND ".join(
@@ -266,7 +265,10 @@ def render_merge(
         for name in comparison
     )
     updates = ", ".join(
-        [f"target.{identifier(name)} = source.{identifier(name)}" for name in comparison]
+        [
+            f"target.{identifier(name)} = source.{identifier(name)}"
+            for name in comparison
+        ]
         + [f"target.{identifier(AUDIT_UPDATE_COLUMN)} = current_timestamp()"]
     )
 
@@ -293,16 +295,14 @@ def render_merge(
             for name in table.published_column_names
         }
     )
-    insert_columns = ", ".join(
-        identifier(name) for name in table.physical_columns
-    )
+    insert_columns = ", ".join(identifier(name) for name in table.physical_columns)
     insert_values = ", ".join(
         supplied[name] if name in supplied else f"source.{identifier(name)}"
         for name in table.physical_columns
     )
 
     return (
-        f"MERGE INTO {qualified_name(table)} AS target\n"
+        f"MERGE INTO {qualified_name(table, destination)} AS target\n"
         f"USING (\n"
         f"        {source}\n"
         f") AS source\n"
@@ -354,6 +354,7 @@ def render_delete_obsolete(
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
+    destination,
 ) -> str | None:
     """A scoped ``DELETE`` of everything in this installation the rows do not claim.
 
@@ -373,7 +374,7 @@ def render_delete_obsolete(
     rows = sorted_rows(table, rows)
     _check_scope(table, rows, scope)
     if not rows:
-        return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
+        return f"DELETE FROM {qualified_name(table, destination)}\n WHERE {scope.predicate}\n"
 
     beyond = tuple(name for name in table.key if name not in scope.columns)
     if not beyond:
@@ -398,7 +399,7 @@ def render_delete_obsolete(
         for row in rows
     )
     return (
-        f"DELETE FROM {qualified_name(table)}\n"
+        f"DELETE FROM {qualified_name(table, destination)}\n"
         f" WHERE {scope.predicate}\n"
         f"   AND NOT (\n"
         f"              {keep}\n"
@@ -407,7 +408,10 @@ def render_delete_obsolete(
 
 
 def render_delete_scope(
-    table: CatalogueTable, *, scope: InstallationScope | InstallationScopes
+    table: CatalogueTable,
+    *,
+    scope: InstallationScope | InstallationScopes,
+    destination,
 ) -> str:
     """A scoped ``DELETE`` of whole installations from one table.
 
@@ -416,9 +420,9 @@ def render_delete_scope(
     opinion about it.
     """
 
-    return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
-
-
+    return (
+        f"DELETE FROM {qualified_name(table, destination)}\n WHERE {scope.predicate}\n"
+    )
 
 
 def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:

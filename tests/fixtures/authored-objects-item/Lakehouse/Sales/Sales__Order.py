@@ -16,10 +16,10 @@ Revision notes:
   - 2026-07-30 Created.
 """
 
+from weaver import Table
+
 from .Files.Sales__OrderExport import Sales__OrderExport
 from .Sales__Customer import Sales__Customer
-
-from weaver import Table
 
 
 class Sales__Order(Table):

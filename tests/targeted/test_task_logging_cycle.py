@@ -21,6 +21,8 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+from factories import full_estate
+from support.workspaces import given_resolver, given_workspace
 
 from weaver.catalogue.builtin import LOG_FOLDER_ID, LOG_PATH
 from weaver.catalogue.state import Catalogue
@@ -29,7 +31,6 @@ from weaver.declaration.metadata import FOLDER
 from weaver.declaration.model import WeaverDocumentId
 from weaver.errors import CommandError
 from weaver.locations import Location
-from weaver.resolution import LocalResolver
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 from weaver.task_logging import (
@@ -40,9 +41,6 @@ from weaver.task_logging import (
     log_folder,
     open_task_log,
 )
-from weaver.workspaces import LocalWorkspace
-
-from factories import full_estate
 
 LOG_IDENTITY = "Lakehouse/_weaver/Files/_.Log"
 
@@ -70,19 +68,20 @@ def test_the_log_folder_reaches_the_catalogue_like_any_other_folder(tmp_path):
         for row in rows[REGISTRY.name]
     } >= {("Files/_", "Log", "folder")}
     assert {
-        (row["schema_name"], row["object_name"])
-        for row in rows[FOLDER_DICTIONARY.name]
+        (row["schema_name"], row["object_name"]) for row in rows[FOLDER_DICTIONARY.name]
     } == {("Files/_", "Log")}
 
 
 def test_the_log_folder_is_resolved_through_its_declared_identity():
-    resolver = LocalResolver(
-        LocalWorkspace(workspace=".local", weaver_lakehouse="Weaver_LH")
-    )
+    """Under the Weaver Lakehouse's own Files area, wherever that resolves."""
 
-    assert log_folder(resolver, ItemRef("Weaver_LH")).value == (
-        ".local/Weaver_LH/Files/_/Log"
+    resolver = given_resolver(
+        lakehouses=("Weaver_LH", "Sales_LH"),
+        workspace=given_workspace(catalogue="Lakehouse/Weaver_LH"),
     )
+    files = resolver.files_root(ItemRef("Weaver_LH")).value
+
+    assert log_folder(resolver, ItemRef("Weaver_LH")).value == f"{files}/_/Log"
 
 
 # --- the writer ---------------------------------------------------------------

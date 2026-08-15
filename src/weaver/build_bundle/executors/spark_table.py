@@ -27,9 +27,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ...errors import InstallError
 from ...declaration.columns import validate_build_columns
-from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ...declaration.metadata import AUDIT_COLUMNS, PYTHON, audit_column_name
+from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
 
@@ -37,8 +37,8 @@ from .base import InstallationContext
 #: detection against an inferred query's own output columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
 
-class SparkTableExecutor:
 
+class SparkTableExecutor:
     name = "spark_table"
 
     def execute(
@@ -56,29 +56,26 @@ class SparkTableExecutor:
             )
 
         instruction = json.loads(payload.decode("utf-8"))
-        names = context.names
         # Both sides are resolved against the batch's destination: the table this
         # creates, and every managed object its query reads. Inferring the shape
         # from a query that resolved through the session's own catalogue would
         # read some other Lakehouse's table of that name — and then create a table
         # of that shape, silently, in the right place.
-        qualified = names.expand(instruction["object"])
-        query = names.expand(instruction["source_query"])
+        qualified = instruction["object"]
+        query = instruction["source_query"]
 
         # Fabric defaults case-sensitive analysis off, and Weaver identities are
         # exact, so the query and the DDL must share one scope — or a table
         # created as ``CustomerEnriched`` cannot be read by the next action.
-        exact_case = names.exact_case
 
         # The setup and the describe are one piece of work: a view registered in
         # a different session is one the query cannot see.
-        setup = [names.expand(statement) for statement in instruction.get("setup") or ()]
+        setup = list(instruction.get("setup") or ())
         query_columns, query_types = self._query_shape(
             [*setup, f"DESCRIBE QUERY {query}"],
             context,
             action=action,
             qualified=qualified,
-            exact_case=exact_case,
         )
 
         declared = instruction["declared_columns"]
@@ -107,7 +104,7 @@ class SparkTableExecutor:
             physical,
             column_mapping=instruction.get("column_mapping", True),
         )
-        context.spark_sql(statement, exact_case=exact_case)
+        context.spark_sql(statement, exact_case=True)
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
@@ -121,7 +118,6 @@ class SparkTableExecutor:
         *,
         action: InstallAction,
         qualified: str,
-        exact_case: bool,
     ) -> tuple[tuple[str, ...], dict[str, str]]:
         """The query's output columns, in order, with each column's type.
 
@@ -130,7 +126,7 @@ class SparkTableExecutor:
         """
 
         try:
-            rows = context.spark_sql_batch(statements, exact_case=exact_case)
+            rows = context.spark_sql_batch(statements, exact_case=True)
         except Exception as exc:
             raise InstallError(
                 f"spark_table action {action.id!r} could not read the shape of "
@@ -184,7 +180,9 @@ class SparkTableExecutor:
             return [(name, *declared_by_name[name]) for name in business_columns]
 
         not_null_names = {
-            column for label, column in references if label in ("Primary key", "Not null")
+            column
+            for label, column in references
+            if label in ("Primary key", "Not null")
         }
         return [
             (name, query_types[name], name in not_null_names)
@@ -200,15 +198,11 @@ def _create_table_sql(
         for name, type_, not_null in columns
     )
     mapping = (
-        "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')" if column_mapping else ""
+        "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
+        if column_mapping
+        else ""
     )
-    return (
-        f"CREATE TABLE {qualified} (\n"
-        f"{column_lines}\n"
-        ")\n"
-        "USING delta"
-        f"{mapping}\n"
-    )
+    return f"CREATE TABLE {qualified} (\n{column_lines}\n)\nUSING delta{mapping}\n"
 
 
 def _ident(name: str) -> str:

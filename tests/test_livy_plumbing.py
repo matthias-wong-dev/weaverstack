@@ -6,7 +6,6 @@ returned value is told from printed output — verified without a workspace.
 
 from __future__ import annotations
 
-from weaver.workspaces import FabricWorkspace
 from weaver.fabric.livy import (
     RESULT_PREFIX,
     LivySessionInfo,
@@ -16,6 +15,8 @@ from weaver.fabric.livy import (
     list_workspace_livy_sessions,
     sessions_url,
 )
+from weaver.fabric.resources import WorkspaceItem
+from weaver.workspaces import Workspace
 
 
 def test_the_sessions_url_names_workspace_and_lakehouse():
@@ -55,45 +56,67 @@ class _CollectionClient:
 
     def get_json(self, url):
         if url.endswith("/lh-1/livyapi/versions/2023-12-01/sessions"):
-            return {"items": [{
-                "id": "11", "name": "weaver", "schedulerState": "Ended",
-                "pluginState": "Ended", "livyState": "killed",
-                "cancellationReason": "cancelled by user",
-            }]}
-        return {"items": [{
-            "id": "22", "name": "notebook", "schedulerState": "Scheduled",
-            "pluginState": "Queued", "livyState": "not_started",
-            "submitterId": "person-id", "submitterName": "builder@example.invalid",
-            "artifactId": "lh-2",
-            "submittedAt": "2026-07-27T01:02:03Z", "tags": ["interactive"],
-        }]}
+            return {
+                "items": [
+                    {
+                        "id": "11",
+                        "name": "weaver",
+                        "schedulerState": "Ended",
+                        "pluginState": "Ended",
+                        "livyState": "killed",
+                        "cancellationReason": "cancelled by user",
+                    }
+                ]
+            }
+        return {
+            "items": [
+                {
+                    "id": "22",
+                    "name": "notebook",
+                    "schedulerState": "Scheduled",
+                    "pluginState": "Queued",
+                    "livyState": "not_started",
+                    "submitterId": "person-id",
+                    "submitterName": "builder@example.invalid",
+                    "artifactId": "lh-2",
+                    "submittedAt": "2026-07-27T01:02:03Z",
+                    "tags": ["interactive"],
+                }
+            ]
+        }
 
 
 def test_livy_collection_preserves_scheduler_details():
     sessions = list_livy_sessions("ws-id", "lh-2", client=_CollectionClient())
 
-    assert sessions == (LivySessionInfo(
-        id="22", name="notebook", scheduler_state="Scheduled",
-        plugin_state="Queued", livy_state="not_started",
-        submitter_id="person-id", submitter_name="builder@example.invalid",
-        artifact_id="lh-2",
-        submitted_at="2026-07-27T01:02:03Z", tags=("interactive",),
-    ),)
+    assert sessions == (
+        LivySessionInfo(
+            id="22",
+            name="notebook",
+            scheduler_state="Scheduled",
+            plugin_state="Queued",
+            livy_state="not_started",
+            submitter_id="person-id",
+            submitter_name="builder@example.invalid",
+            artifact_id="lh-2",
+            submitted_at="2026-07-27T01:02:03Z",
+            tags=("interactive",),
+        ),
+    )
     assert sessions[0].active is True
 
 
 def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
     monkeypatch,
 ):
-    workspace = FabricWorkspace(workspace="Analytics", weaver_lakehouse="Control")
+    workspace = Workspace(workspace="Analytics", catalogue="Lakehouse/Control")
     client = _CollectionClient()
 
     # Keep the test pure: the fake resolver already knows the workspace identity.
-    from weaver.fabric.resources import Workspace
 
     class _Resolver:
         def __init__(self, workspace, client):
-            self.workspace = Workspace("ws-id", workspace.workspace)
+            self.workspace = WorkspaceItem("ws-id", workspace.workspace)
 
     monkeypatch.setattr("weaver.fabric.resolution.FabricResolver", _Resolver)
     active = list_workspace_livy_sessions(workspace, client=client, active_only=True)

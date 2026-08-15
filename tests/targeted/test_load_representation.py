@@ -30,6 +30,9 @@ from weaver.declaration.load import (
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
 from weaver.runtime.load_contract import REASON_BLANK_PK, REASON_DUPLICATE_PK
 from weaver.runtime.load_result import RESULT_COLUMNS
+from weaver.spark import FabricSparkTarget
+
+SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 
 WAREHOUSE_TABLE = """/*
 Table ID: Sales.Customer
@@ -67,15 +70,11 @@ select `Customer id`, `Customer name` from sales.raw;
 
 
 def _warehouse(source: str = WAREHOUSE_TABLE):
-    return read_source_document(
-        "Sales.Customer.sql", source.encode("utf-8"), WAREHOUSE
-    )
+    return read_source_document("Sales.Customer.sql", source.encode("utf-8"), WAREHOUSE)
 
 
 def _spark(source: str = SPARK_TABLE):
-    return read_source_document(
-        "Sales.Customer.sql", source.encode("utf-8"), LAKEHOUSE
-    )
+    return read_source_document("Sales.Customer.sql", source.encode("utf-8"), LAKEHOUSE)
 
 
 def _no_key(source: str) -> str:
@@ -100,7 +99,7 @@ def test_a_spark_sql_table_generates_a_deployed_module():
     ``test_spark_sql_module_representation.py``'s.
     """
 
-    load = _spark().create_load()
+    load = _spark().create_load(destination=SALES)
 
     assert load.object_type == FILE_OBJECT
     assert load.template_version == SPARK_LOAD_VERSION
@@ -124,7 +123,7 @@ def test_a_view_has_no_generated_load():
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
     "tsql": (8, "aad6d1857f1c284b64377206111a59159a6b43758a2ed1e77f4626acc9ae6f51"),
-    "spark": (8, "817cb4d0e2cb82d571a232ee4a73f7a956f4b255cf4378bc49af6c26cd665664"),
+    "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
 
@@ -150,7 +149,7 @@ def test_a_change_to_generation_must_move_its_template_version():
         ),
         "spark": (
             SPARK_LOAD_VERSION,
-            hashlib.sha256(_spark().create_load().payload).hexdigest(),
+            hashlib.sha256(_spark().create_load(destination=SALES).payload).hexdigest(),
         ),
     }
 
@@ -162,7 +161,9 @@ def test_a_change_to_generation_must_move_its_template_version():
 
 def test_generation_is_deterministic():
     assert _warehouse().create_load() == _warehouse().create_load()
-    assert _spark().create_load() == _spark().create_load()
+    assert _spark().create_load(destination=SALES) == _spark().create_load(
+        destination=SALES
+    )
 
 
 # --- the Warehouse procedure --------------------------------------------------
@@ -222,7 +223,7 @@ def test_the_procedure_returns_the_result_contract_through_its_signature():
 
     for column in RESULT_COLUMNS:
         assert f"@{column} " in payload
-        assert f"= null output" in payload
+        assert "= null output" in payload
         assert f"set @{column} = " in payload
     assert "as succeeded" not in payload
 

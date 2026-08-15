@@ -36,9 +36,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 
-import pytest
-from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
-
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.targets import FolderTarget
 
 #: `full_integration` is this file's *only* selector — it carries neither `spark`
@@ -149,17 +147,16 @@ def _readable(env, seen) -> None:
 
 # --- the body a developer's own code runs --------------------------------------
 #
-# One round trip into the environment. The body is a single string run wherever
-# the environment runs — in this process against local Spark, or inside a Fabric
-# session over Livy — so what is asserted is genuinely the same code either side.
-# Its only transport-dependent line is ``resolver``, which the environment binds
-# before the body starts.
+# One round trip into the environment. The body is a single string, run inside
+# the Fabric session over Livy, so what is asserted is the code a developer's own
+# object would run. Its only environment-dependent line is ``resolver``, which
+# the environment binds before the body starts.
 #
 # The classes are declared in the body rather than imported from the installed
 # repository because importing one is the load executor's job, and that does not
 # exist yet. They mirror the fixture's own documents.
 
-AUTHORED = '''
+AUTHORED = """
 from weaver.targets import DeltaTarget, FolderTarget
 from weaver import Folder, Table, lakehouse_for
 
@@ -208,7 +205,7 @@ emit({
     "customer_columns": sorted(f.name.lower() for f in customer.dataframe().schema),
     "customer_rows": customer.dataframe().count(),
 })
-'''
+"""
 
 
 def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> None:
@@ -222,7 +219,7 @@ def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> No
 
     _raise_if_the_transition_broke(step)
     plan = step.bundle.plan
-    assert plan.format_version == 1
+    assert plan.format_version == SUPPORTED_FORMAT_VERSION
     assert plan.repository_name == env.repository_root.name
     assert {target.logical_item_name for target in plan.targets} == set(items)
     assert plan.omitted_nodes == ()
@@ -271,8 +268,10 @@ def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> No
     def when(name):
         return next(seq for action_id, seq in at.items() if action_id.endswith(name))
 
-    assert when("DWG.Customer") < when("DWG.ActiveCustomer") < when(
-        "DWG.ActiveCustomerSummary"
+    assert (
+        when("DWG.Customer")
+        < when("DWG.ActiveCustomer")
+        < when("DWG.ActiveCustomerSummary")
     )
     assert when("DWG.Customer") < when("DWG.Order")
     assert when("DWG.Customer") < when("DWG.NamedCustomer")
@@ -318,22 +317,24 @@ def _assert_authored_objects_reach_the_build(env) -> None:
     assert reached["order_rows"] == 0
     assert set(reached["order_columns"]) == {"orderid", "customerid", "amount"} | AUDIT
     assert reached["customer_rows"] == 0
-    assert set(reached["customer_columns"]) == {
-        "customerid",
-        "customername",
-        "isactive",
-    } | AUDIT
+    assert (
+        set(reached["customer_columns"])
+        == {
+            "customerid",
+            "customername",
+            "isactive",
+        }
+        | AUDIT
+    )
     assert reached["empty_columns"] == reached["order_columns"]
 
-    # Object identity resolves through the Lakehouse's own root. Staging access
-    # is transport-specific: a local path in the emulator and a session mount in
-    # Fabric, both naming the same Files-relative object.
+    # Object identity resolves through the Lakehouse's own root, and staging
+    # through the session's mount of it — the same Files-relative object,
+    # addressed as Spark reads it and as Python opens it.
     assert reached["folder_spark_path"] == reached["resolved_folder_path"]
     assert reached["folder_path"].endswith("/Files/Raw/CustomerCsv")
     assert reached["staging_path"].endswith("/Files/Raw/CustomerCsv_Staging")
-    assert reached["resolved_staging_path"].endswith(
-        "/Files/Raw/CustomerCsv_Staging"
-    )
+    assert reached["resolved_staging_path"].endswith("/Files/Raw/CustomerCsv_Staging")
 
 
 def _assert_unchanged(env, step) -> None:
@@ -373,7 +374,9 @@ def _assert_pruned(env, step) -> None:
     # worth making.
     _readable(env, seen)
 
-    prunes = [seq for action_id, seq in step.sequence_of.items() if "prune" in action_id]
+    prunes = [
+        seq for action_id, seq in step.sequence_of.items() if "prune" in action_id
+    ]
     assert prunes, "the seeded orphans should have produced prune actions"
     builds = [
         seq
@@ -405,11 +408,11 @@ def _assert_pruned(env, step) -> None:
 # its own, however many it is given. Which host a Session is, is not a detail
 # the caller may fudge; it is the whole distinction the two classes make.
 
-LOADED = '''
-from weaver.load import run_load
+LOADED = """
+from weaver.operations.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import NotebookSession
+from weaver.sessions import NotebookSession
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
@@ -438,7 +441,7 @@ emit({
         if not entry.is_directory
     ),
 })
-'''
+"""
 
 
 def _why(report) -> str:
@@ -641,11 +644,11 @@ def _corrupt(env, bundle):
 #: Validation, over the estate the load has just filled. Run through `run_test`
 #: over a Session this body holds, for the reason the load body is: the public
 #: entry acquires its own Spark session and the local twin shares one.
-VALIDATED = '''
+VALIDATED = """
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import NotebookSession
-from weaver.test import run_test
+from weaver.sessions import NotebookSession
+from weaver.operations.test import run_test
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
 
@@ -669,7 +672,7 @@ emit({
         if not entry.is_directory
     ),
 })
-'''
+"""
 
 
 def _assert_validated(env, seen) -> None:
@@ -755,7 +758,9 @@ def drive(journey):
     env = journey.env
 
     env.install_repo()
-    _assert_installed(env, journey.run("install", between=lambda e, _b: e.remove_repo()))
+    _assert_installed(
+        env, journey.run("install", between=lambda e, _b: e.remove_repo())
+    )
     _assert_authored_objects_reach_the_build(env)
 
     # The source goes back before every later transition: generation reads it.
@@ -793,19 +798,18 @@ def drive(journey):
 # added here is the composition: a Delta table published into a Warehouse
 # through an alias, materialised there, and reconciled against its source.
 #
-# Fabric only, and not for cost: a `LocalWorkspace` has no Warehouse, so there
-# is no emulator twin to run this against.
+# A Warehouse, so a real workspace is the only place this can run.
 
 CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
 
 #: The load, over both physical sides. The Warehouse's report is a table with a
 #: generated load procedure of its own, so the run graph has work either side of
 #: the endpoint and a real ordering constraint between them.
-CROSS_ITEM_LOADED = '''
-from weaver.load import run_load
+CROSS_ITEM_LOADED = """
+from weaver.operations.load import run_load
 from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.session import NotebookSession
+from weaver.sessions import NotebookSession
 
 requested = (
     PhysicalTargetRef("lakehouse", target.name),
@@ -824,14 +828,14 @@ dry = orchestrate(True)
 real = orchestrate(False)
 
 emit({"dry": dry, "real": real})
-'''
+"""
 
 #: The validation, over both sides. The Warehouse's Test is the reconciliation —
 #: the claim neither side can make alone.
-CROSS_ITEM_VALIDATED = '''
+CROSS_ITEM_VALIDATED = """
 from weaver.load_plan import PhysicalTargetRef
-from weaver.session import NotebookSession
-from weaver.test import run_test
+from weaver.sessions import NotebookSession
+from weaver.operations.test import run_test
 
 requested = (
     PhysicalTargetRef("lakehouse", target.name),
@@ -842,7 +846,7 @@ with NotebookSession(workspace=workspace, spark=spark, store=store) as session:
     emit(
         run_test(session, workspace=workspace, requested=requested).to_mapping()
     )
-'''
+"""
 
 
 def _warehouse_objects(env) -> dict:
@@ -854,8 +858,7 @@ def _warehouse_objects(env) -> dict:
         "where o.type in ('U', 'V', 'P')"
     )
     return {
-        f"{row['schema_name']}.{row['object_name']}": str(row["kind"])
-        for row in rows
+        f"{row['schema_name']}.{row['object_name']}": str(row["kind"]) for row in rows
     }
 
 
@@ -894,9 +897,7 @@ def _assert_warehouse_installed(env, step) -> None:
     # A Warehouse table carries a generated load procedure, and its Test one of
     # its own — which is what gives the run graph something to dispatch on this
     # side of the crossing rather than only on the Lakehouse's.
-    procedures = {
-        name for name, kind in held.items() if kind == "SQL_STORED_PROCEDURE"
-    }
+    procedures = {name for name, kind in held.items() if kind == "SQL_STORED_PROCEDURE"}
     assert procedures == {
         "_.Load Rpt.CustomerReport",
         "_.Test Rpt.ReportReconciles",

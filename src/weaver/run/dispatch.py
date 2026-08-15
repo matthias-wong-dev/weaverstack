@@ -6,7 +6,6 @@ the installed primitive reference to the appropriate Session operation.
 
 from __future__ import annotations
 
-from .result import RunError
 from .resolution import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
@@ -14,6 +13,7 @@ from .resolution import (
     PYTHON_VALIDATION,
     WAREHOUSE_PROCEDURE,
 )
+from .result import RunError
 
 
 def dispatch_primitive(
@@ -221,9 +221,8 @@ def _join(root: str, *parts: str) -> str:
 def can_refresh(session, workspace=None) -> bool:
     """Whether this host has a SQL analytics endpoint to refresh at all.
 
-    The emulator has none, which is an honest absence rather than a fault — the
-    build's own executor skips for the same reason — so the Runner is told and
-    skips the node rather than failing it.
+    A Warehouse has none of its own, so the Runner is told and skips the node
+    rather than failing it.
     """
 
     if session is None:

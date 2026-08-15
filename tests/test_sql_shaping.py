@@ -18,7 +18,6 @@ from weaver.declaration.sql_shaping import (
     render_sql_template,
 )
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "sql"
 
 
@@ -62,7 +61,9 @@ def test_render_sql_template_fills_a_ddl_template():
         "security_access_audit.sql",
     ],
 )
-def test_insert_where_one_eq_zero_guards_every_select_in_serious_sql_fixtures(fixture_name):
+def test_insert_where_one_eq_zero_guards_every_select_in_serious_sql_fixtures(
+    fixture_name,
+):
     sql = _fixture_sql(fixture_name)
     transformed = insert_where_one_eq_zero(sql)
 
@@ -249,7 +250,10 @@ def test_mixed_case_keywords_work_across_transformers():
 
 
 def test_adds_where_to_simple_select():
-    assert insert_where_one_eq_zero("SELECT * from dbo.Users") == "SELECT * from dbo.Users where 1=0"
+    assert (
+        insert_where_one_eq_zero("SELECT * from dbo.Users")
+        == "SELECT * from dbo.Users where 1=0"
+    )
 
 
 def test_wraps_existing_where_condition():
@@ -268,7 +272,9 @@ def test_inserts_before_order_by():
 
 def test_preserves_group_by_after_existing_where():
     assert (
-        insert_where_one_eq_zero("SELECT TeamId, COUNT(*) from dbo.Users where IsActive = 1 GROUP BY TeamId")
+        insert_where_one_eq_zero(
+            "SELECT TeamId, COUNT(*) from dbo.Users where IsActive = 1 GROUP BY TeamId"
+        )
         == "SELECT TeamId, COUNT(*) from dbo.Users where (IsActive = 1) and 1=0 GROUP BY TeamId"
     )
 
@@ -315,7 +321,10 @@ def test_transforms_each_side_of_union():
 
 def test_transforms_multiple_statements():
     sql = "SELECT 1; select 2 where 2 = 2;"
-    assert insert_where_one_eq_zero(sql) == "SELECT 1 where 1=0; select 2 where (2 = 2) and 1=0;"
+    assert (
+        insert_where_one_eq_zero(sql)
+        == "SELECT 1 where 1=0; select 2 where (2 = 2) and 1=0;"
+    )
 
 
 def test_handles_tsql_bracketed_identifiers_and_top():
@@ -544,4 +553,7 @@ end
 def test_does_not_treat_tsql_table_hint_with_as_statement_boundary():
     sql = "SELECT * from dbo.Users WITH (NOLOCK)"
 
-    assert insert_where_one_eq_zero(sql) == "SELECT * from dbo.Users WITH (NOLOCK) where 1=0"
+    assert (
+        insert_where_one_eq_zero(sql)
+        == "SELECT * from dbo.Users WITH (NOLOCK) where 1=0"
+    )

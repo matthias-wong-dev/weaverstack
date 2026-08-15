@@ -18,7 +18,7 @@ from typing import Any, Mapping, Protocol
 
 from ...errors import InstallError
 from ...locations import LakehouseSparkLocation
-from ...spark import SparkDestination, SparkNaming
+from ...spark import FabricSparkTarget
 from ...store import Store
 from ...targets import ItemRef
 from ..models import InstallAction
@@ -34,11 +34,10 @@ class ResolvedTarget:
     because Fabric answers them separately:
 
     ``location``
-        the physical roots — where the bytes are. An ``abfss://`` URL on Fabric, a
-        directory locally.
+        the physical roots — where the bytes are, as an ``abfss://`` URL.
     ``destination``
-        the catalogue name — what a statement calls it. Fabric's four-part
-        ``workspace.lakehouse.schema.object``; locally the folded database name.
+        the catalogue name — what a statement calls it, as Fabric's four-part
+        ``workspace.lakehouse.schema.object``.
 
     Neither substitutes for the other: a folder is created at a path and has no
     catalogue name, while a view exists only as a name.
@@ -53,7 +52,7 @@ class ResolvedTarget:
     bound: BoundTarget
     lakehouse: ItemRef
     location: LakehouseSparkLocation | None = None
-    destination: SparkDestination | None = None
+    destination: FabricSparkTarget | None = None
 
 
 @dataclass(frozen=True)
@@ -83,9 +82,7 @@ class InstallationContext:
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: This installation's publication instant, resolved into ``{{epoch}}``. One
     #: value for the whole run, so every Registry row a build writes carries the
-    #: same one and two rows can be ordered against each other. It is not a
-    #: destination's business, which is why it lives here rather than being
-    #: resolved with the object tokens.
+    #: same one and two rows can be ordered against each other.
     epoch: str | None = None
 
     def resolved(self, target_id: str) -> ResolvedTarget:
@@ -99,8 +96,8 @@ class InstallationContext:
         return found
 
     @property
-    def names(self) -> SparkNaming:
-        """What this batch's destination calls things.
+    def destination(self) -> FabricSparkTarget:
+        """How Fabric Spark addresses this batch's target.
 
         Failing rather than falling back to the session's own catalogue is what
         stops an action with nowhere to go from landing somewhere plausible
@@ -112,7 +109,7 @@ class InstallationContext:
                 f"target {self.target.bound.id!r} resolved to no Spark destination, "
                 "so a statement naming an object has nowhere to run"
             )
-        return SparkNaming(self.target.destination)
+        return self.target.destination
 
 
 @dataclass(frozen=True)

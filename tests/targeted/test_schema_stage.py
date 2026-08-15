@@ -11,9 +11,6 @@ All of it is a set difference plus a rendering, so none of it needs an engine.
 
 from __future__ import annotations
 
-import json
-
-import pytest
 from factories import bound_target, document_id, item_id, target_inventory
 
 from weaver.build_bundle.physical import item_schema_stage
@@ -126,13 +123,18 @@ def test_schemas_are_ordered_so_the_payload_is_stable():
 # --- what a create looks like on each side ------------------------------------
 
 
-def test_a_lakehouse_schema_is_a_spark_schema_payload():
+def test_a_lakehouse_schema_is_finished_spark_sql():
+    """No instruction for the installer to complete: a Fabric Lakehouse pins
+    its own storage, so the statement is known when the bundle is generated."""
+
     planned = stage(CUSTOMER)
     (action,) = actions(planned)
 
-    assert action.executor == "spark_schema"
-    assert action.payload.endswith(".schema.json")
-    assert json.loads(payload_of(planned, action)) == {"schema": "DWG"}
+    assert action.executor == "spark_sql"
+    assert action.payload.endswith(".spark.sql")
+    assert payload_of(planned, action).decode() == (
+        "CREATE SCHEMA IF NOT EXISTS `Demo`.`Sales_LH`.`DWG`\n"
+    )
 
 
 def test_a_warehouse_schema_is_t_sql():
@@ -168,9 +170,9 @@ def test_the_payload_hash_matches_what_the_action_carries():
     planned = stage(CUSTOMER)
     (action,) = actions(planned)
 
-    assert action.payload_sha256 == hashlib.sha256(
-        payload_of(planned, action)
-    ).hexdigest()
+    assert (
+        action.payload_sha256 == hashlib.sha256(payload_of(planned, action)).hexdigest()
+    )
 
 
 def test_the_stage_is_bound_to_the_target_it_was_planned_for():

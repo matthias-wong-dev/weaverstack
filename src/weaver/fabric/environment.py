@@ -20,7 +20,7 @@ from .resources import (
     ENVIRONMENT,
     Item,
     ItemNotFoundError,
-    Workspace,
+    WorkspaceItem,
     find_item,
     find_workspace,
 )
@@ -80,11 +80,21 @@ def environment_dependencies(root: Path | None = None) -> list[str]:
     return pip
 
 
+#: Packages a desktop needs to reach Fabric, and Fabric itself never imports.
+#: They are ordinary runtime dependencies — `pip install weaverstack` gives you
+#: a working CLI — but installing them *into* a Fabric Environment would ship
+#: an HTTP stack, a build frontend and a readline shim to a Spark image that
+#: has no use for any of them.
+DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "pyreadline3"})
+
+
 def missing_from_environment(root: Path | None = None) -> list[str]:
     """Runtime dependencies that ``environment.yml`` fails to install.
 
     The check that keeps the two definitions from drifting: a package added to
     ``pyproject.toml`` but not to the Environment would be absent in Fabric.
+    Desktop-only packages are excluded by name rather than by guesswork, so
+    adding one to that set is a visible decision.
     """
 
     root = root or project_root()
@@ -93,6 +103,7 @@ def missing_from_environment(root: Path | None = None) -> list[str]:
         dependency
         for dependency in runtime_dependencies(root)
         if _normalise(dependency) not in staged
+        and _normalise(dependency) not in {_normalise(n) for n in DESKTOP_ONLY}
     ]
 
 
@@ -120,7 +131,15 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
     output_dir = output_dir or (root / "dist")
     before = set(output_dir.glob(f"{WHEEL_PREFIX}*{WHEEL_SUFFIX}"))
     result = subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(output_dir), str(root)],
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--wheel",
+            "--outdir",
+            str(output_dir),
+            str(root),
+        ],
         capture_output=True,
         text=True,
     )
@@ -137,7 +156,8 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
         return built[-1]
     # A rebuild of an unchanged, already-built version produces no new file.
     existing = sorted(
-        output_dir.glob(f"{WHEEL_PREFIX}*{WHEEL_SUFFIX}"), key=lambda p: p.stat().st_mtime
+        output_dir.glob(f"{WHEEL_PREFIX}*{WHEEL_SUFFIX}"),
+        key=lambda p: p.stat().st_mtime,
     )
     if not existing:
         raise CommandError(
@@ -150,7 +170,7 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
 
 
 def find_or_create_environment(
-    workspace: Workspace, name: str, *, client: FabricClient
+    workspace: WorkspaceItem, name: str, *, client: FabricClient
 ) -> tuple[Item, bool]:
     """The named Environment, created if it does not yet exist.
 
@@ -173,12 +193,14 @@ def find_or_create_environment(
         item = _await_environment(workspace, name, client=client)
     else:
         body = response.json()
-        item = Item(id=body["id"], name=name, type=ENVIRONMENT, workspace_id=workspace.id)
+        item = Item(
+            id=body["id"], name=name, type=ENVIRONMENT, workspace_id=workspace.id
+        )
     return item, True
 
 
 def _await_environment(
-    workspace: Workspace, name: str, *, client: FabricClient, timeout: float = 120.0
+    workspace: WorkspaceItem, name: str, *, client: FabricClient, timeout: float = 120.0
 ) -> Item:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -186,7 +208,9 @@ def _await_environment(
             return find_item(workspace, name, item_type=ENVIRONMENT, client=client)
         except ItemNotFoundError:
             time.sleep(3.0)
-    raise FabricError(f"Environment {name!r} did not appear within {int(timeout)} seconds.")
+    raise FabricError(
+        f"Environment {name!r} did not appear within {int(timeout)} seconds."
+    )
 
 
 def _staging_base(env: Item) -> str:
@@ -266,7 +290,9 @@ def upload_wheel(env: Item, wheel: Path, *, client: FabricClient) -> None:
         )
 
 
-def upload_environment_yml(env: Item, definition: Path, *, client: FabricClient) -> None:
+def upload_environment_yml(
+    env: Item, definition: Path, *, client: FabricClient
+) -> None:
     """Stage the external-dependency definition as the Environment's yml."""
 
     import requests
@@ -275,7 +301,13 @@ def upload_environment_yml(env: Item, definition: Path, *, client: FabricClient)
     response = requests.post(
         url,
         headers={"Authorization": f"Bearer {client.token}"},
-        files={"file": ("environment.yml", definition.read_bytes(), "application/octet-stream")},
+        files={
+            "file": (
+                "environment.yml",
+                definition.read_bytes(),
+                "application/octet-stream",
+            )
+        },
         timeout=client.timeout,
     )
     if response.status_code not in (200, 201):
@@ -286,7 +318,9 @@ def upload_environment_yml(env: Item, definition: Path, *, client: FabricClient)
         )
 
 
-def delete_stale_wheels(env: Item, keep: str, staged: list[str], *, client: FabricClient) -> list[str]:
+def delete_stale_wheels(
+    env: Item, keep: str, staged: list[str], *, client: FabricClient
+) -> list[str]:
     """Remove staged Weaver wheels other than ``keep``. Returns what was removed.
 
     Only ``weaverstack-*.whl`` is ever deleted, so an unrelated custom library
@@ -384,7 +418,7 @@ class InstallResult:
 
 def _version_from_wheel(filename: str) -> str:
     # weaverstack-<version>-py3-none-any.whl
-    stem = filename[len(WHEEL_PREFIX):-len(WHEEL_SUFFIX)]
+    stem = filename[len(WHEEL_PREFIX) : -len(WHEEL_SUFFIX)]
     return stem.split("-py3-")[0].split("-py2.py3-")[0]
 
 
@@ -423,7 +457,9 @@ def install(
 
     with step("Find the Environment"):
         workspace = find_workspace(workspace_name, client=client)
-        env, created = find_or_create_environment(workspace, environment_name, client=client)
+        env, created = find_or_create_environment(
+            workspace, environment_name, client=client
+        )
 
     definition_path = root / ENVIRONMENT_DEFINITION
     wanted_yml = definition_path.read_text("utf-8")
@@ -431,7 +467,9 @@ def install(
     # Diff against what is *published* (what a session imports), not staging.
     with step("Read the published revision"):
         published_libs = read_published(env, client=client)
-        deps_changed = wanted_yml.strip() != (published_libs.get("environmentYml") or "").strip()
+        deps_changed = (
+            wanted_yml.strip() != (published_libs.get("environmentYml") or "").strip()
+        )
         wheel_changed = wheel.name not in library_wheels(published_libs)
 
         # Stage only the differences, and only if they are not already staged (an
@@ -441,7 +479,10 @@ def install(
 
     t = time.perf_counter()
     with step("Stage what changed"):
-        if deps_changed and wanted_yml.strip() != (staging.get("environmentYml") or "").strip():
+        if (
+            deps_changed
+            and wanted_yml.strip() != (staging.get("environmentYml") or "").strip()
+        ):
             upload_environment_yml(env, definition_path, client=client)
         if wheel_changed and wheel.name not in staged:
             upload_wheel(env, wheel, client=client)
@@ -461,7 +502,9 @@ def install(
         timings["publish"] = time.perf_counter() - t
         published_now = publish_status.lower() in {"success", "succeeded"}
         if not published_now:
-            raise FabricError(f"Environment publish finished with status {publish_status!r}.")
+            raise FabricError(
+                f"Environment publish finished with status {publish_status!r}."
+            )
 
     return InstallResult(
         workspace_name=workspace.name,

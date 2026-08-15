@@ -28,7 +28,7 @@ import pytest
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
-MOUNT_CONTRACT = r'''
+MOUNT_CONTRACT = r"""
 import notebookutils, os
 from pathlib import Path
 
@@ -51,7 +51,7 @@ out["seen_via_abfss"] = [
 out["scopes"] = [str(m.scope) for m in notebookutils.fs.mounts()
                  if m.mountPoint == "/weaver_contract"]
 emit(out)
-'''
+"""
 
 
 def test_a_mount_makes_onelake_addressable_by_ordinary_python(
@@ -66,9 +66,7 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
 
     workspace = fabric_workspace_item
     item = fabric_target_lakehouse
-    root = (
-        f"abfss://{workspace.id}@onelake.dfs.fabric.microsoft.com/{item.id}"
-    )
+    root = f"abfss://{workspace.id}@onelake.dfs.fabric.microsoft.com/{item.id}"
 
     seen = livy_session.run(
         f"ROOT = {root!r}\n{MOUNT_CONTRACT}", label="mount contract"
@@ -93,8 +91,8 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
 #: it was told about and then fails to remove the directory, as ``ENOTEMPTY``.
 #:
 #: Only reproducible when one session outlives a change made behind it, which is
-#: the Fabric suite's shape and never the emulator's.
-MOUNT_COHERENCE = r'''
+#: the Fabric suite's shape.
+MOUNT_COHERENCE = r"""
 import notebookutils
 from pathlib import Path
 
@@ -107,9 +105,9 @@ staging.mkdir(parents=True, exist_ok=True)
 (staging / "customers.csv").write_text("a,b\n1,2\n", encoding="utf-8")
 out["before"] = sorted(p.name for p in staging.iterdir())
 emit(out)
-'''
+"""
 
-MOUNT_AFTER_WIPE = r'''
+MOUNT_AFTER_WIPE = r"""
 import notebookutils, shutil, time
 from pathlib import Path
 
@@ -147,7 +145,7 @@ try:
 except OSError as exc:
     out["reset"] = f"{type(exc).__name__}: {exc}"
 emit(out)
-'''
+"""
 
 
 def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
@@ -186,9 +184,7 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
     # The location is resolved rather than composed — a DFS client addresses
     # OneLake by URL, and an item by *id*, not by the name a person types.
     dfs = OneLakeDfsClient()
-    staged = (
-        resolver.files_root(ItemRef(item.name)) / probe / "CustomerCsv_Staging"
-    )
+    staged = resolver.files_root(ItemRef(item.name)) / probe / "CustomerCsv_Staging"
     dfs.delete(staged, recursive=True)
 
     after = livy_session.run(

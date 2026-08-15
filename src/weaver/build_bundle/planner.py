@@ -35,10 +35,16 @@ from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
+from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
 from .aliases import plan_item_aliases
-from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
+from .bundle import (
+    SUPPORTED_FORMAT_VERSION,
+    BuildBundle,
+    compute_bundle_id,
+    write_bundle,
+)
 from .catalogue_actions import (
     collect_claims,
     render_catalogue_after_build,
@@ -47,18 +53,17 @@ from .catalogue_actions import (
 from .endpoints import item_refresh_stage
 from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
-from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from .physical import (
     item_build_stages,
+    item_drop_stages,
     item_load_removals,
     item_load_stages,
-    item_drop_stages,
     item_prune_stage,
     item_schema_stage,
 )
 from .prune import TargetInventory
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
-from .targets import ItemBindings, LakehouseBinding
+from .targets import WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
 
 
 def generate_item_build_bundle(
@@ -142,6 +147,7 @@ def generate_item_build_bundle(
     removed = set(registered) - selected_ids
 
     control_target = _control_target(control_lakehouse, targets)
+    control_destination = control_target.spark_target
     if all(target.id != control_target.id for target in targets):
         targets = targets + (control_target,)
 
@@ -161,6 +167,7 @@ def generate_item_build_bundle(
         catalogue,
         removed | selected_for_drop,
         control_target=control_target,
+        control_destination=control_destination,
         stale_claims=stale_claims,
     )
     if catalogue_before is not None:
@@ -182,8 +189,12 @@ def generate_item_build_bundle(
                 target_by_item=target_by_item,
                 selected_documents=selected_documents,
                 selected_aliases=selected_aliases,
-                selected_for_drop=selected_for_drop - selected_loads - selected_validations,
-                selected_for_build=selected_for_build - selected_loads - selected_validations,
+                selected_for_drop=selected_for_drop
+                - selected_loads
+                - selected_validations,
+                selected_for_build=selected_for_build
+                - selected_loads
+                - selected_validations,
                 selected_loads=selected_for_build & selected_loads,
                 removed=removed,
                 registered=registered,
@@ -199,6 +210,7 @@ def generate_item_build_bundle(
             selected_ids - uncertified,
             target_by_item,
             control_target=control_target,
+            control_destination=control_destination,
             # The catalogue as the claim deletions above will leave it, not as
             # it was read — see `without_claims`.
             current=catalogue_after_deletions,
@@ -224,7 +236,9 @@ def generate_item_build_bundle(
         targets=targets,
         sequences=sequences,
         selection=selection,
-        omitted_nodes=tuple(sorted(omitted, key=lambda node: (node.node_id, node.reason))),
+        omitted_nodes=tuple(
+            sorted(omitted, key=lambda node: (node.node_id, node.reason))
+        ),
         target_changes=target_changes,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
@@ -358,7 +372,14 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_aliases,
     )
-    artefacts = item_runtime_artefacts(repository, item=item)
+    artefacts = item_runtime_artefacts(
+        repository,
+        item=item,
+        # The load layer installs these, so their bodies are rendered here
+        # against the target this item is bound to. A Warehouse names its
+        # objects over TDS and has no Spark destination.
+        destination=None if target.kind == WAREHOUSE_TARGET else target.spark_target,
+    )
     stages: list[PlannedStage] = []
 
     # Prune is given every *declared* alias destination, never only the selected
@@ -367,7 +388,11 @@ def plan_item_build(
     # selection just chose to keep. Load artefacts are treated the same way, and
     # the stage derives them itself.
     prune = item_prune_stage(
-        repository, selected_documents, item=item, target=target, inventory=inventory
+        repository,
+        selected_documents,
+        item=item,
+        target=target,
+        inventory=inventory,
     )
     if prune is not None:
         stages.append(prune)
@@ -412,16 +437,15 @@ def plan_item_build(
     # endpoint has caught up. Removals ride in it too: they come from the
     # previous Registry rows rather than from any diff against the target, so
     # they need no earlier barrier to be safe.
-    stages.extend(
-        item_load_stages(artefacts, selected_loads, item=item, target=target)
-    )
+    stages.extend(item_load_stages(artefacts, selected_loads, item=item, target=target))
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
     return PlannedItem(
         stages=tuple(stages),
         omitted=aliases.omitted,
-        uncertified=frozenset(aliases.omitted_destinations) & frozenset(selected_for_build),
+        uncertified=frozenset(aliases.omitted_destinations)
+        & frozenset(selected_for_build),
     )
 
 

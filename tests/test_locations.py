@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from weaver.locations import Location
 from weaver.errors import IdentityError
+from weaver.locations import Location
 
 ABFSS = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse-id"
 
@@ -34,7 +34,9 @@ def test_pathlib_would_have_corrupted_it():
 
 
 def test_joining_a_filesystem_location():
-    assert (Location("/srv/.local") / "Sales" / "Files").value == "/srv/.local/Sales/Files"
+    assert (
+        Location("/srv/.local") / "Sales" / "Files"
+    ).value == "/srv/.local/Sales/Files"
 
 
 def test_join_takes_several_segments():
@@ -52,13 +54,15 @@ def test_the_filesystem_root_survives_normalisation():
 def test_backslashes_are_separators_like_any_other():
     """A Windows caller arrives with them, and everything here splits on "/".
 
-    `LocalWorkspace` normalises its root through `Path`, so on Windows `str()` of it
+    A root normalised through `Path` means that on Windows `str()` of it
     uses backslashes. Left alone they are not separators to `join` or `name`,
     and an Weaver document repository read from a Windows checkout takes its whole path as
     its catalogue name.
     """
 
-    assert Location("D:\\a\\weaverstack\\sales-etl").value == "D:/a/weaverstack/sales-etl"
+    assert (
+        Location("D:\\a\\weaverstack\\sales-etl").value == "D:/a/weaverstack/sales-etl"
+    )
     assert Location("D:\\a\\weaverstack\\sales-etl").name == "sales-etl"
     assert (Location("\\srv\\.local") / "Sales").value == "/srv/.local/Sales"
 

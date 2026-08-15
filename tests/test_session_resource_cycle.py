@@ -14,8 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from weaver.session.resources import Resource, ResourceError, ResourceState
-from weaver.session.telemetry import SessionTelemetry
+from weaver.sessions.resources import Resource, ResourceError, ResourceState
+from weaver.sessions.telemetry import SessionTelemetry
 
 
 @pytest.fixture
@@ -93,9 +93,7 @@ def test_a_failed_resource_refuses_further_use_until_it_is_reacquired(executor):
 
 
 def test_recovery_is_bounded_rather_than_endless(executor):
-    resource = Resource(
-        "livy", lambda: "livy", executor=executor, max_attempts=2
-    )
+    resource = Resource("livy", lambda: "livy", executor=executor, max_attempts=2)
     resource.get()
     resource.fail(RuntimeError("dead"))
     resource.reacquire()
@@ -157,9 +155,7 @@ def test_close_releases_only_what_was_acquired(executor):
     never = Resource(
         "unused", lambda: "value", executor=executor, release=released.append
     )
-    used = Resource(
-        "used", lambda: "value", executor=executor, release=released.append
-    )
+    used = Resource("used", lambda: "value", executor=executor, release=released.append)
     used.get()
 
     never.close()
@@ -173,9 +169,7 @@ def test_close_releases_only_what_was_acquired(executor):
 
 def test_acquisition_is_timed_where_a_session_can_see_it(executor):
     telemetry = SessionTelemetry()
-    resource = Resource(
-        "livy", lambda: "livy", executor=executor, telemetry=telemetry
-    )
+    resource = Resource("livy", lambda: "livy", executor=executor, telemetry=telemetry)
     resource.get()
 
     assert telemetry.measures["livy.acquire"].calls == 1
@@ -200,9 +194,7 @@ def test_closing_mid_acquisition_waits_so_it_can_release_what_arrives(executor):
         release.wait(5)
         return "livy"
 
-    resource = Resource(
-        "livy", acquire, executor=executor, release=released.append
-    )
+    resource = Resource("livy", acquire, executor=executor, release=released.append)
     resource.start(speculative=True)
 
     closing = executor.submit(resource.close)

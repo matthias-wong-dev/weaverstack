@@ -56,9 +56,7 @@ def _dispatch(fault_tolerant: bool, row):
         logical_id=SimpleNamespace(object_id=ObjectId("Sales", "Customer")),
     )
     session = SimpleNamespace(sql_executor=lambda target, workspace=None: sql)
-    result = dispatch_primitive(
-        node, session=session, fault_tolerant=fault_tolerant
-    )
+    result = dispatch_primitive(node, session=session, fault_tolerant=fault_tolerant)
     return result, sql
 
 
@@ -90,7 +88,9 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 
 
 def test_fault_tolerance_reaches_the_procedure_as_an_input():
-    _result, sql = _dispatch(True, dict(ROW, rows_read=0, rows_inserted=0, rows_updated=0))
+    _result, sql = _dispatch(
+        True, dict(ROW, rows_read=0, rows_inserted=0, rows_updated=0)
+    )
 
     assert sql.calls[0][1] == (("fault_tolerant", 1),)
 

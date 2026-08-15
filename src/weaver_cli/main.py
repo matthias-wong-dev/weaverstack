@@ -9,8 +9,8 @@ import time
 import weaver
 from weaver.errors import WeaverError
 
-#: The capacity verbs, kept here so the parser needs no Fabric import — a
-#: CLI-only install without the [fabric] extra must still build its parser.
+#: The capacity verbs, kept here so building the parser imports nothing from
+#: `weaver.fabric` — `weaver --help` should not pay for a transport.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 #: Named in help text. Spelled out here rather than imported at module scope so
@@ -35,7 +35,7 @@ COMPOSE_DEFAULT_FILE = "compose.yml"
 def _target_requirements(targets) -> set[str]:
     """What the named physical targets imply, by their type alone."""
 
-    from weaver.session.requirements import LIVY, ONELAKE, TDS
+    from weaver.sessions.requirements import LIVY, ONELAKE, TDS
 
     wanted: set[str] = set()
     for value in targets or ():
@@ -49,7 +49,7 @@ def _target_requirements(targets) -> set[str]:
 
 
 def _requires_targets(args) -> frozenset[str]:
-    from weaver.session.requirements import AUTH, RESOLVER, requirements
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(
         AUTH, RESOLVER, *_target_requirements(getattr(args, "targets", ()))
@@ -59,7 +59,7 @@ def _requires_targets(args) -> frozenset[str]:
 def _requires_build(args) -> frozenset[str]:
     """A build may touch everything: it writes files, DDL and the catalogue."""
 
-    from weaver.session.requirements import (
+    from weaver.sessions.requirements import (
         AUTH,
         LIVY,
         ONELAKE,
@@ -71,18 +71,10 @@ def _requires_build(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
-def _requires_control(args) -> frozenset[str]:
-    """The catalogue lives in Delta in the Weaver Lakehouse, so Spark reaches it."""
-
-    from weaver.session.requirements import AUTH, LIVY, RESOLVER, requirements
-
-    return requirements(AUTH, RESOLVER, LIVY)
-
-
 def _requires_rest(args) -> frozenset[str]:
     """Fabric control-plane work: a credential and the resolver, nothing more."""
 
-    from weaver.session.requirements import AUTH, RESOLVER, requirements
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(AUTH, RESOLVER)
 
@@ -105,12 +97,6 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"weaverstack {weaver.__version__}",
     )
     subcommands = parser.add_subparsers(dest="command", metavar="command")
-
-    doctor = subcommands.add_parser(
-        "doctor", help="Check whether this machine can run local Spark and Delta."
-    )
-    doctor.add_argument("--json", action="store_true", help="emit the report as JSON")
-    doctor.set_defaults(handler=handle_doctor)
 
     shell = subcommands.add_parser(
         "session",
@@ -139,6 +125,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report time spent by transport after the composition finishes.",
     )
+    compose.add_argument(
+        "--yes",
+        action="store_true",
+        help="Run without asking. Also authorises each command in the sequence.",
+    )
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)
 
@@ -162,21 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         metavar="NAME",
-        help=(
-            "Keep a .weaver.zip build record. Omit NAME to use a UTC timestamp."
-        ),
+        help=("Keep a .weaver.zip build record. Omit NAME to use a UTC timestamp."),
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
     build.set_defaults(handler=handle_build, requires=_requires_build)
-
-    push = subcommands.add_parser(
-        "push", help="Validate and upload a repository."
-    )
-    push.add_argument("repository", help="Local repository folder.")
-    push.add_argument("--json", action="store_true", help="emit the result as JSON")
-    _add_workspace_args(push)
-    push.set_defaults(handler=handle_push, requires=_requires_rest)
 
     load = subcommands.add_parser(
         "load", help="Load installed objects in named targets."
@@ -237,21 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_targets)
 
-    unbind = subcommands.add_parser(
-        "unbind", help="Remove catalogue state for named targets."
-    )
-    unbind.add_argument(
-        "targets",
-        nargs="+",
-        metavar="TARGET",
-        help="Lakehouse/Name or Warehouse/Name",
-    )
-    unbind.add_argument("--json", action="store_true", help="emit the result as JSON")
-    _add_workspace_args(unbind)
-    unbind.set_defaults(handler=handle_unbind, requires=_requires_control)
-
     wipe = subcommands.add_parser(
-        "wipe", help="clear a physical Lakehouse or Warehouse"
+        "wipe", help="Clear a physical Lakehouse or Warehouse."
     )
     wipe.add_argument(
         "targets",
@@ -265,8 +233,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LAKEHOUSE",
         help="Remove claims for wiped targets from this Weaver catalogue.",
     )
-    wipe.add_argument("--dry-run", action="store_true", help="Show what would be removed.")
-    wipe.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
+    wipe.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed."
+    )
+    wipe.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation prompt."
+    )
     wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
     wipe.set_defaults(handler=handle_wipe, requires=_requires_build)
 
@@ -279,26 +251,36 @@ def build_parser() -> argparse.ArgumentParser:
     # `--no-publish` only ever produced a half-installed workspace; and a
     # `--workspace-type local` that this command rejects two lines later is a
     # choice offered in order to refuse it.
-    _add_workspace_args(
-        install, include_weaver_lakehouse=False, include_workspace_type=False
-    )
+    _add_workspace_args(install, include_catalogue=False)
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
-    notebook = subcommands.add_parser(
+    # Fabric estate management rather than a Weaver lifecycle verb: these act on
+    # workspace items and on the capacity underneath them, and nothing they do
+    # reads or writes the catalogue.
+    fabric = subcommands.add_parser(
+        "fabric", help="Manage the Fabric estate Weaver runs on."
+    )
+    fabric_commands = fabric.add_subparsers(dest="fabric_command", metavar="command")
+    fabric.set_defaults(handler=_group_help(fabric))
+
+    notebook = fabric_commands.add_parser(
         "notebook", help="Deploy or run a Fabric notebook."
     )
     notebook_commands = notebook.add_subparsers(
         dest="notebook_command", metavar="command"
     )
+    notebook.set_defaults(handler=_group_help(notebook))
 
     notebook_push = notebook_commands.add_parser(
         "push", help="Create or update a notebook definition."
     )
     notebook_push.add_argument("source", help="Local .py or .ipynb notebook source.")
-    notebook_push.add_argument("--name", help="Fabric display name. Defaults to the filename.")
+    notebook_push.add_argument(
+        "--name", help="Fabric display name. Defaults to the filename."
+    )
     notebook_push.add_argument("--description")
     notebook_push.add_argument("--json", action="store_true")
-    _add_workspace_args(notebook_push, include_weaver_lakehouse=False)
+    _add_workspace_args(notebook_push, include_catalogue=False)
     notebook_push.set_defaults(handler=handle_notebook_push)
 
     notebook_run = notebook_commands.add_parser(
@@ -316,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(notebook_run)
     notebook_run.set_defaults(handler=handle_notebook_run)
 
-    capacity = subcommands.add_parser(
+    capacity = fabric_commands.add_parser(
         "capacity", help="Start, stop, or report the state of a Fabric capacity."
     )
     capacity.add_argument("action", choices=CAPACITY_ACTIONS)
@@ -332,15 +314,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _fabric_cli_workspace(args: argparse.Namespace):
-    """Resolve the Fabric-only values shared by notebook CLI utilities."""
+    """Resolve the workspace the notebook utilities act in."""
 
-    from weaver.errors import CommandError
-    from weaver.workspaces import FabricWorkspace
-
-    workspace = _resolve_workspace(args)
-    if not isinstance(workspace, FabricWorkspace):
-        raise CommandError("A Fabric Workspace is required for notebook commands.")
-    return workspace
+    return _resolve_workspace(args)
 
 
 def handle_notebook_push(args: argparse.Namespace) -> int:
@@ -375,7 +351,11 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     from weaver.fabric.notebooks import run_notebook
 
     workspace = _fabric_cli_workspace(args)
-    lakehouse = args.lakehouse or workspace.weaver_lakehouse
+    # The item name, not the typed configuration value: `run_notebook` resolves
+    # this as a Lakehouse display name, and `Lakehouse/Weaver` is not one.
+    lakehouse = args.lakehouse or (
+        workspace.catalogue_item.name if workspace.catalogue else None
+    )
     if not lakehouse:
         raise CommandError(
             "A Lakehouse is required to run this notebook. "
@@ -421,12 +401,9 @@ def handle_install(args: argparse.Namespace) -> int:
     import json
 
     from weaver.errors import CommandError
-    from weaver.session.host import use_or_create_session
-    from weaver.workspaces import FabricWorkspace
+    from weaver.sessions.host import use_or_create_session
 
     workspace = _resolve_workspace(args)
-    if not isinstance(workspace, FabricWorkspace):
-        raise CommandError("A Fabric Workspace is required to install Weaver.")
     if not workspace.environment:
         raise CommandError(
             "A Fabric Environment is required to install Weaver. "
@@ -476,35 +453,15 @@ def handle_capacity(args: argparse.Namespace) -> int:
 def _add_workspace_args(
     parser: argparse.ArgumentParser,
     *,
-    include_weaver_lakehouse: bool = True,
-    include_workspace_type: bool = True,
+    include_catalogue: bool = True,
 ) -> None:
-    """Add the explicit values that a Workspace configuration can abbreviate.
+    """Add the explicit values that a Workspace configuration can abbreviate."""
 
-    ``include_workspace_type`` is off for commands that only mean anything
-    against Fabric. Offering a choice the handler rejects is worse than not
-    offering it: argparse accepts it, and the failure arrives later and reads
-    like a bug rather than a flag that was never applicable.
-    """
-
-    parser.add_argument(
-        "--workspace",
-        help=(
-            "Fabric Workspace name or local folder path"
-            if include_workspace_type
-            else "Fabric Workspace name"
-        ),
-    )
+    parser.add_argument("--workspace", help="Fabric Workspace name.")
     parser.add_argument("--workspace-config", help="Workspace configuration file.")
-    if include_workspace_type:
-        parser.add_argument(
-            "--workspace-type",
-            choices=("fabric", "local"),
-            help="Resource environment. Defaults to fabric.",
-        )
     parser.add_argument("--environment", help="Fabric Environment name.")
-    if include_weaver_lakehouse:
-        parser.add_argument("--weaver-lakehouse", help="Weaver Lakehouse name.")
+    if include_catalogue:
+        parser.add_argument("--catalogue", help="Weaver Lakehouse name.")
 
 
 def _log_link(task_log) -> str:
@@ -550,15 +507,10 @@ def _prefer_desktop_credential() -> None:
 def _desktop_store(workspace):
     """The store a desktop command uses to reach a workspace.
 
-    Local is within-workspace; Fabric is cross-boundary, so the CLI constructs the
-    OneLakeDfsClient here — core never turns a FabricWorkspace into a DFS client.
+    Reaching into Fabric is a crossing, so the CLI constructs the
+    OneLakeDfsClient here — core never turns a Workspace into a DFS client.
     """
 
-    from weaver.workspaces import LocalWorkspace
-    from weaver.store import FilesystemStore
-
-    if isinstance(workspace, LocalWorkspace):
-        return FilesystemStore()
     from weaver.fabric import OneLakeDfsClient
 
     return OneLakeDfsClient()
@@ -569,7 +521,7 @@ def _resolve_workspace(args: argparse.Namespace):
 
     Inside ``weaver session`` a command that names no workspace inherits the one
     the session was started with, and flags it *does* give are applied on top —
-    so ``build --weaver-lakehouse Other`` overrides the control Lakehouse
+    so ``build --catalogue Other`` overrides the control Lakehouse
     without having to restate the workspace. A command naming its own
     ``--workspace`` addresses that one instead, in its own scope.
 
@@ -579,22 +531,23 @@ def _resolve_workspace(args: argparse.Namespace):
     """
 
     from weaver.config import resolve_workspace
-    from weaver.workspaces import LocalWorkspace
 
     inherited = getattr(getattr(args, "session", None), "workspace", None)
-    if inherited is not None and args.workspace is None and args.workspace_config is None:
+    if (
+        inherited is not None
+        and args.workspace is None
+        and args.workspace_config is None
+    ):
         workspace = _with_command_overrides(inherited, args)
     else:
         workspace = resolve_workspace(
             workspace=args.workspace,
-            workspace_type=getattr(args, "workspace_type", None),
             environment=args.environment,
-            weaver_lakehouse=getattr(args, "weaver_lakehouse", None),
+            catalogue=getattr(args, "catalogue", None),
             workspace_config=args.workspace_config,
         )
 
-    if not isinstance(workspace, LocalWorkspace):
-        _prefer_desktop_credential()
+    _prefer_desktop_credential()
     return workspace
 
 
@@ -603,32 +556,36 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
 
     from dataclasses import replace
 
-    from weaver.errors import CommandError
-    from weaver.targets import ItemRef
-
-    wanted_type = getattr(args, "workspace_type", None)
-    if wanted_type is not None and wanted_type != workspace.workspace_type:
-        raise CommandError(
-            f"this session addresses a {workspace.workspace_type} workspace; "
-            f"name a --workspace to use a {wanted_type} one"
-        )
-
     overrides = {}
     if getattr(args, "environment", None) is not None:
         overrides["environment"] = args.environment
-    if getattr(args, "weaver_lakehouse", None) is not None:
-        overrides["weaver_lakehouse"] = ItemRef.parse(str(args.weaver_lakehouse)).name
+    if getattr(args, "catalogue", None) is not None:
+        overrides["catalogue"] = str(args.catalogue)
     return replace(workspace, **overrides) if overrides else workspace
 
 
 def _session(args: argparse.Namespace):
-    """The Session this command runs in, where there is one.
+    """The Session this command inherits, where there is one.
 
     ``weaver session`` attaches one to every line it parses. A one-shot
-    invocation has none, and each operation opens and closes its own.
+    invocation has none.
     """
 
     return getattr(args, "session", None)
+
+
+def _running_session(args: argparse.Namespace, workspace):
+    """The Session this command runs in, borrowed or opened for it.
+
+    Operations take names and a Session, never a resolved Workspace — so the
+    CLI, which resolves one for its own inheritance and override rules, is what
+    turns it into a Session. Borrowed from ``weaver session`` where there is
+    one, and closed here only when this opened it.
+    """
+
+    from weaver.sessions.host import use_or_create_session
+
+    return use_or_create_session(_session(args), workspace=workspace)
 
 
 def handle_session(args: argparse.Namespace) -> int:
@@ -665,7 +622,7 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
     if not _can_ask():
         return attempt()
 
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(
         _session(args), workspace=_resolve_workspace(args)
@@ -707,8 +664,8 @@ def _read_key() -> str:
     try:
         import termios
         import tty
-    except ImportError:  # a platform without POSIX terminal control
-        return sys.stdin.readline()[:1]
+    except ImportError:
+        return _read_key_windows()
 
     descriptor = sys.stdin.fileno()
     try:
@@ -731,6 +688,29 @@ def _read_key() -> str:
         termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
 
 
+def _read_key_windows() -> str:
+    """One keypress on a console without POSIX terminal control.
+
+    ``msvcrt`` reads a key as it is pressed, so Esc declines a retry here as it
+    does elsewhere. Reading a line instead would wait for Enter, which is the
+    other answer.
+
+    A function or arrow key arrives as a prefix and then its code. Both are
+    returned together, so it matches neither answer and the caller asks again
+    rather than reading the code as the next keypress.
+    """
+
+    try:
+        import msvcrt
+    except ImportError:  # neither POSIX nor Windows: read a line and take one key
+        return sys.stdin.readline()[:1]
+
+    key = msvcrt.getwch()
+    if key in ("\x00", "\xe0"):
+        return key + msvcrt.getwch()
+    return key
+
+
 def _can_ask() -> bool:
     """Whether there is somebody at a terminal to answer."""
 
@@ -741,74 +721,6 @@ def _authorised(args: argparse.Namespace) -> bool:
     """Return whether a command has already received confirmation."""
 
     return bool(getattr(args, "yes", False) or getattr(args, "authorised", False))
-
-
-def handle_push(args: argparse.Namespace) -> int:
-    """Validate locally, then replace ``Files/weaver_items`` as one unit."""
-
-    import json
-
-    from weaver.locations import Location
-    from weaver.push import push_item_repository
-    from weaver.errors import CommandError
-    from weaver.resolution import resolver_for
-
-    workspace = _resolve_workspace(args)
-    if not workspace.weaver_lakehouse:
-        raise CommandError(
-            "A Weaver Lakehouse is required to push a repository. "
-            "Use --weaver-lakehouse or configure one for this workspace."
-        )
-    resolver = resolver_for(workspace)
-    result = push_item_repository(
-        Location(args.repository),
-        resolver.weaver_items_root,
-        destination_store=_desktop_store(workspace),
-    )
-    payload = result.to_mapping()
-    if args.json:
-        print(json.dumps(payload, indent=2))
-    else:
-        print(f"Uploaded {len(result.files)} file(s).")
-        print(f"  from: {result.source}")
-        print(f"  to:   {result.destination}")
-        print(f"  signature: {result.repository_signature}")
-    return 0
-
-
-def handle_unbind(args: argparse.Namespace) -> int:
-    import json
-
-    from weaver.operations import _unbind_target_names
-    from weaver.errors import CommandError
-
-    lakehouses, warehouses = _unbind_target_names(args.targets)
-    workspace = _resolve_workspace(args)
-    if not workspace.weaver_lakehouse:
-        raise CommandError("A configured Weaver Lakehouse is required to unbind targets.")
-    result = _run_unbind(
-        workspace,
-        lakehouses=lakehouses,
-        warehouses=warehouses,
-        session=_session(args),
-    )
-    if args.json:
-        print(json.dumps(result, indent=2))
-    else:
-        print(f"Removed {len(result['logical_items'])} logical installation(s).")
-        for target in result["targets"]:
-            print(f"  {target}")
-    return 0
-
-
-def _run_unbind(workspace, *, lakehouses, warehouses, session=None) -> dict:
-    """The core operation. The CLI's job here is the arguments, not the crossing."""
-
-    from weaver.operations import unbind_catalogue_claims
-
-    return unbind_catalogue_claims(
-        workspace, lakehouses=lakehouses, warehouses=warehouses, session=session
-    )
 
 
 def handle_load(args: argparse.Namespace) -> int:
@@ -868,28 +780,23 @@ def _run_load(
 ):
     """One load, decided here and dispatched where each primitive lives.
 
-    There is one call now. `weaver.load` reads the estate through Session
-    capabilities, builds the graph locally and dispatches each node to whatever
-    can run it — TDS for a Warehouse procedure, the run's remote scope for a
-    deployed Python module — so the desktop, a notebook and the emulator differ
-    only in what the Session answers.
+    `weaver.load` reads the estate through Session capabilities, builds the
+    graph here and dispatches each node to whatever can run it — TDS for a
+    Warehouse procedure, the run's remote scope for a deployed Python module —
+    so a desktop and a notebook differ only in what the Session answers.
 
     What this module still owns is the *preflight*: rejecting a mistyped target
     over one REST call, before anything expensive is acquired.
     """
 
-    from weaver.session.host import use_or_create_session
-    from weaver.workspaces import LocalWorkspace
+    from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not isinstance(workspace, LocalWorkspace) and not opened.executes_here(
-            workspace
-        ):
+        if not opened.executes_here(workspace):
             _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.load(
             list(targets),
             names=names,
-            workspace=workspace,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             session=opened,
@@ -924,10 +831,14 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
 
     from weaver.errors import CommandError
     from weaver.fabric import FabricResolver, ItemNotFoundError
-    from weaver.fabric.resources import LAKEHOUSE, WAREHOUSE
-    from weaver.targets import DeltaTarget, parse_physical_target, physical_item
+    from weaver.targets import (
+        parse_physical_target,
+        physical_item,
+        physical_kind,
+    )
 
     if session is not None:
+
         def resolve(item, *, item_type):
             return session.resolve_item(item, item_type=item_type, workspace=workspace)
     else:
@@ -936,7 +847,7 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
     absent = []
     for value in targets:
         target = parse_physical_target(value, what="load target", error=CommandError)
-        item_type = LAKEHOUSE if isinstance(target, DeltaTarget) else WAREHOUSE
+        item_type = physical_kind(target)
         try:
             resolve(physical_item(target), item_type=item_type)
         except ItemNotFoundError:
@@ -1020,24 +931,18 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
     one is a deployed module that belongs where the imports happen.
     """
 
-    from weaver.session.host import use_or_create_session
-    from weaver.workspaces import LocalWorkspace
+    from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not isinstance(workspace, LocalWorkspace) and not opened.executes_here(
-            workspace
-        ):
+        if not opened.executes_here(workspace):
             _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.test(
             list(targets),
-            workspace=workspace,
             name=name,
             file=file,
             dry_run=dry_run,
             session=opened,
         )
-
-
 
 
 def _print_test(report) -> None:
@@ -1085,13 +990,13 @@ def handle_wipe(args: argparse.Namespace) -> int:
     # A preview is needed only when the command needs confirmation.
     previewing = args.dry_run or not _authorised(args)
     if previewing:
-        planned = weaver.wipe(
-            args.targets,
-            workspace=workspace,
-            unbind_from=args.unbind_from,
-            dry_run=True,
-            session=_session(args),
-        )
+        with _running_session(args, workspace) as opened:
+            planned = weaver.wipe(
+                args.targets,
+                unbind_from=args.unbind_from,
+                dry_run=True,
+                session=opened,
+            )
         print(f"wipe on {workspace.workspace}\n")
         for report in planned.reports:
             print(f"  {report.target}")
@@ -1123,12 +1028,12 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 print("Cancelled.")
                 return 1
 
-    result = weaver.wipe(
-        args.targets,
-        workspace=workspace,
-        unbind_from=args.unbind_from,
-        session=_session(args),
-    )
+    with _running_session(args, workspace) as opened:
+        result = weaver.wipe(
+            args.targets,
+            unbind_from=args.unbind_from,
+            session=opened,
+        )
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
     elif result.count:
@@ -1149,13 +1054,13 @@ def _build_once(args: argparse.Namespace) -> int:
     import json
 
     workspace = _resolve_workspace(args)
-    result = weaver.build(
-        args.repository,
-        bind=args.item_bindings,
-        workspace=workspace,
-        bundle=args.bundle,
-        session=_session(args),
-    )
+    with _running_session(args, workspace) as opened:
+        result = weaver.build(
+            args.repository,
+            bind=args.item_bindings,
+            bundle=args.bundle,
+            session=opened,
+        )
     payload = result.to_mapping()
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -1176,42 +1081,14 @@ def _indented(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line if line else line for line in text.splitlines())
 
 
-def handle_doctor(args: argparse.Namespace) -> int:
-    """Report what a local build and load needs, and what is missing.
+def _group_help(group: argparse.ArgumentParser):
+    """A group named without a subcommand lists its own, not the whole CLI."""
 
-    None of it is required to use Weaver on Fabric. It matters for local
-    development, where a missing JDK otherwise surfaces as a Java stack trace.
-    """
-
-    from weaver.diagnostics import check_local_spark, platform_summary
-
-    report = check_local_spark()
-
-    if args.json:
-        import json
-
-        print(json.dumps(report.as_dict(), indent=2))
-        return 0 if report.ok else 1
-
-    print(f"local Spark and Delta on {platform_summary()}\n")
-    for check in report.checks:
-        print(f"  {check}")
-    if report.ok:
-        print("\nReady. Run the local tests with:  pytest -m spark")
+    def show(args: argparse.Namespace) -> int:
+        group.print_help()
         return 0
-    print()
-    for hint in report.hints:
-        # Keep diagnostics printable by legacy Windows consoles whose default
-        # CP-1252 encoding cannot represent the Unicode arrow.
-        print(f"  -> {hint}")
-    # A non-zero status keeps this usable as a gate in a script, but on its own
-    # it reads as "your installation is broken" to someone who never wanted
-    # local Spark. Say plainly that it is optional.
-    print(
-        "\nThis reports local Spark only. Weaver on Fabric needs none of it —\n"
-        "wipe, install and capacity work without a JVM."
-    )
-    return 1
+
+    return show
 
 
 def main(argv: list[str] | None = None) -> int:

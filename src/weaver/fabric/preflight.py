@@ -26,11 +26,10 @@ from .resources import (
     LAKEHOUSE,
     WAREHOUSE,
     Item,
-    Workspace,
+    WorkspaceItem,
     find_workspace,
     list_items,
 )
-
 
 #: A binding's target kind, as the Fabric item type the workspace must hold it
 #: as. Two vocabularies that happen to name the same two things, so the mapping
@@ -66,7 +65,7 @@ class RequiredItem:
 class Preflight:
     """What the workspace holds, and the resolved identity of each requirement."""
 
-    workspace: Workspace
+    workspace: WorkspaceItem
     resolved: dict[str, Item]
 
     def item(self, name: str, item_type: str) -> Item:
@@ -76,7 +75,7 @@ class Preflight:
 def required_items(
     bindings,
     *,
-    weaver_lakehouse: str,
+    control_item: str,
     environment: str | None = None,
 ) -> tuple[RequiredItem, ...]:
     """Everything a desktop build must find, deduplicated and ordered.
@@ -88,7 +87,7 @@ def required_items(
     """
 
     wanted: list[RequiredItem] = [
-        RequiredItem(weaver_lakehouse, LAKEHOUSE, "Weaver Lakehouse")
+        RequiredItem(str(control_item), LAKEHOUSE, "Weaver Lakehouse")
     ]
     if environment:
         wanted.append(RequiredItem(environment, ENVIRONMENT, "Environment"))
@@ -108,7 +107,7 @@ def preflight_fabric_targets(
     bindings,
     *,
     workspace: str,
-    weaver_lakehouse: str,
+    control_item: str,
     environment: str | None = None,
     client=None,
 ) -> Preflight:
@@ -128,7 +127,7 @@ def preflight_fabric_targets(
     resolved: dict[str, Item] = {}
     problems: list[str] = []
     for required in required_items(
-        bindings, weaver_lakehouse=weaver_lakehouse, environment=environment
+        bindings, control_item=control_item, environment=environment
     ):
         matches = by_name_and_type.get((required.item_type, required.name), [])
         if not matches:

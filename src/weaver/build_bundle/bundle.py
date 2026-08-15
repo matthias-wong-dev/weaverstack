@@ -37,14 +37,13 @@ from ..store import Store
 from .models import DELETE_FILE, OMISSION_REASONS, BuildPlan
 
 #: The only bundle format this code writes and accepts.
-SUPPORTED_FORMAT_VERSION = 1
+SUPPORTED_FORMAT_VERSION = 2
 
 PLAN_FILENAME = "plan.yml"
 PAYLOAD_DIR = "payload"
 
 SPARK_SQL_EXECUTOR = "spark_sql"
 SPARK_SQL_BATCH_EXECUTOR = "spark_sql_batch"
-SPARK_SCHEMA_EXECUTOR = "spark_schema"
 SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
 TSQL_BATCH_EXECUTOR = "tsql_batch"
@@ -52,10 +51,9 @@ FOLDER_EXECUTOR = "folder"
 ALIAS_EXECUTOR = "alias"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 LOAD_FILE_EXECUTOR = "load_file"
-#: Executors a bundle may carry. ``spark_sql`` runs a create or a frozen prune
-#: DROP; ``spark_sql_batch`` runs ordered catalogue DML as one action;
-#: ``spark_schema`` makes one schema in the destination, whose ``LOCATION``
-#: is a resolved path and so cannot be frozen; ``spark_table`` completes a Spark
+#: Executors a bundle may carry. ``spark_sql`` runs one finished statement — a
+#: create, a ``CREATE SCHEMA`` or a frozen prune ``DROP``; ``spark_sql_batch``
+#: runs ordered catalogue DML as one action; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
 #: ordered array of them, each as its own batch; ``folder`` makes or removes a
@@ -64,7 +62,6 @@ VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
         SPARK_SQL_BATCH_EXECUTOR,
-        SPARK_SCHEMA_EXECUTOR,
         SPARK_TABLE_EXECUTOR,
         TSQL_EXECUTOR,
         TSQL_BATCH_EXECUTOR,
@@ -80,7 +77,6 @@ VALID_EXECUTORS = frozenset(
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
-    SPARK_SCHEMA_EXECUTOR: ".schema.json",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
@@ -90,9 +86,7 @@ _EXECUTOR_EXTENSION = {
     # than the content, which is the one thing every load file has in common.
     LOAD_FILE_EXECUTOR: ".payload",
 }
-_PAYLOADLESS_EXECUTORS = frozenset(
-    {FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR}
-)
+_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR})
 #: Kinds that carry no payload even though their executor usually does. Only
 #: ``delete_file``: removing a deployed file needs the identity and nothing else,
 #: while writing one needs the exact bytes. Expressing it per *kind* keeps the
@@ -241,7 +235,9 @@ def validate_plan_structure(plan: BuildPlan) -> None:
 
     for node in plan.omitted_nodes:
         if node.reason not in OMISSION_REASONS:
-            raise BuildError(f"omitted node {node.node_id!r} has unknown reason {node.reason!r}")
+            raise BuildError(
+                f"omitted node {node.node_id!r} has unknown reason {node.reason!r}"
+            )
     omitted_ids = {node.node_id for node in plan.omitted_nodes}
 
     target_ids = plan.target_ids
@@ -285,7 +281,9 @@ def validate_plan_structure(plan: BuildPlan) -> None:
                 action_ids.add(action.id)
                 _validate_action_shape(action, omitted_ids)
 
-    if seen_numbers != sorted(set(seen_numbers)) or len(seen_numbers) != len(set(seen_numbers)):
+    if seen_numbers != sorted(set(seen_numbers)) or len(seen_numbers) != len(
+        set(seen_numbers)
+    ):
         raise BuildError(
             f"sequence numbers must be unique and ascending, got {seen_numbers}"
         )
@@ -334,7 +332,9 @@ def _validate_payload_integrity(location, plan: BuildPlan, store: Store) -> None
             continue
         payload_location = location.join(*action.payload.split("/"))
         if not store.exists(payload_location):
-            raise BuildError(f"action {action.id!r} payload is missing: {action.payload!r}")
+            raise BuildError(
+                f"action {action.id!r} payload is missing: {action.payload!r}"
+            )
         digest = hashlib.sha256(store.read(payload_location)).hexdigest()
         if digest != action.payload_sha256:
             raise BuildError(
@@ -346,9 +346,7 @@ def _validate_payload_integrity(location, plan: BuildPlan, store: Store) -> None
 def _check_payload_path(payload: str) -> None:
     _check_relative(payload, what="payload path")
     if not payload.startswith(PAYLOAD_DIR + "/"):
-        raise BuildError(
-            f"payload {payload!r} must live under {PAYLOAD_DIR!r}/"
-        )
+        raise BuildError(f"payload {payload!r} must live under {PAYLOAD_DIR!r}/")
 
 
 def _check_relative(path: str, *, what: str) -> None:

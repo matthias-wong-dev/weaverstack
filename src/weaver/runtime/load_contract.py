@@ -6,12 +6,12 @@ import inspect
 from dataclasses import dataclass
 
 from ..declaration.metadata import (
-    DEFAULT_DELETE_THRESHOLD,
-    DEFAULT_STABILITY_ROWS,
-    DEFAULT_UPDATE_THRESHOLD,
     AUDIT_DELETE,
     AUDIT_INSERT,
     AUDIT_UPDATE,
+    DEFAULT_DELETE_THRESHOLD,
+    DEFAULT_STABILITY_ROWS,
+    DEFAULT_UPDATE_THRESHOLD,
     FOLDER,
     PYTHON,
     TABLE,
@@ -82,8 +82,7 @@ class LoadContract:
 
         if document.kind != TABLE:
             raise LoadError(
-                f"{document.qualified}: a {document.kind} has no table load "
-                "contract"
+                f"{document.qualified}: a {document.kind} has no table load contract"
             )
         return cls(
             object_id=document.object_id,
@@ -122,8 +121,7 @@ class FolderLoadContract:
     def from_document(cls, document: SesDocument) -> "FolderLoadContract":
         if document.kind != FOLDER:
             raise LoadError(
-                f"{document.qualified}: a {document.kind} has no folder load "
-                "contract"
+                f"{document.qualified}: a {document.kind} has no folder load contract"
             )
         return cls(
             object_id=document.object_id,

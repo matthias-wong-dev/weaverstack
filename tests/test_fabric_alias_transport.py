@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-from weaver.errors import CommandError
-from weaver.fabric.client import FabricError
-from weaver.fabric.resources import SQL_ENDPOINT, refresh_sql_endpoint_metadata
 from weaver.fabric.resources import LAKEHOUSE, Item
 from weaver.fabric.shortcuts import create_shortcut, delete_shortcut
 
@@ -81,7 +76,10 @@ def test_a_shortcut_path_is_escaped_into_one_url_segment():
     client = _Client()
 
     delete_shortcut(
-        _lakehouse("Curated", "dest1"), path="Tables/Sales", name="Landed", client=client
+        _lakehouse("Curated", "dest1"),
+        path="Tables/Sales",
+        name="Landed",
+        client=client,
     )
 
     _method, path, _payload = client.calls[0]
@@ -92,7 +90,10 @@ def test_removing_an_absent_shortcut_is_the_intended_state_not_a_fault():
     client = _Client(responses=[_Response(404)])
 
     delete_shortcut(
-        _lakehouse("Curated", "dest1"), path="Tables/Sales", name="Landed", client=client
+        _lakehouse("Curated", "dest1"),
+        path="Tables/Sales",
+        name="Landed",
+        client=client,
     )
 
     assert client.calls[0][0] == "DELETE"

@@ -21,12 +21,73 @@ DEFAULT_OPERATION_TIMEOUT = 900.0
 DEFAULT_OPERATION_POLL_INTERVAL = 2.0
 
 
+#: How many times a request is retried when the transport fails, and how long to
+#: wait between attempts. A desktop operation talks to Fabric for as long as the
+#: operation takes, and over ten minutes a single connection is likely to be
+#: refused outright while the work it is watching carries on unaffected.
+CONNECTION_ATTEMPTS = 4
+CONNECTION_BACKOFF = 2.0
+
+
 class FabricError(WeaverError):
     """Raised when a Fabric API call fails."""
 
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def never_sent(exc: BaseException) -> bool:
+    """Whether a transport failure happened before the request left this machine.
+
+    A connection that was never established carries nothing: Fabric has not seen
+    the request, so sending it again cannot create a second item or run a
+    statement twice. Once the request is on the wire that is no longer knowable.
+    """
+
+    try:
+        from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+    except ImportError:  # pragma: no cover - requests vendors urllib3
+        return False
+    # requests reports the cause several ways: chained, as the argument it was
+    # constructed with, or as a MaxRetryError's `reason`. All three are walked,
+    # because which one appears depends on where urllib3 gave up.
+    frontier = [exc]
+    seen: set[int] = set()
+    while frontier:
+        current = frontier.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, (NewConnectionError, ConnectTimeoutError)):
+            return True
+        frontier.extend([current.__cause__, current.__context__])
+        frontier.extend(arg for arg in current.args if isinstance(arg, BaseException))
+        reason = getattr(current, "reason", None)
+        if isinstance(reason, BaseException):
+            frontier.append(reason)
+    return False
+
+
+def send(method: str, url: str, **kwargs):
+    """One HTTP request, retried while the failure is safe to repeat.
+
+    A read can always be repeated. Anything else only when the connection was
+    never established, since Fabric cannot have acted on a request it never
+    received. The last failure is raised as it came, for the caller to translate
+    into its own error.
+    """
+
+    import requests
+
+    for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        try:
+            return requests.request(method, url, **kwargs)
+        except requests.exceptions.RequestException as exc:
+            repeatable = method == "GET" or never_sent(exc)
+            if not repeatable or attempt == CONNECTION_ATTEMPTS:
+                raise
+            time.sleep(CONNECTION_BACKOFF * attempt)
 
 
 class FabricClient:
@@ -63,17 +124,24 @@ class FabricClient:
     ):
         import requests
 
-        url = path if path.startswith("http") else f"{self.api_base_url}/{path.lstrip('/')}"
-        response = requests.request(
-            method,
-            url,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(payload) if payload is not None else None,
-            timeout=self.timeout,
+        url = (
+            path
+            if path.startswith("http")
+            else f"{self.api_base_url}/{path.lstrip('/')}"
         )
+        try:
+            response = send(
+                method,
+                url,
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload) if payload is not None else None,
+                timeout=self.timeout,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise FabricError(f"{method} {url} could not be reached: {exc}") from exc
         if response.status_code not in expected:
             raise FabricError(
                 f"{method} {url} returned {response.status_code}: "

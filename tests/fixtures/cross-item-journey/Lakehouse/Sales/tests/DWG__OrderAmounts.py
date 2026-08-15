@@ -9,10 +9,10 @@ Revision notes:
   - 2026-08-08 Created.
 """
 
-from weaver import Test
-
 from DWG__Customer import DWG__Customer
 from DWG__Order import DWG__Order
+
+from weaver import Test
 
 
 class DWG__OrderAmounts(Test):
@@ -37,6 +37,6 @@ class DWG__OrderAmounts(Test):
         )
 
     def actual(self):
-        return DWG__Order(self).dataframe().selectExpr(
-            "OrderId", "CustomerId", "Amount"
+        return (
+            DWG__Order(self).dataframe().selectExpr("OrderId", "CustomerId", "Amount")
         )

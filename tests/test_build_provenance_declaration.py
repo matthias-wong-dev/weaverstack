@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import hashlib
 
-import pytest
 import yaml
 
 from weaver.build_bundle import (
@@ -48,6 +47,7 @@ from weaver.build_bundle import (
     plan_from_yaml,
     plan_to_yaml,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 PAYLOAD = b"create or alter procedure [_].[Load Sales.CustomerRevenue] as\nselect 1\n"
 SOURCE = "Warehouse/Reporting/Sales.CustomerRevenue.sql"
@@ -94,9 +94,11 @@ def test_the_key_is_absent_rather_than_null_when_there_is_no_source():
 
 
 def _plan(action: InstallAction) -> BuildPlan:
-    target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
+    target = BoundTarget(
+        id="warehouse-Reporting", kind="warehouse", item_id="Reporting"
+    )
     return BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig-abc",
@@ -172,7 +174,7 @@ def test_a_failure_names_the_operation_then_the_file_then_the_reason():
     found out, not what went wrong, so it comes last or not at all.
     """
 
-    from weaver.operations import BuildFailure
+    from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
         action_id="object-warehouse-reporting-sales-customerrevenue",
@@ -190,7 +192,7 @@ def test_a_failure_names_the_operation_then_the_file_then_the_reason():
 
 
 def test_a_failure_with_no_authored_source_still_names_what_failed():
-    from weaver.operations import BuildFailure
+    from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
         action_id="alias-Lakehouse-Reporting-DWG.Customer",
@@ -204,7 +206,7 @@ def test_a_failure_with_no_authored_source_still_names_what_failed():
 
 
 def test_a_failure_falls_back_to_the_action_id_when_it_has_no_artefact():
-    from weaver.operations import BuildFailure
+    from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
         action_id="publish-registry", error_type="BuildError", message="no"

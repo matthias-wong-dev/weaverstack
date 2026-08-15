@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.errors import GraphError
 from weaver.declaration import Graph
+from weaver.errors import GraphError
 
 
 def chain() -> Graph:

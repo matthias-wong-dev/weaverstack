@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import os
 
+from ..errors import ConfigError
+
 #: Scopes. Generic technical values, not environment-specific.
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 STORAGE_SCOPE = "https://storage.azure.com/.default"
@@ -42,6 +44,31 @@ def prefer_cli_credential() -> str:
         return existing
     os.environ[CREDENTIAL_ENV] = DEFAULT_CREDENTIAL
     return DEFAULT_CREDENTIAL
+
+
+def checked_credential(supplied):
+    """One injected credential, checked for the shape Azure's protocol names.
+
+    Structural rather than an ``isinstance`` against ``TokenCredential``: the
+    protocol is what matters and a caller may pass a wrapper, a fake, or a
+    credential from a library Weaver does not import. What every one of them
+    must have is a callable ``get_token``.
+
+    Checked where it is *supplied* rather than where it is first used, because
+    a Session acquires its token lazily — so a wrong object handed to
+    ``weaver.session()`` would otherwise surface much later, during whichever
+    operation happened to reach Fabric first.
+    """
+
+    if supplied is None:
+        return None
+    if not callable(getattr(supplied, "get_token", None)):
+        raise ConfigError(
+            "a credential must offer a callable get_token(*scopes), which is "
+            f"the azure.core TokenCredential shape; {type(supplied).__name__} "
+            "does not"
+        )
+    return supplied
 
 
 def credential():

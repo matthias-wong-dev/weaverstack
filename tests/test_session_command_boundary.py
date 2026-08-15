@@ -4,13 +4,13 @@
 exists: a console pays for authentication, item resolution and a Livy session
 once, and every command typed at the prompt reuses them. The promise was
 already true of ``build`` and ``wipe``. It was quietly false of ``load``,
-``test`` and ``unbind``, which each opened a :class:`LivySession` of their own,
+``test`` and unbinding, which each opened a :class:`LivySession` of their own,
 waited a minute for it, and closed it on the way out — so a developer running
 
 .. code-block:: text
 
     weaver> wipe  Lakehouse/Sales
-    weaver> build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    weaver> build ./repository --bind Lakehouse/Sales=Sales
     weaver> load  Lakehouse/Sales
     weaver> test  Lakehouse/Sales
 
@@ -31,8 +31,8 @@ from types import SimpleNamespace
 import pytest
 
 from weaver.errors import WeaverError
-from weaver.session.console import ConsoleScope, ConsoleSession
-from weaver.workspaces import FabricWorkspace
+from weaver.sessions.console import ConsoleScope, ConsoleSession
+from weaver.workspaces import Workspace
 from weaver_cli.main import build_parser
 
 
@@ -84,9 +84,9 @@ class _PresentResolver:
         return SimpleNamespace(id="00000000-0000-0000-0000-000000000000")
 
     def spark_destination(self, item):
-        from weaver.spark import fabric_destination
+        from weaver.spark import FabricSparkTarget
 
-        return fabric_destination(workspace="My Workspace", lakehouse=item.name)
+        return FabricSparkTarget(workspace="My Workspace", lakehouse=item.name)
 
 
 @pytest.fixture
@@ -106,7 +106,9 @@ def transport(monkeypatch):
         classmethod(lambda cls, *args, **kwargs: _CountingLivy.for_workspace()),
     )
     monkeypatch.setattr(
-        ConsoleScope, "resolver", property(lambda self: _PresentResolver(self.workspace))
+        ConsoleScope,
+        "resolver",
+        property(lambda self: _PresentResolver(self.workspace)),
     )
     return _CountingLivy
 
@@ -126,7 +128,9 @@ def _answer_for(code: str):
     if "_catalogue_here" in code:
         return Catalogue({}).to_mapping()
     if "unbind_targets" in code:
-        return UnbindResult(targets=("Lakehouse/Sales",), logical_items=(), statements=()).to_mapping()
+        return UnbindResult(
+            targets=("Lakehouse/Sales",), logical_items=(), statements=()
+        ).to_mapping()
     return {}
 
 
@@ -136,9 +140,9 @@ def _weaver_python(session):
     return [code for code in session.submitted if "import weaver" in code]
 
 
-def _workspace() -> FabricWorkspace:
-    return FabricWorkspace(
-        workspace="My Workspace", weaver_lakehouse="Weaver", environment="weaver"
+def _workspace() -> Workspace:
+    return Workspace(
+        workspace="My Workspace", catalogue="Lakehouse/Weaver", environment="weaver"
     )
 
 
@@ -167,7 +171,6 @@ def test_a_run_of_commands_in_one_session_starts_one_livy(transport, capsys):
     with ConsoleSession(workspace=_workspace()) as session:
         _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["unbind", "Lakehouse/Sales"])
 
     assert transport.acquired == 1
 
@@ -184,10 +187,9 @@ def test_each_command_still_did_its_own_work(transport, capsys):
     with ConsoleSession(workspace=_workspace()) as session:
         _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["unbind", "Lakehouse/Sales"])
 
     # Each command reached the estate, and none of them imported Weaver to do
-    # it: reading the catalogue and unbinding it are both Spark SQL.
+    # it: reading the catalogue is Spark SQL.
     assert any("SELECT" in code for code in transport.submitted), (
         "the estate was never read, so this passes for the wrong reason"
     )
@@ -223,8 +225,8 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
             "--dry-run",
             "--workspace",
             "My Workspace",
-            "--weaver-lakehouse",
-            "Weaver",
+            "--catalogue",
+            "Lakehouse/Weaver",
             "--environment",
             "weaver",
         ]
@@ -254,7 +256,7 @@ def test_only_the_session_opens_a_livy_session():
     root = Path(__file__).resolve().parents[1] / "src"
     allowed = {
         # Where a Livy session is legitimately acquired and owned.
-        root / "weaver" / "session" / "console.py",
+        root / "weaver" / "sessions" / "console.py",
         # The module that defines it, and the package that exports it.
         root / "weaver" / "fabric" / "livy.py",
         root / "weaver" / "fabric" / "__init__.py",

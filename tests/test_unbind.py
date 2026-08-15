@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from weaver.catalogue.tables import INSTALLATION
+from weaver.spark import FabricSparkTarget
 from weaver.unbind import plan_unbind, unbind_targets
+
+#: The Weaver Lakehouse every catalogue statement is addressed to.
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 class _Catalogue:
     def __init__(self, rows):
         self._rows = rows
         self.executed = []
-
-    def expand(self, name):
-        return name
+        self.destination = WEAVER
 
     def columns_of(self, _name):
         return tuple(INSTALLATION.physical_columns)
@@ -86,8 +88,10 @@ def test_every_installation_is_removed_in_one_pass_over_the_tables():
         )
     )
 
-    one_at_a_time = sum(len(prune_installation(scope)) for scope in scopes)
-    together = prune_installation(InstallationScopes(scopes))
+    one_at_a_time = sum(
+        len(prune_installation(scope, destination=WEAVER)) for scope in scopes
+    )
+    together = prune_installation(InstallationScopes(scopes), destination=WEAVER)
 
     assert len(together) == one_at_a_time // len(scopes)
     assert len(together) == len(set(together)), "a table was addressed twice"
@@ -107,7 +111,7 @@ def test_the_combined_delete_names_every_installation_and_no_others():
         )
     )
 
-    for statement in prune_installation(scopes):
+    for statement in prune_installation(scopes, destination=WEAVER):
         where = statement.split("WHERE", 1)[1]
         assert "'Sales'" in where and "'Reporting'" in where
         # Outer parentheses around the OR: without them a later `AND` would

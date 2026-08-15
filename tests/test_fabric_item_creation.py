@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from weaver.errors import CommandError
-from weaver.fabric.resources import LAKEHOUSE, Workspace, create_lakehouse
+from weaver.fabric.resources import LAKEHOUSE, WorkspaceItem, create_lakehouse
 
-WORKSPACE = Workspace(id="workspace-id", name="Analytics")
+WORKSPACE = WorkspaceItem(id="workspace-id", name="Analytics")
 
 
 class _CreateClient:
@@ -67,7 +67,11 @@ def test_a_lakehouse_is_created_with_schemas_enabled():
             (200, 201, 202, 409),
         )
     ]
-    assert (item.id, item.name, item.type) == ("lakehouse-id", "PYTEST_WEAVER", LAKEHOUSE)
+    assert (item.id, item.name, item.type) == (
+        "lakehouse-id",
+        "PYTEST_WEAVER",
+        LAKEHOUSE,
+    )
 
 
 def test_a_name_fabric_has_not_released_yet_reports_why():

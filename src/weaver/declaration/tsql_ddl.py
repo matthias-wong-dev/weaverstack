@@ -8,8 +8,8 @@ same shape validation path.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import re
+from pathlib import Path
 
 import yaml
 
@@ -376,10 +376,7 @@ def _render_name_only_cte(names: tuple[str, ...]) -> str:
     """A single-column ``(column_name)`` CTE, empty when there are no names."""
 
     if not names:
-        return (
-            "    select convert(nvarchar(128), null) as column_name\n"
-            "    where 1 = 0"
-        )
+        return "    select convert(nvarchar(128), null) as column_name\n    where 1 = 0"
     values = _leading_comma_list(
         [f"({_sql_literal(name)})" for name in names],
         first_indent="        ",

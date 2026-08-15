@@ -1,8 +1,8 @@
 """Load orchestration across the one boundary only Fabric has.
 
-Its local twin (``tests/spark/test_local_load_orchestration_cycle.py``) proves the
-composition over three Lakehouse dispatch kinds. What it cannot prove is the
-crossing, because the emulator has no SQL analytics endpoint to cross:
+Composition over three Lakehouse dispatch kinds is decided without a tenant.
+What needs one is the crossing, because only a real Lakehouse has a SQL
+analytics endpoint to cross:
 
 .. code-block:: text
 
@@ -50,7 +50,7 @@ SEED = "DWG.Seed"
 #: is an architectural decision here, not an implementation detail: the dry run
 #: and the real run are two moments of one estate, and asking about them
 #: separately would be two claims about two instants.
-BODY = '''
+BODY = """
 import weaver
 from weaver.locations import Location
 from weaver.resolution import store_for
@@ -73,7 +73,7 @@ emit({{
     "log": log,
     "task_log": real.task_log,
 }})
-'''
+"""
 
 
 @pytest.fixture(scope="module")
@@ -82,9 +82,7 @@ def orchestrated(fabric_mixed_estate):
 
     env = fabric_mixed_estate.env
     seen = env.run_python(
-        BODY.format(
-            lakehouse=env.target.name, warehouse=env.warehouse.item.name
-        ),
+        BODY.format(lakehouse=env.target.name, warehouse=env.warehouse.item.name),
         label="orchestrate the installed load graph",
     )
     return env, seen
@@ -157,7 +155,10 @@ def test_every_node_resolves_to_its_exact_installed_primitive(orchestrated):
     # never through a notebook's attachment. Named logically: a dry run says
     # what it intends to reach without reaching a workspace to resolve it, so
     # the Lakehouse is in the name rather than in an absolute URL.
-    for node_id in (f"load:Lakehouse/{lakehouse}/{SEED}", f"load:Lakehouse/{lakehouse}/{CUSTOMER}"):
+    for node_id in (
+        f"load:Lakehouse/{lakehouse}/{SEED}",
+        f"load:Lakehouse/{lakehouse}/{CUSTOMER}",
+    ):
         location = nodes[node_id]["dispatch_location"]
         assert location.startswith(f"Lakehouse/{lakehouse}/")
         assert "/_/Load/" in location
@@ -176,9 +177,7 @@ def test_the_executed_graph_is_the_one_the_dry_run_planned(orchestrated):
     assert seen["real"]["edges"] == seen["dry"]["edges"]
     assert {
         node["node_id"]: node["dispatch_location"] for node in seen["real"]["nodes"]
-    } == {
-        node["node_id"]: node["dispatch_location"] for node in seen["dry"]["nodes"]
-    }
+    } == {node["node_id"]: node["dispatch_location"] for node in seen["dry"]["nodes"]}
 
 
 def test_every_step_ran_in_topological_order_through_its_own_primitive(orchestrated):

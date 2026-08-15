@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.declaration import parse_item_repository
+from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 from weaver.errors import DiscoveryError
 from weaver.locations import Location
-from weaver.declaration import parse_item_repository
-from weaver.catalogue.tables import CATALOGUE_TABLES
-from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 
 
 def _write(root: Path, relative: str, text: str) -> None:
@@ -62,7 +62,7 @@ class {class_name}(Folder):
 
 
 def _spark_view(object_id: str) -> str:
-    return f'''\
+    return f"""\
 /*
 View ID: {object_id}
 Description: A declared view.
@@ -71,11 +71,11 @@ Dependencies:
   - Sales.Customer
 */
 select Id from Sales.Customer
-'''
+"""
 
 
 def _warehouse_table(object_id: str) -> str:
-    return f'''\
+    return f"""\
 /*
 Table ID: {object_id}
 Description: A reporting table.
@@ -83,7 +83,7 @@ Lineage: A source system.
 Primary key: Id
 */
 select cast(1 as varchar(20)) as Id;
-'''
+"""
 
 
 def _estate(tmp_path: Path) -> Path:
@@ -178,7 +178,9 @@ def test_item_signature_covers_its_schema_document_and_support_files(tmp_path):
 
     _write(root, "Lakehouse/Raw/lib/csv_helpers.py", "def rows():\n    return [1]\n")
     support_changed = parse_item_repository(Location(str(root)))
-    assert support_changed["Lakehouse/Raw"].signature != before["Lakehouse/Raw"].signature
+    assert (
+        support_changed["Lakehouse/Raw"].signature != before["Lakehouse/Raw"].signature
+    )
     assert (
         support_changed["Lakehouse/Curated"].signature
         == before["Lakehouse/Curated"].signature
@@ -246,7 +248,10 @@ def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
     )
     after = parse_item_repository(Location(str(root)))
 
-    assert after["Warehouse/Reporting"].signature != before["Warehouse/Reporting"].signature
+    assert (
+        after["Warehouse/Reporting"].signature
+        != before["Warehouse/Reporting"].signature
+    )
     for unchanged in ("Lakehouse/Curated", "Lakehouse/Raw", "Warehouse/Audit"):
         assert after[unchanged].signature == before[unchanged].signature
 
@@ -303,7 +308,9 @@ def test_a_dialect_suffix_is_not_a_document_name(tmp_path):
     """
 
     root = _estate(tmp_path)
-    _write(root, "Lakehouse/Curated/Sales.Rollup.spark.sql", _spark_view("Sales.Rollup"))
+    _write(
+        root, "Lakehouse/Curated/Sales.Rollup.spark.sql", _spark_view("Sales.Rollup")
+    )
     with pytest.raises(DiscoveryError, match="must name Schema and Object"):
         parse_item_repository(Location(str(root)))
 
@@ -394,8 +401,6 @@ def test_authored_weaver_item_is_rejected(tmp_path):
     _write(root, "Lakehouse/_weaver/schemas/_.yml", _schema("_"))
     with pytest.raises(DiscoveryError, match="package-owned"):
         parse_item_repository(Location(str(root)))
-
-
 
 
 def test_canonical_metadata_reference_resolves_across_items(tmp_path):

@@ -71,7 +71,10 @@ def _folded(key: str, text: str, *, indent: int = 0) -> str:
 
     pad = " " * indent
     body = textwrap.fill(
-        _escaped(text), width=_WIDTH - indent - 2, initial_indent="", subsequent_indent=""
+        _escaped(text),
+        width=_WIDTH - indent - 2,
+        initial_indent="",
+        subsequent_indent="",
     )
     lines = "\n".join(f"{pad}  {line}" for line in body.splitlines())
     return f"{pad}{key}: >-\n{lines}"
@@ -212,6 +215,4 @@ def render_item_sources() -> dict[str, str]:
 
 
 def item_repository_files() -> dict[str, bytes]:
-    return {
-        path: text.encode("utf-8") for path, text in render_item_sources().items()
-    }
+    return {path: text.encode("utf-8") for path, text in render_item_sources().items()}

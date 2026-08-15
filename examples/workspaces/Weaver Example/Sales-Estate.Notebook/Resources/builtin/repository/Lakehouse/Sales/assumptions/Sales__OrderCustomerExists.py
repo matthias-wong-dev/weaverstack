@@ -29,7 +29,6 @@ class Sales__OrderCustomerExists(Assumption):
         # so both resolve against the Lakehouse this Assumption was pointed at.
         orders = Sales__Order(self).dataframe()
         customers = Sales__Customer(self).dataframe()
-        return (
-            orders.join(customers, "Customer id", "left_anti")
-            .select("Order id", "Customer id")
+        return orders.join(customers, "Customer id", "left_anti").select(
+            "Order id", "Customer id"
         )

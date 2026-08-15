@@ -13,6 +13,7 @@ from .lakehouse import Lakehouse, default_lakehouse
 
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .runtime.folder_load import StagingFolder
+    from .runtime.load_result import LoadResult
 
 #: What Weaver names a folder's staging sibling. Repeated from
 #: :mod:`weaver.runtime.folder_load` rather than imported: the authoring surface
@@ -141,7 +142,7 @@ class Folder(WeaverObject):
 
             rows = self.spark.read.json(Sales__Export(self).spark_path())
 
-        The ``abfss://`` form on Fabric, the same directory locally.
+        The ``abfss://`` form, which is what Spark reads.
         """
 
         return self.lakehouse.folder_spark_path(*self.identity)
@@ -169,7 +170,7 @@ class Folder(WeaverObject):
     def _staging_path(self) -> Path:
         """Where staging goes: the destination's own path, with a suffix.
 
-        The same sibling :meth:`weaver.resolution.LocalResolver.folder_staging`
+        The same sibling ``folder_staging`` the resolver exposes
         issues.
         """
 
@@ -537,9 +538,7 @@ class SparkSqlTest(_SparkSqlValidation, Test):
 
         from .runtime.spark_sql_validation import read_spark_sql_test
 
-        return read_spark_sql_test(
-            self.spark, sql=self.sql, what=type(self).__name__
-        )
+        return read_spark_sql_test(self.spark, sql=self.sql, what=type(self).__name__)
 
     def expected(self):
         return self._sides()[0]

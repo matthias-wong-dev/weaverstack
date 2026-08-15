@@ -78,6 +78,7 @@ def target_kind_for(language: str, kind: str) -> str:
         return DELTA_TARGET
     return SQL_TARGET
 
+
 _ID_KEYS = {
     "Folder ID": FOLDER,
     "Table ID": TABLE,
@@ -318,8 +319,13 @@ class Reference:
 
     def __post_init__(self) -> None:
         if (self.item_type is None) != (self.item_name is None):
-            raise MetadataError("a qualified reference needs both item type and item name")
-        if self.item_type is not None and self.item_type not in ("Lakehouse", "Warehouse"):
+            raise MetadataError(
+                "a qualified reference needs both item type and item name"
+            )
+        if self.item_type is not None and self.item_type not in (
+            "Lakehouse",
+            "Warehouse",
+        ):
             raise MetadataError(
                 f"reference item type must be Lakehouse or Warehouse, got {self.item_type!r}"
             )
@@ -332,7 +338,11 @@ class Reference:
 
     @property
     def target(self) -> str:
-        within = f"Files/{self.schema}.{self.object}" if self.is_files else self.object_id.qualified
+        within = (
+            f"Files/{self.schema}.{self.object}"
+            if self.is_files
+            else self.object_id.qualified
+        )
         if self.item_type is None:
             return within
         return f"{self.item_type}/{self.item_name}/{within}"
@@ -582,7 +592,9 @@ def extract_python_metadata(source: str) -> str:
         raise MetadataError(f"python object file is not parseable: {exc}") from exc
     doc = ast.get_docstring(module, clean=True)
     if doc is None or not doc.strip():
-        raise MetadataError("python object file must begin with a docstring metadata block")
+        raise MetadataError(
+            "python object file must begin with a docstring metadata block"
+        )
     return doc
 
 
@@ -591,7 +603,9 @@ def extract_sql_metadata_and_body(source: str) -> tuple[str, str]:
 
     match = re.match(r"\s*/\*(.*?)\*/(.*)\Z", source, flags=re.DOTALL)
     if not match:
-        raise MetadataError("Weaver document SQL must begin with a /* ... */ metadata block")
+        raise MetadataError(
+            "Weaver document SQL must begin with a /* ... */ metadata block"
+        )
     return match.group(1).strip("\n"), match.group(2).lstrip()
 
 
@@ -629,7 +643,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 
     kind, object_id = _parse_id(loaded)
     if is_validation_kind(kind):
-        return _parse_validation(loaded, kind=kind, language=language, object_id=object_id)
+        return _parse_validation(
+            loaded, kind=kind, language=language, object_id=object_id
+        )
     _reject_unknown_keys(loaded, kind)
 
     # A Warehouse (T-SQL) table may declare Schema or omit it: with a declaration
@@ -657,7 +673,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 
     if kind == VIEW and "Incremental" in loaded:
         raise MetadataError("Incremental is not supported for View objects")
-    is_incremental = _parse_flag_with_default(loaded, "Incremental", default=kind == FOLDER)
+    is_incremental = _parse_flag_with_default(
+        loaded, "Incremental", default=kind == FOLDER
+    )
 
     declared_columns = _parse_schema(loaded.get("Schema"))
     if kind == TABLE and language == PYTHON and not declared_columns:
@@ -670,13 +688,19 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     unique_keys = _parse_unique_keys(loaded.get("Unique keys"), primary_key)
     foreign_keys = _parse_foreign_keys(loaded.get("Foreign keys"), object_id)
     declared_not_null = _parse_column_list(loaded.get("Not null"), "Not null")
-    delete_threshold = _parse_percentage(loaded, DELETE_THRESHOLD, DEFAULT_DELETE_THRESHOLD)
-    update_threshold = _parse_percentage(loaded, UPDATE_THRESHOLD, DEFAULT_UPDATE_THRESHOLD)
+    delete_threshold = _parse_percentage(
+        loaded, DELETE_THRESHOLD, DEFAULT_DELETE_THRESHOLD
+    )
+    update_threshold = _parse_percentage(
+        loaded, UPDATE_THRESHOLD, DEFAULT_UPDATE_THRESHOLD
+    )
     stability_rows = _parse_row_count(loaded, STABILITY_ROWS, DEFAULT_STABILITY_ROWS)
     identity = _parse_identity(loaded.get("Identity"))
     if identity is not None and language not in IDENTITY_LANGUAGES:
         raise MetadataError(_IDENTITY_UNSUPPORTED)
-    comparison = _parse_column_set(loaded.get("Comparison columns"), "Comparison columns")
+    comparison = _parse_column_set(
+        loaded.get("Comparison columns"), "Comparison columns"
+    )
     column_notes = _parse_column_notes(loaded.get("Column notes"))
 
     _validate_columns(
@@ -699,7 +723,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
                 "Comparison columns require a Primary key — they drive upsert comparison, "
                 "which only happens when rows can be matched"
             )
-    schema = _apply_column_details(declared_columns, column_notes, primary_key, declared_not_null)
+    schema = _apply_column_details(
+        declared_columns, column_notes, primary_key, declared_not_null
+    )
 
     warehouse_alias, lakehouse_alias = _parse_aliases(loaded, language, kind, object_id)
 
@@ -795,7 +821,9 @@ def _parse_id(raw: dict[str, Any]) -> tuple[str, ObjectId]:
         raise MetadataError(f"{key} must be a non-empty Schema.Object string")
     parts = [part.strip() for part in value.strip().split(".")]
     if len(parts) != 2 or not all(parts):
-        raise MetadataError(f"{key} must be a two-part Schema.Object declaration, got {value!r}")
+        raise MetadataError(
+            f"{key} must be a two-part Schema.Object declaration, got {value!r}"
+        )
     return _ID_KEYS[key], ObjectId(schema=parts[0], object=parts[1])
 
 
@@ -824,9 +852,14 @@ def _reject_unknown_keys(raw: dict[str, Any], kind: str) -> None:
     known = {key: kinds for key, kinds in elsewhere.items() if kinds}
     detail = ""
     if known:
-        detail = " (" + "; ".join(
-            f"{key} belongs to {_listed(kinds)}" for key, kinds in sorted(known.items())
-        ) + ")"
+        detail = (
+            " ("
+            + "; ".join(
+                f"{key} belongs to {_listed(kinds)}"
+                for key, kinds in sorted(known.items())
+            )
+            + ")"
+        )
     # A validation declaration is the one place a *correctly spelled* key is
     # commonly wrong, because everything describing materialised data behaviour
     # reads as plausible on a Test until you ask what it would do. Say so rather
@@ -898,9 +931,15 @@ def _parse_logical_reference(
             f"item-qualified logical identity, got {target!r}"
         )
     if object_text.count(".") != 1:
-        raise MetadataError(f"{key} reference must end in Schema.Object, got {target!r}")
+        raise MetadataError(
+            f"{key} reference must end in Schema.Object, got {target!r}"
+        )
     schema, object_name = object_text.split(".")
-    names = (schema, object_name, item_name) if item_name is not None else (schema, object_name)
+    names = (
+        (schema, object_name, item_name)
+        if item_name is not None
+        else (schema, object_name)
+    )
     if any(not name or name != name.strip() for name in names):
         raise MetadataError(f"{key} reference contains an empty or padded logical name")
     return Reference(
@@ -936,7 +975,9 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
     seen: list[ObjectId] = []
     for entry in value:
         if not isinstance(entry, str) or not entry.strip():
-            raise MetadataError("Dependencies entries must be non-empty Schema.Object names")
+            raise MetadataError(
+                "Dependencies entries must be non-empty Schema.Object names"
+            )
         parts = [part.strip() for part in entry.strip().split(".")]
         if len(parts) != 2 or not all(parts):
             raise MetadataError(
@@ -1031,9 +1072,7 @@ def _parse_revision_notes(value: Any) -> tuple[tuple[Revision, ...], str | None]
     for entry in value:
         if isinstance(entry, (date, datetime)):
             # YAML resolves a bare `- 2026-07-23` to a date rather than text.
-            raise MetadataError(
-                f"Revision notes entry {entry} has a date but no note"
-            )
+            raise MetadataError(f"Revision notes entry {entry} has a date but no note")
         if not isinstance(entry, str) or not entry.strip():
             raise MetadataError("Revision notes entries must be non-empty text")
         text = entry.strip()
@@ -1051,7 +1090,7 @@ def _parse_revision_notes(value: Any) -> tuple[tuple[Revision, ...], str | None]
                 f"Revision notes mix date formats — {shape} was used first, "
                 f"then {entry_shape} in {text!r}. Use one spelling throughout an object."
             )
-        note = text[len(date_text):].strip()
+        note = text[len(date_text) :].strip()
         if not note:
             raise MetadataError(f"Revision notes entry {text!r} has a date but no note")
         revisions.append(Revision(date=date_text, note=note))
@@ -1074,7 +1113,9 @@ def _match_revision_date(text: str) -> tuple[str, str] | None:
                 1 <= first <= 31 and 1 <= second <= 31 and (first <= 12 or second <= 12)
             )
         if not plausible:
-            raise MetadataError(f"Revision notes entry does not open with a real date: {text!r}")
+            raise MetadataError(
+                f"Revision notes entry does not open with a real date: {text!r}"
+            )
         return shape, match.group(0)
     return None
 
@@ -1171,12 +1212,11 @@ def _parse_unique_keys(
         if not columns:
             raise MetadataError("Unique keys entries must name at least one column")
         if columns in keys:
-            raise MetadataError(
-                "Unique keys repeats the key " + ", ".join(columns)
-            )
+            raise MetadataError("Unique keys repeats the key " + ", ".join(columns))
         if primary_key and columns == primary_key:
             raise MetadataError(
-                "a Unique keys entry repeats the Primary key (" + ", ".join(columns)
+                "a Unique keys entry repeats the Primary key ("
+                + ", ".join(columns)
                 + ") — the primary key is already unique, so remove it from Unique keys"
             )
         keys.append(columns)
@@ -1346,9 +1386,7 @@ def _parse_schema(value: Any) -> tuple[Column, ...]:
         if not isinstance(name, str) or not name.strip():
             raise MetadataError("Schema column names must be non-empty strings")
         if not isinstance(column_type, str) or not column_type.strip():
-            raise MetadataError(
-                f"Schema column {name!r} must declare a non-empty type"
-            )
+            raise MetadataError(f"Schema column {name!r} must declare a non-empty type")
         columns.append(Column(name=name.strip(), type=column_type.strip()))
     return tuple(columns)
 
@@ -1357,7 +1395,9 @@ def _parse_column_notes(value: Any) -> dict[str, MetadataText]:
     if value is None:
         return {}
     if not isinstance(value, dict) or not value:
-        raise MetadataError("Column notes must be a non-empty mapping of column to description")
+        raise MetadataError(
+            "Column notes must be a non-empty mapping of column to description"
+        )
     notes: dict[str, MetadataText] = {}
     for name, note in value.items():
         if not isinstance(name, str) or not name.strip():
@@ -1430,7 +1470,9 @@ def _validate_columns(
     # The identity column is Weaver's, not the author's, so it must not be
     # declared in Schema — but the primary key may name it when the surrogate is
     # the key, so it counts as a known column for the reference checks.
-    if identity is not None and identity in {column.name for column in declared_columns}:
+    if identity is not None and identity in {
+        column.name for column in declared_columns
+    }:
         raise MetadataError(
             f"Identity {identity} names a declared column; the identity column is "
             "Weaver-managed and must not appear in Schema"

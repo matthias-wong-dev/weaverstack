@@ -18,6 +18,7 @@ from .render import (
 )
 from .tables import CatalogueTable
 
+
 def read_table(
     catalogue: Any,
     table: CatalogueTable,
@@ -45,7 +46,7 @@ def read_table(
             "say which Lakehouse that is"
         )
 
-    name = catalogue.expand(qualified_name(table))
+    name = qualified_name(table, catalogue.destination)
     try:
         existing = catalogue.columns_of(name)
     except Exception as exception:

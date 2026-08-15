@@ -24,16 +24,15 @@ from collections.abc import Callable
 from typing import Any
 
 from weaver.fabric import (
-    FabricClient,
     LAKEHOUSE,
     WAREHOUSE,
+    FabricClient,
     create_lakehouse,
     create_warehouse,
     find_item,
     find_workspace,
 )
 from weaver.fabric.auth import prefer_cli_credential
-
 
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 
@@ -110,9 +109,7 @@ def main() -> int:
                 create=create_lakehouse,
             )
         except Exception as exc:
-            failures.append(
-                f"Lakehouse {name}: {type(exc).__name__}: {exc}"
-            )
+            failures.append(f"Lakehouse {name}: {type(exc).__name__}: {exc}")
             print(f"FAILED  Lakehouse  {name}: {exc}")
             continue
 
@@ -131,9 +128,7 @@ def main() -> int:
                 create=create_warehouse,
             )
         except Exception as exc:
-            failures.append(
-                f"Warehouse {name}: {type(exc).__name__}: {exc}"
-            )
+            failures.append(f"Warehouse {name}: {type(exc).__name__}: {exc}")
             print(f"FAILED  Warehouse  {name}: {exc}")
             continue
 

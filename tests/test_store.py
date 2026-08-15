@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from weaver.store import Entry, FilesystemStore, Store
-from weaver.locations import Location
 from weaver.errors import CommandError
-from weaver.store import StoreError
+from weaver.locations import Location
+from weaver.store import Entry, FilesystemStore, Store, StoreError
 
 
 @pytest.fixture
@@ -68,8 +67,6 @@ def test_directories_report_no_size(store, root):
     assert directory.size is None
 
 
-
-
 def test_deleting_a_directory_needs_recursive(store, root):
     store.write(root / "tree" / "file.txt", b"x")
     with pytest.raises(StoreError, match="recursive"):
@@ -91,42 +88,6 @@ def test_make_directory_is_idempotent(store, root):
 def test_listing_a_missing_location_is_an_error(store, root):
     with pytest.raises(StoreError, match="does not exist"):
         store.list(root / "absent")
-
-
-
-def test_a_link_points_at_the_source_without_copying_it(store, root):
-    """The emulator's counterpart of a OneLake shortcut: no bytes of its own."""
-
-    store.write(root / "source" / "part.parquet", b"rows")
-    store.link(root / "source", root / "alias")
-
-    assert store.read(root / "alias" / "part.parquet") == b"rows"
-    store.write(root / "source" / "part.parquet", b"more rows")
-    assert store.read(root / "alias" / "part.parquet") == b"more rows"
-
-
-def test_a_link_replaces_one_that_is_already_there(store, root):
-    store.make_directory(root / "first")
-    store.make_directory(root / "second")
-    store.link(root / "first", root / "alias")
-    store.link(root / "second", root / "alias")
-
-    assert (root / "alias").path.resolve() == (root / "second").path.resolve()
-
-
-def test_linking_to_something_absent_is_an_error_rather_than_a_dangling_link(store, root):
-    with pytest.raises(StoreError, match="does not exist"):
-        store.link(root / "absent", root / "alias")
-
-
-def test_deleting_a_link_removes_the_link_and_never_what_it_points_at(store, root):
-    store.write(root / "source" / "part.parquet", b"rows")
-    store.link(root / "source", root / "alias")
-
-    store.delete(root / "alias", recursive=True)
-
-    assert not store.exists(root / "alias")
-    assert store.read(root / "source" / "part.parquet") == b"rows"
 
 
 def test_the_local_store_refuses_url_locations(store):

@@ -18,6 +18,9 @@ def test_error_hierarchy_has_one_root():
 def test_the_top_level_is_the_ordinary_notebook_surface_only():
     assert set(weaver.__all__) == {
         "__version__",
+        # The reusable context every operation accepts. A callable rather than
+        # the session package, which is why that package is `weaver.sessions`.
+        "session",
         "build",
         "BuildResult",
         "wipe",
@@ -55,7 +58,7 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
 def test_internal_composition_seams_are_not_top_level_attributes():
     internal = {
         "Workspace",
-        "FabricWorkspace",
+        "Workspace",
         "LocalWorkspace",
         "Location",
         "Store",
@@ -73,10 +76,9 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "wipe_lakehouse",
         "wipe_sql_target",
         "generate_item_build_bundle",
-        "build_uploaded_item_repository",
         "install_bundle_archive",
-        "prepare_weaver_lakehouse",
-        "initialise_weaver_lakehouse",
+        "prepare_catalogue",
+        "initialise_catalogue",
         # Load planning, resolution, dispatch and logging stay in their owning
         # modules: what the namespace exposes is the operation and what it
         # returns, never how it decided.

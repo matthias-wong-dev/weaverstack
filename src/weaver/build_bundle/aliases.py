@@ -10,14 +10,13 @@ What an alias *becomes* depends on the destination it is bound to, and that is a
 planning decision because it is a decision about the target kind:
 
 ===============================  ==============================================
-Fabric or local Lakehouse        a ``create_alias`` action — a OneLake shortcut
-                                 in Fabric, a filesystem link in the emulator
-Fabric Warehouse                 a frozen view over the bound source
+Lakehouse                        a ``create_alias`` action — a OneLake shortcut
+Warehouse                        a frozen view over the bound source
 ===============================  ==============================================
 
 Only the Warehouse form is spelled out in SQL, because only there is the
-statement itself the decision. A shortcut and a link are two transports for one
-frozen decision — this destination, that source.
+statement itself the decision. A shortcut carries one frozen decision — this
+destination, that source.
 
 An alias the current bindings give no physical form is left out of the plan and
 recorded as an omission. That is the planner's decision: the installer may only
@@ -31,22 +30,28 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from ..declaration.model import WeaverDocumentId, WeaverItemId
+from .changes import (
+    FOLDER as FOLDER_KIND,
+)
+from .changes import (
+    TABLE as TABLE_KIND,
+)
+from .changes import (
+    VIEW as VIEW_KIND,
+)
+from .changes import (
+    added,
+)
 from .models import (
     CREATE_ALIAS,
     OMIT_ALIAS_UNSUPPORTED,
-    InstallAction,
     BuildBatch,
+    InstallAction,
     OmittedNode,
-)
-from .changes import (
-    FOLDER as FOLDER_KIND,
-    TABLE as TABLE_KIND,
-    VIEW as VIEW_KIND,
-    added,
 )
 from .payloads import sha256_hex
 from .stages import ALIAS, PlannedStage
-from .targets import BoundTarget, WAREHOUSE_TARGET
+from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Where a Lakehouse alias is materialised, by whether it names a Files document.
 TABLES_AREA = "Tables"
@@ -134,9 +139,7 @@ def plan_item_aliases(
     if supported:
         item_slug = _slug(item)
         payloads: dict[str, bytes] = {}
-        action = _alias_action(
-            supported, item=item, target=target, payloads=payloads
-        )
+        action = _alias_action(supported, item=item, target=target, payloads=payloads)
         # One action stands for every alias the item consumes, so it produces
         # several changes. Each names what the alias physically *is* at this
         # binding — a folder under Files, a view in a Warehouse, a table in a
@@ -172,7 +175,9 @@ def plan_item_aliases(
     )
 
 
-def _unsupported(alias, *, target: BoundTarget, source_target: BoundTarget | None) -> str | None:
+def _unsupported(
+    alias, *, target: BoundTarget, source_target: BoundTarget | None
+) -> str | None:
     """Why this alias has no physical form here, or None when it has one."""
 
     if source_target is None:
@@ -314,9 +319,9 @@ def _shortcut_payload(supported, *, target: BoundTarget) -> bytes:
             for alias, source_target in supported
         ]
     }
-    return (json.dumps(mapping, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
-        "utf-8"
-    )
+    return (
+        json.dumps(mapping, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
 
 
 def _tsql_ident(name: str) -> str:

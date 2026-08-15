@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 TSQL_LOAD_VERSION = 8
 #: 8 replaced the generated SQL load program with a deployed ``SparkSqlTable``
 #: module, so every previously installed Spark load artefact is stale.
-SPARK_LOAD_VERSION = 8
+SPARK_LOAD_VERSION = 9
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
 #: Warehouse load is a stored procedure; a Lakehouse load is a file in the
@@ -64,7 +64,7 @@ class GeneratedLoad:
     extension: str
 
 
-def generate_load(document: "SourceDocument") -> GeneratedLoad:
+def generate_load(document: "SourceDocument", *, destination=None) -> GeneratedLoad:
     """The installable load payload for one validated source.
 
     Only a table has one. A Folder's load is its authored module and a View has
@@ -79,11 +79,25 @@ def generate_load(document: "SourceDocument") -> GeneratedLoad:
     if document.language == SQL:
         return _tsql_load(document)
     if document.language == SPARK_SQL:
-        return _spark_load(document)
+        return _spark_load(document, destination)
     raise NotImplementedError(
         f"{document.relative_path}: a {document.language} table's load is its "
         "authored module, which is deployed rather than generated"
     )
+
+
+def load_identity(document: "SourceDocument") -> tuple[str, int]:
+    """One generated load's object type and template version, without rendering.
+
+    What an artefact *is* does not depend on where it is bound, so a caller
+    listing identities and signatures asks this instead of generating a payload
+    it would throw away — and, for a Spark load, could not render at all
+    without a destination.
+    """
+
+    if document.language == SQL:
+        return PROCEDURE_OBJECT, TSQL_LOAD_VERSION
+    return FILE_OBJECT, SPARK_LOAD_VERSION
 
 
 def has_generated_load(document: "SourceDocument") -> bool:
@@ -109,7 +123,7 @@ def _tsql_load(document: "SourceDocument") -> GeneratedLoad:
     )
 
 
-def _spark_load(document: "SourceDocument") -> GeneratedLoad:
+def _spark_load(document: "SourceDocument", destination) -> GeneratedLoad:
     from .metadata import extract_sql_metadata_and_body
     from .spark_sql_module import addressed, render_spark_sql_module
 
@@ -121,7 +135,7 @@ def _spark_load(document: "SourceDocument") -> GeneratedLoad:
     content = render_spark_sql_module(
         document.document,
         header=header,
-        body=addressed((document.sql_body or "").strip()),
+        body=addressed((document.sql_body or "").strip(), destination),
         source_name=document.relative_path.rpartition("/")[2],
     )
     return GeneratedLoad(
@@ -134,6 +148,7 @@ def _spark_load(document: "SourceDocument") -> GeneratedLoad:
 
 __all__ = [
     "FILE_OBJECT",
+    "load_identity",
     "PROCEDURE_OBJECT",
     "SPARK_LOAD_VERSION",
     "TSQL_LOAD_VERSION",

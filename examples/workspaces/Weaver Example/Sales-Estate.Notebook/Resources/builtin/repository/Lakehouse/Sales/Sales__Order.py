@@ -38,12 +38,16 @@ class Sales__Order(Table):
         # the abfss:// form, which pathlib cannot express. path() is the
         # mounted Path for ordinary Python — see the folder's own module.
         exported = Sales__OrderExport(self).spark_path()
-        rows = self.spark.read.option("header", True).csv(exported).selectExpr(
-            "`Order id`",
-            "`Customer id`",
-            "cast(`Order date` as date) as `Order date`",
-            "cast(`Amount` as decimal(18,2)) as `Amount`",
-            "`Order status`",
+        rows = (
+            self.spark.read.option("header", True)
+            .csv(exported)
+            .selectExpr(
+                "`Order id`",
+                "`Customer id`",
+                "cast(`Order date` as date) as `Order date`",
+                "cast(`Amount` as decimal(18,2)) as `Amount`",
+                "`Order status`",
+            )
         )
         # A cancelled order is retired explicitly. Absence would not do it: this
         # source is incremental, so absence only means "outside the window".

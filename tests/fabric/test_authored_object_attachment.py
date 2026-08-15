@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.targets import ItemRef
-
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 
@@ -34,9 +32,9 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
 
     from weaver.fabric import FabricResolver
 
-    weaver_lakehouse = ItemRef(fabric_workspace.weaver_lakehouse)
+    catalogue = fabric_workspace.catalogue_item
     expected_root = FabricResolver(fabric_workspace, client=fabric_client).spark_root(
-        weaver_lakehouse
+        catalogue
     )
 
     payload = livy_session.run(

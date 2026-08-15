@@ -11,27 +11,26 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from support.sessions import given_installer
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.resolution import LocalResolver
-from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
-from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    InstallAction,
     BuildBatch,
     BuildPlan,
-    BuildSequence,
     BuildSelection,
+    BuildSequence,
     Impact,
+    InstallAction,
     compute_bundle_id,
     load_bundle,
     write_bundle,
 )
-from support.sessions import given_installer
-
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
 from weaver.errors import BuildError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 
@@ -81,12 +80,14 @@ def _bundle(tmp_path):
         BuildSequence(
             number=(index + 1) * 10,
             description=f"step {index}",
-            batches=(BuildBatch(id=f"b{index}", target_id=TARGET.id, actions=(action,)),),
+            batches=(
+                BuildBatch(id=f"b{index}", target_id=TARGET.id, actions=(action,)),
+            ),
         )
         for index, action in enumerate(filled)
     )
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
@@ -179,7 +180,16 @@ def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
     assert report.status == SUCCEEDED
 
 
-def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path):
+def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_path):
+    """Inside a Fabric session there is no REST client to refresh with.
+
+    The refresh is a workspace operation, and a notebook resolver reaches the
+    workspace through NotebookUtils rather than REST — so it offers no refresh
+    and the action is recorded as skipped. A desktop resolver performs it. The
+    plan is the same either way, which is what keeps the decision in the
+    Builder and out of the host.
+    """
+
     action = InstallAction(
         id="refresh-application-sql-endpoint",
         kind="refresh_sql_endpoint",
@@ -194,7 +204,7 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
         batches=(BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),),
     )
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
@@ -205,15 +215,24 @@ def test_local_endpoint_refresh_is_recorded_as_skipped_without_failing(tmp_path)
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()
     location = Location(str(tmp_path / "refresh-bundle"))
-    bundle = write_bundle(
-        location, plan=plan, payloads={}, store=store
-    )
-    workspace = LocalWorkspace(
-        workspace=tmp_path / "local", weaver_lakehouse="Weaver"
-    )
+    bundle = write_bundle(location, plan=plan, payloads={}, store=store)
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+
+    class WithoutRefresh:
+        """A resolver that resolves, and cannot refresh an endpoint."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name == "refresh_sql_endpoint":
+                raise AttributeError(name)
+            return getattr(self._inner, name)
 
     report = given_installer(
-        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+        workspace=workspace,
+        store=store,
+        resolver=WithoutRefresh(given_resolver(workspace=workspace)),
     ).install(bundle)
 
     assert report.status == SUCCEEDED
@@ -245,7 +264,7 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
         payload_sha256=None,
     )
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
@@ -266,10 +285,10 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     bundle = write_bundle(
         Location(str(tmp_path / "refresh-bundle")), plan=plan, payloads={}, store=store
     )
-    workspace = LocalWorkspace(workspace=tmp_path / "local", weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
 
     installer = given_installer(
-        workspace=workspace, store=store, resolver=LocalResolver(workspace)
+        workspace=workspace, store=store, resolver=given_resolver(workspace=workspace)
     )
     asked = []
     installer.session.spark = lambda *a, **k: asked.append(True)
@@ -301,7 +320,9 @@ def _tsql_batch(tmp_path, count: int):
 
     import hashlib
 
-    target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
+    target = BoundTarget(
+        id="warehouse-Reporting", kind="warehouse", item_id="Reporting"
+    )
     payloads = {}
     actions = []
     for index in range(count):
@@ -319,7 +340,7 @@ def _tsql_batch(tmp_path, count: int):
             )
         )
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",

@@ -203,7 +203,11 @@ def _rows(executor, table: str, columns: str, values: list[tuple]) -> None:
 
 
 def _literal(value) -> str:
-    return str(value) if isinstance(value, int) else "'" + str(value).replace("'", "''") + "'"
+    return (
+        str(value)
+        if isinstance(value, int)
+        else "'" + str(value).replace("'", "''") + "'"
+    )
 
 
 def _load(executor, name: str) -> LoadResult:
@@ -220,7 +224,9 @@ def _contents(executor, name: str, columns: str = "[Customer id], [Customer name
     rows = executor.query(
         f"select {columns} from [{SCHEMA}].[{name}] order by [Customer id];"
     )
-    return [tuple(row[column.strip(" []")] for column in columns.split(",")) for row in rows]
+    return [
+        tuple(row[column.strip(" []")] for column in columns.split(",")) for row in rows
+    ]
 
 
 # --- a complex staging query ---------------------------------------------------
@@ -461,9 +467,7 @@ def test_the_delete_working_table_is_cleaned_up_after_a_clean_run(retired):
 def unclaimed(retire_program):
     """A retirement naming a key the target does not hold."""
 
-    result = _retired(
-        retire_program, source=[("c1", "One", 1)], retirement=[("c99",)]
-    )
+    result = _retired(retire_program, source=[("c1", "One", 1)], retirement=[("c99",)])
     return SimpleNamespace(
         result=result, contents=_contents(retire_program, "ProgramRetire")
     )

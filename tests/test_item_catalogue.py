@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from test_item_dependencies import _dependency_estate
+from test_item_repository import _estate
 
-from weaver.locations import Location
-from weaver.declaration import parse_item_repository
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.catalogue.projection import (
     CatalogueProjection,
     project_alias_registry,
@@ -23,9 +22,13 @@ from weaver.catalogue.tables import (
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
 )
+from weaver.declaration import parse_item_repository
+from weaver.declaration.model import WeaverItemId
+from weaver.locations import Location
+from weaver.spark import FabricSparkTarget
 
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate
+#: The Weaver Lakehouse every catalogue statement is addressed to.
+WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"):
@@ -88,9 +91,7 @@ def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
 
-    schemas = {
-        row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)
-    }
+    schemas = {row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)}
     # `Files/_` is the generated runtime folder's schema. It is catalogued by the
     # same rule as any other folder schema, which is the point: nothing about the
     # load layer gets a namespace convention of its own.
@@ -113,8 +114,8 @@ def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
     raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     curated = _project(repository, "Lakehouse/Curated", "Curated_Dev")
 
-    raw_sql = "\n".join(reconcile(raw).statements)
-    curated_sql = "\n".join(reconcile(curated).statements)
+    raw_sql = "\n".join(reconcile(raw, destination=WEAVER).statements)
+    curated_sql = "\n".join(reconcile(curated, destination=WEAVER).statements)
     assert "`item_name` = 'Raw'" in raw_sql
     assert "`item_name` = 'Curated'" not in raw_sql
     assert "`item_name` = 'Curated'" in curated_sql
@@ -131,9 +132,7 @@ def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
     assert first.scope == second.scope
     assert first_row["target_name"] == "Raw_Dev"
     assert second_row["target_name"] == "Raw_Prod"
-    assert {
-        key: value for key, value in first_row.items() if key != "target_name"
-    } == {
+    assert {key: value for key, value in first_row.items() if key != "target_name"} == {
         key: value for key, value in second_row.items() if key != "target_name"
     }
 
@@ -186,7 +185,9 @@ def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
         repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="lakehouse"
     )
 
-    assert _registry_row(projection, "Sales", "PortableCustomer")["object_type"] == "table"
+    assert (
+        _registry_row(projection, "Sales", "PortableCustomer")["object_type"] == "table"
+    )
 
 
 def test_an_alias_signature_is_its_declaration_and_not_its_sources_content(tmp_path):
@@ -243,7 +244,9 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
-    reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
+    reconciliation = reconcile(
+        _project(repository, "Lakehouse/Raw", "Raw_Dev"), destination=WEAVER
+    )
 
     assert reconciliation.registry.table is REGISTRY
     assert reconciliation.statements[-1] == reconciliation.registry.merge
@@ -270,11 +273,11 @@ class _FakeCatalogue:
     def __init__(self, columns_by_table):
         self._columns = columns_by_table
 
-    def expand(self, token: str) -> str:
-        return token.strip("{}").replace("object:", "")
+    def qualify(self, schema: str, name: str) -> str:
+        return f"`{schema}`.`{name}`"
 
     def columns_of(self, name: str) -> tuple[str, ...]:
-        table = name.split(".", 1)[1]
+        table = name.rsplit(".", 1)[1].strip("`")
         if table not in self._columns:
             raise _Absent(name)
         return ()
@@ -285,7 +288,7 @@ class _FakeCatalogue:
 
 class _Shaped(_FakeCatalogue):
     def columns_of(self, name: str) -> tuple[str, ...]:
-        table = name.split(".", 1)[1]
+        table = name.rsplit(".", 1)[1].strip("`")
         if table not in self._columns:
             raise _Absent(name)
         return tuple(self._columns[table])
@@ -365,9 +368,8 @@ def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
     """
 
     from weaver.catalogue.state import read_catalogue_state
-    from weaver.errors import BuildError
-
     from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.errors import BuildError
 
     all_but_one = [
         table.name for table in CATALOGUE_TABLES if table.name != "TableDictionary"

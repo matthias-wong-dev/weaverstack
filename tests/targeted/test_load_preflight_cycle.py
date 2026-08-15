@@ -32,25 +32,30 @@ being flattened into a guess. That is the last section below.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-
-from weaver.errors import CommandError
-from weaver.run.result import RunError
-from weaver.load import run_load
-from weaver.run.state import read_target_inventories
-from weaver.run import RunState
-from weaver.load_plan import PhysicalTargetRef
-from weaver.load_report import TASK_SUCCEEDED
-from weaver.resolution import LocalResolver
-from weaver.workspaces import LocalWorkspace
-
 from factories import (
     installed_catalogue,
     installed_inventories,
     load_estate,
     load_estate_bindings,
 )
+from support.workspaces import InventoryClient, given_workspace
+
+from weaver.errors import CommandError
+from weaver.fabric.resolution import FabricResolver
+from weaver.load_plan import PhysicalTargetRef
+from weaver.load_report import TASK_SUCCEEDED
+from weaver.operations.load import run_load
+from weaver.run import RunState
+from weaver.run.result import RunError
+from weaver.run.state import read_target_inventories
+from weaver.store import FilesystemStore
+
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -76,13 +81,13 @@ class Prepared:
     both.
     """
 
-    catalogue: object
+    catalogue: Lakehouse / object
     inventories: dict
     workspace: object
     session: object
 
 
-class Refreshing(LocalResolver):
+class Refreshing(FabricResolver):
     def refresh_sql_endpoint(self, item):
         return None
 
@@ -91,16 +96,25 @@ class Refreshing(LocalResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
 
     return Prepared(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        session=given_session(workspace=workspace, resolver=Refreshing(workspace)),
+        session=given_session(
+            workspace=workspace,
+            resolver=Refreshing(
+                workspace,
+                client=InventoryClient(
+                    workspace.workspace,
+                    [("Lakehouse", name) for name in ("Weaver_LH", "Raw_LH")],
+                ),
+                base_url=Path(tmp_path).as_posix(),
+            ),
+            store=FilesystemStore(),
+        ),
     )
 
 
@@ -203,9 +217,7 @@ def empty_estate(tmp_path):
         tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
     )
     bindings = item_bindings((ITEM, "Views_LH"))
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
 
     # A real Session over a real estate root, so the run writes its evidence
@@ -214,7 +226,18 @@ def empty_estate(tmp_path):
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
-        session=given_session(workspace=workspace, resolver=Refreshing(workspace)),
+        session=given_session(
+            workspace=workspace,
+            resolver=Refreshing(
+                workspace,
+                client=InventoryClient(
+                    workspace.workspace,
+                    [("Lakehouse", name) for name in ("Weaver_LH", "Raw_LH")],
+                ),
+                base_url=Path(tmp_path).as_posix(),
+            ),
+            store=FilesystemStore(),
+        ),
     )
 
 
@@ -277,12 +300,14 @@ def real_session(tmp_path):
 
     from support.sessions import given_session
 
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
+    # The failure under test happens inside the inventory reader, so what this
+    # Session needs is a store and a resolver rather than a way to reach Fabric.
+    return given_session(
+        workspace=workspace,
+        lakehouses=("Weaver_LH", "Raw_LH"),
+        store=FilesystemStore(),
     )
-    # The failure under test happens inside the inventory reader. Supplying an
-    # inert Spark value keeps this pure test from acquiring a real JVM first.
-    return given_session(workspace=workspace, spark=object())
 
 
 def _failing_reader(monkeypatch, exc):

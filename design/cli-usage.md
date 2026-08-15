@@ -6,35 +6,32 @@ This document explains command use and workspace configuration. It describes
 the public CLI, not the implementation of command handlers.
 
 ```bash
-pip install 'weaverstack[cli]'
+pip install weaverstack
 weaver --help
 ```
 
-Fabric commands use the identity from `az login`. Local commands need no Azure
-credentials.
+Commands use the identity from `az login`.
 
 ## Workspace resolution
 
 Commands accept the applicable subset of:
 
 ```text
---workspace <Fabric-name-or-local-folder>
---workspace-type <fabric|local>
+--workspace <Fabric-workspace-name>
 --workspace-config <path>
 --environment <Fabric-Environment>
---weaver-lakehouse <control-Lakehouse>
+--catalogue <control-Lakehouse>
 ```
 
-`workspace_type` defaults to `fabric`. Explicit CLI values override the one
-Workspace described by the configuration file. A local Workspace is simply a
-folder path:
+Explicit CLI values override the one Workspace described by the configuration
+file:
 
 ```bash
 weaver build ./estate \
-  --workspace .local \
-  --workspace-type local \
-  --weaver-lakehouse Weaver \
-  --bind Lakehouse/Sales=Lakehouse/Sales
+  --workspace Analytics \
+  --environment weaver \
+  --catalogue Lakehouse/Weaver \
+  --bind Lakehouse/Sales=Sales
 ```
 
 A configuration is shorthand for the same values. Physical target names are
@@ -42,9 +39,8 @@ the keys and their default logical bindings are the values:
 
 ```yaml
 workspace: Analytics
-workspace_type: fabric
 environment: Runtime
-weaver_lakehouse: Control
+catalogue: Lakehouse/Control
 
 lakehouses:
   Sales_Dev: Lakehouse/Sales
@@ -52,7 +48,8 @@ warehouses:
   Reporting_Dev: Warehouse/Reporting
 ```
 
-See [`examples/env.yml`](../examples/env.yml) for the expanded form.
+See [`examples/weaver_example.yml`](../examples/weaver_example.yml) for the
+expanded form, including per-target execution settings.
 
 ## Session
 
@@ -70,7 +67,7 @@ Starting resources in the background...
 Commands are the ordinary CLI commands. `exit` to leave.
 
 weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
-weaver> build . --bind Lakehouse/Sales=Lakehouse/Sales
+weaver> build . --bind Lakehouse/Sales=Sales
 weaver> load Lakehouse/Sales Warehouse/Reporting
 weaver> test Lakehouse/Sales
 weaver> exit
@@ -85,7 +82,7 @@ resources per workspace it is asked about.
 
 **A workspace given at startup is inherited** by commands that name none, which
 is why the example above repeats no `--workspace`. Flags a command *does* give
-are applied on top, so `build --weaver-lakehouse Other` overrides the control
+are applied on top, so `build --catalogue Lakehouse/Other` overrides the control
 Lakehouse without restating the workspace. Naming a different `--workspace`
 addresses that one instead, with its own resources.
 
@@ -96,8 +93,7 @@ borrowing another workspace's Environment.
 **The prompt does not wait for Fabric.** Where a workspace is known at startup,
 the credential and the Livy session are acquired in the background; the first
 command that needs Spark waits on that startup rather than beginning a second
-one, which matters on a capacity that permits exactly one. A local workspace
-warms its JVM the same way.
+one, which matters on a capacity that permits exactly one.
 
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
@@ -200,10 +196,9 @@ them, in which case it skips that entirely, because the catalogue tables are
 going with it and deleting rows from a table about to be removed is work nobody
 needs.
 
-That is worth knowing, because the catalogue tidy is not cheap. Measured against
-a real workspace, a wipe of two destination targets spent about **two minutes**,
-almost all of it deleting rows the next build would immediately rewrite. Naming
-the control Lakehouse as well brought the same wipe to **4.4 seconds**.
+That is worth knowing, because the catalogue tidy is not cheap: it deletes a row
+per claim, and for a from-scratch loop those are rows the next build rewrites
+immediately.
 
 So for a from-scratch loop, wipe the control Lakehouse too. Keep it out only
 when you mean to preserve the catalogue — decommissioning one target out of an
@@ -217,15 +212,16 @@ bindings and targets the last one had. `compose.yml` writes the sequence down:
 ```yaml
 compose:
   dev:
-    - weaver wipe Lakehouse/Sales Warehouse/Reporting
-    - weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
-    - weaver load Warehouse/Reporting
-    - weaver test Warehouse/Reporting
+    - wipe Lakehouse/Sales Warehouse/Reporting
+    - build ./repository --bind Lakehouse/Sales=Sales
+    - load Warehouse/Reporting
+    - test Warehouse/Reporting
 ```
 
 ```bash
 weaver compose dev
 weaver compose dev --file path/to/compose.yml
+weaver compose dev --yes                        # unattended
 ```
 
 The sequence is displayed and confirmed before anything runs:
@@ -233,10 +229,10 @@ The sequence is displayed and confirmed before anything runs:
 ```text
 Compose: dev  (compose.yml)
 
-1. weaver wipe Lakehouse/Sales Warehouse/Reporting
-2. weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
-3. weaver load Warehouse/Reporting
-4. weaver test Warehouse/Reporting
+1. wipe Lakehouse/Sales Warehouse/Reporting
+2. build ./repository --bind Lakehouse/Sales=Sales
+3. load Warehouse/Reporting
+4. test Warehouse/Reporting
 
 Execute this sequence? [y/N]
 ```
@@ -244,10 +240,12 @@ Execute this sequence? [y/N]
 The default is no, and only `y`/`yes` proceeds. **That one answer authorises the
 whole sequence** — a `wipe` inside it does not stop to ask again, because having
 agreed to four commands, being asked about the first of them is not a second
-safeguard. Without a terminal to ask, nothing runs.
+safeguard. Without a terminal to ask, nothing runs unless `--yes` said so
+already; `--yes` carries the same authority to each command in the sequence.
 
 **Entries are ordinary Weaver command lines**, parsed by the same parser and run
-by the same handlers, so an option means here what it means at a prompt. Nothing
+by the same handlers, so an option means here what it means at a prompt. The
+leading `weaver` is optional, because a composition holds nothing else. Nothing
 shell-shaped is accepted — no pipes, no redirection, no `&&`, no variables, no
 other executables — and neither is `session`, `doctor` or a nested `compose`.
 
@@ -279,20 +277,6 @@ missing Weaver Lakehouse fails preflight instead of quietly making one. A
 desktop build proves it — along with the Environment and every bound Lakehouse
 and Warehouse — from a single workspace listing before it starts a Livy session.
 
-## Push (compatibility utility)
-
-Push validates the complete authored repository before replacing
-`Files/weaver_items/`:
-
-```bash
-weaver push ./estate --workspace-config examples/env.yml
-```
-
-Push is whole-repository only. It does not build targets or mutate catalogue
-rows, and the local source folder name is not added as another remote level.
-`Lakehouse/_weaver` is package-owned and is composed in memory; it must not be
-authored or uploaded. Build does not consume this destination.
-
 ## Build
 
 Bindings are physical-first:
@@ -300,9 +284,9 @@ Bindings are physical-first:
 ```bash
 weaver build \
   ./estate \
-  --workspace-config examples/env.yml \
+  --workspace-config examples/weaver_example.yml \
   --bind Lakehouse/Sales_Dev \
-  --bind Warehouse/Reporting_Dev=Warehouse/Alternative
+  --bind Warehouse/Reporting_Dev=Alternative
 ```
 
 Without `=`, the physical target uses its configured logical default. With `=`,
@@ -318,12 +302,12 @@ Unchanged objects receive no physical action; selected changes use an explicit
 drop followed by a strict create. `Prohibit Rebuild` protects an existing
 physical object while allowing its incoming catalogue metadata to advance.
 
-For a local CLI targeting Fabric, parsing and request validation happen first;
-one Environment-backed Livy session then returns authoritative build state,
-planning happens locally, and a completed archive is uploaded under
-`Files/cli/<execution-id>/` for one in-session install call. Native Fabric builds
-still prepare, plan, and install in-session. Local targets run in-process against
-the emulator. Warehouses remain Fabric-only.
+From a desktop, parsing and request validation happen first; the build state is
+then read across — the catalogue and a Lakehouse's views as Spark SQL, its
+objects as storage, a Warehouse over TDS — and planning happens here against
+that state. Every build action runs in the Installer, wherever that is. Weaver
+running inside Fabric prepares, plans and installs in the session it is already
+in.
 
 Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 `--bundle <name>` to choose its name.
@@ -333,7 +317,7 @@ Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 Run the installed Tests and Assumptions in one or more physical targets:
 
 ```bash
-weaver test Lakehouse/Sales --workspace-config examples/env.yml
+weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
 The exit code is the verdict — non-zero when anything failed or could not be
@@ -385,21 +369,6 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 
 `weaver test` runs both Tests and Assumptions. See [validation](validation.md).
 
-## Unbind
-
-Unbind removes catalogue state for explicitly named physical targets without
-inspecting or deleting those targets:
-
-```bash
-weaver unbind \
-  --workspace-config examples/env.yml \
-  Lakehouse/Sales_Dev \
-  Warehouse/Reporting_Dev
-```
-
-It works even when the physical target has already disappeared. Unrelated
-installations remain.
-
 ## Wipe
 
 Wipe clears everything in each selected typed target. Physical wipe does not
@@ -410,7 +379,7 @@ with `--unbind-from` (or the configured control Lakehouse).
 weaver wipe \
   Lakehouse/Sales_Dev \
   Warehouse/Reporting_Dev \
-  --workspace-config examples/env.yml \
+  --workspace-config examples/weaver_example.yml \
   --unbind-from Control \
   --dry-run
 ```
@@ -426,14 +395,16 @@ from a directory being deleted. Only the pointer goes: the data belongs to the
 item that produced it, and wiping one Lakehouse never reaches through a shortcut
 into another.
 
-## Capacity and diagnostics
+## Fabric estate
+
+`weaver fabric` manages the estate Weaver runs on rather than anything Weaver
+built. Nothing under it reads or writes the catalogue.
 
 ```bash
-weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
-weaver capacity status  --resource-group <rg> --capacity-name <capacity>
-weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity resume  --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity status  --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity suspend --resource-group <rg> --capacity-name <capacity>
 
-weaver doctor
+weaver fabric notebook push ./notebooks/Refresh.py --workspace "Analytics"
+weaver fabric notebook run Refresh --workspace "Analytics"
 ```
-
-`doctor` reports whether local Spark, Delta and a supported JDK are available.

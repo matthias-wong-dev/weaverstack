@@ -20,9 +20,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver.session.console import ConsoleScope, ConsoleSession
-from weaver.session.notebook import NotebookSession
-from weaver.workspaces import FabricWorkspace, LocalWorkspace
+from weaver.sessions.console import ConsoleScope, ConsoleSession
+from weaver.sessions.notebook import NotebookSession
+from weaver.workspaces import Workspace
 
 CASE_KEY = "spark.sql.caseSensitive"
 
@@ -110,25 +110,12 @@ def desktop(monkeypatch):
     def make(payload=None):
         livy = _Livy(payload)
         session = ConsoleSession(
-            workspace=FabricWorkspace(
-                workspace="Weaver", weaver_lakehouse="Weaver", environment="weaver"
+            workspace=Workspace(
+                workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
             ),
             livy=livy,
-            require_weaver=False,
         )
         return session, livy
-
-    return make
-
-
-@pytest.fixture
-def emulator():
-    """A console on the local emulator: Spark is right here."""
-
-    def make(spark):
-        return ConsoleSession(
-            workspace=LocalWorkspace(workspace="/root"), spark=spark, resolver=object()
-        )
 
     return make
 
@@ -139,8 +126,8 @@ def notebook():
 
     def make(spark):
         return NotebookSession(
-            workspace=FabricWorkspace(
-                workspace="Weaver", weaver_lakehouse="Weaver", environment="weaver"
+            workspace=Workspace(
+                workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
             ),
             spark=spark,
             resolver=object(),
@@ -199,12 +186,9 @@ def test_the_last_statement_answers(desktop):
     assert answered == [{"col_name": "n", "data_type": "int"}]
 
 
-@pytest.mark.parametrize("host", ["emulator", "notebook"])
-def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(
-    host, emulator, notebook, request
-):
+def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(notebook):
     spark = _Spark(answers={"DESCRIBE QUERY SELECT 1": [_Row(col_name="n")]})
-    session = request.getfixturevalue(host)(spark)
+    session = notebook(spark)
 
     answered = session.execute_spark_sql_batch(
         ["CREATE TEMPORARY VIEW v AS SELECT 1", "DESCRIBE QUERY SELECT 1"]
@@ -222,15 +206,12 @@ def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(
 # --- one identifier-case scope over the whole batch ----------------------------
 
 
-@pytest.mark.parametrize("host", ["emulator", "notebook"])
-def test_every_statement_in_a_batch_shares_the_exact_case_scope(
-    host, emulator, notebook, request
-):
+def test_every_statement_in_a_batch_shares_the_exact_case_scope(notebook):
     """A setup analysed under one case and its query under another is a different
     query. Both hosts hold the scope open across the batch, and put it back."""
 
     spark = _Spark()
-    session = request.getfixturevalue(host)(spark)
+    session = notebook(spark)
 
     session.execute_spark_sql_batch(
         ["CREATE TEMPORARY VIEW V AS SELECT 1 AS N", "DESCRIBE QUERY SELECT N FROM V"],
@@ -241,10 +222,7 @@ def test_every_statement_in_a_batch_shares_the_exact_case_scope(
     assert spark.conf.values[CASE_KEY] == "false"
 
 
-@pytest.mark.parametrize("host", ["emulator", "notebook"])
-def test_a_failing_statement_still_puts_the_case_scope_back(
-    host, emulator, notebook, request
-):
+def test_a_failing_statement_still_puts_the_case_scope_back(notebook):
     """A session left case-sensitive by a failure would change every statement
     that followed it, including ones from other work in the same session."""
 
@@ -254,7 +232,7 @@ def test_a_failing_statement_still_puts_the_case_scope_back(
             raise RuntimeError("analysis failed")
 
     spark = _Failing()
-    session = request.getfixturevalue(host)(spark)
+    session = notebook(spark)
 
     with pytest.raises(RuntimeError, match="analysis failed"):
         session.execute_spark_sql_batch(["SELECT 1"], exact_case=True)
@@ -262,10 +240,9 @@ def test_a_failing_statement_still_puts_the_case_scope_back(
     assert spark.conf.values[CASE_KEY] == "false"
 
 
-@pytest.mark.parametrize("host", ["emulator", "notebook"])
-def test_without_exact_case_the_host_default_stands(host, emulator, notebook, request):
+def test_without_exact_case_the_host_default_stands(notebook):
     spark = _Spark()
-    session = request.getfixturevalue(host)(spark)
+    session = notebook(spark)
 
     session.execute_spark_sql_batch(["SELECT 1"])
 

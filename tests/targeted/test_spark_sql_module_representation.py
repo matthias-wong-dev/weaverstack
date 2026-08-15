@@ -28,6 +28,9 @@ from weaver.declaration.spark_sql_module import (
     deployed_module_name,
     python_string,
 )
+from weaver.spark import FabricSparkTarget
+
+SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 
 SOURCE = """/*
 Table ID: Sales.OrderSummary
@@ -60,7 +63,7 @@ def _document(source: str = SOURCE):
 
 
 def _module(source: str = SOURCE) -> str:
-    return _document(source).create_load().payload.decode("utf-8")
+    return _document(source).create_load(destination=SALES).payload.decode("utf-8")
 
 
 def _namespace(source: str = SOURCE) -> dict:
@@ -132,20 +135,20 @@ def test_the_authored_sql_survives_byte_for_byte_but_addressed():
 
     _header, body = extract_sql_metadata_and_body(SOURCE)
 
-    assert _namespace()["Sales__OrderSummary"].sql == addressed(body.strip())
+    assert _namespace()["Sales__OrderSummary"].sql == addressed(body.strip(), SALES)
 
 
-def test_the_module_carries_object_tokens_rather_than_resolved_names():
-    """Destination-free, like every other bundle payload.
+def test_the_module_names_the_lakehouse_it_reads():
+    """Addressed when the bundle is generated, like every other payload.
 
-    The installer resolves these as it writes the file down, which is the first
-    moment it knows which Lakehouse the module is landing in.
+    A deployed module is opened by whoever is debugging a load, and what it
+    reads and writes should be readable there rather than resolved later.
     """
 
     sql = _namespace()["Sales__OrderSummary"].sql
 
-    assert "{{object:Sales.Order}}" in sql
-    assert "Sales.Order where" not in sql
+    assert "`Sales_LH`.`Sales`.`Order`" in sql
+    assert "from Sales.Order where" not in sql
 
 
 def test_the_temporary_view_is_not_addressed_as_a_managed_object():

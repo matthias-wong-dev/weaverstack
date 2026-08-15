@@ -13,9 +13,9 @@ execution can return both a diagnostic result set and its output counts. The
 pure renderer tests in ``tests/targeted/test_tsql_validation_representation.py`` cover
 the SQL's *shape*; this covers the engine's *answer*.
 
-The outcomes match ``tests/spark/test_validation_comparison_primitive.py``
-deliberately. Two engines, one set of validation semantics; if the two files
-disagree, the semantics have diverged.
+The outcomes match what a Lakehouse validation produces, deliberately: two
+engines, one set of validation semantics. If they disagree, the semantics have
+diverged.
 """
 
 from __future__ import annotations
@@ -117,9 +117,7 @@ def estate(clean_disposable_warehouse):
 
 def _drop(executor) -> None:
     executor.execute_script(
-        "\n".join(
-            f"drop procedure if exists [_].[{name}];" for name in PROCEDURES
-        )
+        "\n".join(f"drop procedure if exists [_].[{name}];" for name in PROCEDURES)
         + "\n"
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{table}', N'U') is not null "
@@ -265,7 +263,9 @@ def test_an_assumption_counts_and_returns_its_violations(estate):
 def test_an_assumption_holding_reports_zero(estate):
     _rows(estate, "ValidationActual", [(1, 100)])
 
-    result = _counts(estate, f"Assumption {SCHEMA}.OrdersArePositive", kind="Assumption")
+    result = _counts(
+        estate, f"Assumption {SCHEMA}.OrdersArePositive", kind="Assumption"
+    )
 
     assert result["violation_count"] == 0
 

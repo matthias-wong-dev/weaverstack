@@ -1,7 +1,7 @@
-"""Generate deterministic, destination-free create definitions.
+"""Generate one source's create definition against its bound destination.
 
-Build definitions create structures; load definitions populate tables. Executors
-resolve object tokens against the target destination at installation time.
+Build definitions create structures; load definitions populate tables. Every
+managed name is rendered here, so an executor runs the statement as written.
 """
 
 from __future__ import annotations
@@ -11,9 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..errors import DiscoveryError
-from ..spark.tokens import object_token
 from .columns import metadata_column_references
-from .dependencies import rewrite_sql_references
+from .dependencies import address_managed_references
 from .metadata import SPARK_SQL, SQL, TABLE, VIEW
 
 if TYPE_CHECKING:
@@ -57,8 +56,12 @@ class GeneratedDdl:
     extension: str
 
 
-def generate_ddl(document: "SourceDocument") -> GeneratedDdl:
+def generate_ddl(document: "SourceDocument", *, destination=None) -> GeneratedDdl:
     """The installable create definition for one validated source.
+
+    ``destination`` is the Spark destination the object is bound to, and every
+    managed name in the result is rendered against it. A Warehouse object needs
+    none: its script is T-SQL, addressed by the connection it runs on.
 
     Folders have no create DDL — a Folder is a directory, created by the
     installer rather than by a statement — so this is never called for one.
@@ -66,12 +69,17 @@ def generate_ddl(document: "SourceDocument") -> GeneratedDdl:
 
     if document.language == SQL:
         return _tsql_ddl(document)
+    if destination is None:
+        raise DiscoveryError(
+            f"{document.relative_path}: a Spark object needs a bound destination "
+            "before its create definition can be generated"
+        )
     if document.kind == TABLE:
         if document.language == SPARK_SQL:
-            return _spark_table_ddl(document)
-        return _python_table_ddl(document)
+            return _spark_table_ddl(document, destination)
+        return _python_table_ddl(document, destination)
     if document.kind == VIEW:
-        return _view_ddl(document)
+        return _view_ddl(document, destination)
     raise NotImplementedError(
         f"{document.relative_path}: a {document.kind} has no create DDL"
     )
@@ -100,33 +108,13 @@ def _tsql_ddl(document: "SourceDocument") -> GeneratedDdl:
     )
 
 
-def _object_name(document: "SourceDocument") -> str:
+def _object_name(document: "SourceDocument", destination) -> str:
     """How a payload names the object it builds."""
 
-    return object_token(document.object_id.schema, document.object_id.object)
+    return destination.qualify(document.object_id.schema, document.object_id.object)
 
 
-def _addressed(body: str) -> str:
-    """One SQL body with its managed references named for a destination.
-
-    Only ordinary two-part references are rewritten, and that is exactly the set
-    the reader guarantees resolves inside the repository: a valid repository
-    resolves every one of them, so what is left over is deliberately outside — a
-    physically-qualified three- or four-part name, or a table-valued function.
-    Both are the author naming something Weaver does not manage, and both are
-    left alone.
-    """
-
-    def rewrite(reference):
-        object_id = reference.object_id
-        if object_id is None:  # a call, or a qualified physical name
-            return None
-        return object_token(object_id.schema, object_id.object)
-
-    return rewrite_sql_references(body, rewrite)
-
-
-def _python_table_ddl(document: "SourceDocument") -> GeneratedDdl:
+def _python_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
     """A Delta table from its declared columns, plus the audit columns.
 
     A Python-backed table has no query to infer from, so the reader requires a
@@ -141,13 +129,13 @@ def _python_table_ddl(document: "SourceDocument") -> GeneratedDdl:
             f"{document.relative_path}: a Python-backed Delta table must declare "
             "its schema; schema inference needs a query"
         )
-    content = _create_table_sql(_object_name(document), columns)
+    content = _create_table_sql(_object_name(document, destination), columns)
     return GeneratedDdl(
         executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
     )
 
 
-def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
+def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
     """A Spark SQL table's deferred, deterministic build instruction.
 
     Declared or inferred, its shape is only settled by running the query in the
@@ -163,7 +151,7 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
     declared = ses.has_declared_schema
     setup, query = _shape_program(document)
     payload = {
-        "object": _object_name(document),
+        "object": _object_name(document, destination),
         "schema_mode": "declared" if declared else "inferred",
         "declared_columns": (
             [_column_entry(column) for column in ses.schema] if declared else None
@@ -172,8 +160,10 @@ def _spark_table_ddl(document: "SourceDocument") -> GeneratedDdl:
         # and the one query whose shape *is* the table's. A body may hold two
         # queries (staging, then the keys to delete), and only the first says
         # what the table looks like.
-        "setup": [_addressed(statement) for statement in setup],
-        "source_query": _addressed(query),
+        "setup": [
+            address_managed_references(statement, destination) for statement in setup
+        ],
+        "source_query": address_managed_references(query, destination),
         "references": [list(pair) for pair in metadata_column_references(ses)],
         "audit_columns": [_column_entry(column) for column in ses.audit_columns],
         "column_mapping": True,
@@ -214,7 +204,7 @@ def _shape_program(document: "SourceDocument") -> tuple[tuple[str, ...], str]:
     )
 
 
-def _view_ddl(document: "SourceDocument") -> GeneratedDdl:
+def _view_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
     """A persistent view over the validated body, its managed names addressed.
 
     The body is otherwise untouched. What changes is that every reference to
@@ -223,8 +213,8 @@ def _view_ddl(document: "SourceDocument") -> GeneratedDdl:
     the session happened to be attached to.
     """
 
-    body = _addressed((document.sql_body or "").rstrip())
-    content = f"CREATE VIEW {_object_name(document)} AS\n{body}\n"
+    body = address_managed_references((document.sql_body or "").rstrip(), destination)
+    content = f"CREATE VIEW {_object_name(document, destination)} AS\n{body}\n"
     return GeneratedDdl(
         executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
     )

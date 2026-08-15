@@ -1,51 +1,87 @@
 """Sessions built around resources a test already holds.
 
-A Session closes only what it opened, so handing it a Spark session, a store or
-a resolver is the ordinary way for a caller that already has them to reach the
-build path — a notebook does exactly this, and so does a module-scoped fixture
-that owns one JVM for a whole file.
+A Session closes only what it opened, so handing it a store or a resolver is the
+ordinary way for a caller that already has them to reach the build path — a
+notebook does exactly this.
 
 That is why the suite needs no test-only installer: there is one Installer, it
 takes a Session, and a test gives that Session whatever it already has.
+
+Outside ``tests/fabric`` that Session is a
+:class:`~weaver.sessions.testing.TestSession`, which records every statement it
+is asked to run and answers from what the test configured. What a statement
+*does* is proven against a real workspace; what Weaver *renders* is proven by
+reading it back here.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from weaver.session import ConsoleSession
-from weaver.workspaces import LocalWorkspace
+from weaver.sessions import TestSession
+from weaver.workspaces import Workspace
 
-#: Somewhere for a Session that will never touch a filesystem to call home. Used
+from .workspaces import TARGET_LAKEHOUSE, WEAVER_LAKEHOUSE
+
+#: Somewhere for a Session that will never reach a workspace to call home. Used
 #: where the claim is about installer semantics and the workspace is incidental.
-NOWHERE = LocalWorkspace(workspace=Path("/tmp/weaver-test-workspace"))
+NOWHERE = Workspace(workspace="Demo", catalogue="Lakehouse/Weaver")
 
 
 def given_session(
     *,
     workspace: Any = None,
-    spark: Any = None,
     store: Any = None,
     resolver: Any = None,
-) -> ConsoleSession:
-    """A Session around resources the caller owns and will close itself."""
+    lakehouses: Any = None,
+    warehouses: Any = (),
+    spark_rows: Any = None,
+    executes_here: bool = False,
+) -> TestSession:
+    """A Session around resources the caller owns and will close itself.
 
-    return ConsoleSession(
-        workspace=workspace if workspace is not None else NOWHERE,
-        spark=spark,
+    Without a resolver, one is built over an inventory this test declares —
+    never the real one, which would reach a tenant. ``lakehouses`` and
+    ``warehouses`` name what the workspace holds; a name outside them resolves
+    to nothing, exactly as it would in a workspace that does not hold it.
+
+    ``spark_rows`` configures the rows one statement answers with, as
+    ``{statement: rows}``, for the reads a build makes before it decides.
+    """
+
+    resolved_workspace = workspace if workspace is not None else NOWHERE
+    if resolver is None:
+        from .workspaces import given_resolver
+
+        resolver = given_resolver(
+            workspace=resolved_workspace,
+            lakehouses=(
+                lakehouses
+                if lakehouses is not None
+                else (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE)
+            ),
+            warehouses=warehouses,
+        )
+    session = TestSession(
+        workspace=resolved_workspace,
         store=store,
         resolver=resolver,
+        executes_here=executes_here,
     )
+    for statement, rows in (spark_rows or {}).items():
+        session.answer_spark_sql(statement, rows)
+    return session
 
 
 def given_installer(
     *,
     workspace: Any = None,
-    spark: Any = None,
     store: Any = None,
     resolver: Any = None,
     executors: Any = None,
+    lakehouses: Any = None,
+    warehouses: Any = (),
+    spark_rows: Any = None,
 ):
     """An Installer over :func:`given_session`, for an installer-semantics test."""
 
@@ -53,12 +89,15 @@ def given_installer(
 
     return Installer(
         given_session(
-            workspace=workspace, spark=spark, store=store, resolver=resolver
+            workspace=workspace,
+            store=store,
+            resolver=resolver,
+            lakehouses=lakehouses,
+            warehouses=warehouses,
+            spark_rows=spark_rows,
         ),
         executors=executors,
     )
-
-
 
 
 __all__ = ["NOWHERE", "given_installer", "given_session"]

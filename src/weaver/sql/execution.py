@@ -259,16 +259,13 @@ def _output_parameter_batch(
     a caller and are the one part of this text that is not Weaver's own.
     """
 
-    locals_ = [f"@weaver_out_{name}" for name, _type in outputs]
     declares = "\n".join(
         f"declare @weaver_out_{name} {type_name};" for name, type_name in outputs
     )
     arguments = [f"@{name} = ?" for name, _value in inputs] + [
         f"@{name} = @weaver_out_{name} output" for name, _type in outputs
     ]
-    projection = ", ".join(
-        f"@weaver_out_{name} as {name}" for name, _type in outputs
-    )
+    projection = ", ".join(f"@weaver_out_{name} as {name}" for name, _type in outputs)
     call = f"exec {procedure}\n    " + "\n  , ".join(arguments) + ";"
     return f"{declares}\n\n{call}\n\nselect {projection};"
 

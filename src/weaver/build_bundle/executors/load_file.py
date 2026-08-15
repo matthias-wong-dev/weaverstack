@@ -4,10 +4,9 @@ A ``write_file`` action carries the exact bytes to put down: an authored module
 travels verbatim, and a generated one is complete when it is generated, because
 a module reads its target's columns when it runs rather than when it is written.
 
-One thing happens on the way down. A generated module carries its object
-references as ``{{object:…}}`` tokens so a bundle produces the same bytes
-wherever it is built; the installed file has to be runnable, so the tokens are
-resolved here, at the first moment the destination is known.
+Nothing happens on the way down. A generated module already names the Lakehouse
+it reads, because the build knew the target when it rendered the module, so what
+is written is what was frozen.
 
 .. code-block:: text
 
@@ -35,10 +34,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...declaration.load import SPARK_LOAD_EXTENSION as MODULE_EXTENSION
-from ...declaration.spark_sql_module import GENERATED_MODULE_MARKER
 from ...errors import InstallError
-from ...spark import tokens
 from ...targets import FolderTarget
 from ..models import DELETE_FILE, WRITE_FILE, InstallAction
 from .base import InstallationContext
@@ -59,7 +55,6 @@ class LoadFileExecutor:
         if action.kind == WRITE_FILE:
             if payload is None:
                 raise InstallError(f"load file action {action.id!r} has no payload")
-            payload = self._addressed(location.value, payload, context)
             context.store.write(location, payload)
             return {"written": location.value, "bytes": len(payload)}
         if action.kind == DELETE_FILE:
@@ -74,41 +69,6 @@ class LoadFileExecutor:
         raise InstallError(
             f"load file action {action.id!r} has unknown kind {action.kind!r}"
         )
-
-    def _addressed(
-        self, path: str, payload: bytes, context: InstallationContext
-    ) -> bytes:
-        """Finish a generated load, and address it, on the way down.
-
-        The bundle stays destination-free so one repository generates the same
-        bytes everywhere; the installed file has to be runnable by whoever opens
-        it, and by then the destination is known.
-
-        Deployed Python is left exactly as authored: a module addresses its
-        target through the resolved Lakehouse it is constructed with, so only a
-        generated module has anything to resolve.
-
-        Told apart by what the payload is rather than what it is called. Both
-        are ``.py`` in one tree, so the name cannot say; a generated module
-        declares itself on its first line.
-        """
-
-        if not path.endswith(MODULE_EXTENSION):
-            return payload
-        text = payload.decode("utf-8")
-        if not text.lstrip().startswith(GENERATED_MODULE_MARKER):
-            return payload
-        destination = context.target.destination
-        if destination is None:
-            raise InstallError(
-                f"a generated load lands in {context.target.bound.id!r}, which "
-                "resolved to no Spark destination, so its object names cannot be "
-                "addressed"
-            )
-        # Resolved against the destination directly rather than through the
-        # catalogue: writing a file needs no Spark session, and asking for one
-        # would make installing a load depend on a capability it never uses.
-        return tokens.expand(text, destination).encode("utf-8")
 
     def _location(self, node_id: str, context: InstallationContext):
         """``Lakehouse/Sales/file:_/Load/lib/dates.py`` under this batch's target.

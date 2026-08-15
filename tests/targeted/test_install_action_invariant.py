@@ -44,30 +44,27 @@ DEFERRED = {
     "drop_procedure": "generated load procedures land in a later branch",
 }
 
+#: Kinds whose Delta-side execution needs a real Lakehouse and is still waiting
+#: for the test that gives it one. Recorded here rather than quietly dropped,
+#: because a checklist that lost an entry would read as covered.
+AWAITING_FABRIC = {
+    "build_folder": "the Delta-side folder execution test needs a real Lakehouse",
+    "drop_folder": "as above",
+    "drop_table": "the rebuild drop needs a real Delta table to clear",
+    "drop_view": "as above",
+}
+
 #: Kinds that change a target, and the test that executes each. A kind appearing
 #: on both physical sides needs one test per side: the executors differ, and so
 #: does what "the object is what it should be" means.
 COVERED = {
-    "create_schema": (
-        "test_create_schema_action_creates_the_schema",
-        "test_create_schema_action_creates_the_schema_in_the_warehouse",
-    ),
-    "build_table": (
-        "test_build_table_action_creates_the_declared_columns",
-        "test_build_table_action_is_accepted_by_fabric",
-    ),
-    "build_view": (
-        "test_build_view_action_creates_a_view_over_the_table_it_reads",
-    ),
-    "build_folder": ("test_build_folder_action_creates_the_directory",),
+    "create_schema": ("test_create_schema_action_creates_the_schema_in_the_warehouse",),
+    "build_table": ("test_build_table_action_is_accepted_by_fabric",),
+    "build_view": ("test_build_view_action_creates_a_view_over_the_table_it_reads",),
     "create_alias": (
-        "test_the_alias_lands_in_the_consumers_tables_area_without_copying_data",
         "test_the_alias_exists_as_a_onelake_shortcut",
         "test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse",
     ),
-    "drop_table": ("test_drop_table_action_clears_the_way_for_a_rebuild",),
-    "drop_view": ("test_drop_table_action_clears_the_way_for_a_rebuild",),
-    "drop_folder": ("test_drop_folder_action_removes_the_directory",),
     "prune_table": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_view": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_schema": ("test_prune_table_action_removes_an_object_nothing_declares",),
@@ -112,7 +109,7 @@ def test_the_product_defines_action_kinds_to_check():
 def test_every_action_kind_is_covered_or_deliberately_deferred():
     """The checklist itself. A new kind must be placed before this passes."""
 
-    placed = set(COVERED) | set(DEFERRED) | CATALOGUE_KINDS
+    placed = set(COVERED) | set(DEFERRED) | set(AWAITING_FABRIC) | CATALOGUE_KINDS
     unplaced = declared_kinds() - placed
 
     assert not unplaced, (
@@ -125,6 +122,13 @@ def test_no_kind_is_both_covered_and_deferred():
     """A deferral that is also covered means one of the two is stale."""
 
     assert not set(COVERED) & set(DEFERRED)
+    assert not set(COVERED) & set(AWAITING_FABRIC)
+
+
+def test_every_kind_awaiting_fabric_says_why():
+    """A gap with no reason is indistinguishable from an oversight."""
+
+    assert all(reason.strip() for reason in AWAITING_FABRIC.values())
 
 
 @pytest.mark.parametrize(

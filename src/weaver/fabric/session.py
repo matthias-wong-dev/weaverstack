@@ -10,12 +10,12 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ..errors import CommandError
-from ..workspaces import FabricWorkspace
 from ..locations import Location
 from ..targets import ItemRef
+from ..workspaces import Workspace
 from .onelake import abfss_root
 from .resolution import FabricResolver
-from .resources import LAKEHOUSE, WAREHOUSE, Item, Workspace, find_item
+from .resources import LAKEHOUSE, WAREHOUSE, Item, WorkspaceItem, find_item
 
 
 def _value(record: Any, name: str) -> Any:
@@ -29,17 +29,13 @@ class FabricSessionResolver(FabricResolver):
 
     def __init__(
         self,
-        workspace: FabricWorkspace,
+        workspace: Workspace,
         *,
         runtime: Any | None = None,
         lakehouse: Any | None = None,
         credentials: Any | None = None,
         client: Any | None = None,
     ) -> None:
-        if not isinstance(workspace, FabricWorkspace):
-            raise CommandError(
-                f"FabricSessionResolver needs a FabricWorkspace, got {type(workspace).__name__}"
-            )
         if runtime is None or lakehouse is None:
             try:
                 from notebookutils import lakehouse as notebook_lakehouse
@@ -65,21 +61,19 @@ class FabricSessionResolver(FabricResolver):
             )
 
         self.configuration = workspace
-        self._workspace = Workspace(id=str(workspace_id), name=str(workspace_name))
+        self._workspace = WorkspaceItem(id=str(workspace_id), name=str(workspace_name))
         self._lakehouse_utils = lakehouse
         self._credentials = credentials
         self.client = client
         self._items: dict[str, Item] = {}
 
     @property
-    def workspace(self) -> Workspace:
+    def workspace(self) -> WorkspaceItem:
         return self._workspace
 
     @property
     def root(self) -> Location:
-        return Location(
-            f"abfss://{self.workspace.id}@onelake.dfs.fabric.microsoft.com"
-        )
+        return Location(f"abfss://{self.workspace.id}@onelake.dfs.fabric.microsoft.com")
 
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
         if item_type == WAREHOUSE:
@@ -123,7 +117,6 @@ class FabricSessionResolver(FabricResolver):
     def sql_endpoint(self, target):
         self.client = self._rest_client()
         return super().sql_endpoint(target)
-
 
     def _rest_client(self):
         """Fabric REST using the identity of this Fabric session."""

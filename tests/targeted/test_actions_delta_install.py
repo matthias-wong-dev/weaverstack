@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from factories import (
     FakeSpark,
     FakeSql,
@@ -29,10 +28,11 @@ from factories import (
     resolved_target,
     warehouse_context,
 )
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.locations import Location
 from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.executors import default_executors
+from weaver.locations import Location
 
 VIEW_SQL = b"CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS SELECT 1\n"
 
@@ -170,8 +170,7 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     )
 
     (statement,) = spark.statements
-    assert "{{object:" not in statement
-    assert "sales_lh__DWG" in statement
+    assert statement == VIEW_SQL.decode().strip()
 
 
 def test_a_spark_action_with_no_way_to_run_a_statement_fails_saying_so():
@@ -308,14 +307,14 @@ AUDIT = ("row_insert_datetime", "row_update_datetime", "row_delete_datetime")
 def _load_context(tmp_path, columns=("Customer id", "Customer name")):
     """A real store and resolver, because placement is the claim being made."""
 
-    from weaver.resolution import LocalResolver
     from weaver.store import FilesystemStore
-    from weaver.workspaces import LocalWorkspace
 
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     return installation_context(
         store=FilesystemStore(),
-        resolver=LocalResolver(workspace),
+        # Rooted on this test's own filesystem, so what the resolver names is
+        # somewhere the store can actually write.
+        resolver=given_resolver(workspace=workspace, root=tmp_path),
         target=resolved_target(),
         spark=_TableSpark(tuple(columns) + AUDIT),
     )
@@ -323,6 +322,7 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
 
 def _load_action(*, kind: str, relative: str, payload: str | None):
     from factories import ITEM
+
     from weaver.etl import LOAD_ROOT
 
     return build_action(
@@ -342,7 +342,9 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     from weaver.etl import LOAD_ROOT
 
     context = _load_context(tmp_path)
-    action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    action = _load_action(
+        kind="write_file", relative="lib/dates.py", payload="p.payload"
+    )
 
     result = execute_install_action(action, b"def parse(value):\n", context=context)
 
@@ -367,7 +369,7 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     document = read_source_document(
         "Sales.OrderSummary.sql", _SPARK_LOAD_SOURCE.encode("utf-8"), LAKEHOUSE
     )
-    payload = document.create_load().payload
+    payload = document.create_load(destination=resolved_target().destination).payload
 
     context = _load_context(
         tmp_path,
@@ -386,11 +388,10 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     result = execute_install_action(action, payload, context=context)
     written = context.store.read(Location(result.details["written"])).decode()
 
-    assert b"{{object:" in payload, "the bundle payload is destination-free"
     assert written.lstrip().startswith("# Weaver generated load")
     assert "Total amount" in written
-    assert "{{" not in written, "the installed file names its destination"
-    assert "Sales_LH" in written or "sales_lh" in written
+    assert "{{" not in written, "a generated module carries no unresolved token"
+    assert "`Sales_LH`" in written, "and names the Lakehouse it reads"
 
 
 def test_a_deployed_python_module_is_left_exactly_as_authored(tmp_path):
@@ -440,14 +441,19 @@ def test_a_write_creates_the_directories_beneath_it(tmp_path):
         kind="write_file", relative="lib/nested/deep/dates.py", payload="p.payload"
     )
 
-    assert execute_install_action(action, b"x = 1\n", context=context).status == "succeeded"
+    assert (
+        execute_install_action(action, b"x = 1\n", context=context).status
+        == "succeeded"
+    )
 
 
 def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
     """An empty file is a plausible-looking wrong answer, so it is refused."""
 
     context = _load_context(tmp_path)
-    action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    action = _load_action(
+        kind="write_file", relative="lib/dates.py", payload="p.payload"
+    )
 
     result = execute_install_action(action, None, context=context)
 
@@ -474,7 +480,9 @@ def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
 
 def test_a_deployed_file_is_removed_where_it_was_written(tmp_path):
     context = _load_context(tmp_path)
-    write = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    write = _load_action(
+        kind="write_file", relative="lib/dates.py", payload="p.payload"
+    )
     execute_install_action(write, b"x = 1\n", context=context)
 
     delete = _load_action(kind="delete_file", relative="lib/dates.py", payload=None)

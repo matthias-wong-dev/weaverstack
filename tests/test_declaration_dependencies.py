@@ -14,18 +14,24 @@ from weaver.declaration import extract_python_references, extract_sql_references
 
 
 def refs(sql: str) -> set[str]:
-    return {str(reference) for reference in extract_sql_references(textwrap.dedent(sql))}
+    return {
+        str(reference) for reference in extract_sql_references(textwrap.dedent(sql))
+    }
 
 
 def parts(sql: str) -> tuple[tuple[str, ...], ...]:
-    return tuple(reference.parts for reference in extract_sql_references(textwrap.dedent(sql)))
+    return tuple(
+        reference.parts for reference in extract_sql_references(textwrap.dedent(sql))
+    )
 
 
 # --- Python ------------------------------------------------------------------
 
 
 def test_one_double_underscore_is_an_object_reference():
-    assert [str(r) for r in extract_python_references(("Sales__Order",))] == ["Sales.Order"]
+    assert [str(r) for r in extract_python_references(("Sales__Order",))] == [
+        "Sales.Order"
+    ]
 
 
 def test_the_weaver_import_is_not_a_reference():
@@ -47,7 +53,9 @@ def test_names_that_are_not_two_parts_are_ignored(name):
 
 def test_lowercase_house_style_still_extracts():
     """A developer may write sales__order; matching it is a build concern."""
-    assert [str(r) for r in extract_python_references(("sales__order",))] == ["sales.order"]
+    assert [str(r) for r in extract_python_references(("sales__order",))] == [
+        "sales.order"
+    ]
 
 
 def test_references_are_deduplicated_in_order():
@@ -143,7 +151,11 @@ def test_joins_apply_and_comma_lists():
         cross apply Sales.Lines(o.Id) as l
         , Sales.Extra e
     """) == {
-        "Sales.Order", "Sales.Customer", "Reference.Fx", "Sales.Lines", "Sales.Extra",
+        "Sales.Order",
+        "Sales.Customer",
+        "Reference.Fx",
+        "Sales.Lines",
+        "Sales.Extra",
     }
 
 
@@ -187,7 +199,9 @@ def test_trim_from_is_not_a_relation_position():
 
 
 def test_extract_from_is_not_a_relation_position():
-    assert refs("select extract(year from OrderDate) from Sales.Order") == {"Sales.Order"}
+    assert refs("select extract(year from OrderDate) from Sales.Order") == {
+        "Sales.Order"
+    }
 
 
 def test_a_comment_mentioning_from_is_ignored():

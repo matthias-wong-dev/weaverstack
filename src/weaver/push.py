@@ -65,9 +65,7 @@ def push_item_repository(
         destination_store.delete(destination, recursive=True)
     destination_store.make_directory(destination)
     for relative, content in sorted(files):
-        destination_store.write(
-            destination.join(*relative.split("/")), content
-        )
+        destination_store.write(destination.join(*relative.split("/")), content)
     return PushResult(
         source=source.value,
         destination=destination.value,

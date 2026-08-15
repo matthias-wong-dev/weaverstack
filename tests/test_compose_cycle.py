@@ -31,7 +31,7 @@ DEV = """\
 compose:
   dev:
     - weaver wipe Lakehouse/Sales Warehouse/Reporting
-    - weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    - weaver build ./repository --bind Lakehouse/Sales=Sales
     - weaver load Warehouse/Reporting
     - weaver test Warehouse/Reporting
 """
@@ -40,14 +40,15 @@ compose:
 class _Args:
     """The parsed ``compose`` invocation, with no workspace of its own."""
 
-    def __init__(self, name, file=None, session=None):
+    def __init__(self, name, file=None, session=None, yes=False):
         self.name = name
         self.file = file
         self.session = session
+        self.yes = yes
         self.workspace = None
         self.workspace_type = None
         self.workspace_config = None
-        self.weaver_lakehouse = None
+        self.catalogue = None
         self.environment = None
 
 
@@ -112,6 +113,24 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 def test_an_entry_is_a_weaver_command_line():
     assert command_words("weaver load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
+
+
+def test_the_weaver_prefix_is_optional():
+    """A composition holds Weaver commands, so naming the program adds nothing.
+
+    Both spellings work: a line pasted from a terminal keeps the prefix, and a
+    line written for the file need not.
+    """
+
+    assert command_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
+
+
+def test_an_entry_that_names_no_weaver_command_says_which_ones_exist():
+    with pytest.raises(CommandError) as raised:
+        command_words("rm -rf /")
+
+    assert "not a Weaver command" in str(raised.value)
+    assert "build" in str(raised.value)
 
 
 def test_quoted_arguments_survive_exactly():
@@ -187,7 +206,28 @@ def test_without_a_terminal_nothing_runs(tmp_path, recorded, capsys):
 
     assert status == 1
     assert not calls
-    assert "requires confirmation from an interactive input stream" in capsys.readouterr().err
+    assert "--yes" in capsys.readouterr().err
+
+
+def test_yes_runs_a_composition_unattended(tmp_path, recorded, capsys):
+    """The other half of the refusal above: a script says so and it runs.
+
+    Approving the sequence approves each command in it, so a wipe inside one
+    does not ask again — there is nobody to ask.
+    """
+
+    calls, parser_factory, _ = recorded
+    path = _write(tmp_path, DEV)
+
+    status = run_composition(
+        _Args("dev", file=str(path), yes=True),
+        parser_factory=parser_factory,
+        stdin=io.StringIO(""),
+    )
+
+    assert status == 0
+    assert len(calls) == 4
+    assert all(getattr(parsed, "authorised", False) for parsed in calls)
 
 
 def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
@@ -198,7 +238,9 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
     monkeypatch.setattr("weaver_cli.compose._interactive", lambda stdin: True)
     monkeypatch.setattr("weaver_cli.compose._confirmed", lambda stdin: False)
 
-    status = run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
+    status = run_composition(
+        _Args("dev", file=str(path)), parser_factory=parser_factory
+    )
 
     assert status == 0
     assert not calls
@@ -240,13 +282,15 @@ def test_every_command_runs_in_order_with_its_arguments(
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    status = run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
+    status = run_composition(
+        _Args("dev", file=str(path)), parser_factory=parser_factory
+    )
 
     assert status == 0
     assert len(calls) == 4
     assert calls[0].targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
     assert calls[1].repository == "./repository"
-    assert calls[1].item_bindings == ["Lakehouse/Sales=Lakehouse/Sales"]
+    assert calls[1].item_bindings == ["Lakehouse/Sales=Sales"]
     assert calls[2].targets == ["Warehouse/Reporting"]
     assert calls[3].targets == ["Warehouse/Reporting"]
 
@@ -269,7 +313,7 @@ def test_a_composition_inside_a_session_joins_the_one_already_open(
 ):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
-    from weaver.session import ConsoleSession
+    from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=None) as session:
         run_composition(
@@ -281,9 +325,7 @@ def test_a_composition_inside_a_session_joins_the_one_already_open(
         assert not session.closed, "a borrowed Session must outlive the composition"
 
 
-def test_the_sequence_stops_at_the_first_failure(
-    tmp_path, recorded, confirmed, capsys
-):
+def test_the_sequence_stops_at_the_first_failure(tmp_path, recorded, confirmed, capsys):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
@@ -352,15 +394,13 @@ def test_a_composition_warms_the_union_before_the_first_command(
     build in front of it. The resources are shared, so warming the maximum set
     once is warming it correctly."""
 
-    from weaver.session.requirements import AUTH, LIVY, ONELAKE, RESOLVER, TDS
+    from weaver.sessions.requirements import AUTH, LIVY, ONELAKE, RESOLVER, TDS
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
     prepared = []
 
-    monkeypatch.setattr(
-        "weaver_cli.shell._default_workspace", lambda args: object()
-    )
+    monkeypatch.setattr("weaver_cli.shell._default_workspace", lambda args: object())
 
     class Warmed:
         closed = False
@@ -378,9 +418,7 @@ def test_a_composition_warms_the_union_before_the_first_command(
     assert required == {AUTH, RESOLVER, ONELAKE, LIVY, TDS}
 
 
-def test_a_composition_with_no_workspace_warms_nothing(
-    tmp_path, recorded, confirmed
-):
+def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confirmed):
     """There is nothing to warm against, and asking would put workspace
     resolution in front of a sequence that may name one per command."""
 

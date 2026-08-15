@@ -30,6 +30,7 @@ from weaver.catalogue.state import read_catalogue_state
 from weaver.catalogue.tables import CATALOGUE_TABLES, REGISTRY
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
+from weaver.spark import FabricSparkTarget
 
 
 class CountingCatalogue:
@@ -42,11 +43,15 @@ class CountingCatalogue:
 
     # --- the SparkCatalogue surface the reader uses ---------------------------
 
-    def expand(self, token: str) -> str:
-        return token.strip("{}").replace("object:", "")
+    #: The Weaver Lakehouse this catalogue is addressed to. A statement names
+    #: its object in full, exactly as the reader will send it.
+    destination = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
+
+    def qualify(self, schema: str, name: str) -> str:
+        return self.destination.qualify(schema, name)
 
     def columns_of(self, name: str) -> tuple[str, ...]:
-        table = {t.name: t for t in CATALOGUE_TABLES}[name.split(".", 1)[1]]
+        table = {t.name: t for t in CATALOGUE_TABLES}[name.rsplit(".", 1)[1].strip("`")]
         self.reads.append(table.name)
         return tuple(table.physical_columns)
 
@@ -77,7 +82,7 @@ class CountingCatalogue:
 
 def _table_of(statement: str) -> str:
     return next(
-        table.name for table in CATALOGUE_TABLES if f"FROM _.{table.name}" in statement
+        table.name for table in CATALOGUE_TABLES if f".`{table.name}`" in statement
     )
 
 
@@ -151,12 +156,13 @@ def test_rows_are_grouped_back_by_logical_item():
 
     state = read_catalogue_state(catalogue, (sales, inventory))
 
-    assert {
-        row["object_name"] for row in state.rows[sales][REGISTRY.name]
-    } == {"Customer", "Order"}
-    assert {
-        row["object_name"] for row in state.rows[inventory][REGISTRY.name]
-    } == {"Product"}
+    assert {row["object_name"] for row in state.rows[sales][REGISTRY.name]} == {
+        "Customer",
+        "Order",
+    }
+    assert {row["object_name"] for row in state.rows[inventory][REGISTRY.name]} == {
+        "Product"
+    }
 
 
 def test_an_item_with_no_rows_is_still_present_in_the_catalogue():
@@ -203,7 +209,12 @@ def test_a_row_outside_the_requested_scopes_is_a_failure_not_a_silent_drop():
     sales = WeaverItemId.parse("Lakehouse/Sales")
     stranger = WeaverItemId.parse("Lakehouse/SomeoneElse")
     catalogue = CountingCatalogue(
-        {REGISTRY.name: (_registry_row(sales, "Customer"), _registry_row(stranger, "X"))}
+        {
+            REGISTRY.name: (
+                _registry_row(sales, "Customer"),
+                _registry_row(stranger, "X"),
+            )
+        }
     )
 
     with pytest.raises(BuildError, match="did not ask for"):

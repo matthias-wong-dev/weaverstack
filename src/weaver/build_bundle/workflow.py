@@ -17,31 +17,29 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterator, Mapping
 
-from ..errors import BuildError
-from ..locations import Location
-from ..declaration.model import WeaverItemId, WeaverRepository
-from ..declaration.repository import parse_item_repository
-from ..store import FilesystemStore, Store
-from ..targets import ItemRef
-from .bundle import BuildBundle, load_bundle
-from .builder import Builder
-from .installer import Installer
-from .planner import generate_item_build_bundle
-from .models import BuildPlan
-from .report import InstallationReport
-from .targets import ItemBindings, LakehouseBinding
-from .targets import WAREHOUSE_TARGET
-from .prune import (
-    TargetInventory,
-    read_lakehouse_inventory,
-    read_warehouse_inventory,
-)
 from ..catalogue.state import (
     Catalogue,
     Reconciliation,
     read_catalogue_state,
     reconcile_catalogue_state,
 )
+from ..declaration.model import WeaverItemId, WeaverRepository
+from ..declaration.repository import parse_item_repository
+from ..errors import BuildError
+from ..locations import Location
+from ..store import FilesystemStore, Store
+from ..targets import ItemRef
+from .builder import Builder
+from .bundle import BuildBundle, load_bundle
+from .installer import Installer
+from .models import BuildPlan
+from .prune import (
+    TargetInventory,
+    read_lakehouse_inventory,
+    read_warehouse_inventory,
+)
+from .report import InstallationReport
+from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
 
 ARCHIVE_SUFFIX = ".weaver.zip"
 
@@ -159,12 +157,9 @@ def validate_build_request(
         )
     builtin = WeaverItemId.parse("Lakehouse/_weaver")
     binding = bindings.by_item.get(builtin)
-    if binding is not None and not isinstance(binding.target, LakehouseBinding):
+    if binding is not None and binding.target.kind != LAKEHOUSE_TARGET:
         raise BuildError("Lakehouse/_weaver requires a Lakehouse binding")
-    if (
-        binding is not None
-        and binding.target.lakehouse.name != control_lakehouse.lakehouse.name
-    ):
+    if binding is not None and binding.target.item.name != control_lakehouse.item.name:
         raise BuildError(
             "Lakehouse/_weaver must be bound to the explicit control-plane Lakehouse"
         )
@@ -187,7 +182,7 @@ def read_build_state(
     """
 
     workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.weaver_lakehouse:
+    if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
 
     with session.step("Read target inventories"):
@@ -212,9 +207,7 @@ def _read_catalogue(*, session, workspace, required):
     """
 
     return read_catalogue_state(
-        session_catalogue(
-            session, workspace, ItemRef(workspace.weaver_lakehouse)
-        ),
+        session_catalogue(session, workspace, workspace.catalogue_item),
         required,
     )
 
@@ -337,7 +330,9 @@ def persist_bundle_archive(
             f"bundle archive must end with {ARCHIVE_SUFFIX!r}: {destination.value}"
         )
     bundle_store = bundle.store or store
-    with _temp_copy(bundle.location, bundle_store, prefix="weaver-bundle-source-") as root:
+    with _temp_copy(
+        bundle.location, bundle_store, prefix="weaver-bundle-source-"
+    ) as root:
         with tempfile.TemporaryDirectory(prefix="weaver-bundle-archive-") as temporary:
             archive = Path(temporary) / destination.name
             _write_archive(root, archive)
@@ -448,37 +443,11 @@ def build_item_repository(
             plan=bundle.plan,
             report=report,
             repository_signature=repository.signature,
-            item_signatures={item.identity: item.signature for item in repository.items},
+            item_signatures={
+                item.identity: item.signature for item in repository.items
+            },
             archive=persisted,
         )
-
-
-def build_uploaded_item_repository(
-    repository_root: Location,
-    *,
-    bindings: ItemBindings,
-    session,
-    workspace=None,
-    control_lakehouse: LakehouseBinding,
-    archive: Location | None = None,
-    archive_store: Store | None = None,
-    sql_by_item=None,
-    executors=None,
-) -> ItemBuildResult:
-    """Compatibility wrapper for a repository stored with the target estate."""
-
-    return build_item_repository_source(
-        repository_root,
-        source_store=session.store(workspace or session.workspace),
-        bindings=bindings,
-        session=session,
-        workspace=workspace,
-        control_lakehouse=control_lakehouse,
-        archive=archive,
-        archive_store=archive_store,
-        sql_by_item=sql_by_item,
-        executors=executors,
-    )
 
 
 def build_item_repository_source(
@@ -559,17 +528,9 @@ def read_reconciled_catalogue(
         }
 
     workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.weaver_lakehouse:
+    if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
-    from ..spark import SparkCatalogue
-    from ..targets import ItemRef
-
-    catalogue = SparkCatalogue(
-        session.spark(workspace),
-        session.resolver(workspace).spark_destination(
-            ItemRef(workspace.weaver_lakehouse)
-        ),
-    )
+    catalogue = session_catalogue(session, workspace, workspace.catalogue_item)
     state = read_catalogue_state(catalogue, sorted(items, key=str))
     return reconcile_catalogue_state(state, inventories=inventories)
 
@@ -679,7 +640,9 @@ def _write_archive(root: Path, destination: Path) -> None:
     with zipfile.ZipFile(
         destination, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
     ) as zipped:
-        for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
+        for path in sorted(
+            candidate for candidate in root.rglob("*") if candidate.is_file()
+        ):
             relative = path.relative_to(root).as_posix()
             info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED

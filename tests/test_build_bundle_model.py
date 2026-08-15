@@ -16,16 +16,14 @@ from dataclasses import replace
 import pytest
 import yaml
 
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    InstallAction,
     BuildBatch,
     BuildPlan,
-    BuildSequence,
     BuildSelection,
+    BuildSequence,
     Impact,
+    InstallAction,
     OmittedNode,
     compute_bundle_id,
     load_bundle,
@@ -33,7 +31,10 @@ from weaver.build_bundle import (
     plan_to_yaml,
     write_bundle,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.errors import BuildError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 
@@ -69,23 +70,31 @@ def _plan(bundle_id: str = "") -> BuildPlan:
         BuildSequence(
             number=30,
             description="build folders",
-            batches=(BuildBatch(id="b-folder", target_id=TARGET.id, actions=(_folder_action(),)),),
+            batches=(
+                BuildBatch(
+                    id="b-folder", target_id=TARGET.id, actions=(_folder_action(),)
+                ),
+            ),
         ),
         BuildSequence(
             number=40,
             description="build view",
-            batches=(BuildBatch(id="b-view", target_id=TARGET.id, actions=(_view_action(),)),),
+            batches=(
+                BuildBatch(id="b-view", target_id=TARGET.id, actions=(_view_action(),)),
+            ),
         ),
     )
     return BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id=bundle_id,
         repository_name="MyRepo",
         repository_signature="sig-abc",
         targets=(TARGET,),
         sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
-        omitted_nodes=(OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),),
+        omitted_nodes=(
+            OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),
+        ),
     )
 
 
@@ -139,15 +148,23 @@ def test_bundle_id_is_stable_and_content_addressed():
 
 
 def test_bundle_id_ignores_the_stored_id_field():
-    assert compute_bundle_id(_plan(bundle_id="")) == compute_bundle_id(_plan(bundle_id="stale"))
+    assert compute_bundle_id(_plan(bundle_id="")) == compute_bundle_id(
+        _plan(bundle_id="stale")
+    )
 
 
 def test_bundle_id_changes_when_a_payload_hash_changes():
     plan = _plan()
     tampered_action = replace(_view_action(), payload_sha256="0" * 64)
-    tampered_batch = BuildBatch(id="b-view", target_id=TARGET.id, actions=(tampered_action,))
+    tampered_batch = BuildBatch(
+        id="b-view", target_id=TARGET.id, actions=(tampered_action,)
+    )
     tampered = replace(
-        plan, sequences=(plan.sequences[0], replace(plan.sequences[1], batches=(tampered_batch,)))
+        plan,
+        sequences=(
+            plan.sequences[0],
+            replace(plan.sequences[1], batches=(tampered_batch,)),
+        ),
     )
     assert compute_bundle_id(plan) != compute_bundle_id(tampered)
 
@@ -223,7 +240,7 @@ def test_load_rejects_a_missing_manifest(tmp_path):
 def test_load_rejects_an_unsupported_format_version(tmp_path):
     store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
-    plan = replace(_identified_plan(), format_version=2)
+    plan = replace(_identified_plan(), format_version=SUPPORTED_FORMAT_VERSION + 1)
     store.write(location.join("plan.yml"), plan_to_yaml(plan).encode("utf-8"))
     with pytest.raises(BuildError, match="format version"):
         load_bundle(location, store=store)
@@ -245,7 +262,9 @@ def test_validate_rejects_a_batch_with_unknown_target():
 
 def test_validate_rejects_duplicate_action_ids():
     plan = _identified_plan()
-    dup = replace(_folder_action(), id="view-DWG.ActiveCustomer")  # collides with the view id
+    dup = replace(
+        _folder_action(), id="view-DWG.ActiveCustomer"
+    )  # collides with the view id
     batch = BuildBatch(id="b-dup", target_id=TARGET.id, actions=(dup,))
     bad = replace(plan, sequences=plan.sequences + (BuildSequence(60, "d", (batch,)),))
     with pytest.raises(BuildError, match="duplicate action id"):
@@ -254,7 +273,9 @@ def test_validate_rejects_duplicate_action_ids():
 
 def test_validate_rejects_payload_executor_extension_mismatch():
     plan = _identified_plan()
-    bad_action = replace(_view_action(), payload="payload/x/thing.py")  # spark_sql wants .spark.sql
+    bad_action = replace(
+        _view_action(), payload="payload/x/thing.py"
+    )  # spark_sql wants .spark.sql
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[1], batches=(batch,)),))
     with pytest.raises(BuildError, match="extension"):

@@ -6,9 +6,9 @@ them is decided in this process: column validation, the physical columns, the
 DDL. Nothing imports Weaver on the far side, which is why this is ``remote``.
 
 ``DESCRIBE QUERY`` replaced reading a ``DataFrame``'s schema, and the swap is
-only safe if Fabric answers it the same way. The cases are shared with
-``tests/spark/boundary/test_spark_table_shape_boundary.py`` so the emulator and a
-real Lakehouse are held to one set of expectations:
+only safe if Fabric answers it the same way. The cases live in
+``tests/support/spark_table_cases.py``, so what is rendered without a tenant and
+what a real Lakehouse builds are held to one set of expectations:
 
 * every structural type a document can declare survives to the built table;
 * a query reading a temporary view its own setup registered resolves, which it
@@ -36,7 +36,10 @@ pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 @pytest.fixture(scope="module")
 def spark_table_estate(
-    fabric_workspace, fabric_client, fabric_target_lakehouse, weaver_session,
+    fabric_workspace,
+    fabric_client,
+    fabric_target_lakehouse,
+    weaver_session,
     livy_session,
 ):
     """Every case installed from here, and one observation of what they left."""
@@ -45,6 +48,7 @@ def spark_table_estate(
     from typing import Any
 
     from factories import bound_target
+
     from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
     from weaver.build_bundle.installer import Installer
@@ -83,14 +87,14 @@ def spark_table_estate(
     def run(action, payload):
         return execute_install_action(action, payload, context=context)
 
-    results = {"schema": run(cases.schema_action(), cases.SCHEMA_PAYLOAD)}
+    results = {"schema": run(cases.schema_action(), cases.schema_payload(destination))}
     for case in cases.BUILDING:
-        results[case.name] = run(cases.install_action(case), case.payload)
+        results[case.name] = run(cases.install_action(case), case.payload(destination))
     results[cases.EXACT_CASE_READER] = run(
-        cases.view_action(), cases.EXACT_CASE_VIEW_SQL
+        cases.view_action(), cases.view_sql(destination)
     )
     unresolved = run(
-        cases.install_action(cases.UNRESOLVED), cases.UNRESOLVED.payload
+        cases.install_action(cases.UNRESOLVED), cases.UNRESOLVED.payload(destination)
     )
 
     built = {

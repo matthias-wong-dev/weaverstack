@@ -1,30 +1,29 @@
 """The build environment a test drives, independent of transport.
 
-`BuildEnv` hides *where* a build runs behind callables, so one set of assertions
-serves local Spark and Fabric alike. It lives here rather than in either
-transport's conftest because it belongs to neither: putting it in the Fabric one
-is what left local Spark tests importing Fabric fixtures, and made `-m spark`
-and `tests/fabric/` describe different things.
+`BuildEnv` hides *how* a build reaches its estate behind callables, so a test
+body names what it is asserting rather than Livy, Spark or ODBC. It lives here
+rather than in `tests/fabric/conftest.py` so that a test importing it does not
+thereby acquire a workspace, a credential and a session.
 
-Each transport supplies the callables — `tests/support/local_build.py` for the
-emulator, `tests/fabric/conftest.py` for a session — and what a test writes is
-the same either side.
+`tests/fabric/conftest.py` supplies the callables.
 """
 
 from __future__ import annotations
 
-import shutil
+import re
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-import pytest
-from .observation import Observation, observation_from, observe_body
-
-from weaver.targets import ItemRef
 from weaver.store import Store
+from weaver.targets import ItemRef
+
+from .observation import Observation, observation_from, observe_body
+from .workspaces import WORKSPACE
+
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.workspaces import Workspace
 
 
 @dataclass(frozen=True)
@@ -146,7 +145,9 @@ class Journey:
         """
 
         if self._failed is not None:
-            step = Step(name=name, error=RuntimeError(f"upstream step {self._failed!r} failed"))
+            step = Step(
+                name=name, error=RuntimeError(f"upstream step {self._failed!r} failed")
+            )
             self.steps[name] = step
             return step
         try:
@@ -188,13 +189,17 @@ class InstallOutcome:
 class BuildEnv:
     """Everything a build test needs, with transport hidden behind callables.
 
-    Assertions are written in the same logical names a payload uses —
-    ``{{object:DWG.Customer}}`` — and resolved against a named destination before
-    they run. That is not sugar. A test that asked for ``DWG.Customer`` would
-    resolve it through the session's own catalogue, which is exactly the mistake
-    the build no longer makes: it would read back from the Lakehouse the object
-    was wrongly written to and pass. Naming the destination in the assertion is
-    what makes the assertion able to see the thing it claims about.
+    Assertions are written in logical names — ``{{object:DWG.Customer}}`` — and
+    resolved against a named destination before they run. That is not sugar. A
+    test that asked for ``DWG.Customer`` would resolve it through the session's
+    own catalogue, which is exactly the mistake the build no longer makes: it
+    would read back from the Lakehouse the object was wrongly written to and
+    pass. Naming the destination in the assertion is what makes the assertion
+    able to see the thing it claims about.
+
+    The substitution is this harness's own. A *payload* carries no tokens any
+    more — a build renders final names — so what is resolved here is only the
+    shorthand a test is written in.
     """
 
     label: str
@@ -240,16 +245,32 @@ class BuildEnv:
         return destination or self.destination
 
     def _addressed(self, text: str, destination) -> str:
-        """Resolve object tokens, where there is a Spark destination to resolve to.
+        """Resolve this harness's shorthand against a named Spark destination.
 
         A Warehouse environment has none — it is reached over TDS and its names
         are ordinary T-SQL — so its statements pass through untouched.
         """
 
-        from weaver.spark import expand
-
         place = self.at(destination)
-        return text if place is None else expand(text, place)
+        if place is None:
+            return text
+        text = re.sub(
+            r"\{\{object:([^.{}]+)\.([^.{}]+)\}\}",
+            lambda match: place.qualify(match.group(1), match.group(2)),
+            text,
+        )
+        text = re.sub(
+            r"\{\{schema:([^.{}]+)\}\}",
+            lambda match: place.qualified_schema(match.group(1)),
+            text,
+        )
+        left = re.search(r"\{\{[^{}]*\}\}", text)
+        if left:
+            raise AssertionError(
+                f"{left.group(0)} is not a name this harness resolves; a test "
+                "writes {{object:Schema.Name}} or {{schema:Name}}"
+            )
+        return text
 
     def query(self, sql: str, *, destination=None) -> list:
         """Run a query, resolving its object tokens against one destination.
@@ -269,7 +290,7 @@ class BuildEnv:
         inside them — sets what this suite costs. Six ``query`` calls describing
         one moment are six waits for the same answer; this submits their bodies
         together and returns one payload, which the test then asserts against
-        locally.
+        in this process.
 
         That is not only cheaper, it is more accurate. Separate calls interrogate
         a *mutable remote estate* at six different instants, so a claim about
@@ -393,7 +414,9 @@ def _upload_tree(store, source: Path, destination) -> None:
         pass
     for path in sorted(source.rglob("*")):
         if path.is_file():
-            store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
+            store.write(
+                destination.join(*path.relative_to(source).parts), path.read_bytes()
+            )
 
 
 def _bindings_for(
@@ -421,7 +444,9 @@ def _bindings_for(
     )
     from weaver.declaration.model import LAKEHOUSE, WeaverItemId
 
-    by_item = {WeaverItemId.parse(name): ref for name, ref in (lakehouses or {}).items()}
+    by_item = {
+        WeaverItemId.parse(name): ref for name, ref in (lakehouses or {}).items()
+    }
     entries = []
     for name in weaver_repo_fixture.items:
         item = WeaverItemId.parse(name)
@@ -429,11 +454,21 @@ def _bindings_for(
             bound = by_item.get(item, lakehouse)
             if bound is None:
                 raise AssertionError(f"{item} needs a Lakehouse this env does not have")
-            entries.append(ItemBinding(item, LakehouseBinding(lakehouse=bound)))
+            entries.append(
+                ItemBinding(
+                    item,
+                    LakehouseBinding(lakehouse=bound, workspace_name=WORKSPACE),
+                )
+            )
         else:
             if warehouse is None:
                 raise AssertionError(f"{item} needs a Warehouse this env does not have")
-            entries.append(ItemBinding(item, WarehouseBinding(warehouse=warehouse)))
+            entries.append(
+                ItemBinding(
+                    item,
+                    WarehouseBinding(warehouse=warehouse, workspace_name=WORKSPACE),
+                )
+            )
     return ItemBindings(tuple(entries))
 
 

@@ -34,7 +34,7 @@ def test_ordinary_terminated_statements_split_on_their_separators():
 
 
 def test_the_separator_is_not_part_of_the_statement():
-    statement, = parse_statements("select 1;")
+    (statement,) = parse_statements("select 1;")
 
     assert statement.text == "select 1"
     assert statement.terminated

@@ -4,7 +4,9 @@
 #
 # Paths are as you would type them, so run this from the repository root.
 # Nothing here is discovered: the composition names its file, and the commands
-# name their repository and workspace.
+# name their repository and workspace. Entries name a Weaver command; the
+# `weaver` in front of it is optional, so a line copied from a terminal works
+# unchanged.
 
 compose:
   # Everything from empty: clear the estate, build it, load it, test it.
@@ -14,13 +16,13 @@ compose:
     # is going, because deleting rows from tables that are about to be removed
     # is work nobody needs. Leaving it out cost about eighty seconds per cycle
     # to tidy a catalogue the very next command rebuilds.
-    - weaver wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --workspace-config "examples/weaver_example.yml"
-    - weaver build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Lakehouse/Sales --bind Warehouse/Reporting=Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - weaver load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - weaver test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
+    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
 
   # The inner loop: an authored change, rebuilt and re-run without wiping.
   rebuild:
-    - weaver build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Lakehouse/Sales --bind Warehouse/Reporting=Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - weaver load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - weaver test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
+    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"

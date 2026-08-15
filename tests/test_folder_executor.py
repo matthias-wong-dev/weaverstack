@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.targets import ItemRef
-from weaver.resolution import LocalResolver
-from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
-from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.folder import FolderExecutor
 from weaver.build_bundle.models import (
@@ -19,11 +15,15 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 def _context(tmp_path):
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
-    resolver = LocalResolver(workspace)
+    workspace = given_workspace(catalogue="Lakehouse/Control")
+    resolver = given_resolver(
+        workspace=workspace, lakehouses=("Control", "Sales"), root=tmp_path
+    )
     store = FilesystemStore()
     lakehouse = ItemRef("Sales")
     bound = BoundTarget(
@@ -65,6 +65,6 @@ def test_managed_folder_create_and_drop_are_strict(tmp_path):
 def test_folder_prune_remains_idempotent(tmp_path):
     context = _context(tmp_path)
     result = FolderExecutor().execute(_action(PRUNE_FOLDER), None, context)
-    assert result == {
-        "pruned": (tmp_path / "Sales" / "Files" / "Sales" / "Export").as_posix()
-    }
+    # Named by where it resolved to, which is keyed by item id rather than by
+    # the display name the caller typed.
+    assert result["pruned"].endswith("/Files/Sales/Export")

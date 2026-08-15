@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 from weaver.errors import IdentityError
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 
 ROUND_TRIP = [
     (FolderTarget, "Sales/Files"),
@@ -16,12 +16,16 @@ ROUND_TRIP = [
 ]
 
 
-@pytest.mark.parametrize("kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP])
+@pytest.mark.parametrize(
+    "kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP]
+)
 def test_parse_then_str_is_identity(kind, text):
     assert str(kind.parse(text)) == text
 
 
-@pytest.mark.parametrize("kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP])
+@pytest.mark.parametrize(
+    "kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP]
+)
 def test_parsing_is_stable(kind, text):
     assert kind.parse(text) == kind.parse(str(kind.parse(text)))
 
@@ -63,7 +67,10 @@ def test_warehouse_target_rejects_a_path():
 
 def test_the_same_name_serves_different_slots():
     """Kind comes from the slot, never from the string."""
-    assert DeltaTarget.parse("Shared").lakehouse == WarehouseTarget.parse("Shared").warehouse
+    assert (
+        DeltaTarget.parse("Shared").lakehouse
+        == WarehouseTarget.parse("Shared").warehouse
+    )
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "a\\b", "a:b", "a*b", "..", "a|b"])
@@ -80,3 +87,68 @@ def test_identities_are_immutable():
     target = DeltaTarget.parse("Sales")
     with pytest.raises(Exception):
         target.lakehouse = ItemRef("Other")
+
+
+# --- the binding grammar ------------------------------------------------------
+#
+# `Lakehouse/SalesDev=Sales`: the left-hand side is typed and supplies the type
+# for both sides, so the logical item is named alone.
+
+
+def test_a_binding_types_both_sides_from_the_physical_one():
+    from weaver.build_bundle.targets import parse_item_binding
+
+    binding = parse_item_binding("Lakehouse/SalesDev=Sales")
+
+    assert str(binding.item) == "Lakehouse/Sales"
+    assert binding.target.item.name == "SalesDev"
+
+
+def test_a_warehouse_binding_reads_the_same_way():
+    from weaver.build_bundle.targets import parse_item_binding
+
+    binding = parse_item_binding("Warehouse/ReportingDev=Reporting")
+
+    assert str(binding.item) == "Warehouse/Reporting"
+    assert binding.target.item.name == "ReportingDev"
+
+
+def test_the_same_bare_name_under_two_types_is_two_items():
+    """`Lakehouse/Sales` and `Warehouse/Sales` are distinct logical items.
+
+    Which is why the physical side supplying the type is enough: the bare name
+    on the right is never ambiguous once the left has been read.
+    """
+
+    from weaver.build_bundle.targets import parse_item_binding
+
+    lakehouse = parse_item_binding("Lakehouse/SalesDev=Sales")
+    warehouse = parse_item_binding("Warehouse/SalesWh=Sales")
+
+    assert lakehouse.item != warehouse.item
+
+
+def test_a_typed_logical_item_is_refused_and_says_what_to_write():
+    """Not a type mismatch to check — a sentence that cannot be written.
+
+    The old grammar said the word twice and let the two disagree, so the error
+    it needed was about disagreement. This one has nothing to disagree with.
+    """
+
+    import pytest
+
+    from weaver.build_bundle.targets import parse_item_binding
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="Lakehouse/SalesDev=Sales"):
+        parse_item_binding("Lakehouse/SalesDev=Lakehouse/Sales")
+
+
+def test_a_logical_item_of_the_wrong_type_cannot_be_smuggled_in():
+    import pytest
+
+    from weaver.build_bundle.targets import parse_item_binding
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="named without a type"):
+        parse_item_binding("Lakehouse/SalesDev=Warehouse/Sales")

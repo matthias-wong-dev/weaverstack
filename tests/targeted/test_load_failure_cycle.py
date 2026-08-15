@@ -27,17 +27,25 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from factories import (
+    installed_catalogue,
+    installed_inventories,
+    load_estate,
+    load_estate_bindings,
+)
+from support.workspaces import InventoryClient, given_workspace
 
 from weaver.errors import LoadError
-from weaver.run import RunState
-from weaver.load import run_load
+from weaver.fabric.resolution import FabricResolver
+from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
     FAILED,
     PENDING,
-    SKIPPED,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
     TASK_FAILED,
@@ -45,19 +53,14 @@ from weaver.load_report import (
     TASK_SUCCEEDED_WITH_REJECTS,
     LoadResult,
 )
-from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
-from weaver.resolution import LocalResolver
+from weaver.operations.load import run_load
+from weaver.run import RunState
 from weaver.store import FilesystemStore
-from weaver.task_logging import COMPLETE_STEP, PLAN_FILE, open_task_log
-from weaver.workspaces import LocalWorkspace
+from weaver.task_logging import COMPLETE_STEP, PLAN_FILE
 
-from factories import (
-    installed_catalogue,
-    installed_inventories,
-    load_estate,
-    load_estate_bindings,
-)
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -90,14 +93,14 @@ class Prepared:
     derived the same way the boundary derives it rather than chosen here.
     """
 
-    catalogue: object
+    catalogue: Lakehouse / object
     inventories: dict
     workspace: object
     session: object
     log_root: Location
 
 
-class Refreshing(LocalResolver):
+class Refreshing(FabricResolver):
     def refresh_sql_endpoint(self, item):
         return None
 
@@ -106,16 +109,21 @@ class Refreshing(LocalResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = LocalWorkspace(
-        workspace=str(tmp_path / "estate"), weaver_lakehouse="Weaver_LH"
-    )
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
-    from weaver.targets import ItemRef
+
     from weaver.task_logging import log_folder
 
-    resolver = Refreshing(workspace)
+    resolver = Refreshing(
+        workspace,
+        client=InventoryClient(
+            workspace.workspace,
+            [("Lakehouse", name) for name in ("Weaver_LH", "Raw_LH")],
+        ),
+        base_url=Path(tmp_path).as_posix(),
+    )
     store = FilesystemStore()
-    root = log_folder(resolver, ItemRef(workspace.weaver_lakehouse))
+    root = log_folder(resolver, workspace.catalogue_item)
     store.make_directory(root)
     return Prepared(
         catalogue=installed_catalogue(repository, bindings),

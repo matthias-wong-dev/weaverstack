@@ -19,13 +19,18 @@ import pathlib
 
 import pytest
 
-EXECUTORS = pathlib.Path(__file__).resolve().parents[2] / "src" / "weaver" / "build_bundle" / "executors"
+EXECUTORS = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "src"
+    / "weaver"
+    / "build_bundle"
+    / "executors"
+)
 
 #: Names that would mean an executor is deciding *where* it is rather than doing
 #: its job. Acquisition belongs to the factories; behaviour belongs here.
 ENVIRONMENT_TELLS = {
-    "FabricWorkspace",
-    "LocalWorkspace",
+    "Workspace",
     "FabricStore",
     "FilesystemStore",
     "OneLakeDfsClient",
@@ -51,9 +56,7 @@ def test_there_are_executors_to_check():
     assert executor_modules()
 
 
-@pytest.mark.parametrize(
-    "module", executor_modules(), ids=lambda path: path.stem
-)
+@pytest.mark.parametrize("module", executor_modules(), ids=lambda path: path.stem)
 def test_an_executor_never_names_a_transport(module):
     """No executor mentions a workspace kind, a store class or a resolver class.
 
@@ -62,24 +65,21 @@ def test_an_executor_never_names_a_transport(module):
     """
 
     tree = ast.parse(module.read_text())
-    named = {
-        node.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name)
-    } | {
-        node.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-    } | {
-        alias.name.split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    } | {
-        (node.module or "").split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-    }
+    named = (
+        {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        | {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+        | {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        | {
+            (node.module or "").split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+    )
 
     assert not (named & ENVIRONMENT_TELLS), (
         f"{module.name} names {sorted(named & ENVIRONMENT_TELLS)} — an executor "

@@ -21,51 +21,27 @@ classifiers = [
 ]
 
 # What *installed* Weaver needs to run — the packages a Fabric Environment must
-# carry. Kept in step with deployment/fabric/environment.yml (a test enforces it)
-# so the two definitions cannot drift. Local-only tooling stays in the extras:
-#   pyspark/delta   local Delta execution                       -> [spark]
-#   pytest          the test suite                              -> [dev]
+# carry, and what a desktop needs to reach one. Kept in step with
+# deployment/fabric/environment.yml (a test enforces it) so the two definitions
+# cannot drift. PySpark is not here and must not be: Fabric supplies it where
+# authored runtime code executes, and a desktop never holds a Spark session.
 dependencies = [
     "pyyaml",
     "sqlparse",
     "mssql-python",
-]
-
-[project.optional-dependencies]
-# Desktop CLI. `weaver install` builds a wheel and talks to Fabric over HTTP, so
-# the installer pulls the build frontend and the Fabric HTTP stack. This is the
-# one command a friend tester needs: `pip install ".[cli]"`.
-cli = [
     "azure-identity>=1.23",
     "requests>=2.31",
     "build>=1.2",
     "pyreadline3>=3.5; sys_platform == 'win32'",
 ]
-# Delta and Spark are released in lockstep: delta-spark 3.2.x needs Spark 3.5.x.
-# Ranges rather than pins, so an existing local install is not disturbed.
-fabric = [
-    "azure-identity>=1.23",
-    "requests>=2.31",
-]
-spark = [
-    "pyspark>=3.5,<3.6",
-    "delta-spark>=3.2,<3.3",
-]
-# The suite without a JVM: core tests and the Fabric integration tests, which
-# need credentials and HTTP but no Spark. A friend testing against a workspace
-# wants this rather than [dev] — PySpark is a few hundred megabytes, builds from
-# source, and is useless without a JDK.
+
+[project.optional-dependencies]
+# The test suite. Needs no JVM and no Spark:
 #   pytest                      core suite
 #   pytest -m fabric            plus a workspace, a capacity and `az login`
-test = [
-    "pytest>=8.4",
-    "azure-identity>=1.23",
-    "requests>=2.31",
-    "pyreadline3>=3.5; sys_platform == 'win32'",
-]
-# Everything: the suite, the Fabric stack and local Spark.
 dev = [
-    "weaverstack[test,spark]",
+    "pytest>=8.4",
+    "ruff>=0.14",
 ]
 
 [project.scripts]
@@ -91,7 +67,6 @@ packages = ["src/weaver", "src/weaver_cli"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "spark: local Spark/Delta tests, need a JDK (run with: pytest -m spark)",
     # Place. Every test that needs a real workspace carries it, so `-m fabric`
     # is the whole set rather than a subset that quietly excludes the expensive
     # half — which is what `fabric` meaning *both* place and precondition cost.
@@ -105,10 +80,33 @@ markers = [
     "hosted: Weaver runs inside a Fabric session, as the installed wheel — the product's own position. Needs `weaver install` first (pytest -m 'fabric and hosted')",
     # Scope and subject, layered on top of a position rather than replacing it.
     "provision: creates and deletes Fabric items. Opted into separately because it exercises Fabric's resource management rather than Weaver's, changes rarely, and its churn slows every other run",
-    "full_integration: the one comprehensive Fabric lifecycle journey, which proves the whole pipeline composes rather than answering any single question. Opted into by name, so the expensive composition proof runs by exception",
+    "full_integration: a comprehensive Fabric lifecycle journey, one per position, which proves the whole pipeline composes rather than answering any single question. Opted into by name, so the expensive composition proof runs by exception",
 ]
 # Default runs stay fast and need no JVM.
 addopts = [
     "-m",
-    "not spark and not fabric and not provision and not full_integration",
+    "not fabric and not provision and not full_integration",
 ]
+
+
+# Mechanical hygiene only: unused and duplicate imports, undefined names, dead
+# formatting. Nothing about types or style opinions — what this catches is
+# debris, which review should not have to.
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Fabric notebook content: `spark` and `display` are injected by the host, and
+# its cells are imports interleaved with code by definition.
+"examples/workspaces/**/notebook-content.py" = ["F821", "E402"]
+# Authored fixtures are Weaver documents, not modules of this package.
+"tests/fixtures/**" = ["F821", "F841", "E402"]
+# Public namespaces re-export deliberately.
+"src/weaver/__init__.py" = ["F401"]
+"src/weaver/fabric/__init__.py" = ["F401"]
+"src/weaver/build_bundle/__init__.py" = ["F401"]
+"src/weaver/sessions/__init__.py" = ["F401"]

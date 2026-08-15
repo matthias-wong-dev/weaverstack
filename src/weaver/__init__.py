@@ -16,19 +16,8 @@ from .errors import (
     ValidationError,
     WeaverError,
 )
-from .operations import (
-    BuildResult,
-    WipeReport,
-    WipeResult,
-    build,
-    current_workspace,
-    wipe,
-)
-from .load import load
-from .test import test
-from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
-from .test_report import ValidationNodeReport, ValidationRunReport
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
+from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .objects import (
     Assumption,
     Folder,
@@ -40,6 +29,13 @@ from .objects import (
     View,
     WeaverObject,
 )
+from .operations.build import BuildResult, build
+from .operations.load import load
+from .operations.test import test
+from .operations.wipe import WipeReport, WipeResult, wipe
+from .operations.workspace import current_workspace
+from .sessions.public import session
+from .test_report import ValidationNodeReport, ValidationRunReport
 
 
 def _resolve_version() -> str:
@@ -70,6 +66,8 @@ __all__ = [
     "LoadResult",
     "test",
     "ValidationRunReport",
+    # the reusable context every operation accepts
+    "session",
     "ValidationNodeReport",
     # authored objects
     "WeaverObject",

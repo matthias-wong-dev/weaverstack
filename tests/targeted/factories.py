@@ -20,13 +20,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
+from support.workspaces import WORKSPACE
+
 from weaver.build_bundle import (
-    InstallAction,
     BuildBatch,
     BuildPlan,
+    InstallAction,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
@@ -34,13 +33,13 @@ from weaver.build_bundle import (
     compute_bundle_id,
     write_bundle,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
-from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
-from weaver.build_bundle.stages import PlannedStage
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
+from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
@@ -48,6 +47,9 @@ from weaver.etl import (
     item_runtime_artefacts,
     load_schemas,
 )
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 #: Neutral names, per the environment-neutrality rule: no product, workspace or
 #: tenant may be inferable from a fixture.
@@ -191,7 +193,9 @@ class FixtureCatalogue(Catalogue):
         )
 
     @classmethod
-    def from_repository(cls, repository, *, item: str | WeaverItemId = ITEM) -> "Catalogue":
+    def from_repository(
+        cls, repository, *, item: str | WeaverItemId = ITEM
+    ) -> "Catalogue":
         """The catalogue a successful build of this repository would have left.
 
         The "already installed, nothing changed" state, which is the premise of
@@ -495,14 +499,21 @@ def bound_target(
     id: str = "target-1",
     kind: str = "lakehouse",
     item_id: str = "Sales_LH",
+    item_name: str | None = None,
+    workspace_name: str = WORKSPACE,
     logical_item_name: str | None = "Sales",
     logical_item_type: str | None = "Lakehouse",
     **extra,
 ) -> BoundTarget:
+    # Both halves of the physical identity, as a real one carries: the id
+    # resolves the item, and the display names are what four-part Spark naming
+    # is spelled with.
     return BoundTarget(
         id=id,
         kind=kind,
         item_id=item_id,
+        item_name=item_name if item_name is not None else item_id,
+        workspace_name=workspace_name,
         logical_item_name=logical_item_name,
         logical_item_type=logical_item_type,
         **extra,
@@ -584,7 +595,7 @@ def warehouse_table(
     """
 
     identity_line = f"Identity: {identity}\n\n" if identity else ""
-    return f'''\
+    return f"""\
 /*
 Table ID: {object_id}
 
@@ -596,11 +607,11 @@ Primary key: {primary_key}
 
 {identity_line}*/
 {select}
-'''
+"""
 
 
 def warehouse_view(object_id: str, *, select: str, depends_on: str) -> str:
-    return f'''\
+    return f"""\
 /*
 View ID: {object_id}
 
@@ -609,11 +620,11 @@ Description: A declared view.
 Lineage: ${depends_on}
 */
 {select}
-'''
+"""
 
 
 def spark_view(object_id: str, *, depends_on: str) -> str:
-    return f'''\
+    return f"""\
 /*
 View ID: {object_id}
 
@@ -625,7 +636,7 @@ Dependencies:
   - {depends_on}
 */
 select 1 as CustomerId from {depends_on}
-'''
+"""
 
 
 def folder_document(object_id: str) -> str:
@@ -681,7 +692,9 @@ def alias_repository(
     _write(
         root,
         f"{consumer}/alias.yml",
-        alias_declaration(**{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}),
+        alias_declaration(
+            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}
+        ),
     )
     if consumer_view:
         # A Warehouse consumer reads its alias through T-SQL over the producer's
@@ -945,7 +958,7 @@ def single_action_bundle(
     if payload is not None and action.payload is not None:
         payloads[action.payload] = payload
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="weaver_items",
         repository_signature="repository-signature",
@@ -955,9 +968,7 @@ def single_action_bundle(
         ),
     )
     plan = _with_identity(plan)
-    return write_bundle(
-        location, plan=plan, payloads=payloads, store=store
-    )
+    return write_bundle(location, plan=plan, payloads=payloads, store=store)
 
 
 def _sequence(*, description: str, target_id: str, action: InstallAction):
@@ -1044,12 +1055,12 @@ def lakehouse_catalogue(spark, resolver, item: str):
     return SparkCatalogue(spark, resolver.spark_destination(ItemRef(item)))
 
 
-def spark_destination(
-    item: str = "Sales_LH", *, schema_prefix: str = "sales_lh__", **extra
-):
-    from weaver.spark import SparkDestination
+def spark_destination(item: str = "Sales_LH", *, workspace: str = WORKSPACE):
+    """How Fabric Spark addresses one Lakehouse."""
 
-    return SparkDestination(item=item, schema_prefix=schema_prefix, **extra)
+    from weaver.spark import FabricSparkTarget
+
+    return FabricSparkTarget(workspace=workspace, lakehouse=item)
 
 
 #: Distinguishes "caller said nothing, give the usual one" from "caller means
@@ -1086,7 +1097,7 @@ def spark_sql_capability(spark):
     """
 
     from weaver.build_bundle.executors.spark_case import exact_identifier_case
-    from weaver.session.base import run_spark_statements
+    from weaver.sessions.base import run_spark_statements
 
     def many(statements, *, exact_case: bool = False):
         ordered = list(statements)
@@ -1157,10 +1168,12 @@ def item_bindings(*pairs: tuple[str, str]) -> ItemBindings:
     bindings = []
     for logical, physical in pairs:
         item = WeaverItemId.parse(logical)
+        # Four-part Spark naming is spelled with the workspace's display name,
+        # so a binding that carried none could not name what it builds.
         binding = (
-            LakehouseBinding(ItemRef(physical))
+            LakehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
             if item.item_type == "Lakehouse"
-            else WarehouseBinding(ItemRef(physical))
+            else WarehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
         )
         bindings.append(ItemBinding(item, binding))
     return ItemBindings(tuple(bindings))

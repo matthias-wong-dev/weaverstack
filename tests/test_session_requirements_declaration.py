@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.session.requirements import (
+from weaver.sessions.requirements import (
     AUTH,
     LIVY,
     ONELAKE,
@@ -96,15 +96,26 @@ def test_every_command_that_reaches_a_workspace_asks_for_a_credential():
         ("test", "Lakehouse/Sales"),
         ("build", "."),
         ("wipe", "Lakehouse/Sales"),
-        ("unbind", "Lakehouse/Sales"),
     ):
         assert AUTH in _declared(*words), words
 
 
 def test_a_command_that_declares_nothing_asks_for_nothing():
-    """`doctor` reports on this machine. It must not warm a workspace."""
+    """`capacity` manages the capacity itself, not anything inside a workspace,
+    so it must not warm one."""
 
-    assert _declared("doctor") == set()
+    assert (
+        _declared(
+            "fabric",
+            "capacity",
+            "status",
+            "--resource-group",
+            "rg",
+            "--capacity-name",
+            "cap",
+        )
+        == set()
+    )
 
 
 # --- what the Session does with it --------------------------------------------
@@ -119,16 +130,16 @@ class _Resource:
 
 
 def _scope(monkeypatch):
-    from weaver.session.console import ConsoleScope
-    from weaver.workspaces import FabricWorkspace
+    from weaver.sessions.console import ConsoleScope
+    from weaver.workspaces import Workspace
 
     monkeypatch.setattr(
         "weaver.fabric.auth.credential",
         lambda: (_ for _ in ()).throw(AssertionError("no credential in this test")),
     )
     scope = ConsoleScope.__new__(ConsoleScope)
-    scope.workspace = FabricWorkspace(
-        workspace="W", weaver_lakehouse="Weaver", environment="weaver"
+    scope.workspace = Workspace(
+        workspace="W", catalogue="Lakehouse/Weaver", environment="weaver"
     )
     scope.auth = _Resource()
     scope.livy = _Resource()

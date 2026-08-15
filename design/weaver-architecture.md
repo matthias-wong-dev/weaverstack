@@ -449,12 +449,14 @@ load
 
 Every command executes against a resolved Workspace.
 
-A Workspace identifies:
+A Workspace is one Microsoft Fabric workspace, and identifies:
 
-- Workspace
-- Weaver Lakehouse
-- Environment (Fabric)
-- Local or Fabric host
+- the workspace, by name
+- the Weaver Lakehouse holding the catalogue
+- the Fabric Environment Spark work attaches
+
+It says where the resources are. Where Weaver's own code runs is a Session
+question, not a property of the Workspace.
 
 For example:
 
@@ -472,7 +474,7 @@ weaver build \
     ./estate \
     --workspace MyWorkspace \
     --environment Weaver \
-    --weaver-lakehouse Weaver \
+    --catalogue Lakehouse/Weaver \
     --bind Lakehouse/Raw
 ```
 
@@ -572,8 +574,8 @@ Where the logical and physical names differ, an explicit mapping may be supplied
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw_DEV=Lakehouse/Raw \
-    --bind Warehouse/Reporting_DEV=Warehouse/Reporting
+    --bind Lakehouse/Raw_DEV=Raw \
+    --bind Warehouse/Reporting_DEV=Reporting
 ```
 
 The build process performs the following steps.

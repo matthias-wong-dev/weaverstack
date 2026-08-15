@@ -6,14 +6,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from support.workspaces import given_resolver, given_workspace, mounted_lakehouse
 
-from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 from weaver import Lakehouse, lakehouse_for
-from weaver.resolution import LocalResolver
-from weaver.workspaces import LocalWorkspace
 from weaver.errors import LoadError
 from weaver.lakehouse import MOUNT_OPTIONS, default_lakehouse
-from weaver.spark import local_destination
+from weaver.spark import FabricSparkTarget
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 
 
 @dataclass
@@ -34,26 +33,11 @@ class FakeSpark:
 def test_one_root_carries_both_lakehouse_areas():
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
+    assert (
+        lakehouse.table_path("Sales", "Order")
+        == "abfss://ws@host/lh/Tables/Sales/Order"
+    )
     assert lakehouse.location.files_root == "abfss://ws@host/lh/Files"
-
-
-def test_a_folder_hangs_off_the_same_root_as_a_table_locally(tmp_path):
-    """On a filesystem host the two roots *are* one directory.
-
-    This is why the emulator never showed that a Folder needs something a table
-    does not: locally there is nothing to distinguish.
-    """
-
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
-
-    assert lakehouse.table_path("Sales", "Order") == (
-        f"{tmp_path.as_posix()}/Tables/Sales/Order"
-    )
-    assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
-    assert lakehouse.folder_spark_path("Sales", "Export") == (
-        f"{tmp_path.as_posix()}/Files/Sales/Export"
-    )
 
 
 def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
@@ -63,21 +47,21 @@ def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
     can; Spark cannot use that at all, so it is handed a string it can parse.
     """
 
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+    lakehouse = mounted_lakehouse("Sales_LH", tmp_path)
 
     assert isinstance(lakehouse.folder_path("Sales", "Export"), Path)
     assert isinstance(lakehouse.folder_spark_path("Sales", "Export"), str)
 
 
-def test_a_trailing_separator_does_not_double_up(tmp_path):
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=f"{tmp_path.as_posix()}/")
+def test_a_trailing_separator_does_not_double_up():
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/")
 
-    assert lakehouse.table_path("Sales", "Order") == (
-        f"{tmp_path.as_posix()}/Tables/Sales/Order"
+    assert (
+        lakehouse.table_path("Sales", "Order")
+        == "abfss://ws@host/lh/Tables/Sales/Order"
     )
-    assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
     assert lakehouse.folder_spark_path("Sales", "Export") == (
-        f"{tmp_path.as_posix()}/Files/Sales/Export"
+        "abfss://ws@host/lh/Files/Sales/Export"
     )
 
 
@@ -89,7 +73,10 @@ def test_a_table_is_addressed_by_the_spark_root_in_fabric():
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
+    assert (
+        lakehouse.table_path("Sales", "Order")
+        == "abfss://ws@host/lh/Tables/Sales/Order"
+    )
 
 
 def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
@@ -111,7 +98,9 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
 
-    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
@@ -175,7 +164,9 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
 
-    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
@@ -202,10 +193,22 @@ def test_a_root_must_be_a_real_root():
         Lakehouse(name="Sales_LH", spark_root="  ")
 
 
+def test_a_root_that_is_not_onelake_is_refused():
+    """A Lakehouse is in OneLake, so a directory cannot stand in for one.
+
+    Its Files area is reached through a Fabric mount and its tables through an
+    ``abfss://`` URL; a local path would satisfy neither and would fail later,
+    somewhere that could not say why.
+    """
+
+    with pytest.raises(LoadError, match="abfss://"):
+        Lakehouse(name="Sales_LH", spark_root="/srv/lh")
+
+
 def test_a_path_segment_that_escaped_its_parent_is_refused():
     """The same guard the resolved locations apply — these strings become paths."""
 
-    lakehouse = Lakehouse(name="Sales_LH", spark_root="/srv/lh")
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
     with pytest.raises(Exception, match="path segment"):
         lakehouse.table_path("Sales", "../../etc")
@@ -234,56 +237,75 @@ def test_the_attached_lakehouse_is_the_one_named_two_part():
 def test_a_supplied_destination_is_what_names_objects():
     lakehouse = Lakehouse(
         name="Sales_LH",
-        spark_root="/srv/.local/Sales_LH",
-        destination=local_destination(item="Sales_LH", tables_root="/srv/.local/Sales_LH/Tables"),
+        spark_root="abfss://ws@host/Sales_LH",
+        destination=FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH"),
     )
 
-    assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
+    assert lakehouse.qualify("Sales", "Order") == ("`Demo`.`Sales_LH`.`Sales`.`Order`")
 
 
 # --- resolved by name, through a resolver -----------------------------------
 
 
 def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
 
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.name == "Sales_LH"
-    assert lakehouse.spark_root == (tmp_path / "Sales_LH").as_posix()
-    assert lakehouse.qualify("Sales", "Order") == "`sales_lh__sales`.`Order`"
+    # Storage is OneLake, keyed by item id; the catalogue is named in full.
+    assert lakehouse.spark_root == resolver.spark_root(ItemRef("Sales_LH"))
+    assert lakehouse.qualify("Sales", "Order") == ("`Demo`.`Sales_LH`.`Sales`.`Order`")
 
 
 def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
 
-    assert lakehouse_for(resolver, "Sales_LH") == lakehouse_for(resolver, ItemRef("Sales_LH"))
+    assert lakehouse_for(resolver, "Sales_LH") == lakehouse_for(
+        resolver, ItemRef("Sales_LH")
+    )
 
 
 def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Path):
-    """One layout, whichever type is asked — the emulator mirrors OneLake."""
+    """One layout, reached by the two transports a Lakehouse has.
 
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    Spark writes through ``abfss://`` and the store lists through the DFS
+    ``https://`` endpoint. Both address the same object, and they are not the
+    same string — conflating them would have a write going through a transport
+    that cannot perform it.
+    """
+
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.location == resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
-    assert lakehouse.table_path("Sales", "Order") == resolver.delta_table(
+
+    spark_path = lakehouse.table_path("Sales", "Order")
+    store_path = resolver.delta_table(
         DeltaTarget.parse("Sales_LH"), "Sales", "Order"
     ).value
 
+    assert spark_path.startswith("abfss://")
+    assert store_path.startswith("https://")
+    assert spark_path.endswith("/Tables/Sales/Order")
+    assert store_path.endswith("/Tables/Sales/Order")
+
 
 def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path):
-    resolver = LocalResolver(LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 
-    assert (
-        lakehouse.folder_path("Sales", "Export").as_posix()
-        == resolver.folder_object(target, "Sales", "Export").value
+    # A Folder's files are reached as a filesystem, which outside a Fabric
+    # session there is no way to do — so what agrees here is the *address*.
+    assert lakehouse.location.folder_path("Sales", "Export").endswith(
+        "/Files/Sales/Export"
     )
-    assert (
-        f"{lakehouse.folder_path('Sales', 'Export').as_posix()}_Staging"
-        == resolver.folder_staging(target, "Sales", "Export").value
+    assert resolver.folder_object(target, "Sales", "Export").value.endswith(
+        "/Files/Sales/Export"
+    )
+    assert resolver.folder_staging(target, "Sales", "Export").value.endswith(
+        "/Files/Sales/Export_Staging"
     )
 
 
@@ -302,7 +324,9 @@ def test_the_attached_lakehouse_comes_from_the_sessions_own_settings():
     lakehouse = default_lakehouse(spark)
 
     assert lakehouse.name == "Sales_LH"
-    assert lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    assert (
+        lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    )
 
 
 def test_an_unnamed_attachment_falls_back_to_its_id():
@@ -331,7 +355,9 @@ def test_the_notebook_runtime_answers_when_the_session_does_not(monkeypatch):
 
     lakehouse = default_lakehouse(FakeSpark())
 
-    assert lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    assert (
+        lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    )
 
 
 def test_no_attachment_fails_immediately():
@@ -369,4 +395,6 @@ def test_the_inferred_root_is_spelled_exactly_as_the_fabric_one():
     from weaver.fabric.onelake import abfss_root
     from weaver.lakehouse import _ABFSS_ROOT
 
-    assert _ABFSS_ROOT.format(workspace="ws-id", item="lh-id") == abfss_root("ws-id", "lh-id")
+    assert _ABFSS_ROOT.format(workspace="ws-id", item="lh-id") == abfss_root(
+        "ws-id", "lh-id"
+    )

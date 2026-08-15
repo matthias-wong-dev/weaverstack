@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.store import FilesystemStore
-from weaver.locations import Location
-from weaver.errors import DiscoveryError, MetadataError
 from weaver.declaration import PYTHON, SPARK_SQL, parse_document, parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
+from weaver.errors import DiscoveryError, MetadataError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 REGISTRY = """\
 /*
@@ -115,7 +115,9 @@ def _repo(tmp_path, files: dict[str, str], schemas=("_Control",)):
         path = root / ITEM / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    return _Documents(parse_item_repository(Location(value=str(root)), store=FilesystemStore()))
+    return _Documents(
+        parse_item_repository(Location(value=str(root)), store=FilesystemStore())
+    )
 
 
 def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):
@@ -146,15 +148,11 @@ def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
         _repo(tmp_path, {"_.Registry.sql": registry}, schemas=("_",))
 
 
-
-
 def test_a_misnamed_object_file_is_an_error_not_quietly_demoted(tmp_path):
     # No leading underscore, so it is judged an object file on its suffix and its
     # stem is then reported as wrong. Demoting it to support would hide a typo.
     with pytest.raises(DiscoveryError, match="separates schema and object"):
         _repo(tmp_path, {"Sales.Order.py": "class X: pass\n"}, schemas=("Sales",))
-
-
 
 
 # --- an explicit absence of dependencies ------------------------------------
@@ -193,7 +191,9 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     from weaver.declaration import effective_dependencies
 
     consumer = _python_object(
-        "Sales.Ignored", extra="Dependencies: []\n", imports="from Sales__Order import Sales__Order\n"
+        "Sales.Ignored",
+        extra="Dependencies: []\n",
+        imports="from Sales__Order import Sales__Order\n",
     )
     parent = _python_object("Sales.Order")
     repo = _repo(
@@ -219,8 +219,9 @@ def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
         {"Sales__Derived.py": consumer, "Sales__Order.py": parent},
         schemas=("Sales",),
     )
-    assert [str(dependency) for dependency in
-            effective_dependencies(repo["Sales.Derived"])] == ["Sales.Order"]
+    assert [
+        str(dependency) for dependency in effective_dependencies(repo["Sales.Derived"])
+    ] == ["Sales.Order"]
 
 
 def test_the_retired_audit_spelling_is_still_reserved():
@@ -236,6 +237,10 @@ Lineage: Nothing.
 Schema:
   Order id: string
 """
-    for spelling in ("Row_insert_datetime", "row_insert_datetime", "Row insert datetime"):
+    for spelling in (
+        "Row_insert_datetime",
+        "row_insert_datetime",
+        "Row insert datetime",
+    ):
         with pytest.raises(MetadataError, match="reserved for Weaver's audit columns"):
             parse(base + f"  {spelling}: timestamp\n", language=PYTHON)

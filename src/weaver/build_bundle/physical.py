@@ -7,39 +7,51 @@ nothing here reaches across items or chooses a sequence number.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, replace
 from typing import Mapping
 
 from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
-from ..spark.tokens import object_token
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
 from .changes import (
     FILE as FILE_KIND,
+)
+from .changes import (
     FOLDER as FOLDER_KIND,
+)
+from .changes import (
     SCHEMA as SCHEMA_KIND,
+)
+from .changes import (
     STORED_PROCEDURE as PROCEDURE_KIND,
+)
+from .changes import (
     TABLE as TABLE_KIND,
+)
+from .changes import (
     VIEW as VIEW_KIND,
+)
+from .changes import (
     added as change_added,
+)
+from .changes import (
     removed as change_removed,
 )
 from .models import (
     BUILD_FOLDER,
     BUILD_PROCEDURE,
-    DELETE_FILE,
-    DROP_PROCEDURE,
-    WRITE_FILE,
     BUILD_TABLE,
     BUILD_VIEW,
     CREATE_SCHEMA,
+    DELETE_FILE,
     DROP_FOLDER,
+    DROP_PROCEDURE,
     DROP_TABLE,
     DROP_VIEW,
-    InstallAction,
+    WRITE_FILE,
     BuildBatch,
+    InstallAction,
 )
 from .payloads import sha256_hex
 from .prune import managed_sets, render_inventory_prune
@@ -145,9 +157,7 @@ def item_prune_stage(
             BuildBatch(
                 id=f"item-prune-{item_slug}",
                 target_id=target.id,
-                actions=tuple(
-                    _prefixed(action, item_slug) for action in actions
-                ),
+                actions=tuple(_prefixed(action, item_slug) for action in actions),
             ),
         ),
     )
@@ -240,7 +250,7 @@ def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
         executor, extension = "tsql", ".sql"
     else:
         keyword = "VIEW" if installed_kind == VIEW else "TABLE"
-        statement = f"DROP {keyword} {object_token(schema, name)}\n"
+        statement = f"DROP {keyword} {target.spark_target.qualify(schema, name)}\n"
         executor, extension = "spark_sql", ".spark.sql"
     content = statement.encode("utf-8")
     filename = f"drop-{action_slug}{extension}"
@@ -280,9 +290,7 @@ def item_schema_stage(
         for identity in selected_ids
         if identity.item == item and not identity.is_files
     } | set(extra_schemas)
-    schemas = sorted(
-        schema for schema in wanted if schema.casefold() not in present
-    )
+    schemas = sorted(schema for schema in wanted if schema.casefold() not in present)
     if not schemas:
         return None
 
@@ -295,8 +303,10 @@ def item_schema_stage(
             content = f"create schema [{schema.replace(']', ']]')}];\n".encode("utf-8")
             executor, extension = "tsql", ".sql"
         else:
-            content = (json.dumps({"schema": schema}, sort_keys=True) + "\n").encode()
-            executor, extension = "spark_schema", ".schema.json"
+            content = (
+                target.spark_target.create_schema_statement(schema) + "\n"
+            ).encode()
+            executor, extension = "spark_sql", ".spark.sql"
         filename = f"create-{item_slug}-{schema}{extension}"
         payloads[filename] = content
         action_id = f"schema-{item_slug}-{schema}"
@@ -338,12 +348,13 @@ class RenderedAction:
     payloads: Mapping[str, bytes]
 
 
-def render_document_build_action(identity, source) -> RenderedAction:
+def render_document_build_action(identity, source, *, target) -> RenderedAction:
     """The InstallAction and payload one declared document renders to.
 
     Where ``source.create_ddl()`` becomes something a bundle can carry: the DDL
     says what statement, and this says what action runs it, under what id, with
-    which executor and against which frozen bytes.
+    which executor and against which frozen bytes. Every managed name in the
+    payload is rendered against the target the document's item is bound to.
     """
 
     action_slug = _slug(identity)
@@ -362,7 +373,9 @@ def render_document_build_action(identity, source) -> RenderedAction:
             ),
             payloads={},
         )
-    ddl = source.create_ddl()
+    ddl = source.create_ddl(
+        destination=None if target.kind == WAREHOUSE_TARGET else target.spark_target
+    )
     filename = f"{action_slug}{ddl.extension}"
     content = ddl.content.encode("utf-8")
     return RenderedAction(
@@ -401,10 +414,10 @@ def render_load_build_action(artefact) -> RenderedAction:
             resource_node_id=str(artefact.identity),
             executor=executor,
             payload=filename,
-            payload_sha256=sha256_hex(artefact.payload),
+            payload_sha256=sha256_hex(artefact.installed_bytes),
             source_path=artefact.source_path,
         ),
-        payloads={filename: artefact.payload},
+        payloads={filename: artefact.installed_bytes},
     )
 
 
@@ -587,7 +600,7 @@ def item_build_stages(
         for node in sorted(layer):
             identity = identities[node]
             source = repository.source_documents[identity]
-            rendered = render_document_build_action(identity, source)
+            rendered = render_document_build_action(identity, source, target=target)
             payloads.update(rendered.payloads)
             actions.append(rendered.action)
             changes.append(
@@ -614,5 +627,3 @@ def item_build_stages(
             )
         )
     return tuple(stages)
-
-

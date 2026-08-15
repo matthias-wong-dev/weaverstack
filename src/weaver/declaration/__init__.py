@@ -2,31 +2,76 @@
 
 from __future__ import annotations
 
+from .columns import (
+    metadata_column_references,
+    resolve_build_columns,
+    validate_build_columns,
+)
 from .dependencies import (
     PythonImport,
     RelationReference,
     extract_python_references,
     extract_sql_references,
 )
-from .columns import (
-    metadata_column_references,
-    resolve_build_columns,
-    validate_build_columns,
-)
 from .graph import Edge, Graph
 from .item_dependencies import project_bound_documents, resolve_item_dependencies
+from .metadata import (
+    ASSUMPTION,
+    AUDIT_COLUMNS,
+    AUDIT_DELETE,
+    AUDIT_INSERT,
+    AUDIT_UPDATE,
+    DELTA_LANGUAGES,
+    FOLDER,
+    LAKEHOUSE_NAMESPACE,
+    LANGUAGES,
+    NAMESPACES,
+    OBJECT_KINDS,
+    PYTHON,
+    SPARK_SQL,
+    SQL,
+    TABLE,
+    TEST,
+    VALIDATION_KINDS,
+    VIEW,
+    WAREHOUSE_NAMESPACE,
+    Column,
+    ForeignKey,
+    MetadataText,
+    ObjectId,
+    Reference,
+    Revision,
+    SesDocument,
+    WeaverDocument,
+    audit_column_name,
+    extract_python_metadata,
+    extract_sql_metadata_and_body,
+    is_validation_kind,
+    namespace_for_target,
+    parse_document,
+    parse_python_document,
+    parse_sql_document,
+)
 from .model import (
     FILES,
     ITEM_TYPES,
-    ItemDependency,
     LAKEHOUSE,
-    RepositoryAlias,
     WAREHOUSE,
+    ItemDependency,
+    RepositoryAlias,
     WeaverDocumentId,
     WeaverItem,
     WeaverItemId,
     WeaverRepository,
     WeaverSchemaId,
+)
+from .references import (
+    IDENTITY_COLUMN_NOTE,
+    ResolvedText,
+    column_note,
+    declared_column_notes,
+    resolve_text,
+    validate_repository_metadata,
 )
 from .repository import (
     build_internal_graph,
@@ -49,51 +94,6 @@ from .source import (
     language_for_filename,
     object_id_for_filename,
     read_source_document,
-)
-from .references import (
-    IDENTITY_COLUMN_NOTE,
-    ResolvedText,
-    column_note,
-    declared_column_notes,
-    resolve_text,
-    validate_repository_metadata,
-)
-from .metadata import (
-    ASSUMPTION,
-    AUDIT_COLUMNS,
-    AUDIT_DELETE,
-    AUDIT_INSERT,
-    AUDIT_UPDATE,
-    FOLDER,
-    DELTA_LANGUAGES,
-    LAKEHOUSE_NAMESPACE,
-    LANGUAGES,
-    NAMESPACES,
-    OBJECT_KINDS,
-    PYTHON,
-    SPARK_SQL,
-    SQL,
-    TABLE,
-    TEST,
-    VALIDATION_KINDS,
-    VIEW,
-    WAREHOUSE_NAMESPACE,
-    Column,
-    ForeignKey,
-    MetadataText,
-    ObjectId,
-    Reference,
-    Revision,
-    SesDocument,
-    WeaverDocument,
-    audit_column_name,
-    is_validation_kind,
-    extract_python_metadata,
-    extract_sql_metadata_and_body,
-    namespace_for_target,
-    parse_document,
-    parse_python_document,
-    parse_sql_document,
 )
 
 __all__ = [

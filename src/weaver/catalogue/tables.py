@@ -231,9 +231,7 @@ def _object() -> tuple[CatalogueColumn, ...]:
         CatalogueColumn(
             "schema_name", not_null=True, description="The object's schema."
         ),
-        CatalogueColumn(
-            "object_name", not_null=True, description="The object's name."
-        ),
+        CatalogueColumn("object_name", not_null=True, description="The object's name."),
     )
 
 
@@ -339,8 +337,7 @@ REGISTRY = CatalogueTable(
             "object_type",
             not_null=True,
             description=(
-                "What was installed: folder, table, view, file or "
-                "stored_procedure."
+                "What was installed: folder, table, view, file or stored_procedure."
             ),
         ),
         CatalogueColumn(
@@ -388,9 +385,7 @@ TABLE_DICTIONARY = CatalogueTable(
     columns=(
         *_scope(),
         *_object(),
-        CatalogueColumn(
-            "object_type", not_null=True, description="table or view."
-        ),
+        CatalogueColumn("object_type", not_null=True, description="table or view."),
         *_described(what="object"),
         *_lineage(),
         CatalogueColumn(
@@ -690,4 +685,3 @@ def table(name: str) -> CatalogueTable:
             f"{name!r} is not a catalogue table — expected one of "
             + ", ".join(sorted(TABLES_BY_NAME))
         ) from None
-

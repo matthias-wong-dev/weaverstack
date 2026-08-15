@@ -10,30 +10,39 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from ..catalogue.tables import CATALOGUE_SCHEMA
-from ..etl import LOAD_ROOT
-from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
-from ..spark import object_token, schema_token
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
+from ..etl import LOAD_ROOT
 from ..store import Store
 from ..targets import ItemRef
+from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
+from .changes import (
+    FOLDER as FOLDER_KIND,
+)
+from .changes import (
+    FOLDER_SCHEMA as FOLDER_SCHEMA_KIND,
+)
+from .changes import (
+    SCHEMA as SCHEMA_KIND,
+)
+from .changes import (
+    TABLE as TABLE_KIND,
+)
+from .changes import (
+    VIEW as VIEW_KIND,
+)
+from .changes import (
+    TargetChange,
+    removed,
+)
 from .models import (
     PRUNE_FOLDER,
     PRUNE_SCHEMA,
     PRUNE_TABLE,
     PRUNE_VIEW,
     InstallAction,
-)
-from .changes import (
-    FOLDER as FOLDER_KIND,
-    FOLDER_SCHEMA as FOLDER_SCHEMA_KIND,
-    SCHEMA as SCHEMA_KIND,
-    TABLE as TABLE_KIND,
-    VIEW as VIEW_KIND,
-    TargetChange,
-    removed,
 )
 from .payloads import sha256_hex
 from .targets import BoundTarget
@@ -48,6 +57,8 @@ _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 _RESERVED_SQL_SCHEMAS = frozenset(
     {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
 )
+
+
 @dataclass(frozen=True)
 class _Managed:
     """The keep-set the build diffs the target against, folded for comparison."""
@@ -200,8 +211,7 @@ def read_lakehouse_inventory(
         control_item
         and catalogue is not None
         and catalogue.schema_exists(CATALOGUE_SCHEMA)
-        and CATALOGUE_SCHEMA.casefold()
-        not in {schema.casefold() for schema in schemas}
+        and CATALOGUE_SCHEMA.casefold() not in {schema.casefold() for schema in schemas}
     ):
         # The empty catalogue schema is catalogue state, not storage state: until
         # its first table exists there is no Tables/_ directory for the store to
@@ -236,9 +246,7 @@ def read_lakehouse_inventory(
     views: tuple[str, ...] = ()
     if catalogue is not None:
         views = tuple(
-            f"{schema}.{view}"
-            for schema in schemas
-            for view in catalogue.views(schema)
+            f"{schema}.{view}" for schema in schemas for view in catalogue.views(schema)
         )
     files = () if control_item else _load_files(store, files_root)
     return TargetInventory(
@@ -435,7 +443,7 @@ def render_inventory_prune(
                         PRUNE_VIEW,
                         "view",
                         qualified,
-                        f"DROP VIEW IF EXISTS {object_token(schema, name)}",
+                        f"DROP VIEW IF EXISTS {target.spark_target.qualify(schema, name)}",
                         payloads,
                     )
                 )
@@ -452,7 +460,7 @@ def render_inventory_prune(
                         PRUNE_TABLE,
                         "table",
                         qualified,
-                        f"DROP TABLE IF EXISTS {object_token(schema, name)}",
+                        f"DROP TABLE IF EXISTS {target.spark_target.qualify(schema, name)}",
                         payloads,
                     )
                 )
@@ -477,7 +485,8 @@ def render_inventory_prune(
                         PRUNE_SCHEMA,
                         "schema",
                         schema,
-                        f"DROP SCHEMA IF EXISTS {schema_token(schema)} CASCADE",
+                        f"DROP SCHEMA IF EXISTS "
+                        f"{target.spark_target.qualified_schema(schema)} CASCADE",
                         payloads,
                     )
                 )
@@ -507,9 +516,19 @@ def managed_sets(
     Lakehouse runtime tree needs nothing here, being a declared folder.
     """
 
-    tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
-    views = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == VIEW}
-    folders = {d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET}
+    tables = {
+        d.qualified
+        for d in documents.values()
+        if d.target_kind == object_target_kind and d.kind == TABLE
+    }
+    views = {
+        d.qualified
+        for d in documents.values()
+        if d.target_kind == object_target_kind and d.kind == VIEW
+    }
+    folders = {
+        d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET
+    }
     for destination in alias_destinations:
         qualified = destination.object_id.qualified
         if destination.is_files:
@@ -572,7 +591,8 @@ def _child_dirs(store: Store, root) -> list:
     if not store.exists(root) or not store.is_directory(root):
         return []
     return sorted(
-        (entry for entry in store.list(root) if entry.is_directory), key=lambda e: e.name
+        (entry for entry in store.list(root) if entry.is_directory),
+        key=lambda e: e.name,
     )
 
 

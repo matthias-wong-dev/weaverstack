@@ -54,15 +54,14 @@ from factories import (
     lakehouse_test,
     single_document_repository,
 )
-from support.sessions import given_session
 
+from support.sessions import given_session
+from support.workspaces import given_resolver, given_workspace
 from weaver.etl import item_runtime_artefacts
 from weaver.load_plan import PhysicalTargetRef
-from weaver.resolution import LocalResolver
 from weaver.run import RunState
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
 
 #: The schema these artefacts are declared in, so a thin node is recognisable in
 #: a report as trivial rather than mistaken for an estate someone cared about.
@@ -154,12 +153,11 @@ class {name}:
 OUTCOMES = tuple(ARTEFACTS)
 
 #: A Test's deployed artefact is read rather than called, and what it returns is
-#: a real Spark frame of sides — so these need a Spark session where a load's do
-#: not. They still build no estate and load no data: two literal rows are enough
-#: to make a Test pass or fail, and what a Test *means* is proven elsewhere.
+#: a real Spark frame of sides — so these need a session where a load's do not.
+#: Two literal rows are enough to settle each outcome: what a Test *means* is the
+#: comparison's own claim, and what these settle is how the run reports it.
 VALIDATIONS = {
-    "Agrees": '''\
-from pyspark.sql.types import StringType, StructField, StructType
+    "Agrees": '''from pyspark.sql.types import StringType, StructField, StructType
 
 SIDES = StructType([StructField("_weaver_side", StringType())])
 
@@ -173,8 +171,7 @@ class {name}:
     def read(self):
         return self.spark.createDataFrame([], SIDES)
 ''',
-    "Disagrees": '''\
-from pyspark.sql.types import StringType, StructField, StructType
+    "Disagrees": '''from pyspark.sql.types import StringType, StructField, StructType
 
 SIDES = StructType([StructField("_weaver_side", StringType())])
 
@@ -190,8 +187,7 @@ class {name}:
             [("expected",), ("actual",), ("actual",)], SIDES
         )
 ''',
-    "Unreadable": '''\
-class {name}:
+    "Unreadable": '''class {name}:
     """Cannot be evaluated at all — which is not the same as finding nothing."""
 
     def __init__(self, spark, lakehouse=None):
@@ -203,20 +199,6 @@ class {name}:
 }
 
 JUDGEMENTS = tuple(VALIDATIONS)
-
-
-class NoSpark:
-    """The Spark session a thin artefact is handed and never uses.
-
-    Not a mock of Spark — nothing here calls it, and anything that did would be
-    making a claim about data that a thin run has no business making. It exists
-    so a Session can be complete without a JVM, which is what keeps a thin run
-    in the pure suite: the whole dispatch path runs, and none of it costs
-    seconds.
-    """
-
-    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
-        return "<no spark: a thin run does not touch data>"
 
 
 @dataclass(frozen=True)
@@ -262,30 +244,36 @@ class ThinEstate:
 
 def thin_estate(
     root: Path,
-    spark: Any = None,
     *,
     outcomes: tuple[str, ...] = OUTCOMES,
     judgements: tuple[str, ...] = (),
     lakehouse: str = "Thin_LH",
+    session=None,
+    resolver=None,
+    store=None,
+    workspace=None,
 ) -> ThinEstate:
-    """A Session, a RunState and deployed artefacts for what was named.
+    """A RunState and deployed artefacts for what was named, and a Session.
 
     The catalogue is composed by the same production constructors that describe
     a real estate, so what a thin run plans against is the shape a build
     publishes. Only the artefacts it points at are trivial.
 
-    ``judgements`` adds Tests, which need a real Spark session because a Test's
-    artefact returns a frame — so a caller asking for them passes one.
+    A thin run reaches a primitive and settles what comes back; it never touches
+    data. What varies is *where* the artefacts are deployed and who dispatches
+    to them, which is why the store, resolver and Session are injectable: given
+    a real workspace's resolver and a OneLake store, the same builder deploys
+    into Fabric and the same claims are made against the session that imports
+    them there.
     """
 
     documents = {
-        f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}")
-        for name in outcomes
+        f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}") for name in outcomes
     }
+    # Under ``tests/``, which is where a repository declares one: the folder is
+    # what makes it a validation rather than another table.
     documents.update(
         {
-            # Under ``tests/``, which is where a repository declares one — the
-            # folder is what makes it a validation rather than another table.
             f"tests/{SCHEMA}__{name}.py": lakehouse_test(f"{SCHEMA}.{name}")
             for name in judgements
         }
@@ -295,39 +283,44 @@ def thin_estate(
     )
     bindings = item_bindings(("Lakehouse/Sales", lakehouse))
 
-    workspace = LocalWorkspace(
-        workspace=str(root / "estate"), weaver_lakehouse="Weaver_LH"
-    )
-    resolver = LocalResolver(workspace)
+    if workspace is None:
+        workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
+    if resolver is None:
+        resolver = given_resolver(
+            workspace=workspace, lakehouses=("Weaver_LH", lakehouse), root=root
+        )
+    deployed = store if store is not None else FilesystemStore()
 
     # Written where the *build* would have written them, asked of the build's own
     # enumerator rather than assembled from a path this module believes in. A
     # load module and a Test module do not share a directory, and a fixture that
     # guessed would only be pinning the guess.
-    files_root = Path(resolver.files_root(ItemRef(lakehouse)).value)
-    sources = {
-        f"{SCHEMA}__{name}": source
-        for name, source in (
-            *((name, ARTEFACTS[name]) for name in outcomes),
-            *((name, VALIDATIONS[name]) for name in judgements),
-        )
-    }
+    files_root = resolver.files_root(ItemRef(lakehouse))
+    sources = {f"{SCHEMA}__{name}": ARTEFACTS[name] for name in outcomes}
+    sources.update({f"{SCHEMA}__{name}": VALIDATIONS[name] for name in judgements})
     for artefact in item_runtime_artefacts(repository, item=item_id("Lakehouse/Sales")):
         module = artefact.identity.object_id.object.removesuffix(".py")
         source = sources.get(module)
         if source is None:
             continue
-        path = files_root / artefact.target_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source.format(name=module), encoding="utf-8")
+        # Written through a Store rather than a Path, because the store is what
+        # differs between a temporary directory and OneLake.
+        deployed.write(
+            files_root / artefact.target_path,
+            source.format(name=module).encode("utf-8"),
+        )
 
     target = PhysicalTargetRef("lakehouse", lakehouse)
     return ThinEstate(
-        session=given_session(
+        session=session
+        if session is not None
+        else given_session(
             workspace=workspace,
-            spark=spark if spark is not None else NoSpark(),
-            store=FilesystemStore(),
+            store=deployed,
             resolver=resolver,
+            # Without a Session of its own a thin run reaches its primitive in
+            # this process, which is what made it thin.
+            executes_here=True,
         ),
         workspace=workspace,
         state=RunState(

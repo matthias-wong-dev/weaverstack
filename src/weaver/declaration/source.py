@@ -11,9 +11,10 @@ import codecs
 import hashlib
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ..errors import DiscoveryError
-from ..objects import BASE_CLASSES, BASE_CLASS_NAMES
+from ..objects import BASE_CLASS_NAMES, BASE_CLASSES
 from .dependencies import (
     PythonImport,
     RelationReference,
@@ -27,17 +28,21 @@ from .metadata import (
     SPARK_SQL,
     SQL,
     TABLE,
-    TEST,
     VIEW,
     ObjectId,
     SesDocument,
-    namespace_for_target,
-    target_kind_for,
-    parse_document,
     extract_python_metadata,
     extract_sql_metadata_and_body,
+    namespace_for_target,
+    parse_document,
+    target_kind_for,
 )
 from .model import LAKEHOUSE, WeaverDocumentId
+
+if TYPE_CHECKING:  # names used only in annotations
+    from .ddl import GeneratedDdl
+    from .load import GeneratedLoad
+    from .validation import GeneratedValidation
 
 PYTHON_SUFFIX = ".py"
 SQL_SUFFIX = ".sql"
@@ -55,7 +60,7 @@ def content_hash(data: bytes) -> str:
     """
 
     if data.startswith(codecs.BOM_UTF8):
-        data = data[len(codecs.BOM_UTF8):]
+        data = data[len(codecs.BOM_UTF8) :]
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
@@ -268,7 +273,9 @@ class SourceDocument:
         """Three- and four-part references — physical targets the author named."""
 
         return tuple(
-            reference for reference in self.discovered_references if reference.is_qualified
+            reference
+            for reference in self.discovered_references
+            if reference.is_qualified
         )
 
     @property
@@ -309,19 +316,19 @@ class SourceDocument:
             return None
         return self.relative_path[: -len(PYTHON_SUFFIX)]
 
-    def create_ddl(self) -> "GeneratedDdl":
+    def create_ddl(self, *, destination=None) -> "GeneratedDdl":
         """The generated, installable create definition for this source.
 
         Delegates to :mod:`weaver.ses.ddl`. The source owns it because it knows
-        its language, kind, ID and validated body; a planner calls it and never
-        re-derives create syntax.
+        its language, kind, ID and validated body; a planner calls it with the
+        destination the object is bound to and never re-derives create syntax.
         """
 
         from .ddl import generate_ddl
 
-        return generate_ddl(self)
+        return generate_ddl(self, destination=destination)
 
-    def create_load(self) -> "GeneratedLoad":
+    def create_load(self, *, destination=None) -> "GeneratedLoad":
         """The generated, installable load definition for this source.
 
         The sibling of :meth:`create_ddl`, and owned here for the same reason:
@@ -332,9 +339,9 @@ class SourceDocument:
 
         from .load import generate_load
 
-        return generate_load(self)
+        return generate_load(self, destination=destination)
 
-    def create_validation(self) -> "GeneratedValidation":
+    def create_validation(self, *, destination=None) -> "GeneratedValidation":
         """The generated, installable primitive for this validation declaration.
 
         The third sibling of :meth:`create_ddl` and :meth:`create_load`, owned
@@ -344,7 +351,7 @@ class SourceDocument:
 
         from .validation import generate_validation
 
-        return generate_validation(self)
+        return generate_validation(self, destination=destination)
 
 
 def read_source_document(
@@ -369,7 +376,9 @@ def read_source_document(
     return _read_sql(relative_path, text, source_hash, filename_id, language)
 
 
-def _check_declared_id(relative_path: str, document: SesDocument, filename_id: ObjectId) -> None:
+def _check_declared_id(
+    relative_path: str, document: SesDocument, filename_id: ObjectId
+) -> None:
     if document.object_id != filename_id:
         raise DiscoveryError(
             f"{relative_path}: declares {document.kind} ID "
@@ -497,7 +506,8 @@ def _methods(declared: ast.ClassDef, name: str) -> list[ast.stmt]:
     return [
         node
         for node in declared.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == name
     ]
 
 
@@ -665,11 +675,15 @@ def _check_sql_table_program(
     if language == SPARK_SQL:
         from .spark_sql_program import (
             parse_spark_sql_program as parse,
+        )
+        from .spark_sql_program import (
             validate_query_contract as validate,
         )
     else:
         from .tsql_program import (
             parse_tsql_program as parse,
+        )
+        from .tsql_program import (
             validate_query_contract as validate,
         )
 

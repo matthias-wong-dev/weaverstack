@@ -66,7 +66,9 @@ class _Deferred:
 
     def _resolved(self):
         if object.__getattribute__(self, "_session") is None:
-            object.__setattr__(self, "_session", object.__getattribute__(self, "_acquire")())
+            object.__setattr__(
+                self, "_session", object.__getattribute__(self, "_acquire")()
+            )
         return object.__getattribute__(self, "_session")
 
     def __getattr__(self, name):
@@ -274,7 +276,6 @@ def _epoch(started: datetime) -> str:
 _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
 
-
 def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
     """What this sequence is doing, and which items it is doing it to.
 
@@ -421,6 +422,8 @@ def _run_action(
         target_id=batch.target_id,
         executors=installer.executors,
     )
+
+
 def _execute(
     action: InstallAction,
     load_payload,
@@ -440,7 +443,10 @@ def _execute(
     executor = executors.get(action.executor)
     if executor is None:
         return _failed(
-            action, target_id, started, InstallError(f"no executor named {action.executor!r}")
+            action,
+            target_id,
+            started,
+            InstallError(f"no executor named {action.executor!r}"),
         )
 
     try:

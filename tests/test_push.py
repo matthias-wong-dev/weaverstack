@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from test_item_repository import _estate, _write
 
-from weaver.store import FilesystemStore
+from weaver.errors import DiscoveryError
 from weaver.locations import Location
 from weaver.push import push_item_repository
-from weaver.errors import DiscoveryError
-
-from test_item_repository import _estate, _write
+from weaver.store import FilesystemStore
 
 
 def test_push_replaces_destination_without_an_extra_source_root(tmp_path):

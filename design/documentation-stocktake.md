@@ -18,7 +18,6 @@ migration; this repository does not build a documentation site yet.
 | [weaver-repository.md](weaver-repository.md) | Contract | Retain | Current repository-layout and ownership contract; distinct from build execution. |
 | [sql-execution.md](sql-execution.md) | Contract | Retain | Narrow desktop and in-Fabric SQL boundary with no competing command guide. |
 | [cli-usage.md](cli-usage.md) | How-to | Update | Command reference. Removed architecture arguments and linked to the code architecture where needed. |
-| [local-setup.md](local-setup.md) | How-to | Update | Retained setup instructions; replaced machine-specific timing history with the fixture and cache contract. |
 | [how-to-add-an-artefact.md](how-to-add-an-artefact.md) | How-to | Update | Retained the implementation sequence; condensed reviewer-facing rationale and linked test policy. |
 | [test-architecture.md](test-architecture.md) | Testing | Update | Claim-to-layer policy. Fabric setup remains in the companion Fabric guide. |
 | [fabric-testing.md](fabric-testing.md) | Testing | Update | Real-workspace prerequisites and platform behaviour; links to test architecture for layer selection. |

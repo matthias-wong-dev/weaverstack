@@ -144,7 +144,9 @@ LOAD_OUTPUTS = (
 
 
 def test_call_procedure_declares_locals_and_passes_them_as_outputs():
-    cursor = MultiSetCursor([([(True, 4, None)], ["succeeded", "rows_read", "error_message"])])
+    cursor = MultiSetCursor(
+        [([(True, 4, None)], ["succeeded", "rows_read", "error_message"])]
+    )
     executor, _ = _executor([Connection(cursor)])
 
     executor.call_procedure(
@@ -177,9 +179,7 @@ def test_call_procedure_reads_its_own_projection_not_the_procedures_rows():
     )
     executor, _ = _executor([Connection(cursor)])
 
-    row = executor.call_procedure(
-        "[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS
-    )
+    row = executor.call_procedure("[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS)
 
     assert row == {"succeeded": True, "rows_read": 4, "error_message": None}
 
@@ -187,7 +187,9 @@ def test_call_procedure_reads_its_own_projection_not_the_procedures_rows():
 def test_call_procedure_ends_the_batch_with_its_projection():
     """Last, so that nothing the procedure emits can come after it."""
 
-    cursor = MultiSetCursor([([(True, 4, None)], ["succeeded", "rows_read", "error_message"])])
+    cursor = MultiSetCursor(
+        [([(True, 4, None)], ["succeeded", "rows_read", "error_message"])]
+    )
     executor, _ = _executor([Connection(cursor)])
 
     executor.call_procedure("[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS)

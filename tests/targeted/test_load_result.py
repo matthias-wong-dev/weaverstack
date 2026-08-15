@@ -80,7 +80,9 @@ def test_a_load_that_rejected_rows_did_not_succeed():
     with rejects a clean load. The rows did not arrive, so it is not one.
     """
 
-    tolerated = LoadResult(succeeded=True, rows_read=10, rows_inserted=8, rows_rejected=2)
+    tolerated = LoadResult(
+        succeeded=True, rows_read=10, rows_inserted=8, rows_rejected=2
+    )
 
     reported = tolerated.rejected("2 rows rejected")
 

@@ -111,7 +111,7 @@ def removed(object_kind: str, name: str, action_id: str) -> TargetChange:
 
 
 def merge(
-    *sections: Mapping[str, Iterable[TargetChange]]
+    *sections: Mapping[str, Iterable[TargetChange]],
 ) -> dict[str, tuple[TargetChange, ...]]:
     """Fold several target-keyed change sets into one, preserving order."""
 

@@ -7,7 +7,6 @@ needs no configuration. This is where that assumption meets the API.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 from ..errors import CommandError
 from .client import FabricClient, FabricError
@@ -30,7 +29,9 @@ class ItemNotFoundError(CommandError):
 
 
 @dataclass(frozen=True)
-class Workspace:
+class WorkspaceItem:
+    """One Fabric workspace as the REST API returns it: an id and a name."""
+
     id: str
     name: str
 
@@ -51,7 +52,7 @@ class Item:
         return f"{self.type} {self.name} ({self.id})"
 
 
-def find_workspace(name: str, *, client: FabricClient | None = None) -> Workspace:
+def find_workspace(name: str, *, client: FabricClient | None = None) -> WorkspaceItem:
     """The workspace with this name."""
 
     client = client or FabricClient()
@@ -65,15 +66,18 @@ def find_workspace(name: str, *, client: FabricClient | None = None) -> Workspac
             sorted(w.get("displayName", "?") for w in client.paged("workspaces"))
         )
         raise CommandError(
-            f"Workspace {name!r} was not found. Available Workspaces: {available or 'none'}."
+            f"Workspace {name!r} was not found. Available workspaces: {available or 'none'}."
         )
     if len(matches) > 1:
-        raise CommandError(f"More than one Workspace is named {name!r}.")
-    return Workspace(id=matches[0]["id"], name=name)
+        raise CommandError(f"More than one workspace is named {name!r}.")
+    return WorkspaceItem(id=matches[0]["id"], name=name)
 
 
 def list_items(
-    workspace: Workspace, *, item_type: str | None = None, client: FabricClient | None = None
+    workspace: WorkspaceItem,
+    *,
+    item_type: str | None = None,
+    client: FabricClient | None = None,
 ) -> tuple[Item, ...]:
     client = client or FabricClient()
     path = f"workspaces/{workspace.id}/items"
@@ -91,7 +95,7 @@ def list_items(
 
 
 def find_item(
-    workspace: Workspace,
+    workspace: WorkspaceItem,
     name: str,
     *,
     item_type: str | None = None,
@@ -120,7 +124,7 @@ def find_item(
 
 
 def create_lakehouse(
-    workspace: Workspace, name: str, *, client: FabricClient | None = None
+    workspace: WorkspaceItem, name: str, *, client: FabricClient | None = None
 ) -> Item:
     """Create a **schema-enabled** Lakehouse. Returns the existing one if the name is taken.
 
@@ -162,7 +166,7 @@ def create_lakehouse(
 
 
 def create_warehouse(
-    workspace: Workspace, name: str, *, client: FabricClient | None = None
+    workspace: WorkspaceItem, name: str, *, client: FabricClient | None = None
 ) -> Item:
     """Create a disposable Warehouse, returning an existing typed match."""
 
@@ -224,7 +228,7 @@ def refresh_sql_endpoint_metadata(
 
 
 def _await_item(
-    workspace: Workspace,
+    workspace: WorkspaceItem,
     name: str,
     item_type: str,
     *,

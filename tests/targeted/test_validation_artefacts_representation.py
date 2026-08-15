@@ -29,6 +29,9 @@ from weaver.etl import (
     runtime_artefacts,
 )
 from weaver.locations import Location
+from weaver.spark import FabricSparkTarget
+
+SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 
 LAKEHOUSE = WeaverItemId.parse("Lakehouse/Sales")
 WAREHOUSE = WeaverItemId.parse("Warehouse/Reporting")
@@ -143,7 +146,7 @@ def _by_role(artefacts):
 
 
 def test_a_warehouse_validation_claims_a_procedure_in_the_generated_schema(estate):
-    artefacts = item_validation_artefacts(estate, item=WAREHOUSE)
+    artefacts = item_validation_artefacts(estate, item=WAREHOUSE, destination=SALES)
 
     assert _by_role(artefacts) == {
         "Warehouse/Reporting/procedure:_/Test Sales.Reconciles": ROLE_TEST
@@ -154,7 +157,9 @@ def test_a_warehouse_validation_claims_a_procedure_in_the_generated_schema(estat
 def test_a_lakehouse_validation_claims_a_module_under_the_runtime_root(estate):
     """Under it, not beside it: that root is the item's Python import root."""
 
-    assert _by_role(item_validation_artefacts(estate, item=LAKEHOUSE)) == {
+    assert _by_role(
+        item_validation_artefacts(estate, item=LAKEHOUSE, destination=SALES)
+    ) == {
         "Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py": ROLE_ASSUMPTION,
         "Lakehouse/Sales/file:_/Load/tests/Sales__OrdersReconcile.py": ROLE_TEST,
     }
@@ -163,7 +168,9 @@ def test_a_lakehouse_validation_claims_a_module_under_the_runtime_root(estate):
 def test_the_subdirectory_follows_the_kind(estate):
     paths = [
         artefact.identity.object_id.schema
-        for artefact in item_validation_artefacts(estate, item=LAKEHOUSE)
+        for artefact in item_validation_artefacts(
+            estate, item=LAKEHOUSE, destination=SALES
+        )
     ]
 
     assert sorted(paths) == ["_/Load/assumptions", "_/Load/tests"]
@@ -174,7 +181,9 @@ def test_a_python_validation_is_deployed_rather_than_generated(estate):
 
     artefact = next(
         artefact
-        for artefact in item_validation_artefacts(estate, item=LAKEHOUSE)
+        for artefact in item_validation_artefacts(
+            estate, item=LAKEHOUSE, destination=SALES
+        )
         if artefact.role == ROLE_TEST
     )
 
@@ -184,7 +193,9 @@ def test_a_python_validation_is_deployed_rather_than_generated(estate):
 def test_a_spark_sql_validation_is_compiled_into_a_module(estate):
     artefact = next(
         artefact
-        for artefact in item_validation_artefacts(estate, item=LAKEHOUSE)
+        for artefact in item_validation_artefacts(
+            estate, item=LAKEHOUSE, destination=SALES
+        )
         if artefact.role == ROLE_ASSUMPTION
     )
 
@@ -195,10 +206,13 @@ def test_a_spark_sql_validation_is_compiled_into_a_module(estate):
 
 
 def test_loads_and_validations_are_claimed_together(estate):
-    roles = _by_role(item_runtime_artefacts(estate, item=LAKEHOUSE))
+    roles = _by_role(item_runtime_artefacts(estate, item=LAKEHOUSE, destination=SALES))
 
     assert roles["Lakehouse/Sales/file:_/Load/Sales__Order.py"] == ROLE_LOAD
-    assert roles["Lakehouse/Sales/file:_/Load/tests/Sales__OrdersReconcile.py"] == ROLE_TEST
+    assert (
+        roles["Lakehouse/Sales/file:_/Load/tests/Sales__OrdersReconcile.py"]
+        == ROLE_TEST
+    )
 
 
 def test_a_deployed_module_is_claimed_once(estate):
@@ -206,7 +220,9 @@ def test_a_deployed_module_is_claimed_once(estate):
 
     identities = [
         str(artefact.identity)
-        for artefact in item_runtime_artefacts(estate, item=LAKEHOUSE)
+        for artefact in item_runtime_artefacts(
+            estate, item=LAKEHOUSE, destination=SALES
+        )
     ]
 
     assert len(identities) == len(set(identities))
@@ -223,7 +239,9 @@ def test_the_role_travels_with_the_artefact(estate):
 def test_a_validation_records_the_declaration_it_came_from(estate):
     artefact = next(
         artefact
-        for artefact in item_validation_artefacts(estate, item=WAREHOUSE)
+        for artefact in item_validation_artefacts(
+            estate, item=WAREHOUSE, destination=SALES
+        )
         if artefact.role == ROLE_TEST
     )
 
@@ -280,7 +298,9 @@ def test_a_deployed_python_validation_is_signed_by_its_own_bytes(tmp_path):
 
     artefact = next(
         artefact
-        for artefact in item_validation_artefacts(_parse(_estate(tmp_path)), item=LAKEHOUSE)
+        for artefact in item_validation_artefacts(
+            _parse(_estate(tmp_path)), item=LAKEHOUSE
+        )
         if artefact.role == ROLE_TEST
     )
 
@@ -305,7 +325,7 @@ def test_a_validation_only_warehouse_still_gets_its_generated_schema(tmp_path):
     )
     repository = _parse(tmp_path)
 
-    artefacts = item_runtime_artefacts(repository, item=WAREHOUSE)
+    artefacts = item_runtime_artefacts(repository, item=WAREHOUSE, destination=SALES)
 
     assert load_schemas(artefacts) == ("_",)
 
@@ -318,7 +338,9 @@ def test_a_validation_only_lakehouse_still_gets_its_runtime_tree(tmp_path):
     repository = _parse(tmp_path)
     item = next(model for model in repository.items if model.identity == LAKEHOUSE)
 
-    assert "Lakehouse/Sales/Files/_.Load" in [str(identity) for identity in item.documents]
+    assert "Lakehouse/Sales/Files/_.Load" in [
+        str(identity) for identity in item.documents
+    ]
 
 
 def test_an_item_with_neither_gets_no_runtime_tree(tmp_path):

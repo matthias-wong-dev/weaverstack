@@ -19,9 +19,9 @@
 
 # CELL ********************
 
-import weaver
-
 from pathlib import Path
+
+import weaver
 
 repository = Path("builtin") / "repository"
 
@@ -67,10 +67,10 @@ for report in wipe_result.reports:
 
 build_result = weaver.build(
     repository,
-    weaver_lakehouse="Weaver",    
+    catalogue="Lakehouse/Weaver",
     bind=[
-        "Lakehouse/Sales=Lakehouse/Sales",
-        "Warehouse/Reporting=Warehouse/Reporting",
+        "Lakehouse/Sales=Sales",
+        "Warehouse/Reporting=Reporting",
     ],
 )
 

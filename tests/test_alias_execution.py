@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
-import json
-
 import pytest
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.build_bundle.executors import alias as alias_module
 from weaver.build_bundle.executors import AliasExecutor
+from weaver.build_bundle.executors import alias as alias_module
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, InstallAction
+from weaver.build_bundle.models import CREATE_ALIAS, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
-from weaver.resolution import LocalResolver
+from weaver.spark import FabricSparkTarget
 from weaver.store import Entry, FilesystemStore
 from weaver.targets import ItemRef
-from weaver.workspaces import LocalWorkspace
 
 SOURCE_TARGET_ID = "Lakehouse-Raw--lakehouse-Raw_Dev"
 DESTINATION_TARGET_ID = "Lakehouse-Curated--lakehouse-Curated_Dev"
@@ -60,20 +59,19 @@ def _action() -> InstallAction:
 
 
 def _local_context(tmp_path, *, resolver=None, store=None):
-    from weaver.spark import local_destination
 
     # With a Spark destination, as a real Lakehouse target resolves to. Without
     # one an alias in it cannot even be *named*, which used to go unnoticed
     # because the discovery wait was skipped whenever there was no Spark session.
     destination = replace(
         _target(DESTINATION_TARGET_ID, "Curated_Dev"),
-        destination=local_destination(
-            item="Curated_Dev", tables_root=str(tmp_path / "Curated_Dev" / "Tables")
-        ),
+        destination=FabricSparkTarget(workspace="Demo", lakehouse="Curated_Dev"),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
-    local_resolver = LocalResolver(
-        LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    local_resolver = given_resolver(
+        workspace=given_workspace(catalogue="Lakehouse/Weaver"),
+        lakehouses=("Weaver", "Raw_Dev", "Curated_Dev", "Sales_LH"),
+        root=tmp_path,
     )
     if resolver is not None and hasattr(resolver, "inner"):
         resolver.inner = local_resolver
@@ -99,65 +97,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
     )
 
 
-# --- the emulator: a filesystem link ------------------------------------------
-
-
-def test_a_local_alias_links_the_destination_to_the_source_table(tmp_path):
-    store = FilesystemStore()
-    context = _local_context(tmp_path, store=store)
-    produced = context.resolver.tables_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
-    store.make_directory(produced)
-    store.write(produced / "_delta_log" / "00.json", b"{}")
-
-    details = AliasExecutor().execute(_action(), _payload(), context)
-
-    linked = context.resolver.tables_root(ItemRef("Curated_Dev")) / "Sales" / "Landed"
-    assert linked.path.is_symlink() or linked.path.is_junction()
-    assert linked.path.resolve() == produced.path.resolve()
-    assert store.read(linked / "_delta_log" / "00.json") == b"{}"
-    assert details["aliases"][0]["alias"] == "Lakehouse/Curated/Sales.Landed"
-
-
-def test_a_local_alias_replaces_one_that_is_already_there(tmp_path):
-    """An alias holds no data, so re-running a build re-points it rather than failing."""
-
-    store = FilesystemStore()
-    context = _local_context(tmp_path, store=store)
-    tables = context.resolver.tables_root
-    for name in ("Customer", "Other"):
-        store.make_directory(tables(ItemRef("Raw_Dev")) / "Sales" / name)
-
-    AliasExecutor().execute(_action(), _payload(), context)
-    AliasExecutor().execute(
-        _action(), _payload(source_object="Other"), context
-    )
-
-    linked = tables(ItemRef("Curated_Dev")) / "Sales" / "Landed"
-    assert linked.path.resolve().name == "Other"
-
-
-def test_a_local_alias_over_a_missing_source_fails_rather_than_dangling(tmp_path):
-    context = _local_context(tmp_path)
-
-    with pytest.raises(InstallError, match="has no source to point at"):
-        AliasExecutor().execute(_action(), _payload(), context)
-
-
-def test_a_files_alias_links_into_the_destination_files_area(tmp_path):
-    store = FilesystemStore()
-    context = _local_context(tmp_path, store=store)
-    produced = context.resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Export"
-    store.make_directory(produced)
-
-    AliasExecutor().execute(
-        _action(),
-        _payload(area="Files", source_area="Files", source_object="Export"),
-        context,
-    )
-
-    linked = context.resolver.files_root(ItemRef("Curated_Dev")) / "Sales" / "Landed"
-    assert linked.path.is_symlink() or linked.path.is_junction()
-    assert linked.path.resolve() == produced.path.resolve()
+# --- the shortcut ------------------------------------------------------------
 
 
 def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
@@ -269,7 +209,6 @@ class _LateSpark:
 
 
 def _addressable_context(tmp_path, spark, resolver):
-    from weaver.spark import local_destination
 
     destination = ResolvedTarget(
         bound=BoundTarget(
@@ -279,13 +218,13 @@ def _addressable_context(tmp_path, spark, resolver):
             item_name="Curated_Dev",
         ),
         lakehouse=ItemRef("Curated_Dev"),
-        destination=local_destination(
-            item="Curated_Dev", tables_root=str(tmp_path / "Curated_Dev" / "Tables")
-        ),
+        destination=FabricSparkTarget(workspace="Demo", lakehouse="Curated_Dev"),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
-    local_resolver = LocalResolver(
-        LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Weaver")
+    local_resolver = given_resolver(
+        workspace=given_workspace(catalogue="Lakehouse/Weaver"),
+        lakehouses=("Weaver", "Raw_Dev", "Curated_Dev", "Sales_LH"),
+        root=tmp_path,
     )
     resolver.inner = local_resolver
     store = FilesystemStore()
@@ -318,7 +257,7 @@ def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
 
     reads = [s for s in spark.statements if s.startswith("SELECT")]
     assert len(reads) == 3
-    assert "`curated_dev__sales`.`Landed`" in reads[0]
+    assert "`Demo`.`Curated_Dev`.`Sales`.`Landed`" in reads[0]
     assert "addressable_after_seconds" in details
 
 
@@ -327,7 +266,9 @@ def test_a_shortcut_that_never_becomes_readable_fails_naming_itself(
 ):
     monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     monkeypatch.setattr(alias_module, "ADDRESSABLE_TIMEOUT", 0)
-    context = _addressable_context(tmp_path, _LateSpark(failures=99), _ShortcutResolver())
+    context = _addressable_context(
+        tmp_path, _LateSpark(failures=99), _ShortcutResolver()
+    )
 
     with pytest.raises(InstallError, match="did not become readable within"):
         AliasExecutor().execute(_action(), _payload(), context)
@@ -354,10 +295,24 @@ class _NoTransportStore(FilesystemStore):
     link = None
 
 
-def test_an_environment_with_neither_transport_says_so(tmp_path):
-    context = _local_context(tmp_path, store=_NoTransportStore())
+def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
+    """An alias is a OneLake shortcut, so a host that cannot make one cannot
+    materialise it — and says which action it could not perform."""
 
-    with pytest.raises(InstallError, match="neither a OneLake shortcut nor a store link"):
+    class _WithoutShortcuts:
+        """A resolver that resolves, and offers no shortcut creation."""
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            if name == "create_onelake_shortcut":
+                raise AttributeError(name)
+            return getattr(self.inner, name)
+
+    context = _local_context(tmp_path, resolver=_WithoutShortcuts(None))
+
+    with pytest.raises(InstallError, match="no way to create a OneLake shortcut"):
         AliasExecutor().execute(_action(), _payload(), context)
 
 

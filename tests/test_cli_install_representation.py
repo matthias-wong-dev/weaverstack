@@ -26,7 +26,7 @@ def _parse(*words):
 # --- the surface --------------------------------------------------------------
 
 
-@pytest.mark.parametrize("flag", ["--json", "--no-publish", "--workspace-type"])
+@pytest.mark.parametrize("flag", ["--json", "--no-publish"])
 def test_install_offers_no_flag_for_a_decision_it_has_already_made(flag, capsys):
     """Each of these was a way to ask for a half-finished or silent install."""
 
@@ -60,9 +60,9 @@ def test_install_prints_its_result_without_being_asked(monkeypatch, capsys):
     """No flag, and the payload is on stdout so a pipe gets only the result."""
 
     cli = import_module("weaver_cli.main")
-    from weaver.workspaces import FabricWorkspace
+    from weaver.workspaces import Workspace
 
-    workspace = FabricWorkspace(workspace="Sales", environment="weaver")
+    workspace = Workspace(workspace="Sales", environment="weaver")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
     monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
     monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
@@ -86,10 +86,10 @@ def test_install_frames_its_work_so_a_long_publish_is_visible(monkeypatch, capsy
     """
 
     cli = import_module("weaver_cli.main")
-    from weaver.workspaces import FabricWorkspace
+    from weaver.workspaces import Workspace
 
     session = _RecordingSession()
-    workspace = FabricWorkspace(workspace="Sales", environment="weaver")
+    workspace = Workspace(workspace="Sales", environment="weaver")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
     monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
     monkeypatch.setattr(cli, "_session", lambda args: session)

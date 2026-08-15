@@ -17,20 +17,15 @@ reached and reported is.
 from __future__ import annotations
 
 import pytest
-from support.sessions import given_session
 from factories import (
-    Catalogue,
     item_bindings,
     lakehouse_table,
     single_document_repository,
     target_inventory,
 )
+from support.sessions import given_session
+from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
-from weaver.targets import ItemRef
-from weaver.resolution import LocalResolver
-from weaver.store import FilesystemStore
-from weaver.workspaces import LocalWorkspace
-from weaver.locations import Location
 from weaver.build_bundle import (
     LakehouseBinding,
     build_item_repository,
@@ -38,6 +33,9 @@ from weaver.build_bundle import (
 )
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue as RealCatalogue
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 class RecordingExecutor:
@@ -66,9 +64,9 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = LocalWorkspace(workspace=tmp_path / "ws", weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     store = FilesystemStore()
-    resolver = LocalResolver(workspace)
+    resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
         store.make_directory(resolver.files_root(ItemRef(item)))
         store.make_directory(resolver.tables_root(ItemRef(item)))
@@ -78,7 +76,6 @@ def estate(tmp_path):
         for name in (
             "spark_sql",
             "spark_sql_batch",
-            "spark_schema",
             "spark_table",
             "folder",
             "alias",
@@ -94,16 +91,15 @@ def estate(tmp_path):
         "store": store,
         "resolver": resolver,
         "executors": executors,
-        "session": given_session(
-            workspace=workspace, store=store, resolver=resolver
-        ),
+        "session": given_session(workspace=workspace, store=store, resolver=resolver),
     }
 
 
 def _bindings():
     return effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
     )
 
 
@@ -131,7 +127,9 @@ def build(estate, **overrides):
         "session": estate["session"],
         "executors": estate["executors"],
         "source_store": estate["store"],
-        "control_lakehouse": LakehouseBinding(lakehouse=ItemRef("Weaver")),
+        "control_lakehouse": LakehouseBinding(
+            lakehouse=ItemRef("Weaver"), workspace_name="Demo"
+        ),
     }
     arguments.update(overrides)
     return build_item_repository(estate["repository"], **arguments)
@@ -169,9 +167,7 @@ def test_the_declaration_is_built(estate):
 
     result = build(estate)
 
-    assert any(
-        action.kind == "build_table" for _s, _b, action in result.plan.actions()
-    )
+    assert any(action.kind == "build_table" for _s, _b, action in result.plan.actions())
 
 
 def test_the_result_carries_the_signatures_a_caller_records(estate):
@@ -193,9 +189,7 @@ def test_an_inventory_that_already_holds_the_schema_plans_no_create(estate):
     """Prepared state is *used*, not re-read. If the caller says the schema is
     there, the build must believe it — that is what makes the seam a seam."""
 
-    bindings = effective_item_bindings(
-        item_bindings(("Lakehouse/Sales", "Sales_LH")), weaver_lakehouse="Weaver"
-    )
+    bindings = _bindings()
     inventories = {
         binding.item: target_inventory(
             target_id=binding.to_bound_target().id,
@@ -267,7 +261,8 @@ def test_a_binding_naming_an_unknown_item_is_refused(estate):
             estate,
             bindings=effective_item_bindings(
                 item_bindings(("Lakehouse/Absent", "Sales_LH")),
-                weaver_lakehouse="Weaver",
+                control_item=ItemRef("Weaver"),
+                workspace_name=WORKSPACE,
             ),
         )
 
@@ -287,9 +282,7 @@ def test_a_failing_action_is_reported_not_raised(estate):
     result = build(estate)
 
     assert result.report.status == "failed"
-    assert any(
-        action.status == "failed" for action in result.report.action_results()
-    )
+    assert any(action.status == "failed" for action in result.report.action_results())
 
 
 def test_a_failure_stops_the_rest_of_its_sequence(estate):
@@ -335,40 +328,31 @@ def test_an_archive_is_persisted_where_it_was_asked_for(estate, tmp_path):
 # --- a capability offered is not a capability acquired -------------------------
 
 
-def test_installing_through_fake_executors_never_starts_spark(estate, monkeypatch):
-    """The invariant that keeps plain `pytest` free of Java.
+def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
+    """A capability offered is not a capability acquired.
 
-    A ConsoleSession over a LocalWorkspace defines Spark as a lazy Resource, and
-    the Installer used to defeat that by evaluating `installer.spark` while
-    assembling every batch's context. So a build through recording executors —
-    which touch no Spark at all — still started a JVM, and this module, which is
-    deliberately not marked `spark`, needed one.
+    Scoped to the Installer and this action set, not to builds in general: the
+    catalogue lives in the Weaver Lakehouse and is published with Spark SQL, so
+    an ordinary complete build does cross to Spark. What is guarded here is
+    narrower and still worth guarding — the Installer used to evaluate the
+    Session's Spark while assembling every batch's context, so an action set
+    whose executors never run a statement reached for a session anyway.
 
-    Asserted by making acquisition impossible rather than by handing in a fake
-    Spark: a test that supplied one would pass whether or not the production
-    path was lazy, which is the whole thing being guarded.
+    Asserted by watching what the Session was asked for, because a build that
+    quietly acquired one would still pass an assertion about its result.
     """
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError(
-            "installing through executors that need no Spark acquired a Spark session"
-        )
-
-    monkeypatch.setattr("weaver.spark.local_delta_session", refuse)
-    monkeypatch.setattr(
-        "weaver.session.console.ConsoleScope._acquire_local_spark", refuse
-    )
 
     result = build(estate)
 
     assert result.report.status == "succeeded"
+    assert not estate["session"].spark_sql
 
 
-def test_a_real_spark_executor_still_reaches_the_sessions_own_spark(estate):
+def test_an_executor_that_runs_a_statement_reaches_it_through_the_session(estate):
     """The other half: deferring acquisition must not stop it happening.
 
-    An executor runs its statement through the Session, so what it reaches is
-    the session's own Spark rather than a proxy standing in for one.
+    An executor runs its statement through the Session, so what carries it is
+    the Session's own transport rather than a proxy standing in for one.
     """
 
     seen = []
@@ -377,24 +361,11 @@ def test_a_real_spark_executor_still_reaches_the_sessions_own_spark(estate):
         name = "spark_sql"
 
         def execute(self, action, payload, context):
-            # Running one is what acquires the session, which is the point.
+            # Running one is what acquires the transport, which is the point.
             seen.append(context.spark_sql("SELECT 1"))
             return {"ran": action.id}
-
-    ran = []
-
-    class Marker:
-        @staticmethod
-        def sql(statement):
-            ran.append(statement)
-            return type("Frame", (), {"collect": staticmethod(list)})()
-
-    estate["session"].scope(estate["session"].workspace).local_spark = type(
-        "R", (), {"get": staticmethod(lambda: (Marker(), None))}
-    )()
 
     build(estate, executors={**estate["executors"], "spark_sql": Asking()})
 
     assert seen, "no executor ran"
-    assert ran == ["SELECT 1"] * len(seen)
-    assert not any(isinstance(one, BaseException) for one in seen), seen
+    assert estate["session"].spark_sql == ("SELECT 1",) * len(seen)

@@ -16,16 +16,15 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from weaver.fabric import (
-    FabricClient,
     LAKEHOUSE,
     WAREHOUSE,
+    FabricClient,
     create_lakehouse,
     create_warehouse,
     find_item,
     find_workspace,
 )
 from weaver.fabric.auth import prefer_cli_credential
-
 
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 
@@ -160,20 +159,13 @@ def main() -> int:
                 specification=specification,
             )
         except Exception as exc:
-            message = (
-                f"{specification.item_type} {name}: "
-                f"{type(exc).__name__}: {exc}"
-            )
+            message = f"{specification.item_type} {name}: {type(exc).__name__}: {exc}"
             failures.append(message)
             print(f"FAILED   {message}", file=sys.stderr)
             continue
 
         status = "CREATED" if created else "EXISTS "
-        print(
-            f"{status}  "
-            f"{specification.item_type:<10} "
-            f"{item.name} ({item.id})"
-        )
+        print(f"{status}  {specification.item_type:<10} {item.name} ({item.id})")
 
     if failures:
         print(

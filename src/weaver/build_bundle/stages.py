@@ -20,7 +20,8 @@ from dataclasses import dataclass, field, replace
 from typing import Iterable, Mapping, Sequence
 
 from ..errors import BuildError
-from .changes import TargetChange, merge as merge_changes
+from .changes import TargetChange
+from .changes import merge as merge_changes
 from .models import BuildBatch, BuildSequence
 from .payloads import payload_path
 
@@ -171,7 +172,9 @@ def enumerate_stages(
     return tuple(sequences), payloads, merge_changes(*changes)
 
 
-def _numbered(batch: BuildBatch, number: int, payloads: Mapping[str, str]) -> BuildBatch:
+def _numbered(
+    batch: BuildBatch, number: int, payloads: Mapping[str, str]
+) -> BuildBatch:
     actions = []
     for action in batch.actions:
         if action.payload is None:

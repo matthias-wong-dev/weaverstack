@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import zipfile
 import json
+import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 from support.sessions import given_session
+from support.workspaces import WORKSPACE, given_resolver, given_workspace
+from test_item_repository import _estate
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     BuildState,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
-    build_uploaded_item_repository,
     build_item_repository_source,
     generate_item_build_bundle,
     install_bundle_archive,
@@ -26,14 +23,14 @@ from weaver.build_bundle import (
     persist_bundle_archive,
     timestamped_archive_name,
 )
-from weaver.errors import BuildError
+from weaver.build_bundle.prune import TargetInventory, read_lakehouse_inventory
+from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
-from weaver.build_bundle.prune import TargetInventory
-from weaver.build_bundle.prune import read_lakehouse_inventory
-from weaver.catalogue.state import Catalogue, Reconciliation
-
-from test_item_repository import _estate
+from weaver.errors import BuildError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 class CountingStore:
@@ -99,14 +96,14 @@ def _bindings():
         (
             ItemBinding(
                 WeaverItemId.parse("Lakehouse/Raw"),
-                LakehouseBinding(ItemRef("Raw_Dev")),
+                LakehouseBinding(ItemRef("Raw_Dev"), workspace_name=WORKSPACE),
             ),
         )
     )
 
 
 def _control():
-    return LakehouseBinding(ItemRef("Weaver_Control"))
+    return LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
 
 
 def _inventories(bindings=None):
@@ -148,10 +145,14 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
         for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    result = build_uploaded_item_repository(
+    result = build_item_repository_source(
         root,
+        source_store=remote,
         bindings=_bindings(),
-        session=given_session(store=remote),
+        session=given_session(
+            store=remote,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         control_lakehouse=_control(),
         executors=_executors(),
     )
@@ -173,7 +174,10 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
         root,
         source_store=FilesystemStore(),
         bindings=_bindings(),
-        session=given_session(store=target_store),
+        session=given_session(
+            store=target_store,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         control_lakehouse=_control(),
         executors=_executors(),
     )
@@ -183,14 +187,12 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
 
 
 def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch):
-    repository = parse_item_repository(
-        Location(str(_estate(tmp_path))), store=FilesystemStore()
-    )
+    parse_item_repository(Location(str(_estate(tmp_path))), store=FilesystemStore())
     unknown = ItemBindings(
         (
             ItemBinding(
                 WeaverItemId.parse("Lakehouse/Missing"),
-                LakehouseBinding(ItemRef("Missing_Dev")),
+                LakehouseBinding(ItemRef("Missing_Dev"), workspace_name=WORKSPACE),
             ),
         )
     )
@@ -204,7 +206,10 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
             Location(str(_estate(tmp_path))),
             source_store=FilesystemStore(),
             bindings=unknown,
-            session=given_session(store=FilesystemStore()),
+            session=given_session(
+                store=FilesystemStore(),
+                lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+            ),
             control_lakehouse=_control(),
             executors=_executors(),
         )
@@ -240,17 +245,22 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     restored = BuildState.from_mapping(encoded)
 
     assert restored.to_mapping() == state.to_mapping()
-    assert restored.catalogue.registered[
-        next(iter(restored.catalogue.registered))
-    ].build_epoch == epoch
+    assert (
+        restored.catalogue.registered[
+            next(iter(restored.catalogue.registered))
+        ].build_epoch
+        == epoch
+    )
 
 
 def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
-    from weaver.resolution import LocalResolver
-    from weaver.workspaces import LocalWorkspace
 
-    workspace = LocalWorkspace(workspace=tmp_path, weaver_lakehouse="Control")
-    resolver = LocalResolver(workspace)
+    workspace = given_workspace(catalogue="Lakehouse/Control")
+    resolver = given_resolver(
+        workspace=workspace,
+        lakehouses=("Weaver", "Raw_Dev", "Sales_LH", "Curated_Dev"),
+        root=tmp_path,
+    )
     store = FilesystemStore()
     target = _bindings().entries[0].to_bound_target()
     files = resolver.files_root(ItemRef("Raw_Dev"))
@@ -265,9 +275,7 @@ def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
     for location in locations:
         store.make_directory(location)
 
-    inventory = read_lakehouse_inventory(
-        target, resolver=resolver, store=store
-    )
+    inventory = read_lakehouse_inventory(target, resolver=resolver, store=store)
 
     assert "cli" not in inventory.folder_schemas
     assert "build_bundles" not in inventory.folder_schemas
@@ -285,10 +293,14 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
         for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    result = build_uploaded_item_repository(
+    result = build_item_repository_source(
         root,
+        source_store=remote,
         bindings=_bindings(),
-        session=given_session(store=remote),
+        session=given_session(
+            store=remote,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         control_lakehouse=_control(),
         archive=archive,
         executors=_executors(),
@@ -352,7 +364,10 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
     report = install_bundle_archive(
         archive,
         archive_store=store,
-        session=given_session(store=target),
+        session=given_session(
+            store=target,
+            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+        ),
         executors=_executors(),
     )
 
@@ -366,7 +381,9 @@ def test_archive_rejects_traversal_before_extracting(tmp_path):
         zipped.writestr("../outside.txt", b"no")
 
     with pytest.raises(BuildError, match="unsafe path"):
-        with materialise_bundle_archive(Location(str(archive)), store=FilesystemStore()):
+        with materialise_bundle_archive(
+            Location(str(archive)), store=FilesystemStore()
+        ):
             pass
     assert not (tmp_path / "outside.txt").exists()
 

@@ -14,7 +14,7 @@ for it would mean a reader had to know whether a failure was a place in the
 tree or a thing that happened at one.
 
 Two ledgers, deliberately, and neither derivable from the other. This one says
-a Step took eight seconds. :class:`~weaver.session.telemetry.SessionTelemetry`
+a Step took eight seconds. :class:`~weaver.sessions.telemetry.SessionTelemetry`
 says the eight seconds were four Livy submissions and a token acquisition. A
 suite that spent nine minutes in Livy startup and one in execution has a
 different problem from one that spent ten in execution, and a single number
@@ -31,8 +31,8 @@ import os
 
 import pytest
 
-from weaver.session import ConsoleSession
-from weaver.session.base import STEP, SUBSTEP, TASK
+from weaver.sessions import ConsoleSession
+from weaver.sessions.base import STEP, SUBSTEP, TASK
 
 
 @pytest.fixture
@@ -366,8 +366,8 @@ def test_a_run_s_timings_ride_its_completion_document(session):
     intended and what each step did; how long a step took is a property of
     that step, not a second kind of record."""
 
-    from weaver.load import _completion_document
     from weaver.load_report import LoadRunReport
+    from weaver.operations.load import _completion_document
 
     with session.task("Load"):
         with session.step("Execute"):
@@ -396,8 +396,8 @@ def test_a_completion_document_without_timings_still_has_the_key(session):
     """A caller that recorded none says so, rather than omitting the field and
     making every reader handle its absence."""
 
-    from weaver.load import _completion_document
     from weaver.load_report import LoadRunReport
+    from weaver.operations.load import _completion_document
 
     document = _completion_document(
         LoadRunReport(

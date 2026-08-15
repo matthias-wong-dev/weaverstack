@@ -8,16 +8,16 @@ three full generate-and-installs.
 
 What only Fabric can answer is what happens when the plan *runs*:
 
-**A OneLake shortcut is a workspace API call**, not a file operation, so the
-emulator's filesystem link proves nothing about it.
+**A OneLake shortcut is a workspace API call**, not a file operation, so only
+asking the workspace proves one exists.
 
 **Fabric creates a shortcut synchronously and discovers it asynchronously** — the
 consumer's next statement failed with "neither a view nor a table" until the
 alias action learned to wait for a real read to succeed.
 
 **A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
-item that mutated Delta is closed by a refresh. The emulator has no endpoint and
-skips it, so the refresh is unexercised until here.
+item that mutated Delta is closed by a refresh. Nothing below a real workspace
+exercises that refresh.
 
 So the bundle is generated *here*, in pure Python, and **only the alias action is
 run** out of it — not the estate around it. Schemas, tables, views, catalogue
@@ -41,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from factories import FixtureCatalogue, alias_repository, item_id
+from factories import FixtureCatalogue, alias_repository
 
 from weaver.targets import ItemRef
 
@@ -88,7 +88,9 @@ def generate(
     from weaver.build_bundle.targets import WAREHOUSE_TARGET
 
     bindings = effective_item_bindings(
-        bindings, weaver_lakehouse=workspace.weaver_lakehouse
+        bindings,
+        control_item=workspace.catalogue_item,
+        workspace_name=workspace.workspace,
     )
     inventories = {}
     for binding in bindings.entries:
@@ -106,7 +108,8 @@ def generate(
         target_inventories=inventories,
         catalogue=catalogue,
         control_lakehouse=LakehouseBinding(
-            lakehouse=ItemRef(workspace.weaver_lakehouse)
+            lakehouse=workspace.catalogue_item,
+            workspace_name=workspace.workspace,
         ),
     )
 
@@ -162,7 +165,7 @@ def run_from_here(
         action,
         payload,
         context=InstallationContext(
-                # From the Installer, as every production context gets them. An
+            # From the Installer, as every production context gets them. An
             # executor stays on the desktop and only its statements cross — a
             # table alias asking whether it has become readable, a table build
             # asking what shape its query has.
@@ -183,12 +186,17 @@ def run_from_here(
 
 @pytest.fixture(scope="module")
 def alias_estate(
-    fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session,
-    weaver_session, tmp_path_factory,
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    livy_session,
+    weaver_session,
+    tmp_path_factory,
 ):
     """The alias action, run from here against real Fabric."""
 
     from factories import item_bindings
+
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
@@ -235,13 +243,23 @@ def alias_estate(
     )
 
     alias_result = run_from_here(
-        alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id, session=weaver_session,
+        alias_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=batch.target_id,
+        session=weaver_session,
     )
     assert alias_result.status == "succeeded", alias_result.error_message
     refresh_result = run_from_here(
-        refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id, session=weaver_session,
+        refresh_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=batch.target_id,
+        session=weaver_session,
     )
 
     aliased = at["consumer"].qualify("DWG", "PortableCustomer")
@@ -293,8 +311,8 @@ def alias_estate(
 def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     """Asked of the workspace, not of the plan: the shortcut is really there.
 
-    A OneLake shortcut is an API call. Nothing local — not the emulator's
-    filesystem link, not the planned action — stands in for asking Fabric.
+    A OneLake shortcut is an API call, and the planned action does not stand in
+    for asking Fabric whether one is there.
     """
 
     consumer = alias_estate["consumer"]
@@ -310,9 +328,10 @@ def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     assert ("Tables/DWG", "PortableCustomer") in found
     target = found[("Tables/DWG", "PortableCustomer")]
     assert target.get("itemId") == alias_estate["producer"].id
-    source_schema = alias_estate["resolver"].tables_root(
-        ItemRef(alias_estate["producer"].name)
-    ) / "DWG"
+    source_schema = (
+        alias_estate["resolver"].tables_root(ItemRef(alias_estate["producer"].name))
+        / "DWG"
+    )
     physical_source = next(
         entry.name
         for entry in alias_estate["store"].list(source_schema)
@@ -400,8 +419,13 @@ WAREHOUSE_CONSUMER = "Warehouse/AliasReporting"
 
 
 def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
-    fabric_workspace, fabric_client, fabric_alias_lakehouses,
-    clean_disposable_warehouse, livy_session, weaver_session, tmp_path_factory,
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    clean_disposable_warehouse,
+    livy_session,
+    weaver_session,
+    tmp_path_factory,
 ):
     """The other alias form, and the one that leans hardest on the endpoint.
 
@@ -415,6 +439,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     """
 
     from factories import alias_repository, item_bindings
+
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
@@ -511,13 +536,23 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     )
     refresh_batch, refresh_action = refreshes[0]
     run_from_here(
-        refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=refresh_batch.target_id, session=weaver_session,
+        refresh_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=refresh_batch.target_id,
+        session=weaver_session,
     )
 
     result = run_from_here(
-        alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id, sql=warehouse.executor,
+        alias_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=batch.target_id,
+        sql=warehouse.executor,
         session=weaver_session,
     )
 

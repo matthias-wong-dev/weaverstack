@@ -53,11 +53,10 @@ query's output types during its one self-contained build action. This is query
 shape inference, not source-data inference: no rows are loaded and the action
 cannot broaden its target.
 
-Every generated object reference is resolved against the action's bound target.
-On Fabric that produces the native workspace/Lakehouse/schema/object name. The
-local emulator folds the Lakehouse into its namespace. A bare `Schema.Object`
-would inherit the session's attached Lakehouse and is therefore not a valid
-physical binding.
+Every generated object reference is resolved against the action's bound target,
+producing the native workspace/Lakehouse/schema/object name. A bare
+`Schema.Object` would inherit the session's attached Lakehouse and is therefore
+not a valid physical binding.
 
 ## 3. Inputs prepared before bundle generation
 
@@ -158,7 +157,7 @@ therefore made by the planner:
 
 | Destination | Materialisation |
 |---|---|
-| Lakehouse | a `create_alias` action — a OneLake shortcut in Fabric, a filesystem link plus catalogue registration in the emulator |
+| Lakehouse | a `create_alias` action — a OneLake shortcut |
 | Warehouse | a frozen `CREATE OR ALTER VIEW` over the bound source's three-part name |
 
 Only the Warehouse form is spelled out in SQL, because there the statement *is*
@@ -639,10 +638,8 @@ immediately after its physical work and before any dependent item starts. A
 Warehouse item has no endpoint of its own to refresh, and an item whose only work
 was a folder or a schema has changed nothing the endpoint describes.
 
-The refresh is planned host-independently, like the rest of the bundle. The local
-emulator has no SQL analytics endpoint at all, and the executor says so and skips
-rather than inventing a local equivalent that would keep no promise. The Weaver
-Lakehouse's own refresh closes the build, after catalogue publication.
+The refresh is planned host-independently, like the rest of the bundle. The
+Weaver Lakehouse's own refresh closes the build, after catalogue publication.
 
 The installer validates bundle shape and payload hashes, resolves the already
 bound targets in its own environment, executes actions, and writes the install

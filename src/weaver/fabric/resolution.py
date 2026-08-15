@@ -1,17 +1,16 @@
 """Resolve typed Fabric item names to OneLake locations.
 
 Fabric item identity is workspace, type, and name. Resolution uses the declared
-item type, caches REST lookups, and presents the same interface as local
-resolution.
+item type and caches REST lookups, so a Session's resolver answers a repeated
+name without asking the workspace again.
 """
 
 from __future__ import annotations
 
 from ..errors import CommandError
-from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricWorkspace
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
-from ..spark import SparkDestination, fabric_destination
+from ..spark import FabricSparkTarget
 from ..targets import (
     FILES_AREA,
     DeltaTarget,
@@ -20,6 +19,7 @@ from ..targets import (
     WarehouseTarget,
     validate_name,
 )
+from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Workspace
 from .client import ONELAKE_DFS, FabricClient
 from .onelake import abfss_root, lakehouse_artifact_segment
 from .resources import (
@@ -27,7 +27,6 @@ from .resources import (
     SQL_ENDPOINT,
     WAREHOUSE,
     Item,
-    Workspace,
     find_item,
     find_workspace,
     refresh_sql_endpoint_metadata,
@@ -39,15 +38,11 @@ class FabricResolver:
 
     def __init__(
         self,
-        workspace: FabricWorkspace,
+        workspace: Workspace,
         *,
         client: FabricClient | None = None,
         base_url: str = ONELAKE_DFS,
     ) -> None:
-        if not isinstance(workspace, FabricWorkspace):
-            raise CommandError(
-                f"FabricResolver needs a FabricWorkspace, got {type(workspace).__name__}"
-            )
         self.configuration = workspace
         self.client = client or FabricClient()
         self.base_url = base_url.rstrip("/")
@@ -159,10 +154,10 @@ class FabricResolver:
     #
     # Two operations an installed bundle needs that are neither path arithmetic
     # nor a SQL statement: pointing one Lakehouse at another's data, and asking a
-    # Lakehouse's SQL analytics endpoint to catch up. Both belong here because
-    # this is the adapter that already knows how to reach this workspace, and the
-    # local resolver deliberately offers neither — the emulator links files, and
-    # has no SQL endpoint at all.
+    # Lakehouse's SQL analytics endpoint to catch up. Both are REST, so they
+    # belong to the adapter that already knows how to reach this workspace. A
+    # resolver inside a Fabric session offers neither, and an action that needs
+    # one is recorded as skipped rather than failed.
 
     def create_onelake_shortcut(
         self,
@@ -210,7 +205,6 @@ class FabricResolver:
             client=self._rest_client(),
         )
 
-
     def sql_endpoint(self, target: WarehouseTarget):
         """Resolve a typed Warehouse to the common SQL endpoint record."""
 
@@ -218,8 +212,7 @@ class FabricResolver:
 
         warehouse = self.warehouse(target)
         payload = self.client.get_json(
-            f"workspaces/{self.workspace.id}/warehouses/"
-            f"{warehouse.id}/connectionString"
+            f"workspaces/{self.workspace.id}/warehouses/{warehouse.id}/connectionString"
         )
         value = payload.get("connectionString")
         if not isinstance(value, str) or not value.strip():
@@ -237,28 +230,30 @@ class FabricResolver:
 
     # --- the weaver lakehouse ---------------------------------------------
 
-    def _weaver_lakehouse(self) -> ItemRef:
-        name = self.configuration.weaver_lakehouse
-        if name is None:
+    def _catalogue(self) -> ItemRef:
+        """The item the catalogue lives in, from the workspace's typed value."""
+
+        if self.configuration.catalogue is None:
             raise CommandError(
-                "A Weaver Lakehouse is required for this Workspace. "
-                "Set weaver_lakehouse on the Workspace or supply it explicitly."
+                "A catalogue is required for this Workspace. Set "
+                "catalogue='Lakehouse/Weaver' on the Workspace or supply it "
+                "explicitly."
             )
-        return ItemRef(name)
+        return self.configuration.catalogue_item
 
     @property
-    def weaver_lakehouse(self) -> Location:
-        return self.lakehouse(self._weaver_lakehouse())
+    def catalogue(self) -> Location:
+        return self.lakehouse(self._catalogue())
 
     @property
     def weaver_items_root(self) -> Location:
         """The workspace's one declaration, with item types directly below it."""
 
-        return self.files_root(self._weaver_lakehouse()) / WEAVER_ITEMS_AREA
+        return self.files_root(self._catalogue()) / WEAVER_ITEMS_AREA
 
     @property
     def build_bundles_root(self) -> Location:
-        return self.files_root(self._weaver_lakehouse()) / BUILD_BUNDLES_AREA
+        return self.files_root(self._catalogue()) / BUILD_BUNDLES_AREA
 
     def build_bundle(self, name: str) -> Location:
         from ..targets import validate_name
@@ -280,7 +275,7 @@ class FabricResolver:
             files_root=f"{root}/{FILES_AREA}",
         )
 
-    def spark_destination(self, item: ItemRef) -> SparkDestination:
+    def spark_destination(self, item: ItemRef) -> FabricSparkTarget:
         """One Lakehouse, as Fabric's Spark catalogue names it.
 
         Fabric's namespace is the fundamental representation:
@@ -293,14 +288,14 @@ class FabricResolver:
         ids stay in resolution and in the bundle's target block.
         """
 
-        return fabric_destination(
+        return FabricSparkTarget(
             workspace=self.workspace.name,
             lakehouse=self.resolve(item, item_type=LAKEHOUSE).name,
         )
 
     @property
     def control_tables_root(self) -> Location:
-        return self.tables_root(self._weaver_lakehouse())
+        return self.tables_root(self._catalogue())
 
 
 def _server_name(value: str) -> str:

@@ -218,13 +218,13 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
     """
 
     root = tmp_path / "estate"
-    repository = single_document_repository(
+    single_document_repository(
         root, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
     other = single_document_repository(
-        root, item="Lakehouse/Other", documents={
-            "DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")
-        }
+        root,
+        item="Lakehouse/Other",
+        documents={"DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")},
     )
 
     stage = item_prune_stage(
@@ -263,8 +263,9 @@ def warehouse_estate(tmp_path):
     """
 
     from factories import WAREHOUSE_ITEM, schema_document, warehouse_table
-    from weaver.locations import Location
+
     from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
 
     root = tmp_path / "repo"
     for relative, text in {
@@ -319,6 +320,7 @@ def test_the_procedure_schema_is_in_the_keep_set(warehouse_estate):
     """Stated directly, so a failure names the keep-set rather than the stage."""
 
     from factories import WAREHOUSE_ITEM
+
     from weaver.etl import item_load_artefacts
 
     documents = {

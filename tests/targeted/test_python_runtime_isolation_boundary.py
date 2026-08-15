@@ -329,9 +329,7 @@ def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
 
     root = tree(tmp_path, "raw")
     deployed = root / "Sales__Customer.py"
-    deployed.write_text(
-        "class Sales__Customer:\n    version = 'A'\n", encoding="utf-8"
-    )
+    deployed.write_text("class Sales__Customer:\n    version = 'A'\n", encoding="utf-8")
 
     with RuntimeScope.new() as first_run:
         first = _customer(
@@ -344,9 +342,7 @@ def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
         assert first.Sales__Customer.version == "A"
 
     # The build, rewriting the same physical path.
-    deployed.write_text(
-        "class Sales__Customer:\n    version = 'B'\n", encoding="utf-8"
-    )
+    deployed.write_text("class Sales__Customer:\n    version = 'B'\n", encoding="utf-8")
 
     with RuntimeScope.new() as second_run:
         second = _customer(

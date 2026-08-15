@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from weaver.errors import CommandError, WeaverError
-from weaver.session.requirements import union
+from weaver.sessions.requirements import union
 
 #: Default composition file in the current directory.
 DEFAULT_FILE = "compose.yml"
@@ -87,23 +87,41 @@ def command_words(entry: str) -> list[str]:
         raise CommandError(f"{entry!r}: {exc}") from exc
     if not words:
         raise CommandError("a composition entry cannot be empty")
-    if words[0] != "weaver":
-        raise CommandError(
-            f"{entry!r} is not a Weaver command: every entry begins with 'weaver'"
-        )
-    rest = words[1:]
+    # A composition runs Weaver commands, so the program name is what a reader
+    # already knows. Accepted either way, because a line copied from a terminal
+    # keeps it.
+    rest = words[1:] if words[0] == "weaver" else words
     if not rest:
         raise CommandError(f"{entry!r} names no command")
     refusal = NOT_IN_A_COMPOSITION.get(rest[0])
     if refusal is not None:
         raise CommandError(f"{entry!r}: {refusal}")
+    known = weaver_commands()
+    if rest[0] not in known:
+        raise CommandError(
+            f"{entry!r} is not a Weaver command: {rest[0]!r} is not one of "
+            + ", ".join(sorted(known))
+        )
     return rest
 
 
-def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> int:
+def weaver_commands() -> frozenset[str]:
+    """Every command name the parser accepts at the top level."""
+
+    from .main import build_parser
+
+    for action in build_parser()._subparsers._group_actions:
+        if action.choices:
+            return frozenset(action.choices)
+    return frozenset()
+
+
+def run_composition(
+    args: argparse.Namespace, *, parser_factory=None, stdin=None
+) -> int:
     """Show the sequence, ask once, then run it in one Session."""
 
-    from weaver.session.host import use_or_create_session
+    from weaver.sessions.host import use_or_create_session
 
     if parser_factory is None:
         from .main import build_parser
@@ -116,21 +134,24 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
     parsed_commands = [_parse(parser, entry) for entry in entries]
 
     _show(args.name, path, entries)
-    stream = stdin or sys.stdin
-    if not _interactive(stream):
-        print(
-            "A composition requires confirmation from an interactive input stream.",
-            file=sys.stderr,
-        )
-        return 1
-    if not _confirmed(stream):
-        print("Composition cancelled.")
-        return 0
+    if not getattr(args, "yes", False):
+        stream = stdin or sys.stdin
+        if not _interactive(stream):
+            print(
+                "A composition asks before it runs. Pass --yes to run it unattended.",
+                file=sys.stderr,
+            )
+            return 1
+        if not _confirmed(stream):
+            print("Composition cancelled.")
+            return 0
 
     from .shell import _default_workspace
 
     workspace = _default_workspace(args)
-    with use_or_create_session(getattr(args, "session", None), workspace=workspace) as session:
+    with use_or_create_session(
+        getattr(args, "session", None), workspace=workspace
+    ) as session:
         _warm_for(session, parsed_commands, workspace=workspace)
         try:
             return _execute(entries, parsed_commands, session=session)

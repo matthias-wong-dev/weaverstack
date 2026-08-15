@@ -4,7 +4,7 @@ The extraction half of a SQL-authored table, proved without Spark. What is
 asserted here is what the primitive *does with* a session — which statements it
 submits, in what order, and what it hands back — and a recording double answers
 that exactly. Whether Spark then executes the SQL correctly is Spark's claim,
-made where a session exists (``tests/spark/test_spark_sql_table_primitive.py``).
+made in ``tests/fabric/test_spark_table_lakehouse_boundary.py``.
 
 The load itself is deliberately absent. A SQL-authored table reaches
 ``load_table`` through the ordinary ``Table.load()``, so rejection, thresholds
@@ -202,9 +202,7 @@ def test_a_delete_query_naming_the_key_in_another_order_is_accepted():
     _staging, deletes = read_spark_sql(
         session,
         sql="select * from source;\nselect * from gone;",
-        contract=_contract(
-            primary_key=("Customer id", "Order id"), incremental=True
-        ),
+        contract=_contract(primary_key=("Customer id", "Order id"), incremental=True),
     )
 
     assert deletes.columns == ["Order id", "Customer id"]

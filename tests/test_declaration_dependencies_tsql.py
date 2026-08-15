@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
-
 from weaver.declaration import extract_sql_references
 
 
 def refs(sql: str) -> set[str]:
-    return {str(reference) for reference in extract_sql_references(textwrap.dedent(sql))}
+    return {
+        str(reference) for reference in extract_sql_references(textwrap.dedent(sql))
+    }
 
 
 # --- bracket-delimited relations ---------------------------------------------

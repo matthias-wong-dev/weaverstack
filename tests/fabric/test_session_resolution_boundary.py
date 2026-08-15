@@ -15,7 +15,7 @@ import pytest
 
 from weaver.errors import CommandError
 from weaver.fabric.resources import LAKEHOUSE
-from weaver.session import ConsoleSession
+from weaver.sessions import ConsoleSession
 from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
@@ -44,8 +44,12 @@ def test_the_same_name_is_not_asked_about_twice(
 ):
     reference = ItemRef(fabric_target_lakehouse.name)
 
-    first = console.resolve_item(reference, item_type=LAKEHOUSE, workspace=fabric_workspace)
-    second = console.resolve_item(reference, item_type=LAKEHOUSE, workspace=fabric_workspace)
+    first = console.resolve_item(
+        reference, item_type=LAKEHOUSE, workspace=fabric_workspace
+    )
+    second = console.resolve_item(
+        reference, item_type=LAKEHOUSE, workspace=fabric_workspace
+    )
 
     assert first is second, "the second answer came from the workspace, not the cache"
     assert console.telemetry.counters.get("resolve.item.cache_hits") == 1

@@ -20,20 +20,20 @@ import pytest
 from factories import (
     ITEM,
     WAREHOUSE_ITEM,
-    FixtureInventory,
     estate_bindings,
     estate_inventories,
     full_estate,
     item_id,
     target_inventory,
 )
+from support.workspaces import WORKSPACE
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE, TargetChange
+from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE
 from weaver.catalogue.state import Catalogue
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 #: Actions that change a target. Anything here must be accounted for by a
 #: change; anything not here is either catalogue work, which does not touch the
@@ -77,7 +77,9 @@ def build(repository, tmp_path, *, inventories=None, catalogue=None):
         if inventories is not None
         else estate_inventories(repository, empty=True),
         catalogue=catalogue if catalogue is not None else Catalogue({}),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control")),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
 
 
@@ -142,9 +144,7 @@ def test_no_change_is_attributed_to_the_wrong_target(repository, tmp_path):
     """
 
     plan = build(repository, tmp_path).plan
-    by_action = {
-        action.id: batch.target_id for _s, batch, action in plan.actions()
-    }
+    by_action = {action.id: batch.target_id for _s, batch, action in plan.actions()}
 
     for target_id, changes in plan.target_changes.items():
         for change in changes:
