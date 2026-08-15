@@ -37,7 +37,7 @@ revision you are reading before treating it as the baseline.
 Two documents, and they answer different questions.
 [design/weaver-architecture.md](design/weaver-architecture.md) is what Weaver
 *is* — repository structure, documents, build, bundle, installation, the Weaver
-Lakehouse, the command lifecycle. [design/code-architecture.md](design/code-architecture.md)
+catalogue, the command lifecycle. [design/code-architecture.md](design/code-architecture.md)
 is how *this repository* is arranged to deliver it — the four doers, the
 representations they hand each other, and where anything physical happens. Read
 the first for behaviour, the second before moving code between layers.
