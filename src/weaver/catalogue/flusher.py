@@ -93,7 +93,14 @@ class WarehouseFlusher:
     # --- the contract ---------------------------------------------------------
 
     def submit(self, row: Mapping[str, Any]) -> None:
-        """Accept one row for writing. Does not wait for the Warehouse."""
+        """Accept one row for writing. Does not wait for the Warehouse.
+
+        Accepting and queueing happen under one lock, so ``close`` cannot put
+        the stop sentinel between them: the worker would stop before reaching
+        the row, and close would return reporting nothing wrong. Queueing costs
+        nothing to hold the lock for — the queue is unbounded and the worker
+        never blocks a put.
+        """
 
         with self._lock:
             if not self._accepting:
@@ -103,7 +110,7 @@ class WarehouseFlusher:
             self._submitted += 1
             self._pending += 1
             self._ensure_worker()
-        self._queue.put(dict(row))
+            self._queue.put(dict(row))
 
     def flush(self, *, timeout: float = DRAIN_TIMEOUT) -> None:
         """Wait for every accepted row to be written, and surface any failure."""
@@ -137,11 +144,14 @@ class WarehouseFlusher:
             was_accepting = self._accepting
             self._accepting = False
             worker = self._worker
+            # Under the lock, so the sentinel is behind every row already
+            # accepted. Joining is not: the worker settles a batch under the
+            # same lock, and waiting for it while holding one would deadlock.
+            if worker is not None and was_accepting:
+                self._queue.put(_STOP)
         if worker is None:
             self._raise_any_failure()
             return
-        if was_accepting:
-            self._queue.put(_STOP)
         worker.join(timeout=timeout)
         self._worker = None
         self._raise_any_failure()

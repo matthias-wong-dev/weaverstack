@@ -8,6 +8,7 @@ sentence of that contract.
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 
@@ -325,3 +326,55 @@ def test_a_slow_worker_does_not_hang_a_flush_for_ever():
     assert time.monotonic() - started < 5
 
     recorder.release.set()
+
+
+# --- accepting a row while the Session is closing -----------------------------
+
+
+class GatedQueue(queue.Queue):
+    """A queue that holds one row's ``put`` open, to catch a submit in flight."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate_on: str | None = None
+        self.entered = threading.Event()
+        self.proceed = threading.Event()
+
+    def put(self, item, *args, **kwargs):
+        if isinstance(item, dict) and item.get("object_name") == self.gate_on:
+            self.entered.set()
+            self.proceed.wait(timeout=5)
+        super().put(item, *args, **kwargs)
+
+
+def test_a_row_accepted_before_close_is_written_even_if_close_overtakes_it():
+    """Accepting a row and queueing it is one step, or the row can be lost.
+
+    A flusher is shared by every caller appending to one table, so a submit can
+    be in flight when another thread closes the Session. If the stop sentinel
+    can be queued between the two, the worker stops before reaching the row and
+    ``close`` returns reporting nothing wrong.
+    """
+
+    recorder = Recorder()
+    flusher = a_flusher(recorder)
+    gated = GatedQueue()
+    flusher._queue = gated
+    gated.gate_on = "Second"
+
+    flusher.submit(a_row(object_name="First"))
+    flusher.flush()
+
+    late = threading.Thread(target=lambda: flusher.submit(a_row(object_name="Second")))
+    late.start()
+    assert gated.entered.wait(timeout=5)
+
+    closing = threading.Thread(target=flusher.close)
+    closing.start()
+    time.sleep(0.05)
+    gated.proceed.set()
+    late.join(timeout=5)
+    closing.join(timeout=5)
+
+    assert flusher.submitted == 2
+    assert flusher.written == 2, "a row the flusher accepted never reached the table"
