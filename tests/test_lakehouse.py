@@ -246,7 +246,7 @@ def test_a_supplied_destination_is_what_names_objects():
 
 
 def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
-    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
 
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
@@ -259,7 +259,7 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
 
 
 def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
-    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
 
     assert lakehouse_for(resolver, "Sales_LH") == lakehouse_for(resolver, ItemRef("Sales_LH"))
 
@@ -273,7 +273,7 @@ def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Pa
     that cannot perform it.
     """
 
-    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
 
     assert lakehouse.location == resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
@@ -290,7 +290,7 @@ def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Pa
 
 
 def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path):
-    resolver = given_resolver(workspace=given_workspace(weaver_lakehouse="Weaver"))
+    resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 

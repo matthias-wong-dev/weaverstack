@@ -198,7 +198,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         "from weaver.build_bundle.workflow import session_catalogue\n"
         "from weaver.targets import ItemRef\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"

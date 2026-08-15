@@ -21,7 +21,7 @@ def test_typical_configuration_parses_physical_defaults():
         {
             "workspace": "Analytics",
             "environment": "WeaverRuntime",
-            "weaver_lakehouse": "Weaver",
+            "catalogue": "Lakehouse/Weaver",
             "execution": {"parallel_workers": 8},
             "lakehouses": {"Dev_Data": "Lakehouse/Sales"},
             "warehouses": {

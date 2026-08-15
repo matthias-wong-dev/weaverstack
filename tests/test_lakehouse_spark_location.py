@@ -25,7 +25,7 @@ from support.workspaces import given_resolver, given_workspace
 @pytest.fixture
 def resolver(tmp_path):
     return given_resolver(
-        workspace=given_workspace(weaver_lakehouse="Weaver"),
+        workspace=given_workspace(catalogue="Lakehouse/Weaver"),
         lakehouses=("Weaver", "Lakehouse_A", "Lakehouse_B", "Sales_LH"),
     )
 
@@ -87,7 +87,7 @@ def test_two_destinations_resolve_separately(resolver):
     )
 
 
-def test_the_weaver_lakehouse_resolves_like_any_other_item(resolver):
+def test_the_catalogue_resolves_like_any_other_item(resolver):
     """It is the attached one, not a special case of resolution.
 
     Initialisation builds the catalogue *into* the Weaver Lakehouse, so it is a destination
@@ -155,7 +155,7 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
 
     from weaver.build_bundle.targets import BoundTarget
 
-    workspace = given_workspace(weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     resolver = given_resolver(
         workspace=workspace,
         lakehouses=("Weaver", "Lakehouse_A", "Lakehouse_B", "Sales_LH"),
@@ -181,7 +181,7 @@ def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
 
     from weaver.build_bundle.targets import BoundTarget
 
-    workspace = given_workspace(weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     resolver = given_resolver(
         workspace=workspace,
         lakehouses=("Weaver", "Lakehouse_A", "Lakehouse_B", "Sales_LH"),

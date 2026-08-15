@@ -89,7 +89,7 @@ def generate(
 
     bindings = effective_item_bindings(
         bindings,
-        weaver_lakehouse=workspace.weaver_lakehouse,
+        control_item=workspace.catalogue_item,
         workspace_name=workspace.workspace,
     )
     inventories = {}
@@ -108,7 +108,7 @@ def generate(
         target_inventories=inventories,
         catalogue=catalogue,
         control_lakehouse=LakehouseBinding(
-            lakehouse=ItemRef(workspace.weaver_lakehouse),
+            lakehouse=workspace.catalogue_item,
             workspace_name=workspace.workspace,
         ),
     )

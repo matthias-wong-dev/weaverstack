@@ -93,7 +93,7 @@ class Prepared:
     derived the same way the boundary derives it rather than chosen here.
     """
 
-    catalogue: object
+    catalogue: Lakehouse/object
     inventories: dict
     workspace: object
     session: object
@@ -109,7 +109,7 @@ class Refreshing(FabricResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
     from weaver.targets import ItemRef
     from weaver.task_logging import log_folder
@@ -123,7 +123,7 @@ def session(tmp_path):
         base_url=Path(tmp_path).as_posix(),
     )
     store = FilesystemStore()
-    root = log_folder(resolver, ItemRef(workspace.weaver_lakehouse))
+    root = log_folder(resolver, workspace.catalogue_item)
     store.make_directory(root)
     return Prepared(
         catalogue=installed_catalogue(repository, bindings),

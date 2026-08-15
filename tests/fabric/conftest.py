@@ -230,7 +230,7 @@ def fabric_lakehouses(fabric_workspace_item, fabric_client):
 
 
 @pytest.fixture(scope="session")
-def fabric_weaver_lakehouse(fabric_workspace_item, fabric_client):
+def fabric_catalogue(fabric_workspace_item, fabric_client):
     """The fixed Lakehouse standing in as the Weaver Lakehouse for the run.
 
     The Livy session is created against it; Weaver itself comes from the attached
@@ -297,14 +297,14 @@ def environment_name():
 
 
 @pytest.fixture(scope="session")
-def fabric_workspace(fabric_workspace_item, fabric_weaver_lakehouse, environment_name):
+def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
     """A workspace that names the Environment Weaver was installed into."""
 
     from weaver.workspaces import FabricWorkspace
 
     return FabricWorkspace(
         workspace=fabric_workspace_item.name,
-        weaver_lakehouse=fabric_weaver_lakehouse.name,
+        catalogue=fabric_catalogue.name,
         environment=environment_name,
     )
 
@@ -930,7 +930,7 @@ def _fabric_build_context(
     # on its way in.
     resolver = FabricResolver(workspace, client=fabric_client)
     store = OneLakeDfsClient()
-    weaver = ItemRef(workspace.weaver_lakehouse)
+    weaver = workspace.catalogue_item
     target = ItemRef(target_lh.name)
     warehouse_name = warehouse.item.name if warehouse is not None else None
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
@@ -960,7 +960,7 @@ def _fabric_build_context(
     def _workspace_literal() -> str:
         return (
             f"FabricWorkspace(workspace={workspace.workspace!r}, "
-            f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+            f"catalogue={workspace.catalogue!r}, "
             f"environment={workspace.environment!r})"
         )
 
@@ -1003,7 +1003,7 @@ def _fabric_build_context(
             f"workspace_name=workspace.workspace)\n"
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
-            "selected, weaver_lakehouse=workspace.weaver_lakehouse, "
+            "selected, control_item=workspace.catalogue_item, "
             "workspace_name=workspace.workspace)\n"
             "session = NotebookSession(workspace=workspace, spark=spark)\n"
             "inventories = read_target_inventories(bindings, session=session)\n"
@@ -1212,7 +1212,7 @@ def _empty_the_target(
 
     wiped = [target]
     if weaver_destination is not None:
-        wiped.append(ItemRef(workspace.weaver_lakehouse))
+        wiped.append(workspace.catalogue_item)
     for item in wiped:
         for report in wipe_lakehouse(item, workspace, store=store):
             print(f"Fabric wipe: {report}")
@@ -1235,7 +1235,7 @@ def fabric_build_env(
 
 
 def _warehouse_build_env(
-    fabric_workspace, weaver_lakehouse, warehouse, weaver_repo_fixture, session
+    fabric_workspace, catalogue, warehouse, weaver_repo_fixture, session
 ) -> "BuildEnv":
     """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
 
@@ -1254,7 +1254,7 @@ def _warehouse_build_env(
 
     resolver = FabricResolver(fabric_workspace, client=None)
     store = OneLakeDfsClient()
-    weaver = _ItemRef(weaver_lakehouse.name)
+    weaver = _ItemRef(catalogue.name)
     warehouse_ref = _ItemRef(warehouse.item.name)
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
     repository_root = resolver.files_root(weaver).join(*repository_relative)
@@ -1265,7 +1265,7 @@ def _warehouse_build_env(
     def _workspace_literal() -> str:
         return (
             f"FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-            f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+            f"catalogue={fabric_workspace.catalogue!r}, "
             f"environment={fabric_workspace.environment!r})"
         )
 
@@ -1307,9 +1307,9 @@ def _warehouse_build_env(
             "repository = parse_item_repository(repository_root, store=store)\n"
             f"selected = ItemBindings(({binds},))\n"
             "bindings = effective_item_bindings("
-            "selected, weaver_lakehouse=workspace.weaver_lakehouse, "
+            "selected, control_item=workspace.catalogue_item, "
             "workspace_name=workspace.workspace)\n"
-            "control = LakehouseBinding(ItemRef(workspace.weaver_lakehouse), "
+            "control = LakehouseBinding(workspace.catalogue_item, "
             "workspace_name=workspace.workspace)\n"
             "session = NotebookSession(workspace=workspace, spark=spark)\n"
             "inventories = read_target_inventories(bindings, session=session)\n"
@@ -1422,7 +1422,7 @@ def _warehouse_build_env(
 
 @pytest.fixture(scope="module")
 def warehouse_estate(
-    fabric_workspace, fabric_weaver_lakehouse, clean_disposable_warehouse, weaver_repo_fixture, livy_session
+    fabric_workspace, fabric_catalogue, clean_disposable_warehouse, weaver_repo_fixture, livy_session
 ):
     """The Warehouse estate, built **in Fabric** and installed once per module.
 
@@ -1433,7 +1433,7 @@ def warehouse_estate(
 
     env = _warehouse_build_env(
         fabric_workspace,
-        fabric_weaver_lakehouse,
+        fabric_catalogue,
         clean_disposable_warehouse,
         weaver_repo_fixture,
         livy_session,

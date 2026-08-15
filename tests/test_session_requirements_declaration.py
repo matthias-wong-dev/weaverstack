@@ -136,7 +136,7 @@ def _scope(monkeypatch):
     )
     scope = ConsoleScope.__new__(ConsoleScope)
     scope.workspace = FabricWorkspace(
-        workspace="W", weaver_lakehouse="Weaver", environment="weaver"
+        workspace="W", catalogue="Lakehouse/Weaver", environment="weaver"
     )
     scope.auth = _Resource()
     scope.livy = _Resource()

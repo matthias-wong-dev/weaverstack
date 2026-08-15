@@ -290,7 +290,7 @@ def _workspace_literal(workspace) -> str:
         return "None"
     return (
         f"FabricWorkspace(workspace={workspace.workspace!r}, "
-        f"weaver_lakehouse={workspace.weaver_lakehouse!r}, "
+        f"catalogue={workspace.catalogue!r}, "
         f"environment={workspace.environment!r})"
     )
 

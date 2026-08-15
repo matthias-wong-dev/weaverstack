@@ -60,7 +60,7 @@ COMPLETE_STEP = "complete"
 _TIMESTAMP = "%Y%m%dT%H%M%S.%f"
 
 
-def log_folder(resolver: Any, weaver_lakehouse: ItemRef | str) -> Location:
+def log_folder(resolver: Any, catalogue: ItemRef | str) -> Location:
     """Where the declared ``_.Log`` folder materialises, per the resolver.
 
     Derived from the folder's *identity* through the same resolution every other
@@ -68,7 +68,12 @@ def log_folder(resolver: Any, weaver_lakehouse: ItemRef | str) -> Location:
     rather than where the logger guessed.
     """
 
-    item = ItemRef(weaver_lakehouse) if isinstance(weaver_lakehouse, str) else weaver_lakehouse
+    # A caller may hand this the workspace's typed catalogue or the item it
+    # names; both mean the same Lakehouse.
+    if isinstance(catalogue, str):
+        item = ItemRef(catalogue.rpartition("/")[2])
+    else:
+        item = catalogue
     return resolver.folder_object(FolderTarget(item), CATALOGUE_SCHEMA, LOG_FOLDER)
 
 

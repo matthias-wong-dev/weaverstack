@@ -22,7 +22,7 @@ Commands accept the applicable subset of:
 --workspace-type <fabric|local>
 --workspace-config <path>
 --environment <Fabric-Environment>
---weaver-lakehouse <control-Lakehouse>
+--catalogue <control-Lakehouse>
 ```
 
 `workspace_type` defaults to `fabric`. Explicit CLI values override the one
@@ -33,7 +33,7 @@ folder path:
 weaver build ./estate \
   --workspace .local \
   --workspace-type local \
-  --weaver-lakehouse Weaver \
+  --catalogue Lakehouse/Weaver \
   --bind Lakehouse/Sales=Lakehouse/Sales
 ```
 
@@ -44,7 +44,7 @@ the keys and their default logical bindings are the values:
 workspace: Analytics
 workspace_type: fabric
 environment: Runtime
-weaver_lakehouse: Control
+catalogue: Lakehouse/Control
 
 lakehouses:
   Sales_Dev: Lakehouse/Sales
@@ -85,7 +85,7 @@ resources per workspace it is asked about.
 
 **A workspace given at startup is inherited** by commands that name none, which
 is why the example above repeats no `--workspace`. Flags a command *does* give
-are applied on top, so `build --weaver-lakehouse Other` overrides the control
+are applied on top, so `build --catalogue Lakehouse/Other` overrides the control
 Lakehouse without restating the workspace. Naming a different `--workspace`
 addresses that one instead, with its own resources.
 

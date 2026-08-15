@@ -155,7 +155,7 @@ class Catalogue:
     # be. Both produce this class, which is what lets the two be compared.
 
     @classmethod
-    def from_weaver_lakehouse(cls, catalogue: Any, items) -> "Catalogue":
+    def from_catalogue(cls, catalogue: Any, items) -> "Catalogue":
         """The persisted catalogue, read over Spark from the Weaver Lakehouse."""
 
         return read_catalogue_state(catalogue, items)

@@ -46,7 +46,7 @@ SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
 
 def local_resolver() -> LocalResolver:
     return LocalResolver(
-        given_workspace(weaver_lakehouse="Weaver_LH")
+        given_workspace(catalogue="Lakehouse/Weaver_LH")
     )
 
 

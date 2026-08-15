@@ -51,7 +51,7 @@ def plan(repository, tmp_path_factory):
         item_bindings(
             ("Lakehouse/Sales", LAKEHOUSE), ("Warehouse/Reporting", WAREHOUSE)
         ),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
     inventories = {}

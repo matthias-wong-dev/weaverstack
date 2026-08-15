@@ -288,7 +288,7 @@ class LivySession:
         from .resources import LAKEHOUSE
 
         resolver = resolver or FabricResolver(workspace)
-        home = resolver.resolve(ItemRef(workspace.weaver_lakehouse), item_type=LAKEHOUSE)
+        home = resolver.resolve(workspace.catalogue_item, item_type=LAKEHOUSE)
 
         environment_id = kwargs.pop("environment_id", None)
         if environment_id is None:

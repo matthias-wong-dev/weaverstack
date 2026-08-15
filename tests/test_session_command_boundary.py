@@ -138,7 +138,7 @@ def _weaver_python(session):
 
 def _workspace() -> FabricWorkspace:
     return FabricWorkspace(
-        workspace="My Workspace", weaver_lakehouse="Weaver", environment="weaver"
+        workspace="My Workspace", catalogue="Lakehouse/Weaver", environment="weaver"
     )
 
 
@@ -223,8 +223,8 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
             "--dry-run",
             "--workspace",
             "My Workspace",
-            "--weaver-lakehouse",
-            "Weaver",
+            "--catalogue",
+            "Lakehouse/Weaver",
             "--environment",
             "weaver",
         ]

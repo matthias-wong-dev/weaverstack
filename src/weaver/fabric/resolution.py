@@ -237,28 +237,28 @@ class FabricResolver:
 
     # --- the weaver lakehouse ---------------------------------------------
 
-    def _weaver_lakehouse(self) -> ItemRef:
-        name = self.configuration.weaver_lakehouse
+    def _catalogue(self) -> ItemRef:
+        name = self.configuration.catalogue
         if name is None:
             raise CommandError(
                 "A Weaver Lakehouse is required for this Workspace. "
-                "Set weaver_lakehouse on the Workspace or supply it explicitly."
+                "Set catalogue on the Workspace or supply it explicitly."
             )
         return ItemRef(name)
 
     @property
-    def weaver_lakehouse(self) -> Location:
-        return self.lakehouse(self._weaver_lakehouse())
+    def catalogue(self) -> Location:
+        return self.lakehouse(self._catalogue())
 
     @property
     def weaver_items_root(self) -> Location:
         """The workspace's one declaration, with item types directly below it."""
 
-        return self.files_root(self._weaver_lakehouse()) / WEAVER_ITEMS_AREA
+        return self.files_root(self._catalogue()) / WEAVER_ITEMS_AREA
 
     @property
     def build_bundles_root(self) -> Location:
-        return self.files_root(self._weaver_lakehouse()) / BUILD_BUNDLES_AREA
+        return self.files_root(self._catalogue()) / BUILD_BUNDLES_AREA
 
     def build_bundle(self, name: str) -> Location:
         from ..targets import validate_name
@@ -300,7 +300,7 @@ class FabricResolver:
 
     @property
     def control_tables_root(self) -> Location:
-        return self.tables_root(self._weaver_lakehouse())
+        return self.tables_root(self._catalogue())
 
 
 def _server_name(value: str) -> str:

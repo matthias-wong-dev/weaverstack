@@ -33,7 +33,7 @@ def test(
     name: str | None = None,
     file: str | Path | None = None,
     workspace: str | Path | Workspace | None = None,
-    weaver_lakehouse: str | None = None,
+    catalogue: str | None = None,
     workspace_config: str | Path | None = None,
     dry_run: bool = False,
     strict: bool = False,
@@ -56,7 +56,7 @@ def test(
     requested = _requested(targets)
     resolved = _resolve_workspace(
         workspace=workspace,
-        weaver_lakehouse=weaver_lakehouse,
+        catalogue=catalogue,
         workspace_config=workspace_config,
         requested=requested,
         session=session,
@@ -309,7 +309,7 @@ def _requested(targets: str | Sequence[str]):
 def _resolve_workspace(
     *,
     workspace: str | Path | Workspace | None,
-    weaver_lakehouse: str | None,
+    catalogue: str | None,
     workspace_config: str | Path | None,
     requested,
     session=None,
@@ -321,15 +321,15 @@ def _resolve_workspace(
     resolved = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session
     )
-    if weaver_lakehouse is not None:
+    if catalogue is not None:
         resolved = replace(
             resolved,
-            weaver_lakehouse=ItemRef.parse(str(weaver_lakehouse)).name,
+            catalogue=str(catalogue),
         )
     resolved = _with_inferred_control_lakehouse(resolved)
-    if not resolved.weaver_lakehouse:
+    if not resolved.catalogue:
         raise CommandError(
-            "test needs a Weaver control Lakehouse: pass weaver_lakehouse=, give "
+            "test needs a Weaver control Lakehouse: pass catalogue=, give "
             "one in workspace configuration, or run inside a Fabric notebook "
             "with one attached as the default Lakehouse"
         )

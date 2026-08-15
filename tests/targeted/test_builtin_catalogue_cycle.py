@@ -6,7 +6,7 @@ privileged path that ran first, the ordinary path would never be exercised on an
 empty estate and the claim would be decorative.
 
 Build used to run a whole nested build before its own — `_ensure_control_plane`
-called `initialise_weaver_lakehouse`, which read state, planned and installed a
+called `initialise_catalogue`, which read state, planned and installed a
 bundle of its own, before the real build read anything. So every build built the
 catalogue twice, and the second build's plan was never the one that created it.
 
@@ -66,7 +66,7 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = given_workspace(weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     store = FilesystemStore()
     resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
@@ -103,7 +103,7 @@ def _build(estate):
 
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
     inventories = {
@@ -141,7 +141,7 @@ def test_the_repository_carries_the_builtin_item_without_it_being_authored(estat
 def test_the_builtin_item_is_bound_to_the_control_lakehouse_automatically():
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
 
@@ -218,8 +218,8 @@ def test_no_build_module_reaches_the_initialisation_wrapper():
     offenders = [
         module.name
         for module in build_modules
-        if "initialise_weaver_lakehouse" in module.read_text(encoding="utf-8")
-        or "prepare_weaver_lakehouse" in module.read_text(encoding="utf-8")
+        if "initialise_catalogue" in module.read_text(encoding="utf-8")
+        or "prepare_catalogue" in module.read_text(encoding="utf-8")
     ]
 
     assert not offenders, (

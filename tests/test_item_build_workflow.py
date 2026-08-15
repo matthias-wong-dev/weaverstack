@@ -258,7 +258,7 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
 
 def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
         
-    workspace = given_workspace(weaver_lakehouse="Control")
+    workspace = given_workspace(catalogue="Lakehouse/Control")
     resolver = given_resolver(
         workspace=workspace, lakehouses=("Weaver", "Raw_Dev", "Sales_LH", "Curated_Dev"), root=tmp_path
     )

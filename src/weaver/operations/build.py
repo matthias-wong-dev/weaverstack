@@ -104,7 +104,7 @@ def build(
     *,
     bind: str | Sequence[str] | None = None,
     workspace: str | Path | Workspace | None = None,
-    weaver_lakehouse: str | None = None,
+    catalogue: str | None = None,
     workspace_config: str | Path | None = None,
     bundle: str | None = None,
     session=None,
@@ -119,7 +119,7 @@ def build(
     ``workspace=None`` means the current Fabric session. A typed ``Workspace``
     arrives already resolved, so configuration is never layered over it.
 
-    ``weaver_lakehouse`` names the Weaver control Lakehouse. Inside a notebook it
+    ``catalogue`` names the Weaver control Lakehouse. Inside a notebook it
     defaults to the attached Lakehouse, which is the control Lakehouse only and
     becomes an authored target only if a binding says so.
 
@@ -130,18 +130,18 @@ def build(
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session
     )
-    if weaver_lakehouse is not None:
+    if catalogue is not None:
         # An explicit argument outranks a configured or already-resolved value,
         # so a notebook can override what it inferred without rebuilding the
         # Workspace it inferred it into.
         resolved_workspace = replace(
             resolved_workspace,
-            weaver_lakehouse=ItemRef.parse(str(weaver_lakehouse)).name,
+            catalogue=str(catalogue),
         )
     resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
-    if not resolved_workspace.weaver_lakehouse:
+    if not resolved_workspace.catalogue:
         raise CommandError(
-            "build needs a Weaver control Lakehouse: pass weaver_lakehouse=, "
+            "build needs a Weaver control Lakehouse: pass catalogue=, "
             "give one in workspace configuration, or run inside a Fabric "
             "notebook with one attached as the default Lakehouse"
         )
@@ -152,11 +152,11 @@ def build(
     workspace_name = getattr(resolved_workspace, "workspace", None)
     bindings = effective_item_bindings(
         selected,
-        weaver_lakehouse=resolved_workspace.weaver_lakehouse,
+        control_item=resolved_workspace.catalogue_item,
         workspace_name=workspace_name,
     )
     control = LakehouseBinding(
-        ItemRef(resolved_workspace.weaver_lakehouse), workspace_name=workspace_name
+        resolved_workspace.catalogue_item, workspace_name=workspace_name
     )
     source_location, source_store = _repository_source(source, resolved_workspace)
 
@@ -361,7 +361,7 @@ def _build_desktop_fabric(
     preflight_fabric_targets(
         bindings,
         workspace=workspace.workspace,
-        weaver_lakehouse=workspace.weaver_lakehouse,
+        control_item=workspace.catalogue_item,
         environment=workspace.environment,
     )
     resolver = session.resolver(workspace)

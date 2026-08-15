@@ -79,7 +79,7 @@ def test_the_log_folder_is_resolved_through_its_declared_identity():
 
     resolver = given_resolver(
         lakehouses=("Weaver_LH", "Sales_LH"),
-        workspace=given_workspace(weaver_lakehouse="Weaver_LH"),
+        workspace=given_workspace(catalogue="Lakehouse/Weaver_LH"),
     )
     files = resolver.files_root(ItemRef("Weaver_LH")).value
 

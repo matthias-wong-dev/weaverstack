@@ -70,7 +70,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
     local_resolver = given_resolver(
-        workspace=given_workspace(weaver_lakehouse="Weaver"),
+        workspace=given_workspace(catalogue="Lakehouse/Weaver"),
         lakehouses=("Weaver", "Raw_Dev", "Curated_Dev", "Sales_LH"),
         root=tmp_path,
     )
@@ -227,7 +227,7 @@ def _addressable_context(tmp_path, spark, resolver):
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
     local_resolver = given_resolver(
-        workspace=given_workspace(weaver_lakehouse="Weaver"),
+        workspace=given_workspace(catalogue="Lakehouse/Weaver"),
         lakehouses=("Weaver", "Raw_Dev", "Curated_Dev", "Sales_LH"),
         root=tmp_path,
     )

@@ -76,7 +76,7 @@ class Preflight:
 def required_items(
     bindings,
     *,
-    weaver_lakehouse: str,
+    control_item: str,
     environment: str | None = None,
 ) -> tuple[RequiredItem, ...]:
     """Everything a desktop build must find, deduplicated and ordered.
@@ -88,7 +88,7 @@ def required_items(
     """
 
     wanted: list[RequiredItem] = [
-        RequiredItem(weaver_lakehouse, LAKEHOUSE, "Weaver Lakehouse")
+        RequiredItem(str(control_item), LAKEHOUSE, "Weaver Lakehouse")
     ]
     if environment:
         wanted.append(RequiredItem(environment, ENVIRONMENT, "Environment"))
@@ -108,7 +108,7 @@ def preflight_fabric_targets(
     bindings,
     *,
     workspace: str,
-    weaver_lakehouse: str,
+    control_item: str,
     environment: str | None = None,
     client=None,
 ) -> Preflight:
@@ -128,7 +128,7 @@ def preflight_fabric_targets(
     resolved: dict[str, Item] = {}
     problems: list[str] = []
     for required in required_items(
-        bindings, weaver_lakehouse=weaver_lakehouse, environment=environment
+        bindings, control_item=control_item, environment=environment
     ):
         matches = by_name_and_type.get((required.item_type, required.name), [])
         if not matches:

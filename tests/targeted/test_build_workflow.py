@@ -66,7 +66,7 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = given_workspace(weaver_lakehouse="Weaver")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver")
     store = FilesystemStore()
     resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
@@ -102,7 +102,7 @@ def estate(tmp_path):
 def _bindings():
     return effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
 
@@ -267,7 +267,7 @@ def test_a_binding_naming_an_unknown_item_is_refused(estate):
             estate,
             bindings=effective_item_bindings(
                 item_bindings(("Lakehouse/Absent", "Sales_LH")),
-                weaver_lakehouse="Weaver",
+                control_item=ItemRef("Weaver"),
                 workspace_name=WORKSPACE,
             ),
         )

@@ -34,9 +34,9 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
 
     from weaver.fabric import FabricResolver
 
-    weaver_lakehouse = ItemRef(fabric_workspace.weaver_lakehouse)
+    catalogue = fabric_workspace.catalogue_item
     expected_root = FabricResolver(fabric_workspace, client=fabric_client).spark_root(
-        weaver_lakehouse
+        catalogue
     )
 
     payload = livy_session.run(

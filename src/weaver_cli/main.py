@@ -274,7 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     # `--workspace-type local` that this command rejects two lines later is a
     # choice offered in order to refuse it.
     _add_workspace_args(
-        install, include_weaver_lakehouse=False
+        install, include_catalogue=False
     )
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
@@ -292,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     notebook_push.add_argument("--name", help="Fabric display name. Defaults to the filename.")
     notebook_push.add_argument("--description")
     notebook_push.add_argument("--json", action="store_true")
-    _add_workspace_args(notebook_push, include_weaver_lakehouse=False)
+    _add_workspace_args(notebook_push, include_catalogue=False)
     notebook_push.set_defaults(handler=handle_notebook_push)
 
     notebook_run = notebook_commands.add_parser(
@@ -369,7 +369,7 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     from weaver.fabric.notebooks import run_notebook
 
     workspace = _fabric_cli_workspace(args)
-    lakehouse = args.lakehouse or workspace.weaver_lakehouse
+    lakehouse = args.lakehouse or workspace.catalogue
     if not lakehouse:
         raise CommandError(
             "A Lakehouse is required to run this notebook. "
@@ -470,15 +470,15 @@ def handle_capacity(args: argparse.Namespace) -> int:
 def _add_workspace_args(
     parser: argparse.ArgumentParser,
     *,
-    include_weaver_lakehouse: bool = True,
+    include_catalogue: bool = True,
 ) -> None:
     """Add the explicit values that a Workspace configuration can abbreviate."""
 
     parser.add_argument("--workspace", help="Fabric Workspace name.")
     parser.add_argument("--workspace-config", help="Workspace configuration file.")
     parser.add_argument("--environment", help="Fabric Environment name.")
-    if include_weaver_lakehouse:
-        parser.add_argument("--weaver-lakehouse", help="Weaver Lakehouse name.")
+    if include_catalogue:
+        parser.add_argument("--catalogue", help="Weaver Lakehouse name.")
 
 
 def _log_link(task_log) -> str:
@@ -538,7 +538,7 @@ def _resolve_workspace(args: argparse.Namespace):
 
     Inside ``weaver session`` a command that names no workspace inherits the one
     the session was started with, and flags it *does* give are applied on top —
-    so ``build --weaver-lakehouse Other`` overrides the control Lakehouse
+    so ``build --catalogue Other`` overrides the control Lakehouse
     without having to restate the workspace. A command naming its own
     ``--workspace`` addresses that one instead, in its own scope.
 
@@ -556,7 +556,7 @@ def _resolve_workspace(args: argparse.Namespace):
         workspace = resolve_workspace(
             workspace=args.workspace,
             environment=args.environment,
-            weaver_lakehouse=getattr(args, "weaver_lakehouse", None),
+            catalogue=getattr(args, "catalogue", None),
             workspace_config=args.workspace_config,
         )
 
@@ -576,8 +576,8 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
     overrides = {}
     if getattr(args, "environment", None) is not None:
         overrides["environment"] = args.environment
-    if getattr(args, "weaver_lakehouse", None) is not None:
-        overrides["weaver_lakehouse"] = ItemRef.parse(str(args.weaver_lakehouse)).name
+    if getattr(args, "catalogue", None) is not None:
+        overrides["catalogue"] = str(args.catalogue)
     return replace(workspace, **overrides) if overrides else workspace
 
 
@@ -714,10 +714,10 @@ def handle_push(args: argparse.Namespace) -> int:
     from weaver.resolution import resolver_for
 
     workspace = _resolve_workspace(args)
-    if not workspace.weaver_lakehouse:
+    if not workspace.catalogue:
         raise CommandError(
             "A Weaver Lakehouse is required to push a repository. "
-            "Use --weaver-lakehouse or configure one for this workspace."
+            "Use --catalogue or configure one for this workspace."
         )
     resolver = resolver_for(workspace)
     result = push_item_repository(
@@ -744,7 +744,7 @@ def handle_unbind(args: argparse.Namespace) -> int:
 
     lakehouses, warehouses = _unbind_target_names(args.targets)
     workspace = _resolve_workspace(args)
-    if not workspace.weaver_lakehouse:
+    if not workspace.catalogue:
         raise CommandError("A configured Weaver Lakehouse is required to unbind targets.")
     result = _run_unbind(
         workspace,

@@ -286,7 +286,7 @@ def thin_estate(
     bindings = item_bindings(("Lakehouse/Sales", lakehouse))
 
     if workspace is None:
-        workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+        workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     if resolver is None:
         resolver = given_resolver(
             workspace=workspace, lakehouses=("Weaver_LH", lakehouse), root=root

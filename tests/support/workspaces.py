@@ -21,7 +21,10 @@ from weaver.fabric.resolution import FabricResolver
 from weaver.workspaces import FabricWorkspace
 
 WORKSPACE = "Demo"
+#: The Lakehouse the catalogue lives in, as an item name.
 WEAVER_LAKEHOUSE = "Weaver"
+#: And as the workspace's typed catalogue value.
+CATALOGUE = f"Lakehouse/{WEAVER_LAKEHOUSE}"
 TARGET_LAKEHOUSE = "Sales_LH"
 
 LAKEHOUSE_TYPE = "Lakehouse"
@@ -108,7 +111,7 @@ class _Response:
 def given_workspace(
     *,
     workspace: str = WORKSPACE,
-    weaver_lakehouse: str | None = WEAVER_LAKEHOUSE,
+    catalogue: str | None = CATALOGUE,
     environment: str | None = None,
     **rest,
 ) -> FabricWorkspace:
@@ -116,7 +119,7 @@ def given_workspace(
 
     return FabricWorkspace(
         workspace=workspace,
-        weaver_lakehouse=weaver_lakehouse,
+        catalogue=catalogue,
         environment=environment,
         **rest,
     )
@@ -158,6 +161,7 @@ def given_resolver(
 __all__ = [
     "InventoryClient",
     "TARGET_LAKEHOUSE",
+    "CATALOGUE",
     "WEAVER_LAKEHOUSE",
     "WORKSPACE",
     "given_resolver",

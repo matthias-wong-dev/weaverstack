@@ -17,7 +17,7 @@ from .workspaces import (
 _KEYS = {
     "workspace",
     "environment",
-    "weaver_lakehouse",
+    "catalogue",
     "execution",
     "lakehouses",
     "warehouses",
@@ -52,7 +52,7 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
     common = {
         "workspace": payload["workspace"],
         "environment": payload.get("environment"),
-        "weaver_lakehouse": payload.get("weaver_lakehouse"),
+        "catalogue": payload.get("catalogue"),
         "execution": _execution(payload.get("execution"), where="execution"),
         "lakehouses": _targets(payload.get("lakehouses"), item_type=LAKEHOUSE),
         "warehouses": _targets(payload.get("warehouses"), item_type=WAREHOUSE),
@@ -67,7 +67,7 @@ def resolve_workspace(
     *,
     workspace: str | None = None,
     environment: str | None = None,
-    weaver_lakehouse: str | None = None,
+    catalogue: str | None = None,
     workspace_config: str | Path | None = None,
 ) -> Workspace:
     """Apply CLI-over-configuration precedence and return one Workspace."""
@@ -86,9 +86,9 @@ def resolve_workspace(
         "environment": environment
         if environment is not None
         else (configured.environment if configured is not None else None),
-        "weaver_lakehouse": weaver_lakehouse
-        if weaver_lakehouse is not None
-        else (configured.weaver_lakehouse if configured is not None else None),
+        "catalogue": catalogue
+        if catalogue is not None
+        else (configured.catalogue if configured is not None else None),
         "execution": configured.execution
         if configured is not None
         else ExecutionSettings(),

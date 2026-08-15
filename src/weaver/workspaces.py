@@ -15,9 +15,30 @@ from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
 
+#: The one item type a catalogue may name today. Typed values are accepted for
+#: both so the grammar is stable, and a Warehouse catalogue is refused with the
+#: reason rather than an error about parsing.
+CATALOGUE_KIND = "Lakehouse"
+
 WEAVER_ITEMS_AREA = "weaver_items"
 BUILD_BUNDLES_AREA = "build_bundles"
 CLI_AREA = "cli"
+
+
+def _catalogue_value(value: object) -> str:
+    """One ``Lakehouse/Name`` catalogue, checked and returned as written."""
+
+    if not isinstance(value, str) or "/" not in value:
+        raise ConfigError(
+            f"catalogue must be typed as '{CATALOGUE_KIND}/Name', got {value!r}"
+        )
+    kind, _, name = value.partition("/")
+    if kind != CATALOGUE_KIND:
+        raise ConfigError(
+            f"the catalogue is a {CATALOGUE_KIND} today, so {value!r} cannot be "
+            "used; moving it to a Warehouse is separate work"
+        )
+    return f"{CATALOGUE_KIND}/{validate_name(name, what='catalogue')}"
 
 
 @dataclass(frozen=True)
@@ -64,7 +85,11 @@ class Workspace:
     """The configuration one workspace carries, whatever it is addressed for."""
 
     environment: str | None = None
-    weaver_lakehouse: str | None = None
+    #: Where the control plane lives, typed: ``Lakehouse/Weaver``. Typed because
+    #: the catalogue is a Lakehouse today and a later migration may make it a
+    #: Warehouse — and when it does, this value changes without the name
+    #: changing again.
+    catalogue: str | None = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     lakehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
     warehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
@@ -76,11 +101,9 @@ class Workspace:
                 "environment",
                 validate_name(self.environment, what="environment"),
             )
-        if self.weaver_lakehouse is not None:
+        if self.catalogue is not None:
             object.__setattr__(
-                self,
-                "weaver_lakehouse",
-                validate_name(self.weaver_lakehouse, what="weaver_lakehouse"),
+                self, "catalogue", _catalogue_value(self.catalogue)
             )
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
@@ -98,6 +121,23 @@ class Workspace:
                 self.warehouses, item_type=WAREHOUSE, field_name="warehouses"
             ),
         )
+
+    @property
+    def catalogue_item(self) -> "ItemRef":
+        """The catalogue as a resolvable item, or a failure saying it is unset.
+
+        Callers name the item rather than re-parsing the typed string, so where
+        the control plane lives is read in one place.
+        """
+
+        from .targets import ItemRef
+
+        if not self.catalogue:
+            raise ConfigError(
+                "this Workspace names no catalogue; pass catalogue="
+                "'Lakehouse/Weaver' or set it in workspace configuration"
+            )
+        return ItemRef(self.catalogue.split("/", 1)[1])
 
     def declaration_for(self, item_type: str, physical_name: str) -> TargetDeclaration:
         declarations = self.lakehouses if item_type == LAKEHOUSE else self.warehouses

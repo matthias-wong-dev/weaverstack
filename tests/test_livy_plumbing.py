@@ -85,7 +85,7 @@ def test_livy_collection_preserves_scheduler_details():
 def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
     monkeypatch,
 ):
-    workspace = FabricWorkspace(workspace="Analytics", weaver_lakehouse="Control")
+    workspace = FabricWorkspace(workspace="Analytics", catalogue="Lakehouse/Control")
     client = _CollectionClient()
 
     # Keep the test pure: the fake resolver already knows the workspace identity.

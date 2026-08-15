@@ -98,14 +98,20 @@ def _current_fabric_workspace() -> FabricWorkspace:
 
 
 def _with_inferred_control_lakehouse(workspace: Workspace) -> Workspace:
-    if workspace.weaver_lakehouse or not isinstance(workspace, FabricWorkspace):
+    if workspace.catalogue or not isinstance(workspace, FabricWorkspace):
         return workspace
     if not _inside_fabric_session(workspace):
         return workspace
     from ..lakehouse import default_lakehouse
 
     spark = _active_spark()
-    return replace(workspace, weaver_lakehouse=default_lakehouse(spark).name)
+    # Typed on the way in, because what a notebook's attachment gives is a
+    # bare name and the field is a typed one.
+    from ..workspaces import CATALOGUE_KIND
+
+    return replace(
+        workspace, catalogue=f"{CATALOGUE_KIND}/{default_lakehouse(spark).name}"
+    )
 
 
 

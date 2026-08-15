@@ -161,7 +161,7 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
         "from weaver.targets import ItemRef, WarehouseTarget\n"
         "from weaver.resolution import resolver_for\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "resolver = resolver_for(workspace)\n"
         f"target = ItemRef({fabric_target_lakehouse.name!r})\n"
@@ -201,7 +201,7 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
         "from weaver.sessions import NotebookSession\n"
         "from weaver.build_bundle.targets import BoundTarget\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
         "bound = BoundTarget(id='wh', kind='warehouse', "
@@ -237,7 +237,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
         "from weaver.build_bundle.targets import BoundTarget\n"
         "from weaver.build_bundle.executors.base import InstallationContext\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"
@@ -295,7 +295,7 @@ def test_the_session_native_store_reads_back_what_it_wrote(
         "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"
@@ -389,7 +389,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
 
     bindings = effective_item_bindings(
         bindings,
-        weaver_lakehouse=fabric_workspace.weaver_lakehouse,
+        control_item=fabric_workspace.catalogue_item,
         workspace_name=fabric_workspace.workspace,
     )
     inventory = read_warehouse_inventory(
@@ -431,7 +431,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
             repository, item="Lakehouse/_weaver"
         ),
         control_lakehouse=LakehouseBinding(
-            lakehouse=ItemRef(fabric_workspace.weaver_lakehouse),
+            lakehouse=fabric_workspace.catalogue_item,
             workspace_name=fabric_workspace.workspace,
         ),
     )
@@ -444,7 +444,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         "from weaver.sessions import NotebookSession\n"
         "from weaver.build_bundle.prune import read_warehouse_inventory\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"

@@ -47,7 +47,7 @@ class _Args:
         self.workspace = None
         self.workspace_type = None
         self.workspace_config = None
-        self.weaver_lakehouse = None
+        self.catalogue = None
         self.environment = None
 
 

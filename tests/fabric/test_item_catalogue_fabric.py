@@ -57,13 +57,13 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.spark import SparkCatalogue\n"
         f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
-        f"weaver_lakehouse={fabric_workspace.weaver_lakehouse!r}, "
+        f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
         "resolver = resolver_for(workspace)\n"
         "root = resolver.weaver_items_root\n"
         "store.make_directory(root)\n"
-        "control = LakehouseBinding(ItemRef(workspace.weaver_lakehouse), "
+        "control = LakehouseBinding(workspace.catalogue_item, "
         "workspace_name=workspace.workspace)\n"
         "result = build_uploaded_item_repository(\n"
         "    root,\n"
@@ -73,7 +73,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "    control_lakehouse=control)\n"
         "report = result.report\n"
         "catalogue = SparkCatalogue(spark, resolver.spark_destination(\n"
-        "    ItemRef(workspace.weaver_lakehouse)))\n"
+        "    workspace.catalogue_item))\n"
         "installation = spark.table(catalogue.qualify('_', INSTALLATION.name)).where(\n"
         f"    {installation_filter!r}).select('target_name').collect()\n"
         "registry_count = spark.table(catalogue.qualify('_', REGISTRY.name)).where(\n"
@@ -89,7 +89,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "    'expected': sorted(table.name for table in CATALOGUE_TABLES),\n"
         "    'physical_tables': sorted(\n"
         "        entry.name for entry in store.list(\n"
-        "            resolver.tables_root(ItemRef(workspace.weaver_lakehouse)) / '_')\n"
+        "            resolver.tables_root(workspace.catalogue_item) / '_')\n"
         "        if entry.name.casefold() != 'schema.json.gz'\n"
         "    ),\n"
         "    'target_names': [row['target_name'] for row in installation],\n"
@@ -104,7 +104,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     assert {name.casefold() for name in payload["physical_tables"]} == {
         name.casefold() for name in payload["expected"]
     }
-    assert payload["target_names"] == [fabric_workspace.weaver_lakehouse]
+    assert payload["target_names"] == [fabric_workspace.catalogue]
     # Every catalogue table, plus the one Folder the control plane declares:
     # `_.Log`, the task log every top-level Weaver task writes beneath.
     assert payload["registry_count"] == payload["table_count"] + 1

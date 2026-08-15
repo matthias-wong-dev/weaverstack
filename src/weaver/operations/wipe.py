@@ -149,15 +149,26 @@ def wipe(
                     )
 
             unbound = None
-            control = unbind_from or resolved_workspace.weaver_lakehouse
+            control = unbind_from or resolved_workspace.catalogue
+            # Compared as item names, because the two arrive spelled
+            # differently: `unbind_from` names an item and the workspace's
+            # catalogue is typed. Wiping the catalogue itself skips the unbind
+            # entirely — deleting rows from tables that are about to be removed
+            # is work nobody needs.
+            control_name = str(control).rpartition("/")[2] if control else None
             whole_lakehouses = {
                 target.physical_name
                 for target in parsed
                 if target.item_type == "Lakehouse"
             }
-            if not dry_run and control and control not in whole_lakehouses:
+            if not dry_run and control and control_name not in whole_lakehouses:
+                # `unbind_from` names an item; the workspace field is typed.
+                # Both mean one Lakehouse, so the field is written typed.
                 catalogue_workspace = replace(
-                    resolved_workspace, weaver_lakehouse=ItemRef.parse(control).name
+                    resolved_workspace,
+                    catalogue=control
+                    if "/" in str(control)
+                    else f"Lakehouse/{control}",
                 )
                 with opened.step("Unbind catalogue claims"):
                     unbound = _unbind_physical_targets(
@@ -260,7 +271,7 @@ def unbind_catalogue_claims(
                 "configuration"
             )
         catalogue = session_catalogue(
-            opened, workspace, ItemRef(workspace.weaver_lakehouse)
+            opened, workspace, workspace.catalogue_item
         )
         return unbind_targets(
             catalogue, lakehouses=lakehouses, warehouses=warehouses

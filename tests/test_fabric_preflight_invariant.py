@@ -88,7 +88,7 @@ def _preflight(client, bindings, *, environment="WeaverEnv"):
     return preflight_fabric_targets(
         bindings,
         workspace=WORKSPACE,
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
         environment=environment,
         client=client,
     )
@@ -103,7 +103,7 @@ def test_every_bound_target_and_the_control_lakehouse_are_required():
             ("Sales", "Sales_LH", "Lakehouse"),
             ("Reporting", "Reporting", "Warehouse"),
         ),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
         environment="WeaverEnv",
     )
 
@@ -115,7 +115,7 @@ def test_every_bound_target_and_the_control_lakehouse_are_required():
     }
 
 
-def test_the_weaver_lakehouse_is_required_once_though_it_arrives_twice():
+def test_the_catalogue_is_required_once_though_it_arrives_twice():
     """`effective_item_bindings` binds `_weaver` to the control Lakehouse.
 
     So the Weaver Lakehouse reaches preflight both as itself and as that
@@ -128,7 +128,7 @@ def test_the_weaver_lakehouse_is_required_once_though_it_arrives_twice():
             ("Sales", "Sales_LH", "Lakehouse"),
             ("_weaver", "Weaver", "Lakehouse"),
         ),
-        weaver_lakehouse="Weaver",
+        control_item=ItemRef("Weaver"),
     )
 
     assert sum(1 for item in wanted if item.name == "Weaver") == 1
@@ -198,7 +198,7 @@ def test_a_missing_workspace_fails_before_anything_is_listed():
         _preflight(client, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
 
-def test_a_missing_weaver_lakehouse_fails():
+def test_a_missing_catalogue_fails():
     client = FakeClient([("Sales_LH", "Lakehouse"), ("WeaverEnv", "Environment")])
 
     with pytest.raises(PreflightError, match="Weaver Lakehouse 'Weaver' was not found"):

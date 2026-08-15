@@ -9,7 +9,7 @@ Session out, and each operation given it rather than opening its own.
 
     with weaver.session(
         workspace="Sales Analytics",
-        weaver_lakehouse="Weaver",
+        catalogue="Weaver",
         environment="weaver",
     ) as session:
         weaver.build(".", bind="Lakehouse/SalesDev=Lakehouse/Sales", session=session)
@@ -39,7 +39,7 @@ from ..errors import CommandError
 def session(
     *,
     workspace: Any = None,
-    weaver_lakehouse: str | None = None,
+    catalogue: str | None = None,
     environment: str | None = None,
     workspace_config: Any = None,
     credential: Any = None,
@@ -77,7 +77,7 @@ def session(
     else:
         resolved = resolve_workspace(
             workspace=workspace,
-            weaver_lakehouse=weaver_lakehouse,
+            catalogue=catalogue,
             environment=environment,
             workspace_config=workspace_config,
         )

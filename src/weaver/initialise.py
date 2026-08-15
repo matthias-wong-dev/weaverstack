@@ -31,7 +31,7 @@ class InitialiseResult:
     """What initialisation did, in terms a caller can print or assert on."""
 
     item: str
-    weaver_lakehouse: str
+    catalogue: str
     plan: BuildPlan
     report: InstallationReport
 
@@ -48,7 +48,7 @@ class InitialiseResult:
 
         return {
             "item": self.item,
-            "weaver_lakehouse": self.weaver_lakehouse,
+            "catalogue": self.catalogue,
             "bundle_id": self.plan.bundle_id,
             "status": self.report.status,
             "tables": list(self.tables),
@@ -58,11 +58,11 @@ class InitialiseResult:
 @dataclass(frozen=True)
 class PreparedWeaverLakehouse:
     workspace: str
-    weaver_lakehouse: str
+    catalogue: str
     created: bool
 
 
-def prepare_weaver_lakehouse(
+def prepare_catalogue(
     workspace,
     *,
     exists_ok: bool = False,
@@ -71,9 +71,9 @@ def prepare_weaver_lakehouse(
 ) -> PreparedWeaverLakehouse:
     """Create the configured Weaver Lakehouse and its required Files areas."""
 
-    if not workspace.weaver_lakehouse:
+    if not workspace.catalogue:
         raise CommandError("initialise requires a configured Weaver Lakehouse")
-    name = workspace.weaver_lakehouse
+    name = workspace.catalogue
     if isinstance(workspace, FabricWorkspace):
         from .fabric.resources import (
             LAKEHOUSE,
@@ -114,9 +114,9 @@ def _session_around(workspace, *, spark, store):
     return ConsoleSession(workspace=workspace, spark=spark, store=store)
 
 
-def initialise_weaver_lakehouse(
+def initialise_catalogue(
     *,
-    weaver_lakehouse: ItemRef,
+    catalogue: ItemRef,
     workspace,
     store: Store,
     spark: Any = None,
@@ -140,7 +140,7 @@ def initialise_weaver_lakehouse(
     ignore it.
     """
 
-    control = LakehouseBinding(lakehouse=weaver_lakehouse)
+    control = LakehouseBinding(lakehouse=catalogue)
     bindings = ItemBindings(
         (
             ItemBinding(
@@ -175,7 +175,7 @@ def initialise_weaver_lakehouse(
 
     return InitialiseResult(
         item="Lakehouse/_weaver",
-        weaver_lakehouse=weaver_lakehouse.name,
+        catalogue=catalogue.name,
         plan=result.plan,
         report=result.report,
     )

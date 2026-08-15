@@ -187,7 +187,7 @@ def read_build_state(
     """
 
     workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.weaver_lakehouse:
+    if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
 
     with session.step("Read target inventories"):
@@ -213,7 +213,7 @@ def _read_catalogue(*, session, workspace, required):
 
     return read_catalogue_state(
         session_catalogue(
-            session, workspace, ItemRef(workspace.weaver_lakehouse)
+            session, workspace, workspace.catalogue_item
         ),
         required,
     )
@@ -559,7 +559,7 @@ def read_reconciled_catalogue(
         }
 
     workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.weaver_lakehouse:
+    if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
     from ..spark import SparkCatalogue
     from ..targets import ItemRef
@@ -567,7 +567,7 @@ def read_reconciled_catalogue(
     catalogue = SparkCatalogue(
         session.spark(workspace),
         session.resolver(workspace).spark_destination(
-            ItemRef(workspace.weaver_lakehouse)
+            workspace.catalogue_item
         ),
     )
     state = read_catalogue_state(catalogue, sorted(items, key=str))

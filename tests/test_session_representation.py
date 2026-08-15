@@ -37,7 +37,7 @@ def _other(name="B_Workspace") -> FabricWorkspace:
 
 def _fabric(name="A_Workspace") -> FabricWorkspace:
     return FabricWorkspace(
-        workspace=name, weaver_lakehouse="Weaver", environment="weaver"
+        workspace=name, catalogue="Lakehouse/Weaver", environment="weaver"
     )
 
 
@@ -105,7 +105,7 @@ def test_context_identity_ignores_which_targets_were_declared():
     plain = _fabric()
     with_targets = FabricWorkspace(
         workspace="A_Workspace",
-        weaver_lakehouse="Weaver",
+        catalogue="Lakehouse/Weaver",
         environment="weaver",
         lakehouses={
             "Sales": TargetDeclaration(item=WeaverItemId.parse("Lakehouse/Sales")),
@@ -119,7 +119,7 @@ def test_context_identity_ignores_which_targets_were_declared():
 
 def test_a_different_control_lakehouse_is_a_different_context():
     other = FabricWorkspace(
-        workspace="A_Workspace", weaver_lakehouse="Other", environment="weaver"
+        workspace="A_Workspace", catalogue="Lakehouse/Other", environment="weaver"
     )
 
     assert workspace_context(_fabric()) != workspace_context(other)
@@ -142,7 +142,7 @@ def test_a_console_cannot_address_a_workspace_kind_it_has_no_host_for(console):
     class Elsewhere:
         workspace = "somewhere"
         workspace_type = "elsewhere"
-        weaver_lakehouse = None
+        catalogue = None
         environment = None
 
     with pytest.raises(CommandError, match="cannot address"):

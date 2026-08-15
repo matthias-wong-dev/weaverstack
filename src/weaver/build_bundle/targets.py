@@ -279,9 +279,13 @@ class ItemBindings:
 
 
 def effective_item_bindings(
-    bindings: ItemBindings, *, weaver_lakehouse: str, workspace_name: str
+    bindings: ItemBindings, *, control_item: "ItemRef | str", workspace_name: str
 ) -> ItemBindings:
     """Add the mandatory package-owned control item binding.
+
+    ``control_item`` is the physical item the catalogue lives in — the item
+    itself rather than the workspace's typed ``catalogue`` value, because what
+    a binding needs is a name it can resolve.
 
     ``workspace_name`` is required rather than optional, because the binding
     this adds is the one every build renders its catalogue statements against.
@@ -304,7 +308,10 @@ def effective_item_bindings(
             ItemBinding(
                 builtin,
                 LakehouseBinding(
-                    ItemRef.parse(weaver_lakehouse), workspace_name=workspace_name
+                    control_item
+                    if isinstance(control_item, ItemRef)
+                    else ItemRef(str(control_item)),
+                    workspace_name=workspace_name,
                 ),
             ),
         )

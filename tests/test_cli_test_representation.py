@@ -81,8 +81,8 @@ def _run(*args, workspace="Demo"):
             *args,
             "--workspace",
             workspace,
-            "--weaver-lakehouse",
-            "Weaver",
+            "--catalogue",
+            "Lakehouse/Weaver",
         ]
     )
 

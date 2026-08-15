@@ -81,7 +81,7 @@ class Prepared:
     through — a stronger claim than a flag nobody checks.
     """
 
-    catalogue: object
+    catalogue: Lakehouse/object
     inventories: dict
     workspace: object
     session: object
@@ -98,7 +98,7 @@ def session(tmp_path):
     bindings = load_estate_bindings()
     from support.sessions import given_session
 
-    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
 
     class Refuses:
         """Any write here is a dry run that wrote something."""

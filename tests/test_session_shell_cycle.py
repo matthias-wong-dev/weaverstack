@@ -54,7 +54,7 @@ def _run(script: str, factory, workspace=None, environment="weaver") -> int:
         workspace=workspace,
         workspace_config=None,
         environment=environment,
-        weaver_lakehouse=None,
+        catalogue=None,
     )
     return run_shell(args, parser_factory=factory, stdin=io.StringIO(script))
 
@@ -248,7 +248,7 @@ def _args(session=None, **overrides):
         workspace=None,
         workspace_config=None,
         environment=None,
-        weaver_lakehouse=None,
+        catalogue=None,
         session=session,
     )
     values.update(overrides)
@@ -256,17 +256,17 @@ def _args(session=None, **overrides):
 
 
 def test_a_command_naming_nothing_inherits_the_session_workspace():
-    with ConsoleSession(workspace=_workspace(weaver_lakehouse="Weaver")) as session:
+    with ConsoleSession(workspace=_workspace(catalogue="Lakehouse/Weaver")) as session:
         assert _resolve_workspace(_args(session)).workspace == "Demo"
 
 
 def test_a_command_may_override_the_control_lakehouse_it_inherits():
-    with ConsoleSession(workspace=_workspace(weaver_lakehouse="Weaver")) as session:
-        resolved = _resolve_workspace(_args(session, weaver_lakehouse="Other"))
+    with ConsoleSession(workspace=_workspace(catalogue="Lakehouse/Weaver")) as session:
+        resolved = _resolve_workspace(_args(session, catalogue="Lakehouse/Other"))
 
-        assert resolved.weaver_lakehouse == "Other"
+        assert resolved.catalogue == "Lakehouse/Other"
         assert resolved.workspace == "Demo"
-        assert session.workspace.weaver_lakehouse == "Weaver", "the session is unchanged"
+        assert session.workspace.catalogue == "Lakehouse/Weaver", "the session is unchanged"
 
 
 def test_a_command_naming_its_own_workspace_does_not_inherit():
@@ -293,11 +293,11 @@ def test_a_session_started_without_a_workspace_inherits_nothing():
 
 
 def test_overrides_do_not_mutate_the_workspace_they_are_applied_to():
-    original = _workspace(weaver_lakehouse="Weaver")
+    original = _workspace(catalogue="Lakehouse/Weaver")
     overridden = _with_command_overrides(
-        original, _args(weaver_lakehouse="Other", environment="dev")
+        original, _args(catalogue="Lakehouse/Other", environment="dev")
     )
 
-    assert original.weaver_lakehouse == "Weaver"
-    assert overridden.weaver_lakehouse == "Other"
+    assert original.catalogue == "Lakehouse/Weaver"
+    assert overridden.catalogue == "Lakehouse/Other"
     assert overridden.environment == "dev"

@@ -48,7 +48,7 @@ def load(
     *,
     names: str | Sequence[str] | None = None,
     workspace: str | Path | Workspace | None = None,
-    weaver_lakehouse: str | None = None,
+    catalogue: str | None = None,
     workspace_config: str | Path | None = None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
@@ -91,18 +91,18 @@ def load(
     resolved_workspace = _operation_workspace(
         workspace=workspace, workspace_config=workspace_config, session=session
     )
-    if weaver_lakehouse is not None:
+    if catalogue is not None:
         # An explicit argument outranks a configured or already-resolved value,
         # so a caller can override what it inferred without rebuilding the
         # Workspace it inferred it into.
         resolved_workspace = replace(
             resolved_workspace,
-            weaver_lakehouse=ItemRef.parse(str(weaver_lakehouse)).name,
+            catalogue=str(catalogue),
         )
     resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
-    if not resolved_workspace.weaver_lakehouse:
+    if not resolved_workspace.catalogue:
         raise CommandError(
-            "load needs a Weaver control Lakehouse: pass weaver_lakehouse=, "
+            "load needs a Weaver control Lakehouse: pass catalogue=, "
             "give one in workspace configuration, or run inside a Fabric "
             "notebook with one attached as the default Lakehouse"
         )

@@ -117,8 +117,8 @@ def test_the_command_exposes_every_option_the_contract_names():
             "Lakehouse/Sales",
             "--workspace",
             "My Workspace",
-            "--weaver-lakehouse",
-            "Weaver",
+            "--catalogue",
+            "Lakehouse/Weaver",
             "--workspace-config",
             "environment.yml",
             "--fault-tolerant",
@@ -132,7 +132,7 @@ def test_the_command_exposes_every_option_the_contract_names():
 
     assert load.targets == ["Lakehouse/Sales"]
     assert load.workspace == "My Workspace"
-    assert load.weaver_lakehouse == "Weaver"
+    assert load.catalogue == "Lakehouse/Weaver"
     assert load.workspace_config == "environment.yml"
     assert load.fault_tolerant
     assert load.dry_run
@@ -191,7 +191,7 @@ def test_the_cautious_answers_are_the_defaults(recorded):
     assert recorded[0]["names"] is None
 
 
-def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded):
+def test_an_explicit_catalogue_needs_no_configuration_file(recorded):
     """The case the CLI must not require ceremony for.
 
     Naming both the workspace and its control Lakehouse is a complete request.
@@ -199,27 +199,27 @@ def test_an_explicit_weaver_lakehouse_needs_no_configuration_file(recorded):
     argument useless.
     """
 
-    main(_command("--weaver-lakehouse", "Weaver"))
+    main(_command("--catalogue", "Lakehouse/Weaver"))
 
-    assert recorded[0]["workspace"].weaver_lakehouse == "Weaver"
+    assert recorded[0]["workspace"].catalogue == "Lakehouse/Weaver"
 
 
 def test_workspace_configuration_is_still_supported(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
-        "workspace: Demo\nweaver_lakehouse: Configured\n",
+        "workspace: Demo\ncatalogue: Lakehouse/Configured\n",
         encoding="utf-8",
     )
 
     main(["load", "Lakehouse/Sales", "--workspace-config", str(config)])
 
-    assert recorded[0]["workspace"].weaver_lakehouse == "Configured"
+    assert recorded[0]["workspace"].catalogue == "Lakehouse/Configured"
 
 
 def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
-        "workspace: Demo\nweaver_lakehouse: Configured\n",
+        "workspace: Demo\ncatalogue: Lakehouse/Configured\n",
         encoding="utf-8",
     )
 
@@ -229,12 +229,12 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
             "Lakehouse/Sales",
             "--workspace-config",
             str(config),
-            "--weaver-lakehouse",
-            "Explicit",
+            "--catalogue",
+            "Lakehouse/Explicit",
         ]
     )
 
-    assert recorded[0]["workspace"].weaver_lakehouse == "Explicit"
+    assert recorded[0]["workspace"].catalogue == "Lakehouse/Explicit"
 
 
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
@@ -450,8 +450,8 @@ def _fabric(*args: str) -> list[str]:
         "Lakehouse/Sales",
         "--workspace",
         "My Workspace",
-        "--weaver-lakehouse",
-        "Weaver",
+        "--catalogue",
+        "Lakehouse/Weaver",
         "--environment",
         "weaver",
         *args,
@@ -536,8 +536,8 @@ def test_every_requested_target_is_checked_not_only_the_first(livy, capsys):
             "Warehouse/Reporting",
             "--workspace",
             "My Workspace",
-            "--weaver-lakehouse",
-            "Weaver",
+            "--catalogue",
+            "Lakehouse/Weaver",
             "--environment",
             "weaver",
         ]
@@ -561,8 +561,8 @@ def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
             "Warehouse/Reporting",
             "--workspace",
             "My Workspace",
-            "--weaver-lakehouse",
-            "Weaver",
+            "--catalogue",
+            "Lakehouse/Weaver",
             "--environment",
             "weaver",
         ]

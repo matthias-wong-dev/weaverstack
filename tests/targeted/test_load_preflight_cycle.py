@@ -80,7 +80,7 @@ class Prepared:
     both.
     """
 
-    catalogue: object
+    catalogue: Lakehouse/object
     inventories: dict
     workspace: object
     session: object
@@ -95,7 +95,7 @@ class Refreshing(FabricResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
 
     return Prepared(
@@ -216,7 +216,7 @@ def empty_estate(tmp_path):
         tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
     )
     bindings = item_bindings((ITEM, "Views_LH"))
-    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
 
     # A real Session over a real estate root, so the run writes its evidence
@@ -299,7 +299,7 @@ def real_session(tmp_path):
 
     from support.sessions import given_session
 
-    workspace = given_workspace(weaver_lakehouse="Weaver_LH")
+    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     # The failure under test happens inside the inventory reader, so what this
     # Session needs is a store and a resolver rather than a way to reach Fabric.
     return given_session(

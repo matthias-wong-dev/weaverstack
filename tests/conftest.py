@@ -158,7 +158,7 @@ def _lakehouses(root: Path, *, weaver: str, target: str, extra=()) -> Lakehouses
 
     from support.workspaces import given_resolver, given_workspace
 
-    workspace = given_workspace(weaver_lakehouse=weaver)
+    workspace = given_workspace(catalogue=f"Lakehouse/{weaver}")
     resolver = given_resolver(
         workspace=workspace, lakehouses=(weaver, target, *extra), root=root
     )

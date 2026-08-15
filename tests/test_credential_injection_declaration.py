@@ -81,7 +81,7 @@ def test_a_wrong_credential_fails_at_the_call_that_supplied_it():
     """The point of checking early: the traceback names the caller's line."""
 
     with pytest.raises(ConfigError, match="get_token"):
-        weaver.session(workspace="Demo", weaver_lakehouse="Weaver", credential=object())
+        weaver.session(workspace="Demo", catalogue="Lakehouse/Weaver", credential=object())
 
 
 def test_opening_a_session_with_a_credential_acquires_no_token():
@@ -95,7 +95,7 @@ def test_opening_a_session_with_a_credential_acquires_no_token():
     supplied = _Credential()
 
     with weaver.session(
-        workspace="Demo", weaver_lakehouse="Weaver", credential=supplied
+        workspace="Demo", catalogue="Lakehouse/Weaver", credential=supplied
     ):
         pass
 
@@ -108,7 +108,7 @@ def test_the_supplied_credential_is_what_the_session_authenticates_with():
     supplied = _Credential()
 
     with weaver.session(
-        workspace="Demo", weaver_lakehouse="Weaver", credential=supplied
+        workspace="Demo", catalogue="Lakehouse/Weaver", credential=supplied
     ) as session:
         provider = session.scope().token_provider()
         assert provider() == "a-token"
@@ -119,5 +119,5 @@ def test_the_supplied_credential_is_what_the_session_authenticates_with():
 def test_without_one_nothing_is_pinned():
     """Core imposes no chain. The default is chosen when it is needed."""
 
-    with weaver.session(workspace="Demo", weaver_lakehouse="Weaver") as session:
+    with weaver.session(workspace="Demo", catalogue="Lakehouse/Weaver") as session:
         assert session.scope()._credential is None

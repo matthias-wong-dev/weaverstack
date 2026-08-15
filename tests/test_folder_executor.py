@@ -21,7 +21,7 @@ from support.workspaces import given_resolver, given_workspace
 
 
 def _context(tmp_path):
-    workspace = given_workspace(weaver_lakehouse="Control")
+    workspace = given_workspace(catalogue="Lakehouse/Control")
     resolver = given_resolver(
         workspace=workspace, lakehouses=("Control", "Sales"), root=tmp_path
     )

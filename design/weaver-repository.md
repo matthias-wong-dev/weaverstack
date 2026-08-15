@@ -113,7 +113,7 @@ weaver build \
   --bind Lakehouse/Raw_Dev=Lakehouse/Raw \
   --bind Warehouse/Reporting_Dev=Warehouse/Reporting \
   --workspace Analytics --environment Runtime \
-  --weaver-lakehouse Control
+  --catalogue Lakehouse/Control
 ```
 
 From Python inside the target environment, `weaver.build(source, bind=...)` is

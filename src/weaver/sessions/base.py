@@ -33,7 +33,7 @@ def workspace_context(workspace: Workspace) -> tuple:
 
     return (
         str(workspace.workspace),
-        workspace.weaver_lakehouse,
+        workspace.catalogue,
         workspace.environment,
     )
 
