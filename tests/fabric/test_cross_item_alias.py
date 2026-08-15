@@ -56,7 +56,7 @@ CONSUMER = "Lakehouse/AliasConsumer"
 
 
 def upload(store, root, source: Path) -> None:
-    """Replace the repository under the Weaver Lakehouse with this estate's."""
+    """Replace the staged repository with this estate's."""
 
     if store.exists(root):
         store.delete(root, recursive=True)

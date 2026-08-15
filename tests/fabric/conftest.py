@@ -219,7 +219,7 @@ def _warehouse_name() -> str:
 
 @pytest.fixture
 def fabric_lakehouses(fabric_workspace_item, fabric_client):
-    """A Weaver Lakehouse and a target Lakehouse, created and then deleted.
+    """Two Lakehouses, created and then deleted.
 
     The local equivalent of this fixture is `lakehouses`, and the pair are
     deliberately shaped the same so a test can be written against either.
@@ -915,20 +915,15 @@ def _fabric_build_context(
     the explicit repository source and reads back results. Both Lakehouses are disposable and are
     deleted when the run ends.
 
-    **The session attaches to the Weaver Lakehouse**, which is the production
-    model: the control plane is the fixed attachment and destinations are the
-    variable data plane. It used to attach to the *target*, so that a two-part
-    ``Schema.Object`` happened to land in the right place — which made the whole
-    suite blind to the thing it most needed to check. Under the real model an
-    unqualified name lands in the control plane, and every statement therefore has
-    to name its Lakehouse.
+    **The session attaches to a Lakehouse because Fabric creates one against a
+    Lakehouse**, and to no more than that: which Lakehouse carries no meaning, so
+    every statement Weaver generates names the Lakehouse it is about, in full.
 
-    **Both Lakehouses are schema-enabled.** The target so a managed table appears
-    under ``Tables/<schema>/<table>``; the Weaver Lakehouse because the catalogue
-    lives in a schema called ``_`` and a Lakehouse without schemas cannot hold one.
+    **The target is schema-enabled**, so a managed table appears under
+    ``Tables/<schema>/<table>``.
 
-    **The Weaver Lakehouse and the Livy session are the run's, not this context's.**
-    A destination is disposable and a control plane is not — that is the
+    **The catalogue and the Livy session are the run's, not this context's.**
+    A destination is disposable and a catalogue is not — that is the
     architecture, and modelling it costs less as well. A Livy session takes one to
     two minutes to reach ``idle``, which was about seventy per cent of this
     module's wall clock when every test started its own; a capacity that permits
@@ -1132,10 +1127,9 @@ def _fabric_build_context(
         return _timed_session_run(session, label, preamble + body).payload
 
     def seed_orphans() -> None:
-        # Seeded in the *destination*, by its four-part name — the session is
-        # attached to the Weaver Lakehouse, so an unqualified create here would
-        # put the orphans in the control plane and prune would rightly not find
-        # them.
+        # Seeded in the *destination*, by its four-part name, exactly as a
+        # build names what it creates. A two-part name would depend on the
+        # session's attachment, which is precisely what nothing may rely on.
         statements = [
             f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('DWG')}",
             f"CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('Legacy')}",
@@ -1269,7 +1263,7 @@ def fabric_build_env(
     livy_session,
     weaver_repo_fixture,
 ):
-    """One Fabric build environment per test, over the run's Weaver Lakehouse,
+    """One Fabric build environment per test, over the run's catalogue,
     target Lakehouse and Livy session. The target is emptied on the way in, which
     is what a freshly created one used to provide."""
 

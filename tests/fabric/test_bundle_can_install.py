@@ -12,7 +12,7 @@ pay for a session here. So this file is one test with everything in it rather
 than several with a little each.
 
 **No catalogue.** The bundle carries physical stages only, which is what makes
-this about *physicality* and nothing else — no DML against the Weaver Lakehouse,
+this about *physicality* and nothing else — no DML against the catalogue,
 no claims to reconcile, no publication to interpret. The catalogue's own round
 trip is a separate claim with its own tests
 (`test_item_catalogue_fabric.py`, `spark/boundary/test_catalogue_fidelity.py`).

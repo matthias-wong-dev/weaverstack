@@ -366,7 +366,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     # Found by exactly that: it passed alone and failed in the suite.
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
 
-    # The declaration goes into the Weaver Lakehouse, as a user's would.
+    # The declaration is staged in a Lakehouse's Files, as a user's would be.
     root = resolver.weaver_items_root
     if store.exists(root):
         store.delete(root, recursive=True)
@@ -408,7 +408,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
                 bound, sql=warehouse.executor
             )
         else:
-            # The control Lakehouse is read for real, over OneLake from here.
+            # The catalogue is read for real, over TDS from here.
             # An empty inventory would be a lie rather than a simplification —
             # the catalogue schema is already there, and claiming otherwise makes
             # the planner emit a create that the session then rejects.

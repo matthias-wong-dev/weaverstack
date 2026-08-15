@@ -19,7 +19,7 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
 ):
     """``Sales__Order(spark)`` — no destination named anywhere, as in a notebook.
 
-    A Livy session is opened beneath the Weaver Lakehouse, so that is the
+    A Livy session is opened beneath one Lakehouse, so that is the
     attachment, and it is what inference must produce: the same root the desktop
     resolver names over REST. If this fails, the session reports its attachment
     under keys other than the ones :func:`weaver.lakehouse.default_lakehouse`
