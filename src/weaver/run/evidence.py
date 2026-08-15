@@ -26,13 +26,21 @@ from .result import RunError
 RESULT_FOR_STATUS = {
     "succeeded": "succeeded",
     "succeeded_with_rejects": "succeeded",
-    "validated": "succeeded",
+    # A validation that ran and found nothing.
+    "passed": "succeeded",
     "failed": "failed",
+    # The node could not be evaluated at all. Not a failure of the data, but
+    # not a success either, and a reader asking "did this land" wants Failed.
     "invalid": "failed",
     "blocked": "blocked",
     "skipped": "skipped",
     # Never reached, because the run stopped before scheduling it.
     "pending": "skipped",
+    # The two dry-run outcomes. A dry run writes nothing, so neither should
+    # reach a row — they are mapped so that a change of mind about that does
+    # not surface as a run failing at its last step.
+    "validated": "skipped",
+    "planned": "skipped",
 }
 
 

@@ -314,3 +314,43 @@ def test_an_unknown_stored_value_reads_as_written():
 )
 def test_public_names_follow_the_sentence_case_rules(internal, public):
     assert public_column_name(internal) == public
+
+
+# --- every node status has a public Result -----------------------------------
+
+
+def test_every_node_status_maps_to_a_frozen_result():
+    """A status with no mapping fails the run at its last step, in Fabric.
+
+    Weaver has two node vocabularies — a load's and a validation's — and
+    `_.Log` records both. When they were mapped by hand one of them was
+    forgotten, and the first thing that noticed was a real workspace.
+    """
+
+    from weaver.run.evidence import RESULT_FOR_STATUS
+    from weaver.run.result import (
+        BLOCKED,
+        FAILED,
+        INVALID,
+        PENDING,
+        SKIPPED,
+        SUCCEEDED,
+        SUCCEEDED_WITH_REJECTS,
+        VALIDATED,
+    )
+    from weaver.test_report import STATUSES as VALIDATION_STATUSES
+
+    every = {
+        SUCCEEDED,
+        SUCCEEDED_WITH_REJECTS,
+        FAILED,
+        BLOCKED,
+        SKIPPED,
+        PENDING,
+        INVALID,
+        VALIDATED,
+        *VALIDATION_STATUSES,
+    }
+
+    assert every <= set(RESULT_FOR_STATUS)
+    assert set(RESULT_FOR_STATUS.values()) <= set(RESULT_VOCABULARY)
