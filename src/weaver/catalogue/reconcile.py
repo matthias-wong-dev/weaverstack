@@ -8,7 +8,7 @@ Registry certification is written last. See ``design/catalogue.md``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Sequence
 
 from .projection import CatalogueProjection
 from .render import (
@@ -20,7 +20,6 @@ from .render import (
     render_merge,
 )
 from .tables import (
-    CATALOGUE_TABLES,
     DICTIONARY_TABLES,
     INSTALLATION,
     REGISTRY,
@@ -325,21 +324,6 @@ def compare(
         updated=updated,
         unchanged=unchanged,
         deleted=sum(1 for key in found if key not in wanted),
-    )
-
-
-def summarise(
-    projection: CatalogueProjection, existing: Mapping[str, Sequence[Row]]
-) -> tuple[TableChanges, ...]:
-    """What a build's catalogue work would change, table by table.
-
-    ``existing`` is keyed by table name, as :func:`weaver.catalogue.reader.
-    read_installation` returns it.
-    """
-
-    return tuple(
-        compare(table, projection.for_table(table), existing.get(table.name, ()))
-        for table in CATALOGUE_TABLES
     )
 
 
