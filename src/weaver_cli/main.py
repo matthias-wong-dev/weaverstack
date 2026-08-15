@@ -71,14 +71,6 @@ def _requires_build(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
-def _requires_control(args) -> frozenset[str]:
-    """The catalogue lives in Delta in the Weaver Lakehouse, so Spark reaches it."""
-
-    from weaver.sessions.requirements import AUTH, LIVY, RESOLVER, requirements
-
-    return requirements(AUTH, RESOLVER, LIVY)
-
-
 def _requires_rest(args) -> frozenset[str]:
     """Fabric control-plane work: a credential and the resolver, nothing more."""
 
@@ -133,6 +125,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report time spent by transport after the composition finishes.",
     )
+    compose.add_argument(
+        "--yes",
+        action="store_true",
+        help="Run without asking. Also authorises each command in the sequence.",
+    )
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)
 
@@ -163,14 +160,6 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
     build.set_defaults(handler=handle_build, requires=_requires_build)
-
-    push = subcommands.add_parser(
-        "push", help="Validate and upload a repository."
-    )
-    push.add_argument("repository", help="Local repository folder.")
-    push.add_argument("--json", action="store_true", help="emit the result as JSON")
-    _add_workspace_args(push)
-    push.set_defaults(handler=handle_push, requires=_requires_rest)
 
     load = subcommands.add_parser(
         "load", help="Load installed objects in named targets."
@@ -231,21 +220,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_targets)
 
-    unbind = subcommands.add_parser(
-        "unbind", help="Remove catalogue state for named targets."
-    )
-    unbind.add_argument(
-        "targets",
-        nargs="+",
-        metavar="TARGET",
-        help="Lakehouse/Name or Warehouse/Name",
-    )
-    unbind.add_argument("--json", action="store_true", help="emit the result as JSON")
-    _add_workspace_args(unbind)
-    unbind.set_defaults(handler=handle_unbind, requires=_requires_control)
-
     wipe = subcommands.add_parser(
-        "wipe", help="clear a physical Lakehouse or Warehouse"
+        "wipe", help="Clear a physical Lakehouse or Warehouse."
     )
     wipe.add_argument(
         "targets",
@@ -278,12 +254,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
-    notebook = subcommands.add_parser(
+    # Fabric estate management rather than a Weaver lifecycle verb: these act on
+    # workspace items and on the capacity underneath them, and nothing they do
+    # reads or writes the catalogue.
+    fabric = subcommands.add_parser(
+        "fabric", help="Manage the Fabric estate Weaver runs on."
+    )
+    fabric_commands = fabric.add_subparsers(dest="fabric_command", metavar="command")
+    fabric.set_defaults(handler=_group_help(fabric))
+
+    notebook = fabric_commands.add_parser(
         "notebook", help="Deploy or run a Fabric notebook."
     )
     notebook_commands = notebook.add_subparsers(
         dest="notebook_command", metavar="command"
     )
+    notebook.set_defaults(handler=_group_help(notebook))
 
     notebook_push = notebook_commands.add_parser(
         "push", help="Create or update a notebook definition."
@@ -310,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(notebook_run)
     notebook_run.set_defaults(handler=handle_notebook_run)
 
-    capacity = subcommands.add_parser(
+    capacity = fabric_commands.add_parser(
         "capacity", help="Start, stop, or report the state of a Fabric capacity."
     )
     capacity.add_argument("action", choices=CAPACITY_ACTIONS)
@@ -681,8 +667,8 @@ def _read_key() -> str:
     try:
         import termios
         import tty
-    except ImportError:  # a platform without POSIX terminal control
-        return sys.stdin.readline()[:1]
+    except ImportError:
+        return _read_key_windows()
 
     descriptor = sys.stdin.fileno()
     try:
@@ -705,6 +691,29 @@ def _read_key() -> str:
         termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
 
 
+def _read_key_windows() -> str:
+    """One keypress on a console without POSIX terminal control.
+
+    ``msvcrt`` reads a key as it is pressed, so Esc declines a retry here as it
+    does elsewhere. Reading a line instead would wait for Enter, which is the
+    other answer.
+
+    A function or arrow key arrives as a prefix and then its code. Both are
+    returned together, so it matches neither answer and the caller asks again
+    rather than reading the code as the next keypress.
+    """
+
+    try:
+        import msvcrt
+    except ImportError:  # neither POSIX nor Windows: read a line and take one key
+        return sys.stdin.readline()[:1]
+
+    key = msvcrt.getwch()
+    if key in ("\x00", "\xe0"):
+        return key + msvcrt.getwch()
+    return key
+
+
 def _can_ask() -> bool:
     """Whether there is somebody at a terminal to answer."""
 
@@ -715,74 +724,6 @@ def _authorised(args: argparse.Namespace) -> bool:
     """Return whether a command has already received confirmation."""
 
     return bool(getattr(args, "yes", False) or getattr(args, "authorised", False))
-
-
-def handle_push(args: argparse.Namespace) -> int:
-    """Validate locally, then replace ``Files/weaver_items`` as one unit."""
-
-    import json
-
-    from weaver.locations import Location
-    from weaver.push import push_item_repository
-    from weaver.errors import CommandError
-    from weaver.resolution import resolver_for
-
-    workspace = _resolve_workspace(args)
-    if not workspace.catalogue:
-        raise CommandError(
-            "A Weaver Lakehouse is required to push a repository. "
-            "Use --catalogue or configure one for this workspace."
-        )
-    resolver = resolver_for(workspace)
-    result = push_item_repository(
-        Location(args.repository),
-        resolver.weaver_items_root,
-        destination_store=_desktop_store(workspace),
-    )
-    payload = result.to_mapping()
-    if args.json:
-        print(json.dumps(payload, indent=2))
-    else:
-        print(f"Uploaded {len(result.files)} file(s).")
-        print(f"  from: {result.source}")
-        print(f"  to:   {result.destination}")
-        print(f"  signature: {result.repository_signature}")
-    return 0
-
-
-def handle_unbind(args: argparse.Namespace) -> int:
-    import json
-
-    from weaver.operations.wipe import _unbind_target_names
-    from weaver.errors import CommandError
-
-    lakehouses, warehouses = _unbind_target_names(args.targets)
-    workspace = _resolve_workspace(args)
-    if not workspace.catalogue:
-        raise CommandError("A configured Weaver Lakehouse is required to unbind targets.")
-    result = _run_unbind(
-        workspace,
-        lakehouses=lakehouses,
-        warehouses=warehouses,
-        session=_session(args),
-    )
-    if args.json:
-        print(json.dumps(result, indent=2))
-    else:
-        print(f"Removed {len(result['logical_items'])} logical installation(s).")
-        for target in result["targets"]:
-            print(f"  {target}")
-    return 0
-
-
-def _run_unbind(workspace, *, lakehouses, warehouses, session=None) -> dict:
-    """The core operation. The CLI's job here is the arguments, not the crossing."""
-
-    from weaver.operations.wipe import unbind_catalogue_claims
-
-    return unbind_catalogue_claims(
-        workspace, lakehouses=lakehouses, warehouses=warehouses, session=session
-    )
 
 
 def handle_load(args: argparse.Namespace) -> int:
@@ -1141,6 +1082,16 @@ def _build_once(args: argparse.Namespace) -> int:
 def _indented(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line if line else line for line in text.splitlines())
 
+
+
+def _group_help(group: argparse.ArgumentParser):
+    """A group named without a subcommand lists its own, not the whole CLI."""
+
+    def show(args: argparse.Namespace) -> int:
+        group.print_help()
+        return 0
+
+    return show
 
 
 def main(argv: list[str] | None = None) -> int:

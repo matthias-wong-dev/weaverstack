@@ -318,12 +318,10 @@ def wipe_lakehouse(
 def _lakehouse_exists(resolver, lakehouse: ItemRef) -> bool:
     """Whether the Lakehouse is there, resolved as a Lakehouse.
 
-    Locally that is a directory check; on Fabric, resolving it as a Lakehouse
-    both proves it exists and refuses a same-named Warehouse.
+    Resolving it by type both proves it exists and refuses a same-named
+    Warehouse, which matters here because the caller is about to delete.
     """
 
-    if hasattr(resolver, "lakehouse_exists"):
-        return resolver.lakehouse_exists(lakehouse)
     from .errors import CommandError as _CommandError
 
     try:

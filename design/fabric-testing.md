@@ -158,8 +158,8 @@ minutes; the wheel itself uploads in about a second.
 Capacity is billed while it runs, so turn it on, work, turn it off.
 
 ```bash
-weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
-weaver capacity status  --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity resume  --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity status  --resource-group <rg> --capacity-name <capacity>
 
 .venv/bin/python -m pytest -m "fabric and remote" # no publish needed
 
@@ -168,7 +168,7 @@ weaver install --workspace <workspace> --environment weaver
 .venv/bin/python -m pytest -m "fabric and hosted"
 .venv/bin/python -m pytest -m full_integration
 
-weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity suspend --resource-group <rg> --capacity-name <capacity>
 ```
 
 Leave a gap between the wheel-backed tiers: a capacity often allows one Spark

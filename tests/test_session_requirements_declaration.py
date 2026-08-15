@@ -96,7 +96,6 @@ def test_every_command_that_reaches_a_workspace_asks_for_a_credential():
         ("test", "Lakehouse/Sales"),
         ("build", "."),
         ("wipe", "Lakehouse/Sales"),
-        ("unbind", "Lakehouse/Sales"),
     ):
         assert AUTH in _declared(*words), words
 
@@ -106,6 +105,7 @@ def test_a_command_that_declares_nothing_asks_for_nothing():
     so it must not warm one."""
 
     assert _declared(
+        "fabric",
         "capacity",
         "status",
         "--resource-group",

@@ -40,10 +40,11 @@ compose:
 class _Args:
     """The parsed ``compose`` invocation, with no workspace of its own."""
 
-    def __init__(self, name, file=None, session=None):
+    def __init__(self, name, file=None, session=None, yes=False):
         self.name = name
         self.file = file
         self.session = session
+        self.yes = yes
         self.workspace = None
         self.workspace_type = None
         self.workspace_config = None
@@ -112,6 +113,24 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 def test_an_entry_is_a_weaver_command_line():
     assert command_words("weaver load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
+
+
+def test_the_weaver_prefix_is_optional():
+    """A composition holds Weaver commands, so naming the program adds nothing.
+
+    Both spellings work: a line pasted from a terminal keeps the prefix, and a
+    line written for the file need not.
+    """
+
+    assert command_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
+
+
+def test_an_entry_that_names_no_weaver_command_says_which_ones_exist():
+    with pytest.raises(CommandError) as raised:
+        command_words("rm -rf /")
+
+    assert "not a Weaver command" in str(raised.value)
+    assert "build" in str(raised.value)
 
 
 def test_quoted_arguments_survive_exactly():
@@ -187,7 +206,28 @@ def test_without_a_terminal_nothing_runs(tmp_path, recorded, capsys):
 
     assert status == 1
     assert not calls
-    assert "requires confirmation from an interactive input stream" in capsys.readouterr().err
+    assert "--yes" in capsys.readouterr().err
+
+
+def test_yes_runs_a_composition_unattended(tmp_path, recorded, capsys):
+    """The other half of the refusal above: a script says so and it runs.
+
+    Approving the sequence approves each command in it, so a wipe inside one
+    does not ask again — there is nobody to ask.
+    """
+
+    calls, parser_factory, _ = recorded
+    path = _write(tmp_path, DEV)
+
+    status = run_composition(
+        _Args("dev", file=str(path), yes=True),
+        parser_factory=parser_factory,
+        stdin=io.StringIO(""),
+    )
+
+    assert status == 0
+    assert len(calls) == 4
+    assert all(getattr(parsed, "authorised", False) for parsed in calls)
 
 
 def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):

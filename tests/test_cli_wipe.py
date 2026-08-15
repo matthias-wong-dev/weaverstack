@@ -51,17 +51,16 @@ def test_removed_target_switches_are_rejected():
         )
 
 
-def test_unbind_uses_the_same_whole_target_grammar():
-    args = build_parser().parse_args(
-        [
-            "unbind",
-            "Lakehouse/Sales",
-            "Warehouse/Reporting",
-            "--workspace",
-            "Analytics",
-        ]
-    )
-    assert args.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
+def test_unbinding_is_reached_through_wipe_and_not_a_command_of_its_own():
+    """Removing catalogue claims is part of clearing a target, not a verb.
+
+    `unbind_catalogue_claims` is still the operation, and `--unbind-from`
+    selects it. What is gone is a separate command that removed claims for a
+    target it never looked at.
+    """
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["unbind", "Lakehouse/Sales"])
 
 
 def test_wipe_requires_a_typed_target():

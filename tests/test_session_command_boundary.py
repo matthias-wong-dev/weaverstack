@@ -4,7 +4,7 @@
 exists: a console pays for authentication, item resolution and a Livy session
 once, and every command typed at the prompt reuses them. The promise was
 already true of ``build`` and ``wipe``. It was quietly false of ``load``,
-``test`` and ``unbind``, which each opened a :class:`LivySession` of their own,
+``test`` and unbinding, which each opened a :class:`LivySession` of their own,
 waited a minute for it, and closed it on the way out — so a developer running
 
 .. code-block:: text
@@ -167,7 +167,6 @@ def test_a_run_of_commands_in_one_session_starts_one_livy(transport, capsys):
     with ConsoleSession(workspace=_workspace()) as session:
         _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["unbind", "Lakehouse/Sales"])
 
     assert transport.acquired == 1
 
@@ -184,10 +183,9 @@ def test_each_command_still_did_its_own_work(transport, capsys):
     with ConsoleSession(workspace=_workspace()) as session:
         _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["unbind", "Lakehouse/Sales"])
 
     # Each command reached the estate, and none of them imported Weaver to do
-    # it: reading the catalogue and unbinding it are both Spark SQL.
+    # it: reading the catalogue is Spark SQL.
     assert any("SELECT" in code for code in transport.submitted), (
         "the estate was never read, so this passes for the wrong reason"
     )

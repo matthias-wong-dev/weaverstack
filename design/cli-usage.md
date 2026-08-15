@@ -217,15 +217,16 @@ bindings and targets the last one had. `compose.yml` writes the sequence down:
 ```yaml
 compose:
   dev:
-    - weaver wipe Lakehouse/Sales Warehouse/Reporting
-    - weaver build ./repository --bind Lakehouse/Sales=Sales
-    - weaver load Warehouse/Reporting
-    - weaver test Warehouse/Reporting
+    - wipe Lakehouse/Sales Warehouse/Reporting
+    - build ./repository --bind Lakehouse/Sales=Sales
+    - load Warehouse/Reporting
+    - test Warehouse/Reporting
 ```
 
 ```bash
 weaver compose dev
 weaver compose dev --file path/to/compose.yml
+weaver compose dev --yes                        # unattended
 ```
 
 The sequence is displayed and confirmed before anything runs:
@@ -233,10 +234,10 @@ The sequence is displayed and confirmed before anything runs:
 ```text
 Compose: dev  (compose.yml)
 
-1. weaver wipe Lakehouse/Sales Warehouse/Reporting
-2. weaver build ./repository --bind Lakehouse/Sales=Sales
-3. weaver load Warehouse/Reporting
-4. weaver test Warehouse/Reporting
+1. wipe Lakehouse/Sales Warehouse/Reporting
+2. build ./repository --bind Lakehouse/Sales=Sales
+3. load Warehouse/Reporting
+4. test Warehouse/Reporting
 
 Execute this sequence? [y/N]
 ```
@@ -244,10 +245,12 @@ Execute this sequence? [y/N]
 The default is no, and only `y`/`yes` proceeds. **That one answer authorises the
 whole sequence** — a `wipe` inside it does not stop to ask again, because having
 agreed to four commands, being asked about the first of them is not a second
-safeguard. Without a terminal to ask, nothing runs.
+safeguard. Without a terminal to ask, nothing runs unless `--yes` said so
+already; `--yes` carries the same authority to each command in the sequence.
 
 **Entries are ordinary Weaver command lines**, parsed by the same parser and run
-by the same handlers, so an option means here what it means at a prompt. Nothing
+by the same handlers, so an option means here what it means at a prompt. The
+leading `weaver` is optional, because a composition holds nothing else. Nothing
 shell-shaped is accepted — no pipes, no redirection, no `&&`, no variables, no
 other executables — and neither is `session`, `doctor` or a nested `compose`.
 
@@ -278,20 +281,6 @@ so creating one is provisioning rather than building, and a build against a
 missing Weaver Lakehouse fails preflight instead of quietly making one. A
 desktop build proves it — along with the Environment and every bound Lakehouse
 and Warehouse — from a single workspace listing before it starts a Livy session.
-
-## Push (compatibility utility)
-
-Push validates the complete authored repository before replacing
-`Files/weaver_items/`:
-
-```bash
-weaver push ./estate --workspace-config examples/env.yml
-```
-
-Push is whole-repository only. It does not build targets or mutate catalogue
-rows, and the local source folder name is not added as another remote level.
-`Lakehouse/_weaver` is package-owned and is composed in memory; it must not be
-authored or uploaded. Build does not consume this destination.
 
 ## Build
 
@@ -385,21 +374,6 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 
 `weaver test` runs both Tests and Assumptions. See [validation](validation.md).
 
-## Unbind
-
-Unbind removes catalogue state for explicitly named physical targets without
-inspecting or deleting those targets:
-
-```bash
-weaver unbind \
-  --workspace-config examples/env.yml \
-  Lakehouse/Sales_Dev \
-  Warehouse/Reporting_Dev
-```
-
-It works even when the physical target has already disappeared. Unrelated
-installations remain.
-
 ## Wipe
 
 Wipe clears everything in each selected typed target. Physical wipe does not
@@ -426,14 +400,16 @@ from a directory being deleted. Only the pointer goes: the data belongs to the
 item that produced it, and wiping one Lakehouse never reaches through a shortcut
 into another.
 
-## Capacity and diagnostics
+## Fabric estate
+
+`weaver fabric` manages the estate Weaver runs on rather than anything Weaver
+built. Nothing under it reads or writes the catalogue.
 
 ```bash
-weaver capacity resume  --resource-group <rg> --capacity-name <capacity>
-weaver capacity status  --resource-group <rg> --capacity-name <capacity>
-weaver capacity suspend --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity resume  --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity status  --resource-group <rg> --capacity-name <capacity>
+weaver fabric capacity suspend --resource-group <rg> --capacity-name <capacity>
 
-weaver doctor
+weaver fabric notebook push ./notebooks/Refresh.py --workspace "Analytics"
+weaver fabric notebook run Refresh --workspace "Analytics"
 ```
-
-`doctor` reports whether local Spark, Delta and a supported JDK are available.
