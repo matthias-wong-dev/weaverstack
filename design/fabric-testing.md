@@ -52,8 +52,11 @@ Create these once, in the workspace you will point the suite at:
 | `PYTEST_WH_1` | Warehouse | Warehouse destination |
 
 Every Lakehouse must be **schema-enabled** (`creationPayload.enableSchemas`),
-because a managed table has to land at `Tables/<schema>/<table>` and the
-catalogue lives in a schema called `_`.
+because a managed table has to land at `Tables/<schema>/<table>`.
+
+`PYTEST_WEAVER` is a Warehouse, and the harness deletes a Lakehouse of that name
+if it finds one — the catalogue used to be Delta, and a leftover would go on
+answering name lookups nothing makes any more.
 
 > A Warehouse **cannot** share a display name with a Lakehouse. A Lakehouse
 > generates a `SQLEndpoint` facet of the same name, so the name is already taken
@@ -230,15 +233,13 @@ there, so the test places an explicit repository source under a test-only
 OneLake location and its Livy programs parse it, generate the bundle and install
 it, all inside the session against the native Spark catalogue.
 
-From a desktop the same state is read across first — the catalogue and a
+From a desktop the same state is read across first — the catalogue over TDS, a
 Lakehouse's views as Spark SQL, its objects as storage, a Warehouse over TDS —
 and planning happens here against what came back. What differs is where the
 process runs, not what it plans against.
 
-Both Lakehouses are created **schema-enabled**: the target so a managed table
-lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver
-Lakehouse because the catalogue lives in a schema called `_` and a Lakehouse
-without schemas cannot hold one.
+The target Lakehouse is created **schema-enabled**, so a managed table lands
+at `Tables/<schema>/<table>` and views bind by name.
 
 ## Cross-item aliases need two destinations
 
