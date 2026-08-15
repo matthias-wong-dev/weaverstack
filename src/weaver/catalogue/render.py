@@ -198,6 +198,13 @@ def _public(table: CatalogueTable, name: str) -> str:
     return identifier(table.public_name_of(name))
 
 
+#: How many rows one ``MERGE`` carries. A T-SQL table value constructor accepts
+#: at most a thousand rows, and a catalogue table passes that without the estate
+#: being large — a thousand described columns is an ordinary repository. So the
+#: rows are chunked, and the chunk is the engine's limit rather than a guess.
+MERGE_ROWS = 1000
+
+
 def render_merge(
     table: CatalogueTable,
     rows: Sequence[Row],
@@ -218,6 +225,11 @@ def render_merge(
     Registry claim was deleted before any physical work began — so an update can
     only be a row whose projection changed while the object was left alone.
     Dating such a row to this build would say it was rebuilt when it was not.
+
+    Above :data:`MERGE_ROWS` the result is several ``MERGE`` statements rather
+    than one. They are returned together because they are one decision and one
+    action; T-SQL is content with several statements in a batch, and each is
+    idempotent, so the split changes nothing a reader has to know about.
     """
 
     rows = sorted_rows(table, rows)
@@ -226,6 +238,21 @@ def render_merge(
     _check_scope(table, rows, scope)
     _check_unique_keys(table, rows)
 
+    if len(rows) > MERGE_ROWS:
+        chunks = [
+            rows[start : start + MERGE_ROWS]
+            for start in range(0, len(rows), MERGE_ROWS)
+        ]
+        return "".join(_merge_statement(table, chunk, scope=scope) for chunk in chunks)
+    return _merge_statement(table, rows, scope=scope)
+
+
+def _merge_statement(
+    table: CatalogueTable,
+    rows: Sequence[Row],
+    *,
+    scope: InstallationScope | InstallationScopes,
+) -> str:
     source = _source_relation(table, rows)
 
     on = " AND ".join(

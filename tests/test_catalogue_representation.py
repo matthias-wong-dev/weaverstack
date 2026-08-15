@@ -607,3 +607,53 @@ def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
 
     assert "N'Sales_LH.Sales.Customer'" in values
     assert "NULL" in values
+
+
+# --- more rows than one statement can carry ----------------------------------
+
+
+def test_a_thousand_rows_still_render_one_statement():
+    """The engine's limit, and one below it is still one MERGE."""
+
+    from weaver.catalogue.render import MERGE_ROWS
+
+    rows = [registry_row(f"Object{index:05d}") for index in range(MERGE_ROWS)]
+    statement = render_merge(REGISTRY, rows, scope=LAKEHOUSE_SCOPE)
+
+    assert statement.count("MERGE INTO") == 1
+
+
+def test_more_rows_than_the_constructor_takes_are_split():
+    """A T-SQL table value constructor accepts at most a thousand rows.
+
+    A catalogue table passes that without the estate being large — a thousand
+    described columns is an ordinary repository — so the rows are chunked rather
+    than left to fail at install against a real Warehouse.
+    """
+
+    from weaver.catalogue.render import MERGE_ROWS
+
+    rows = [registry_row(f"Object{index:05d}") for index in range(MERGE_ROWS + 1)]
+    statement = render_merge(REGISTRY, rows, scope=LAKEHOUSE_SCOPE)
+
+    assert statement.count("MERGE INTO") == 2
+    # Every row is still there, and no chunk carries more than the limit.
+    for index in range(MERGE_ROWS + 1):
+        assert f"Object{index:05d}" in statement
+    for chunk in statement.split("MERGE INTO")[1:]:
+        values = chunk.split("FROM (VALUES")[1].split("AS source_values")[0]
+        assert values.count("N'Lakehouse'") <= MERGE_ROWS
+
+
+def test_the_split_keeps_key_order_across_chunks():
+    """Determinism survives chunking: a bundle's identity is its bytes."""
+
+    from weaver.catalogue.render import MERGE_ROWS
+
+    rows = [registry_row(f"Object{index:05d}") for index in range(MERGE_ROWS + 50)]
+    statement = render_merge(REGISTRY, list(reversed(rows)), scope=LAKEHOUSE_SCOPE)
+
+    positions = [
+        statement.index(f"Object{index:05d}") for index in range(MERGE_ROWS + 50)
+    ]
+    assert positions == sorted(positions)
