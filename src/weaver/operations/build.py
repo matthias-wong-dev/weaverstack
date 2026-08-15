@@ -103,8 +103,9 @@ def build(
     source=None,
     *,
     bind: str | Sequence[str] | None = None,
-    workspace: str | Path | Workspace | None = None,
+    workspace: str | None = None,
     catalogue: str | None = None,
+    environment: str | None = None,
     workspace_config: str | Path | None = None,
     bundle: str | None = None,
     session=None,
@@ -128,7 +129,11 @@ def build(
     """
 
     resolved_workspace = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config, session=session
+        workspace=workspace,
+        workspace_config=workspace_config,
+        catalogue=catalogue,
+        environment=environment,
+        session=session,
     )
     if catalogue is not None:
         # An explicit argument outranks a configured or already-resolved value,

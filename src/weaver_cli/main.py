@@ -582,13 +582,27 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
 
 
 def _session(args: argparse.Namespace):
-    """The Session this command runs in, where there is one.
+    """The Session this command inherits, where there is one.
 
     ``weaver session`` attaches one to every line it parses. A one-shot
-    invocation has none, and each operation opens and closes its own.
+    invocation has none.
     """
 
     return getattr(args, "session", None)
+
+
+def _running_session(args: argparse.Namespace, workspace):
+    """The Session this command runs in, borrowed or opened for it.
+
+    Operations take names and a Session, never a resolved Workspace — so the
+    CLI, which resolves one for its own inheritance and override rules, is what
+    turns it into a Session. Borrowed from ``weaver session`` where there is
+    one, and closed here only when this opened it.
+    """
+
+    from weaver.sessions.host import use_or_create_session
+
+    return use_or_create_session(_session(args), workspace=workspace)
 
 
 def handle_session(args: argparse.Namespace) -> int:
@@ -846,7 +860,6 @@ def _run_load(
         return weaver.load(
             list(targets),
             names=names,
-            workspace=workspace,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             session=opened,
@@ -984,7 +997,6 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
             _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.test(
             list(targets),
-            workspace=workspace,
             name=name,
             file=file,
             dry_run=dry_run,
@@ -1039,13 +1051,13 @@ def handle_wipe(args: argparse.Namespace) -> int:
     # A preview is needed only when the command needs confirmation.
     previewing = args.dry_run or not _authorised(args)
     if previewing:
-        planned = weaver.wipe(
-            args.targets,
-            workspace=workspace,
-            unbind_from=args.unbind_from,
-            dry_run=True,
-            session=_session(args),
-        )
+        with _running_session(args, workspace) as opened:
+            planned = weaver.wipe(
+                args.targets,
+                unbind_from=args.unbind_from,
+                dry_run=True,
+                session=opened,
+            )
         print(f"wipe on {workspace.workspace}\n")
         for report in planned.reports:
             print(f"  {report.target}")
@@ -1077,12 +1089,12 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 print("Cancelled.")
                 return 1
 
-    result = weaver.wipe(
-        args.targets,
-        workspace=workspace,
-        unbind_from=args.unbind_from,
-        session=_session(args),
-    )
+    with _running_session(args, workspace) as opened:
+        result = weaver.wipe(
+            args.targets,
+            unbind_from=args.unbind_from,
+            session=opened,
+        )
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
     elif result.count:
@@ -1103,13 +1115,13 @@ def _build_once(args: argparse.Namespace) -> int:
     import json
 
     workspace = _resolve_workspace(args)
-    result = weaver.build(
-        args.repository,
-        bind=args.item_bindings,
-        workspace=workspace,
-        bundle=args.bundle,
-        session=_session(args),
-    )
+    with _running_session(args, workspace) as opened:
+        result = weaver.build(
+            args.repository,
+            bind=args.item_bindings,
+            bundle=args.bundle,
+            session=opened,
+        )
     payload = result.to_mapping()
     if args.json:
         print(json.dumps(payload, indent=2))

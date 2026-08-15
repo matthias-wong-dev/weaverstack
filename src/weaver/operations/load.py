@@ -47,8 +47,9 @@ def load(
     targets: str | Sequence[str],
     *,
     names: str | Sequence[str] | None = None,
-    workspace: str | Path | Workspace | None = None,
+    workspace: str | None = None,
     catalogue: str | None = None,
+    environment: str | None = None,
     workspace_config: str | Path | None = None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
@@ -89,7 +90,11 @@ def load(
     from .workspace import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved_workspace = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config, session=session
+        workspace=workspace,
+        workspace_config=workspace_config,
+        catalogue=catalogue,
+        environment=environment,
+        session=session,
     )
     if catalogue is not None:
         # An explicit argument outranks a configured or already-resolved value,

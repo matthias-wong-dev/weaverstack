@@ -85,17 +85,15 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     assert main(
         ["wipe", "Lakehouse/Sales", "--workspace", "/tmp/local", "--dry-run"]
     ) == 0
-    assert calls == [
-        (
-            ("Lakehouse/Sales",),
-            {
-                "workspace": workspace,
-                "unbind_from": None,
-                "dry_run": True,
-                "session": None,
-            },
-        )
-    ]
+    # The CLI hands the operation a Session rather than a resolved Workspace:
+    # operations take names, and the Session is what carries the context the
+    # CLI resolved for its own inheritance and override rules.
+    (targets, passed), = calls
+    assert targets == ("Lakehouse/Sales",)
+    assert passed["unbind_from"] is None
+    assert passed["dry_run"] is True
+    assert passed["session"].workspace is workspace
+    assert "workspace" not in passed
     assert "Nothing was changed" in capsys.readouterr().out
 
 
@@ -128,12 +126,11 @@ def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch)
             "--yes",
         ]
     ) == 0
-    assert calls == [
-        (
-            ("Lakehouse/Sales/Tables",),
-            {"workspace": workspace, "unbind_from": "Control", "session": None},
-        )
-    ]
+    (targets, passed), = calls
+    assert targets == ("Lakehouse/Sales/Tables",)
+    assert passed["unbind_from"] == "Control"
+    assert passed["session"].workspace is workspace
+    assert "workspace" not in passed
 
 
 def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):

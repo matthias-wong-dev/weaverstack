@@ -193,7 +193,7 @@ def test_public_wipe_rejects_partial_lakehouse_targets(value):
 
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
-    workspace = given_workspace(catalogue=None)
+    workspace = None
     monkeypatch.setattr(
         operations,
         "_wipe_one",
@@ -209,7 +209,7 @@ def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
         lambda *_args, **_kwargs: pytest.fail("unbind was not requested"),
     )
 
-    result = public_wipe("Lakehouse/Sales", workspace=workspace)
+    result = public_wipe("Lakehouse/Sales", workspace="Demo")
     assert result.count == 1
     assert result.unbound is None
 
@@ -218,7 +218,7 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     monkeypatch,
 ):
     operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+
     calls = []
     monkeypatch.setattr(
         operations,
@@ -238,6 +238,6 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
         or {"targets": []},
     )
 
-    public_wipe("Lakehouse/Sales", workspace=workspace)
-    public_wipe("Lakehouse/Control", workspace=workspace)
+    public_wipe("Lakehouse/Sales", workspace="Demo", catalogue="Lakehouse/Control")
+    public_wipe("Lakehouse/Control", workspace="Demo", catalogue="Lakehouse/Control")
     assert calls == [("Lakehouse/Control", ("Lakehouse/Sales",))]

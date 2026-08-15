@@ -32,8 +32,9 @@ def test(
     *,
     name: str | None = None,
     file: str | Path | None = None,
-    workspace: str | Path | Workspace | None = None,
+    workspace: str | None = None,
     catalogue: str | None = None,
+    environment: str | None = None,
     workspace_config: str | Path | None = None,
     dry_run: bool = False,
     strict: bool = False,
@@ -57,6 +58,7 @@ def test(
     resolved = _resolve_workspace(
         workspace=workspace,
         catalogue=catalogue,
+        environment=environment,
         workspace_config=workspace_config,
         requested=requested,
         session=session,
@@ -308,8 +310,9 @@ def _requested(targets: str | Sequence[str]):
 
 def _resolve_workspace(
     *,
-    workspace: str | Path | Workspace | None,
+    workspace: str | None,
     catalogue: str | None,
+    environment: str | None = None,
     workspace_config: str | Path | None,
     requested,
     session=None,
@@ -319,7 +322,11 @@ def _resolve_workspace(
     from .workspace import _operation_workspace, _with_inferred_control_lakehouse
 
     resolved = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config, session=session
+        workspace=workspace,
+        workspace_config=workspace_config,
+        catalogue=catalogue,
+        environment=environment,
+        session=session,
     )
     if catalogue is not None:
         resolved = replace(

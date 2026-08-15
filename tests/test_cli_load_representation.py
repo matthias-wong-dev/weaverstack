@@ -201,7 +201,7 @@ def test_an_explicit_catalogue_needs_no_configuration_file(recorded):
 
     main(_command("--catalogue", "Lakehouse/Weaver"))
 
-    assert recorded[0]["workspace"].catalogue == "Lakehouse/Weaver"
+    assert recorded[0]["session"].workspace.catalogue == "Lakehouse/Weaver"
 
 
 def test_workspace_configuration_is_still_supported(recorded, tmp_path):
@@ -213,7 +213,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
 
     main(["load", "Lakehouse/Sales", "--workspace-config", str(config)])
 
-    assert recorded[0]["workspace"].catalogue == "Lakehouse/Configured"
+    assert recorded[0]["session"].workspace.catalogue == "Lakehouse/Configured"
 
 
 def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path):
@@ -234,7 +234,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
         ]
     )
 
-    assert recorded[0]["workspace"].catalogue == "Lakehouse/Explicit"
+    assert recorded[0]["session"].workspace.catalogue == "Lakehouse/Explicit"
 
 
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):

@@ -106,7 +106,9 @@ class WipeResult:
 def wipe(
     targets: str | Iterable[str],
     *,
-    workspace: str | Path | Workspace | None = None,
+    workspace: str | None = None,
+    catalogue: str | None = None,
+    environment: str | None = None,
     workspace_config: str | Path | None = None,
     unbind_from: str | None = None,
     dry_run: bool = False,
@@ -124,7 +126,11 @@ def wipe(
     if not parsed:
         raise CommandError("wipe needs at least one target")
     resolved_workspace = _operation_workspace(
-        workspace=workspace, workspace_config=workspace_config, session=session
+        workspace=workspace,
+        workspace_config=workspace_config,
+        catalogue=catalogue,
+        environment=environment,
+        session=session,
     )
     from ..sessions.host import use_or_create_session
 

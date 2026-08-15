@@ -18,7 +18,9 @@ from ..sessions.host import inside_fabric_session as _inside_fabric_session
 from ..workspaces import FabricWorkspace, Workspace
 
 
-def _operation_workspace(*, workspace, workspace_config, session=None) -> Workspace:
+def _operation_workspace(
+    *, workspace, workspace_config, catalogue=None, environment=None, session=None
+) -> Workspace:
     """Which workspace this operation means.
 
     .. code-block:: text
@@ -42,19 +44,39 @@ def _operation_workspace(*, workspace, workspace_config, session=None) -> Worksp
     """
 
     if isinstance(workspace, Workspace):
-        if workspace_config is not None:
-            raise CommandError(
-                "workspace_config cannot be combined with an already resolved Workspace"
-            )
-        return workspace
-    if workspace is None and workspace_config is None:
-        inherited = getattr(session, "workspace", None)
-        if inherited is not None:
-            return inherited
-        return _current_fabric_workspace()
-    from ..config import resolve_workspace
+        raise CommandError(
+            "an operation takes a workspace name; open a Session for an "
+            "already-resolved Workspace and pass session= instead:\n"
+            "    with weaver.session(workspace=workspace) as session:\n"
+            "        weaver.build('.', session=session)"
+        )
+    # The base context first, then what this call named on top of it. Split in
+    # two because the same overrides apply however the base was found — a
+    # Session's workspace, a configuration file, or a notebook's own context.
+    if workspace is not None or workspace_config is not None:
+        from ..config import resolve_workspace
 
-    return resolve_workspace(workspace=workspace, workspace_config=workspace_config)
+        base = resolve_workspace(
+            workspace=workspace,
+            catalogue=catalogue,
+            environment=environment,
+            workspace_config=workspace_config,
+        )
+    else:
+        inherited = getattr(session, "workspace", None)
+        base = inherited if inherited is not None else _current_fabric_workspace()
+
+    changes = {}
+    if catalogue is not None and base.catalogue != catalogue:
+        changes["catalogue"] = catalogue
+    if environment is not None and base.environment != environment:
+        changes["environment"] = environment
+    if not changes:
+        return base
+
+    from dataclasses import replace
+
+    return replace(base, **changes)
 
 
 

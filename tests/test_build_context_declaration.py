@@ -157,26 +157,44 @@ def test_an_explicit_catalogue_overrides_the_attached_default(
     assert captured["workspace"].catalogue == "Lakehouse/ChosenWeaver"
 
 
-def test_an_explicit_catalogue_overrides_a_typed_workspace(
-    captured, repository, tmp_path
+def test_an_operation_given_a_resolved_workspace_says_to_open_a_session(
+    repository, tmp_path
 ):
-    """A typed Workspace is already resolved; an argument still outranks it."""
+    """Operations take names. A resolved Workspace goes through a Session.
+
+    One way in rather than two: a Workspace argument and a Session argument
+    would both carry a context, and an operation given each would have to pick
+    between them.
+    """
 
     workspace = FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Configured")
 
-    with pytest.raises(Halt):
-        _build(repository, workspace=workspace, catalogue="Lakehouse/Chosen")
+    with pytest.raises(CommandError, match="weaver.session"):
+        _build(repository, workspace=workspace)
+
+
+def test_an_explicit_catalogue_overrides_the_sessions_workspace(
+    captured, repository, desktop_credential
+):
+    """The Session supplies the context; an argument still outranks it."""
+
+    with weaver.session(
+        workspace="Demo", catalogue="Lakehouse/Configured"
+    ) as session:
+        with pytest.raises(Halt):
+            _build(repository, session=session, catalogue="Lakehouse/Chosen")
 
     assert captured["workspace"].catalogue == "Lakehouse/Chosen"
 
 
-def test_a_typed_workspace_supplies_the_catalogue_when_no_argument_does(
-    captured, repository, tmp_path
+def test_the_sessions_workspace_supplies_the_catalogue_when_no_argument_does(
+    captured, repository, desktop_credential
 ):
-    workspace = FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Configured")
-
-    with pytest.raises(Halt):
-        _build(repository, workspace=workspace)
+    with weaver.session(
+        workspace="Demo", catalogue="Lakehouse/Configured"
+    ) as session:
+        with pytest.raises(Halt):
+            _build(repository, session=session)
 
     assert captured["workspace"].catalogue == "Lakehouse/Configured"
 
@@ -212,10 +230,8 @@ def test_no_context_outside_fabric_names_what_to_supply(repository, monkeypatch)
 def test_a_workspace_without_a_catalogue_says_all_three_ways_to_give_one(
     repository, tmp_path
 ):
-    workspace = FabricWorkspace(workspace="Demo")
-
     with pytest.raises(CommandError) as raised:
-        _build(repository, workspace=workspace)
+        _build(repository, workspace="Demo")
 
     message = str(raised.value)
     assert "catalogue=" in message
@@ -223,13 +239,19 @@ def test_a_workspace_without_a_catalogue_says_all_three_ways_to_give_one(
     assert "default Lakehouse" in message
 
 
-def test_configuration_cannot_be_layered_over_an_already_resolved_workspace(
-    repository, tmp_path
+def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session(
+    tmp_path, desktop_credential
 ):
-    workspace = FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Weaver")
+    """The same rule, now stated once where a Workspace is accepted at all."""
 
-    with pytest.raises(CommandError, match="already resolved Workspace"):
-        _build(repository, workspace=workspace, workspace_config=tmp_path / "ws.yml")
+    config = tmp_path / "ws.yml"
+    config.write_text("workspace: Other\n", encoding="utf-8")
+
+    with pytest.raises(CommandError, match="nothing to add"):
+        weaver.session(
+            workspace=FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Weaver"),
+            workspace_config=config,
+        )
 
 
 # --- the Livy session is never reached by a build that cannot succeed ----------
@@ -257,12 +279,13 @@ def test_a_failed_preflight_does_not_create_a_livy_session(
 
     monkeypatch.setattr(fabric.LivySession, "for_workspace", explode)
 
-    workspace = FabricWorkspace(
-        workspace="Analytics", catalogue="Lakehouse/Weaver", environment="WeaverEnv"
-    )
-
     with pytest.raises(preflight_module.PreflightError, match="was not found"):
-        _build(repository, workspace=workspace)
+        _build(
+            repository,
+            workspace="Analytics",
+            catalogue="Lakehouse/Weaver",
+            environment="WeaverEnv",
+        )
 
 
 def test_a_desktop_build_without_an_environment_fails_before_preflight(
@@ -275,10 +298,8 @@ def test_a_desktop_build_without_an_environment_fails_before_preflight(
 
     monkeypatch.setattr(preflight_module, "preflight_fabric_targets", explode)
 
-    workspace = FabricWorkspace(workspace="Analytics", catalogue="Lakehouse/Weaver")
-
     with pytest.raises(CommandError, match="requires an Environment"):
-        _build(repository, workspace=workspace)
+        _build(repository, workspace="Analytics", catalogue="Lakehouse/Weaver")
 
 
 def test_a_repository_error_is_reported_before_any_fabric_call(
@@ -295,13 +316,12 @@ def test_a_repository_error_is_reported_before_any_fabric_call(
 
     empty = tmp_path / "Empty"
     empty.mkdir()
-    workspace = FabricWorkspace(
-        workspace="Analytics", catalogue="Lakehouse/Weaver", environment="WeaverEnv"
-    )
 
     with pytest.raises(BuildError):
         weaver.build(
             str(empty),
             bind="Lakehouse/Sales_LH=Sales",
-            workspace=workspace,
+            workspace="Analytics",
+            catalogue="Lakehouse/Weaver",
+            environment="WeaverEnv",
         )
