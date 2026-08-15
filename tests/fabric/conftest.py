@@ -145,6 +145,11 @@ def _disposable_name(role: str) -> str:
 #: Every name is overridable, so another tenant runs the suite against its own.
 FIXED_ITEMS = {
     "weaver": "PYTEST_WEAVER",
+    # Repositories and bundles need OneLake and the catalogue has none. This
+    # Lakehouse holds them and is never built into: staged files in a *target*
+    # would show up in its own inventory, which is how the bundle the suite had
+    # just written started failing a claim about declared folders.
+    "staging": "PYTEST_STAGING",
     "target": "PYTEST_LH_1",
     "producer": "PYTEST_LH_2",
     "consumer": "PYTEST_LH_3",
@@ -309,6 +314,19 @@ def fabric_catalogue(fabric_workspace_item, fabric_client):
     """
 
     return _ensure_catalogue_warehouse(fabric_client, fabric_workspace_item, "weaver")
+
+
+@pytest.fixture(scope="session")
+def fabric_staging_lakehouse(fabric_workspace_item, fabric_client):
+    """The Lakehouse that holds repositories and bundles, and is never built into.
+
+    Both need OneLake and the catalogue is a Warehouse, so they live somewhere.
+    Somewhere that is not a *target*: a staged file under a target's ``Files``
+    is an ordinary folder to that target's own inventory, so a bundle written
+    there would appear in the estate the build is being held to.
+    """
+
+    return _ensure_lakehouse(fabric_client, fabric_workspace_item, "staging")
 
 
 @pytest.fixture(scope="session")
@@ -944,6 +962,7 @@ def _fabric_build_context(
     fabric_client,
     workspace,
     target_lh,
+    staging_lh,
     session,
     weaver_repo_fixture,
     warehouse=None,
@@ -988,12 +1007,13 @@ def _fabric_build_context(
     store = OneLakeDfsClient()
     weaver = workspace.catalogue_item
     target = ItemRef(target_lh.name)
+    staging = ItemRef(staging_lh.name)
     warehouse_name = warehouse.item.name if warehouse is not None else None
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
     # Staged in the *target* Lakehouse's Files. It used to be the catalogue's,
     # and a Warehouse has no Files area — nor any reason to hold a repository,
     # which was only ever staging for a build that reads it.
-    repository_root = resolver.files_root(target).join(*repository_relative)
+    repository_root = resolver.files_root(staging).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
     _empty_the_target(
@@ -1053,7 +1073,7 @@ def _fabric_build_context(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            f"repository_root = resolver.files_root(ItemRef({target.name!r})).join"
+            f"repository_root = resolver.files_root(ItemRef({staging.name!r})).join"
             f"(*{repository_relative!r})\n"
             "repository = parse_item_repository(repository_root, store=store)\n"
             f"control = WarehouseBinding(warehouse=ItemRef({weaver.name!r}), "
@@ -1070,7 +1090,7 @@ def _fabric_build_context(
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
-            f"    output={staged_bundle_source(target.name, bundle_name)},\n"
+            f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims)\n"
@@ -1084,7 +1104,7 @@ def _fabric_build_context(
         # A desktop-addressed (https) handle to the same physical bundle, so the
         # test can read it and the install can re-resolve it by name in-session.
         return BuildBundle(
-            location=staged_bundle(resolver, target.name, payload["name"]), plan=plan
+            location=staged_bundle(resolver, staging.name, payload["name"]), plan=plan
         )
 
     def install(bundle) -> InstallOutcome:
@@ -1103,7 +1123,7 @@ def _fabric_build_context(
             # The workspace is what lets a Warehouse batch acquire SQL on the
             # session's own identity. A Lakehouse-only bundle never asks.
             "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
-            f"bundle = load_bundle({staged_bundle_source(target.name, bundle_name)}, "
+            f"bundle = load_bundle({staged_bundle_source(staging.name, bundle_name)}, "
             "store=store)\n"
             "report = installer.install(bundle)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
@@ -1208,7 +1228,8 @@ def _fabric_build_context(
         seed_orphans=seed_orphans,
         run_schema_exists=schema_exists,
         run_python=run_python,
-        bundle_location=lambda name: staged_bundle(resolver, target.name, name),
+        destination=destination,
+        bundle_location=lambda name: staged_bundle(resolver, staging.name, name),
     )
 
 
@@ -1305,6 +1326,7 @@ def fabric_build_env(
     fabric_client,
     fabric_workspace,
     fabric_target_lakehouse,
+    fabric_staging_lakehouse,
     livy_session,
     weaver_repo_fixture,
 ):
@@ -1317,6 +1339,7 @@ def fabric_build_env(
         fabric_client,
         fabric_workspace,
         fabric_target_lakehouse,
+        fabric_staging_lakehouse,
         livy_session,
         weaver_repo_fixture,
     ) as env:
@@ -1394,7 +1417,7 @@ def _warehouse_build_env(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            f"repository_root = resolver.files_root(ItemRef({weaver.name!r})).join"
+            f"repository_root = resolver.files_root(ItemRef({staging.name!r})).join"
             f"(*{repository_relative!r})\n"
             "repository = parse_item_repository(repository_root, store=store)\n"
             f"selected = ItemBindings(({binds},))\n"
@@ -1411,7 +1434,7 @@ def _warehouse_build_env(
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
-            f"    output={staged_bundle_source(weaver.name, bundle_name)},\n"
+            f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims)\n"
@@ -1423,7 +1446,7 @@ def _warehouse_build_env(
         ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         return BuildBundle(
-            location=staged_bundle(resolver, weaver.name, payload["name"]), plan=plan
+            location=staged_bundle(resolver, staging.name, payload["name"]), plan=plan
         )
 
     def install(bundle) -> InstallOutcome:
@@ -1439,7 +1462,7 @@ def _warehouse_build_env(
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
             "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
-            f"bundle = load_bundle({staged_bundle_source(weaver.name, bundle_name)}, "
+            f"bundle = load_bundle({staged_bundle_source(staging.name, bundle_name)}, "
             "store=store)\n"
             "report = installer.install(bundle)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
@@ -1529,7 +1552,7 @@ def _warehouse_build_env(
 @pytest.fixture(scope="module")
 def warehouse_estate(
     fabric_workspace,
-    fabric_target_lakehouse,
+    fabric_staging_lakehouse,
     clean_disposable_warehouse,
     weaver_repo_fixture,
     livy_session,
@@ -1543,7 +1566,7 @@ def warehouse_estate(
 
     env = _warehouse_build_env(
         fabric_workspace,
-        fabric_target_lakehouse,
+        fabric_staging_lakehouse,
         clean_disposable_warehouse,
         weaver_repo_fixture,
         livy_session,
@@ -1574,6 +1597,7 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_client"),
         request.getfixturevalue("fabric_workspace"),
         request.getfixturevalue("fabric_target_lakehouse"),
+        request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
     ) as env:
@@ -1597,6 +1621,7 @@ def fabric_cross_item_journey(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_client"),
         request.getfixturevalue("fabric_workspace"),
         request.getfixturevalue("fabric_target_lakehouse"),
+        request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
@@ -1614,6 +1639,7 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_client"),
         request.getfixturevalue("fabric_workspace"),
         request.getfixturevalue("fabric_target_lakehouse"),
+        request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
     ) as env:
@@ -1640,6 +1666,7 @@ def fabric_mixed_estate(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_client"),
         request.getfixturevalue("fabric_workspace"),
         request.getfixturevalue("fabric_target_lakehouse"),
+        request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,

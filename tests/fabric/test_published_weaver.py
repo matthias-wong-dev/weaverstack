@@ -141,7 +141,11 @@ def _wheel_version(filename: str) -> str:
 
 
 def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
-    livy_session, fabric_workspace, fabric_target_lakehouse, clean_disposable_warehouse
+    livy_session,
+    fabric_workspace,
+    fabric_target_lakehouse,
+    fabric_staging_lakehouse,
+    clean_disposable_warehouse,
 ):
     """Resolution in a session is a *different class*, not a different credential.
 
@@ -218,7 +222,7 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
 
 
 def test_a_spark_executor_runs_one_action_in_the_session(
-    livy_session, fabric_workspace, fabric_target_lakehouse
+    livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
     """One real action, through the real executor, on the session's own Spark.
 
@@ -279,7 +283,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
 
 
 def test_the_session_native_store_reads_back_what_it_wrote(
-    livy_session, fabric_workspace, fabric_target_lakehouse
+    livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
     """`FabricStore` over `notebookutils.fs` — a different class, not a different
     credential.
@@ -338,6 +342,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     tmp_path,
     fabric_workspace,
     fabric_target_lakehouse,
+    fabric_staging_lakehouse,
     clean_disposable_warehouse,
     livy_session,
 ):
@@ -372,7 +377,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
 
     # The declaration is staged in a Lakehouse's Files, as a user's would be.
-    root = staged_repository_root(resolver, fabric_target_lakehouse.name)
+    root = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     if store.exists(root):
         store.delete(root, recursive=True)
     local = tmp_path / "repo"
@@ -425,7 +430,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     generate_item_build_bundle(
         repository,
         bindings=bindings,
-        output=staged_bundle(resolver, fabric_target_lakehouse.name, "whrow3"),
+        output=staged_bundle(resolver, fabric_staging_lakehouse.name, "whrow3"),
         store=store,
         target_inventories=inventories,
         # The control item's own catalogue documents are already installed, so
@@ -456,7 +461,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
         "installer = Installer(session)\n"
         f"bundle = load_bundle("
-        f"{staged_bundle_source(fabric_target_lakehouse.name, 'whrow3')}, "
+        f"{staged_bundle_source(fabric_staging_lakehouse.name, 'whrow3')}, "
         "store=store)\n"
         "report = installer.install(bundle)\n"
         # The same session, its own identity, reading the target back.

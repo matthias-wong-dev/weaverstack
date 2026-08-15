@@ -105,7 +105,13 @@ def estate_repository(root: Path):
 
 
 def physical_bundle(
-    repository, *, target_name: str, workspace_name: str, resolver, store
+    repository,
+    *,
+    target_name: str,
+    staging_name: str,
+    workspace_name: str,
+    resolver,
+    store,
 ):
     """A bundle of physical stages and nothing else.
 
@@ -153,7 +159,7 @@ def physical_bundle(
         target_changes=target_changes,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
-    location = staged_bundle(resolver, target_name, BUNDLE)
+    location = staged_bundle(resolver, staging_name, BUNDLE)
     if store.exists(location):
         store.delete(location, recursive=True)
     return write_bundle(location, plan=plan, payloads=payloads, store=store)
@@ -175,6 +181,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     tmp_path,
     fabric_workspace,
     fabric_alias_lakehouses,
+    fabric_staging_lakehouse,
     fabric_empty_lakehouse,
     livy_session,
 ):
@@ -200,6 +207,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     bundle = physical_bundle(
         repository,
         target_name=lakehouse.name,
+        staging_name=fabric_staging_lakehouse.name,
         workspace_name=fabric_workspace.workspace,
         resolver=resolver,
         store=store,
@@ -223,7 +231,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
         "installer = Installer(session)\n"
         f"bundle = load_bundle("
-        f"{staged_bundle_source(lakehouse.name, BUNDLE)}, "
+        f"{staged_bundle_source(fabric_staging_lakehouse.name, BUNDLE)}, "
         "store=store)\n"
         "report = installer.install(bundle)\n"
         "target = bundle.plan.targets[0]\n"
@@ -256,6 +264,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         target_id="target-1",
         kind="lakehouse",
         target_name=lakehouse.name,
+        staging_name=fabric_staging_lakehouse.name,
     )
     for field in ("tables", "views", "schemas", "folders", "files"):
         assert _folded(payload[field]) == _folded(getattr(declared, field)), field

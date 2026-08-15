@@ -86,6 +86,7 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     weaver_session,
     fabric_workspace,
     fabric_target_lakehouse,
+    fabric_empty_lakehouse,
     tmp_path_factory,
 ):
     """One build against a shared catalogue host, and the neighbour survives it.
@@ -101,6 +102,10 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     assert before == {NEIGHBOUR_TABLE, NEIGHBOUR_VIEW}, (
         "the neighbour was not seeded, so this would pass for the wrong reason"
     )
+
+    # The target is shared and permanent, so a previous module's estate is
+    # still in it. Emptied on the way in, as every other build context does.
+    fabric_empty_lakehouse(fabric_target_lakehouse.name)
 
     estate = CROSS_ITEM_JOURNEY_FIXTURE.renamed(
         tmp_path_factory.mktemp("shared-host"), DESKTOP_JOURNEY_NAMES

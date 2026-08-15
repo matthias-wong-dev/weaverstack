@@ -96,20 +96,37 @@ def generate(
         read_warehouse_inventory,
     )
     from weaver.build_bundle.targets import WAREHOUSE_TARGET
+    from weaver.fabric import desktop_sql_executor
+    from weaver.targets import WarehouseTarget
 
     bindings = effective_item_bindings(
         bindings,
         control_item=workspace.catalogue_item,
         workspace_name=workspace.workspace,
     )
+    # The catalogue is a Warehouse and is bound implicitly, so a Lakehouse-only
+    # estate now has a Warehouse inventory to read. It is its own connection:
+    # the estate's Warehouse, where there is one, is a different database.
+    catalogue_sql = desktop_sql_executor(
+        WarehouseTarget(warehouse=workspace.catalogue_item),
+        workspace,
+        resolver=resolver,
+    )
     inventories = {}
-    for binding in bindings.entries:
-        bound = binding.to_bound_target()
-        inventories[binding.item] = (
-            read_warehouse_inventory(bound, sql=sql)
-            if bound.kind == WAREHOUSE_TARGET
-            else read_lakehouse_inventory(bound, resolver=resolver, store=store)
-        )
+    try:
+        for binding in bindings.entries:
+            bound = binding.to_bound_target()
+            if bound.kind != WAREHOUSE_TARGET:
+                inventories[binding.item] = read_lakehouse_inventory(
+                    bound, resolver=resolver, store=store
+                )
+                continue
+            reading = (
+                catalogue_sql if bound.item_id == workspace.catalogue_item.name else sql
+            )
+            inventories[binding.item] = read_warehouse_inventory(bound, sql=reading)
+    finally:
+        catalogue_sql.close()
     return generate_item_build_bundle(
         repository,
         bindings=bindings,
@@ -199,6 +216,7 @@ def alias_estate(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
+    fabric_staging_lakehouse,
     livy_session,
     weaver_session,
     tmp_path_factory,
@@ -217,7 +235,7 @@ def alias_estate(
 
     root = tmp_path_factory.mktemp("alias-repo")
     alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
-    staged = staged_repository_root(resolver, producer.name)
+    staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     upload(store, staged, root)
     repository = parse_item_repository(staged, store=store)
 
@@ -232,7 +250,7 @@ def alias_estate(
             repository, item="Warehouse/_weaver"
         ),
         name="aliasaction",
-        staging=producer.name,
+        staging=fabric_staging_lakehouse.name,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
     _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
@@ -434,6 +452,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
+    fabric_staging_lakehouse,
     clean_disposable_warehouse,
     livy_session,
     weaver_session,
@@ -467,7 +486,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         consumer=WAREHOUSE_CONSUMER,
         consumer_view=False,
     )
-    staged = staged_repository_root(resolver, producer.name)
+    staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     upload(store, staged, root)
     repository = parse_item_repository(staged, store=store)
 
@@ -484,7 +503,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
             repository, item="Warehouse/_weaver"
         ),
         name="whalias",
-        staging=producer.name,
+        staging=fabric_staging_lakehouse.name,
         sql=warehouse.executor,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
