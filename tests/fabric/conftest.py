@@ -946,19 +946,20 @@ def _fabric_build_context(
     from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
-    # Nothing is torn down here. The Weaver Lakehouse, the target and the
-    # session all outlive this context; the next one empties the target again
-    # on its way in.
+    # Nothing is torn down here. The catalogue, the target and the session all
+    # outlive this context; the next one empties the target again on its way in.
     resolver = FabricResolver(workspace, client=fabric_client)
     store = OneLakeDfsClient()
     weaver = workspace.catalogue_item
     target = ItemRef(target_lh.name)
     warehouse_name = warehouse.item.name if warehouse is not None else None
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
-    repository_root = resolver.files_root(weaver).join(*repository_relative)
+    # Staged in the *target* Lakehouse's Files. It used to be the catalogue's,
+    # and a Warehouse has no Files area — nor any reason to hold a repository,
+    # which was only ever staging for a build that reads it.
+    repository_root = resolver.files_root(target).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
-    weaver_destination = resolver.spark_destination(weaver)
     _empty_the_target(
         session,
         store,
@@ -966,7 +967,6 @@ def _fabric_build_context(
         destination,
         workspace,
         warehouse=warehouse_name,
-        weaver_destination=weaver_destination,
     )
 
     def install_repo() -> None:
@@ -1017,7 +1017,7 @@ def _fabric_build_context(
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
-            f"repository_root = resolver.files_root(ItemRef({weaver.name!r})).join"
+            f"repository_root = resolver.files_root(ItemRef({target.name!r})).join"
             f"(*{repository_relative!r})\n"
             "repository = parse_item_repository(repository_root, store=store)\n"
             f"control = LakehouseBinding(lakehouse=ItemRef({weaver.name!r}), "
@@ -1170,7 +1170,6 @@ def _fabric_build_context(
         seed_orphans=seed_orphans,
         run_schema_exists=schema_exists,
         run_python=run_python,
-        weaver_destination=weaver_destination,
     )
 
 
@@ -1187,55 +1186,40 @@ def _empty_the_target(
     destination,
     workspace,
     warehouse=None,
-    weaver_destination=None,
 ) -> None:
-    """Leave the target Lakehouse *and the control plane* as though nothing had run.
+    """Leave the target Lakehouse *and the Weaver catalogue* as though nothing ran.
 
-    **Through Weaver's own wipe.** This used to sweep the two areas with
-    ``store.delete`` and it is exactly the mistake ``AGENTS.md`` records against
-    the first Fabric suite — test code reproducing what the function would have
-    done, and looking like it was testing ``wipe``. It cost twice over. Once
-    because a hand-rolled sweep is a *list* of what to remove, so it can omit
-    something: skipping ``Files/`` on the Weaver Lakehouse left the declared
-    ``_.Log`` folder behind while its Registry row went, and the next build
-    planned to create a folder already there. And once latently, because it
-    recursively deleted directories without removing shortcuts first — which
+    **Through Weaver's own wipe.** This used to sweep the Lakehouse's two areas
+    with ``store.delete`` and it is exactly the mistake ``AGENTS.md`` records
+    against the first Fabric suite — test code reproducing what the function
+    would have done, and looking like it was testing ``wipe``. A hand-rolled
+    sweep is a *list* of what to remove, so it can omit something; and it
+    recursively deleted directories without removing shortcuts first, which
     ``wipe_folder_target`` is careful never to do, since a recursive delete
     through a shortcut reaches the *producer's* data.
 
-    ``wipe_lakehouse`` has neither problem: it clears both areas completely,
-    keeps only what nothing recreates, and takes shortcuts out through the
-    workspace before any storage is swept.
+    **The catalogue is cleared too, and that is the point.** Weaver's own record
+    is state like any other, and it accumulates faster than anything else here:
+    the catalogue is shared and permanent while the *logical item names* bound to
+    one physical target change from module to module, so its Registry ends up
+    holding several items' claims on one physical object. No build repairs that,
+    and correctly so — reconciliation is scoped to the items a build binds,
+    because an item you are not building has claims you have no business
+    deleting. Right in production; in a suite reusing one target under many names
+    it makes the residue permanent.
 
-    **The control plane is wiped too, and that is the point.** Weaver's own
-    record is state like any other, and it accumulates faster than anything else
-    here: the Weaver Lakehouse is shared and permanent while the *logical item
-    names* bound to one physical target change from module to module, so its
-    Registry ends up holding several items' claims on one physical object. No
-    build repairs that, and correctly so — reconciliation is scoped to the items
-    a build binds (``catalogue_items_for_build`` returns those plus alias
-    sources), because an item you are not building has claims you have no
-    business deleting. Right in production; in a suite reusing one Lakehouse
-    under many names it makes the residue permanent.
+    Clearing it is now a Warehouse question rather than a Spark one, so it drops
+    the ``_`` schema over TDS. A build creates its tables *and* its schema, so
+    unlike the Delta arrangement there is nothing to put back.
 
-    What storage cannot reach is the Spark metastore: a *view* exists only
-    there, and the catalogue's schema is assumed by a build rather than created
-    by one. So the session drops the destination's schemas, and drops and
-    restores ``_``.
+    What storage cannot reach in the destination is the Spark metastore: a *view*
+    exists only there. So the session drops the destination's schemas as well.
     """
 
     statements = [
         f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema)} CASCADE"
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
-    if weaver_destination is not None:
-        # Dropped and put back. A build creates the catalogue's tables and
-        # *assumes* its schema, so leaving `_` gone is not clearing the control
-        # plane but damaging it — the same judgement `physical_wipe`
-        # already makes about `dbo`.
-        catalogue_schema = weaver_destination.qualified_schema("_")
-        statements.append(f"DROP SCHEMA IF EXISTS {catalogue_schema} CASCADE")
-        statements.append(f"CREATE SCHEMA IF NOT EXISTS {catalogue_schema}")
     session.run(
         "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n",
         label="empty target",
@@ -1243,12 +1227,37 @@ def _empty_the_target(
 
     from weaver.physical_wipe import wipe_lakehouse
 
-    wiped = [target]
-    if weaver_destination is not None:
-        wiped.append(workspace.catalogue_item)
-    for item in wiped:
-        for report in wipe_lakehouse(item, workspace, store=store):
-            print(f"Fabric wipe: {report}")
+    for report in wipe_lakehouse(target, workspace, store=store):
+        print(f"Fabric wipe: {report}")
+
+    _empty_the_catalogue(workspace)
+
+
+def _empty_the_catalogue(workspace) -> None:
+    """Drop `_` in the catalogue Warehouse, leaving the Warehouse itself alone.
+
+    Weaver owns `_` there and nothing else, so this is the whole of what a reset
+    may touch — a neighbour's schema in the same Warehouse is not the suite's to
+    remove any more than it is Weaver's.
+    """
+
+    from weaver.fabric import FabricResolver, desktop_sql_executor
+    from weaver.targets import WarehouseTarget
+
+    target = WarehouseTarget(warehouse=workspace.catalogue_item)
+    sql = desktop_sql_executor(target, workspace, resolver=FabricResolver(workspace))
+    try:
+        rows = sql.query(
+            "select TABLE_NAME from INFORMATION_SCHEMA.TABLES "
+            "where TABLE_SCHEMA = N'_' and TABLE_TYPE = N'BASE TABLE'"
+        )
+        for row in rows:
+            sql.execute_script(f"drop table if exists [_].[{row['TABLE_NAME']}];")
+        if rows:
+            sql.execute_script("drop schema if exists [_];")
+        print(f"Fabric catalogue reset: dropped {len(rows)} `_` table(s)")
+    finally:
+        sql.close()
 
 
 @pytest.fixture
@@ -1276,7 +1285,7 @@ def fabric_build_env(
 
 
 def _warehouse_build_env(
-    fabric_workspace, catalogue, warehouse, weaver_repo_fixture, session
+    fabric_workspace, staging, warehouse, weaver_repo_fixture, session
 ) -> "BuildEnv":
     """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
 
@@ -1295,7 +1304,10 @@ def _warehouse_build_env(
 
     resolver = FabricResolver(fabric_workspace, client=None)
     store = OneLakeDfsClient()
-    weaver = _ItemRef(catalogue.name)
+    # Staged in a Lakehouse's Files, because that is the only OneLake area
+    # there is. The catalogue is a Warehouse and has none — and no reason to
+    # hold a repository, which is staging for a build that reads it.
+    weaver = _ItemRef(staging.name)
     warehouse_ref = _ItemRef(warehouse.item.name)
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
     repository_root = resolver.files_root(weaver).join(*repository_relative)
@@ -1475,7 +1487,7 @@ def _warehouse_build_env(
 @pytest.fixture(scope="module")
 def warehouse_estate(
     fabric_workspace,
-    fabric_catalogue,
+    fabric_target_lakehouse,
     clean_disposable_warehouse,
     weaver_repo_fixture,
     livy_session,
@@ -1489,7 +1501,7 @@ def warehouse_estate(
 
     env = _warehouse_build_env(
         fabric_workspace,
-        fabric_catalogue,
+        fabric_target_lakehouse,
         clean_disposable_warehouse,
         weaver_repo_fixture,
         livy_session,

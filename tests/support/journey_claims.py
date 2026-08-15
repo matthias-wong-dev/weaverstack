@@ -90,12 +90,9 @@ def _observe(env, step):
     nearly free, so narrowing the payload per phase would save nothing and would
     mean each transition proved a different thing about the estate.
 
-    It spans both Lakehouses in one observation. That is the claim two-part names
-    made impossible — the build wrote where it said and nowhere else — and it is
-    a claim about one instant, so two calls could not make it.
+    One observation, so every claim below is about one instant.
     """
 
-    weaver = env.weaver_destination
     step.observation = env.observe(
         queries={
             "tables": "SHOW TABLES IN {{schema:DWG}}",
@@ -112,11 +109,6 @@ def _observe(env, step):
             "dwg": "DWG",
             "raw": "Raw",
             "legacy": "Legacy",
-            # The control plane is not the destination. An unqualified CREATE
-            # TABLE would land in the attached Lakehouse — this one — and a read
-            # through the same session would find it and pass.
-            "weaver_dwg": ("DWG", weaver),
-            "weaver_raw": ("Raw", weaver),
         },
         label=f"observe {step.name}",
     )
@@ -255,10 +247,6 @@ def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> No
     }
     assert "customer" in stored
 
-    # The control plane is not the destination — read out of the same payload as
-    # the destination's own schemas, so both are true of the same instant.
-    assert not seen.schema("weaver_dwg")
-    assert not seen.schema("weaver_raw")
     assert seen.schema("dwg")
 
     assert env.store.exists(step.bundle.location.join("install-report.yml"))
@@ -408,10 +396,26 @@ def _assert_pruned(env, step) -> None:
 # its own, however many it is given. Which host a Session is, is not a detail
 # the caller may fudge; it is the whole distinction the two classes make.
 
+#: Read a workflow's rows back from `_.Log`, in the body that produced them.
+#: Shared by the two journey programs, and defined as source so it crosses with
+#: them rather than being resolved on the desktop.
+_LOG_ROWS = """
+def _log_rows(workspace, workflow_id):
+    from weaver.catalogue.connection import catalogue_connection
+    from weaver.sessions.host import use_or_create_session
+
+    with use_or_create_session(None, workspace=workspace) as reader:
+        rows = catalogue_connection(reader, workspace).rows(
+            "select [Task type], [Target type], [Target name], [Schema name], "
+            "[Object name], [Result] from [_].[Log] "
+            "where [Workflow ID] = N'" + str(workflow_id) + "'"
+        )
+        return [dict(row) for row in rows]
+"""
+
 LOADED = """
 from weaver.operations.load import run_load
 from weaver.load_plan import PhysicalTargetRef
-from weaver.locations import Location
 from weaver.sessions import NotebookSession
 
 requested = (PhysicalTargetRef("lakehouse", target.name),)
@@ -429,17 +433,13 @@ def orchestrate(dry_run):
 dry = orchestrate(True)
 real = orchestrate(False)
 
-# Listed here rather than from the desktop, and that is not an economy. A
-# location has two spellings — the session's `abfss://` and the desktop's https
-# handle over OneLake DFS — so the evidence is read by whoever wrote it.
+# Read here rather than from the desktop, and that is not an economy. `_.Log` is
+# written asynchronously and the barrier is the Session closing, so a reader in
+# another crossing could see a partial tail.
 emit({
     "dry": dry,
     "real": real,
-    "log": sorted(
-        entry.location.value.rsplit("/", 1)[-1]
-        for entry in store.list(Location(real["workflow_id"]))
-        if not entry.is_directory
-    ),
+    "log": _log_rows(workspace, real["workflow_id"]),
 })
 """
 
@@ -539,31 +539,20 @@ def _assert_load_materialised(env, journey) -> None:
 
 
 def _assert_task_log(env, seen) -> None:
-    """One coherent task folder beneath the declared `_.Log` folder.
+    """One coherent workflow in `_.Log`.
 
-    Only that it is coherent. Filenames, field contracts and reconciliation
-    belong to the small orchestration and task-logging tests.
+    Only that it is coherent. Column contracts and the flusher's own promises
+    belong to the small orchestration and flusher tests.
     """
 
-    from weaver.catalogue.builtin import LOG_FOLDER
-
     real = seen["real"]
-    declared = env.resolver.folder_object(
-        FolderTarget(lakehouse=env.weaver), "_", LOG_FOLDER
-    )
-
-    # `_.Log` is an ordinary Weaver folder artefact, so the desktop finds it
-    # where the build installed it.
-    assert env.store.exists(declared), "`_.Log` must exist as a normal Weaver folder"
-    # And the task wrote beneath it. Matched on the item-relative part, because
-    # the run addressed it as its own environment does and the desktop addresses
-    # the same bytes differently.
-    assert f"/Files/_/{LOG_FOLDER}/task_date=" in real["workflow_id"]
-
     written = seen["log"]
-    assert "plan.json" in written
-    assert sum("_load_" in name for name in written) == len(real["nodes"])
-    assert sum("_complete_" in name for name in written) == 1
+
+    assert real["workflow_id"], "a real run correlates its evidence"
+    # One row per settled node, and nothing else: no plan row, no completion row.
+    assert len(written) == len(real["nodes"])
+    assert {row["Task type"] for row in written} == {"load"}
+    assert {row["Result"] for row in written} == {"Succeeded"}
 
 
 #: The summary view, rewritten. Changing it is what gives the failing transition
@@ -666,11 +655,7 @@ named = validate(name="DWG.OrderAmounts")
 emit({
     "everything": everything,
     "named": named,
-    "log": sorted(
-        entry.location.value.rsplit("/", 1)[-1]
-        for entry in store.list(Location(everything["workflow_id"]))
-        if not entry.is_directory
-    ),
+    "log": _log_rows(workspace, everything["workflow_id"]),
 })
 """
 
@@ -717,13 +702,11 @@ def _assert_validated(env, seen) -> None:
         "DWG.OrderAmounts"
     ]
 
-    # A validation task log of its own, beside the load's, recording counts.
+    # A workflow of its own in `_.Log`, beside the load's.
     written = seen["log"]
-    assert "plan.json" in written
-    assert sum("_test_" in name for name in written) == 1
-    assert sum("_assumption_" in name for name in written) == 1
-    assert sum("_complete_" in name for name in written) == 1
-    assert not any("_weaver_sk" in name for name in written)
+    assert {row["Task type"] for row in written} == {"test"}
+    assert len(written) == len(seen["everything"]["nodes"])
+    assert {row["Result"] for row in written} == {"Succeeded"}
 
 
 def _assert_failed(journey, step) -> None:
@@ -773,7 +756,7 @@ def drive(journey):
     # estate a build made and a load has not touched, so putting rows in one
     # would change what those phases are about. What follows is the failing
     # build, which asserts actions rather than rows.
-    loaded = env.run_python(LOADED, label="load the installed estate")
+    loaded = env.run_python(_LOG_ROWS + LOADED, label="load the installed estate")
     _assert_loaded(env, loaded)
     _assert_load_materialised(env, journey)
     _assert_task_log(env, loaded)
@@ -782,7 +765,9 @@ def drive(journey):
     # just wrote satisfy what the repository says about it? Here rather than
     # anywhere earlier, because a validation over an unloaded estate would be
     # comparing two empty relations and passing for the wrong reason.
-    validated = env.run_python(VALIDATED, label="validate the loaded estate")
+    validated = env.run_python(
+        _LOG_ROWS + VALIDATED, label="validate the loaded estate"
+    )
     _assert_validated(env, validated)
 
     _assert_failed(
@@ -808,7 +793,6 @@ CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
 CROSS_ITEM_LOADED = """
 from weaver.operations.load import run_load
 from weaver.load_plan import PhysicalTargetRef
-from weaver.locations import Location
 from weaver.sessions import NotebookSession
 
 requested = (

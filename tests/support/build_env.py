@@ -231,10 +231,9 @@ class BuildEnv:
     #: one body serves both transports — the only way to exercise code that must
     #: behave identically in a notebook and on a laptop.
     run_python: Callable[[str], Any] = None
-    #: The destination Lakehouse being built, and the Weaver Lakehouse holding the
-    #: catalogue. Two, always — even the simplest install writes to both.
+    #: The destination Lakehouse being built. The catalogue is a Warehouse and
+    #: is reached over TDS, so it has no Spark destination to carry here.
     destination: Any = None
-    weaver_destination: Any = None
     #: Every Lakehouse this fixture bound, by the item that owns it. Empty unless
     #: the fixture asked for more than one — a cross-item alias is the only thing
     #: that does, and it needs both ends addressable to prove the alias points
