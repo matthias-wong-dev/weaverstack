@@ -135,6 +135,10 @@ class Session(ABC):
         #: most Sessions never append a row.
         self._flushers: dict = {}
         self._closed = False
+        #: Between the start of `close` and the Session actually closing. The
+        #: flushers are still writing through it, so it is not closed, but it
+        #: hands out no new stream.
+        self._draining = False
 
     # --- context ------------------------------------------------------------
 
@@ -357,6 +361,8 @@ class Session(ABC):
         with self._scope_lock:
             if self._closed:
                 raise CommandError("this Session is closed and appends nothing")
+            if self._draining:
+                raise CommandError("this Session is closing and appends nothing")
             existing = self._flushers.get(key)
             if existing is not None:
                 return existing
@@ -544,8 +550,12 @@ class Session(ABC):
 
         self.stop_presenting()
         with self._scope_lock:
-            if self._closed:
+            if self._closed or self._draining:
                 return
+            # No new stream from here on. The Session is still open, because the
+            # flushers below write through it, but one handed out after this
+            # point would hold rows nobody waits for.
+            self._draining = True
             flushers = list(self._flushers.values())
             self._flushers.clear()
         failures = []
@@ -556,8 +566,6 @@ class Session(ABC):
                 failures.append(exc)
 
         with self._scope_lock:
-            if self._closed:
-                return
             self._closed = True
             scopes = list(self._scopes.values())
             self._scopes.clear()

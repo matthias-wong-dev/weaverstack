@@ -378,3 +378,36 @@ def test_a_row_accepted_before_close_is_written_even_if_close_overtakes_it():
 
     assert flusher.submitted == 2
     assert flusher.written == 2, "a row the flusher accepted never reached the table"
+
+
+def test_a_stream_opened_while_the_session_is_closing_is_refused():
+    """A flusher created after the drain began would never be drained.
+
+    `close` takes the flushers it knows about and waits for them. One handed
+    out after that would hold rows nobody waits for, and the Session would
+    return having lost them without saying so.
+    """
+
+    session = _session()
+    started = threading.Event()
+    release = threading.Event()
+    flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
+
+    def write(_statement: str) -> None:
+        started.set()
+        release.wait(timeout=5)
+
+    flusher._execute = write
+    flusher.submit(a_row())
+    assert started.wait(timeout=5)
+
+    closing = threading.Thread(target=session.close)
+    closing.start()
+    time.sleep(0.05)
+
+    with pytest.raises(CommandError, match="closing"):
+        session.flusher(LOG, warehouse=WarehouseTarget.parse("Other"))
+
+    release.set()
+    closing.join(timeout=5)
+    assert flusher.written == 1
