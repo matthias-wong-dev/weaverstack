@@ -231,14 +231,12 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     }
 
     assert "publish_catalogue" in kinds, "the new Installation row is recorded"
-    # The control Lakehouse's endpoint refresh rides with the publication: its
-    # catalogue tables were just written, so its analytics endpoint has to
-    # catch up.
+    # And nothing physical: an item whose objects are all unchanged has only
+    # its catalogue tail to write.
     assert kinds <= {
         "delete_catalogue_claims",
         "publish_catalogue",
         "publish_registry",
-        "refresh_sql_endpoint",
     }
 
 

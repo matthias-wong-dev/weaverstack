@@ -332,7 +332,7 @@ def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
     """A capability offered is not a capability acquired.
 
     Scoped to the Installer and this action set, not to builds in general: the
-    catalogue lives in the Weaver Lakehouse and is published with Spark SQL, so
+    catalogue lives in a Warehouse and is published over TDS, so
     an ordinary complete build does cross to Spark. What is guarded here is
     narrower and still worth guarding — the Installer used to evaluate the
     Session's Spark while assembling every batch's context, so an action set

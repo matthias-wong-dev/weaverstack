@@ -110,7 +110,7 @@ def test_context_identity_ignores_which_targets_were_declared():
         },
     )
 
-    # The same place, the same control Lakehouse and the same Environment: one
+    # The same place, the same catalogue and the same Environment: one
     # Livy session serves both, so they must not be two contexts.
     assert workspace_context(plain) == workspace_context(with_targets)
 

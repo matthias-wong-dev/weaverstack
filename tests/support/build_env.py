@@ -399,7 +399,7 @@ def _upload_tree(store, source: Path, destination) -> None:
     """Install a repository, *replacing* whatever was there under that name.
 
     Replacing, not merging. Two modules install different fixtures under the same
-    repository name into one shared Weaver Lakehouse, and a plain file-by-file
+    repository name into one shared staging Lakehouse, and a plain file-by-file
     write left the previous fixture's objects behind — so a Warehouse estate
     inherited a Lakehouse-reading table from a repository it had never heard of,
     and failed on a three-part name naming a Lakehouse that does not exist here.

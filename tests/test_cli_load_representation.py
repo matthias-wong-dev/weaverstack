@@ -192,7 +192,7 @@ def test_the_cautious_answers_are_the_defaults(recorded):
 def test_an_explicit_catalogue_needs_no_configuration_file(recorded):
     """The case the CLI must not require ceremony for.
 
-    Naming both the workspace and its control Lakehouse is a complete request.
+    Naming both the workspace and its catalogue is a complete request.
     Insisting on a configuration file to carry the second would make the first
     argument useless.
     """
@@ -313,14 +313,14 @@ def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
     monkeypatch, capsys, desktop_credential, no_target_preflight
 ):
     def raising(targets, **kwargs):
-        raise CommandError("load needs a Weaver control Lakehouse")
+        raise CommandError("load needs a Weaver catalogue")
 
     monkeypatch.setattr(weaver, "load", raising)
 
     exit_code = main(_command())
 
     assert exit_code == 1
-    assert "control Lakehouse" in capsys.readouterr().err
+    assert "Weaver catalogue" in capsys.readouterr().err
 
 
 # --- the host boundary --------------------------------------------------------

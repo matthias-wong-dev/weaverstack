@@ -1,6 +1,6 @@
 """An underscore schema is ordinary, and an object may depend on nothing.
 
-Weaver's own catalogue lives in schema ``_`` of the Weaver Lakehouse, declared as
+Weaver's own catalogue lives in schema ``_`` of a Warehouse, declared as
 ordinary Weaver document and built through the ordinary build path. Two rules had to give way
 for that, and both were over-broad rather than load-bearing:
 

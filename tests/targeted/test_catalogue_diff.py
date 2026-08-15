@@ -35,10 +35,6 @@ from factories import (
 from weaver.catalogue.reconcile import publish
 from weaver.catalogue.state import Catalogue, retaining
 from weaver.catalogue.tables import REGISTRY
-from weaver.spark import FabricSparkTarget
-
-#: The Weaver Lakehouse every catalogue statement is addressed to.
-WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 CUSTOMER = "DWG.Customer"
 ORDER = "DWG.Order"

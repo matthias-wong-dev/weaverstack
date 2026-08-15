@@ -56,7 +56,7 @@ class RecordingExecutor:
 
 @pytest.fixture
 def estate(tmp_path):
-    """One authored item, and an empty Weaver Lakehouse with no catalogue at all."""
+    """One authored item, and an empty catalogue Warehouse with no `_` at all."""
 
     root = tmp_path / "repo"
     repository = single_document_repository(

@@ -1,7 +1,7 @@
 """Resolving a destination Lakehouse to the roots Spark writes through.
 
 The execution model these serve is fixed: **the Spark session is attached to the
-Weaver Lakehouse.** That is the control plane, and it is why Weaver's own
+attached Lakehouse.** That is where the session lives, and it is why Weaver's own
 catalogue is reached as ordinary two-part names in schema ``_``. Destination
 Lakehouses are the variable data plane, so they are addressed through explicit
 roots and never by pointing the session somewhere else.
@@ -90,7 +90,7 @@ def test_two_destinations_resolve_separately(resolver):
 def test_the_catalogue_resolves_like_any_other_item(resolver):
     """It is the attached one, not a special case of resolution.
 
-    Initialisation builds the catalogue *into* the Weaver Lakehouse, so it is a destination
+    Initialisation builds the catalogue *into* its Warehouse, so it is a destination
     on that one occasion. Nothing about resolving it differs.
     """
 

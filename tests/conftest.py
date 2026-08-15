@@ -133,7 +133,7 @@ def populate_folder_files():
 
 @dataclass(frozen=True)
 class Lakehouses:
-    """A Weaver Lakehouse and a destination Lakehouse in one workspace.
+    """A catalogue Warehouse and a destination Lakehouse in one workspace.
 
     Resolution is the production :class:`~weaver.fabric.resolution.FabricResolver`
     over an inventory declared here; ``root`` puts what it resolves on this

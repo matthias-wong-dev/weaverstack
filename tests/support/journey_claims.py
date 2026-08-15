@@ -25,7 +25,7 @@ The phases, in the order they must run:
                nothing after it could rely on what it found
 
 **Every assertion names the Lakehouse it is about.** The session is attached to
-the Weaver Lakehouse and the build writes to a different one, so a query for a
+one Lakehouse and the build writes to a different one, so a query for a
 bare ``DWG.Customer`` would ask the control plane. ``env.query`` resolves object
 tokens against a named destination, so a read can only succeed where the write
 actually landed.

@@ -25,10 +25,6 @@ from weaver.catalogue.tables import (
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.locations import Location
-from weaver.spark import FabricSparkTarget
-
-#: The Weaver Lakehouse every catalogue statement is addressed to.
-WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"):

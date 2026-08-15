@@ -1,4 +1,4 @@
-"""How `weaver.build` decides which workspace and Weaver Lakehouse it means.
+"""How `weaver.build` decides which workspace and Weaver catalogue it means.
 
 The public build has to work from a Fabric notebook, where a caller reasonably
 supplies only a repository and its bindings, and from a desktop, where nothing
@@ -8,7 +8,7 @@ order serves both:
     explicit argument → typed Workspace → configuration → notebook context
 
 The part worth testing is the *precedence*, because every step of it is a value
-that would otherwise be plausible. A configured Weaver Lakehouse and an attached
+that would otherwise be plausible. A configured catalogue and an attached
 default Lakehouse are both real Lakehouses; picking the wrong one writes a
 catalogue into somewhere that works, and is wrong in a way nothing complains
 about.
@@ -94,7 +94,7 @@ def _build(repository, **kwargs):
 
 
 def test_a_notebook_infers_the_current_workspace(in_notebook, captured, repository):
-    """The Weaver Lakehouse is given so that only the workspace is in question."""
+    """The catalogue is given so that only the workspace is in question."""
 
     with pytest.raises(Halt):
         _build(repository, catalogue="Warehouse/Weaver")
@@ -210,7 +210,7 @@ def test_a_failed_preflight_does_not_create_a_livy_session(
     def refuse(*args, **kwargs):
         raise preflight_module.PreflightError(
             "Fabric build preflight failed in workspace 'Analytics':\n"
-            "- Weaver Lakehouse 'Weaver' was not found"
+            "- Weaver catalogue 'Weaver' was not found"
         )
 
     monkeypatch.setattr(preflight_module, "preflight_fabric_targets", refuse)

@@ -37,10 +37,6 @@ from weaver.build_bundle.catalogue_actions import (
     render_catalogue_before_build,
 )
 from weaver.catalogue.state import reconcile_catalogue_state
-from weaver.spark import FabricSparkTarget
-
-#: The Weaver Lakehouse every catalogue statement is addressed to.
-WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 CUSTOMER = "DWG.Customer"
 

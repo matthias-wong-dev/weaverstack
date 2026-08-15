@@ -126,7 +126,7 @@ def test_a_workspace_without_an_environment_is_an_error():
 def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
     """Fabric creates a Spark session against a Lakehouse, so one has to exist.
 
-    It used to be the Weaver Lakehouse. The catalogue is a Warehouse now, so the
+    The catalogue is a Warehouse, so the
     home comes from the workspace's own Lakehouses — and a workspace that
     configures none is doing Warehouse work, which needs no Spark at all.
     """
