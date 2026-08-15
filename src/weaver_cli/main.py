@@ -57,7 +57,17 @@ def _requires_targets(args) -> frozenset[str]:
 
 
 def _requires_build(args) -> frozenset[str]:
-    """A build may touch everything: it writes files, DDL and the catalogue."""
+    """What a build will want, from the targets it was told to bind.
+
+    A build that names only Warehouses needs no Spark: its objects are T-SQL and
+    the catalogue it writes is a Warehouse too. Declaring Livy anyway would have
+    the console start a Spark session — a minute, and a capacity's only slot —
+    for a build that never submits one.
+
+    A build that names nothing has not said, so it gets the superset: bindings
+    can come from workspace configuration, and what a repository turns out to
+    hold is not knowable from arguments.
+    """
 
     from weaver.sessions.requirements import (
         AUTH,
@@ -68,7 +78,13 @@ def _requires_build(args) -> frozenset[str]:
         requirements,
     )
 
-    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    bindings = getattr(args, "item_bindings", None)
+    if not bindings:
+        return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    # `PHYSICAL[=LOGICAL]`, and the physical half names the kind.
+    targets = [str(value).split("=", 1)[0] for value in bindings]
+    # The catalogue is a Warehouse, so a build always reaches TDS.
+    return requirements(AUTH, RESOLVER, TDS, *_target_requirements(targets))
 
 
 def _requires_rest(args) -> frozenset[str]:
