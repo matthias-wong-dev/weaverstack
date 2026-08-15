@@ -253,14 +253,15 @@ def test_a_spark_executor_runs_one_action_in_the_session(
         " spark_sql=installer.spark_sql(), spark_sql_batch=installer.spark_sql_batch(),\n"
         " target=target, targets={'lh': target})\n"
         "action = InstallAction(id='parity', kind='create_schema', "
-        "resource_node_id=None, executor='spark_schema', payload='p.json', "
+        "resource_node_id=None, executor='spark_sql', payload='p.spark.sql', "
         "payload_sha256=None)\n"
-        "import json\n"
-        # The executor creates without IF NOT EXISTS, so the probe starts from
-        # nothing and clears up after itself — it must be able to run twice.
+        # The statement is created without IF NOT EXISTS, so the probe starts
+        # from nothing and clears up after itself — it must run twice.
         "spark.sql('DROP SCHEMA IF EXISTS ' + "
         "target.destination.qualified_schema('Parity') + ' CASCADE')\n"
-        "result = execute_install_action(action, json.dumps({'schema': 'Parity'}).encode(), "
+        "statement = target.destination.create_schema_statement("
+        "'Parity', if_not_exists=False)\n"
+        "result = execute_install_action(action, statement.encode(), "
         "context=context)\n"
         "seen = {'status': result.status, 'error': result.error_message,\n"
         "        'details': result.details}\n"

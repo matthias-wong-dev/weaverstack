@@ -40,6 +40,7 @@ import pytest
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 
 from weaver.targets import FolderTarget
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 #: `full_integration` is this file's *only* selector — it carries neither `spark`
 #: nor `fabric`, so `pytest -m fabric` runs the targeted probes and leaves the
@@ -222,7 +223,7 @@ def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> No
 
     _raise_if_the_transition_broke(step)
     plan = step.bundle.plan
-    assert plan.format_version == 1
+    assert plan.format_version == SUPPORTED_FORMAT_VERSION
     assert plan.repository_name == env.repository_root.name
     assert {target.logical_item_name for target in plan.targets} == set(items)
     assert plan.omitted_nodes == ()

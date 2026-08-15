@@ -51,6 +51,7 @@ from weaver.build_bundle import (
 from weaver.build_bundle.incremental import BuildSelection, Impact
 from weaver.build_bundle.stages import enumerate_stages
 from weaver.declaration.metadata import DELTA_TARGET
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
@@ -134,7 +135,7 @@ def physical_bundle(repository, *, target_name: str, resolver, store):
     )
     sequences, payloads, target_changes = enumerate_stages(list(planned.stages))
     plan = BuildPlan(
-        format_version=1,
+        format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name=repository.name,
         repository_signature=repository.signature,

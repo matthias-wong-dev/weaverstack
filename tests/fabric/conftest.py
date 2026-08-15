@@ -304,7 +304,7 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
 
     return FabricWorkspace(
         workspace=fabric_workspace_item.name,
-        catalogue=fabric_catalogue.name,
+        catalogue=f"Lakehouse/{fabric_catalogue.name}",
         environment=environment_name,
     )
 

@@ -104,7 +104,9 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     assert {name.casefold() for name in payload["physical_tables"]} == {
         name.casefold() for name in payload["expected"]
     }
-    assert payload["target_names"] == [fabric_workspace.catalogue]
+    # The Installation row records the *item*, not the workspace's typed
+    # catalogue value: what it says is which Lakehouse holds the catalogue.
+    assert payload["target_names"] == [str(fabric_workspace.catalogue_item)]
     # Every catalogue table, plus the one Folder the control plane declares:
     # `_.Log`, the task log every top-level Weaver task writes beneath.
     assert payload["registry_count"] == payload["table_count"] + 1

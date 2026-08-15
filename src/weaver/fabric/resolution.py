@@ -238,13 +238,15 @@ class FabricResolver:
     # --- the weaver lakehouse ---------------------------------------------
 
     def _catalogue(self) -> ItemRef:
-        name = self.configuration.catalogue
-        if name is None:
+        """The item the catalogue lives in, from the workspace's typed value."""
+
+        if self.configuration.catalogue is None:
             raise CommandError(
-                "A Weaver Lakehouse is required for this Workspace. "
-                "Set catalogue on the Workspace or supply it explicitly."
+                "A catalogue is required for this Workspace. Set "
+                "catalogue='Lakehouse/Weaver' on the Workspace or supply it "
+                "explicitly."
             )
-        return ItemRef(name)
+        return self.configuration.catalogue_item
 
     @property
     def catalogue(self) -> Location:
