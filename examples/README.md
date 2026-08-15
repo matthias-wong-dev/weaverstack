@@ -35,11 +35,13 @@ import weaver
 
 repository = Path.cwd() / "repository"
 
-weaver.wipe([
-    "Lakehouse/Sales",
-    "Warehouse/Reporting",
-    "Lakehouse/Weaver",
-])
+weaver.wipe(
+    [
+        "Lakehouse/Sales",
+        "Warehouse/Reporting",
+        "Lakehouse/Weaver",
+    ]
+)
 
 result = weaver.build(
     repository,
@@ -126,10 +128,10 @@ carries one of each primitive Weaver installs, and all four are loaded
 the same way — by importing the deployed module and calling `.load()`:
 
 ``` python
-from Files.Sales__OrderExport import Sales__OrderExport   # a Python folder
-from Sales__Customer import Sales__Customer               # a Python table
-from Sales__Order import Sales__Order                     # a Python table
-from Sales__OrderSummary import Sales__OrderSummary       # a Spark SQL table
+from Files.Sales__OrderExport import Sales__OrderExport  # a Python folder
+from Sales__Customer import Sales__Customer  # a Python table
+from Sales__Order import Sales__Order  # a Python table
+from Sales__OrderSummary import Sales__OrderSummary  # a Spark SQL table
 
 Sales__OrderExport(spark).load()
 Sales__Customer(spark).load()
@@ -158,7 +160,7 @@ A `Folder` is reached two ways, because two things read it and neither
 understands the other's spelling:
 
 ``` python
-folder.path()        # pathlib.Path — open(), glob(), write_text()
+folder.path()  # pathlib.Path — open(), glob(), write_text()
 folder.spark_path()  # str — spark.read, and abfss:// on Fabric
 ```
 

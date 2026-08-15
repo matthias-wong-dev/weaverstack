@@ -394,9 +394,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         control_item=fabric_workspace.catalogue_item,
         workspace_name=fabric_workspace.workspace,
     )
-    read_warehouse_inventory(
-        warehouse_target(warehouse).bound, sql=warehouse.executor
-    )
+    read_warehouse_inventory(warehouse_target(warehouse).bound, sql=warehouse.executor)
     item = item_id(ITEM)
     # Each item's inventory must carry *its own* bound target id — the planner
     # checks that pairing, and the control item's id is nothing like the

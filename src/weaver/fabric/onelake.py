@@ -79,7 +79,7 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
             f"{location.value!r} is not a OneLake location — expected it to start "
             f"with {prefix}"
         )
-    parts = [part for part in location.value[len(prefix):].split("/") if part]
+    parts = [part for part in location.value[len(prefix) :].split("/") if part]
     if len(parts) < 2:
         raise CommandError(f"{location.value!r} names no item beneath its workspace")
     return OneLakePath(workspace=parts[0], item=parts[1], relative="/".join(parts[2:]))
@@ -196,7 +196,10 @@ class OneLakeDfsClient:
     # --- the Store protocol ----------------------------------------------
 
     def exists(self, location: Location) -> bool:
-        return self._request("HEAD", self._url(location), expected=(200, 404)).status_code == 200
+        return (
+            self._request("HEAD", self._url(location), expected=(200, 404)).status_code
+            == 200
+        )
 
     def is_directory(self, location: Location) -> bool:
         response = self._request("HEAD", self._url(location), expected=(200, 404))
@@ -207,7 +210,9 @@ class OneLakeDfsClient:
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         parsed = parse_onelake(location, base_url=self.base_url)
         directory = "/".join(
-            part for part in (lakehouse_artifact_segment(parsed.item), parsed.relative) if part
+            part
+            for part in (lakehouse_artifact_segment(parsed.item), parsed.relative)
+            if part
         )
         url = f"{self.base_url}/{quote(parsed.workspace, safe='')}?" + urlencode(
             {
@@ -230,15 +235,18 @@ class OneLakeDfsClient:
         prefix = f"{lakehouse_artifact_segment(parsed.item)}/"
         for path in response.json().get("paths", []):
             name = path.get("name", "")
-            relative = name[len(prefix):] if name.startswith(prefix) else name
+            relative = name[len(prefix) :] if name.startswith(prefix) else name
             entries.append(
                 Entry(
                     location=Location(
                         f"{self.base_url}/{parsed.workspace}/"
                         f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
                     ),
-                    is_directory=str(path.get("isDirectory", "false")).lower() == "true",
-                    size=int(path["contentLength"]) if path.get("contentLength") else None,
+                    is_directory=str(path.get("isDirectory", "false")).lower()
+                    == "true",
+                    size=int(path["contentLength"])
+                    if path.get("contentLength")
+                    else None,
                     modified=_parse_time(path.get("lastModified")),
                     etag=path.get("etag"),
                 )
@@ -259,7 +267,9 @@ class OneLakeDfsClient:
                 headers={"Content-Length": str(len(data))},
                 expected=(202,),
             )
-        self._request("PATCH", f"{url}?action=flush&position={len(data)}", expected=(200,))
+        self._request(
+            "PATCH", f"{url}?action=flush&position={len(data)}", expected=(200,)
+        )
 
     def delete(self, location: Location, *, recursive: bool = False) -> None:
         query = "?recursive=true" if recursive else ""

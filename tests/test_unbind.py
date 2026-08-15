@@ -88,7 +88,9 @@ def test_every_installation_is_removed_in_one_pass_over_the_tables():
         )
     )
 
-    one_at_a_time = sum(len(prune_installation(scope, destination=WEAVER)) for scope in scopes)
+    one_at_a_time = sum(
+        len(prune_installation(scope, destination=WEAVER)) for scope in scopes
+    )
     together = prune_installation(InstallationScopes(scopes), destination=WEAVER)
 
     assert len(together) == one_at_a_time // len(scopes)

@@ -100,7 +100,9 @@ def test_editing_the_source_after_the_snapshot_does_not_change_the_repository(
         )
 
         assert prepared.repository.signature == before
-        identities = {str(identity) for identity in prepared.repository.source_documents}
+        identities = {
+            str(identity) for identity in prepared.repository.source_documents
+        }
         assert "Lakehouse/Raw/Sales.Injected" not in identities
 
 
@@ -165,9 +167,7 @@ def test_a_relative_source_actually_snapshots(tmp_path, monkeypatch):
     root = _estate(tmp_path)
     monkeypatch.chdir(root)
 
-    with prepare_repository(
-        Location("."), source_store=FilesystemStore()
-    ) as prepared:
+    with prepare_repository(Location("."), source_store=FilesystemStore()) as prepared:
         assert prepared.repository.name == "Estate"
         assert Path(prepared.repository.root.value) != root.resolve()
 

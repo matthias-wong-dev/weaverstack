@@ -77,7 +77,9 @@ class _Capability:
 
     @property
     def created(self) -> str:
-        return next(one for one in self.statements if one.lstrip().upper().startswith("CREATE"))
+        return next(
+            one for one in self.statements if one.lstrip().upper().startswith("CREATE")
+        )
 
 
 AUDIT = [
@@ -125,7 +127,9 @@ def _action() -> InstallAction:
 
 def _context(capability, destination):
     target = ResolvedTarget(
-        bound=BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH"),
+        bound=BoundTarget(
+            id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH"
+        ),
         lakehouse=ItemRef("Sales_LH"),
         destination=destination,
     )
@@ -210,7 +214,9 @@ def test_nothing_is_dropped_to_make_room_for_a_case_variant():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload(), destination=FABRIC_DESTINATION)
 
-    assert not any(one.lstrip().upper().startswith("DROP") for one in capability.statements)
+    assert not any(
+        one.lstrip().upper().startswith("DROP") for one in capability.statements
+    )
 
 
 # --- generation -------------------------------------------------------------
@@ -319,7 +325,9 @@ def test_declared_table_uses_declared_types_and_nullability_not_the_query():
 
 def test_column_names_are_case_sensitive_against_the_declaration():
     capability = _Capability([("customerid", "int")])
-    with pytest.raises(BuildError, match="not returned by the query under the same case"):
+    with pytest.raises(
+        BuildError, match="not returned by the query under the same case"
+    ):
         _run(
             capability,
             _payload(
@@ -335,7 +343,9 @@ def test_column_names_are_case_sensitive_against_the_declaration():
 
 def test_a_declared_column_missing_from_the_query_fails_install():
     capability = _Capability([("CustomerId", "int")])
-    with pytest.raises(BuildError, match="not returned by the query under the same case: CustomerName"):
+    with pytest.raises(
+        BuildError, match="not returned by the query under the same case: CustomerName"
+    ):
         _run(
             capability,
             _payload(
@@ -395,7 +405,9 @@ def test_a_query_that_does_not_resolve_names_the_action_and_carries_spark():
     assert "build-delta-Sales.Customer" in message
     assert CUSTOMER in message
     assert "UNRESOLVED_COLUMN" in message
-    assert not any(one.lstrip().upper().startswith("CREATE") for one in capability.statements)
+    assert not any(
+        one.lstrip().upper().startswith("CREATE") for one in capability.statements
+    )
 
 
 def test_a_query_producing_no_columns_is_refused():

@@ -203,9 +203,7 @@ def _run_spark(session, document, target: PhysicalTargetRef):
     lakehouse = lakehouse_for(session.resolver(), ItemRef(target.name))
     # Addressed exactly as an installed module's program is, so a file run reads
     # the same tables the installed one would.
-    sql = tokens.expand(
-        _addressed(document.sql_body or ""), lakehouse.destination
-    )
+    sql = tokens.expand(_addressed(document.sql_body or ""), lakehouse.destination)
     what = document.object_id.qualified
 
     if document.document.kind == ASSUMPTION:

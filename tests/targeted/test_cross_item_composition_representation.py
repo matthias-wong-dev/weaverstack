@@ -75,9 +75,7 @@ def plan(repository, tmp_path_factory):
 def _at(plan) -> dict:
     """Each action's sequence number, by the action id the manifest gave it."""
 
-    return {
-        action.id: sequence.number for sequence, _batch, action in plan.actions()
-    }
+    return {action.id: sequence.number for sequence, _batch, action in plan.actions()}
 
 
 def _when(plan, ending: str) -> int:

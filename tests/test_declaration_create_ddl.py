@@ -114,10 +114,11 @@ def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
 
 
 def test_view_normalises_only_trailing_whitespace():
-    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl(destination=SALES)
+    ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl(
+        destination=SALES
+    )
     assert ddl.content == (
-        "CREATE VIEW `Demo`.`Sales_LH`.`DWG`.`ActiveCustomer` AS\n"
-        f"{ADDRESSED_BODY}\n"
+        f"CREATE VIEW `Demo`.`Sales_LH`.`DWG`.`ActiveCustomer` AS\n{ADDRESSED_BODY}\n"
     )
 
 
@@ -173,9 +174,7 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl(destination=SALES)
 
     assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
-    assert ddl.content.startswith(
-        "CREATE TABLE `Demo`.`Sales_LH`.`DWG`.`Customer` (\n"
-    )
+    assert ddl.content.startswith("CREATE TABLE `Demo`.`Sales_LH`.`DWG`.`Customer` (\n")
     assert "`CustomerId` integer" in ddl.content
     assert "`CustomerName` string" in ddl.content
     assert "`IsActive` boolean" in ddl.content
@@ -195,7 +194,9 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     at install — not finished SQL (how-does-build-work §2). The query therefore
     *does* belong in the payload; it is executed at install, not at build."""
 
-    ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl(destination=SALES)
+    ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl(
+        destination=SALES
+    )
 
     assert (ddl.executor, ddl.extension) == (
         SPARK_TABLE_EXECUTOR,
@@ -235,7 +236,9 @@ def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
         "select count(*) as CustomerCount from live;",
     )
 
-    payload = json.loads(_doc("DWG.CustomerCount.sql", source).create_ddl(destination=SALES).content)
+    payload = json.loads(
+        _doc("DWG.CustomerCount.sql", source).create_ddl(destination=SALES).content
+    )
 
     assert payload["setup"] == [
         "create or replace temporary view live as\n"
@@ -245,8 +248,10 @@ def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
 
 
 def test_an_inferred_spark_sql_table_carries_no_declared_columns():
-    source = SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip() + "\n*/\n" + (
-        "select count(*) as CustomerCount from DWG.Customer;\n"
+    source = (
+        SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip()
+        + "\n*/\n"
+        + ("select count(*) as CustomerCount from DWG.Customer;\n")
     )
     ddl = _doc("DWG.CustomerCount.sql", source).create_ddl(destination=SALES)
 
@@ -311,4 +316,6 @@ def test_tsql_object_routes_to_the_tsql_executor():
     ],
 )
 def test_create_ddl_is_deterministic(path, source):
-    assert _doc(path, source).create_ddl(destination=SALES) == _doc(path, source).create_ddl(destination=SALES)
+    assert _doc(path, source).create_ddl(destination=SALES) == _doc(
+        path, source
+    ).create_ddl(destination=SALES)

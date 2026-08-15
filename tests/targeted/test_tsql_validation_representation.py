@@ -140,7 +140,10 @@ def test_the_payload_is_the_procedure_not_an_installer(test_script):
 
 
 def test_the_two_contract_queries_are_captured_as_expected_and_actual(test_script):
-    assert "into #weaver_expected_Sales_OrdersReconcile from #expected_orders" in test_script
+    assert (
+        "into #weaver_expected_Sales_OrdersReconcile from #expected_orders"
+        in test_script
+    )
     assert "into #weaver_actual_Sales_OrdersReconcile from Sales.Orders" in test_script
 
 

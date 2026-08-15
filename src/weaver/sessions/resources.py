@@ -143,7 +143,9 @@ class Resource(Generic[T]):
             # is released rather than handed to a caller of a closed Session.
             if self._state is ResourceState.CLOSED:
                 self._release_value(value)
-                raise ResourceError(f"the {self.name} resource was closed while starting")
+                raise ResourceError(
+                    f"the {self.name} resource was closed while starting"
+                )
             self._state = ResourceState.READY
         return value
 

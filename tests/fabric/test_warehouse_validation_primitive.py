@@ -117,9 +117,7 @@ def estate(clean_disposable_warehouse):
 
 def _drop(executor) -> None:
     executor.execute_script(
-        "\n".join(
-            f"drop procedure if exists [_].[{name}];" for name in PROCEDURES
-        )
+        "\n".join(f"drop procedure if exists [_].[{name}];" for name in PROCEDURES)
         + "\n"
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{table}', N'U') is not null "
@@ -265,7 +263,9 @@ def test_an_assumption_counts_and_returns_its_violations(estate):
 def test_an_assumption_holding_reports_zero(estate):
     _rows(estate, "ValidationActual", [(1, 100)])
 
-    result = _counts(estate, f"Assumption {SCHEMA}.OrdersArePositive", kind="Assumption")
+    result = _counts(
+        estate, f"Assumption {SCHEMA}.OrdersArePositive", kind="Assumption"
+    )
 
     assert result["violation_count"] == 0
 

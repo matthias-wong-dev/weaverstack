@@ -123,7 +123,9 @@ def build(repository, tmp_path, *, catalogue):
         store=FilesystemStore(),
         target_inventories=_inventories(repository, bound),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
 
 

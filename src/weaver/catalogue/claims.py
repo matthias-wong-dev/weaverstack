@@ -160,9 +160,7 @@ def without_claims(catalogue, claims):
             kept[name] = tuple(
                 row
                 for row in table_rows
-                if not any(
-                    claim.rule.owns(row, claim.identity) for claim in owners
-                )
+                if not any(claim.rule.owns(row, claim.identity) for claim in owners)
             )
         rows[item] = MappingProxyType(kept)
     return Catalogue(

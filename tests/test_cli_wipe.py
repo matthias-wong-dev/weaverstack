@@ -65,9 +65,7 @@ def test_unbinding_is_reached_through_wipe_and_not_a_command_of_its_own():
 
 def test_wipe_requires_a_typed_target():
     with pytest.raises(SystemExit):
-        build_parser().parse_args(
-            ["wipe", "--workspace", "Demo"]
-        )
+        build_parser().parse_args(["wipe", "--workspace", "Demo"])
 
 
 def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
@@ -81,13 +79,13 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
         return _result(dry_run=True)
 
     monkeypatch.setattr("weaver.wipe", wipe)
-    assert main(
-        ["wipe", "Lakehouse/Sales", "--workspace", "/tmp/local", "--dry-run"]
-    ) == 0
+    assert (
+        main(["wipe", "Lakehouse/Sales", "--workspace", "/tmp/local", "--dry-run"]) == 0
+    )
     # The CLI hands the operation a Session rather than a resolved Workspace:
     # operations take names, and the Session is what carries the context the
     # CLI resolved for its own inheritance and override rules.
-    (targets, passed), = calls
+    ((targets, passed),) = calls
     assert targets == ("Lakehouse/Sales",)
     assert passed["unbind_from"] is None
     assert passed["dry_run"] is True
@@ -114,18 +112,21 @@ def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch)
         return _result(dry_run=kwargs.get("dry_run", False))
 
     monkeypatch.setattr("weaver.wipe", wipe)
-    assert main(
-        [
-            "wipe",
-            "Lakehouse/Sales/Tables",
-            "--workspace",
-            "/tmp/local",
-            "--unbind-from",
-            "Control",
-            "--yes",
-        ]
-    ) == 0
-    (targets, passed), = calls
+    assert (
+        main(
+            [
+                "wipe",
+                "Lakehouse/Sales/Tables",
+                "--workspace",
+                "/tmp/local",
+                "--unbind-from",
+                "Control",
+                "--yes",
+            ]
+        )
+        == 0
+    )
+    ((targets, passed),) = calls
     assert targets == ("Lakehouse/Sales/Tables",)
     assert passed["unbind_from"] == "Control"
     assert passed["session"].workspace is workspace

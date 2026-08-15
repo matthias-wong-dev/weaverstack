@@ -56,30 +56,53 @@ class _CollectionClient:
 
     def get_json(self, url):
         if url.endswith("/lh-1/livyapi/versions/2023-12-01/sessions"):
-            return {"items": [{
-                "id": "11", "name": "weaver", "schedulerState": "Ended",
-                "pluginState": "Ended", "livyState": "killed",
-                "cancellationReason": "cancelled by user",
-            }]}
-        return {"items": [{
-            "id": "22", "name": "notebook", "schedulerState": "Scheduled",
-            "pluginState": "Queued", "livyState": "not_started",
-            "submitterId": "person-id", "submitterName": "builder@example.invalid",
-            "artifactId": "lh-2",
-            "submittedAt": "2026-07-27T01:02:03Z", "tags": ["interactive"],
-        }]}
+            return {
+                "items": [
+                    {
+                        "id": "11",
+                        "name": "weaver",
+                        "schedulerState": "Ended",
+                        "pluginState": "Ended",
+                        "livyState": "killed",
+                        "cancellationReason": "cancelled by user",
+                    }
+                ]
+            }
+        return {
+            "items": [
+                {
+                    "id": "22",
+                    "name": "notebook",
+                    "schedulerState": "Scheduled",
+                    "pluginState": "Queued",
+                    "livyState": "not_started",
+                    "submitterId": "person-id",
+                    "submitterName": "builder@example.invalid",
+                    "artifactId": "lh-2",
+                    "submittedAt": "2026-07-27T01:02:03Z",
+                    "tags": ["interactive"],
+                }
+            ]
+        }
 
 
 def test_livy_collection_preserves_scheduler_details():
     sessions = list_livy_sessions("ws-id", "lh-2", client=_CollectionClient())
 
-    assert sessions == (LivySessionInfo(
-        id="22", name="notebook", scheduler_state="Scheduled",
-        plugin_state="Queued", livy_state="not_started",
-        submitter_id="person-id", submitter_name="builder@example.invalid",
-        artifact_id="lh-2",
-        submitted_at="2026-07-27T01:02:03Z", tags=("interactive",),
-    ),)
+    assert sessions == (
+        LivySessionInfo(
+            id="22",
+            name="notebook",
+            scheduler_state="Scheduled",
+            plugin_state="Queued",
+            livy_state="not_started",
+            submitter_id="person-id",
+            submitter_name="builder@example.invalid",
+            artifact_id="lh-2",
+            submitted_at="2026-07-27T01:02:03Z",
+            tags=("interactive",),
+        ),
+    )
     assert sessions[0].active is True
 
 

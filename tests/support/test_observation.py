@@ -56,7 +56,9 @@ def _run(body: str, spark: FakeSpark):
     """Execute an observation body the way both transports do, and return its emit."""
 
     emitted = []
-    exec(compile(body, "<observation>", "exec"), {"spark": spark, "emit": emitted.append})
+    exec(
+        compile(body, "<observation>", "exec"), {"spark": spark, "emit": emitted.append}
+    )
     assert emitted, "the body emitted nothing"
     return emitted[-1]
 
@@ -117,7 +119,9 @@ def test_quoting_survives_the_round_trip():
 
 
 def test_values_lowercases_one_column():
-    seen = Observation(rows={"tables": [{"tableName": "Customer"}, {"tableName": "ORDER"}]})
+    seen = Observation(
+        rows={"tables": [{"tableName": "Customer"}, {"tableName": "ORDER"}]}
+    )
 
     assert seen.values("tables", "tableName") == {"customer", "order"}
 
@@ -155,7 +159,9 @@ def test_asking_for_evidence_that_was_not_observed_says_what_was():
 
     seen = Observation(rows={"tables": []}, schemas={"dwg": True})
 
-    with pytest.raises(AssertionError, match=r"no evidence named 'views'.*\['tables'\]"):
+    with pytest.raises(
+        AssertionError, match=r"no evidence named 'views'.*\['tables'\]"
+    ):
         seen["views"]
     with pytest.raises(AssertionError, match=r"no schema evidence named 'raw'"):
         seen.schema("raw")

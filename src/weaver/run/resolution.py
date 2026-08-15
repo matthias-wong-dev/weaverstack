@@ -211,7 +211,9 @@ def _where(node) -> str | None:
 
         if node.logical_id is None:
             return None
-        return f"{node.physical_target}/{load_procedure_name(node.logical_id.object_id)}"
+        return (
+            f"{node.physical_target}/{load_procedure_name(node.logical_id.object_id)}"
+        )
     if node.primitive_kind in PYTHON_KINDS and node.primitive_object is not None:
         return (
             f"{node.physical_target}/{node.primitive_object.schema}/"

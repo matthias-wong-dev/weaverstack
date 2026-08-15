@@ -60,7 +60,7 @@ def content_hash(data: bytes) -> str:
     """
 
     if data.startswith(codecs.BOM_UTF8):
-        data = data[len(codecs.BOM_UTF8):]
+        data = data[len(codecs.BOM_UTF8) :]
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
@@ -273,7 +273,9 @@ class SourceDocument:
         """Three- and four-part references — physical targets the author named."""
 
         return tuple(
-            reference for reference in self.discovered_references if reference.is_qualified
+            reference
+            for reference in self.discovered_references
+            if reference.is_qualified
         )
 
     @property
@@ -374,7 +376,9 @@ def read_source_document(
     return _read_sql(relative_path, text, source_hash, filename_id, language)
 
 
-def _check_declared_id(relative_path: str, document: SesDocument, filename_id: ObjectId) -> None:
+def _check_declared_id(
+    relative_path: str, document: SesDocument, filename_id: ObjectId
+) -> None:
     if document.object_id != filename_id:
         raise DiscoveryError(
             f"{relative_path}: declares {document.kind} ID "
@@ -502,7 +506,8 @@ def _methods(declared: ast.ClassDef, name: str) -> list[ast.stmt]:
     return [
         node
         for node in declared.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == name
     ]
 
 

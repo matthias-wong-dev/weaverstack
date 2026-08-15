@@ -128,7 +128,6 @@ class RunRequest:
         }
 
 
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -259,7 +258,9 @@ class Runner:
                 blocking = self._blocking(node, statuses)
                 if blocking:
                     settle(
-                        self._settled(node, BLOCKED, messages=(_blocked_by(node, blocking),)),
+                        self._settled(
+                            node, BLOCKED, messages=(_blocked_by(node, blocking),)
+                        ),
                         BLOCKED,
                     )
                     continue
@@ -307,7 +308,6 @@ class Runner:
                 if status == FAILED and not self.request.fault_tolerant:
                     stopped = True
 
-
         try:
             _execute()
         finally:
@@ -320,9 +320,7 @@ class Runner:
         """Resolve and classify every node without dispatching it."""
 
         resolutions = {node.node_id: self.resolve(node) for node in ordered}
-        invalid = {
-            node_id for node_id, one in resolutions.items() if not one.valid
-        }
+        invalid = {node_id for node_id, one in resolutions.items() if not one.valid}
         blocked: dict[str, set[str]] = {}
         for node_id in invalid:
             for downstream in self.graph.descendants(node_id):

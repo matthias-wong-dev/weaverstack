@@ -165,7 +165,9 @@ class WarehouseTarget:
     def parse(cls, text: str) -> "WarehouseTarget":
         segments = _split(text, what="warehouse target")
         if len(segments) != 1:
-            raise IdentityError(f"warehouse target must name a Warehouse only, got {text!r}")
+            raise IdentityError(
+                f"warehouse target must name a Warehouse only, got {text!r}"
+            )
         return cls(warehouse=ItemRef(segments[0]))
 
     def __str__(self) -> str:
@@ -229,9 +231,7 @@ def physical_kind(target) -> str:
         return LAKEHOUSE_KIND
     if isinstance(target, WarehouseTarget):
         return WAREHOUSE_KIND
-    raise IdentityError(
-        f"{type(target).__name__} is not a typed physical target"
-    )
+    raise IdentityError(f"{type(target).__name__} is not a typed physical target")
 
 
 def physical_item(target) -> ItemRef:
@@ -241,9 +241,7 @@ def physical_item(target) -> ItemRef:
         return target.lakehouse
     if isinstance(target, WarehouseTarget):
         return target.warehouse
-    raise IdentityError(
-        f"{type(target).__name__} is not a typed physical target"
-    )
+    raise IdentityError(f"{type(target).__name__} is not a typed physical target")
 
 
 def physical_target_text(target) -> str:

@@ -62,9 +62,7 @@ class TableCase:
     def addressed_query(self, destination) -> str:
         if self.reads is None:
             return self.source_query
-        return self.source_query.format(
-            reads=destination.qualify(SCHEMA, self.reads)
-        )
+        return self.source_query.format(reads=destination.qualify(SCHEMA, self.reads))
 
     def payload(self, destination) -> bytes:
         """The instruction a build freezes, addressed to one destination."""
@@ -79,7 +77,9 @@ class TableCase:
             "audit_columns": AUDIT_COLUMNS,
             "column_mapping": True,
         }
-        return (json.dumps(instruction, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        return (json.dumps(instruction, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
 
 
 #: Every type a Weaver document can declare that Spark spells structurally.
@@ -255,8 +255,7 @@ def assert_case_built(case: TableCase, rows) -> None:
     business = [name for name in types if name not in AUDIT_NAMES]
 
     assert business == list(case.expected), (
-        f"{case.name} carries {business}, and its query declares "
-        f"{list(case.expected)}"
+        f"{case.name} carries {business}, and its query declares {list(case.expected)}"
     )
     for name, expected in case.expected.items():
         assert types[name] == expected, (

@@ -82,9 +82,7 @@ class CountingCatalogue:
 
 def _table_of(statement: str) -> str:
     return next(
-        table.name
-        for table in CATALOGUE_TABLES
-        if f".`{table.name}`" in statement
+        table.name for table in CATALOGUE_TABLES if f".`{table.name}`" in statement
     )
 
 
@@ -158,12 +156,13 @@ def test_rows_are_grouped_back_by_logical_item():
 
     state = read_catalogue_state(catalogue, (sales, inventory))
 
-    assert {
-        row["object_name"] for row in state.rows[sales][REGISTRY.name]
-    } == {"Customer", "Order"}
-    assert {
-        row["object_name"] for row in state.rows[inventory][REGISTRY.name]
-    } == {"Product"}
+    assert {row["object_name"] for row in state.rows[sales][REGISTRY.name]} == {
+        "Customer",
+        "Order",
+    }
+    assert {row["object_name"] for row in state.rows[inventory][REGISTRY.name]} == {
+        "Product"
+    }
 
 
 def test_an_item_with_no_rows_is_still_present_in_the_catalogue():
@@ -210,7 +209,12 @@ def test_a_row_outside_the_requested_scopes_is_a_failure_not_a_silent_drop():
     sales = WeaverItemId.parse("Lakehouse/Sales")
     stranger = WeaverItemId.parse("Lakehouse/SomeoneElse")
     catalogue = CountingCatalogue(
-        {REGISTRY.name: (_registry_row(sales, "Customer"), _registry_row(stranger, "X"))}
+        {
+            REGISTRY.name: (
+                _registry_row(sales, "Customer"),
+                _registry_row(stranger, "X"),
+            )
+        }
     )
 
     with pytest.raises(BuildError, match="did not ask for"):

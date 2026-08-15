@@ -76,7 +76,9 @@ class TableReconciliation:
     @property
     def statements(self) -> tuple[str, ...]:
         return tuple(
-            statement for statement in (self.delete, self.merge) if statement is not None
+            statement
+            for statement in (self.delete, self.merge)
+            if statement is not None
         )
 
 
@@ -154,7 +156,9 @@ def _for_table(
 ) -> TableReconciliation:
     return TableReconciliation(
         table=table,
-        delete=render_delete_obsolete(table, rows, scope=scope, destination=destination),
+        delete=render_delete_obsolete(
+            table, rows, scope=scope, destination=destination
+        ),
         merge=render_merge(table, rows, scope=scope, destination=destination),
     )
 
@@ -267,8 +271,7 @@ def _publish_table(
         for key, row in wanted.items():
             existing = found.get(key)
             if existing is None or any(
-                row.get(name) != existing.get(name)
-                for name in table.comparison_columns
+                row.get(name) != existing.get(name) for name in table.comparison_columns
             ):
                 changed.append(row)
 

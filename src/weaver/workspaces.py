@@ -112,9 +112,7 @@ class Workspace:
                 validate_name(self.environment, what="environment"),
             )
         if self.catalogue is not None:
-            object.__setattr__(
-                self, "catalogue", _catalogue_value(self.catalogue)
-            )
+            object.__setattr__(self, "catalogue", _catalogue_value(self.catalogue))
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(
@@ -162,4 +160,3 @@ class Workspace:
     def settings_for_warehouse(self, name: str) -> ExecutionSettings:
         declaration = self.warehouses.get(name)
         return declaration.execution if declaration else self.execution
-

@@ -165,7 +165,7 @@ def run_from_here(
         action,
         payload,
         context=InstallationContext(
-                # From the Installer, as every production context gets them. An
+            # From the Installer, as every production context gets them. An
             # executor stays on the desktop and only its statements cross — a
             # table alias asking whether it has become readable, a table build
             # asking what shape its query has.
@@ -186,8 +186,12 @@ def run_from_here(
 
 @pytest.fixture(scope="module")
 def alias_estate(
-    fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session,
-    weaver_session, tmp_path_factory,
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    livy_session,
+    weaver_session,
+    tmp_path_factory,
 ):
     """The alias action, run from here against real Fabric."""
 
@@ -239,13 +243,23 @@ def alias_estate(
     )
 
     alias_result = run_from_here(
-        alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id, session=weaver_session,
+        alias_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=batch.target_id,
+        session=weaver_session,
     )
     assert alias_result.status == "succeeded", alias_result.error_message
     refresh_result = run_from_here(
-        refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id, session=weaver_session,
+        refresh_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=batch.target_id,
+        session=weaver_session,
     )
 
     aliased = at["consumer"].qualify("DWG", "PortableCustomer")
@@ -314,9 +328,10 @@ def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     assert ("Tables/DWG", "PortableCustomer") in found
     target = found[("Tables/DWG", "PortableCustomer")]
     assert target.get("itemId") == alias_estate["producer"].id
-    source_schema = alias_estate["resolver"].tables_root(
-        ItemRef(alias_estate["producer"].name)
-    ) / "DWG"
+    source_schema = (
+        alias_estate["resolver"].tables_root(ItemRef(alias_estate["producer"].name))
+        / "DWG"
+    )
     physical_source = next(
         entry.name
         for entry in alias_estate["store"].list(source_schema)
@@ -404,8 +419,13 @@ WAREHOUSE_CONSUMER = "Warehouse/AliasReporting"
 
 
 def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
-    fabric_workspace, fabric_client, fabric_alias_lakehouses,
-    clean_disposable_warehouse, livy_session, weaver_session, tmp_path_factory,
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    clean_disposable_warehouse,
+    livy_session,
+    weaver_session,
+    tmp_path_factory,
 ):
     """The other alias form, and the one that leans hardest on the endpoint.
 
@@ -516,13 +536,23 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     )
     refresh_batch, refresh_action = refreshes[0]
     run_from_here(
-        refresh_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=refresh_batch.target_id, session=weaver_session,
+        refresh_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=refresh_batch.target_id,
+        session=weaver_session,
     )
 
     result = run_from_here(
-        alias_action, bundle, workspace=fabric_workspace, resolver=resolver,
-        store=store, batch_target=batch.target_id, sql=warehouse.executor,
+        alias_action,
+        bundle,
+        workspace=fabric_workspace,
+        resolver=resolver,
+        store=store,
+        batch_target=batch.target_id,
+        sql=warehouse.executor,
         session=weaver_session,
     )
 

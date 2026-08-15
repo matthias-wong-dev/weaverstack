@@ -265,7 +265,10 @@ def render_merge(
         for name in comparison
     )
     updates = ", ".join(
-        [f"target.{identifier(name)} = source.{identifier(name)}" for name in comparison]
+        [
+            f"target.{identifier(name)} = source.{identifier(name)}"
+            for name in comparison
+        ]
         + [f"target.{identifier(AUDIT_UPDATE_COLUMN)} = current_timestamp()"]
     )
 
@@ -292,9 +295,7 @@ def render_merge(
             for name in table.published_column_names
         }
     )
-    insert_columns = ", ".join(
-        identifier(name) for name in table.physical_columns
-    )
+    insert_columns = ", ".join(identifier(name) for name in table.physical_columns)
     insert_values = ", ".join(
         supplied[name] if name in supplied else f"source.{identifier(name)}"
         for name in table.physical_columns
@@ -419,9 +420,9 @@ def render_delete_scope(
     opinion about it.
     """
 
-    return f"DELETE FROM {qualified_name(table, destination)}\n WHERE {scope.predicate}\n"
-
-
+    return (
+        f"DELETE FROM {qualified_name(table, destination)}\n WHERE {scope.predicate}\n"
+    )
 
 
 def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:

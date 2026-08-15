@@ -55,7 +55,9 @@ def test_exists_and_is_directory(store, files_root):
 
 def test_listing_carries_metadata(store, files_root):
     store.write(files_root / "listed" / "a.csv", b"0123456789")
-    entry = next(e for e in store.list(files_root / "listed") if e.location.name == "a.csv")
+    entry = next(
+        e for e in store.list(files_root / "listed") if e.location.name == "a.csv"
+    )
     assert entry.size == 10
     assert entry.modified is not None
     assert not entry.is_directory
@@ -65,7 +67,8 @@ def test_listing_is_shallow_by_default(store, files_root):
     store.write(files_root / "shallow" / "top.csv", b"x")
     store.write(files_root / "shallow" / "nested" / "deep.csv", b"x")
     assert {e.location.name for e in store.list(files_root / "shallow")} == {
-        "top.csv", "nested",
+        "top.csv",
+        "nested",
     }
 
 
@@ -73,9 +76,6 @@ def test_listing_recursively_reaches_nested_files(store, files_root):
     store.write(files_root / "deep" / "nested" / "deep.csv", b"x")
     names = {e.location.value for e in store.list(files_root / "deep", recursive=True)}
     assert (files_root / "deep" / "nested" / "deep.csv").value in names
-
-
-
 
 
 def test_delete_removes_a_tree(store, files_root):
@@ -108,11 +108,15 @@ def test_a_guid_item_needs_no_type_suffix():
 
 
 def test_a_named_item_carries_its_type():
-    assert onelake_url("MyWorkspace", "Weaver", "Files").endswith("Weaver.Lakehouse/Files")
+    assert onelake_url("MyWorkspace", "Weaver", "Files").endswith(
+        "Weaver.Lakehouse/Files"
+    )
 
 
 def test_a_onelake_location_splits_back_into_its_parts():
-    parsed = parse_onelake(Location(onelake_url("ws", "item-id", "Files/weaver_items/x")))
+    parsed = parse_onelake(
+        Location(onelake_url("ws", "item-id", "Files/weaver_items/x"))
+    )
     assert (parsed.workspace, parsed.relative) == ("ws", "Files/weaver_items/x")
 
 

@@ -14,9 +14,6 @@ from ..errors import WeaverError
 # --- the contract a result must meet ------------------------------------------
 
 
-
-
-
 class RunError(WeaverError):
     """An error raised when a run cannot proceed.
 
@@ -65,7 +62,6 @@ class RunFailure:
 
 
 # --- what a run says about a node ---------------------------------------------
-
 
 
 # --- severity -----------------------------------------------------------------
@@ -145,9 +141,6 @@ def warning(code: str, message: str, **extra: str | None) -> RunMessage:
 
 def info(code: str, message: str, **extra: str | None) -> RunMessage:
     return RunMessage(SEVERITY_INFO, code, message, **extra)
-
-
-
 
 
 # --- node statuses ------------------------------------------------------------
@@ -319,20 +312,12 @@ def run_status(nodes, *, dry_run: bool = False) -> str:
         # a reason it could not.
         if not statuses:
             return RUN_INVALID
-        return (
-            RUN_INVALID
-            if statuses & {INVALID, BLOCKED}
-            else RUN_SUCCEEDED
-        )
+        return RUN_INVALID if statuses & {INVALID, BLOCKED} else RUN_SUCCEEDED
     if not statuses:
         return RUN_SUCCEEDED
     if FAILED in statuses or BLOCKED in statuses or INVALID in statuses:
         succeeded = {SUCCEEDED, SUCCEEDED_WITH_REJECTS, VALIDATED, SKIPPED}
-        return (
-            RUN_PARTIALLY_SUCCEEDED
-            if statuses & succeeded
-            else RUN_FAILED
-        )
+        return RUN_PARTIALLY_SUCCEEDED if statuses & succeeded else RUN_FAILED
     if SUCCEEDED_WITH_REJECTS in statuses:
         return RUN_SUCCEEDED_WITH_REJECTS
     return RUN_SUCCEEDED

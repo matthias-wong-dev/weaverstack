@@ -94,7 +94,7 @@ class {class_name}(Assumption):
 
 
 def _tsql_test(object_id: str) -> str:
-    return f'''\
+    return f"""\
 /*
 Test ID: {object_id}
 
@@ -105,18 +105,18 @@ Primary key: Id
 select Id from Sales.Order;
 
 select Id from Sales.Order;
-'''
+"""
 
 
 def _tsql_assumption(object_id: str) -> str:
-    return f'''\
+    return f"""\
 /*
 Assumption ID: {object_id}
 
 Description: Every order carries a customer.
 */
 select Id from Sales.Order where CustomerId is null;
-'''
+"""
 
 
 @pytest.fixture
@@ -489,10 +489,13 @@ def test_a_test_must_define_expected_and_actual(lakehouse):
 
 
 def test_a_test_may_not_author_read(lakehouse):
-    source = _python_test("Sales.OrdersReconcile") + """
+    source = (
+        _python_test("Sales.OrdersReconcile")
+        + """
     def read(self):
         return None
 """
+    )
     _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
 
     with pytest.raises(DiscoveryError, match="which a Test may not"):
@@ -503,16 +506,23 @@ def test_an_assumption_must_define_read(lakehouse):
     source = _python_assumption("Sales.OrdersHaveCustomers").replace(
         "def read(self):", "def rows(self):"
     )
-    _write(lakehouse, "Lakehouse/Sales/assumptions/Sales__OrdersHaveCustomers.py", source)
+    _write(
+        lakehouse, "Lakehouse/Sales/assumptions/Sales__OrdersHaveCustomers.py", source
+    )
 
     with pytest.raises(DiscoveryError, match="must implement read"):
         parse(lakehouse)
 
 
 def test_a_test_must_inherit_test(lakehouse):
-    source = _python_test("Sales.OrdersReconcile").replace(
-        "class Sales__OrdersReconcile(Test)", "class Sales__OrdersReconcile(Assumption)"
-    ).replace("from weaver import Test", "from weaver import Assumption")
+    source = (
+        _python_test("Sales.OrdersReconcile")
+        .replace(
+            "class Sales__OrdersReconcile(Test)",
+            "class Sales__OrdersReconcile(Assumption)",
+        )
+        .replace("from weaver import Test", "from weaver import Assumption")
+    )
     _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
 
     with pytest.raises(DiscoveryError, match="must inherit Test"):
@@ -617,9 +627,7 @@ def test_setup_between_a_test_s_contract_queries_is_refused(warehouse):
         "select Id into #between from Sales.Order;\n\n"
         "select Id from Sales.Order;",
     )
-    _write(
-        warehouse, "Warehouse/Reporting/tests/Sales.OrderReconciliation.sql", source
-    )
+    _write(warehouse, "Warehouse/Reporting/tests/Sales.OrderReconciliation.sql", source)
 
     with pytest.raises(DiscoveryError, match="Setup belongs before them"):
         parse(warehouse)

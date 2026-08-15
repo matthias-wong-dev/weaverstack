@@ -77,7 +77,9 @@ def build(repository, tmp_path, *, inventories=None, catalogue=None):
         if inventories is not None
         else estate_inventories(repository, empty=True),
         catalogue=catalogue if catalogue is not None else Catalogue({}),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
 
 
@@ -142,9 +144,7 @@ def test_no_change_is_attributed_to_the_wrong_target(repository, tmp_path):
     """
 
     plan = build(repository, tmp_path).plan
-    by_action = {
-        action.id: batch.target_id for _s, batch, action in plan.actions()
-    }
+    by_action = {action.id: batch.target_id for _s, batch, action in plan.actions()}
 
     for target_id, changes in plan.target_changes.items():
         for change in changes:

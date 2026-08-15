@@ -342,7 +342,9 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     from weaver.etl import LOAD_ROOT
 
     context = _load_context(tmp_path)
-    action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    action = _load_action(
+        kind="write_file", relative="lib/dates.py", payload="p.payload"
+    )
 
     result = execute_install_action(action, b"def parse(value):\n", context=context)
 
@@ -367,9 +369,7 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     document = read_source_document(
         "Sales.OrderSummary.sql", _SPARK_LOAD_SOURCE.encode("utf-8"), LAKEHOUSE
     )
-    payload = document.create_load(
-        destination=resolved_target().destination
-    ).payload
+    payload = document.create_load(destination=resolved_target().destination).payload
 
     context = _load_context(
         tmp_path,
@@ -441,14 +441,19 @@ def test_a_write_creates_the_directories_beneath_it(tmp_path):
         kind="write_file", relative="lib/nested/deep/dates.py", payload="p.payload"
     )
 
-    assert execute_install_action(action, b"x = 1\n", context=context).status == "succeeded"
+    assert (
+        execute_install_action(action, b"x = 1\n", context=context).status
+        == "succeeded"
+    )
 
 
 def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
     """An empty file is a plausible-looking wrong answer, so it is refused."""
 
     context = _load_context(tmp_path)
-    action = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    action = _load_action(
+        kind="write_file", relative="lib/dates.py", payload="p.payload"
+    )
 
     result = execute_install_action(action, None, context=context)
 
@@ -475,7 +480,9 @@ def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
 
 def test_a_deployed_file_is_removed_where_it_was_written(tmp_path):
     context = _load_context(tmp_path)
-    write = _load_action(kind="write_file", relative="lib/dates.py", payload="p.payload")
+    write = _load_action(
+        kind="write_file", relative="lib/dates.py", payload="p.payload"
+    )
     execute_install_action(write, b"x = 1\n", context=context)
 
     delete = _load_action(kind="delete_file", relative="lib/dates.py", payload=None)

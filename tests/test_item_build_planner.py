@@ -126,7 +126,8 @@ def generate_item_build_bundle(repository, **kwargs):
     kwargs.setdefault("target_inventories", inventories)
     kwargs.setdefault("catalogue", Catalogue({}))
     kwargs.setdefault(
-        "control_lakehouse", LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
+        "control_lakehouse",
+        LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     return _generate_item_build_bundle(repository, **kwargs)
 
@@ -154,11 +155,17 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
         ("Warehouse", "Audit"),
     }
     assert any(len(sequence.batches) == 2 for sequence in bundle.plan.sequences)
-    assert all(batch.target_id in bundle.plan.target_ids for sequence in bundle.plan.sequences for batch in sequence.batches)
+    assert all(
+        batch.target_id in bundle.plan.target_ids
+        for sequence in bundle.plan.sequences
+        for batch in sequence.batches
+    )
 
 
 def test_same_physical_item_cannot_be_bound_twice(tmp_path):
-    with pytest.raises(BuildError, match="physical Lakehouse target is bound more than once"):
+    with pytest.raises(
+        BuildError, match="physical Lakehouse target is bound more than once"
+    ):
         ItemBindings(
             (
                 _binding("Lakehouse/Raw", "Shared"),
@@ -200,9 +207,10 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
         if node.reason == "alias_unsupported"
     }
     assert set(omitted) == {"alias:Warehouse/Reporting/Sales.PortableCustomer"}
-    assert "Lakehouse/Curated is not bound" in omitted[
-        "alias:Warehouse/Reporting/Sales.PortableCustomer"
-    ].detail
+    assert (
+        "Lakehouse/Curated is not bound"
+        in omitted["alias:Warehouse/Reporting/Sales.PortableCustomer"].detail
+    )
     assert not any(
         action.kind == "create_alias" for _s, _b, action in bundle.plan.actions()
     )
@@ -215,9 +223,11 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
         for _s, _b, action in bundle.plan.actions()
         if action.kind == "publish_registry"
     )
-    payload = FilesystemStore().read(
-        bundle.location.join(*registry.payload.split("/"))
-    ).decode()
+    payload = (
+        FilesystemStore()
+        .read(bundle.location.join(*registry.payload.split("/")))
+        .decode()
+    )
     assert "PortableCustomer" not in payload
 
 
@@ -345,10 +355,7 @@ def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
     at = {
         action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
     }
-    assert (
-        at["schema-Warehouse--Reporting-Sales"]
-        < at["aliases-Warehouse--Reporting"]
-    )
+    assert at["schema-Warehouse--Reporting-Sales"] < at["aliases-Warehouse--Reporting"]
 
 
 def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
@@ -385,7 +392,9 @@ def test_authored_three_part_name_is_preserved_in_payload(tmp_path):
         store=FilesystemStore(),
     )
     payloads = [
-        FilesystemStore().read(bundle.location.join(*action.payload.split("/"))).decode()
+        FilesystemStore()
+        .read(bundle.location.join(*action.payload.split("/")))
+        .decode()
         for _, _, action in bundle.plan.actions()
         if action.payload and action.kind == "build_table"
     ]
@@ -448,7 +457,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "alias": noop,
             "tsql_batch": noop,
             "sql_endpoint_refresh": noop,
-                "load_file": noop,
+            "load_file": noop,
         },
     )
     report = installer.install(reloaded)
@@ -488,7 +497,11 @@ def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
         for action in batch.actions
         if action.kind == "prune_folder"
     } == {"folder:Sales.OldFolder"}
-    assert all("Customer" not in action.id for batch in prune.batches for action in batch.actions)
+    assert all(
+        "Customer" not in action.id
+        for batch in prune.batches
+        for action in batch.actions
+    )
 
 
 def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
@@ -514,8 +527,12 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
         store=lakehouses.store,
     )
 
-    assert any(action.kind.startswith("prune") for _s, _b, action in reconciled.plan.actions())
-    assert not any(action.kind.startswith("prune") for _s, _b, action in jammed.plan.actions())
+    assert any(
+        action.kind.startswith("prune") for _s, _b, action in reconciled.plan.actions()
+    )
+    assert not any(
+        action.kind.startswith("prune") for _s, _b, action in jammed.plan.actions()
+    )
 
 
 def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakehouses):
@@ -524,7 +541,9 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakeh
     second = ItemRef("Curated_Dev")
     for target, orphan in ((lakehouses.target, "RawGhost"), (second, "CuratedGhost")):
         lakehouses.store.make_directory(lakehouses.resolver.files_root(target))
-        lakehouses.store.make_directory(lakehouses.resolver.tables_root(target) / "Sales" / orphan)
+        lakehouses.store.make_directory(
+            lakehouses.resolver.tables_root(target) / "Sales" / orphan
+        )
 
     bundle = generate_item_build_bundle(
         repository,
@@ -545,7 +564,9 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakeh
         batch.target_id: {action.id for action in batch.actions}
         for batch in prune.batches
     }
-    assert any("Lakehouse--Raw-prune-table-Sales.RawGhost" in ids for ids in by_target.values())
+    assert any(
+        "Lakehouse--Raw-prune-table-Sales.RawGhost" in ids for ids in by_target.values()
+    )
     assert any(
         "Lakehouse--Curated-prune-table-Sales.CuratedGhost" in ids
         for ids in by_target.values()
@@ -713,7 +734,9 @@ def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
     )
 
     assert _refreshed(bundle) == {"control-lakehouse-Weaver_Control"}
-    assert any(action.kind == "build_folder" for _s, _b, action in bundle.plan.actions())
+    assert any(
+        action.kind == "build_folder" for _s, _b, action in bundle.plan.actions()
+    )
 
 
 class _WarehouseInventory:
@@ -758,7 +781,9 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
 
     assert [sequence.description for sequence in bundle.plan.sequences[-3:]] == [
@@ -774,7 +799,9 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     )
     assert len(registry.batches) == 1
     registry_payloads = [
-        FilesystemStore().read(bundle.location.join(*action.payload.split("/"))).decode()
+        FilesystemStore()
+        .read(bundle.location.join(*action.payload.split("/")))
+        .decode()
         for batch in registry.batches
         for action in batch.actions
     ]

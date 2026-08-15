@@ -216,7 +216,6 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
 ):
     """The cost this ordering removes from every ordinary load in an estate."""
 
-
     calls = _counting(
         monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
     )
@@ -224,9 +223,7 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
     class Sales__Country(_TableUnderTest):
         static = False
 
-    table = Sales__Country(
-        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path)
-    )
+    table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
     # It goes on to read(), which this double refuses — the point is only that
     # it got there without asking the target anything.
     with pytest.raises(AssertionError, match="read\\(\\) must not run"):

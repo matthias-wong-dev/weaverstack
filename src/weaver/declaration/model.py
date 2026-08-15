@@ -53,7 +53,9 @@ def _logical_name(value: object, *, what: str) -> str:
     if not isinstance(value, str):
         raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
     if not value or value != value.strip():
-        raise IdentityError(f"{what} must be a non-empty name without surrounding whitespace")
+        raise IdentityError(
+            f"{what} must be a non-empty name without surrounding whitespace"
+        )
     if any(character in value for character in ("/", "\\", ".", ":")):
         raise IdentityError(f"{what} must be one logical name, got {value!r}")
     return value
@@ -70,7 +72,9 @@ def _relative_path(value: object, *, what: str) -> str:
     if not isinstance(value, str):
         raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
     if not value or value != value.strip():
-        raise IdentityError(f"{what} must be a non-empty path without surrounding whitespace")
+        raise IdentityError(
+            f"{what} must be a non-empty path without surrounding whitespace"
+        )
     if "\\" in value:
         raise IdentityError(f"{what} must use '/' between components, got {value!r}")
     components = value.split("/")
@@ -87,7 +91,9 @@ def _file_name(value: object, *, what: str) -> str:
     if not isinstance(value, str):
         raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
     if not value or value != value.strip():
-        raise IdentityError(f"{what} must be a non-empty name without surrounding whitespace")
+        raise IdentityError(
+            f"{what} must be a non-empty name without surrounding whitespace"
+        )
     if "/" in value or "\\" in value:
         raise IdentityError(f"{what} must be one filename, got {value!r}")
     if value in (".", ".."):
@@ -106,7 +112,9 @@ def _procedure_name(value: object, *, what: str) -> str:
     if not isinstance(value, str):
         raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
     if not value or value != value.strip():
-        raise IdentityError(f"{what} must be a non-empty name without surrounding whitespace")
+        raise IdentityError(
+            f"{what} must be a non-empty name without surrounding whitespace"
+        )
     if any(character in value for character in ("/", "\\")):
         raise IdentityError(f"{what} must be one object name, got {value!r}")
     return value
@@ -115,7 +123,9 @@ def _procedure_name(value: object, *, what: str) -> str:
 def _item_type(value: object) -> str:
     if not isinstance(value, str) or value not in ITEM_TYPES:
         expected = ", ".join(sorted(ITEM_TYPES))
-        raise IdentityError(f"item type must be exactly one of {expected}, got {value!r}")
+        raise IdentityError(
+            f"item type must be exactly one of {expected}, got {value!r}"
+        )
     return value
 
 
@@ -171,7 +181,9 @@ class WeaverSchemaId:
     schema: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "schema", _logical_name(self.schema, what="schema name"))
+        object.__setattr__(
+            self, "schema", _logical_name(self.schema, what="schema name")
+        )
 
     @classmethod
     def parse(cls, text: str) -> "WeaverSchemaId":
@@ -447,7 +459,9 @@ class WeaverRepository:
     generated_files: Mapping[str, bytes] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "name", _logical_name(self.name, what="repository name"))
+        object.__setattr__(
+            self, "name", _logical_name(self.name, what="repository name")
+        )
         _reject_duplicates(tuple(item.identity for item in self.items), what="item")
 
     def __getitem__(self, identity: str) -> WeaverItem:

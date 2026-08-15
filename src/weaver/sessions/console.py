@@ -315,9 +315,7 @@ class ConsoleSession(Session):
 
         return self.scope(workspace).warm()
 
-    def prepare(
-        self, required, *, workspace: Workspace | None = None
-    ) -> "WarmUp":
+    def prepare(self, required, *, workspace: Workspace | None = None) -> "WarmUp":
         """Begin acquiring exactly what a caller said it would need.
 
         The Session is told rather than inferring, so it is not a second place
@@ -706,7 +704,7 @@ class ConsoleScope(WorkspaceScope):
                 f"{name} could not run: the Weaver published in {self.name} is "
                 f"older than this console ({__version__}) and does not carry "
                 f"{exc.evalue}. Publish the current wheel with `weaver install "
-                f"--workspace \"{self.name}\" --environment "
+                f'--workspace "{self.name}" --environment '
                 f"{getattr(self.workspace, 'environment', '<environment>')}`"
             )
         return exc
@@ -716,8 +714,12 @@ class ConsoleScope(WorkspaceScope):
     def sql_for(self, target: Any):
         """The TDS capability for one Warehouse, acquired once per Session."""
 
-        warehouse = target if isinstance(target, WarehouseTarget) else WarehouseTarget(
-            target if isinstance(target, ItemRef) else ItemRef(str(target))
+        warehouse = (
+            target
+            if isinstance(target, WarehouseTarget)
+            else WarehouseTarget(
+                target if isinstance(target, ItemRef) else ItemRef(str(target))
+            )
         )
         name = warehouse.warehouse.name
         with self._lock:

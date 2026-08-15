@@ -30,9 +30,7 @@ class Impact:
         return {
             "new": [str(value) for value in self.new],
             "changed": [str(value) for value in self.changed],
-            "impacted_descendants": [
-                str(value) for value in self.impacted_descendants
-            ],
+            "impacted_descendants": [str(value) for value in self.impacted_descendants],
         }
 
     @classmethod
@@ -48,7 +46,9 @@ class Impact:
                 if WeaverDocumentId.parse(value) not in set(changed)
             )
         return cls(
-            new=tuple(WeaverDocumentId.parse(value) for value in mapping.get("new", ())),
+            new=tuple(
+                WeaverDocumentId.parse(value) for value in mapping.get("new", ())
+            ),
             changed=changed,
             impacted_descendants=tuple(
                 WeaverDocumentId.parse(value) for value in descendants
@@ -78,8 +78,7 @@ class BuildSelection:
         return cls(
             impact=Impact.from_mapping(mapping.get("impact", {})),
             prohibited=tuple(
-                WeaverDocumentId.parse(value)
-                for value in mapping.get("prohibited", ())
+                WeaverDocumentId.parse(value) for value in mapping.get("prohibited", ())
             ),
             selected_for_drop=tuple(
                 WeaverDocumentId.parse(value)
@@ -199,9 +198,7 @@ def runtime_artefact_identities(
 
     from ..etl import runtime_artefacts
 
-    return frozenset(
-        artefact.identity for artefact in runtime_artefacts(repository)
-    )
+    return frozenset(artefact.identity for artefact in runtime_artefacts(repository))
 
 
 def determine_impact(
@@ -240,9 +237,7 @@ def determine_impact(
             new.add(identity)
         elif signature != declared[identity]:
             changed.add(identity)
-    changed |= {
-        identity for identity in stale_aliases if identity in installed
-    }
+    changed |= {identity for identity in stale_aliases if identity in installed}
 
     existing = set(installed)
     impacted = set(changed)

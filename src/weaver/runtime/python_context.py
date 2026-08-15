@@ -138,8 +138,7 @@ def import_deployed_module(
         missing = exc.name or ""
         if missing and (name == missing or name.startswith(f"{missing}.")):
             raise LoadError(
-                f"{node_id}: no deployed module at "
-                f"{context.runtime_root}/{relative}"
+                f"{node_id}: no deployed module at {context.runtime_root}/{relative}"
             ) from exc
         raise LoadError(
             f"{node_id}: importing {context.runtime_root}/{relative} raised "
@@ -147,8 +146,7 @@ def import_deployed_module(
         ) from exc
     except FileNotFoundError as exc:
         raise LoadError(
-            f"{node_id}: no deployed module at "
-            f"{context.runtime_root}/{relative}"
+            f"{node_id}: no deployed module at {context.runtime_root}/{relative}"
         ) from exc
     except Exception as exc:  # noqa: BLE001 - authored code, any failure is data
         raise LoadError(

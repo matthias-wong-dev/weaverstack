@@ -207,7 +207,10 @@ def test_a_dependencys_table_is_read_the_same_way(spark):
     Sales__Customer(order).dataframe()
 
     assert spark.read.calls == [
-        ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Customer")
+        (
+            "delta",
+            "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Customer",
+        )
     ]
 
 
@@ -286,7 +289,9 @@ def test_staging_is_issued_by_a_load_and_asking_outside_one_says_so(spark, tmp_p
         export.staging_folder()
 
 
-def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, monkeypatch):
+def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(
+    spark, monkeypatch
+):
     """Weaver mounts the root it resolved, never the notebook's attachment.
 
     That is what keeps a detached orchestrator able to load a Lakehouse nobody
@@ -302,7 +307,9 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(spark, mon
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
 
-    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     export = Sales__OrderExport(
@@ -373,9 +380,14 @@ def test_the_authoring_module_imports_without_spark():
     import sys
 
     result = subprocess.run(
-        [sys.executable, "-c",
-         "import sys, weaver.objects; print('pyspark' in sys.modules)"],
-        capture_output=True, text=True, check=True,
+        [
+            sys.executable,
+            "-c",
+            "import sys, weaver.objects; print('pyspark' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert result.stdout.strip() == "False"
 

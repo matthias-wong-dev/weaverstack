@@ -100,10 +100,6 @@ def _local_context(tmp_path, *, resolver=None, store=None):
 # --- the emulator: a filesystem link ------------------------------------------
 
 
-
-
-
-
 def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
     context = _local_context(tmp_path)
 
@@ -270,7 +266,9 @@ def test_a_shortcut_that_never_becomes_readable_fails_naming_itself(
 ):
     monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     monkeypatch.setattr(alias_module, "ADDRESSABLE_TIMEOUT", 0)
-    context = _addressable_context(tmp_path, _LateSpark(failures=99), _ShortcutResolver())
+    context = _addressable_context(
+        tmp_path, _LateSpark(failures=99), _ShortcutResolver()
+    )
 
     with pytest.raises(InstallError, match="did not become readable within"):
         AliasExecutor().execute(_action(), _payload(), context)

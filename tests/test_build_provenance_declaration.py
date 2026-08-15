@@ -94,7 +94,9 @@ def test_the_key_is_absent_rather_than_null_when_there_is_no_source():
 
 
 def _plan(action: InstallAction) -> BuildPlan:
-    target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
+    target = BoundTarget(
+        id="warehouse-Reporting", kind="warehouse", item_id="Reporting"
+    )
     return BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",

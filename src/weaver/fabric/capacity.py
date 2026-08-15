@@ -72,9 +72,14 @@ def capacity_command(
         raise CapacityError("A capacity name is required.")
 
     command = [
-        "az", "fabric", "capacity", verb,
-        "--resource-group", resource_group,
-        "--capacity-name", capacity_name,
+        "az",
+        "fabric",
+        "capacity",
+        verb,
+        "--resource-group",
+        resource_group,
+        "--capacity-name",
+        capacity_name,
     ]
     if subscription_id:
         command.extend(["--subscription", subscription_id])

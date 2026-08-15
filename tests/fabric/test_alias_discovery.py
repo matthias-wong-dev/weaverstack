@@ -28,8 +28,12 @@ CONSUMER = "Lakehouse/DiscoveryConsumer"
 
 
 def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
-    fabric_workspace, fabric_client, fabric_alias_lakehouses, livy_session,
-    weaver_session, tmp_path_factory,
+    fabric_workspace,
+    fabric_client,
+    fabric_alias_lakehouses,
+    livy_session,
+    weaver_session,
+    tmp_path_factory,
 ):
     """The action reports how long it waited, which is the behaviour itself."""
 

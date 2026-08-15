@@ -238,7 +238,9 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
     monkeypatch.setattr("weaver_cli.compose._interactive", lambda stdin: True)
     monkeypatch.setattr("weaver_cli.compose._confirmed", lambda stdin: False)
 
-    status = run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
+    status = run_composition(
+        _Args("dev", file=str(path)), parser_factory=parser_factory
+    )
 
     assert status == 0
     assert not calls
@@ -280,7 +282,9 @@ def test_every_command_runs_in_order_with_its_arguments(
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    status = run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
+    status = run_composition(
+        _Args("dev", file=str(path)), parser_factory=parser_factory
+    )
 
     assert status == 0
     assert len(calls) == 4
@@ -321,9 +325,7 @@ def test_a_composition_inside_a_session_joins_the_one_already_open(
         assert not session.closed, "a borrowed Session must outlive the composition"
 
 
-def test_the_sequence_stops_at_the_first_failure(
-    tmp_path, recorded, confirmed, capsys
-):
+def test_the_sequence_stops_at_the_first_failure(tmp_path, recorded, confirmed, capsys):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
@@ -398,9 +400,7 @@ def test_a_composition_warms_the_union_before_the_first_command(
     path = _write(tmp_path, DEV)
     prepared = []
 
-    monkeypatch.setattr(
-        "weaver_cli.shell._default_workspace", lambda args: object()
-    )
+    monkeypatch.setattr("weaver_cli.shell._default_workspace", lambda args: object())
 
     class Warmed:
         closed = False
@@ -418,9 +418,7 @@ def test_a_composition_warms_the_union_before_the_first_command(
     assert required == {AUTH, RESOLVER, ONELAKE, LIVY, TDS}
 
 
-def test_a_composition_with_no_workspace_warms_nothing(
-    tmp_path, recorded, confirmed
-):
+def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confirmed):
     """There is nothing to warm against, and asking would put workspace
     resolution in front of a sequence that may name one per command."""
 

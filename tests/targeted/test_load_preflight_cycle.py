@@ -81,7 +81,7 @@ class Prepared:
     both.
     """
 
-    catalogue: Lakehouse/object
+    catalogue: Lakehouse / object
     inventories: dict
     workspace: object
     session: object

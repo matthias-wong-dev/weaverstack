@@ -73,9 +73,7 @@ class FabricSessionResolver(FabricResolver):
 
     @property
     def root(self) -> Location:
-        return Location(
-            f"abfss://{self.workspace.id}@onelake.dfs.fabric.microsoft.com"
-        )
+        return Location(f"abfss://{self.workspace.id}@onelake.dfs.fabric.microsoft.com")
 
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
         if item_type == WAREHOUSE:
@@ -119,7 +117,6 @@ class FabricSessionResolver(FabricResolver):
     def sql_endpoint(self, target):
         self.client = self._rest_client()
         return super().sql_endpoint(target)
-
 
     def _rest_client(self):
         """Fabric REST using the identity of this Fabric session."""

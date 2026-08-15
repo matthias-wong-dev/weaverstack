@@ -55,7 +55,9 @@ def active_spark():
 
         SparkSession = import_module("pyspark.sql").SparkSession
     except ImportError as exc:
-        raise CommandError("An active Spark session is required for this operation.") from exc
+        raise CommandError(
+            "An active Spark session is required for this operation."
+        ) from exc
     spark = SparkSession.getActiveSession()
     if spark is None:
         raise CommandError("An active Spark session is required for this operation.")

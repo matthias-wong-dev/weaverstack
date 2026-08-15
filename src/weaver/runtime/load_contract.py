@@ -82,8 +82,7 @@ class LoadContract:
 
         if document.kind != TABLE:
             raise LoadError(
-                f"{document.qualified}: a {document.kind} has no table load "
-                "contract"
+                f"{document.qualified}: a {document.kind} has no table load contract"
             )
         return cls(
             object_id=document.object_id,
@@ -122,8 +121,7 @@ class FolderLoadContract:
     def from_document(cls, document: SesDocument) -> "FolderLoadContract":
         if document.kind != FOLDER:
             raise LoadError(
-                f"{document.qualified}: a {document.kind} has no folder load "
-                "contract"
+                f"{document.qualified}: a {document.kind} has no folder load contract"
             )
         return cls(
             object_id=document.object_id,

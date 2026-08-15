@@ -37,8 +37,8 @@ from .base import InstallationContext
 #: detection against an inferred query's own output columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
 
-class SparkTableExecutor:
 
+class SparkTableExecutor:
     name = "spark_table"
 
     def execute(
@@ -180,7 +180,9 @@ class SparkTableExecutor:
             return [(name, *declared_by_name[name]) for name in business_columns]
 
         not_null_names = {
-            column for label, column in references if label in ("Primary key", "Not null")
+            column
+            for label, column in references
+            if label in ("Primary key", "Not null")
         }
         return [
             (name, query_types[name], name in not_null_names)
@@ -196,15 +198,11 @@ def _create_table_sql(
         for name, type_, not_null in columns
     )
     mapping = (
-        "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')" if column_mapping else ""
+        "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
+        if column_mapping
+        else ""
     )
-    return (
-        f"CREATE TABLE {qualified} (\n"
-        f"{column_lines}\n"
-        ")\n"
-        "USING delta"
-        f"{mapping}\n"
-    )
+    return f"CREATE TABLE {qualified} (\n{column_lines}\n)\nUSING delta{mapping}\n"
 
 
 def _ident(name: str) -> str:

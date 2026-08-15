@@ -72,8 +72,10 @@ def resolve_workspace(
     """Apply CLI-over-configuration precedence and return one Workspace."""
 
     configured = load_workspace(workspace_config) if workspace_config else None
-    resolved_identity = workspace if workspace is not None else (
-        configured.workspace if configured is not None else None
+    resolved_identity = (
+        workspace
+        if workspace is not None
+        else (configured.workspace if configured is not None else None)
     )
     if resolved_identity is None:
         raise ConfigError(
@@ -95,7 +97,6 @@ def resolve_workspace(
         "warehouses": configured.warehouses if configured is not None else {},
     }
     return Workspace(**common)
-
 
 
 def _execution(raw: Any, *, where: str) -> ExecutionSettings:
@@ -136,10 +137,10 @@ def _targets(raw: Any, *, item_type: str) -> dict[str, TargetDeclaration]:
         try:
             item = WeaverItemId.parse(item_text)
         except (TypeError, ValueError) as exc:
-            raise ConfigError(f"{where} has invalid logical item {item_text!r}") from exc
-        if item.item_type != item_type:
             raise ConfigError(
-                f"{where} must name a {item_type} item, got {item}"
-            )
+                f"{where} has invalid logical item {item_text!r}"
+            ) from exc
+        if item.item_type != item_type:
+            raise ConfigError(f"{where} must name a {item_type} item, got {item}")
         declarations[str(physical_name)] = TargetDeclaration(item, execution)
     return declarations

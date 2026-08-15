@@ -78,8 +78,6 @@ def _operation_workspace(
     return replace(base, **changes)
 
 
-
-
 def operation_workspace(
     operation: str,
     *,
@@ -132,8 +130,6 @@ def current_workspace() -> Workspace:
     )
 
 
-
-
 def _current_fabric_workspace() -> Workspace:
     try:
         from notebookutils import runtime
@@ -152,8 +148,6 @@ def _current_fabric_workspace() -> Workspace:
     return Workspace(workspace=str(name))
 
 
-
-
 def _with_inferred_control_lakehouse(workspace: Workspace) -> Workspace:
     if workspace.catalogue:
         return workspace
@@ -169,7 +163,3 @@ def _with_inferred_control_lakehouse(workspace: Workspace) -> Workspace:
     return replace(
         workspace, catalogue=f"{CATALOGUE_KIND}/{default_lakehouse(spark).name}"
     )
-
-
-
-

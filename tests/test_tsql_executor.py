@@ -35,9 +35,7 @@ ACTION = InstallAction(
 
 
 def _context(sql):
-    return InstallationContext(
-        resolver=None, store=None, target=None, sql=sql
-    )
+    return InstallationContext(resolver=None, store=None, target=None, sql=sql)
 
 
 def test_the_whole_script_is_run_as_one_script():

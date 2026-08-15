@@ -77,9 +77,7 @@ def test_a_table_shortcut_is_taken_away_before_storage_is_swept(
 
 
 def test_only_the_area_being_wiped_loses_its_shortcuts(lakehouses, shortcut_workspace):
-    wipe_folder_target(
-        FolderTarget(lakehouse=lakehouses.target), lakehouses.workspace
-    )
+    wipe_folder_target(FolderTarget(lakehouse=lakehouses.target), lakehouses.workspace)
 
     assert shortcut_workspace.removed == ["Files/Sales/Landed"]
 

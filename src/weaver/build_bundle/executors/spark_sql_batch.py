@@ -16,7 +16,6 @@ from .base import InstallationContext
 
 
 class SparkSqlBatchExecutor:
-
     name = "spark_sql_batch"
 
     def execute(
@@ -39,8 +38,7 @@ class SparkSqlBatchExecutor:
                 f"spark_sql_batch action {action.id!r} has an invalid JSON payload"
             ) from exc
         if not isinstance(statements, list) or not all(
-            isinstance(statement, str) and statement.strip()
-            for statement in statements
+            isinstance(statement, str) and statement.strip() for statement in statements
         ):
             raise InstallError(
                 f"spark_sql_batch action {action.id!r} must contain SQL strings"

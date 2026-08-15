@@ -54,9 +54,7 @@ def test_a_target_resolves_to_its_two_roots(resolver):
 def test_a_table_is_addressed_under_the_tables_root(resolver):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
     root = _spark_root(resolver, "Sales_LH")
-    assert location.table_path("Sales", "Customer") == (
-        f"{root}/Tables/Sales/Customer"
-    )
+    assert location.table_path("Sales", "Customer") == (f"{root}/Tables/Sales/Customer")
     assert location.schema_root("Sales") == f"{root}/Tables/Sales"
 
 
@@ -76,7 +74,9 @@ def test_two_destinations_resolve_separately(resolver):
 
     first = resolver.lakehouse_spark_location(ItemRef("Lakehouse_A"))
     second = resolver.lakehouse_spark_location(ItemRef("Lakehouse_B"))
-    assert first.table_path("Sales", "Customer") != second.table_path("Sales", "Customer")
+    assert first.table_path("Sales", "Customer") != second.table_path(
+        "Sales", "Customer"
+    )
     # Storage is keyed by item id rather than display name, so what tells the
     # two apart is what resolution answered for each.
     assert first.table_path("Sales", "Customer").startswith(

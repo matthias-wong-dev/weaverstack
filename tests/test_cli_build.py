@@ -159,20 +159,13 @@ def main() -> int:
                 specification=specification,
             )
         except Exception as exc:
-            message = (
-                f"{specification.item_type} {name}: "
-                f"{type(exc).__name__}: {exc}"
-            )
+            message = f"{specification.item_type} {name}: {type(exc).__name__}: {exc}"
             failures.append(message)
             print(f"FAILED   {message}", file=sys.stderr)
             continue
 
         status = "CREATED" if created else "EXISTS "
-        print(
-            f"{status}  "
-            f"{specification.item_type:<10} "
-            f"{item.name} ({item.id})"
-        )
+        print(f"{status}  {specification.item_type:<10} {item.name} ({item.id})")
 
     if failures:
         print(

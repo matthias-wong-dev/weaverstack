@@ -65,9 +65,7 @@ def _bindings(*targets):
             if kind == "Lakehouse"
             else WarehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
         )
-        entries.append(
-            ItemBinding(WeaverItemId.parse(f"{kind}/{item_name}"), binding)
-        )
+        entries.append(ItemBinding(WeaverItemId.parse(f"{kind}/{item_name}"), binding))
     return ItemBindings(tuple(entries))
 
 
@@ -162,7 +160,9 @@ def test_adding_targets_does_not_add_listings():
     )
     _preflight(
         many,
-        _bindings(*[(f"Item{index}", f"LH_{index}", "Lakehouse") for index in range(20)]),
+        _bindings(
+            *[(f"Item{index}", f"LH_{index}", "Lakehouse") for index in range(20)]
+        ),
     )
 
     assert many.item_listings == few.item_listings == 1

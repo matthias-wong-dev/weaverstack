@@ -157,9 +157,7 @@ def item_prune_stage(
             BuildBatch(
                 id=f"item-prune-{item_slug}",
                 target_id=target.id,
-                actions=tuple(
-                    _prefixed(action, item_slug) for action in actions
-                ),
+                actions=tuple(_prefixed(action, item_slug) for action in actions),
             ),
         ),
     )
@@ -292,9 +290,7 @@ def item_schema_stage(
         for identity in selected_ids
         if identity.item == item and not identity.is_files
     } | set(extra_schemas)
-    schemas = sorted(
-        schema for schema in wanted if schema.casefold() not in present
-    )
+    schemas = sorted(schema for schema in wanted if schema.casefold() not in present)
     if not schemas:
         return None
 
@@ -378,9 +374,7 @@ def render_document_build_action(identity, source, *, target) -> RenderedAction:
             payloads={},
         )
     ddl = source.create_ddl(
-        destination=None
-        if target.kind == WAREHOUSE_TARGET
-        else target.spark_target
+        destination=None if target.kind == WAREHOUSE_TARGET else target.spark_target
     )
     filename = f"{action_slug}{ddl.extension}"
     content = ddl.content.encode("utf-8")
@@ -606,9 +600,7 @@ def item_build_stages(
         for node in sorted(layer):
             identity = identities[node]
             source = repository.source_documents[identity]
-            rendered = render_document_build_action(
-                identity, source, target=target
-            )
+            rendered = render_document_build_action(identity, source, target=target)
             payloads.update(rendered.payloads)
             actions.append(rendered.action)
             changes.append(
@@ -635,5 +627,3 @@ def item_build_stages(
             )
         )
     return tuple(stages)
-
-

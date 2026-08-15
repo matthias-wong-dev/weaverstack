@@ -49,9 +49,7 @@ def test_executor_performs_the_refresh_selected_by_the_bundle():
 
     resolver = Resolver()
 
-    details = SqlEndpointRefreshExecutor().execute(
-        _action(), None, _context(resolver)
-    )
+    details = SqlEndpointRefreshExecutor().execute(_action(), None, _context(resolver))
 
     assert resolver.refreshed == ["Sales"]
     assert details == {"status": "Succeeded", "lakehouse": "Sales"}
@@ -120,9 +118,7 @@ def test_fabric_resolver_uses_the_typed_endpoint_paired_with_the_lakehouse():
             ]
 
     client = Client(response)
-    resolver = FabricResolver(
-        Workspace(workspace="Analytics"), client=client
-    )
+    resolver = FabricResolver(Workspace(workspace="Analytics"), client=client)
 
     result = resolver.refresh_sql_endpoint(ItemRef("Sales"))
 

@@ -39,7 +39,9 @@ def test_a_single_page_returns_its_entries(monkeypatch):
         headers={},
         paths=[{"name": "lh.Lakehouse/Files/a.csv", "contentLength": "10"}],
     )
-    entries = store.list(Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files"))
+    entries = store.list(
+        Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files")
+    )
     assert [e.location.name for e in entries] == ["a.csv"]
 
 

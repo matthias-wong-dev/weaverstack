@@ -209,8 +209,13 @@ def _optional_text(value: Any) -> str | None:
     return None if value is None or value == "" else str(value)
 
 
-def _call(method: str, url: str, token: str, payload: Any = None,
-          expected: tuple[int, ...] = (200, 201, 202)) -> dict:
+def _call(
+    method: str,
+    url: str,
+    token: str,
+    payload: Any = None,
+    expected: tuple[int, ...] = (200, 201, 202),
+) -> dict:
     import requests
 
     try:
@@ -333,7 +338,9 @@ class LivySession:
             # conf, not a top-level field — the published libraries (Weaver and
             # its dependencies) are loaded only when this is set.
             payload["conf"] = {
-                "spark.fabric.environmentDetails": json.dumps({"id": self.environment_id})
+                "spark.fabric.environmentDetails": json.dumps(
+                    {"id": self.environment_id}
+                )
             }
         created = _call("POST", self.base, self.token, payload)
         session_id = created.get("id") or created.get("livyId")
@@ -356,7 +363,9 @@ class LivySession:
             time.sleep(self.poll_interval)
         raise LivyError(f"Livy session did not reach {wanted!r} within {int(timeout)}s")
 
-    def run(self, code: str, *, timeout: float = DEFAULT_STATEMENT_TIMEOUT) -> StatementResult:
+    def run(
+        self, code: str, *, timeout: float = DEFAULT_STATEMENT_TIMEOUT
+    ) -> StatementResult:
         """Run code in the session and return what it printed.
 
         A statement that wants to return something calls :func:`emit`, which
@@ -368,7 +377,9 @@ class LivySession:
             raise LivyError("The Livy session has not been started.")
 
         submitted = _call(
-            "POST", f"{self.session_url}/statements", self.token,
+            "POST",
+            f"{self.session_url}/statements",
+            self.token,
             {"code": code, "kind": "pyspark"},
         )
         statement_url = f"{self.session_url}/statements/{submitted['id']}"
@@ -376,7 +387,11 @@ class LivySession:
         deadline = time.time() + timeout
         while time.time() < deadline:
             statement = _call("GET", statement_url, self.token, expected=(200,))
-            if (statement.get("state") or "").lower() in {"available", "error", "cancelled"}:
+            if (statement.get("state") or "").lower() in {
+                "available",
+                "error",
+                "cancelled",
+            }:
                 return _result(statement)
             time.sleep(self.poll_interval)
         raise LivyError(f"Livy statement did not finish within {int(timeout)}s")
@@ -412,7 +427,12 @@ class LivySession:
                 return
             if not state:  # 404 — the session is no longer there
                 return
-            if (state.get("state") or "").lower() in {"dead", "killed", "success", "error"}:
+            if (state.get("state") or "").lower() in {
+                "dead",
+                "killed",
+                "success",
+                "error",
+            }:
                 return
             time.sleep(self.poll_interval)
         print(
@@ -440,7 +460,7 @@ def _payload(text: str) -> Any:
     for line in reversed((text or "").splitlines()):
         if line.startswith(RESULT_PREFIX):
             try:
-                return json.loads(line[len(RESULT_PREFIX):])
+                return json.loads(line[len(RESULT_PREFIX) :])
             except json.JSONDecodeError:
                 return None
     return None

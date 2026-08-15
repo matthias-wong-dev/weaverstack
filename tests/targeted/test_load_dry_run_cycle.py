@@ -80,7 +80,7 @@ class Prepared:
     through — a stronger claim than a flag nobody checks.
     """
 
-    catalogue: Lakehouse/object
+    catalogue: Lakehouse / object
     inventories: dict
     workspace: object
     session: object
@@ -116,7 +116,6 @@ def session(tmp_path):
             workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
         ),
     )
-
 
 
 def dry_run(session, *targets, names=(), fault_tolerant=False):

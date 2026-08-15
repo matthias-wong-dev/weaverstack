@@ -76,7 +76,6 @@ def load(
     )
     selected_names = _load_names(names)
 
-
     from .workspace import operation_workspace
 
     resolved_workspace = operation_workspace(
@@ -186,9 +185,7 @@ def run_load(
         else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
     )
     if log is not None:
-        log.write_plan(
-            _plan_document(runner.graph, state, requested, names, dry_run)
-        )
+        log.write_plan(_plan_document(runner.graph, state, requested, names, dry_run))
     with session.step("Execute"):
         result = runner.run(
             session=session,
@@ -375,10 +372,15 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
     }
     for node in report.nodes:
         counted["executed"] += 1 if node.executed else 0
-        counted["succeeded"] += 1 if node.status in (
-            SUCCEEDED,
-            SUCCEEDED_WITH_REJECTS,
-        ) else 0
+        counted["succeeded"] += (
+            1
+            if node.status
+            in (
+                SUCCEEDED,
+                SUCCEEDED_WITH_REJECTS,
+            )
+            else 0
+        )
         counted["failed"] += 1 if node.status == "failed" else 0
         counted["blocked"] += 1 if node.status == "blocked" else 0
         if node.result is not None:

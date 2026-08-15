@@ -265,7 +265,9 @@ def test_a_command_may_override_the_control_lakehouse_it_inherits():
 
         assert resolved.catalogue == "Lakehouse/Other"
         assert resolved.workspace == "Demo"
-        assert session.workspace.catalogue == "Lakehouse/Weaver", "the session is unchanged"
+        assert session.workspace.catalogue == "Lakehouse/Weaver", (
+            "the session is unchanged"
+        )
 
 
 def test_a_command_naming_its_own_workspace_does_not_inherit():
@@ -273,7 +275,6 @@ def test_a_command_naming_its_own_workspace_does_not_inherit():
         resolved = _resolve_workspace(_args(session, workspace="Second_Workspace"))
 
         assert resolved.workspace == "Second_Workspace"
-
 
 
 def test_without_a_session_nothing_is_inherited():

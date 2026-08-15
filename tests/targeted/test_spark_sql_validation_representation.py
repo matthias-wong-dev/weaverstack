@@ -64,9 +64,7 @@ def _module(source: str, path: str) -> str:
 
 @pytest.fixture
 def test_module():
-    return _module(
-        TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql"
-    )
+    return _module(TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql")
 
 
 @pytest.fixture

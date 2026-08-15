@@ -90,7 +90,9 @@ class FilesystemStore:
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         root = self._local(location)
         if not root.exists():
-            raise StoreError(f"cannot list a location that does not exist: {location.value}")
+            raise StoreError(
+                f"cannot list a location that does not exist: {location.value}"
+            )
         if not root.is_dir():
             raise StoreError(f"cannot list a file: {location.value}")
         paths = sorted(root.rglob("*") if recursive else root.glob("*"))
@@ -174,5 +176,3 @@ def _is_junction(path: Path) -> bool:
 
 def _is_link(path: Path) -> bool:
     return path.is_symlink() or _is_junction(path)
-
-

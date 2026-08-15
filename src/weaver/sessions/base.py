@@ -78,7 +78,11 @@ class ReportingFrame:
     def age(self) -> float:
         """Seconds since this frame opened, whether or not it has closed."""
 
-        return self.elapsed if self.elapsed is not None else time.monotonic() - self.started
+        return (
+            self.elapsed
+            if self.elapsed is not None
+            else time.monotonic() - self.started
+        )
 
     def to_mapping(self) -> dict:
         mapping: dict[str, Any] = {
@@ -340,7 +344,9 @@ class Session(ABC):
     def task_completed(self, name: str | None = None) -> None:
         self._exit("task", name)
 
-    def task_failed(self, name: str | None = None, error: BaseException | None = None) -> None:
+    def task_failed(
+        self, name: str | None = None, error: BaseException | None = None
+    ) -> None:
         self._exit("task", name, error=error)
 
     def step_started(self, name: str, detail: str | None = None) -> None:
@@ -349,7 +355,9 @@ class Session(ABC):
     def step_completed(self, name: str | None = None) -> None:
         self._exit("step", name)
 
-    def step_failed(self, name: str | None = None, error: BaseException | None = None) -> None:
+    def step_failed(
+        self, name: str | None = None, error: BaseException | None = None
+    ) -> None:
         self._exit("step", name, error=error)
 
     def substep_started(self, name: str, detail: str | None = None) -> None:
@@ -358,7 +366,9 @@ class Session(ABC):
     def substep_completed(self, name: str | None = None) -> None:
         self._exit("substep", name)
 
-    def substep_failed(self, name: str | None = None, error: BaseException | None = None) -> None:
+    def substep_failed(
+        self, name: str | None = None, error: BaseException | None = None
+    ) -> None:
         self._exit("substep", name, error=error)
 
     # --- the paired form, which is the one to use ----------------------------
@@ -430,7 +440,9 @@ class Session(ABC):
         self.timings.append(frame)
         self.present(frame, "failed" if frame.failed else "completed", error)
 
-    def _exit(self, kind: str, name: str | None, error: BaseException | None = None) -> None:
+    def _exit(
+        self, kind: str, name: str | None, error: BaseException | None = None
+    ) -> None:
         for index in range(len(self._frames) - 1, -1, -1):
             frame = self._frames[index]
             if frame.kind == kind and (name is None or frame.name == name):

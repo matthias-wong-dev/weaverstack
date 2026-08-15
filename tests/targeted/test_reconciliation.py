@@ -176,9 +176,7 @@ def test_a_files_schema_is_understood_as_a_folder_claim():
 
     result = reconcile(
         FixtureCatalogue.from_registry_rows(
-            registry_row(
-                "Lakehouse/Sales/Files/Raw.CustomerCsv", object_type="folder"
-            )
+            registry_row("Lakehouse/Sales/Files/Raw.CustomerCsv", object_type="folder")
         ),
         target_inventory(folder_schemas=("Raw",), folders=("Raw.CustomerCsv",)),
     )
@@ -231,9 +229,7 @@ def test_a_deployed_file_the_inventory_does_not_hold_is_disproved():
 
 
 def test_a_generated_procedure_is_reconciled_against_the_procedures_read():
-    identity = document_id(
-        "Warehouse/Reporting/procedure:_/Load Sales.Customer"
-    )
+    identity = document_id("Warehouse/Reporting/procedure:_/Load Sales.Customer")
     rows = FixtureCatalogue.from_registry_rows(
         registry_row(identity, object_type="stored_procedure", object_role="load"),
         item="Warehouse/Reporting",

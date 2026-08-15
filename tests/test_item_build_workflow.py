@@ -187,9 +187,7 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
 
 
 def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch):
-    parse_item_repository(
-        Location(str(_estate(tmp_path))), store=FilesystemStore()
-    )
+    parse_item_repository(Location(str(_estate(tmp_path))), store=FilesystemStore())
     unknown = ItemBindings(
         (
             ItemBinding(
@@ -209,9 +207,9 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
             source_store=FilesystemStore(),
             bindings=unknown,
             session=given_session(
-            store=FilesystemStore(),
-            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
-        ),
+                store=FilesystemStore(),
+                lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
+            ),
             control_lakehouse=_control(),
             executors=_executors(),
         )
@@ -247,16 +245,21 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     restored = BuildState.from_mapping(encoded)
 
     assert restored.to_mapping() == state.to_mapping()
-    assert restored.catalogue.registered[
-        next(iter(restored.catalogue.registered))
-    ].build_epoch == epoch
+    assert (
+        restored.catalogue.registered[
+            next(iter(restored.catalogue.registered))
+        ].build_epoch
+        == epoch
+    )
 
 
 def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
-        
+
     workspace = given_workspace(catalogue="Lakehouse/Control")
     resolver = given_resolver(
-        workspace=workspace, lakehouses=("Weaver", "Raw_Dev", "Sales_LH", "Curated_Dev"), root=tmp_path
+        workspace=workspace,
+        lakehouses=("Weaver", "Raw_Dev", "Sales_LH", "Curated_Dev"),
+        root=tmp_path,
     )
     store = FilesystemStore()
     target = _bindings().entries[0].to_bound_target()
@@ -272,9 +275,7 @@ def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
     for location in locations:
         store.make_directory(location)
 
-    inventory = read_lakehouse_inventory(
-        target, resolver=resolver, store=store
-    )
+    inventory = read_lakehouse_inventory(target, resolver=resolver, store=store)
 
     assert "cli" not in inventory.folder_schemas
     assert "build_bundles" not in inventory.folder_schemas
@@ -380,7 +381,9 @@ def test_archive_rejects_traversal_before_extracting(tmp_path):
         zipped.writestr("../outside.txt", b"no")
 
     with pytest.raises(BuildError, match="unsafe path"):
-        with materialise_bundle_archive(Location(str(archive)), store=FilesystemStore()):
+        with materialise_bundle_archive(
+            Location(str(archive)), store=FilesystemStore()
+        ):
             pass
     assert not (tmp_path / "outside.txt").exists()
 

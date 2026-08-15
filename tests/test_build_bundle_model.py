@@ -70,12 +70,18 @@ def _plan(bundle_id: str = "") -> BuildPlan:
         BuildSequence(
             number=30,
             description="build folders",
-            batches=(BuildBatch(id="b-folder", target_id=TARGET.id, actions=(_folder_action(),)),),
+            batches=(
+                BuildBatch(
+                    id="b-folder", target_id=TARGET.id, actions=(_folder_action(),)
+                ),
+            ),
         ),
         BuildSequence(
             number=40,
             description="build view",
-            batches=(BuildBatch(id="b-view", target_id=TARGET.id, actions=(_view_action(),)),),
+            batches=(
+                BuildBatch(id="b-view", target_id=TARGET.id, actions=(_view_action(),)),
+            ),
         ),
     )
     return BuildPlan(
@@ -86,7 +92,9 @@ def _plan(bundle_id: str = "") -> BuildPlan:
         targets=(TARGET,),
         sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
-        omitted_nodes=(OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),),
+        omitted_nodes=(
+            OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),
+        ),
     )
 
 
@@ -140,15 +148,23 @@ def test_bundle_id_is_stable_and_content_addressed():
 
 
 def test_bundle_id_ignores_the_stored_id_field():
-    assert compute_bundle_id(_plan(bundle_id="")) == compute_bundle_id(_plan(bundle_id="stale"))
+    assert compute_bundle_id(_plan(bundle_id="")) == compute_bundle_id(
+        _plan(bundle_id="stale")
+    )
 
 
 def test_bundle_id_changes_when_a_payload_hash_changes():
     plan = _plan()
     tampered_action = replace(_view_action(), payload_sha256="0" * 64)
-    tampered_batch = BuildBatch(id="b-view", target_id=TARGET.id, actions=(tampered_action,))
+    tampered_batch = BuildBatch(
+        id="b-view", target_id=TARGET.id, actions=(tampered_action,)
+    )
     tampered = replace(
-        plan, sequences=(plan.sequences[0], replace(plan.sequences[1], batches=(tampered_batch,)))
+        plan,
+        sequences=(
+            plan.sequences[0],
+            replace(plan.sequences[1], batches=(tampered_batch,)),
+        ),
     )
     assert compute_bundle_id(plan) != compute_bundle_id(tampered)
 
@@ -246,7 +262,9 @@ def test_validate_rejects_a_batch_with_unknown_target():
 
 def test_validate_rejects_duplicate_action_ids():
     plan = _identified_plan()
-    dup = replace(_folder_action(), id="view-DWG.ActiveCustomer")  # collides with the view id
+    dup = replace(
+        _folder_action(), id="view-DWG.ActiveCustomer"
+    )  # collides with the view id
     batch = BuildBatch(id="b-dup", target_id=TARGET.id, actions=(dup,))
     bad = replace(plan, sequences=plan.sequences + (BuildSequence(60, "d", (batch,)),))
     with pytest.raises(BuildError, match="duplicate action id"):
@@ -255,7 +273,9 @@ def test_validate_rejects_duplicate_action_ids():
 
 def test_validate_rejects_payload_executor_extension_mismatch():
     plan = _identified_plan()
-    bad_action = replace(_view_action(), payload="payload/x/thing.py")  # spark_sql wants .spark.sql
+    bad_action = replace(
+        _view_action(), payload="payload/x/thing.py"
+    )  # spark_sql wants .spark.sql
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[1], batches=(batch,)),))
     with pytest.raises(BuildError, match="extension"):

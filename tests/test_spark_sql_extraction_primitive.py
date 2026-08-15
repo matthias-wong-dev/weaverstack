@@ -202,9 +202,7 @@ def test_a_delete_query_naming_the_key_in_another_order_is_accepted():
     _staging, deletes = read_spark_sql(
         session,
         sql="select * from source;\nselect * from gone;",
-        contract=_contract(
-            primary_key=("Customer id", "Order id"), incremental=True
-        ),
+        contract=_contract(primary_key=("Customer id", "Order id"), incremental=True),
     )
 
     assert deletes.columns == ["Order id", "Customer id"]

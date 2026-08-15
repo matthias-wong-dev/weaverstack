@@ -186,9 +186,7 @@ def test_the_last_statement_answers(desktop):
     assert answered == [{"col_name": "n", "data_type": "int"}]
 
 
-def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(
-    notebook
-):
+def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(notebook):
     spark = _Spark(answers={"DESCRIBE QUERY SELECT 1": [_Row(col_name="n")]})
     session = notebook(spark)
 
@@ -208,9 +206,7 @@ def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(
 # --- one identifier-case scope over the whole batch ----------------------------
 
 
-def test_every_statement_in_a_batch_shares_the_exact_case_scope(
-    notebook
-):
+def test_every_statement_in_a_batch_shares_the_exact_case_scope(notebook):
     """A setup analysed under one case and its query under another is a different
     query. Both hosts hold the scope open across the batch, and put it back."""
 
@@ -226,9 +222,7 @@ def test_every_statement_in_a_batch_shares_the_exact_case_scope(
     assert spark.conf.values[CASE_KEY] == "false"
 
 
-def test_a_failing_statement_still_puts_the_case_scope_back(
-    notebook
-):
+def test_a_failing_statement_still_puts_the_case_scope_back(notebook):
     """A session left case-sensitive by a failure would change every statement
     that followed it, including ones from other work in the same session."""
 

@@ -31,9 +31,7 @@ class WipeTarget:
 
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
-        target = parse_physical_target(
-            text, what="wipe target", error=CommandError
-        )
+        target = parse_physical_target(text, what="wipe target", error=CommandError)
         return cls(item_type=physical_kind(target), item=physical_item(target))
 
     @property
@@ -44,18 +42,20 @@ class WipeTarget:
         return f"{self.item_type}/{self.item}"
 
 
-
-
-def _unbind_target_names(targets: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _unbind_target_names(
+    targets: Iterable[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Parse unbind selection through the same typed grammar used by wipe."""
 
     parsed = tuple(WipeTarget.parse(target) for target in targets)
     return (
-        tuple(target.physical_name for target in parsed if target.item_type == "Lakehouse"),
-        tuple(target.physical_name for target in parsed if target.item_type == "Warehouse"),
+        tuple(
+            target.physical_name for target in parsed if target.item_type == "Lakehouse"
+        ),
+        tuple(
+            target.physical_name for target in parsed if target.item_type == "Warehouse"
+        ),
     )
-
-
 
 
 @dataclass(frozen=True)
@@ -78,8 +78,6 @@ class WipeReport:
         }
 
 
-
-
 @dataclass(frozen=True)
 class WipeResult:
     workspace: str
@@ -98,8 +96,6 @@ class WipeResult:
             "unbound": dict(self.unbound) if self.unbound is not None else None,
             "dry_run": self.dry_run,
         }
-
-
 
 
 def wipe(
@@ -141,7 +137,9 @@ def wipe(
         # Named for what it is. A dry run reads the estate and decides, which
         # takes real time and is worth seeing; what it must not do is present
         # itself as the removal.
-        with opened.task("Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, parsed))):
+        with opened.task(
+            "Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, parsed))
+        ):
             storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
             store = opened.store(resolved_workspace) if storage_targets else None
             reports: list[WipeReport] = []
@@ -192,8 +190,6 @@ def wipe(
             )
 
 
-
-
 def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
     from ..physical_wipe import wipe_lakehouse, wipe_sql_target
 
@@ -229,9 +225,6 @@ def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
     return (report,)
 
 
-
-
-
 def _unbind_physical_targets(
     workspace: Workspace, targets: Sequence[WipeTarget], *, session=None
 ):
@@ -257,8 +250,6 @@ def _unbind_physical_targets(
     )
 
 
-
-
 def unbind_catalogue_claims(
     workspace: Workspace, *, lakehouses, warehouses, session=None
 ) -> dict:
@@ -278,9 +269,7 @@ def unbind_catalogue_claims(
             from ..fabric.livy import missing_environment
 
             raise CommandError(missing_environment(workspace))
-        catalogue = session_catalogue(
-            opened, workspace, workspace.catalogue_item
-        )
+        catalogue = session_catalogue(opened, workspace, workspace.catalogue_item)
         return unbind_targets(
             catalogue, lakehouses=lakehouses, warehouses=warehouses
         ).to_mapping()

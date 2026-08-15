@@ -63,7 +63,9 @@ def test_the_script_is_self_contained():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
     # It creates its own temp shape table and drops it — no external state.
     assert "if object_id('tempdb..#weaver_shape" in content
-    assert content.rstrip().endswith("drop table #weaver_shape_Reporting_CustomerReport;")
+    assert content.rstrip().endswith(
+        "drop table #weaver_shape_Reporting_CustomerReport;"
+    )
 
 
 def test_the_query_runs_shape_only():
@@ -115,7 +117,9 @@ def test_the_not_null_header_drives_inferred_nullability():
     # The primary key and the Not null column are both in the not-null CTE the
     # nullability CASE reads; Note is not, so it stays nullable.
     start = content.index("not_null_columns as")
-    cte = content[start : content.index(")", content.index("names(column_name)", start))]
+    cte = content[
+        start : content.index(")", content.index("names(column_name)", start))
+    ]
     assert "N'CustomerId'" in cte
     assert "N'CustomerName'" in cte
     assert "N'Note'" not in cte
@@ -132,9 +136,10 @@ def test_a_primary_key_constraint_is_added():
         assert "not enforced" in content
     # Declared mode names the key column literally; inferred mode builds the
     # column list on the server from the primary-key CTE.
-    assert "primary key nonclustered ([CustomerId]) not enforced" in _ddl(
-        "Reporting.CustomerReport.sql", DECLARED
-    ).content
+    assert (
+        "primary key nonclustered ([CustomerId]) not enforced"
+        in _ddl("Reporting.CustomerReport.sql", DECLARED).content
+    )
 
 
 # --- inferred vs declared ---------------------------------------------------
@@ -214,8 +219,7 @@ def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     # a T-SQL error ("No column name was specified for column 1 of 'all_columns'").
     assert (
         "select 0 as column_ordinal, "
-        "N'[CustomerKey] bigint identity not null' as column_definition"
-        in content
+        "N'[CustomerKey] bigint identity not null' as column_definition" in content
     )
     # Guarded so a query producing the same name is refused, not silently doubled.
     assert "throw 51006" in content
@@ -277,7 +281,9 @@ def test_the_delete_query_is_shaped_and_checked_against_the_primary_key():
 def test_both_shape_tables_are_cleaned_up():
     content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
 
-    assert content.count("drop table #weaver_delete_shape_Reporting_CustomerReport;") == 2
+    assert (
+        content.count("drop table #weaver_delete_shape_Reporting_CustomerReport;") == 2
+    )
     assert content.count("drop table #weaver_shape_Reporting_CustomerReport;") == 2
 
 

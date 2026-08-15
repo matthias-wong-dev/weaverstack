@@ -45,7 +45,9 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
         "weaver.fabric.resources.find_item",
         lambda ws, name, *, item_type, client: Item("env99", name, item_type, ws.id),
     )
-    workspace = Workspace(workspace="WS", catalogue="Lakehouse/Weaver", environment="Weaver")
+    workspace = Workspace(
+        workspace="WS", catalogue="Lakehouse/Weaver", environment="Weaver"
+    )
 
     session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
@@ -70,7 +72,9 @@ def test_start_attaches_the_environment_as_a_spark_conf(monkeypatch):
         return {}
 
     monkeypatch.setattr(livy, "_call", fake_call)
-    session = LivySession("ws1", "lh1", token="t", environment_id="env99", bootstrap=None)
+    session = LivySession(
+        "ws1", "lh1", token="t", environment_id="env99", bootstrap=None
+    )
     session.start()
 
     create = next(p for m, u, p in calls if m == "POST" and u.endswith("/sessions"))

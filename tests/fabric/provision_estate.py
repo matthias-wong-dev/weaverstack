@@ -109,9 +109,7 @@ def main() -> int:
                 create=create_lakehouse,
             )
         except Exception as exc:
-            failures.append(
-                f"Lakehouse {name}: {type(exc).__name__}: {exc}"
-            )
+            failures.append(f"Lakehouse {name}: {type(exc).__name__}: {exc}")
             print(f"FAILED  Lakehouse  {name}: {exc}")
             continue
 
@@ -130,9 +128,7 @@ def main() -> int:
                 create=create_warehouse,
             )
         except Exception as exc:
-            failures.append(
-                f"Warehouse {name}: {type(exc).__name__}: {exc}"
-            )
+            failures.append(f"Warehouse {name}: {type(exc).__name__}: {exc}")
             print(f"FAILED  Warehouse  {name}: {exc}")
             continue
 

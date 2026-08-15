@@ -6,7 +6,12 @@ never reaches it. Install with the ``fabric`` extra.
 
 from __future__ import annotations
 
-from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
+from .capacity import (
+    CapacityAction,
+    CapacityError,
+    capacity_command,
+    run_capacity_action,
+)
 from .client import FabricClient, FabricError
 from .environment import (
     InstallResult,

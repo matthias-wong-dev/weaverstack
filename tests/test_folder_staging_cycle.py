@@ -82,9 +82,7 @@ def export(tmp_path):
     Sales__Export.returns = None
     Sales__Export.static = False
     Sales__Export.seen = []
-    return Sales__Export(
-        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
-    )
+    return Sales__Export(object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path))
 
 
 def _staging(export) -> Path:

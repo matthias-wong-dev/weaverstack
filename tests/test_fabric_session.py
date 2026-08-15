@@ -167,9 +167,7 @@ def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decodin
                     _Info(f"{path}/.authored.crc", ".authored.crc", False, 8),
                 ]
             if path == self.remote_archive.rsplit("/", 1)[0]:
-                return [
-                    _Info(self.remote_archive, "record.weaver.zip", False, 12)
-                ]
+                return [_Info(self.remote_archive, "record.weaver.zip", False, 12)]
             raise AssertionError(path)
 
         def cp(self, source, destination, recurse):

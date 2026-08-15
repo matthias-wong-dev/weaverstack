@@ -133,9 +133,7 @@ def _reject_duplicate_query_columns(
     groups: dict[str, list[str]] = {}
     for column in query_columns:
         groups.setdefault(column.lower(), []).append(column)
-    colliding = sorted(
-        ", ".join(names) for names in groups.values() if len(names) > 1
-    )
+    colliding = sorted(", ".join(names) for names in groups.values() if len(names) > 1)
     if colliding:
         raise BuildError(
             f"{qualified}: the query produces columns that collide by name "

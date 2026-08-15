@@ -66,7 +66,9 @@ def _clear(
         return ()
     kept = {name.casefold() for name in keep}
     entries = [
-        entry for entry in store.list(location) if entry.location.name.casefold() not in kept
+        entry
+        for entry in store.list(location)
+        if entry.location.name.casefold() not in kept
     ]
     removed = tuple(sorted(entry.location.name for entry in entries))
     if not dry_run:
@@ -177,9 +179,7 @@ def wipe_delta_target(
         target=f"delta:{target}",
         location=location,
         removed=shortcuts
-        + _clear(
-            store, location, resolver.root, dry_run=dry_run, keep=_KEPT_SCHEMAS
-        ),
+        + _clear(store, location, resolver.root, dry_run=dry_run, keep=_KEPT_SCHEMAS),
         dry_run=dry_run,
     )
 
@@ -358,6 +358,8 @@ def wipe_selection(
             )
         else:
             reports.extend(
-                wipe_lakehouse(ItemRef.parse(name), workspace, store=store, dry_run=dry_run)
+                wipe_lakehouse(
+                    ItemRef.parse(name), workspace, store=store, dry_run=dry_run
+                )
             )
     return tuple(reports)

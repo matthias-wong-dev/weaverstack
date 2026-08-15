@@ -16,12 +16,16 @@ ROUND_TRIP = [
 ]
 
 
-@pytest.mark.parametrize("kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP])
+@pytest.mark.parametrize(
+    "kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP]
+)
 def test_parse_then_str_is_identity(kind, text):
     assert str(kind.parse(text)) == text
 
 
-@pytest.mark.parametrize("kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP])
+@pytest.mark.parametrize(
+    "kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP]
+)
 def test_parsing_is_stable(kind, text):
     assert kind.parse(text) == kind.parse(str(kind.parse(text)))
 
@@ -63,7 +67,10 @@ def test_warehouse_target_rejects_a_path():
 
 def test_the_same_name_serves_different_slots():
     """Kind comes from the slot, never from the string."""
-    assert DeltaTarget.parse("Shared").lakehouse == WarehouseTarget.parse("Shared").warehouse
+    assert (
+        DeltaTarget.parse("Shared").lakehouse
+        == WarehouseTarget.parse("Shared").warehouse
+    )
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "a\\b", "a:b", "a*b", "..", "a|b"])

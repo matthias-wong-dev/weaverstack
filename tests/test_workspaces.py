@@ -1,6 +1,5 @@
 """Workspace values are directly constructible without configuration files."""
 
-
 import pytest
 
 from weaver.declaration.model import WeaverItemId
@@ -24,8 +23,6 @@ def test_workspace_sub_parameters_are_item_names():
     assert workspace.environment == "WeaverRuntime"
 
 
-
-
 def test_target_configuration_is_immutable():
     workspace = Workspace(
         workspace="Analytics",
@@ -44,5 +41,3 @@ def test_target_configuration_is_immutable():
 def test_bad_workspace_name_is_rejected():
     with pytest.raises(IdentityError):
         Workspace(workspace="  ")
-
-

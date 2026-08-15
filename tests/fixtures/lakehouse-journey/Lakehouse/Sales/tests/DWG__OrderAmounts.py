@@ -37,6 +37,6 @@ class DWG__OrderAmounts(Test):
         )
 
     def actual(self):
-        return DWG__Order(self).dataframe().selectExpr(
-            "OrderId", "CustomerId", "Amount"
+        return (
+            DWG__Order(self).dataframe().selectExpr("OrderId", "CustomerId", "Amount")
         )

@@ -265,9 +265,7 @@ def _output_parameter_batch(
     arguments = [f"@{name} = ?" for name, _value in inputs] + [
         f"@{name} = @weaver_out_{name} output" for name, _type in outputs
     ]
-    projection = ", ".join(
-        f"@weaver_out_{name} as {name}" for name, _type in outputs
-    )
+    projection = ", ".join(f"@weaver_out_{name} as {name}" for name, _type in outputs)
     call = f"exec {procedure}\n    " + "\n  , ".join(arguments) + ";"
     return f"{declares}\n\n{call}\n\nselect {projection};"
 

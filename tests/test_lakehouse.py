@@ -33,7 +33,10 @@ class FakeSpark:
 def test_one_root_carries_both_lakehouse_areas():
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
+    assert (
+        lakehouse.table_path("Sales", "Order")
+        == "abfss://ws@host/lh/Tables/Sales/Order"
+    )
     assert lakehouse.location.files_root == "abfss://ws@host/lh/Files"
 
 
@@ -53,7 +56,10 @@ def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
 def test_a_trailing_separator_does_not_double_up():
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/")
 
-    assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
+    assert (
+        lakehouse.table_path("Sales", "Order")
+        == "abfss://ws@host/lh/Tables/Sales/Order"
+    )
     assert lakehouse.folder_spark_path("Sales", "Export") == (
         "abfss://ws@host/lh/Files/Sales/Export"
     )
@@ -67,7 +73,10 @@ def test_a_table_is_addressed_by_the_spark_root_in_fabric():
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
+    assert (
+        lakehouse.table_path("Sales", "Order")
+        == "abfss://ws@host/lh/Tables/Sales/Order"
+    )
 
 
 def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
@@ -89,7 +98,9 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
 
-    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
@@ -153,7 +164,9 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
 
-    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})())
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
     monkeypatch.setattr(module, "_MOUNTS", {})
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
@@ -228,9 +241,7 @@ def test_a_supplied_destination_is_what_names_objects():
         destination=FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH"),
     )
 
-    assert lakehouse.qualify("Sales", "Order") == (
-        "`Demo`.`Sales_LH`.`Sales`.`Order`"
-    )
+    assert lakehouse.qualify("Sales", "Order") == ("`Demo`.`Sales_LH`.`Sales`.`Order`")
 
 
 # --- resolved by name, through a resolver -----------------------------------
@@ -244,15 +255,15 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
     assert lakehouse.name == "Sales_LH"
     # Storage is OneLake, keyed by item id; the catalogue is named in full.
     assert lakehouse.spark_root == resolver.spark_root(ItemRef("Sales_LH"))
-    assert lakehouse.qualify("Sales", "Order") == (
-        "`Demo`.`Sales_LH`.`Sales`.`Order`"
-    )
+    assert lakehouse.qualify("Sales", "Order") == ("`Demo`.`Sales_LH`.`Sales`.`Order`")
 
 
 def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
     resolver = given_resolver(workspace=given_workspace(catalogue="Lakehouse/Weaver"))
 
-    assert lakehouse_for(resolver, "Sales_LH") == lakehouse_for(resolver, ItemRef("Sales_LH"))
+    assert lakehouse_for(resolver, "Sales_LH") == lakehouse_for(
+        resolver, ItemRef("Sales_LH")
+    )
 
 
 def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Path):
@@ -313,7 +324,9 @@ def test_the_attached_lakehouse_comes_from_the_sessions_own_settings():
     lakehouse = default_lakehouse(spark)
 
     assert lakehouse.name == "Sales_LH"
-    assert lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    assert (
+        lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    )
 
 
 def test_an_unnamed_attachment_falls_back_to_its_id():
@@ -342,7 +355,9 @@ def test_the_notebook_runtime_answers_when_the_session_does_not(monkeypatch):
 
     lakehouse = default_lakehouse(FakeSpark())
 
-    assert lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    assert (
+        lakehouse.spark_root == "abfss://ws-id@onelake.dfs.fabric.microsoft.com/lh-id"
+    )
 
 
 def test_no_attachment_fails_immediately():
@@ -380,4 +395,6 @@ def test_the_inferred_root_is_spelled_exactly_as_the_fabric_one():
     from weaver.fabric.onelake import abfss_root
     from weaver.lakehouse import _ABFSS_ROOT
 
-    assert _ABFSS_ROOT.format(workspace="ws-id", item="lh-id") == abfss_root("ws-id", "lh-id")
+    assert _ABFSS_ROOT.format(workspace="ws-id", item="lh-id") == abfss_root(
+        "ws-id", "lh-id"
+    )

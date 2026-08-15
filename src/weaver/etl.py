@@ -215,9 +215,7 @@ def item_validation_artefacts(
 
     if _is_builtin(item):
         return ()
-    model = next(
-        (each for each in repository.items if each.identity == item), None
-    )
+    model = next((each for each in repository.items if each.identity == item), None)
     if model is None:
         return ()
 
@@ -486,9 +484,7 @@ def validation_procedure_name(kind: str, source: ObjectId) -> str:
     """
 
     schema = _tsql_ident(ETL_SCHEMA)
-    procedure = _tsql_ident(
-        f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}"
-    )
+    procedure = _tsql_ident(f"{VALIDATION_PROCEDURE_PREFIX[kind]}{source.qualified}")
     return f"{schema}.{procedure}"
 
 
@@ -670,7 +666,9 @@ def generated_item_files(
             if any(source.kind == TABLE or source.is_validation for source in documents)
             else {}
         )
-    if not has_deployable_source(item, documents=documents, support_paths=support_paths):
+    if not has_deployable_source(
+        item, documents=documents, support_paths=support_paths
+    ):
         return {}
     return {
         **schema,

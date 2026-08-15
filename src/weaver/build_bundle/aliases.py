@@ -139,9 +139,7 @@ def plan_item_aliases(
     if supported:
         item_slug = _slug(item)
         payloads: dict[str, bytes] = {}
-        action = _alias_action(
-            supported, item=item, target=target, payloads=payloads
-        )
+        action = _alias_action(supported, item=item, target=target, payloads=payloads)
         # One action stands for every alias the item consumes, so it produces
         # several changes. Each names what the alias physically *is* at this
         # binding — a folder under Files, a view in a Warehouse, a table in a
@@ -177,7 +175,9 @@ def plan_item_aliases(
     )
 
 
-def _unsupported(alias, *, target: BoundTarget, source_target: BoundTarget | None) -> str | None:
+def _unsupported(
+    alias, *, target: BoundTarget, source_target: BoundTarget | None
+) -> str | None:
     """Why this alias has no physical form here, or None when it has one."""
 
     if source_target is None:
@@ -319,9 +319,9 @@ def _shortcut_payload(supported, *, target: BoundTarget) -> bytes:
             for alias, source_target in supported
         ]
     }
-    return (json.dumps(mapping, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
-        "utf-8"
-    )
+    return (
+        json.dumps(mapping, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
 
 
 def _tsql_ident(name: str) -> str:

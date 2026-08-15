@@ -26,7 +26,9 @@ class Edge:
 class Graph:
     """A directed acyclic graph over named nodes."""
 
-    def __init__(self, nodes: Iterable[str], edges: Iterable[tuple[str, str]] = ()) -> None:
+    def __init__(
+        self, nodes: Iterable[str], edges: Iterable[tuple[str, str]] = ()
+    ) -> None:
         self._nodes = tuple(sorted(set(nodes)))
         known = set(self._nodes)
 
@@ -43,7 +45,9 @@ class Graph:
                 continue
             seen.add((upstream, downstream))
             collected.append(Edge(upstream=upstream, downstream=downstream))
-        self._edges = tuple(sorted(collected, key=lambda edge: (edge.upstream, edge.downstream)))
+        self._edges = tuple(
+            sorted(collected, key=lambda edge: (edge.upstream, edge.downstream))
+        )
 
         self._downstream: Mapping[str, list[str]] = defaultdict(list)
         self._upstream: Mapping[str, list[str]] = defaultdict(list)
@@ -146,7 +150,7 @@ class Graph:
 
         def walk(node: str) -> list[str] | None:
             if node in on_path:
-                return path[path.index(node):] + [node]
+                return path[path.index(node) :] + [node]
             if node in seen:
                 return None
             seen.add(node)

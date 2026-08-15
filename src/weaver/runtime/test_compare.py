@@ -79,7 +79,9 @@ def _quoted(column: str) -> str:
     return f"`{column}`"
 
 
-def _check_shape(expected: Any, actual: Any, *, key: tuple[str, ...], what: str) -> None:
+def _check_shape(
+    expected: Any, actual: Any, *, key: tuple[str, ...], what: str
+) -> None:
     """Refuse a comparison the engine would perform and nobody could read.
 
     An explicit error here rather than whatever ``EXCEPT`` says about mismatched

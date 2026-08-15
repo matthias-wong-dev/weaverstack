@@ -15,7 +15,6 @@ from .base import InstallationContext
 
 
 class SparkSqlExecutor:
-
     name = "spark_sql"
 
     def execute(

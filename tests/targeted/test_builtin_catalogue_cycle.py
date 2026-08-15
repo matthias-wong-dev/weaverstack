@@ -91,9 +91,7 @@ def estate(tmp_path):
         "repository": repository,
         "store": store,
         "executors": executors,
-        "session": given_session(
-            workspace=workspace, store=store, resolver=resolver
-        ),
+        "session": given_session(workspace=workspace, store=store, resolver=resolver),
     }
 
 
@@ -117,13 +115,13 @@ def _build(estate):
         bindings=bindings,
         # Nothing persisted, nothing present: the bootstrap state, stated as
         # state rather than arranged by a privileged step.
-        state=BuildState(
-            catalogue=Catalogue(rows={}), target_inventories=inventories
-        ),
+        state=BuildState(catalogue=Catalogue(rows={}), target_inventories=inventories),
         session=estate["session"],
         executors=estate["executors"],
         source_store=estate["store"],
-        control_lakehouse=LakehouseBinding(lakehouse=ItemRef("Weaver"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            lakehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
+        ),
     )
     return bindings, result
 
@@ -178,8 +176,7 @@ def test_the_catalogue_tables_are_built_by_the_same_executors_as_authored_object
     catalogue_actions = [
         action
         for _sequence, _batch, action in result.plan.actions()
-        if action.resource_node_id
-        and action.resource_node_id.startswith(f"{BUILTIN}/")
+        if action.resource_node_id and action.resource_node_id.startswith(f"{BUILTIN}/")
     ]
     assert catalogue_actions
     used = {action.executor for action in catalogue_actions}

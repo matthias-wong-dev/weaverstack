@@ -92,7 +92,9 @@ def test_unknown_keys_are_named_not_ignored():
 
 def test_a_key_from_another_kind_names_the_kinds_that_have_it():
     """Naming them turns "unknown key" into "wrong kind of declaration"."""
-    with pytest.raises(MetadataError, match=r"Primary key belongs to Table, Test and View"):
+    with pytest.raises(
+        MetadataError, match=r"Primary key belongs to Table, Test and View"
+    ):
         parse(FOLDER_YAML + "\nPrimary key: Order id")
 
 
@@ -120,29 +122,45 @@ def test_placeholders_are_refused():
 
 
 def test_a_whole_value_reference_is_a_reference():
-    document = parse(TABLE_YAML.replace("Description: One row per customer order.",
-                                        "Description: $Sales.OrderSource"))
+    document = parse(
+        TABLE_YAML.replace(
+            "Description: One row per customer order.",
+            "Description: $Sales.OrderSource",
+        )
+    )
     assert document.description.is_reference
     assert document.description.reference.object_id.qualified == "Sales.OrderSource"
     assert document.description.reference.column is None
 
 
 def test_a_column_reference_carries_the_column():
-    document = parse(TABLE_YAML.replace("Description: One row per customer order.",
-                                        "Description: $Sales.OrderSource[Order date]"))
+    document = parse(
+        TABLE_YAML.replace(
+            "Description: One row per customer order.",
+            "Description: $Sales.OrderSource[Order date]",
+        )
+    )
     assert document.description.reference.column == "Order date"
 
 
 def test_mixed_prose_and_reference_is_refused():
     """A contract that is only sometimes machine-readable is not a contract."""
     with pytest.raises(MetadataError, match="not a mix"):
-        parse(TABLE_YAML.replace("Description: One row per customer order.",
-                                 "Description: See $Sales.OrderSource"))
+        parse(
+            TABLE_YAML.replace(
+                "Description: One row per customer order.",
+                "Description: See $Sales.OrderSource",
+            )
+        )
 
 
 def test_a_literal_dollar_can_be_escaped():
-    document = parse(TABLE_YAML.replace("Description: One row per customer order.",
-                                        "Description: Amounts are in $$AUD."))
+    document = parse(
+        TABLE_YAML.replace(
+            "Description: One row per customer order.",
+            "Description: Amounts are in $$AUD.",
+        )
+    )
     assert document.description.literal == "Amounts are in $AUD."
     assert not document.description.is_reference
 
@@ -152,7 +170,9 @@ def test_a_literal_dollar_can_be_escaped():
 
 def test_notes_are_free_range():
     """Unpoliced by design — no reference parsing, no placeholder rules."""
-    document = parse(TABLE_YAML + "\nNotes: |\n  Amounts are $AUD.\n  TBD whether tax is included.")
+    document = parse(
+        TABLE_YAML + "\nNotes: |\n  Amounts are $AUD.\n  TBD whether tax is included."
+    )
     assert document.notes.startswith("Amounts are $AUD.")
 
 
@@ -233,15 +253,15 @@ def test_notes_and_revision_notes_apply_to_every_kind():
 
 
 def test_a_column_set_is_comma_separated():
-    document = parse(TABLE_YAML.replace("Primary key: Order id",
-                                        "Primary key: Order id, Order date"))
+    document = parse(
+        TABLE_YAML.replace("Primary key: Order id", "Primary key: Order id, Order date")
+    )
     assert document.primary_key == ("Order id", "Order date")
 
 
 def test_a_column_set_refuses_a_yaml_list():
     with pytest.raises(MetadataError, match="column set"):
-        parse(TABLE_YAML.replace("Primary key: Order id",
-                                 "Primary key:\n  - Order id"))
+        parse(TABLE_YAML.replace("Primary key: Order id", "Primary key:\n  - Order id"))
 
 
 def test_a_column_list_is_a_yaml_list():
@@ -316,7 +336,11 @@ def test_identity_is_an_engine_generated_bigint_column():
     )
     assert document.identity == "OrderKey"
     identity = document.identity_column
-    assert (identity.type, identity.not_null, identity.is_identity) == ("bigint", True, True)
+    assert (identity.type, identity.not_null, identity.is_identity) == (
+        "bigint",
+        True,
+        True,
+    )
     # It leads the effective schema and is not one of the declared columns.
     assert document.effective_schema[0].name == "OrderKey"
     assert "OrderKey" not in {column.name for column in document.schema}
@@ -397,7 +421,9 @@ def test_prohibit_rebuild_works_on_views():
 
 def test_incremental_is_refused_on_a_view():
     with pytest.raises(MetadataError, match="View"):
-        parse("View ID: A.B\nDescription: x\nLineage: y\nIncremental: true", language=SQL)
+        parse(
+            "View ID: A.B\nDescription: x\nLineage: y\nIncremental: true", language=SQL
+        )
 
 
 def test_not_null_includes_the_primary_key():
@@ -420,14 +446,18 @@ def test_a_narrower_comparison_set_is_kept():
 def test_declared_schema_stays_exactly_what_was_written():
     document = parse(TABLE_YAML)
     assert [column.name for column in document.schema] == [
-        "Order id", "Order date", "Amount",
+        "Order id",
+        "Order date",
+        "Amount",
     ]
 
 
 def test_the_effective_schema_adds_the_audit_columns():
     document = parse(TABLE_YAML)
     assert [column.name for column in document.effective_schema][-3:] == [
-        "row_insert_datetime", "row_update_datetime", "row_delete_datetime",
+        "row_insert_datetime",
+        "row_update_datetime",
+        "row_delete_datetime",
     ]
 
 
@@ -487,7 +517,9 @@ def test_a_delta_table_validates_now():
 
 
 def test_column_notes_attach_to_declared_columns():
-    document = parse(TABLE_YAML + "\nColumn notes:\n  Amount: Order total including tax.")
+    document = parse(
+        TABLE_YAML + "\nColumn notes:\n  Amount: Order total including tax."
+    )
     amount = next(column for column in document.schema if column.name == "Amount")
     assert amount.note.literal == "Order total including tax."
 
@@ -614,7 +646,9 @@ def test_a_spark_sql_object_must_declare_dependencies():
 def test_a_spark_sql_table_uses_the_delta_audit_spelling():
     document = parse(SPARK_YAML, language=SPARK_SQL)
     assert [column.name for column in document.audit_columns] == [
-        "row_insert_datetime", "row_update_datetime", "row_delete_datetime",
+        "row_insert_datetime",
+        "row_update_datetime",
+        "row_delete_datetime",
     ]
 
 
@@ -697,7 +731,9 @@ def test_a_validation_declares_no_lineage():
 
 
 def test_a_test_primary_key_may_be_composite():
-    document = parse(TEST_YAML.replace("Primary key: Order id", "Primary key: Order id, Line no"))
+    document = parse(
+        TEST_YAML.replace("Primary key: Order id", "Primary key: Order id, Line no")
+    )
     assert document.primary_key == ("Order id", "Line no")
 
 
@@ -721,13 +757,22 @@ def test_a_validation_takes_the_shared_document_keys():
         + "\nDependencies:\n  - Sales.Order\n"
     )
     assert document.notes == "Slow against a full year."
-    assert [str(revision) for revision in document.revision_notes] == ["2026-08-08 First cut."]
-    assert [dependency.qualified for dependency in document.dependencies] == ["Sales.Order"]
+    assert [str(revision) for revision in document.revision_notes] == [
+        "2026-08-08 First cut."
+    ]
+    assert [dependency.qualified for dependency in document.dependencies] == [
+        "Sales.Order"
+    ]
     assert document.declares_dependencies
 
 
 def test_a_validation_description_may_reference_another_object():
-    document = parse(TEST_YAML.replace("Description: Orders reconcile to the independently derived expected relation.", "Description: $Sales.Order"))
+    document = parse(
+        TEST_YAML.replace(
+            "Description: Orders reconcile to the independently derived expected relation.",
+            "Description: $Sales.Order",
+        )
+    )
     assert document.description.reference.object_id.qualified == "Sales.Order"
 
 
@@ -746,7 +791,7 @@ def test_a_validation_description_may_reference_another_object():
         "Delete percentage threshold: 10",
         "Warehouse alias: Sales.OrdersReconcile",
         "Schema:\n  Order id: string",
-        "File key: \"*.csv\"",
+        'File key: "*.csv"',
     ],
 )
 def test_data_object_metadata_is_refused_on_a_test(key):
@@ -798,7 +843,9 @@ def test_a_spark_sql_validation_need_not_declare_dependencies():
 
 def test_a_validation_may_still_declare_what_inference_cannot_reach():
     document = parse(TEST_YAML + "\nDependencies:\n  - Sales.Order", language=SPARK_SQL)
-    assert [dependency.qualified for dependency in document.dependencies] == ["Sales.Order"]
+    assert [dependency.qualified for dependency in document.dependencies] == [
+        "Sales.Order"
+    ]
 
 
 def test_a_validation_may_not_depend_on_itself():

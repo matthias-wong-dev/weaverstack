@@ -21,8 +21,7 @@ def _dependency_estate(tmp_path):
     root = _estate(tmp_path)
     raw_table = _table("Sales.Customer").replace(
         "from weaver import Table",
-        "from weaver import Table\n"
-        "from .Files.Sales__Landing import Sales__Landing",
+        "from weaver import Table\nfrom .Files.Sales__Landing import Sales__Landing",
     )
     landing = _folder("Sales.Landing").replace(
         "from weaver import Folder",
@@ -30,13 +29,11 @@ def _dependency_estate(tmp_path):
     )
     export = _folder("Sales.Export").replace(
         "from weaver import Folder",
-        "from weaver import Folder\n"
-        "from ..Sales__Customer import Sales__Customer",
+        "from weaver import Folder\nfrom ..Sales__Customer import Sales__Customer",
     )
     archive = _folder("Sales.Archive").replace(
         "from weaver import Folder",
-        "from weaver import Folder\n"
-        "from .Sales__Landing import Sales__Landing",
+        "from weaver import Folder\nfrom .Sales__Landing import Sales__Landing",
     )
     reporting = _warehouse_table("Sales.Customer").replace(
         "select cast(1 as varchar(20)) as Id;",
@@ -93,7 +90,10 @@ def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
     assert str(delta_to_folder.producer) == "Lakehouse/Raw/Files/Sales.Landing"
     assert str(folder_to_delta.producer) == "Lakehouse/Raw/Sales.Customer"
     assert str(folder_to_folder.producer) == "Lakehouse/Raw/Files/Sales.Landing"
-    assert all(edge.is_within_item for edge in (delta_to_folder, folder_to_delta, folder_to_folder))
+    assert all(
+        edge.is_within_item
+        for edge in (delta_to_folder, folder_to_delta, folder_to_folder)
+    )
 
 
 def test_lib_import_creates_no_object_edge(tmp_path):
@@ -176,7 +176,9 @@ def test_published_dependency_edges_ignore_the_alias_node(tmp_path):
     destinations = {alias.destination for alias in repository.aliases}
 
     assert destinations
-    assert all(edge.producer not in destinations for edge in repository.dependency_edges)
+    assert all(
+        edge.producer not in destinations for edge in repository.dependency_edges
+    )
 
     alias_edge = _edge(
         repository, "Warehouse/Reporting/Sales.Customer", "Sales.PortableCustomer"

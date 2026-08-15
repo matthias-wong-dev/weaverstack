@@ -34,8 +34,7 @@ _TMP_PREFIX = "._weaver_tmp_"
 STAGING_SUFFIX = "_Staging"
 
 INTOLERANT_MESSAGE = (
-    "staged files were rejected and fault_tolerant = 0, so the folder was not "
-    "modified"
+    "staged files were rejected and fault_tolerant = 0, so the folder was not modified"
 )
 TOLERATED_MESSAGE = "staged files were rejected and excluded from the load"
 
@@ -56,9 +55,7 @@ def load_folder(
 
     destination_path, staging_path = _validate_paths(destination, staging)
     staged, rejected = _classify(staging_path, contract)
-    deletes = _validate_deletes(
-        deletes, staged, destination_path, contract=contract
-    )
+    deletes = _validate_deletes(deletes, staged, destination_path, contract=contract)
     rows_read = len(staged) + len(rejected)
 
     if rejected and not fault_tolerant:
@@ -70,9 +67,7 @@ def load_folder(
         )
 
     inserted, updated = _publish(staged, staging_path, destination_path)
-    deleted = _reconcile_deletes(
-        destination_path, deletes, staged, contract=contract
-    )
+    deleted = _reconcile_deletes(destination_path, deletes, staged, contract=contract)
 
     result = LoadResult(
         succeeded=True,
@@ -208,7 +203,9 @@ def _classify(staging_path: Path, contract) -> tuple[list[str], list[str]]:
     return staged, rejected
 
 
-def _validate_deletes(deletes, staged, destination: Path, *, contract) -> tuple[str, ...]:
+def _validate_deletes(
+    deletes, staged, destination: Path, *, contract
+) -> tuple[str, ...]:
     """Every delete entry, checked to be an exact file this folder may remove."""
 
     if isinstance(deletes, (str, bytes)):
@@ -255,8 +252,7 @@ def _validate_deletes(deletes, staged, destination: Path, *, contract) -> tuple[
             )
         if path.name in RESERVED_NAMES:
             raise LoadError(
-                f"{contract.qualified}: {raw!r} is a Weaver file and cannot be "
-                "deleted"
+                f"{contract.qualified}: {raw!r} is a Weaver file and cannot be deleted"
             )
         relative = path.as_posix()
         if not matches_file_key(relative, contract.file_keys):

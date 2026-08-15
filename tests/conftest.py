@@ -175,9 +175,7 @@ def _lakehouses(root: Path, *, weaver: str, target: str, extra=()) -> Lakehouses
         weaver=weaver_ref,
         target=target_ref,
         root=root,
-        session=given_session(
-            workspace=workspace, resolver=resolver, store=store
-        ),
+        session=given_session(workspace=workspace, resolver=resolver, store=store),
     )
 
 

@@ -193,7 +193,9 @@ class FixtureCatalogue(Catalogue):
         )
 
     @classmethod
-    def from_repository(cls, repository, *, item: str | WeaverItemId = ITEM) -> "Catalogue":
+    def from_repository(
+        cls, repository, *, item: str | WeaverItemId = ITEM
+    ) -> "Catalogue":
         """The catalogue a successful build of this repository would have left.
 
         The "already installed, nothing changed" state, which is the premise of
@@ -593,7 +595,7 @@ def warehouse_table(
     """
 
     identity_line = f"Identity: {identity}\n\n" if identity else ""
-    return f'''\
+    return f"""\
 /*
 Table ID: {object_id}
 
@@ -605,11 +607,11 @@ Primary key: {primary_key}
 
 {identity_line}*/
 {select}
-'''
+"""
 
 
 def warehouse_view(object_id: str, *, select: str, depends_on: str) -> str:
-    return f'''\
+    return f"""\
 /*
 View ID: {object_id}
 
@@ -618,11 +620,11 @@ Description: A declared view.
 Lineage: ${depends_on}
 */
 {select}
-'''
+"""
 
 
 def spark_view(object_id: str, *, depends_on: str) -> str:
-    return f'''\
+    return f"""\
 /*
 View ID: {object_id}
 
@@ -634,7 +636,7 @@ Dependencies:
   - {depends_on}
 */
 select 1 as CustomerId from {depends_on}
-'''
+"""
 
 
 def folder_document(object_id: str) -> str:
@@ -690,7 +692,9 @@ def alias_repository(
     _write(
         root,
         f"{consumer}/alias.yml",
-        alias_declaration(**{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}),
+        alias_declaration(
+            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}
+        ),
     )
     if consumer_view:
         # A Warehouse consumer reads its alias through T-SQL over the producer's
@@ -964,9 +968,7 @@ def single_action_bundle(
         ),
     )
     plan = _with_identity(plan)
-    return write_bundle(
-        location, plan=plan, payloads=payloads, store=store
-    )
+    return write_bundle(location, plan=plan, payloads=payloads, store=store)
 
 
 def _sequence(*, description: str, target_id: str, action: InstallAction):

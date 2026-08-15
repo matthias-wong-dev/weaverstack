@@ -82,7 +82,9 @@ def _runner(estate, *, inventories=None, can_refresh=True, dry_run=False):
 def resolve(estate, *, inventories=None, can_refresh=True):
     """Resolution, asked of the snapshot and of nothing else."""
 
-    return Resolutions(_runner(estate, inventories=inventories, can_refresh=can_refresh))
+    return Resolutions(
+        _runner(estate, inventories=inventories, can_refresh=can_refresh)
+    )
 
 
 def without(inventories, target: str, **fields):
@@ -214,9 +216,7 @@ def test_load_resolution_reports_a_missing_target_table(estate):
     trimmed = without(inventories, "Warehouse/Reporting_WH", tables=())
     resolved = resolve((catalogue, trimmed)).by_id[SUMMARY]
 
-    assert [message.code for message in resolved.messages] == [
-        TARGET_MISSING
-    ]
+    assert [message.code for message in resolved.messages] == [TARGET_MISSING]
 
 
 def test_load_resolution_reports_a_missing_target(estate):
@@ -229,9 +229,7 @@ def test_load_resolution_reports_a_missing_target(estate):
     resolved = resolve((catalogue, without_warehouse)).by_id[SUMMARY]
 
     assert not resolved.target_present
-    assert [message.code for message in resolved.messages] == [
-        TARGET_MISSING
-    ]
+    assert [message.code for message in resolved.messages] == [TARGET_MISSING]
 
 
 # --- and what that does to everything downstream ------------------------------

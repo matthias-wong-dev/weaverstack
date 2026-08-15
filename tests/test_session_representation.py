@@ -34,9 +34,7 @@ def _other(name="B_Workspace") -> Workspace:
 
 
 def _fabric(name="A_Workspace") -> Workspace:
-    return Workspace(
-        workspace=name, catalogue="Lakehouse/Weaver", environment="weaver"
-    )
+    return Workspace(workspace=name, catalogue="Lakehouse/Weaver", environment="weaver")
 
 
 # --- identity ---------------------------------------------------------------
@@ -95,7 +93,9 @@ def test_a_session_started_without_a_workspace_never_gains_one():
         session.scope(_other("named-by-a-command"))
 
         assert session.workspace is None
-        with pytest.raises(CommandError, match="A Workspace is required for this command"):
+        with pytest.raises(
+            CommandError, match="A Workspace is required for this command"
+        ):
             session.scope(None)
 
 
@@ -124,7 +124,6 @@ def test_a_different_control_lakehouse_is_a_different_context():
 
 
 # --- position ---------------------------------------------------------------
-
 
 
 def test_a_console_reaching_into_fabric_does_not_execute_here(console):
@@ -217,7 +216,7 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
         """Enough of a credential for a token to exist, and no network at all."""
 
         def get_token(self, *scopes, **kwargs):
-            return SimpleNamespace(token="token", expires_on=2 ** 31 - 1)
+            return SimpleNamespace(token="token", expires_on=2**31 - 1)
 
     built = FakeLivy()
     # Everything is replaced *before* the scope exists, because a Resource binds
@@ -229,9 +228,7 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
         "weaver.fabric.LivySession.for_workspace",
         classmethod(lambda cls, *args, **kwargs: built),
     )
-    monkeypatch.setattr(
-        ConsoleScope, "resolver", property(lambda self: object())
-    )
+    monkeypatch.setattr(ConsoleScope, "resolver", property(lambda self: object()))
 
     with ConsoleSession(workspace=_fabric()) as session:
         scope = session.scope()

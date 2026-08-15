@@ -22,7 +22,9 @@ class Location:
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, str):
-            raise IdentityError(f"location must be a string, got {type(self.value).__name__}")
+            raise IdentityError(
+                f"location must be a string, got {type(self.value).__name__}"
+            )
         value = self.value.strip()
         if not value:
             raise IdentityError("location must not be empty")
@@ -122,9 +124,7 @@ class LakehouseSparkLocation:
     def folder_path(self, schema: str, name: str) -> str:
         """Where one managed folder lives, under the Files area."""
 
-        return (
-            f"{self.files_root.rstrip('/')}/{_segment(schema)}/{_segment(name)}"
-        )
+        return f"{self.files_root.rstrip('/')}/{_segment(schema)}/{_segment(name)}"
 
     def __str__(self) -> str:
         return f"{self.item} (tables={self.tables_root}, files={self.files_root})"

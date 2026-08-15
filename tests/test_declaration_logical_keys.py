@@ -69,7 +69,7 @@ def test_unique_keys_are_a_list_of_column_sets():
         Unique keys:
           - Order number
           - Customer id, Order date
-        """
+        """,
     )
     assert document.unique_keys == (
         ("Order number",),
@@ -111,7 +111,9 @@ def test_unique_key_columns_must_be_in_the_schema():
 
 
 def test_a_foreign_key_pairs_this_object_s_columns_with_a_parent_s():
-    document = parse(TABLE, "\nForeign keys:\n  - Customer id: Sales.Customer[Customer id]\n")
+    document = parse(
+        TABLE, "\nForeign keys:\n  - Customer id: Sales.Customer[Customer id]\n"
+    )
     (key,) = document.foreign_keys
     assert key.columns == ("Customer id",)
     assert key.reference == ObjectId(schema="Sales", object="Customer")
@@ -121,7 +123,7 @@ def test_a_foreign_key_pairs_this_object_s_columns_with_a_parent_s():
 def test_a_composite_foreign_key_keeps_both_column_orders():
     document = parse(
         TABLE,
-        "\nForeign keys:\n  - Region, Country: Sales.Territory[Territory region, Territory country]\n"
+        "\nForeign keys:\n  - Region, Country: Sales.Territory[Territory region, Territory country]\n",
     )
     (key,) = document.foreign_keys
     assert key.columns == ("Region", "Country")
@@ -129,7 +131,9 @@ def test_a_composite_foreign_key_keeps_both_column_orders():
 
 
 def test_an_object_may_reference_itself():
-    document = parse(TABLE, "\nForeign keys:\n  - Parent order id: Sales.Order[Order id]\n")
+    document = parse(
+        TABLE, "\nForeign keys:\n  - Parent order id: Sales.Order[Order id]\n"
+    )
     (key,) = document.foreign_keys
     assert key.reference == ObjectId(schema="Sales", object="Order")
 
@@ -141,7 +145,7 @@ def test_two_relationships_may_run_to_the_same_parent():
         Foreign keys:
           - Customer id: Sales.Customer[Customer id]
           - Region: Sales.Customer[Region]
-        """
+        """,
     )
     assert len(document.foreign_keys) == 2
     assert {str(key.reference) for key in document.foreign_keys} == {"Sales.Customer"}
@@ -155,7 +159,7 @@ def test_a_foreign_key_has_no_name_so_an_identical_pair_is_a_duplicate():
             Foreign keys:
               - Customer id: Sales.Customer[Customer id]
               - Customer id: Sales.Customer[Customer id]
-            """
+            """,
         )
 
 
@@ -171,7 +175,10 @@ def test_the_parent_must_carry_its_columns():
 
 def test_the_parent_must_be_a_two_part_name():
     with pytest.raises(MetadataError, match=r"Schema.Object\[Column, Column\]"):
-        parse(TABLE, "\nForeign keys:\n  - Customer id: Lakehouse.Sales.Customer[Customer id]\n")
+        parse(
+            TABLE,
+            "\nForeign keys:\n  - Customer id: Lakehouse.Sales.Customer[Customer id]\n",
+        )
 
 
 def test_each_entry_maps_one_column_set_to_one_parent():
@@ -219,7 +226,9 @@ def test_a_view_has_no_declared_schema_so_its_key_columns_defer_to_build():
     assert document.defers_column_validation
 
 
-@pytest.mark.parametrize("key", ["Comparison columns", "Identity", "Not null", "Incremental"])
+@pytest.mark.parametrize(
+    "key", ["Comparison columns", "Identity", "Not null", "Incremental"]
+)
 def test_a_view_declares_nothing_that_implies_storage(key):
     value = "\n  - Order id" if key == "Not null" else " Order id"
     if key == "Incremental":

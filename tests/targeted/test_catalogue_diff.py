@@ -67,9 +67,7 @@ def desired_from(repository, *names):
 
 def registry_changes(changes):
     return next(
-        change
-        for change in changes.per_table()[item_id()]
-        if change.table is REGISTRY
+        change for change in changes.per_table()[item_id()] if change.table is REGISTRY
     )
 
 
@@ -230,7 +228,9 @@ def test_an_installation_the_build_did_not_name_is_never_touched(repository):
 def test_registry_statements_are_kept_separate_from_the_rest(repository):
     """Registry is written last, in its own barrier, so it is returned apart."""
 
-    result = publish(Catalogue(rows={}), desired_from(repository, CUSTOMER), destination=WEAVER)
+    result = publish(
+        Catalogue(rows={}), desired_from(repository, CUSTOMER), destination=WEAVER
+    )
 
     assert result.registry.statements
     assert all(

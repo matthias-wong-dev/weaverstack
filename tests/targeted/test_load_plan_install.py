@@ -124,9 +124,7 @@ def test_an_item_with_no_selected_load_work_gets_no_layer(lakehouse):
     """A phase with nothing to do is not a barrier, and takes no number."""
 
     selected = {key for key in lakehouse.source_documents if key.item == item_id()}
-    planned = plan(
-        lakehouse, selected_documents=selected, selected_for_build=selected
-    )
+    planned = plan(lakehouse, selected_documents=selected, selected_for_build=selected)
 
     assert "load" not in phases(planned)
 
@@ -156,8 +154,11 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
 
     item = item_id(WAREHOUSE_ITEM)
     target = bound_target(
-        id="target-1", kind="warehouse", item_id="Reporting_WH",
-        logical_item_name="Reporting", logical_item_type="Warehouse",
+        id="target-1",
+        kind="warehouse",
+        item_id="Reporting_WH",
+        logical_item_name="Reporting",
+        logical_item_type="Warehouse",
     )
     planned = plan(
         warehouse,
@@ -183,8 +184,11 @@ def test_the_procedure_schema_is_created_in_the_ordinary_schema_phase(warehouse)
 
     item = item_id(WAREHOUSE_ITEM)
     target = bound_target(
-        id="target-1", kind="warehouse", item_id="Reporting_WH",
-        logical_item_name="Reporting", logical_item_type="Warehouse",
+        id="target-1",
+        kind="warehouse",
+        item_id="Reporting_WH",
+        logical_item_name="Reporting",
+        logical_item_type="Warehouse",
     )
     planned = plan(
         warehouse,
@@ -226,8 +230,11 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
     gone = document_id(f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Retired")
     item = item_id(WAREHOUSE_ITEM)
     target = bound_target(
-        id="target-1", kind="warehouse", item_id="Reporting_WH",
-        logical_item_name="Reporting", logical_item_type="Warehouse",
+        id="target-1",
+        kind="warehouse",
+        item_id="Reporting_WH",
+        logical_item_name="Reporting",
+        logical_item_type="Warehouse",
     )
     planned = plan(
         warehouse,

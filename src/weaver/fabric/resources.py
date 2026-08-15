@@ -74,7 +74,10 @@ def find_workspace(name: str, *, client: FabricClient | None = None) -> Workspac
 
 
 def list_items(
-    workspace: WorkspaceItem, *, item_type: str | None = None, client: FabricClient | None = None
+    workspace: WorkspaceItem,
+    *,
+    item_type: str | None = None,
+    client: FabricClient | None = None,
 ) -> tuple[Item, ...]:
     client = client or FabricClient()
     path = f"workspaces/{workspace.id}/items"

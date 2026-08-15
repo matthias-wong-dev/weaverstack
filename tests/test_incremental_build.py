@@ -62,7 +62,9 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
     from weaver.etl import item_load_artefacts
 
     item = WeaverItemId.parse(item_text)
-    retained = [identity for identity in repository.source_documents if identity.item == item]
+    retained = [
+        identity for identity in repository.source_documents if identity.item == item
+    ]
     retained.extend(
         alias.destination
         for alias in repository.aliases
@@ -100,7 +102,13 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
 
 def _raw_binding(target="Raw_Target"):
     item = WeaverItemId.parse("Lakehouse/Raw")
-    return ItemBindings((ItemBinding(item, LakehouseBinding(ItemRef(target), workspace_name=WORKSPACE)),))
+    return ItemBindings(
+        (
+            ItemBinding(
+                item, LakehouseBinding(ItemRef(target), workspace_name=WORKSPACE)
+            ),
+        )
+    )
 
 
 def _raw_inventory(repository, target="Raw_Target"):
@@ -119,7 +127,9 @@ def _raw_inventory(repository, target="Raw_Target"):
             schemas=("Sales",),
             folder_schemas=("Sales",),
             tables=tuple(
-                source.qualified for identity, source in documents if not identity.is_files
+                source.qualified
+                for identity, source in documents
+                if not identity.is_files
             ),
             folders=tuple(
                 source.qualified for identity, source in documents if identity.is_files
@@ -135,19 +145,13 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
         for identity in repository.source_documents
         if str(identity.item) == "Lakehouse/Raw"
     }
-    empty = determine_impact(
-        repository, Catalogue({}).registered, selected=raw
-    )
+    empty = determine_impact(repository, Catalogue({}).registered, selected=raw)
     assert set(empty.new) == raw
     assert empty.changed == empty.impacted == ()
 
-    installed = _catalogue(
-        repository, "Lakehouse/Raw", old=(("Sales", "Customer"),)
-    )
+    installed = _catalogue(repository, "Lakehouse/Raw", old=(("Sales", "Customer"),))
     impact = determine_impact(repository, installed.registered, selected=raw)
-    assert [str(value) for value in impact.changed] == [
-        "Lakehouse/Raw/Sales.Customer"
-    ]
+    assert [str(value) for value in impact.changed] == ["Lakehouse/Raw/Sales.Customer"]
     assert set(impact.to_mapping()) == {"new", "changed", "impacted_descendants"}
 
 
@@ -242,15 +246,17 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
 
     existing_path = root / "Lakehouse/Raw/Sales__Customer.py"
     existing_path.write_text(
-        existing_path.read_text().replace(
+        existing_path.read_text()
+        .replace(
             "Description: A declared table.",
             "Description: The current governed declaration.",
-        ).replace(
+        )
+        .replace(
             "Lineage: A source system.",
             "Lineage: A revised source.",
-        ).replace(
-            "Primary key: Id", "Primary key: Id\nProhibit rebuild: true"
-        ).replace(
+        )
+        .replace("Primary key: Id", "Primary key: Id\nProhibit rebuild: true")
+        .replace(
             "from weaver import Table",
             "from weaver import Table\n"
             "from .Files.Sales__Customer import Sales__Customer as SourceCustomer",
@@ -287,7 +293,9 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         store=store,
         target_inventories=_raw_inventory(repository),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
     customer_actions = [
         action
@@ -394,7 +402,9 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
             repository, alias_installed=alias_installed
         ),
         catalogue=Catalogue(rows),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
 
 
@@ -590,9 +600,14 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
     registered = Catalogue(_alias_catalogue(repository)).registered
 
     assert all(document.build_epoch is None for document in registered.values())
-    assert stale_alias_destinations(
-        repository, registered, bound_items={WeaverItemId.parse("Warehouse/Reporting")}
-    ) == ()
+    assert (
+        stale_alias_destinations(
+            repository,
+            registered,
+            bound_items={WeaverItemId.parse("Warehouse/Reporting")},
+        )
+        == ()
+    )
 
 
 def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
@@ -627,11 +642,14 @@ def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
-    assert stale_alias_destinations(
-        repository,
-        Catalogue(rows).registered,
-        bound_items={WeaverItemId.parse("Lakehouse/Curated")},
-    ) == ()
+    assert (
+        stale_alias_destinations(
+            repository,
+            Catalogue(rows).registered,
+            bound_items={WeaverItemId.parse("Lakehouse/Curated")},
+        )
+        == ()
+    )
 
 
 def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
@@ -671,9 +689,7 @@ def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind == "publish_registry"
     )
-    payload = store.read(
-        bundle.location.join(*registry.payload.split("/"))
-    ).decode()
+    payload = store.read(bundle.location.join(*registry.payload.split("/"))).decode()
 
     assert "{{epoch}}" in payload
     assert "build_epoch" in payload
@@ -689,7 +705,9 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
         store=store,
         target_inventories=_raw_inventory(repository),
         catalogue=_catalogue(repository, "Lakehouse/Raw"),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
     physical = {
         BUILD_FOLDER,
@@ -697,7 +715,9 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
         DROP_FOLDER,
         DROP_TABLE,
     }
-    assert not any(action.kind in physical for _sequence, _batch, action in bundle.plan.actions())
+    assert not any(
+        action.kind in physical for _sequence, _batch, action in bundle.plan.actions()
+    )
     assert bundle.plan.selection.selected_for_build == ()
     restored = BuildPlan.from_mapping(bundle.plan.to_mapping())
     assert restored.selection == bundle.plan.selection
@@ -724,7 +744,9 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         catalogue=_catalogue(
             repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
         ),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
     actions = [
         (sequence.number, action.kind, action.resource_node_id)
@@ -735,17 +757,25 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
     ]
     assert len(catalogue_numbers) == 1
     drop_numbers = [
-        number for number, kind, _identity in actions if kind in {DROP_FOLDER, DROP_TABLE}
+        number
+        for number, kind, _identity in actions
+        if kind in {DROP_FOLDER, DROP_TABLE}
     ]
     build_numbers = [
-        number for number, kind, _identity in actions if kind in {BUILD_FOLDER, BUILD_TABLE}
+        number
+        for number, kind, _identity in actions
+        if kind in {BUILD_FOLDER, BUILD_TABLE}
     ]
     assert max(catalogue_numbers) < min(drop_numbers) < min(build_numbers)
     dropped = [
-        identity for _number, kind, identity in actions if kind in {DROP_FOLDER, DROP_TABLE}
+        identity
+        for _number, kind, identity in actions
+        if kind in {DROP_FOLDER, DROP_TABLE}
     ]
     built = [
-        identity for _number, kind, identity in actions if kind in {BUILD_FOLDER, BUILD_TABLE}
+        identity
+        for _number, kind, identity in actions
+        if kind in {BUILD_FOLDER, BUILD_TABLE}
     ]
     assert dropped.index("Lakehouse/Raw/Files/Sales.Export") < dropped.index(
         "Lakehouse/Raw/Sales.Customer"
@@ -781,7 +811,9 @@ select 1 as Id
         store=store,
         target_inventories=_raw_inventory(installed),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
     actions = [action for _sequence, _batch, action in bundle.plan.actions()]
     customer = "Lakehouse/Raw/Sales.Customer"
@@ -829,7 +861,9 @@ def test_registered_document_removed_from_repository_is_uncertified_before_prune
         store=store,
         target_inventories=inventories,
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        control_lakehouse=LakehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
     )
     actions = [
         (sequence.number, action.kind, action.resource_node_id)

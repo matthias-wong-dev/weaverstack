@@ -116,7 +116,9 @@ def weaver_commands() -> frozenset[str]:
     return frozenset()
 
 
-def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> int:
+def run_composition(
+    args: argparse.Namespace, *, parser_factory=None, stdin=None
+) -> int:
     """Show the sequence, ask once, then run it in one Session."""
 
     from weaver.sessions.host import use_or_create_session
@@ -136,8 +138,7 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
         stream = stdin or sys.stdin
         if not _interactive(stream):
             print(
-                "A composition asks before it runs. Pass --yes to run it "
-                "unattended.",
+                "A composition asks before it runs. Pass --yes to run it unattended.",
                 file=sys.stderr,
             )
             return 1
@@ -148,7 +149,9 @@ def run_composition(args: argparse.Namespace, *, parser_factory=None, stdin=None
     from .shell import _default_workspace
 
     workspace = _default_workspace(args)
-    with use_or_create_session(getattr(args, "session", None), workspace=workspace) as session:
+    with use_or_create_session(
+        getattr(args, "session", None), workspace=workspace
+    ) as session:
         _warm_for(session, parsed_commands, workspace=workspace)
         try:
             return _execute(entries, parsed_commands, session=session)

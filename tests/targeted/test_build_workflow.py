@@ -91,9 +91,7 @@ def estate(tmp_path):
         "store": store,
         "resolver": resolver,
         "executors": executors,
-        "session": given_session(
-            workspace=workspace, store=store, resolver=resolver
-        ),
+        "session": given_session(workspace=workspace, store=store, resolver=resolver),
     }
 
 
@@ -169,9 +167,7 @@ def test_the_declaration_is_built(estate):
 
     result = build(estate)
 
-    assert any(
-        action.kind == "build_table" for _s, _b, action in result.plan.actions()
-    )
+    assert any(action.kind == "build_table" for _s, _b, action in result.plan.actions())
 
 
 def test_the_result_carries_the_signatures_a_caller_records(estate):
@@ -286,9 +282,7 @@ def test_a_failing_action_is_reported_not_raised(estate):
     result = build(estate)
 
     assert result.report.status == "failed"
-    assert any(
-        action.status == "failed" for action in result.report.action_results()
-    )
+    assert any(action.status == "failed" for action in result.report.action_results())
 
 
 def test_a_failure_stops_the_rest_of_its_sequence(estate):

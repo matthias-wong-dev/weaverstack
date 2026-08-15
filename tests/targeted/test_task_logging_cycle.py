@@ -68,8 +68,7 @@ def test_the_log_folder_reaches_the_catalogue_like_any_other_folder(tmp_path):
         for row in rows[REGISTRY.name]
     } >= {("Files/_", "Log", "folder")}
     assert {
-        (row["schema_name"], row["object_name"])
-        for row in rows[FOLDER_DICTIONARY.name]
+        (row["schema_name"], row["object_name"]) for row in rows[FOLDER_DICTIONARY.name]
     } == {("Files/_", "Log")}
 
 

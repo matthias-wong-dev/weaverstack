@@ -80,7 +80,9 @@ def _bundle(tmp_path):
         BuildSequence(
             number=(index + 1) * 10,
             description=f"step {index}",
-            batches=(BuildBatch(id=f"b{index}", target_id=TARGET.id, actions=(action,)),),
+            batches=(
+                BuildBatch(id=f"b{index}", target_id=TARGET.id, actions=(action,)),
+            ),
         )
         for index, action in enumerate(filled)
     )
@@ -213,9 +215,7 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()
     location = Location(str(tmp_path / "refresh-bundle"))
-    bundle = write_bundle(
-        location, plan=plan, payloads={}, store=store
-    )
+    bundle = write_bundle(location, plan=plan, payloads={}, store=store)
     workspace = given_workspace(catalogue="Lakehouse/Weaver")
 
     class WithoutRefresh:
@@ -320,7 +320,9 @@ def _tsql_batch(tmp_path, count: int):
 
     import hashlib
 
-    target = BoundTarget(id="warehouse-Reporting", kind="warehouse", item_id="Reporting")
+    target = BoundTarget(
+        id="warehouse-Reporting", kind="warehouse", item_id="Reporting"
+    )
     payloads = {}
     actions = []
     for index in range(count):

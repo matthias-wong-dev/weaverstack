@@ -50,7 +50,15 @@ from .source import (
 
 #: Never read, never installed.
 IGNORED_DIRECTORIES = frozenset(
-    {"__pycache__", ".git", ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea"}
+    {
+        "__pycache__",
+        ".git",
+        ".venv",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".idea",
+    }
 )
 IGNORED_FILENAMES = frozenset({".DS_Store", "Thumbs.db"})
 IGNORED_SUFFIXES = (".pyc", ".pyo", ".swp", ".orig", ".rej")
@@ -63,12 +71,6 @@ _AUTHORED_SUBDIRECTORIES = (
     "only schemas/, lib/, tests/, assumptions/ and Lakehouse Files/ are authored "
     "subdirectories of an item"
 )
-
-
-
-
-
-
 
 
 def _read_validation(
@@ -113,9 +115,7 @@ def _read_validation(
 
     identity = WeaverDocumentId(item, source.object_id)
     source = replace(source, logical_id=identity)
-    _insert_exact_case(
-        source_documents, identity, source, relative, what="declaration"
-    )
+    _insert_exact_case(source_documents, identity, source, relative, what="declaration")
     validations_by_item[item].append(identity)
 
 
@@ -142,7 +142,7 @@ def parse_item_repository(
     prefix = root.value.rstrip("/") + "/"
     entries: list[tuple[str, bool]] = []
     for entry in store.list(root, recursive=True):
-        relative = entry.location.value[len(prefix):]
+        relative = entry.location.value[len(prefix) :]
         parts = relative.split("/")
         if (
             "_ignore" in parts
@@ -535,7 +535,9 @@ def _with_build_signatures(
         try:
             module = ast.parse(text)
         except SyntaxError as exc:
-            raise DiscoveryError(f"{relative}: invalid imported helper Python: {exc}") from exc
+            raise DiscoveryError(
+                f"{relative}: invalid imported helper Python: {exc}"
+            ) from exc
         parsed_imports[relative] = _python_imports(module)
         return parsed_imports[relative]
 
@@ -741,7 +743,9 @@ def _read_item_aliases(
     """
 
     aliases: list[RepositoryAlias] = []
-    native_folded = {str(identity).casefold(): identity for identity in source_documents}
+    native_folded = {
+        str(identity).casefold(): identity for identity in source_documents
+    }
     destination_folded: dict[str, WeaverDocumentId] = {}
 
     for item in sorted(alias_files):
@@ -823,15 +827,13 @@ def _read_item_aliases(
     return tuple(aliases)
 
 
-
-
 def _repository_files(store: Store, root: Location) -> list[str]:
     prefix = root.value.rstrip("/") + "/"
     relatives: list[str] = []
     for entry in store.list(root, recursive=True):
         if entry.is_directory:
             continue
-        relative = entry.location.value[len(prefix):]
+        relative = entry.location.value[len(prefix) :]
         if _ignored(relative):
             continue
         relatives.append(relative)
@@ -844,8 +846,6 @@ def _ignored(relative: str) -> bool:
         return True
     filename = parts[-1]
     return filename in IGNORED_FILENAMES or filename.endswith(IGNORED_SUFFIXES)
-
-
 
 
 def importable_module_name(relative_path: str) -> str | None:
@@ -864,31 +864,7 @@ def importable_module_name(relative_path: str) -> str | None:
     return stem.replace("/", ".")
 
 
-
-
-
-
 # --- schema, namespace and alias resolution ---------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # --- the internal dependency graph -------------------------------------------
@@ -952,7 +928,8 @@ def _resolve(
     if not candidates:
         return None
     own_target = [
-        candidate for candidate in candidates
+        candidate
+        for candidate in candidates
         if candidate.target_kind == referrer.target_kind
         and candidate.node_id != referrer.node_id
     ]

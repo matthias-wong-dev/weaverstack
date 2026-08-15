@@ -70,15 +70,11 @@ select `Customer id`, `Customer name` from sales.raw;
 
 
 def _warehouse(source: str = WAREHOUSE_TABLE):
-    return read_source_document(
-        "Sales.Customer.sql", source.encode("utf-8"), WAREHOUSE
-    )
+    return read_source_document("Sales.Customer.sql", source.encode("utf-8"), WAREHOUSE)
 
 
 def _spark(source: str = SPARK_TABLE):
-    return read_source_document(
-        "Sales.Customer.sql", source.encode("utf-8"), LAKEHOUSE
-    )
+    return read_source_document("Sales.Customer.sql", source.encode("utf-8"), LAKEHOUSE)
 
 
 def _no_key(source: str) -> str:
@@ -165,7 +161,9 @@ def test_a_change_to_generation_must_move_its_template_version():
 
 def test_generation_is_deterministic():
     assert _warehouse().create_load() == _warehouse().create_load()
-    assert _spark().create_load(destination=SALES) == _spark().create_load(destination=SALES)
+    assert _spark().create_load(destination=SALES) == _spark().create_load(
+        destination=SALES
+    )
 
 
 # --- the Warehouse procedure --------------------------------------------------

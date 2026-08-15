@@ -109,9 +109,7 @@ def generate_tsql_load_script(
         staging_table=names["staging"],
         target_table=names["target"],
         load_body=_indent(load_body, 4),
-        end_artifact_cleanup=_indent(
-            _end_cleanup(names, contract, claims_deletes), 4
-        ),
+        end_artifact_cleanup=_indent(_end_cleanup(names, contract, claims_deletes), 4),
     ).rstrip()
 
     return render_sql_template(
@@ -132,7 +130,8 @@ def _result_parameters() -> str:
     """
 
     return "\n".join(
-        f"  , @{name} {type_name} = null output" for name, type_name in RESULT_PARAMETERS
+        f"  , @{name} {type_name} = null output"
+        for name, type_name in RESULT_PARAMETERS
     )
 
 
@@ -154,7 +153,9 @@ def _result_assignment(**values: str) -> str:
         "error_message": "@weaver_error",
     }
     defaults.update(values)
-    return "\n".join(f"set @{name} = {defaults[name]};" for name, _ in RESULT_PARAMETERS)
+    return "\n".join(
+        f"set @{name} = {defaults[name]};" for name, _ in RESULT_PARAMETERS
+    )
 
 
 # --- the pieces of the procedure ---------------------------------------------
@@ -292,9 +293,7 @@ def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
     )
 
 
-def _primary_key_body(
-    names: dict, contract: LoadContract, claims_deletes: bool
-) -> str:
+def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     blank = _blank_key_predicate(contract.primary_key)
     return render_sql_template(
         "load/primary_key_body",
@@ -352,9 +351,7 @@ def _prospective_deletes(
             f"select @weaver_prospective_deletes = count(*) from {names['delete']};"
         )
     if not contract.deletes_absent_rows:
-        return (
-            "-- Incremental: nothing is deleted, so there is nothing to count."
-        )
+        return "-- Incremental: nothing is deleted, so there is nothing to count."
     join = _join("s", "c", contract.primary_key)
     return (
         f"select @weaver_prospective_deletes = count(*)\n"
@@ -365,9 +362,7 @@ def _prospective_deletes(
     )
 
 
-def _reconciliation(
-    names: dict, contract: LoadContract, claims_deletes: bool
-) -> str:
+def _reconciliation(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     """Remove the target rows this load retires — a physical delete.
 
     Which rows those are is what ``Incremental`` decides. A non-incremental
@@ -431,12 +426,7 @@ def _end_cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> s
     cleanup = _cleanup(names, contract, claims_deletes)
     if not contract.primary_key:
         return cleanup
-    return (
-        "if @weaver_rows_rejected = 0\n"
-        "begin\n"
-        f"{_indent(cleanup, 4)}\n"
-        "end;"
-    )
+    return f"if @weaver_rows_rejected = 0\nbegin\n{_indent(cleanup, 4)}\nend;"
 
 
 # --- the installer's column metadata -----------------------------------------
@@ -450,9 +440,7 @@ def _column_metadata_sql(names: dict, contract: LoadContract) -> str:
     """
 
     audit = ", ".join(_sql_literal(name) for name in AUDIT_COLUMNS)
-    source_column_filter = (
-        f"c.name not in ({audit})\n        and c.is_identity = 0"
-    )
+    source_column_filter = f"c.name not in ({audit})\n        and c.is_identity = 0"
     return render_sql_template(
         "load/column_metadata",
         target_table_literal=_sql_literal(names["target"]),
@@ -461,7 +449,9 @@ def _column_metadata_sql(names: dict, contract: LoadContract) -> str:
     )
 
 
-def _update_select(names: dict, contract: LoadContract, source_column_filter: str) -> str:
+def _update_select(
+    names: dict, contract: LoadContract, source_column_filter: str
+) -> str:
     """Build the UPDATE SET list: every loadable column except the key.
 
     The key is excluded because it is what matched the rows. The audit columns

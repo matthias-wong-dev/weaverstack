@@ -57,13 +57,13 @@ class RunState:
         )
 
 
-
 # --- reading one out of the estate --------------------------------------------
 #
 # The boundary above the Runner: these are what a *caller* does before there is
 # a run at all. They live beside `RunState` because what they exist to produce
 # is a `RunState`, and separating the two meant a reader had to find both to
 # see where the snapshot came from.
+
 
 def read_run_state(targets, *, session, workspace=None) -> RunState:
     """The installed catalogue and every requested target, as one handover."""
@@ -92,9 +92,7 @@ def read_installed_catalogue(*, session, workspace=None):
     if workspace is None or not workspace.catalogue:
         raise RunError("a run needs a Workspace with a Weaver Lakehouse")
 
-    return read(
-        session_catalogue(session, workspace, workspace.catalogue_item)
-    )
+    return read(session_catalogue(session, workspace, workspace.catalogue_item))
 
 
 def read_target_inventories(targets, *, session, workspace=None) -> dict:
@@ -174,11 +172,10 @@ def open_run_log(session, *, workspace=None, task_type: str):
         raise RunError("writing a task log needs a Workspace with a Weaver Lakehouse")
     return open_task_log(
         task_type=task_type,
-        folder=log_folder(
-            session.resolver(workspace), workspace.catalogue_item
-        ),
+        folder=log_folder(session.resolver(workspace), workspace.catalogue_item),
         store=session.store(workspace),
     )
+
 
 __all__ = [
     "RunState",

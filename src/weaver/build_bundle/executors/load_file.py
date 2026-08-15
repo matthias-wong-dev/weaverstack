@@ -70,7 +70,6 @@ class LoadFileExecutor:
             f"load file action {action.id!r} has unknown kind {action.kind!r}"
         )
 
-
     def _location(self, node_id: str, context: InstallationContext):
         """``Lakehouse/Sales/file:_/Load/lib/dates.py`` under this batch's target.
 

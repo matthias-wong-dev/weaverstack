@@ -106,7 +106,9 @@ def transport(monkeypatch):
         classmethod(lambda cls, *args, **kwargs: _CountingLivy.for_workspace()),
     )
     monkeypatch.setattr(
-        ConsoleScope, "resolver", property(lambda self: _PresentResolver(self.workspace))
+        ConsoleScope,
+        "resolver",
+        property(lambda self: _PresentResolver(self.workspace)),
     )
     return _CountingLivy
 
@@ -126,7 +128,9 @@ def _answer_for(code: str):
     if "_catalogue_here" in code:
         return Catalogue({}).to_mapping()
     if "unbind_targets" in code:
-        return UnbindResult(targets=("Lakehouse/Sales",), logical_items=(), statements=()).to_mapping()
+        return UnbindResult(
+            targets=("Lakehouse/Sales",), logical_items=(), statements=()
+        ).to_mapping()
     return {}
 
 

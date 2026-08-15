@@ -66,9 +66,7 @@ def test_weaver_wipes_a_populated_warehouse(
     started = time.monotonic()
     # The production implementation, given the SQL executor explicitly — which is
     # the only thing a session would have supplied differently.
-    wipe_sql_target(
-        warehouse.target, warehouse.workspace, sql=warehouse.executor
-    )
+    wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
     warehouse.timings["wipe execution"] = time.monotonic() - started
     print(
         f"Warehouse {warehouse.item.name} wipe execution: "

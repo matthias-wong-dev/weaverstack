@@ -39,7 +39,12 @@ from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
 from .aliases import plan_item_aliases
-from .bundle import SUPPORTED_FORMAT_VERSION, BuildBundle, compute_bundle_id, write_bundle
+from .bundle import (
+    SUPPORTED_FORMAT_VERSION,
+    BuildBundle,
+    compute_bundle_id,
+    write_bundle,
+)
 from .catalogue_actions import (
     collect_claims,
     render_catalogue_after_build,
@@ -184,8 +189,12 @@ def generate_item_build_bundle(
                 target_by_item=target_by_item,
                 selected_documents=selected_documents,
                 selected_aliases=selected_aliases,
-                selected_for_drop=selected_for_drop - selected_loads - selected_validations,
-                selected_for_build=selected_for_build - selected_loads - selected_validations,
+                selected_for_drop=selected_for_drop
+                - selected_loads
+                - selected_validations,
+                selected_for_build=selected_for_build
+                - selected_loads
+                - selected_validations,
                 selected_loads=selected_for_build & selected_loads,
                 removed=removed,
                 registered=registered,
@@ -227,7 +236,9 @@ def generate_item_build_bundle(
         targets=targets,
         sequences=sequences,
         selection=selection,
-        omitted_nodes=tuple(sorted(omitted, key=lambda node: (node.node_id, node.reason))),
+        omitted_nodes=tuple(
+            sorted(omitted, key=lambda node: (node.node_id, node.reason))
+        ),
         target_changes=target_changes,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
@@ -426,16 +437,15 @@ def plan_item_build(
     # endpoint has caught up. Removals ride in it too: they come from the
     # previous Registry rows rather than from any diff against the target, so
     # they need no earlier barrier to be safe.
-    stages.extend(
-        item_load_stages(artefacts, selected_loads, item=item, target=target)
-    )
+    stages.extend(item_load_stages(artefacts, selected_loads, item=item, target=target))
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
     return PlannedItem(
         stages=tuple(stages),
         omitted=aliases.omitted,
-        uncertified=frozenset(aliases.omitted_destinations) & frozenset(selected_for_build),
+        uncertified=frozenset(aliases.omitted_destinations)
+        & frozenset(selected_for_build),
     )
 
 

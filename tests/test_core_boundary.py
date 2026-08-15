@@ -72,7 +72,9 @@ def test_the_cli_source_never_names_spark():
         for name in ("pyspark", "delta"):
             if f"import {name}" in source or f"from {name}" in source:
                 offenders.append(f"{module.name}: {name}")
-    assert not offenders, f"the CLI imports Spark, which [cli] does not install: {offenders}"
+    assert not offenders, (
+        f"the CLI imports Spark, which [cli] does not install: {offenders}"
+    )
 
 
 def test_the_cli_builds_and_runs_with_spark_unimportable():

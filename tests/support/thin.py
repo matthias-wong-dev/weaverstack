@@ -201,7 +201,6 @@ class {name}:
 JUDGEMENTS = tuple(VALIDATIONS)
 
 
-
 @dataclass(frozen=True)
 class ThinEstate:
     """What a thin run needs, and nothing a build would have brought with it."""
@@ -269,8 +268,7 @@ def thin_estate(
     """
 
     documents = {
-        f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}")
-        for name in outcomes
+        f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}") for name in outcomes
     }
     # Under ``tests/``, which is where a repository declares one: the folder is
     # what makes it a validation rather than another table.

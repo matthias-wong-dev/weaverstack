@@ -34,17 +34,13 @@ def plan_unbind(
 ) -> UnbindResult:
     """Render complete catalogue deletion without inspecting physical targets."""
 
-    selected = {
-        (LAKEHOUSE, ItemRef.parse(value).name) for value in lakehouses
-    } | {
+    selected = {(LAKEHOUSE, ItemRef.parse(value).name) for value in lakehouses} | {
         (WAREHOUSE, ItemRef.parse(value).name) for value in warehouses
     }
     rows = read_table(catalogue, INSTALLATION)
     scopes = sorted(
         {
-            InstallationScope(
-                str(row["item_type"]), str(row["item_name"])
-            )
+            InstallationScope(str(row["item_type"]), str(row["item_name"]))
             for row in rows
             if (str(row["item_type"]), str(row["target_name"])) in selected
         },
@@ -71,9 +67,7 @@ def plan_unbind(
 def unbind_targets(catalogue, *, lakehouses=(), warehouses=()) -> UnbindResult:
     """Execute target-directed catalogue deletion and touch no physical target."""
 
-    result = plan_unbind(
-        catalogue, lakehouses=lakehouses, warehouses=warehouses
-    )
+    result = plan_unbind(catalogue, lakehouses=lakehouses, warehouses=warehouses)
     for statement in result.statements:
         catalogue.sql(statement)
     return result

@@ -75,9 +75,9 @@ def test_valid_rows_remain_and_stale_object_metadata_is_removed():
         inventories={ITEM: _inventory("Current")},
     )
 
-    assert [row["object_name"] for row in result.catalogue.rows[ITEM][REGISTRY.name]] == [
-        "Current"
-    ]
+    assert [
+        row["object_name"] for row in result.catalogue.rows[ITEM][REGISTRY.name]
+    ] == ["Current"]
     assert [
         row["object_name"] for row in result.catalogue.rows[ITEM][TABLE_DICTIONARY.name]
     ] == ["Current"]
@@ -99,7 +99,8 @@ def test_same_named_folder_and_table_keep_the_four_part_catalogue_identity():
     ] == ["folder"]
     assert result.catalogue.rows[ITEM][TABLE_DICTIONARY.name] == ()
     assert [
-        row["object_type"] for row in result.catalogue.rows[ITEM][FOLDER_DICTIONARY.name]
+        row["object_type"]
+        for row in result.catalogue.rows[ITEM][FOLDER_DICTIONARY.name]
     ] == ["folder"]
     assert result.stale_objects == ("Lakehouse/Sales/Sales.Customer",)
     assert result.stale_claims

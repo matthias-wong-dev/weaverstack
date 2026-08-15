@@ -78,9 +78,7 @@ class BoundTarget:
                 f"{self.display} carries no workspace name, so a Fabric Spark "
                 "statement for it cannot be named"
             )
-        return FabricSparkTarget(
-            workspace=self.workspace_name, lakehouse=self.name
-        )
+        return FabricSparkTarget(workspace=self.workspace_name, lakehouse=self.name)
 
     @property
     def name(self) -> str:
@@ -261,7 +259,9 @@ class ItemBindings:
         physical: set[tuple[str, str]] = set()
         for binding in self.entries:
             if binding.item in seen:
-                raise BuildError(f"logical item is bound more than once: {binding.item}")
+                raise BuildError(
+                    f"logical item is bound more than once: {binding.item}"
+                )
             seen.add(binding.item)
             target = binding.target
             key = (
@@ -304,7 +304,9 @@ def effective_item_bindings(
 
     builtin = WeaverItemId(LAKEHOUSE, "_weaver")
     if builtin in bindings.by_item:
-        raise BuildError("Lakehouse/_weaver is bound implicitly and must not be selected")
+        raise BuildError(
+            "Lakehouse/_weaver is bound implicitly and must not be selected"
+        )
     return ItemBindings(
         bindings.entries
         + (

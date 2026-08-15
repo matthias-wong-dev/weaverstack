@@ -91,11 +91,7 @@ class Catalogue:
             frozenset(
                 present_tables
                 if present_tables is not None
-                else {
-                    table
-                    for tables in frozen_rows.values()
-                    for table in tables
-                }
+                else {table for tables in frozen_rows.values() for table in tables}
             ),
         )
 
@@ -109,13 +105,18 @@ class Catalogue:
                     "item": str(item),
                     "tables": {
                         table: [
-                            {key: _encode_json_value(value) for key, value in row.items()}
+                            {
+                                key: _encode_json_value(value)
+                                for key, value in row.items()
+                            }
                             for row in rows
                         ]
                         for table, rows in sorted(tables.items())
                     },
                 }
-                for item, tables in sorted(self.rows.items(), key=lambda pair: str(pair[0]))
+                for item, tables in sorted(
+                    self.rows.items(), key=lambda pair: str(pair[0])
+                )
             ],
             "present_tables": sorted(self.present_tables),
         }
@@ -133,10 +134,7 @@ class Catalogue:
             WeaverItemId.parse(entry["item"]): MappingProxyType(
                 {
                     table: tuple(
-                        {
-                            key: _decode_json_value(value)
-                            for key, value in row.items()
-                        }
+                        {key: _decode_json_value(value) for key, value in row.items()}
                         for row in table_rows
                     )
                     for table, table_rows in entry.get("tables", {}).items()
@@ -251,6 +249,7 @@ class CatalogueChanges:
             for changes in self.per_table().values()
             for change in changes
         )
+
 
 def retaining(catalogue: Catalogue, repository, identities) -> Catalogue:
     """Narrow a desired catalogue to what a build actually certified.
@@ -400,7 +399,7 @@ def _decode_json_value(value):
 
 
 def _registered_documents(
-    rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
+    rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]],
 ) -> Mapping[WeaverDocumentId, RegisteredDocument]:
     registered: dict[WeaverDocumentId, RegisteredDocument] = {}
     for item, tables in rows.items():

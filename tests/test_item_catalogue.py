@@ -91,9 +91,7 @@ def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
 
-    schemas = {
-        row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)
-    }
+    schemas = {row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)}
     # `Files/_` is the generated runtime folder's schema. It is catalogued by the
     # same rule as any other folder schema, which is the point: nothing about the
     # load layer gets a namespace convention of its own.
@@ -134,9 +132,7 @@ def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
     assert first.scope == second.scope
     assert first_row["target_name"] == "Raw_Dev"
     assert second_row["target_name"] == "Raw_Prod"
-    assert {
-        key: value for key, value in first_row.items() if key != "target_name"
-    } == {
+    assert {key: value for key, value in first_row.items() if key != "target_name"} == {
         key: value for key, value in second_row.items() if key != "target_name"
     }
 
@@ -189,7 +185,9 @@ def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
         repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="lakehouse"
     )
 
-    assert _registry_row(projection, "Sales", "PortableCustomer")["object_type"] == "table"
+    assert (
+        _registry_row(projection, "Sales", "PortableCustomer")["object_type"] == "table"
+    )
 
 
 def test_an_alias_signature_is_its_declaration_and_not_its_sources_content(tmp_path):
@@ -246,7 +244,9 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
-    reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"), destination=WEAVER)
+    reconciliation = reconcile(
+        _project(repository, "Lakehouse/Raw", "Raw_Dev"), destination=WEAVER
+    )
 
     assert reconciliation.registry.table is REGISTRY
     assert reconciliation.statements[-1] == reconciliation.registry.merge

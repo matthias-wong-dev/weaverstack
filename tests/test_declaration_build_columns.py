@@ -125,9 +125,7 @@ def test_an_identity_colliding_with_a_query_column_is_refused():
 
 
 def test_columns_that_collide_only_by_case_are_ambiguous():
-    document = _doc(
-        "Table ID: Sales.Order\nDescription: x\nLineage: y"
-    )
+    document = _doc("Table ID: Sales.Order\nDescription: x\nLineage: y")
     with pytest.raises(BuildError, match="collide by name"):
         resolve_build_columns(document, ("Amount", "amount"))
 
@@ -146,7 +144,9 @@ def test_declared_columns_are_authoritative_and_order_is_kept():
 
 def test_a_declared_column_missing_from_the_query_fails():
     document = _doc(DECLARED)
-    with pytest.raises(BuildError, match="not returned by the query under the same case: Amount"):
+    with pytest.raises(
+        BuildError, match="not returned by the query under the same case: Amount"
+    ):
         resolve_build_columns(document, ("Order id",))
 
 
@@ -168,7 +168,9 @@ def test_declared_equivalence_ignores_order_but_not_case():
 def test_declared_equivalence_requires_exact_case():
     document = _doc(DECLARED)
     # The query spells them differently; declared "Order id"/"Amount" are not met.
-    with pytest.raises(BuildError, match="not returned by the query under the same case"):
+    with pytest.raises(
+        BuildError, match="not returned by the query under the same case"
+    ):
         resolve_build_columns(document, ("amount", "order id"))
 
 
@@ -184,9 +186,7 @@ def test_reference_set_covers_every_column_naming_field_when_inferred():
 
 
 def test_reference_set_reads_declared_notes_from_the_schema():
-    document = _doc(
-        DECLARED + "Column notes:\n  Amount: Order total.\n"
-    )
+    document = _doc(DECLARED + "Column notes:\n  Amount: Order total.\n")
     references = metadata_column_references(document)
     assert ("Column notes", "Amount") in references
     assert ("Primary key", "Order id") in references

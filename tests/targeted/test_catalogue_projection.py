@@ -158,9 +158,10 @@ def test_narrowing_is_a_later_step_not_an_input(repository):
 def test_it_is_stable_across_calls(repository):
     """Two derivations of one repository must agree, or a diff is meaningless."""
 
-    assert derived(repository, CUSTOMER, VIEW).rows == derived(
-        repository, CUSTOMER, VIEW
-    ).rows
+    assert (
+        derived(repository, CUSTOMER, VIEW).rows
+        == derived(repository, CUSTOMER, VIEW).rows
+    )
 
 
 # --- it carries no binding ----------------------------------------------------
@@ -257,9 +258,7 @@ def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     )
 
     assert set(published.rows) == {producer}
-    assert not any(
-        identity.item == consumer for identity in published.registered
-    )
+    assert not any(identity.item == consumer for identity in published.registered)
 
 
 # --- more than one item -------------------------------------------------------
@@ -338,9 +337,9 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     repository = full_estate(tmp_path / "repo")
     catalogue = Catalogue.from_repository(repository)
 
-    assert {
-        document.object_type for document in catalogue.registered.values()
-    } == set(OBJECT_TYPES)
+    assert {document.object_type for document in catalogue.registered.values()} == set(
+        OBJECT_TYPES
+    )
 
 
 def test_every_declared_object_and_artefact_is_registered(tmp_path):

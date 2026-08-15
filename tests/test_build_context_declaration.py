@@ -72,9 +72,7 @@ def captured(monkeypatch):
     monkeypatch.setattr(weaver.operations.build, "_run_build", capture("build"))
     # Preflight is a different claim — that a build proves its items exist before
     # opening anything — and has its own tests below.
-    monkeypatch.setattr(
-        weaver.operations.build, "_preflight", lambda *a, **k: None
-    )
+    monkeypatch.setattr(weaver.operations.build, "_preflight", lambda *a, **k: None)
     return seen
 
 
@@ -107,9 +105,7 @@ def test_a_notebook_infers_the_current_workspace(in_notebook, captured, reposito
 def test_a_notebook_infers_the_attached_lakehouse_as_the_catalogue(
     in_notebook, captured, repository, monkeypatch
 ):
-    monkeypatch.setattr(
-        weaver.operations.workspace, "_active_spark", lambda: object()
-    )
+    monkeypatch.setattr(weaver.operations.workspace, "_active_spark", lambda: object())
 
     with pytest.raises(Halt):
         _build(repository)
@@ -122,9 +118,7 @@ def test_the_inferred_lakehouse_is_the_control_plane_and_not_an_authored_target(
 ):
     """The attachment names where the catalogue lives, not what to build into."""
 
-    monkeypatch.setattr(
-        weaver.operations.workspace, "_active_spark", lambda: object()
-    )
+    monkeypatch.setattr(weaver.operations.workspace, "_active_spark", lambda: object())
 
     with pytest.raises(Halt):
         _build(repository)
@@ -146,9 +140,7 @@ def test_the_inferred_lakehouse_is_the_control_plane_and_not_an_authored_target(
 def test_an_explicit_catalogue_overrides_the_attached_default(
     in_notebook, captured, repository, monkeypatch
 ):
-    monkeypatch.setattr(
-        weaver.operations.workspace, "_active_spark", lambda: object()
-    )
+    monkeypatch.setattr(weaver.operations.workspace, "_active_spark", lambda: object())
 
     with pytest.raises(Halt):
         _build(repository, catalogue="Lakehouse/ChosenWeaver")
@@ -177,9 +169,7 @@ def test_an_explicit_catalogue_overrides_the_sessions_workspace(
 ):
     """The Session supplies the context; an argument still outranks it."""
 
-    with weaver.session(
-        workspace="Demo", catalogue="Lakehouse/Configured"
-    ) as session:
+    with weaver.session(workspace="Demo", catalogue="Lakehouse/Configured") as session:
         with pytest.raises(Halt):
             _build(repository, session=session, catalogue="Lakehouse/Chosen")
 
@@ -189,9 +179,7 @@ def test_an_explicit_catalogue_overrides_the_sessions_workspace(
 def test_the_sessions_workspace_supplies_the_catalogue_when_no_argument_does(
     captured, repository, desktop_credential
 ):
-    with weaver.session(
-        workspace="Demo", catalogue="Lakehouse/Configured"
-    ) as session:
+    with weaver.session(workspace="Demo", catalogue="Lakehouse/Configured") as session:
         with pytest.raises(Halt):
             _build(repository, session=session)
 
@@ -305,9 +293,7 @@ def test_a_desktop_build_without_an_environment_fails_before_preflight(
     assert "weaver install" not in str(raised.value)
 
 
-def test_a_repository_error_is_reported_before_any_fabric_call(
-    tmp_path, monkeypatch
-):
+def test_a_repository_error_is_reported_before_any_fabric_call(tmp_path, monkeypatch):
     """Repository errors come first: they need no workspace to be true."""
 
     from weaver.fabric import preflight as preflight_module

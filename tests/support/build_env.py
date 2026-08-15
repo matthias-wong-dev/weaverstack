@@ -148,7 +148,9 @@ class Journey:
         """
 
         if self._failed is not None:
-            step = Step(name=name, error=RuntimeError(f"upstream step {self._failed!r} failed"))
+            step = Step(
+                name=name, error=RuntimeError(f"upstream step {self._failed!r} failed")
+            )
             self.steps[name] = step
             return step
         try:
@@ -415,7 +417,9 @@ def _upload_tree(store, source: Path, destination) -> None:
         pass
     for path in sorted(source.rglob("*")):
         if path.is_file():
-            store.write(destination.join(*path.relative_to(source).parts), path.read_bytes())
+            store.write(
+                destination.join(*path.relative_to(source).parts), path.read_bytes()
+            )
 
 
 def _bindings_for(
@@ -443,7 +447,9 @@ def _bindings_for(
     )
     from weaver.declaration.model import LAKEHOUSE, WeaverItemId
 
-    by_item = {WeaverItemId.parse(name): ref for name, ref in (lakehouses or {}).items()}
+    by_item = {
+        WeaverItemId.parse(name): ref for name, ref in (lakehouses or {}).items()
+    }
     entries = []
     for name in weaver_repo_fixture.items:
         item = WeaverItemId.parse(name)
@@ -463,9 +469,7 @@ def _bindings_for(
             entries.append(
                 ItemBinding(
                     item,
-                    WarehouseBinding(
-                        warehouse=warehouse, workspace_name=WORKSPACE
-                    ),
+                    WarehouseBinding(warehouse=warehouse, workspace_name=WORKSPACE),
                 )
             )
     return ItemBindings(tuple(entries))

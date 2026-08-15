@@ -277,7 +277,9 @@ def _reported(
     if log is not None:
         log.write_completion({"status": status, **report.totals()})
     if strict and status in (FAILED, INVALID):
-        raise ValidationError(_failure_message(report), )
+        raise ValidationError(
+            _failure_message(report),
+        )
     return report
 
 

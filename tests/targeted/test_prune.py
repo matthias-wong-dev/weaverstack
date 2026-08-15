@@ -222,9 +222,9 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
         root, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
     other = single_document_repository(
-        root, item="Lakehouse/Other", documents={
-            "DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")
-        }
+        root,
+        item="Lakehouse/Other",
+        documents={"DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")},
     )
 
     stage = item_prune_stage(

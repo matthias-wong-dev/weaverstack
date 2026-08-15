@@ -71,7 +71,9 @@ def push_notebook(
     try:
         definition_format, part_path = _SUPPORTED[source_path.suffix.casefold()]
     except KeyError as exc:
-        raise CommandError("Notebook source must use the .py or .ipynb extension.") from exc
+        raise CommandError(
+            "Notebook source must use the .py or .ipynb extension."
+        ) from exc
     notebook_name = name or source_path.stem
     client = client or FabricClient()
     physical_workspace = find_workspace(workspace, client=client)
@@ -81,7 +83,9 @@ def push_notebook(
             "parts": [
                 {
                     "path": part_path,
-                    "payload": base64.b64encode(source_path.read_bytes()).decode("ascii"),
+                    "payload": base64.b64encode(source_path.read_bytes()).decode(
+                        "ascii"
+                    ),
                     "payloadType": "InlineBase64",
                 }
             ],
@@ -146,12 +150,14 @@ def run_notebook(
     attached_environment = find_item(
         physical_workspace, environment, item_type=ENVIRONMENT, client=client
     )
+
     def reference(item) -> dict:
         return {
             "referenceType": "ById",
             "itemId": item.id,
             "workspaceId": physical_workspace.id,
         }
+
     payload = {
         "executionData": {
             "compute": "Spark",
@@ -169,7 +175,9 @@ def run_notebook(
     )
     job_url = response.headers.get("Location") or response.headers.get("location")
     if not job_url:
-        raise FabricError("Fabric accepted the notebook job without returning its location.")
+        raise FabricError(
+            "Fabric accepted the notebook job without returning its location."
+        )
     result = NotebookRunResult(
         workspace=physical_workspace.name,
         notebook=notebook.name,
@@ -196,7 +204,11 @@ def run_notebook(
             exit_value=body.get("exitValue"),
         )
         if not result.succeeded:
-            reason = body.get("failureReason") or body.get("error") or "no reason returned"
+            reason = (
+                body.get("failureReason") or body.get("error") or "no reason returned"
+            )
             raise FabricError(f"Notebook {name!r} {status}: {reason}")
         return result
-    raise FabricError(f"Notebook {name!r} did not finish within {int(timeout)} seconds.")
+    raise FabricError(
+        f"Notebook {name!r} did not finish within {int(timeout)} seconds."
+    )

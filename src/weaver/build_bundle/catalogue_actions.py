@@ -57,10 +57,10 @@ def collect_claims(
     return tuple(dict.fromkeys(claims))
 
 
-def _claim_statements(
-    claims: Iterable[CatalogueClaim], destination
-) -> tuple[str, ...]:
-    grouped: dict[tuple[CatalogueTable, object], set[WeaverDocumentId]] = defaultdict(set)
+def _claim_statements(claims: Iterable[CatalogueClaim], destination) -> tuple[str, ...]:
+    grouped: dict[tuple[CatalogueTable, object], set[WeaverDocumentId]] = defaultdict(
+        set
+    )
     for claim in claims:
         grouped[(claim.rule.table, claim.identity.item)].add(claim.identity)
 
@@ -98,9 +98,7 @@ def _claim_statements(
             statements.append(
                 f"DELETE FROM "
                 f"{destination.qualify(CATALOGUE_SCHEMA, table.name)}\n"
-                f"WHERE {scope.predicate}\n  AND ("
-                + "\n    OR ".join(predicates)
-                + ")"
+                f"WHERE {scope.predicate}\n  AND (" + "\n    OR ".join(predicates) + ")"
             )
     return tuple(statements)
 
@@ -139,9 +137,7 @@ def _stage(
         slug=slug,
         description=description,
         payloads={filename: content},
-        batches=(
-            BuildBatch(id=slug, target_id=control_target.id, actions=(action,)),
-        ),
+        batches=(BuildBatch(id=slug, target_id=control_target.id, actions=(action,)),),
     )
 
 
@@ -167,9 +163,7 @@ def render_catalogue_before_build(
 def _item_signature(repository, item) -> str:
     """The item's own signature, which is what an Installation row records."""
 
-    return next(
-        model.signature for model in repository.items if model.identity == item
-    )
+    return next(model.signature for model in repository.items if model.identity == item)
 
 
 def _with_installation_rows(desired: Catalogue, installation) -> Catalogue:

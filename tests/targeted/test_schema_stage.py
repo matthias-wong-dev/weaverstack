@@ -170,9 +170,9 @@ def test_the_payload_hash_matches_what_the_action_carries():
     planned = stage(CUSTOMER)
     (action,) = actions(planned)
 
-    assert action.payload_sha256 == hashlib.sha256(
-        payload_of(planned, action)
-    ).hexdigest()
+    assert (
+        action.payload_sha256 == hashlib.sha256(payload_of(planned, action)).hexdigest()
+    )
 
 
 def test_the_stage_is_bound_to_the_target_it_was_planned_for():

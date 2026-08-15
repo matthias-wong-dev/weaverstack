@@ -71,7 +71,9 @@ class PythonImport:
 # --- Python -----------------------------------------------------------------
 
 
-def extract_python_references(imported_modules: tuple[str, ...]) -> tuple[RelationReference, ...]:
+def extract_python_references(
+    imported_modules: tuple[str, ...],
+) -> tuple[RelationReference, ...]:
     """Object references among a module's absolute imports.
 
     Structural: exactly one ``__``, with both sides present and neither

@@ -165,11 +165,16 @@ def _load_identities(repository, item):
         from weaver.etl import item_load_artefacts
     except ImportError:  # pragma: no cover - Weaver without a load layer
         return set()
-    return {artefact.identity for artefact in item_load_artefacts(repository, item=item)}
+    return {
+        artefact.identity for artefact in item_load_artefacts(repository, item=item)
+    }
 
 
 def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
-    tmp_path, fabric_workspace, fabric_alias_lakehouses, fabric_empty_lakehouse,
+    tmp_path,
+    fabric_workspace,
+    fabric_alias_lakehouses,
+    fabric_empty_lakehouse,
     livy_session,
 ):
     """The one claim a session is worth paying for, made once.
@@ -196,7 +201,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         target_name=lakehouse.name,
         workspace_name=fabric_workspace.workspace,
         resolver=resolver,
-        store=store
+        store=store,
     )
     planned_order = [action.id for _s, _b, action in bundle.plan.actions()]
     assert planned_order, "the bundle planned no physical work to install"

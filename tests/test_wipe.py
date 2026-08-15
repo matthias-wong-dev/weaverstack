@@ -28,25 +28,42 @@ def folder_target(name: str = "Sales_LH/Files") -> FolderTarget:
 
 def test_a_wipe_empties_the_folder_target(populated_folders):
     report = wipe_folder_target(
-        folder_target(), populated_folders.workspace, store=populated_folders.store, session=populated_folders.session
+        folder_target(),
+        populated_folders.workspace,
+        store=populated_folders.store,
+        session=populated_folders.session,
     )
     assert report.count == 2  # the Sales schema directory, and the stray file
     assert populated_folders.resolver.files_root(populated_folders.target).path.is_dir()
-    assert list(
-        populated_folders.resolver.files_root(populated_folders.target).path.iterdir()
-    ) == []
+    assert (
+        list(
+            populated_folders.resolver.files_root(
+                populated_folders.target
+            ).path.iterdir()
+        )
+        == []
+    )
 
 
 def test_the_configured_root_survives_its_own_wipe(populated_folders):
     root = populated_folders.resolver.folder_root(folder_target())
     wipe_folder_target(
-        folder_target(), populated_folders.workspace, store=populated_folders.store, session=populated_folders.session
+        folder_target(),
+        populated_folders.workspace,
+        store=populated_folders.store,
+        session=populated_folders.session,
     )
     assert root.path.is_dir()
 
 
 def test_a_dry_run_reports_without_removing(populated_folders):
-    report = wipe_folder_target(folder_target(), populated_folders.workspace, store=populated_folders.store, session=populated_folders.session, dry_run=True)
+    report = wipe_folder_target(
+        folder_target(),
+        populated_folders.workspace,
+        store=populated_folders.store,
+        session=populated_folders.session,
+        dry_run=True,
+    )
     assert report.dry_run is True
     assert report.count == 2
     assert (
@@ -81,7 +98,10 @@ def test_wiping_a_lakehouse_that_does_not_exist_says_so(lakehouses):
 def test_a_wipe_takes_everything_not_only_what_weaver_manages(populated_folders):
     """A wipe clears the target. That is why a CLI must gate it."""
     report = wipe_folder_target(
-        folder_target(), populated_folders.workspace, store=populated_folders.store, session=populated_folders.session
+        folder_target(),
+        populated_folders.workspace,
+        store=populated_folders.store,
+        session=populated_folders.session,
     )
     assert "notes.txt" in report.removed
 
@@ -89,7 +109,9 @@ def test_a_wipe_takes_everything_not_only_what_weaver_manages(populated_folders)
 # --- warehouse ---------------------------------------------------------------
 
 
-def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(lakehouses, monkeypatch):
+def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(
+    lakehouses, monkeypatch
+):
     import importlib
 
     class Sql:
@@ -103,8 +125,13 @@ def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(lakehouses, m
     def forbidden_store(_workspace):
         raise AssertionError("Warehouse-only wipe asked for a Store")
 
-    monkeypatch.setattr(importlib.import_module("weaver.physical_wipe"), "store_for", forbidden_store)
-    reports = wipe(lakehouses.workspace, store=lakehouses.store, session=lakehouses.session,
+    monkeypatch.setattr(
+        importlib.import_module("weaver.physical_wipe"), "store_for", forbidden_store
+    )
+    reports = wipe(
+        lakehouses.workspace,
+        store=lakehouses.store,
+        session=lakehouses.session,
         sql_target=WarehouseTarget.parse("Reporting_WH"),
         sql=sql,
     )
@@ -120,7 +147,10 @@ def test_a_warehouse_sql_failure_names_the_selected_warehouse(lakehouses):
             raise RuntimeError("driver broke")
 
     with pytest.raises(SqlExecutionError, match="Reporting_WH.*driver broke"):
-        wipe(lakehouses.workspace, store=lakehouses.store, session=lakehouses.session,
+        wipe(
+            lakehouses.workspace,
+            store=lakehouses.store,
+            session=lakehouses.session,
             sql_target=WarehouseTarget.parse("Reporting_WH"),
             sql=BrokenSql(),
         )
@@ -128,7 +158,10 @@ def test_a_warehouse_sql_failure_names_the_selected_warehouse(lakehouses):
 
 def test_a_warehouse_wipe_has_no_dry_run_mode(lakehouses):
     with pytest.raises(CommandError, match="does not support dry_run"):
-        wipe(lakehouses.workspace, store=lakehouses.store, session=lakehouses.session,
+        wipe(
+            lakehouses.workspace,
+            store=lakehouses.store,
+            session=lakehouses.session,
             sql_target=WarehouseTarget.parse("Reporting_WH"),
             sql=object(),
             dry_run=True,
@@ -145,7 +178,12 @@ def test_wipe_needs_at_least_one_target(lakehouses):
 
 def test_targets_are_independently_optional(populated_folders):
     """Clear the tables and leave downloaded source files alone, or the reverse."""
-    reports = wipe(populated_folders.workspace, store=populated_folders.store, session=populated_folders.session, folder_target=folder_target())
+    reports = wipe(
+        populated_folders.workspace,
+        store=populated_folders.store,
+        session=populated_folders.session,
+        folder_target=folder_target(),
+    )
     assert len(reports) == 1
     assert reports[0].target.startswith("folder:")
 
@@ -155,11 +193,19 @@ def test_a_wipe_refuses_to_reach_outside_the_workspace_root(lakehouses, tmp_path
     from weaver.physical_wipe import _guard
 
     with pytest.raises(CommandError, match="outside the workspace root"):
-        _guard(Location(str(tmp_path.parent / "elsewhere")), Location(str(lakehouses.root)))
+        _guard(
+            Location(str(tmp_path.parent / "elsewhere")), Location(str(lakehouses.root))
+        )
 
 
 def test_the_report_reads_usefully(populated_folders):
-    report = wipe_folder_target(folder_target(), populated_folders.workspace, store=populated_folders.store, session=populated_folders.session, dry_run=True)
+    report = wipe_folder_target(
+        folder_target(),
+        populated_folders.workspace,
+        store=populated_folders.store,
+        session=populated_folders.session,
+        dry_run=True,
+    )
     assert "would remove" in str(report)
     assert "Sales_LH/Files" in str(report)
 
@@ -233,10 +279,10 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     monkeypatch.setattr(
         operations,
         "_unbind_physical_targets",
-        lambda control, targets, **_kwargs: calls.append(
-            (control.catalogue, tuple(map(str, targets)))
-        )
-        or {"targets": []},
+        lambda control, targets, **_kwargs: (
+            calls.append((control.catalogue, tuple(map(str, targets))))
+            or {"targets": []}
+        ),
     )
 
     public_wipe("Lakehouse/Sales", workspace="Demo", catalogue="Lakehouse/Control")

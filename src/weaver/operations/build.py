@@ -143,12 +143,8 @@ def build(
     from ..build_bundle.workflow import prepare_repository, validate_build_request
     from ..sessions.host import use_or_create_session
 
-    with prepare_repository(
-        source_location, source_store=source_store
-    ) as prepared:
-        validate_build_request(
-            prepared.repository, bindings, control_lakehouse=control
-        )
+    with prepare_repository(source_location, source_store=source_store) as prepared:
+        validate_build_request(prepared.repository, bindings, control_lakehouse=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             arguments = dict(
@@ -322,5 +318,3 @@ def _run_build(
 
 def _binding_text(binding) -> str:
     return f"{binding.target.physical_kind}/{binding.target.item.name}={binding.item}"
-
-

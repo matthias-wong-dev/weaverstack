@@ -46,7 +46,7 @@ pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 #: the deployed tree the way the deployed tree is meant to be imported, loads the
 #: folder through the resolved OneLake path, and runs the generated Spark SQL
 #: program from the file the installer wrote.
-BODY = r'''
+BODY = r"""
 import os, sys
 from pathlib import Path
 
@@ -96,7 +96,7 @@ results["sql_authored_is_generated"] = (
 results["sql_authored_load"] = DWG__NamedCustomer(spark, lakehouse=destination).load().as_row()
 
 emit(results)
-'''
+"""
 
 
 def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_estate):

@@ -36,7 +36,10 @@ pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 @pytest.fixture(scope="module")
 def spark_table_estate(
-    fabric_workspace, fabric_client, fabric_target_lakehouse, weaver_session,
+    fabric_workspace,
+    fabric_client,
+    fabric_target_lakehouse,
+    weaver_session,
     livy_session,
 ):
     """Every case installed from here, and one observation of what they left."""
@@ -86,9 +89,7 @@ def spark_table_estate(
 
     results = {"schema": run(cases.schema_action(), cases.schema_payload(destination))}
     for case in cases.BUILDING:
-        results[case.name] = run(
-            cases.install_action(case), case.payload(destination)
-        )
+        results[case.name] = run(cases.install_action(case), case.payload(destination))
     results[cases.EXACT_CASE_READER] = run(
         cases.view_action(), cases.view_sql(destination)
     )

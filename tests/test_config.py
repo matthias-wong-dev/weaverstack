@@ -15,7 +15,6 @@ def test_a_workspace_is_named_and_nothing_else_is_required():
     assert workspace.workspace == "Analytics"
 
 
-
 def test_typical_configuration_parses_physical_defaults():
     workspace = parse_workspace(
         {
@@ -80,7 +79,6 @@ def test_parallel_workers_must_be_positive():
         parse_workspace(
             {"workspace": "Analytics", "execution": {"parallel_workers": 0}}
         )
-
 
 
 def test_missing_file_is_reported(tmp_path: Path):

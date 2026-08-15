@@ -57,11 +57,7 @@ def statements(stage) -> list[str]:
 
     if stage is None:
         return []
-    return [
-        line
-        for content in stage.payloads.values()
-        for line in json.loads(content)
-    ]
+    return [line for content in stage.payloads.values() for line in json.loads(content)]
 
 
 def after(repository, *names, current=None):
@@ -96,7 +92,9 @@ def test_a_build_that_removes_nothing_writes_no_deletes(repository):
     """
 
     stage = render_catalogue_before_build(
-        FixtureCatalogue.from_registry_rows(), (), control_target=bound_target(),
+        FixtureCatalogue.from_registry_rows(),
+        (),
+        control_target=bound_target(),
         control_destination=WEAVER,
     )
 
@@ -109,7 +107,9 @@ def test_an_objects_claims_are_deleted_when_it_is_being_dropped(repository):
     catalogue = FixtureCatalogue.from_registry_rows(registry_row(CUSTOMER))
 
     stage = render_catalogue_before_build(
-        catalogue, {document_id(CUSTOMER)}, control_target=bound_target(),
+        catalogue,
+        {document_id(CUSTOMER)},
+        control_target=bound_target(),
         control_destination=WEAVER,
     )
 
@@ -135,7 +135,9 @@ def test_the_registry_claim_is_deleted_before_the_dictionaries(repository):
 
     lines = statements(
         render_catalogue_before_build(
-            catalogue, {document_id(CUSTOMER)}, control_target=bound_target(),
+            catalogue,
+            {document_id(CUSTOMER)},
+            control_target=bound_target(),
             control_destination=WEAVER,
         )
     )
@@ -258,7 +260,9 @@ def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
     # item was built against*, which remains true of a build that certified
     # nothing. Losing it would make the item look as though it had never been
     # bound at all.
-    assert any(line.startswith("MERGE INTO") and "Installation" in line for line in lines)
+    assert any(
+        line.startswith("MERGE INTO") and "Installation" in line for line in lines
+    )
 
 
 def test_a_build_certifying_nothing_against_an_empty_catalogue_removes_nothing(
@@ -323,7 +327,9 @@ def test_a_mixed_change_removes_then_merges(repository):
     # Within one table. Tables are independent of each other, so one table's
     # merge may well precede another's delete; what may never happen is a
     # delete running after the merge that re-asserted the same table's rows.
-    dictionary = [index for index, line in enumerate(lines) if "TableDictionary" in line]
+    dictionary = [
+        index for index, line in enumerate(lines) if "TableDictionary" in line
+    ]
     deletes = [index for index in dictionary if lines[index].startswith("DELETE FROM")]
     merges = [index for index in dictionary if lines[index].startswith("MERGE INTO")]
 

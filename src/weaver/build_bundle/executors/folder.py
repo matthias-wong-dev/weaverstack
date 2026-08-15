@@ -53,7 +53,9 @@ class FolderExecutor:
             if context.store.exists(location):
                 context.store.delete(location, recursive=True)
             return {"pruned": location.value}
-        raise InstallError(f"folder action {action.id!r} has unknown kind {action.kind!r}")
+        raise InstallError(
+            f"folder action {action.id!r} has unknown kind {action.kind!r}"
+        )
 
     def _location(self, node_id: str, context: InstallationContext):
         target = FolderTarget(lakehouse=context.target.lakehouse)

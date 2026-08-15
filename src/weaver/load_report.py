@@ -208,9 +208,7 @@ class LoadRunReport:
             nodes=tuple(
                 LoadNodeReport.from_mapping(one) for one in payload.get("nodes") or ()
             ),
-            edges=tuple(
-                (edge[0], edge[1]) for edge in payload.get("edges") or ()
-            ),
+            edges=tuple((edge[0], edge[1]) for edge in payload.get("edges") or ()),
             order=tuple(payload.get("order") or ()),
             messages=tuple(
                 LoadMessage.from_mapping(one) for one in payload.get("messages") or ()
@@ -235,9 +233,11 @@ def final_status(nodes: tuple[LoadNodeReport, ...], *, dry_run: bool) -> str:
         return TASK_INVALID if dry_run else TASK_SUCCEEDED
     statuses = [node.status for node in nodes]
     if dry_run:
-        return TASK_INVALID if any(
-            status in (INVALID, BLOCKED) for status in statuses
-        ) else TASK_SUCCEEDED
+        return (
+            TASK_INVALID
+            if any(status in (INVALID, BLOCKED) for status in statuses)
+            else TASK_SUCCEEDED
+        )
     bad = [status for status in statuses if status in (FAILED, BLOCKED)]
     good = [
         status

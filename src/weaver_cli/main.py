@@ -153,9 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         metavar="NAME",
-        help=(
-            "Keep a .weaver.zip build record. Omit NAME to use a UTC timestamp."
-        ),
+        help=("Keep a .weaver.zip build record. Omit NAME to use a UTC timestamp."),
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
@@ -235,8 +233,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LAKEHOUSE",
         help="Remove claims for wiped targets from this Weaver catalogue.",
     )
-    wipe.add_argument("--dry-run", action="store_true", help="Show what would be removed.")
-    wipe.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
+    wipe.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed."
+    )
+    wipe.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation prompt."
+    )
     wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
     wipe.set_defaults(handler=handle_wipe, requires=_requires_build)
 
@@ -249,9 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     # `--no-publish` only ever produced a half-installed workspace; and a
     # `--workspace-type local` that this command rejects two lines later is a
     # choice offered in order to refuse it.
-    _add_workspace_args(
-        install, include_catalogue=False
-    )
+    _add_workspace_args(install, include_catalogue=False)
     install.set_defaults(handler=handle_install, requires=_requires_rest)
 
     # Fabric estate management rather than a Weaver lifecycle verb: these act on
@@ -275,7 +275,9 @@ def build_parser() -> argparse.ArgumentParser:
         "push", help="Create or update a notebook definition."
     )
     notebook_push.add_argument("source", help="Local .py or .ipynb notebook source.")
-    notebook_push.add_argument("--name", help="Fabric display name. Defaults to the filename.")
+    notebook_push.add_argument(
+        "--name", help="Fabric display name. Defaults to the filename."
+    )
     notebook_push.add_argument("--description")
     notebook_push.add_argument("--json", action="store_true")
     _add_workspace_args(notebook_push, include_catalogue=False)
@@ -540,7 +542,11 @@ def _resolve_workspace(args: argparse.Namespace):
     from weaver.config import resolve_workspace
 
     inherited = getattr(getattr(args, "session", None), "workspace", None)
-    if inherited is not None and args.workspace is None and args.workspace_config is None:
+    if (
+        inherited is not None
+        and args.workspace is None
+        and args.workspace_config is None
+    ):
         workspace = _with_command_overrides(inherited, args)
     else:
         workspace = resolve_workspace(
@@ -558,8 +564,6 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
     """The session's workspace, with whatever this command line said on top."""
 
     from dataclasses import replace
-
-
 
     overrides = {}
     if getattr(args, "environment", None) is not None:
@@ -840,6 +844,7 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
     from weaver.targets import DeltaTarget, parse_physical_target, physical_item
 
     if session is not None:
+
         def resolve(item, *, item_type):
             return session.resolve_item(item, item_type=item_type, workspace=workspace)
     else:
@@ -944,8 +949,6 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
             dry_run=dry_run,
             session=opened,
         )
-
-
 
 
 def _print_test(report) -> None:
@@ -1082,7 +1085,6 @@ def _build_once(args: argparse.Namespace) -> int:
 
 def _indented(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line if line else line for line in text.splitlines())
-
 
 
 def _group_help(group: argparse.ArgumentParser):

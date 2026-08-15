@@ -60,8 +60,7 @@ def test_every_object_is_classified_from_its_filename_and_item(authored):
     """The item picks the SQL dialect; the filename picks nothing but the name."""
 
     assert {
-        name: (document.language, document.kind)
-        for name, document in authored.items()
+        name: (document.language, document.kind) for name, document in authored.items()
     } == {
         "Lakehouse/Sales/Files/Sales.OrderExport": (PYTHON, "Folder"),
         "Lakehouse/Sales/Sales.Order": (PYTHON, "Table"),
@@ -97,7 +96,9 @@ def test_a_python_table_carries_its_full_contract(authored):
     assert document.comparison_columns == ("Last modified",)
     assert document.lineage.reference.object_id.qualified == "Sales.OrderExport"
     assert [column.name for column in document.effective_schema][-3:] == [
-        "row_insert_datetime", "row_update_datetime", "row_delete_datetime",
+        "row_insert_datetime",
+        "row_update_datetime",
+        "row_delete_datetime",
     ]
 
 
@@ -112,7 +113,9 @@ def test_a_warehouse_object_defers_column_validation(authored):
     report = authored["Warehouse/Reporting/Reporting.OrderReport"].document
     assert report.defers_column_validation is True
     assert [column.name for column in report.audit_columns] == [
-        "Row insert datetime", "Row update datetime", "Row delete datetime",
+        "Row insert datetime",
+        "Row update datetime",
+        "Row delete datetime",
     ]
 
 
@@ -125,10 +128,14 @@ def test_a_view_prohibits_rebuild_with_its_reason(authored):
 def test_a_spark_table_declares_schema_and_dependencies(authored):
     document = authored["Lakehouse/Sales/Sales.OrderSummary"].document
     assert [column.name for column in document.schema] == [
-        "Customer id", "Order count", "Total amount",
+        "Customer id",
+        "Order count",
+        "Total amount",
     ]
     assert [str(d) for d in document.dependencies] == ["Sales.Order"]
-    assert [column.name for column in document.audit_columns][0] == "row_insert_datetime"
+    assert [column.name for column in document.audit_columns][
+        0
+    ] == "row_insert_datetime"
 
 
 # --- structural --------------------------------------------------------------
@@ -182,7 +189,9 @@ def test_references_across_every_language(authored):
         "Lakehouse/Sales/Sales.OrderSummary": ["Sales.Cancelled", "Sales.Order"],
         "Warehouse/Reporting/Sales.Customer": ["Sales_LH.Sales.Customer"],
         "Warehouse/Reporting/Reporting.OrderReport": [
-            "Sales.Customer", "Sales.OrderLineCount", "Sales_LH.Sales.Order",
+            "Sales.Customer",
+            "Sales.OrderLineCount",
+            "Sales_LH.Sales.Order",
         ],
         "Warehouse/Reporting/Reporting.OrderView": ["Reporting.OrderReport"],
     }
@@ -244,7 +253,10 @@ def test_an_item_signature_moves_only_for_its_own_content(repository, tmp_path):
     )
     after = parse_item_repository(Location(str(copy)))
 
-    assert after["Warehouse/Reporting"].signature != repository["Warehouse/Reporting"].signature
+    assert (
+        after["Warehouse/Reporting"].signature
+        != repository["Warehouse/Reporting"].signature
+    )
     assert after["Lakehouse/Sales"].signature == repository["Lakehouse/Sales"].signature
 
 
@@ -295,7 +307,9 @@ def test_a_physical_three_part_read_is_a_reference_not_an_edge(repository):
     """
 
     physical = [
-        edge for edge in repository.dependency_edges if edge.resolution_kind == "physical"
+        edge
+        for edge in repository.dependency_edges
+        if edge.resolution_kind == "physical"
     ]
     assert {edge.reference for edge in physical} == {
         "Sales_LH.Sales.Order",
@@ -324,7 +338,9 @@ def test_a_two_part_name_resolves_inside_the_writers_own_item(repository):
 
 def test_descendants_are_what_a_rebuild_would_uncertify(repository):
     assert set(
-        repository.dependency_graph.descendants("Lakehouse/Sales/Files/Sales.OrderExport")
+        repository.dependency_graph.descendants(
+            "Lakehouse/Sales/Files/Sales.OrderExport"
+        )
     ) == {
         "Lakehouse/Sales/Sales.Order",
         "Lakehouse/Sales/Sales.Customer",

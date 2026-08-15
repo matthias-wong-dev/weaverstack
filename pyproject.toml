@@ -93,7 +93,7 @@ addopts = [
 # formatting. Nothing about types or style opinions — what this catches is
 # debris, which review should not have to.
 [tool.ruff]
-line-length = 96
+line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]

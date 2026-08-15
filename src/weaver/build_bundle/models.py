@@ -197,7 +197,9 @@ class BuildBatch:
         return cls(
             id=mapping["id"],
             target_id=mapping["target_id"],
-            actions=tuple(InstallAction.from_mapping(a) for a in mapping.get("actions", ())),
+            actions=tuple(
+                InstallAction.from_mapping(a) for a in mapping.get("actions", ())
+            ),
         )
 
 
@@ -221,7 +223,9 @@ class BuildSequence:
         return cls(
             number=mapping["number"],
             description=mapping["description"],
-            batches=tuple(BuildBatch.from_mapping(b) for b in mapping.get("batches", ())),
+            batches=tuple(
+                BuildBatch.from_mapping(b) for b in mapping.get("batches", ())
+            ),
         )
 
 
@@ -243,9 +247,7 @@ class BuildPlan:
     #: installation was certified with. A sibling file outside the hash could be
     #: edited after certification, which is the thing frozen payloads exist to
     #: prevent.
-    target_changes: Mapping[str, tuple[TargetChange, ...]] = field(
-        default_factory=dict
-    )
+    target_changes: Mapping[str, tuple[TargetChange, ...]] = field(default_factory=dict)
 
     def to_mapping(self) -> dict[str, Any]:
         mapping = {
@@ -271,8 +273,12 @@ class BuildPlan:
             bundle_id=mapping["bundle_id"],
             repository_name=mapping["repository_name"],
             repository_signature=mapping["repository_signature"],
-            targets=tuple(BoundTarget.from_mapping(t) for t in mapping.get("targets", ())),
-            sequences=tuple(BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())),
+            targets=tuple(
+                BoundTarget.from_mapping(t) for t in mapping.get("targets", ())
+            ),
+            sequences=tuple(
+                BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())
+            ),
             selection=BuildSelection.from_mapping(mapping["selection"]),
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())

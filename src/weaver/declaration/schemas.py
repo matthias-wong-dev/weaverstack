@@ -114,7 +114,9 @@ def parse_schema_document(text: str, relative_path: str) -> SchemaSes:
 
     schema_id = loaded.get(_SCHEMA_ID)
     if not isinstance(schema_id, str) or not schema_id.strip():
-        raise DiscoveryError(f"{relative_path}: {_SCHEMA_ID} is required and must be non-empty")
+        raise DiscoveryError(
+            f"{relative_path}: {_SCHEMA_ID} is required and must be non-empty"
+        )
     schema_id = schema_id.strip()
     if "." in schema_id or any(character.isspace() for character in schema_id):
         raise DiscoveryError(
@@ -124,7 +126,9 @@ def parse_schema_document(text: str, relative_path: str) -> SchemaSes:
     description = loaded.get(_DESCRIPTION)
     if description is not None:
         if not isinstance(description, str) or not description.strip():
-            raise DiscoveryError(f"{relative_path}: {_DESCRIPTION} must be non-empty when present")
+            raise DiscoveryError(
+                f"{relative_path}: {_DESCRIPTION} must be non-empty when present"
+            )
         description = description.strip()
 
     return SchemaSes(

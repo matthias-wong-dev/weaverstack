@@ -151,8 +151,12 @@ class NotebookScope(WorkspaceScope):
 
         from ..targets import ItemRef, WarehouseTarget
 
-        warehouse = target if isinstance(target, WarehouseTarget) else WarehouseTarget(
-            target if isinstance(target, ItemRef) else ItemRef(str(target))
+        warehouse = (
+            target
+            if isinstance(target, WarehouseTarget)
+            else WarehouseTarget(
+                target if isinstance(target, ItemRef) else ItemRef(str(target))
+            )
         )
         name = warehouse.warehouse.name
         with self._lock:

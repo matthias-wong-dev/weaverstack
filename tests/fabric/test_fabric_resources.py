@@ -21,6 +21,7 @@ from weaver.fabric import LAKEHOUSE, find_item, list_items
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
+
 def test_the_workspace_resolves_to_an_id(fabric_workspace_item):
     assert fabric_workspace_item.id
     assert fabric_workspace_item.name
@@ -36,7 +37,9 @@ def test_an_unknown_workspace_lists_what_there_is(fabric_workspace_item):
 
     from weaver.fabric import find_workspace
 
-    with pytest.raises(CommandError, match="Workspace 'weavertest_no_such_workspace' was not found"):
+    with pytest.raises(
+        CommandError, match="Workspace 'weavertest_no_such_workspace' was not found"
+    ):
         find_workspace("weavertest_no_such_workspace")
 
 

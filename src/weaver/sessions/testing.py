@@ -198,9 +198,7 @@ class TestSession(Session):
     # --- recording -----------------------------------------------------------
 
     def _record(self, kind: str, body, workspace, **detail) -> None:
-        named = getattr(
-            self.workspace_or_default(workspace), "workspace", None
-        )
+        named = getattr(self.workspace_or_default(workspace), "workspace", None)
         self.calls.append(
             RecordedCall(kind=kind, body=body, workspace=named, detail=detail)
         )

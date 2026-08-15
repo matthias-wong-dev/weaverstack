@@ -96,7 +96,7 @@ def test_a_finished_statement_is_run_exactly_as_the_build_froze_it():
 
     details = _run(capability, destination)
 
-    statement, = capability.statements
+    (statement,) = capability.statements
     assert "`Analytics`.`Sales`.`Sales`.`CustomerEnriched`" in statement
     assert details["destination"] == "Sales"
     assert details["statement_first_line"] == statement.splitlines()[0]
@@ -122,9 +122,7 @@ def test_a_view_carries_the_destinations_case_scope(destination):
 def test_a_view_without_a_way_to_run_a_statement_says_so():
     capability = _Capability()
     context = _context(capability, FabricSparkTarget(workspace="A", lakehouse="Sales"))
-    context = InstallationContext(
-        resolver=None, store=None, target=context.target
-    )
+    context = InstallationContext(resolver=None, store=None, target=context.target)
 
     with pytest.raises(InstallError, match="no Spark SQL capability"):
         SparkSqlExecutor().execute(_view_action(), b"SELECT 1", context)
@@ -194,12 +192,14 @@ def test_every_statement_in_a_batch_gets_the_same_epoch():
 
     capability = _Capability()
     payload = (
-        b'["INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST(\'{{epoch}}\' AS TIMESTAMP))",'
-        b' "INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST(\'{{epoch}}\' AS TIMESTAMP))"]'
+        b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST('{{epoch}}' AS TIMESTAMP))\","
+        b" \"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST('{{epoch}}' AS TIMESTAMP))\"]"
     )
 
     SparkSqlBatchExecutor().execute(
-        _batch_action(), payload, _batch_context(capability, epoch="2026-07-31 09:00:00.000000")
+        _batch_action(),
+        payload,
+        _batch_context(capability, epoch="2026-07-31 09:00:00.000000"),
     )
 
     dated = capability.statements
@@ -218,7 +218,7 @@ def test_a_statement_needing_an_epoch_without_one_says_so():
     with pytest.raises(InstallError, match="supplied none"):
         SparkSqlBatchExecutor().execute(
             _batch_action(),
-            b'["INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (\'{{epoch}}\')"]',
+            b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES ('{{epoch}}')\"]",
             _batch_context(capability, epoch=None),
         )
 
@@ -231,7 +231,9 @@ def test_a_batch_naming_no_epoch_runs_without_one():
 
     capability = _Capability()
     SparkSqlBatchExecutor().execute(
-        _batch_action(), b'["DELETE FROM `Demo`.`Weaver`.`_`.`Registry`"]', _batch_context(capability)
+        _batch_action(),
+        b'["DELETE FROM `Demo`.`Weaver`.`_`.`Registry`"]',
+        _batch_context(capability),
     )
 
     assert [statement.split()[0] for statement in capability.statements] == ["DELETE"]
@@ -240,9 +242,7 @@ def test_a_batch_naming_no_epoch_runs_without_one():
 def test_a_batch_without_a_way_to_run_statements_says_so():
     capability = _Capability()
     bare = _batch_context(capability)
-    bare = InstallationContext(
-        resolver=None, store=None, target=bare.target
-    )
+    bare = InstallationContext(resolver=None, store=None, target=bare.target)
 
     with pytest.raises(InstallError, match="no Spark SQL capability"):
         SparkSqlBatchExecutor().execute(_batch_action(), b'["DELETE FROM x"]', bare)

@@ -338,7 +338,8 @@ def livy_session(fabric_workspace, fabric_client):
         for entry in active_sessions:
             session_info = entry.session
             states = "/".join(
-                state or "-" for state in (
+                state or "-"
+                for state in (
                     session_info.scheduler_state,
                     session_info.plugin_state,
                     session_info.livy_state,
@@ -349,7 +350,8 @@ def livy_session(fabric_workspace, fabric_client):
                 f"{session_info.id or '?'} ({states})"
                 + (
                     f"; submitted by {session_info.submitter_name}"
-                    if session_info.submitter_name else ""
+                    if session_info.submitter_name
+                    else ""
                 )
             )
 
@@ -506,8 +508,7 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
             )
         timings["endpoint readiness"] = time.monotonic() - stage
         print(
-            f"Warehouse {name} endpoint readiness: "
-            f"{timings['endpoint readiness']:.2f}s"
+            f"Warehouse {name} endpoint readiness: {timings['endpoint readiness']:.2f}s"
         )
 
         stage = time.monotonic()
@@ -522,9 +523,7 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
                 connection_started = time.monotonic()
                 with candidate.pool.lease():
                     pass
-                timings["first SQL connection"] = (
-                    time.monotonic() - connection_started
-                )
+                timings["first SQL connection"] = time.monotonic() - connection_started
                 query_started = time.monotonic()
                 assert candidate.query("select 1 as ready")[0]["ready"] == 1
                 timings["first select 1"] = time.monotonic() - query_started
@@ -682,9 +681,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
 
     def run(repository, *, inventory=None, rebuild=False, build=True):
         identity = item_id("Warehouse/Reporting")
-        selected = {
-            key for key in repository.source_documents if key.item == identity
-        }
+        selected = {key for key in repository.source_documents if key.item == identity}
         planned = plan_item_build(
             repository,
             item=identity,
@@ -704,13 +701,11 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
             selected_for_drop=set(selected) if rebuild else set(),
             selected_for_build=selected if build else set(),
             registered=(
-                {key: registered_document(key) for key in selected}
-                if rebuild
-                else {}
+                {key: registered_document(key) for key in selected} if rebuild else {}
             ),
         )
         context = InstallationContext(
-                resolver=None,
+            resolver=None,
             store=None,
             target=target,
             sql=disposable_warehouse.executor,
@@ -769,6 +764,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
         run=run,
         target=target,
     )
+
 
 # --- one populated lifecycle, on either workspace --------------------------------
 
@@ -1047,7 +1043,9 @@ def _fabric_build_context(
             sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
             action_status={a["id"]: a["status"] for a in payload["actions"]},
             action_order=tuple(a["id"] for a in payload["actions"]),
-            action_error={a["id"]: a["error"] for a in payload["actions"] if a["error"]},
+            action_error={
+                a["id"]: a["error"] for a in payload["actions"] if a["error"]
+            },
         )
         if outcome.status != "succeeded":
             print("INSTALL ACTION ERRORS:", outcome.action_error)
@@ -1116,14 +1114,25 @@ def _fabric_build_context(
         store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
 
     yield BuildEnv(
-        label="fabric", workspace=workspace, weaver=weaver, target=target,
-        resolver=resolver, store=store, repository_root=repository_root,
+        label="fabric",
+        workspace=workspace,
+        weaver=weaver,
+        target=target,
+        resolver=resolver,
+        store=store,
+        repository_root=repository_root,
         generate_spark=True,  # in-session catalogue
-        install_repo=install_repo, remove_repo=remove_repo, generate=generate,
-        install=install, run_query=query, run_columns=columns,
-        seed_orphans=seed_orphans, run_schema_exists=schema_exists,
+        install_repo=install_repo,
+        remove_repo=remove_repo,
+        generate=generate,
+        install=install,
+        run_query=query,
+        run_columns=columns,
+        seed_orphans=seed_orphans,
+        run_schema_exists=schema_exists,
         run_python=run_python,
-        destination=destination, weaver_destination=weaver_destination,
+        destination=destination,
+        weaver_destination=weaver_destination,
     )
 
 
@@ -1206,16 +1215,24 @@ def _empty_the_target(
 
 @pytest.fixture
 def fabric_build_env(
-    fabric_workspace_item, fabric_client, fabric_workspace, fabric_target_lakehouse,
-    livy_session, weaver_repo_fixture,
+    fabric_workspace_item,
+    fabric_client,
+    fabric_workspace,
+    fabric_target_lakehouse,
+    livy_session,
+    weaver_repo_fixture,
 ):
     """One Fabric build environment per test, over the run's Weaver Lakehouse,
     target Lakehouse and Livy session. The target is emptied on the way in, which
     is what a freshly created one used to provide."""
 
     with _fabric_build_context(
-        fabric_workspace_item, fabric_client, fabric_workspace, fabric_target_lakehouse,
-        livy_session, weaver_repo_fixture,
+        fabric_workspace_item,
+        fabric_client,
+        fabric_workspace,
+        fabric_target_lakehouse,
+        livy_session,
+        weaver_repo_fixture,
     ) as env:
         yield env
 
@@ -1348,7 +1365,9 @@ def _warehouse_build_env(
             sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
             action_status={a["id"]: a["status"] for a in payload["actions"]},
             action_order=tuple(a["id"] for a in payload["actions"]),
-            action_error={a["id"]: a["error"] for a in payload["actions"] if a["error"]},
+            action_error={
+                a["id"]: a["error"] for a in payload["actions"] if a["error"]
+            },
         )
         if outcome.status != "succeeded":
             print("WAREHOUSE INSTALL ACTION ERRORS:", outcome.action_error)
@@ -1397,18 +1416,31 @@ def _warehouse_build_env(
             sql.execute_script(statement)
 
     return BuildEnv(
-        label="warehouse", workspace=fabric_workspace, weaver=weaver, target=warehouse_ref,
-        resolver=resolver, store=store, repository_root=repository_root,
+        label="warehouse",
+        workspace=fabric_workspace,
+        weaver=weaver,
+        target=warehouse_ref,
+        resolver=resolver,
+        store=store,
+        repository_root=repository_root,
         generate_spark=None,
-        install_repo=install_repo, remove_repo=remove_repo, generate=generate,
-        install=install, run_query=query, run_columns=columns,
+        install_repo=install_repo,
+        remove_repo=remove_repo,
+        generate=generate,
+        install=install,
+        run_query=query,
+        run_columns=columns,
         seed_orphans=seed_orphans,
     )
 
 
 @pytest.fixture(scope="module")
 def warehouse_estate(
-    fabric_workspace, fabric_catalogue, clean_disposable_warehouse, weaver_repo_fixture, livy_session
+    fabric_workspace,
+    fabric_catalogue,
+    clean_disposable_warehouse,
+    weaver_repo_fixture,
+    livy_session,
 ):
     """The Warehouse estate, built **in Fabric** and installed once per module.
 
@@ -1425,8 +1457,6 @@ def warehouse_estate(
         livy_session,
     )
     yield _install_estate(env)
-
-
 
 
 # --- the estates a Fabric test drives ----------------------------------------

@@ -79,7 +79,9 @@ class PhysicalTargetRef:
         from .targets import DeltaTarget, physical_item
 
         return cls(
-            kind=LAKEHOUSE_TARGET if isinstance(target, DeltaTarget) else WAREHOUSE_TARGET,
+            kind=LAKEHOUSE_TARGET
+            if isinstance(target, DeltaTarget)
+            else WAREHOUSE_TARGET,
             name=physical_item(target).name,
         )
 
@@ -167,9 +169,7 @@ class InstalledEstate:
     aliases: tuple[InstalledAlias, ...]
     #: Physical addresses two logical objects both claim, by the target they are
     #: in. Recorded rather than raised — see :meth:`from_catalogue`.
-    ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(
-        default_factory=dict
-    )
+    ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(default_factory=dict)
 
     @classmethod
     def from_catalogue(cls, catalogue: Catalogue) -> "InstalledEstate":
@@ -245,7 +245,9 @@ class InstalledEstate:
     @property
     def targets(self) -> tuple[PhysicalTargetRef, ...]:
         return tuple(
-            sorted(set(self.installations.values()), key=lambda ref: (ref.kind, ref.name))
+            sorted(
+                set(self.installations.values()), key=lambda ref: (ref.kind, ref.name)
+            )
         )
 
 
@@ -544,7 +546,11 @@ class LoadDag:
         ordered: list[LoadNode] = []
         while pending:
             ready = sorted(
-                (remaining[node_id] for node_id, waiting in pending.items() if not waiting),
+                (
+                    remaining[node_id]
+                    for node_id, waiting in pending.items()
+                    if not waiting
+                ),
                 key=lambda node: node.sort_key,
             )
             if not ready:
@@ -608,7 +614,9 @@ class _Planner:
 
     # --- what owns load work --------------------------------------------------
 
-    def _installed_primitives(self) -> dict[WeaverDocumentId, tuple[str, InstalledObject]]:
+    def _installed_primitives(
+        self,
+    ) -> dict[WeaverDocumentId, tuple[str, InstalledObject]]:
         """Every data object the estate installed a load primitive for."""
 
         found: dict[WeaverDocumentId, tuple[str, InstalledObject]] = {}
@@ -642,9 +650,7 @@ class _Planner:
             allowed_targets = frozenset(requested)
             visited: set[WeaverDocumentId] = set()
             for identity in seeds:
-                self._select(
-                    identity, visited, allowed_targets=allowed_targets
-                )
+                self._select(identity, visited, allowed_targets=allowed_targets)
             self._place_refresh_barriers()
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),

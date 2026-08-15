@@ -12,7 +12,6 @@ Schema:
   CustomerName: string
 """
 
-
 from weaver import Table
 
 

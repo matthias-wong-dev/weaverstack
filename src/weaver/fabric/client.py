@@ -124,7 +124,11 @@ class FabricClient:
     ):
         import requests
 
-        url = path if path.startswith("http") else f"{self.api_base_url}/{path.lstrip('/')}"
+        url = (
+            path
+            if path.startswith("http")
+            else f"{self.api_base_url}/{path.lstrip('/')}"
+        )
         try:
             response = send(
                 method,

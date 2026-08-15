@@ -41,7 +41,6 @@ ADDRESSABLE_POLL_INTERVAL = 5.0
 
 
 class AliasExecutor:
-
     name = "alias"
 
     def execute(
@@ -86,14 +85,14 @@ class AliasExecutor:
             name=frozen["object"],
             source=source.lakehouse,
             source_path=(
-                f"{frozen['source_area']}/{frozen['source_schema']}"
-                f"/{source_name}"
+                f"{frozen['source_area']}/{frozen['source_schema']}/{source_name}"
             ),
         )
         return {"alias": frozen["alias"], "source": frozen["source"], **(made or {})}
 
-
-    def _await_addressable(self, context: InstallationContext, frozen: list) -> float | None:
+    def _await_addressable(
+        self, context: InstallationContext, frozen: list
+    ) -> float | None:
         """Wait until every table alias just created can actually be read.
 
         A read rather than a catalogue lookup, because the catalogue is the part

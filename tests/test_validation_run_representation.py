@@ -42,7 +42,9 @@ LAKEHOUSE_TARGET = PhysicalTargetRef(kind="lakehouse", name="Sales_LH")
 WAREHOUSE_TARGET = PhysicalTargetRef(kind="warehouse", name="Reporting_WH")
 
 
-def _validation(kind="Test", *, item=WAREHOUSE, target=WAREHOUSE_TARGET, installed=True):
+def _validation(
+    kind="Test", *, item=WAREHOUSE, target=WAREHOUSE_TARGET, installed=True
+):
     from weaver.etl import validation_artefact_id
 
     object_id = ObjectId(schema="Sales", object="OrdersReconcile")
@@ -190,8 +192,7 @@ def test_a_lakehouse_validation_is_reached_as_a_module():
 def test_a_test_with_no_discrepancies_passes():
     executor = _Executor({"missing_count": 0, "unexpected_count": 0})
 
-    node = _ran(
-_validation(), executor)
+    node = _ran(_validation(), executor)
 
     assert node.status == PASSED
     assert node.result.failure_count == 0
@@ -200,8 +201,7 @@ _validation(), executor)
 def test_a_test_with_discrepancies_fails_and_carries_both_counts():
     executor = _Executor({"missing_count": 2, "unexpected_count": 3})
 
-    node = _ran(
-_validation(), executor)
+    node = _ran(_validation(), executor)
 
     assert node.status == FAILED
     assert (node.result.missing_count, node.result.unexpected_count) == (2, 3)
@@ -211,9 +211,7 @@ _validation(), executor)
 def test_an_assumption_reads_its_own_count():
     executor = _Executor({"violation_count": 4})
 
-    node = _ran(
-        _validation("Assumption"), executor
-    )
+    node = _ran(_validation("Assumption"), executor)
 
     assert node.status == FAILED
     assert node.result.violation_count == 4
@@ -225,9 +223,7 @@ def test_an_assumption_reads_its_own_count():
 def test_a_missing_primitive_is_invalid_rather_than_passing():
     """A Test that was never installed must not read as a Test that found nothing."""
 
-    node = _ran(
-        _validation(installed=False), _Executor({})
-    )
+    node = _ran(_validation(installed=False), _Executor({}))
 
     assert node.status == INVALID
     assert node.result.failure_count == 0
@@ -240,8 +236,7 @@ def test_an_execution_failure_is_invalid_and_says_why():
         def call_procedure(self, procedure, *, inputs=(), outputs=()):
             raise RuntimeError("the declared Primary key repeats")
 
-    node = _ran(
-_validation(), _Broken({}))
+    node = _ran(_validation(), _Broken({}))
 
     assert node.status == INVALID
     assert "repeats" in node.result.error_message
@@ -249,8 +244,7 @@ _validation(), _Broken({}))
 
 
 def test_no_sql_capability_is_reported_against_the_validation():
-    node = _ran(
-_validation(), None)
+    node = _ran(_validation(), None)
 
     assert node.status == INVALID
     assert "no SQL capability" in node.result.error_message
@@ -272,10 +266,7 @@ def test_every_validation_reports_even_after_one_fails():
             return {"missing_count": 0, "unexpected_count": 0}
 
     alternating = _Alternating()
-    nodes = tuple(
-        _ran(
-_validation(), alternating) for _ in range(2)
-    )
+    nodes = tuple(_ran(_validation(), alternating) for _ in range(2))
 
     assert [node.status for node in nodes] == [INVALID, PASSED]
 
@@ -286,8 +277,7 @@ _validation(), alternating) for _ in range(2)
 def test_a_whole_target_run_asks_the_procedure_to_stay_quiet():
     executor = _Executor({"missing_count": 0, "unexpected_count": 0})
 
-    _ran(
-_validation(), executor)
+    _ran(_validation(), executor)
 
     assert executor.calls[0][1] == (("suppress_result_set", 1),)
 
@@ -298,9 +288,7 @@ def test_a_targeted_run_asks_for_the_rows():
         result_sets=(({"_weaver_side": "expected", "OrderId": 1},),),
     )
 
-    node = _ran(
-        _validation(), executor, collect=True
-    )
+    node = _ran(_validation(), executor, collect=True)
 
     assert executor.calls[0][1] == (("suppress_result_set", 0),)
     assert node.diagnostics == ({"_weaver_side": "expected", "OrderId": 1},)
@@ -314,9 +302,7 @@ def test_a_targeted_run_executes_the_procedure_exactly_once():
         result_sets=(({"_weaver_side": "expected", "OrderId": 1},),),
     )
 
-    _ran(
-        _validation(), executor, collect=True
-    )
+    _ran(_validation(), executor, collect=True)
 
     assert len(executor.calls) == 1
 
@@ -369,8 +355,7 @@ class _Aggregated:
     def collect(self):
         self.frame.actions += 1
         return [
-            {"_weaver_side": side, "count": n}
-            for side, n in self.frame.by_side.items()
+            {"_weaver_side": side, "count": n} for side, n in self.frame.by_side.items()
         ]
 
 
@@ -404,9 +389,7 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
 
     # The capabilities a Python validation reaches through, as the Session
     # supplies them: this run's Spark, and this run's runtime scope.
-    environment = SimpleNamespace(
-        spark=object(), resolver=None, runtime_scope=_Scope()
-    )
+    environment = SimpleNamespace(spark=object(), resolver=None, runtime_scope=_Scope())
 
     class _Lakehouse:
         def files_root(self):

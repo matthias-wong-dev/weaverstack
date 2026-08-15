@@ -113,9 +113,7 @@ class TaskLog:
         it can be as precise as it needs to be.
         """
 
-        name = (
-            f"{self._stamp()}_{_slug(step_type)}_{uuid.uuid4().hex}.json"
-        )
+        name = f"{self._stamp()}_{_slug(step_type)}_{uuid.uuid4().hex}.json"
         return self._write(name, {**result, **self._identity(), "step_type": step_type})
 
     def write_completion(self, summary: Mapping[str, Any]) -> Location:

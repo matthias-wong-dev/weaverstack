@@ -81,7 +81,9 @@ def test_a_wrong_credential_fails_at_the_call_that_supplied_it():
     """The point of checking early: the traceback names the caller's line."""
 
     with pytest.raises(ConfigError, match="get_token"):
-        weaver.session(workspace="Demo", catalogue="Lakehouse/Weaver", credential=object())
+        weaver.session(
+            workspace="Demo", catalogue="Lakehouse/Weaver", credential=object()
+        )
 
 
 def test_opening_a_session_with_a_credential_acquires_no_token():

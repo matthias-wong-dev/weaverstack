@@ -34,7 +34,9 @@ def test_pathlib_would_have_corrupted_it():
 
 
 def test_joining_a_filesystem_location():
-    assert (Location("/srv/.local") / "Sales" / "Files").value == "/srv/.local/Sales/Files"
+    assert (
+        Location("/srv/.local") / "Sales" / "Files"
+    ).value == "/srv/.local/Sales/Files"
 
 
 def test_join_takes_several_segments():
@@ -58,7 +60,9 @@ def test_backslashes_are_separators_like_any_other():
     its catalogue name.
     """
 
-    assert Location("D:\\a\\weaverstack\\sales-etl").value == "D:/a/weaverstack/sales-etl"
+    assert (
+        Location("D:\\a\\weaverstack\\sales-etl").value == "D:/a/weaverstack/sales-etl"
+    )
     assert Location("D:\\a\\weaverstack\\sales-etl").name == "sales-etl"
     assert (Location("\\srv\\.local") / "Sales").value == "/srv/.local/Sales"
 

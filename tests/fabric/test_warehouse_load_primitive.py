@@ -150,9 +150,7 @@ def estate(clean_disposable_warehouse):
 def static_estate(clean_disposable_warehouse):
     """The same table declared static, under a name of its own."""
 
-    built = _install(
-        clean_disposable_warehouse.executor, STATIC_OBJECT, static=True
-    )
+    built = _install(clean_disposable_warehouse.executor, STATIC_OBJECT, static=True)
     yield built
     _drop(built)
 

@@ -61,9 +61,7 @@ AWAITING_FABRIC = {
 COVERED = {
     "create_schema": ("test_create_schema_action_creates_the_schema_in_the_warehouse",),
     "build_table": ("test_build_table_action_is_accepted_by_fabric",),
-    "build_view": (
-        "test_build_view_action_creates_a_view_over_the_table_it_reads",
-    ),
+    "build_view": ("test_build_view_action_creates_a_view_over_the_table_it_reads",),
     "create_alias": (
         "test_the_alias_exists_as_a_onelake_shortcut",
         "test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse",

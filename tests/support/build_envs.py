@@ -112,17 +112,13 @@ class SesFixture:
 #: The declaration fixtures a build env can install. One place, so no test
 #: hard-codes a path and both transports draw the same source.
 BUILD_FIXTURE = SesFixture(_FIXTURES / "build-lakehouse-item", ("Lakehouse/Raw",))
-SQL_TABLE_FIXTURE = SesFixture(
-    _FIXTURES / "sql-table-build-item", ("Lakehouse/Sales",)
-)
+SQL_TABLE_FIXTURE = SesFixture(_FIXTURES / "sql-table-build-item", ("Lakehouse/Sales",))
 #: Three documents and nothing else — two Python tables and a Python folder — so
 #: an authored-object test builds the smallest thing that has one of each.
 AUTHORED_OBJECTS_FIXTURE = SesFixture(
     _FIXTURES / "authored-objects-item", ("Lakehouse/Sales",)
 )
-MIXED_ESTATE_FIXTURE = SesFixture(
-    _FIXTURES / "mixed-estate-item", ("Lakehouse/Sales",)
-)
+MIXED_ESTATE_FIXTURE = SesFixture(_FIXTURES / "mixed-estate-item", ("Lakehouse/Sales",))
 WAREHOUSE_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "warehouse-estate-item", ("Warehouse/Reporting",)
 )

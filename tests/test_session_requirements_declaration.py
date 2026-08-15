@@ -104,15 +104,18 @@ def test_a_command_that_declares_nothing_asks_for_nothing():
     """`capacity` manages the capacity itself, not anything inside a workspace,
     so it must not warm one."""
 
-    assert _declared(
-        "fabric",
-        "capacity",
-        "status",
-        "--resource-group",
-        "rg",
-        "--capacity-name",
-        "cap",
-    ) == set()
+    assert (
+        _declared(
+            "fabric",
+            "capacity",
+            "status",
+            "--resource-group",
+            "rg",
+            "--capacity-name",
+            "cap",
+        )
+        == set()
+    )
 
 
 # --- what the Session does with it --------------------------------------------

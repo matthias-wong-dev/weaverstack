@@ -93,7 +93,7 @@ class Prepared:
     derived the same way the boundary derives it rather than chosen here.
     """
 
-    catalogue: Lakehouse/object
+    catalogue: Lakehouse / object
     inventories: dict
     workspace: object
     session: object

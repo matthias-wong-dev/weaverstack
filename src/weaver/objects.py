@@ -538,9 +538,7 @@ class SparkSqlTest(_SparkSqlValidation, Test):
 
         from .runtime.spark_sql_validation import read_spark_sql_test
 
-        return read_spark_sql_test(
-            self.spark, sql=self.sql, what=type(self).__name__
-        )
+        return read_spark_sql_test(self.spark, sql=self.sql, what=type(self).__name__)
 
     def expected(self):
         return self._sides()[0]

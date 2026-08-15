@@ -84,7 +84,9 @@ def test_a_test_projects_a_dictionary_row(repository):
     assert row["item_name"] == "Sales"
     assert row["schema_name"] == "Sales"
     assert row["test_type"] == "test"
-    assert row["description"] == "The materialised rows match the independent calculation."
+    assert (
+        row["description"] == "The materialised rows match the independent calculation."
+    )
     assert row["primary_key"] == "Id"
 
 
@@ -98,9 +100,12 @@ def test_an_assumption_projects_a_dictionary_row(repository):
 def test_an_assumption_has_no_primary_key(repository):
     """Structurally, not incidentally: there is one side to correlate."""
 
-    assert by_name(project(repository), TEST_DICTIONARY)["OrdersHaveCustomers"][
-        "primary_key"
-    ] is None
+    assert (
+        by_name(project(repository), TEST_DICTIONARY)["OrdersHaveCustomers"][
+            "primary_key"
+        ]
+        is None
+    )
 
 
 def test_a_test_without_a_key_projects_a_null_key(tmp_path):
@@ -113,9 +118,10 @@ def test_a_test_without_a_key_projects_a_null_key(tmp_path):
     )
     repository = parse_item_repository(Location(str(tmp_path)))
 
-    assert by_name(project(repository), TEST_DICTIONARY)["OrdersReconcile"][
-        "primary_key"
-    ] is None
+    assert (
+        by_name(project(repository), TEST_DICTIONARY)["OrdersReconcile"]["primary_key"]
+        is None
+    )
 
 
 def test_a_composite_key_is_projected_in_declared_order(tmp_path):
@@ -130,9 +136,10 @@ def test_a_composite_key_is_projected_in_declared_order(tmp_path):
     )
     repository = parse_item_repository(Location(str(tmp_path)))
 
-    assert by_name(project(repository), TEST_DICTIONARY)["OrdersReconcile"][
-        "primary_key"
-    ] == "Id, Line no"
+    assert (
+        by_name(project(repository), TEST_DICTIONARY)["OrdersReconcile"]["primary_key"]
+        == "Id, Line no"
+    )
 
 
 def test_a_referenced_description_keeps_its_pointer(tmp_path):
@@ -176,7 +183,9 @@ def test_a_validation_claims_no_registry_row(repository):
 
 
 def test_a_validation_claims_no_table_dictionary_row(repository):
-    described = {row["object_name"] for row in rows(project(repository), TABLE_DICTIONARY)}
+    described = {
+        row["object_name"] for row in rows(project(repository), TABLE_DICTIONARY)
+    }
 
     assert described == {"Order"}
 
@@ -184,9 +193,9 @@ def test_a_validation_claims_no_table_dictionary_row(repository):
 def test_a_validation_puts_its_schema_to_use(repository):
     """It names a schema the item declares, so the schema is described."""
 
-    assert {row["schema_name"] for row in rows(project(repository), SCHEMA_DICTIONARY)} >= {
-        "Sales"
-    }
+    assert {
+        row["schema_name"] for row in rows(project(repository), SCHEMA_DICTIONARY)
+    } >= {"Sales"}
 
 
 # --- dependencies belong to the logical identity ----------------------------
@@ -265,10 +274,18 @@ def test_a_runtime_artefact_is_known_by_its_role_not_its_shape():
 
     registered = _read_back(
         _registry_row("Order", object_role=ROLE_DATA),
-        _registry_row("Load Sales.Order", object_role=ROLE_LOAD, object_type="stored_procedure"),
-        _registry_row("Test Sales.Reconciles", object_role=ROLE_TEST, object_type="stored_procedure"),
+        _registry_row(
+            "Load Sales.Order", object_role=ROLE_LOAD, object_type="stored_procedure"
+        ),
+        _registry_row(
+            "Test Sales.Reconciles",
+            object_role=ROLE_TEST,
+            object_type="stored_procedure",
+        ),
     )
-    by_name = {identity.object_id.object: document for identity, document in registered.items()}
+    by_name = {
+        identity.object_id.object: document for identity, document in registered.items()
+    }
 
     assert not by_name["Order"].is_runtime_artefact
     assert by_name["Load Sales.Order"].is_runtime_artefact

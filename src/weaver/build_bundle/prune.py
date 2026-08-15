@@ -57,6 +57,8 @@ _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 _RESERVED_SQL_SCHEMAS = frozenset(
     {"dbo", "guest", "information_schema", "sys", "queryinsights", "_rsc"}
 )
+
+
 @dataclass(frozen=True)
 class _Managed:
     """The keep-set the build diffs the target against, folded for comparison."""
@@ -209,8 +211,7 @@ def read_lakehouse_inventory(
         control_item
         and catalogue is not None
         and catalogue.schema_exists(CATALOGUE_SCHEMA)
-        and CATALOGUE_SCHEMA.casefold()
-        not in {schema.casefold() for schema in schemas}
+        and CATALOGUE_SCHEMA.casefold() not in {schema.casefold() for schema in schemas}
     ):
         # The empty catalogue schema is catalogue state, not storage state: until
         # its first table exists there is no Tables/_ directory for the store to
@@ -245,9 +246,7 @@ def read_lakehouse_inventory(
     views: tuple[str, ...] = ()
     if catalogue is not None:
         views = tuple(
-            f"{schema}.{view}"
-            for schema in schemas
-            for view in catalogue.views(schema)
+            f"{schema}.{view}" for schema in schemas for view in catalogue.views(schema)
         )
     files = () if control_item else _load_files(store, files_root)
     return TargetInventory(
@@ -517,9 +516,19 @@ def managed_sets(
     Lakehouse runtime tree needs nothing here, being a declared folder.
     """
 
-    tables = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == TABLE}
-    views = {d.qualified for d in documents.values() if d.target_kind == object_target_kind and d.kind == VIEW}
-    folders = {d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET}
+    tables = {
+        d.qualified
+        for d in documents.values()
+        if d.target_kind == object_target_kind and d.kind == TABLE
+    }
+    views = {
+        d.qualified
+        for d in documents.values()
+        if d.target_kind == object_target_kind and d.kind == VIEW
+    }
+    folders = {
+        d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET
+    }
     for destination in alias_destinations:
         qualified = destination.object_id.qualified
         if destination.is_files:
@@ -582,7 +591,8 @@ def _child_dirs(store: Store, root) -> list:
     if not store.exists(root) or not store.is_directory(root):
         return []
     return sorted(
-        (entry for entry in store.list(root) if entry.is_directory), key=lambda e: e.name
+        (entry for entry in store.list(root) if entry.is_directory),
+        key=lambda e: e.name,
     )
 
 
@@ -590,4 +600,3 @@ def _tsql_ident(name: str) -> str:
     """A bracket-quoted T-SQL identifier."""
 
     return "[" + name.replace("]", "]]") + "]"
-

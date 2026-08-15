@@ -210,9 +210,7 @@ def _read_catalogue(*, session, workspace, required):
     """
 
     return read_catalogue_state(
-        session_catalogue(
-            session, workspace, workspace.catalogue_item
-        ),
+        session_catalogue(session, workspace, workspace.catalogue_item),
         required,
     )
 
@@ -335,7 +333,9 @@ def persist_bundle_archive(
             f"bundle archive must end with {ARCHIVE_SUFFIX!r}: {destination.value}"
         )
     bundle_store = bundle.store or store
-    with _temp_copy(bundle.location, bundle_store, prefix="weaver-bundle-source-") as root:
+    with _temp_copy(
+        bundle.location, bundle_store, prefix="weaver-bundle-source-"
+    ) as root:
         with tempfile.TemporaryDirectory(prefix="weaver-bundle-archive-") as temporary:
             archive = Path(temporary) / destination.name
             _write_archive(root, archive)
@@ -446,7 +446,9 @@ def build_item_repository(
             plan=bundle.plan,
             report=report,
             repository_signature=repository.signature,
-            item_signatures={item.identity: item.signature for item in repository.items},
+            item_signatures={
+                item.identity: item.signature for item in repository.items
+            },
             archive=persisted,
         )
 
@@ -641,7 +643,9 @@ def _write_archive(root: Path, destination: Path) -> None:
     with zipfile.ZipFile(
         destination, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
     ) as zipped:
-        for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
+        for path in sorted(
+            candidate for candidate in root.rglob("*") if candidate.is_file()
+        ):
             relative = path.relative_to(root).as_posix()
             info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED

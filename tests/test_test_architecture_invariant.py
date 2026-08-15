@@ -223,11 +223,9 @@ LEGACY_NESTED_CLAIMS = {
 
 GRANDFATHERED = LEGACY_ROOT_CLAIMS | LEGACY_NESTED_CLAIMS
 
+
 def _test_modules() -> set[str]:
-    return {
-        path.relative_to(ROOT).as_posix()
-        for path in TESTS.rglob("test_*.py")
-    }
+    return {path.relative_to(ROOT).as_posix() for path in TESTS.rglob("test_*.py")}
 
 
 def test_every_test_module_names_a_claim_or_is_explicitly_grandfathered():

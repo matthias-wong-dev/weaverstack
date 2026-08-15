@@ -41,7 +41,9 @@ class GeneratedValidation:
     extension: str
 
 
-def generate_validation(document: "SourceDocument", *, destination=None) -> GeneratedValidation:
+def generate_validation(
+    document: "SourceDocument", *, destination=None
+) -> GeneratedValidation:
     """The installable primitive for one validated validation declaration.
 
     :func:`has_generated_validation` is the question to ask first — a Python

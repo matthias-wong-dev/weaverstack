@@ -75,7 +75,11 @@ def resolve_text(
 def _index(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:
     grouped: dict[str, list[SourceDocument]] = {}
     for document in documents:
-        key = str(document.logical_id) if document.logical_id is not None else document.qualified.lower()
+        key = (
+            str(document.logical_id)
+            if document.logical_id is not None
+            else document.qualified.lower()
+        )
         grouped.setdefault(key, []).append(document)
     return grouped
 
@@ -100,7 +104,9 @@ def _follow(
 
     step = (target.node_id, reference.column or "")
     if step in seen:
-        trail = " -> ".join(f"{node}[{column}]" if column else node for node, column in seen)
+        trail = " -> ".join(
+            f"{node}[{column}]" if column else node for node, column in seen
+        )
         raise DiscoveryError(
             f"metadata reference cycle: {trail} -> {target.node_id} — a reference "
             "copies text from its target, so a cycle has no text to copy"
@@ -147,7 +153,9 @@ def _target(
             if reference.is_item_qualified
             else referrer.logical_id.item
         )
-        identity = WeaverDocumentId(item, reference.object_id, is_files=reference.is_files)
+        identity = WeaverDocumentId(
+            item, reference.object_id, is_files=reference.is_files
+        )
         key = str(identity)
         key = alias_index.get(key, key)
         candidates = index.get(key, [])
@@ -163,7 +171,9 @@ def _target(
     if not candidates:
         return None
     same_namespace = [
-        candidate for candidate in candidates if candidate.namespace == referrer.namespace
+        candidate
+        for candidate in candidates
+        if candidate.namespace == referrer.namespace
     ]
     return same_namespace[0] if len(same_namespace) == 1 else None
 
@@ -240,7 +250,9 @@ def column_note(document: SourceDocument, column: str) -> MetadataText | None:
     return None
 
 
-def declared_column_notes(document: SourceDocument) -> tuple[tuple[str, MetadataText], ...]:
+def declared_column_notes(
+    document: SourceDocument,
+) -> tuple[tuple[str, MetadataText], ...]:
     """Every column that carries a note, in declared order, plus the identity.
 
     This is the whole of what the catalogue's column dictionary describes: the
@@ -255,7 +267,9 @@ def declared_column_notes(document: SourceDocument) -> tuple[tuple[str, Metadata
         notes.append((ses.identity, MetadataText(literal=IDENTITY_COLUMN_NOTE)))
     if ses.has_declared_schema:
         notes.extend(
-            (column.name, column.note) for column in ses.schema if column.note is not None
+            (column.name, column.note)
+            for column in ses.schema
+            if column.note is not None
         )
         return tuple(notes)
     raw = ses.raw.get("Column notes") or {}

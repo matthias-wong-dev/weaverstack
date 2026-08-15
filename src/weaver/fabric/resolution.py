@@ -205,7 +205,6 @@ class FabricResolver:
             client=self._rest_client(),
         )
 
-
     def sql_endpoint(self, target: WarehouseTarget):
         """Resolve a typed Warehouse to the common SQL endpoint record."""
 
@@ -213,8 +212,7 @@ class FabricResolver:
 
         warehouse = self.warehouse(target)
         payload = self.client.get_json(
-            f"workspaces/{self.workspace.id}/warehouses/"
-            f"{warehouse.id}/connectionString"
+            f"workspaces/{self.workspace.id}/warehouses/{warehouse.id}/connectionString"
         )
         value = payload.get("connectionString")
         if not isinstance(value, str) or not value.strip():

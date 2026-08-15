@@ -185,9 +185,7 @@ def _only_in_prose(source: str, word: str) -> bool:
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
-    stripped = "\n".join(
-        line.split("#")[0] for line in source.splitlines()
-    )
+    stripped = "\n".join(line.split("#")[0] for line in source.splitlines())
     for text in quoted:
         stripped = stripped.replace(text, "")
     return word not in stripped

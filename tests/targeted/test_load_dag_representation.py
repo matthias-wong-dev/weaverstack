@@ -69,17 +69,16 @@ def test_load_dag_maps_physical_targets_back_to_logical_items(estate):
         WeaverItemId.parse(LOAD_PRODUCER): RAW,
         WeaverItemId.parse(LOAD_CONSUMER): REPORTING,
     }
-    assert estate.objects[
-        WeaverDocumentId.parse(f"{LOAD_PRODUCER}/Sales.Order")
-    ].target == RAW
+    assert (
+        estate.objects[WeaverDocumentId.parse(f"{LOAD_PRODUCER}/Sales.Order")].target
+        == RAW
+    )
 
 
 def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
     dag = load_dag(estate, targets=(RAW, REPORTING))
 
-    assert {
-        node.node_id: node.primitive_kind for node in dag.nodes
-    } == {
+    assert {node.node_id: node.primitive_kind for node in dag.nodes} == {
         "load:Lakehouse/Raw_LH/Sales.Export": PYTHON_FOLDER,
         "load:Lakehouse/Raw_LH/Sales.Order": PYTHON_TABLE,
         # A Spark-SQL-authored table dispatches as what it installs as.
@@ -115,9 +114,7 @@ def test_load_dag_excludes_objects_that_own_no_load_primitive(estate):
 def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
     dag = load_dag(estate, targets=(REPORTING,))
 
-    assert node_ids(dag) == (
-        "load:Warehouse/Reporting_WH/Sales.Summary",
-    )
+    assert node_ids(dag) == ("load:Warehouse/Reporting_WH/Sales.Summary",)
     assert dag.edges == ()
 
 
@@ -259,7 +256,9 @@ def test_load_dag_inserts_endpoint_refresh_before_alias_consumers(estate):
     ) in dag.edges
 
 
-def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse(estate):
+def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse(
+    estate,
+):
     dag = load_dag(estate, targets=(RAW, REPORTING))
 
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
@@ -303,9 +302,7 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
         targets=(RAW, REPORTING),
     )
 
-    refreshes = [
-        node for node in dag.nodes if node.primitive_kind == ENDPOINT_REFRESH
-    ]
+    refreshes = [node for node in dag.nodes if node.primitive_kind == ENDPOINT_REFRESH]
     assert [node.node_id for node in refreshes] == ["refresh:Lakehouse/Raw_LH"]
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
         "load:Lakehouse/Raw_LH/Sales.Order",

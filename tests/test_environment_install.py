@@ -30,7 +30,9 @@ from weaver.fabric.resources import Item, ItemNotFoundError, WorkspaceItem
 
 def test_only_weaver_wheels_are_recognised():
     assert is_weaver_wheel("weaverstack-0.1.0-py3-none-any.whl")
-    assert is_weaver_wheel("weaverstack-0.1.1.dev0+g7148d2d4a.d20260723-py3-none-any.whl")
+    assert is_weaver_wheel(
+        "weaverstack-0.1.1.dev0+g7148d2d4a.d20260723-py3-none-any.whl"
+    )
     assert not is_weaver_wheel("pandas-2.2.0-py3-none-any.whl")
     assert not is_weaver_wheel("weaverstack-0.1.0.tar.gz")
 
@@ -44,7 +46,9 @@ def test_version_is_read_back_from_the_wheel_name():
 
 
 def test_staged_wheels_reads_the_custom_library_list():
-    staging = {"customLibraries": {"wheelFiles": ["weaverstack-0.1.0-py3-none-any.whl"]}}
+    staging = {
+        "customLibraries": {"wheelFiles": ["weaverstack-0.1.0-py3-none-any.whl"]}
+    }
     assert staged_wheels(staging) == ["weaverstack-0.1.0-py3-none-any.whl"]
     assert staged_wheels({}) == []
 
@@ -71,15 +75,22 @@ def test_stale_weaver_wheels_are_removed_but_the_kept_one_is_not():
         "weaverstack-0.0.9-py3-none-any.whl",  # stale
         "weaverstack-0.2.0-py3-none-any.whl",  # the one we keep
     ]
-    removed = delete_stale_wheels(_env(), "weaverstack-0.2.0-py3-none-any.whl", staged, client=client)
-    assert set(removed) == {"weaverstack-0.1.0-py3-none-any.whl", "weaverstack-0.0.9-py3-none-any.whl"}
+    removed = delete_stale_wheels(
+        _env(), "weaverstack-0.2.0-py3-none-any.whl", staged, client=client
+    )
+    assert set(removed) == {
+        "weaverstack-0.1.0-py3-none-any.whl",
+        "weaverstack-0.0.9-py3-none-any.whl",
+    }
     assert all("weaverstack-0.2.0" not in path for path in client.deleted)
 
 
 def test_unrelated_custom_libraries_are_never_deleted():
     client = _RecordingClient()
     staged = ["pandas-2.2.0-py3-none-any.whl", "some_internal_lib-1.0-py3-none-any.whl"]
-    removed = delete_stale_wheels(_env(), "weaverstack-0.2.0-py3-none-any.whl", staged, client=client)
+    removed = delete_stale_wheels(
+        _env(), "weaverstack-0.2.0-py3-none-any.whl", staged, client=client
+    )
     assert removed == []
     assert client.deleted == []
 
@@ -136,7 +147,9 @@ class _PublishedClient:
         self.status_code = status_code
 
     def get_json(self, path):
-        raise FabricError("published-library lookup failed", status_code=self.status_code)
+        raise FabricError(
+            "published-library lookup failed", status_code=self.status_code
+        )
 
 
 def test_never_published_environment_is_empty():
@@ -183,16 +196,27 @@ def test_fabric_client_preserves_failure_status(monkeypatch):
 def _wire(monkeypatch, *, published: dict, staged: dict, state: str, wheel_name: str):
     """Stub every Fabric call install() makes; record uploads and publishes."""
 
-    events: dict[str, object] = {"uploaded_yml": False, "uploaded_wheel": False, "published": False}
+    events: dict[str, object] = {
+        "uploaded_yml": False,
+        "uploaded_wheel": False,
+        "published": False,
+    }
 
-    monkeypatch.setattr(env_mod, "build_wheel", lambda root=None, **k: Path(f"dist/{wheel_name}"))
     monkeypatch.setattr(
-        env_mod, "find_workspace", lambda name, client=None: env_mod.WorkspaceItem("ws1", name)
+        env_mod, "build_wheel", lambda root=None, **k: Path(f"dist/{wheel_name}")
+    )
+    monkeypatch.setattr(
+        env_mod,
+        "find_workspace",
+        lambda name, client=None: env_mod.WorkspaceItem("ws1", name),
     )
     monkeypatch.setattr(
         env_mod,
         "find_or_create_environment",
-        lambda ws, name, *, client: (env_mod.Item("env1", name, "Environment", ws.id), False),
+        lambda ws, name, *, client: (
+            env_mod.Item("env1", name, "Environment", ws.id),
+            False,
+        ),
     )
     monkeypatch.setattr(env_mod, "read_published", lambda env, *, client: published)
     monkeypatch.setattr(env_mod, "read_staging", lambda env, *, client: staged)
@@ -223,7 +247,11 @@ def _published_body(wheel: str, yml: str) -> dict:
 
 
 def test_unchanged_source_skips_publish(monkeypatch):
-    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
+    yml = (
+        env_mod.project_root()
+        .joinpath(env_mod.ENVIRONMENT_DEFINITION)
+        .read_text(encoding="utf-8")
+    )
     wheel = "weaverstack-0.1.1.dev999-py3-none-any.whl"
     events = _wire(
         monkeypatch,
@@ -236,11 +264,19 @@ def test_unchanged_source_skips_publish(monkeypatch):
     assert result.wheel_changed is False
     assert result.dependencies_changed is False
     assert result.publish_status == "AlreadyInstalled"
-    assert events == {"uploaded_yml": False, "uploaded_wheel": False, "published": False}
+    assert events == {
+        "uploaded_yml": False,
+        "uploaded_wheel": False,
+        "published": False,
+    }
 
 
 def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
-    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
+    yml = (
+        env_mod.project_root()
+        .joinpath(env_mod.ENVIRONMENT_DEFINITION)
+        .read_text(encoding="utf-8")
+    )
     old_wheel = "weaverstack-0.1.1.dev111-py3-none-any.whl"
     new_wheel = "weaverstack-0.1.1.dev222-py3-none-any.whl"
     events = _wire(
@@ -267,7 +303,11 @@ def test_a_changed_wheel_is_always_published(monkeypatch):
     defaulted off.
     """
 
-    yml = env_mod.project_root().joinpath(env_mod.ENVIRONMENT_DEFINITION).read_text(encoding="utf-8")
+    yml = (
+        env_mod.project_root()
+        .joinpath(env_mod.ENVIRONMENT_DEFINITION)
+        .read_text(encoding="utf-8")
+    )
     events = _wire(
         monkeypatch,
         published=_published_body("weaverstack-0.1.1.dev111-py3-none-any.whl", yml),

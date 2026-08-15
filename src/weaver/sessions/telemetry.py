@@ -101,7 +101,10 @@ class SessionTelemetry:
     @property
     def measures(self) -> Mapping[str, Measure]:
         with self._lock:
-            return {name: Measure(**vars(measure)) for name, measure in self._measures.items()}
+            return {
+                name: Measure(**vars(measure))
+                for name, measure in self._measures.items()
+            }
 
     @property
     def counters(self) -> Mapping[str, int]:
@@ -111,9 +114,12 @@ class SessionTelemetry:
     def to_mapping(self) -> dict:
         return {
             "lifetime": round(self.lifetime, 3),
-            "measures": [measure.to_mapping() for measure in sorted(
-                self.measures.values(), key=lambda measure: measure.name
-            )],
+            "measures": [
+                measure.to_mapping()
+                for measure in sorted(
+                    self.measures.values(), key=lambda measure: measure.name
+                )
+            ],
             "counters": dict(sorted(self.counters.items())),
         }
 

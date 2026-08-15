@@ -67,8 +67,6 @@ def test_directories_report_no_size(store, root):
     assert directory.size is None
 
 
-
-
 def test_deleting_a_directory_needs_recursive(store, root):
     store.write(root / "tree" / "file.txt", b"x")
     with pytest.raises(StoreError, match="recursive"):
@@ -90,11 +88,6 @@ def test_make_directory_is_idempotent(store, root):
 def test_listing_a_missing_location_is_an_error(store, root):
     with pytest.raises(StoreError, match="does not exist"):
         store.list(root / "absent")
-
-
-
-
-
 
 
 def test_the_local_store_refuses_url_locations(store):

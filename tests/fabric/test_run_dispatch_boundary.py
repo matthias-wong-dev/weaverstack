@@ -191,8 +191,10 @@ def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
 def _said(node) -> str:
     """Everything one node reported, as one string to look in."""
 
-    return " ".join(message.message for message in node.messages) + " " + str(
-        getattr(node.result, "error_message", "") or ""
+    return (
+        " ".join(message.message for message in node.messages)
+        + " "
+        + str(getattr(node.result, "error_message", "") or "")
     )
 
 

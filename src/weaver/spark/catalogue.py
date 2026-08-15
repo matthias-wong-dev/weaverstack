@@ -108,9 +108,7 @@ class SparkCatalogue:
         this is the one part of an inventory that has to be asked of Spark.
         """
 
-        return self._named(
-            f"SHOW VIEWS IN {self.qualified_schema(schema)}", "viewName"
-        )
+        return self._named(f"SHOW VIEWS IN {self.qualified_schema(schema)}", "viewName")
 
     def tables(self, schema: str) -> tuple[str, ...]:
         """Table names in one schema of this destination.
@@ -119,7 +117,9 @@ class SparkCatalogue:
         """
 
         views = {name.lower() for name in self.views(schema)}
-        found = self._named(f"SHOW TABLES IN {self.qualified_schema(schema)}", "tableName")
+        found = self._named(
+            f"SHOW TABLES IN {self.qualified_schema(schema)}", "tableName"
+        )
         return tuple(name for name in found if name.lower() not in views)
 
     def _named(self, statement: str, column: str) -> tuple[str, ...]:
@@ -201,4 +201,3 @@ def is_absent(exception: Exception) -> bool:
         or "NoSuchDatabaseException" in type(exception).__name__
         or "NoSuchTableException" in type(exception).__name__
     )
-

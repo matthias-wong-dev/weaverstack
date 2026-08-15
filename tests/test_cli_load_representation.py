@@ -141,9 +141,7 @@ def test_the_command_exposes_every_option_the_contract_names():
 def test_more_than_one_target_is_one_request():
     parser = build_parser()
 
-    load = parser.parse_args(
-        ["load", "Lakehouse/Sales", "Warehouse/Reporting"]
-    )
+    load = parser.parse_args(["load", "Lakehouse/Sales", "Warehouse/Reporting"])
 
     assert load.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
 
@@ -409,9 +407,7 @@ class _FakeResolver:
 
         type(self).asked.append((item.name, item_type))
         if item.name not in type(self).present:
-            raise ItemNotFoundError(
-                f"no {item_type} named {item.name!r} in workspace"
-            )
+            raise ItemNotFoundError(f"no {item_type} named {item.name!r} in workspace")
         return object()
 
 
@@ -576,7 +572,7 @@ def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
 def test_a_resolver_failure_that_is_not_a_missing_item_keeps_its_own_diagnosis(
     livy, capsys
 ):
-    """"Your Lakehouse is gone" is a bad answer to "your token expired"."""
+    """ "Your Lakehouse is gone" is a bad answer to "your token expired"."""
 
     from weaver.errors import CommandError
 

@@ -200,7 +200,9 @@ def _document_graph(
     return Graph(nodes, sorted(edges))
 
 
-def _item_graph(repository: WeaverRepository, resolved: tuple[ItemDependency, ...]) -> Graph:
+def _item_graph(
+    repository: WeaverRepository, resolved: tuple[ItemDependency, ...]
+) -> Graph:
     """The acyclic item-level graph a multi-item build is planned against.
 
     One item depends on another when it reaches into it: either a document
@@ -229,9 +231,7 @@ def _item_graph(repository: WeaverRepository, resolved: tuple[ItemDependency, ..
         edges.add((str(alias.source.item), str(alias.destination.item)))
 
     try:
-        return Graph(
-            (str(item.identity) for item in repository.items), sorted(edges)
-        )
+        return Graph((str(item.identity) for item in repository.items), sorted(edges))
     except GraphError as exc:
         raise GraphError(f"item {exc}") from exc
 
@@ -290,7 +290,9 @@ def _python_references(source: SourceDocument) -> list[tuple[str, WeaverDocument
     return references
 
 
-def _resolved_python_modules(logical_id: WeaverDocumentId, imported) -> list[tuple[str, tuple[str, ...]]]:
+def _resolved_python_modules(
+    logical_id: WeaverDocumentId, imported
+) -> list[tuple[str, tuple[str, ...]]]:
     module = tuple(imported.module.split(".")) if imported.module else ()
     if imported.level:
         base = (FILES,) if logical_id.is_files else ()

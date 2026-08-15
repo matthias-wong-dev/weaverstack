@@ -186,9 +186,7 @@ def _result_from(validation: InstalledValidation, row):
 # --- Lakehouse ----------------------------------------------------------------
 
 
-def _dispatch_python(
-    validation: InstalledValidation, environment: Any, collect: bool
-):
+def _dispatch_python(validation: InstalledValidation, environment: Any, collect: bool):
     """Import the deployed module, construct it, and read it.
 
     The same import machinery a load uses, in the same isolated context: a
@@ -260,7 +258,9 @@ def _count(frame: Any) -> int:
 
 
 def _collected(frame: Any) -> tuple:
-    return tuple(row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect())
+    return tuple(
+        row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect()
+    )
 
 
 def _class_name(validation: InstalledValidation) -> str:
