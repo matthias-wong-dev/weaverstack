@@ -13,6 +13,8 @@ the same either side.
 
 from __future__ import annotations
 
+import re
+
 import shutil
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -189,13 +191,17 @@ class InstallOutcome:
 class BuildEnv:
     """Everything a build test needs, with transport hidden behind callables.
 
-    Assertions are written in the same logical names a payload uses —
-    ``{{object:DWG.Customer}}`` — and resolved against a named destination before
-    they run. That is not sugar. A test that asked for ``DWG.Customer`` would
-    resolve it through the session's own catalogue, which is exactly the mistake
-    the build no longer makes: it would read back from the Lakehouse the object
-    was wrongly written to and pass. Naming the destination in the assertion is
-    what makes the assertion able to see the thing it claims about.
+    Assertions are written in logical names — ``{{object:DWG.Customer}}`` — and
+    resolved against a named destination before they run. That is not sugar. A
+    test that asked for ``DWG.Customer`` would resolve it through the session's
+    own catalogue, which is exactly the mistake the build no longer makes: it
+    would read back from the Lakehouse the object was wrongly written to and
+    pass. Naming the destination in the assertion is what makes the assertion
+    able to see the thing it claims about.
+
+    The substitution is this harness's own. A *payload* carries no tokens any
+    more — a build renders final names — so what is resolved here is only the
+    shorthand a test is written in.
     """
 
     label: str
@@ -241,16 +247,32 @@ class BuildEnv:
         return destination or self.destination
 
     def _addressed(self, text: str, destination) -> str:
-        """Resolve object tokens, where there is a Spark destination to resolve to.
+        """Resolve this harness's shorthand against a named Spark destination.
 
         A Warehouse environment has none — it is reached over TDS and its names
         are ordinary T-SQL — so its statements pass through untouched.
         """
 
-        from weaver.spark import expand
-
         place = self.at(destination)
-        return text if place is None else expand(text, place)
+        if place is None:
+            return text
+        text = re.sub(
+            r"\{\{object:([^.{}]+)\.([^.{}]+)\}\}",
+            lambda match: place.qualify(match.group(1), match.group(2)),
+            text,
+        )
+        text = re.sub(
+            r"\{\{schema:([^.{}]+)\}\}",
+            lambda match: place.qualified_schema(match.group(1)),
+            text,
+        )
+        left = re.search(r"\{\{[^{}]*\}\}", text)
+        if left:
+            raise AssertionError(
+                f"{left.group(0)} is not a name this harness resolves; a test "
+                "writes {{object:Schema.Name}} or {{schema:Name}}"
+            )
+        return text
 
     def query(self, sql: str, *, destination=None) -> list:
         """Run a query, resolving its object tokens against one destination.

@@ -103,7 +103,9 @@ def estate_repository(root: Path):
     )
 
 
-def physical_bundle(repository, *, target_name: str, resolver, store):
+def physical_bundle(
+    repository, *, target_name: str, workspace_name: str, resolver, store
+):
     """A bundle of physical stages and nothing else.
 
     Built from `plan_item_build`, which returns exactly the stages that touch a
@@ -113,7 +115,12 @@ def physical_bundle(repository, *, target_name: str, resolver, store):
     """
 
     item = item_id(ITEM)
-    target = bound_target(id="target-1", item_id=target_name)
+    # The real workspace's display name, because four-part naming is spelled
+    # with it: a plan built with the fixture default would ask Fabric for a
+    # workspace that does not exist, and Fabric would rightly refuse it.
+    target = bound_target(
+        id="target-1", item_id=target_name, workspace_name=workspace_name
+    )
     selected = {key for key in repository.source_documents if key.item == item}
     loads = _load_identities(repository, item)
     planned = plan_item_build(
@@ -185,7 +192,11 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
 
     repository = estate_repository(tmp_path / "repo")
     bundle = physical_bundle(
-        repository, target_name=lakehouse.name, resolver=resolver, store=store
+        repository,
+        target_name=lakehouse.name,
+        workspace_name=fabric_workspace.workspace,
+        resolver=resolver,
+        store=store
     )
     planned_order = [action.id for _s, _b, action in bundle.plan.actions()]
     assert planned_order, "the bundle planned no physical work to install"
