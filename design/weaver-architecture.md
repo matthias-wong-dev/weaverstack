@@ -261,9 +261,9 @@ separate.
 
 ---
 
-# Weaver Lakehouse
+# Weaver catalogue
 
-Each workspace contains a dedicated Weaver Lakehouse that stores the catalogue
+Each workspace names a Warehouse whose `_` schema stores the catalogue
 describing its deployed workspace. It is Weaver's operational metadata store.
 
 The catalogue records information such as:
@@ -452,7 +452,7 @@ Every command executes against a resolved Workspace.
 A Workspace is one Microsoft Fabric workspace, and identifies:
 
 - the workspace, by name
-- the Weaver Lakehouse holding the catalogue
+- the Warehouse holding the catalogue
 - the Fabric Environment Spark work attaches
 
 It says where the resources are. Where Weaver's own code runs is a Session

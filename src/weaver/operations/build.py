@@ -124,7 +124,7 @@ def build(
     )
 
     selected = _item_bindings(bind, resolved_workspace)
-    from ..build_bundle.targets import LakehouseBinding, effective_item_bindings
+    from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
 
     workspace_name = getattr(resolved_workspace, "workspace", None)
     bindings = effective_item_bindings(
@@ -132,7 +132,7 @@ def build(
         control_item=resolved_workspace.catalogue_item,
         workspace_name=workspace_name,
     )
-    control = LakehouseBinding(
+    control = WarehouseBinding(
         resolved_workspace.catalogue_item, workspace_name=workspace_name
     )
     source_location, source_store = _repository_source(source, resolved_workspace)

@@ -10,7 +10,7 @@ source explicitly. Supported sources are a local checkout, a Fabric Notebook's
 Resources directory, or an accessible OneLake location. Remote trees are copied
 to driver-local temporary storage before static parsing.
 
-The control Lakehouse holds catalogue state and build transport, not authored
+The catalogue Warehouse holds catalogue state, not authored
 repository state. A tree can be copied to `Files/weaver_items` through
 `weaver.push.push_item_repository`, which the Fabric suite uses to stage a
 repository; build does not read that location implicitly.

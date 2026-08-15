@@ -177,6 +177,41 @@ def _ensure_lakehouse(client, workspace, role: str):
         return create_lakehouse(workspace, name, client=client)
 
 
+def _ensure_catalogue_warehouse(client, workspace, role: str):
+    """The fixed Warehouse the Weaver catalogue lives in, created if absent.
+
+    Self-healing like the Lakehouses. A Lakehouse of the same name is left from
+    when the catalogue was Delta, and is removed rather than worked around: it
+    would go on answering name lookups for an item type nothing asks for any
+    more, and a reader finding it would reasonably think it was still in use.
+    """
+
+    from weaver.fabric.resources import (
+        LAKEHOUSE,
+        WAREHOUSE,
+        create_warehouse,
+        delete_item,
+        find_item,
+    )
+
+    name = _fixed_name(role)
+    try:
+        stale = find_item(workspace, name, item_type=LAKEHOUSE, client=client)
+    except Exception:
+        pass
+    else:
+        print(f"removing the retired {name} Lakehouse: the catalogue is a Warehouse")
+        try:
+            delete_item(stale, client=client)
+        except Exception as exc:  # a leftover must not stop the run
+            print(f"warning: could not delete {stale}: {exc}")
+
+    try:
+        return find_item(workspace, name, item_type=WAREHOUSE, client=client)
+    except Exception:
+        return create_warehouse(workspace, name, client=client)
+
+
 def _warehouse_name() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"Weaver_Pytest_{timestamp}_{uuid.uuid4().hex[:4]}"
@@ -224,19 +259,15 @@ def fabric_lakehouses(fabric_workspace_item, fabric_client):
 
 @pytest.fixture(scope="session")
 def fabric_catalogue(fabric_workspace_item, fabric_client):
-    """The fixed Lakehouse standing in as the Weaver Lakehouse for the run.
+    """The fixed Warehouse the Weaver catalogue lives in for the run.
 
-    The Livy session is created against it; Weaver itself comes from the attached
-    Environment, not from here.
-
-    **Schema-enabled**, because the catalogue lives in a schema called ``_`` and a
-    Lakehouse without schemas cannot hold one. **Reused, not recreated** — which is
-    also the more faithful arrangement: production has one Weaver Lakehouse for the
-    life of a session, and its catalogue is meant to persist. ``initialise`` is
-    idempotent, so an existing catalogue reconciles rather than collides.
+    **Reused, not recreated**, which is the faithful arrangement as well as the
+    cheap one: production has one catalogue for the life of a workspace and it
+    is meant to persist. A build reconciles what it finds, so an existing
+    catalogue is the ordinary case rather than a collision.
     """
 
-    return _ensure_lakehouse(fabric_client, fabric_workspace_item, "weaver")
+    return _ensure_catalogue_warehouse(fabric_client, fabric_workspace_item, "weaver")
 
 
 @pytest.fixture(scope="session")
@@ -295,10 +326,21 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
 
     from weaver.workspaces import Workspace
 
+    from weaver.declaration.model import WeaverItemId
+    from weaver.workspaces import TargetDeclaration
+
     return Workspace(
         workspace=fabric_workspace_item.name,
         catalogue=f"Warehouse/{fabric_catalogue.name}",
         environment=environment_name,
+        # A Spark session attaches to a Lakehouse, and the catalogue is no
+        # longer one. The target Lakehouse is the home; which it is carries no
+        # meaning, because every statement names the Lakehouse it is about.
+        lakehouses={
+            _fixed_name("target"): TargetDeclaration(
+                item=WeaverItemId.parse("Lakehouse/Sales")
+            )
+        },
     )
 
 

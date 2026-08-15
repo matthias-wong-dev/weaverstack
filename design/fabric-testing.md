@@ -44,7 +44,7 @@ Create these once, in the workspace you will point the suite at:
 
 | Item | Type | Role |
 |---|---|---|
-| `PYTEST_WEAVER` | Lakehouse | the Weaver Lakehouse — the control plane |
+| `PYTEST_WEAVER` | Warehouse | the Weaver catalogue |
 | `PYTEST_LH_1` | Lakehouse | destination target |
 | `PYTEST_LH_2` | Lakehouse | cross-item alias producer |
 | `PYTEST_LH_3` | Lakehouse | cross-item alias consumer |
@@ -120,7 +120,7 @@ different reason.
 They are separated because they exercise Fabric's resource management rather
 than Weaver's and change rarely, while their create/delete churn slows every run
 of the code actually under development. `create_lakehouse` is still required
-platform integration — ordinary `weaver build` ensures the control Lakehouse — so this says
+platform integration — ordinary `weaver build` ensures the catalogue — so this says
 *when* to run the cover, not that it is unnecessary.
 
 The item names above are defaults; each has a matching
@@ -258,7 +258,7 @@ Lakehouse will accept the name as a relation, and the consumer's very next
 statement failed with *"neither a view nor a table"*. The alias action now waits
 for a real read to succeed before reporting success.
 
-**The session attaches to the Weaver Lakehouse**, which is the production model —
+**The session attaches to the target Lakehouse**, because Fabric creates a Spark session against one —
 the control plane is the fixed attachment, destinations are the variable data
 plane. It used to attach to the *target*, and that made the suite structurally
 unable to fail: a two-part `Schema.Object` happened to land in the right place,

@@ -149,7 +149,7 @@ The handoff points, roughly in the order you meet them.
 | | what it is |
 |---|---|
 | `WeaverRepository` | authored files, parsed and structurally checked — never executed |
-| `Catalogue` | what Weaver installed, read from the control Lakehouse |
+| `Catalogue` | what Weaver installed, read from the catalogue Warehouse over TDS |
 | `TargetInventory` | what a physical target actually holds right now |
 | `BuildState` | `Catalogue` + inventories, as one snapshot the Builder is handed |
 | `BuildBundle` | the plan: sequences → batches → `InstallAction`s, plus frozen payloads |

@@ -144,7 +144,7 @@ alias would be planned before its own source was built.
 Bindings are typed. A Lakehouse item binds to a Lakehouse and a Warehouse item
 binds to a Warehouse; Weaver never infers a destructive target from a bare
 display name. The package-owned `Warehouse/_weaver` item is bound implicitly to
-the mandatory control Lakehouse.
+the mandatory catalogue Warehouse.
 
 ## 4a. Aliases
 
@@ -605,7 +605,6 @@ item layer 1
         prune, managed drops, schemas, aliases, documents, endpoint refresh, load
 
 final batched catalogue publication
-Weaver Lakehouse SQL endpoint refresh
 ```
 
 Items in the same topological layer share their barriers — one batch each —
@@ -639,7 +638,7 @@ Warehouse item has no endpoint of its own to refresh, and an item whose only wor
 was a folder or a schema has changed nothing the endpoint describes.
 
 The refresh is planned host-independently, like the rest of the bundle. The
-Weaver Lakehouse's own refresh closes the build, after catalogue publication.
+Nothing closes the build: catalogue rows are written over TDS into the Warehouse that holds them, and are readable when they commit.
 
 The installer validates bundle shape and payload hashes, resolves the already
 bound targets in its own environment, executes actions, and writes the install

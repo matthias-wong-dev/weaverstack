@@ -5,9 +5,11 @@ Guidance for coding agents working **on weaverstack itself**.
 ## Repository role
 
 `weaverstack` is a data-engineering runtime for Microsoft Fabric built around a
-central control plane. One mandatory **Weaver Lakehouse** holds the workspace
-declaration under `Files/weaver_items` and the authoritative catalogue;
-destination Lakehouses and Warehouses hold only materialised output.
+central catalogue. The **Weaver catalogue** is Weaver's package-owned
+operational metadata, under the `_` schema of a configured Fabric Warehouse —
+which may be Weaver's own or one already holding a user's schemas, since Weaver
+owns `_` there and nothing else. Destination Lakehouses and Warehouses hold only
+materialised output.
 
 The distribution is `weaverstack`; the import is `weaver`.
 
@@ -173,9 +175,13 @@ doers do not know which one they are in.
 
 There is one `build`, one `load` and one `test`. Every build action runs in the
 `Installer` wherever that is, and the state a build plans against is read the
-same way — the catalogue and a Lakehouse's views are Spark SQL, a Lakehouse's
-objects are storage, a Warehouse is TDS. So a desktop `weaver build` needs no
-published wheel: nothing it submits imports Weaver.
+same way — the catalogue is TDS, a Lakehouse's views are Spark SQL, a
+Lakehouse's objects are storage, a Warehouse is TDS. So a desktop `weaver build`
+needs no published wheel: nothing it submits imports Weaver.
+
+Because the catalogue is a Warehouse, a Warehouse-only workflow performs **zero
+Livy submissions**. Catalogue reads, publication and `_.Log` writes must never be
+the reason a Spark session starts.
 
 What crosses as a program is a run's Python primitives, which are deployed
 modules imported where Spark is. `weaver load` therefore requires the published
@@ -241,9 +247,10 @@ These become enforceable as the corresponding code lands:
   be attached to the notebook, and that covers *names* as well as paths: a
   generated statement says which Lakehouse it means, as the native four-part
   `workspace.lakehouse.schema.object`, rendered when the bundle is generated. A
-  bare `Schema.Object` resolves through whatever the session is attached to —
-  which is the Weaver Lakehouse — so it is the ambient-context anti-pattern in
-  disguise.
+  bare `Schema.Object` resolves through whatever the session happens to be
+  attached to, so it is the ambient-context anti-pattern in disguise. The
+  catalogue is the one exception and only because it is not one: `[_].[Registry]`
+  is two parts because a Warehouse connection reaches one database.
 
   There is one narrow exception, and it is bounded by the same rule.
   `weaver.lakehouse.default_lakehouse` reads a notebook's *own* attachment, so a
@@ -474,9 +481,9 @@ relevant design document rather than adding a competing explanation elsewhere.
 ### Terminology
 
 Use the established name for each public concept. In particular: Workspace,
-Environment, Weaver Lakehouse, Lakehouse, Warehouse, target, logical target,
-physical target, repository, catalogue, registry, session, composition, build,
-load, test and assumption. Do not invent synonyms in UI text when a defined term
+Environment, Weaver catalogue, catalogue Warehouse, Lakehouse, Warehouse,
+target, logical target, physical target, repository, catalogue, registry,
+session, composition, build, load, test and assumption. Do not invent synonyms in UI text when a defined term
 already exists.
 
 ### GitHub publishing

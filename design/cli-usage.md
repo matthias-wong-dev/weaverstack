@@ -184,14 +184,14 @@ end of the build in front of it.
 
 ## Wiping a whole estate
 
-Name the Weaver Lakehouse alongside the destinations:
+Name the catalogue Warehouse alongside the destinations:
 
 ```bash
 weaver wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --yes
 ```
 
 `wipe` removes the physical contents of what it is given, then deletes the
-catalogue claims of anything it emptied — unless the control Lakehouse is among
+catalogue claims of anything it emptied — unless the catalogue Warehouse is among
 them, in which case it skips that entirely, because the catalogue tables are
 going with it and deleting rows from a table about to be removed is work nobody
 needs.
@@ -200,7 +200,7 @@ That is worth knowing, because the catalogue tidy is not cheap: it deletes a row
 per claim, and for a from-scratch loop those are rows the next build rewrites
 immediately.
 
-So for a from-scratch loop, wipe the control Lakehouse too. Keep it out only
+So for a from-scratch loop, wipe the catalogue Warehouse too. Keep it out only
 when you mean to preserve the catalogue — decommissioning one target out of an
 estate that carries on.
 
@@ -267,13 +267,13 @@ weaver install --workspace Analytics --environment Runtime
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
 by the ordinary build: `Warehouse/_weaver` is composed into every parsed
-repository, bound to the configured Weaver Lakehouse, and its tables are created
+repository, bound to the configured catalogue Warehouse, and its tables are created
 by ordinary planned actions. A full reset is therefore a wipe followed by a
 build.
 
-The Weaver Lakehouse itself must already exist. It is a Fabric workspace item,
+The catalogue Warehouse itself must already exist. It is a Fabric workspace item,
 so creating one is provisioning rather than building, and a build against a
-missing Weaver Lakehouse fails preflight instead of quietly making one. A
+missing catalogue Warehouse fails preflight instead of quietly making one. A
 desktop build proves it — along with the Environment and every bound Lakehouse
 and Warehouse — from a single workspace listing before it starts a Livy session.
 
@@ -294,7 +294,7 @@ the right side is an invocation-only logical override. Lakehouse and Warehouse
 types must match.
 
 Every build adds the implicit binding from `Warehouse/_weaver` to the configured
-Weaver Lakehouse. Catalogue publication is mandatory and registry certification
+catalogue Warehouse. Catalogue publication is mandatory and registry certification
 is last. Every build treats the repository as authoritative: a document removed
 from it loses its catalogue claims and its physical object is pruned. The build
 planner compares effective signatures with the reconciled Registry.
@@ -373,7 +373,7 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 
 Wipe clears everything in each selected typed target. Physical wipe does not
 require catalogue access; immediate catalogue cleanup is selected separately
-with `--unbind-from` (or the configured control Lakehouse).
+with `--unbind-from` (or the configured catalogue).
 
 ```bash
 weaver wipe \

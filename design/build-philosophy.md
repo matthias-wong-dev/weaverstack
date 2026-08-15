@@ -710,7 +710,7 @@ physical target.
 A two-part `Schema.Object` in a generated statement is this anti-pattern, even
 though it looks like the opposite of one. It carries no path and names no
 Lakehouse — and therefore takes whichever Lakehouse the session happens to be
-attached to. Since the session is attached to the Weaver Lakehouse, every
+attached to. Since the session's attachment carries no meaning, every
 destination statement written that way aims at the control plane.
 
 An object is instead named logically in the payload and resolved against the
