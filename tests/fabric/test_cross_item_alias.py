@@ -41,6 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import staged_repository_root
 from factories import FixtureCatalogue, alias_repository
 
 from weaver.targets import ItemRef
@@ -207,8 +208,9 @@ def alias_estate(
 
     root = tmp_path_factory.mktemp("alias-repo")
     alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
-    upload(store, resolver.weaver_items_root, root)
-    repository = parse_item_repository(resolver.weaver_items_root, store=store)
+    staged = staged_repository_root(resolver, producer.name)
+    upload(store, staged, root)
+    repository = parse_item_repository(staged, store=store)
 
     bindings = item_bindings((PRODUCER, producer.name), (CONSUMER, consumer.name))
     bundle = generate(
@@ -455,8 +457,9 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         consumer=WAREHOUSE_CONSUMER,
         consumer_view=False,
     )
-    upload(store, resolver.weaver_items_root, root)
-    repository = parse_item_repository(resolver.weaver_items_root, store=store)
+    staged = staged_repository_root(resolver, producer.name)
+    upload(store, staged, root)
+    repository = parse_item_repository(staged, store=store)
 
     bundle = generate(
         workspace=fabric_workspace,

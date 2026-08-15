@@ -112,7 +112,7 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
         session=weaver_session,
     )
     assert built.status == "succeeded", [
-        (failure.action_id, failure.error_message) for failure in built.errors
+        (failure.action_id, failure.message) for failure in built.errors
     ]
 
     # The neighbour's objects, its rows and its view are all still there.

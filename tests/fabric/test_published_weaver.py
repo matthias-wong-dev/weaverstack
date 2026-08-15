@@ -35,6 +35,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
+from conftest import staged_repository_root
 from factories import item_id, single_document_repository, warehouse_table
 
 from weaver.build_bundle.executors.base import ResolvedTarget
@@ -334,7 +335,11 @@ def test_the_session_native_store_reads_back_what_it_wrote(
 
 
 def test_a_locally_generated_bundle_installs_inside_fabric(
-    tmp_path, fabric_workspace, clean_disposable_warehouse, livy_session
+    tmp_path,
+    fabric_workspace,
+    fabric_target_lakehouse,
+    clean_disposable_warehouse,
+    livy_session,
 ):
     """Weaver installing a Warehouse from inside a session, on its own identity.
 
@@ -367,7 +372,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
 
     # The declaration is staged in a Lakehouse's Files, as a user's would be.
-    root = resolver.weaver_items_root
+    root = staged_repository_root(resolver, fabric_target_lakehouse.name)
     if store.exists(root):
         store.delete(root, recursive=True)
     local = tmp_path / "repo"

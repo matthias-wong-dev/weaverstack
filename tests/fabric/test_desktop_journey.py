@@ -74,7 +74,7 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
         session=weaver_session,
     )
     assert built.status == "succeeded", [
-        (failure.action_id, failure.error_message) for failure in built.errors
+        (failure.action_id, failure.message) for failure in built.errors
     ]
 
     loaded = weaver.load([lakehouse, warehouse], session=weaver_session)

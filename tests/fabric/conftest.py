@@ -153,6 +153,21 @@ FIXED_ITEMS = {
 }
 
 
+#: Where the suite stages a repository, beneath a Lakehouse's Files. The
+#: catalogue used to hold one and cannot: it is a Warehouse. Staging is all it
+#: ever was, so any Lakehouse will do — the tests name one they already have.
+WEAVER_ITEMS_AREA = "weaver_items"
+
+
+def staged_repository_root(resolver, lakehouse):
+    """Where a test's repository is uploaded, for a build to read it back."""
+
+    from weaver.targets import ItemRef
+
+    item = lakehouse if isinstance(lakehouse, ItemRef) else ItemRef(str(lakehouse))
+    return resolver.files_root(item) / WEAVER_ITEMS_AREA
+
+
 def _fixed_name(role: str) -> str:
     return os.environ.get(f"WEAVER_PYTEST_{role.upper()}", FIXED_ITEMS[role])
 
