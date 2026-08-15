@@ -256,10 +256,8 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
 def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
     """Weaver owns one Files area in a destination, and prune must not claim it.
 
-    There used to be three. The other two held the workspace declaration and
-    retained build bundles, and both belonged to a catalogue Lakehouse that no
-    longer exists — so an ordinary folder of either name is now an ordinary
-    folder.
+    `Files/cli` is the whole reserve. Any other folder is a user's, whatever it
+    is called, so prune sees it and an inventory counts it.
     """
 
     workspace = given_workspace(catalogue="Warehouse/Control")
