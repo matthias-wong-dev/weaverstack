@@ -22,8 +22,8 @@ import pytest
 from weaver.catalogue import (
     DEPENDENCY,
     FOREIGN_KEY_DICTIONARY,
-    INDEX_DICTIONARY,
     INSTALLATION,
+    KEY_DICTIONARY,
     REGISTRY,
     TABLE_DICTIONARY,
     InstallationScope,
@@ -174,7 +174,7 @@ def test_the_clock_is_a_call_not_a_rendered_instant():
     assert statement.count("current_timestamp()") == 3  # one update, two inserts
 
 
-# --- the published build epoch ------------------------------------------------
+# --- the published build build_datetime ------------------------------------------------
 
 
 def _clauses(statement: str) -> tuple[str, str, str]:
@@ -195,8 +195,8 @@ def test_the_epoch_is_a_token_so_the_payload_stays_frozen():
         REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
     )
 
-    assert "CAST('{{epoch}}' AS TIMESTAMP)" in statement
-    assert statement.count("{{epoch}}") == 1
+    assert "CAST('{{build_datetime}}' AS TIMESTAMP)" in statement
+    assert statement.count("{{build_datetime}}") == 1
 
 
 def test_the_epoch_is_written_on_insert_and_nowhere_else():
@@ -213,30 +213,33 @@ def test_the_epoch_is_written_on_insert_and_nowhere_else():
     )
     source, guard, update = _clauses(statement)
 
-    assert "build_epoch" not in source, "not projected — no row carries one"
-    assert "build_epoch" not in guard, "not compared — it differs every build"
-    assert "build_epoch" not in update, "not updated — that is the whole point"
-    assert "`build_epoch`" in statement[statement.index("WHEN NOT MATCHED") :]
+    assert "build_datetime" not in source, "not projected — no row carries one"
+    assert "build_datetime" not in guard, "not compared — it differs every build"
+    assert "build_datetime" not in update, "not updated — only an insert dates a row"
+    assert "`build_datetime`" in statement[statement.index("WHEN NOT MATCHED") :]
 
 
 def test_a_table_without_a_published_column_is_rendered_exactly_as_before():
-    """Only Registry carries an epoch. Nothing else gained a column."""
+    """Only Registry carries an build_datetime. Nothing else gained a column."""
 
     row = {
         "item_type": "Lakehouse",
         "item_name": "Raw",
-        "schema_name": "Sales",
-        "object_name": "Customer",
-        "dependency_name": "Sales.Order",
-        "is_within_item": True,
+        "referencing_schema_name": "Sales",
+        "referencing_object_name": "Customer",
+        "dependency_reference": "Sales.Order",
+        "referenced_item_type": "Lakehouse",
+        "referenced_item_name": "Raw",
+        "referenced_schema_name": "Sales",
+        "referenced_object_name": "Order",
         "signature": "abc",
     }
     statement = render_merge(
         DEPENDENCY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
     )
 
-    assert "{{epoch}}" not in statement
-    assert "build_epoch" not in statement
+    assert "{{build_datetime}}" not in statement
+    assert "build_datetime" not in statement
 
 
 # --- scope -------------------------------------------------------------------
@@ -523,14 +526,14 @@ def test_a_composite_key_delete_names_every_key_column():
         "item_name": "Raw",
         "schema_name": "Sales",
         "object_name": "Order",
-        "index_type": "unique",
+        "key_type": "unique",
         "column_set": "Order number",
         "signature": "abc",
     }
     statement = render_delete_obsolete(
-        INDEX_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
+        KEY_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
     )
-    for column in ("schema_name", "object_name", "index_type", "column_set"):
+    for column in ("schema_name", "object_name", "key_type", "column_set"):
         assert f"`{column}` <=>" in statement
 
 
@@ -557,19 +560,23 @@ def test_an_installation_row_updates_the_target_name_without_a_new_key():
 
 
 def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
+    """An authored physical name resolves to no edge, and the row says so."""
+
     row = {
         "item_type": "Warehouse",
         "item_name": "Reporting",
-        "schema_name": "Rpt",
-        "object_name": "CustomerSummary",
-        "dependency_name": "Sales_LH.Sales.Customer",
-        "is_within_item": False,
+        "referencing_schema_name": "Rpt",
+        "referencing_object_name": "CustomerSummary",
+        "dependency_reference": "Sales_LH.Sales.Customer",
+        "referenced_item_type": None,
+        "referenced_item_name": None,
+        "referenced_schema_name": None,
+        "referenced_object_name": None,
         "signature": "abc",
     }
     statement = render_merge(
         DEPENDENCY, [row], scope=WAREHOUSE_SCOPE, destination=WEAVER
     )
-    assert "AS BOOLEAN) AS `is_within_item`" in statement
     values = statement.split("FROM VALUES")[1].split("AS source_values")[0]
     assert "'Sales_LH.Sales.Customer'" in values
-    assert "false" in values
+    assert "NULL" in values

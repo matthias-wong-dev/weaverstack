@@ -46,7 +46,7 @@ class _Capability:
         return [one for statements, _case in self.calls for one in statements]
 
 
-def _context(capability, destination, *, epoch=None, item="Sales"):
+def _context(capability, destination, *, build_datetime=None, item="Sales"):
     return InstallationContext(
         resolver=None,
         store=None,
@@ -57,7 +57,7 @@ def _context(capability, destination, *, epoch=None, item="Sales"):
         ),
         spark_sql=capability.one,
         spark_sql_batch=capability.many,
-        epoch=epoch,
+        build_datetime=build_datetime,
     )
 
 
@@ -149,11 +149,11 @@ def _batch_action():
     )
 
 
-def _batch_context(capability, *, epoch=None):
+def _batch_context(capability, *, build_datetime=None):
     return _context(
         capability,
         FabricSparkTarget(workspace="Analytics", lakehouse="Control"),
-        epoch=epoch,
+        build_datetime=build_datetime,
         item="Control",
     )
 
@@ -182,31 +182,31 @@ def test_a_batch_is_one_piece_of_work_in_payload_order():
 
 
 def test_every_statement_in_a_batch_gets_the_same_epoch():
-    """The reason the epoch is an installation value rather than a clock call.
+    """The reason the build_datetime is an installation value rather than a clock call.
 
     One build publishes Registry rows for several items in several statements.
     Were each to read the clock, an alias and the source it points at could be
     dated milliseconds apart and then order against each other on the next build
-    — which is exactly the false staleness the epoch exists to prevent.
+    — which is exactly the false staleness the build_datetime exists to prevent.
     """
 
     capability = _Capability()
     payload = (
-        b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST('{{epoch}}' AS TIMESTAMP))\","
-        b" \"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST('{{epoch}}' AS TIMESTAMP))\"]"
+        b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST('{{build_datetime}}' AS TIMESTAMP))\","
+        b" \"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES (CAST('{{build_datetime}}' AS TIMESTAMP))\"]"
     )
 
     SparkSqlBatchExecutor().execute(
         _batch_action(),
         payload,
-        _batch_context(capability, epoch="2026-07-31 09:00:00.000000"),
+        _batch_context(capability, build_datetime="2026-07-31 09:00:00.000000"),
     )
 
     dated = capability.statements
     assert len(dated) == 2
     assert all("2026-07-31 09:00:00.000000" in statement for statement in dated)
     assert dated[0] == dated[1]
-    assert all("{{epoch}}" not in statement for statement in dated)
+    assert all("{{build_datetime}}" not in statement for statement in dated)
 
 
 def test_a_statement_needing_an_epoch_without_one_says_so():
@@ -218,8 +218,8 @@ def test_a_statement_needing_an_epoch_without_one_says_so():
     with pytest.raises(InstallError, match="supplied none"):
         SparkSqlBatchExecutor().execute(
             _batch_action(),
-            b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES ('{{epoch}}')\"]",
-            _batch_context(capability, epoch=None),
+            b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES ('{{build_datetime}}')\"]",
+            _batch_context(capability, build_datetime=None),
         )
 
     assert capability.calls == []

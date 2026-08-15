@@ -334,7 +334,7 @@ class RepositoryAlias:
         shortcut whenever a table was reloaded.
 
         A source that was rebuilt is still a reason to remake the alias — but
-        that is freshness, answered by comparing build epochs in the Registry,
+        that is freshness, answered by comparing build datetimes in the Registry,
         not by this signature. Keeping the two apart is what lets an unchanged
         alias over an unchanged source be left alone.
         """

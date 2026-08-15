@@ -307,7 +307,7 @@ def test_the_publication_epoch_stays_a_token(repository):
 
     lines = statements(after(repository, CUSTOMER)[1])
 
-    assert any("{{epoch}}" in line for line in lines)
+    assert any("{{build_datetime}}" in line for line in lines)
 
 
 def test_a_mixed_change_removes_then_merges(repository):

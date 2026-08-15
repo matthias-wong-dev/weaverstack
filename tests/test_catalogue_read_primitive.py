@@ -99,7 +99,7 @@ def _registry_row(item: WeaverItemId, object_name: str):
         "object_type": "table",
         "object_role": "data",
         "signature": f"sig-{object_name}",
-        "build_epoch": None,
+        "build_datetime": None,
     }
 
 

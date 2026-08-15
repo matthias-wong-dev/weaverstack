@@ -392,7 +392,7 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
     """The one part of the incremental claim a workspace still has to answer.
 
     That an unchanged alias over an unchanged source plans *no action* is decided
-    from signatures and epochs before any pointer is touched, and belongs in
+    from signatures and build datetimes before any pointer is touched, and belongs in
     `tests/targeted/test_alias_planning.py` — installing an estate to watch a
     decision get made was the expensive habit this module is shedding.
 

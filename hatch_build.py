@@ -118,10 +118,7 @@ def compute_version() -> str:
         # A shallow checkout may have no reachable tag but still has exact
         # source identity through HEAD and the working tree.
         return f"0.0.0.dev{_fingerprint(head=head, source_tree=source_tree)}"
-    if (
-        int(match.group("distance")) == 0
-        and source_tree == head_tree
-    ):
+    if int(match.group("distance")) == 0 and source_tree == head_tree:
         return match.group("base")
     fingerprint = _fingerprint(head=head, source_tree=source_tree)
     return f"{_bump_patch(match.group('base'))}.dev{fingerprint}"

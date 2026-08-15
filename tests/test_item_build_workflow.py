@@ -217,7 +217,7 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
 
 def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     item = WeaverItemId.parse("Lakehouse/Raw")
-    epoch = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
+    build_datetime = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
     state = BuildState(
         catalogue=Catalogue(
             {
@@ -231,7 +231,7 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
                             "object_type": "table",
                             "object_role": "data",
                             "signature": "abc123",
-                            "build_epoch": epoch,
+                            "build_datetime": build_datetime,
                         },
                     )
                 }
@@ -248,8 +248,8 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     assert (
         restored.catalogue.registered[
             next(iter(restored.catalogue.registered))
-        ].build_epoch
-        == epoch
+        ].build_datetime
+        == build_datetime
     )
 
 

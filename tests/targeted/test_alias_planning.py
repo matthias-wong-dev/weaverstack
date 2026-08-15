@@ -202,7 +202,7 @@ def test_the_consumer_gets_its_own_endpoint_refresh(estate):
 # --- staleness the graph cannot see -------------------------------------------
 
 
-def certified(repository, *names, epoch=None):
+def certified(repository, *names, build_datetime=None):
     """The Registry as a successful build of these nodes would have left it.
 
     `declared_signatures` is used for aliases too, and deliberately: an alias
@@ -216,7 +216,7 @@ def certified(repository, *names, epoch=None):
     signatures = declared_signatures(repository, {document_id(name) for name in names})
     return {
         document_id(name): registered_document(
-            name, signature=signatures[document_id(name)], build_epoch=epoch
+            name, signature=signatures[document_id(name)], build_datetime=build_datetime
         )
         for name in names
     }
@@ -227,13 +227,13 @@ def test_an_alias_is_stale_when_its_source_was_published_later(estate):
 
     A producer rebuilt by some *earlier* build is, to this one, entirely
     unchanged — nothing in the repository records that it moved. The only
-    surviving evidence is that its Registry row carries a later epoch than the
+    surviving evidence is that its Registry row carries a later build_datetime than the
     alias over it.
     """
 
     registered = {
-        **certified(estate, SOURCE, epoch="2026-01-02T00:00:00"),
-        **certified(estate, ALIAS, epoch="2026-01-01T00:00:00"),
+        **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
+        **certified(estate, ALIAS, build_datetime="2026-01-01T00:00:00"),
     }
 
     stale = stale_alias_destinations(
@@ -245,8 +245,8 @@ def test_an_alias_is_stale_when_its_source_was_published_later(estate):
 
 def test_an_alias_published_after_its_source_is_current(estate):
     registered = {
-        **certified(estate, SOURCE, epoch="2026-01-01T00:00:00"),
-        **certified(estate, ALIAS, epoch="2026-01-02T00:00:00"),
+        **certified(estate, SOURCE, build_datetime="2026-01-01T00:00:00"),
+        **certified(estate, ALIAS, build_datetime="2026-01-02T00:00:00"),
     }
 
     stale = stale_alias_destinations(
@@ -263,7 +263,7 @@ def test_a_missing_registry_row_is_not_staleness(estate):
     object as having moved when it was simply never installed.
     """
 
-    registered = certified(estate, SOURCE, epoch="2026-01-02T00:00:00")
+    registered = certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00")
 
     stale = stale_alias_destinations(
         estate, registered, bound_items={item_id(CONSUMER)}
@@ -276,8 +276,8 @@ def test_an_unbound_consumer_keeps_its_stale_alias(estate):
     """That is the deferral: a build acts only on items it was pointed at."""
 
     registered = {
-        **certified(estate, SOURCE, epoch="2026-01-02T00:00:00"),
-        **certified(estate, ALIAS, epoch="2026-01-01T00:00:00"),
+        **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
+        **certified(estate, ALIAS, build_datetime="2026-01-01T00:00:00"),
     }
 
     stale = stale_alias_destinations(
@@ -294,13 +294,15 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     """An unchanged alias over an unchanged source must not be replaced.
 
     This is the decision `test_cross_item_alias.py` spent a full
-    generate-and-install to observe. It is made from signatures and epochs before
+    generate-and-install to observe. It is made from signatures and build datetimes before
     any pointer is touched, so it belongs here — what Fabric can still say is
     that the shortcut object itself was not disturbed.
     """
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(ALIAS)}
-    registered = certified(estate, SOURCE, VIEW, ALIAS, epoch="2026-01-01T00:00:00")
+    registered = certified(
+        estate, SOURCE, VIEW, ALIAS, build_datetime="2026-01-01T00:00:00"
+    )
     stale = stale_alias_destinations(estate, registered, bound_items=set(targets()))
 
     selection = select_build(

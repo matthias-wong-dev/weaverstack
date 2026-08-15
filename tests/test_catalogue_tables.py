@@ -24,8 +24,8 @@ from weaver.catalogue import (
     DICTIONARY_TABLES,
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
-    INDEX_DICTIONARY,
     INSTALLATION,
+    KEY_DICTIONARY,
     REGISTRY,
     SCHEMA_DICTIONARY,
     SIGNATURE,
@@ -44,7 +44,7 @@ def test_there_are_exactly_eleven_catalogue_tables():
         "FolderDictionary",
         "TableDictionary",
         "ColumnDictionary",
-        "IndexDictionary",
+        "KeyDictionary",
         "ForeignKeyDictionary",
         "TestDictionary",
         "Dependency",
@@ -217,16 +217,16 @@ def test_a_logical_key_is_identified_by_its_columns_not_a_name():
     also means a table may declare several alternate keys without collision.
     """
 
-    assert INDEX_DICTIONARY.key == (
+    assert KEY_DICTIONARY.key == (
         "item_type",
         "item_name",
         "schema_name",
         "object_name",
-        "index_type",
+        "key_type",
         "column_set",
     )
-    assert "index_name" not in INDEX_DICTIONARY.column_names
-    assert "is_unique" not in INDEX_DICTIONARY.column_names
+    assert "index_name" not in KEY_DICTIONARY.column_names
+    assert "is_unique" not in KEY_DICTIONARY.column_names
 
 
 def test_a_relationship_row_is_the_whole_edge():
@@ -242,21 +242,22 @@ def test_a_relationship_row_is_the_whole_edge():
 
 
 def test_a_dependency_records_the_reference_exactly_as_authored():
-    """The row keeps the author's spelling and says whether it stayed at home.
+    """The row keeps the author's spelling alongside the edge Weaver resolved.
 
-    Recording a resolved physical name would let one item appear to depend
-    directly on another's storage. Crossing items is an alias, and aliases are a
-    separate table.
+    The authored spelling is what identifies the row, because it is the one
+    thing every dependency has: an edge that leaves the item through an alias
+    resolves to nothing, and two authored references may reach one object.
     """
 
     assert DEPENDENCY.key == (
         "item_type",
         "item_name",
-        "schema_name",
-        "object_name",
-        "dependency_name",
+        "referencing_schema_name",
+        "referencing_object_name",
+        "dependency_reference",
     )
-    assert "is_within_item" in DEPENDENCY.column_names
+    assert "referenced_item_type" in DEPENDENCY.column_names
+    assert "referenced_object_name" in DEPENDENCY.column_names
 
 
 def test_an_alias_is_keyed_by_the_name_its_own_item_presents():

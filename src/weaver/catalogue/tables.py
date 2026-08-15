@@ -29,7 +29,8 @@ columns are appended by the ordinary build and so are not declared here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Mapping
 
 from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
 
@@ -69,14 +70,56 @@ VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
 #: How a logical key is classified. Both are declared, neither is built.
 KEY_PRIMARY = "primary_key"
 KEY_UNIQUE = "unique"
-INDEX_TYPES = (KEY_PRIMARY, KEY_UNIQUE)
+KEY_TYPES = (KEY_PRIMARY, KEY_UNIQUE)
+
+#: The public spelling of every stored vocabulary. Internal Python keeps its
+#: snake-case values; the persistence boundary writes and reads these.
+OBJECT_TYPE_VOCABULARY = {
+    "folder": "Folder",
+    "table": "Table",
+    "view": "View",
+    "file": "File",
+    "stored_procedure": "Stored procedure",
+}
+
+OBJECT_ROLE_VOCABULARY = {
+    ROLE_DATA: "Data",
+    ROLE_LOAD: "Load",
+    ROLE_TEST: "Test",
+    ROLE_ASSUMPTION: "Assumption",
+}
+
+KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
+
+TEST_TYPE_VOCABULARY = {ROLE_TEST: "Test", ROLE_ASSUMPTION: "Assumption"}
 
 STRING = "string"
 BOOLEAN = "boolean"
 TIMESTAMP = "timestamp"
+BIGINT = "bigint"
 
 #: The signature column, on every table.
 SIGNATURE = "signature"
+
+#: Words the public spelling keeps in upper case. Everything else in a column
+#: name is an ordinary word: capitalised when it leads, lower case after.
+INITIALISMS = {"id": "ID", "sql": "SQL", "url": "URL", "sk": "SK"}
+
+
+def public_column_name(name: str) -> str:
+    """The public Warehouse spelling of an internal column name.
+
+    Internal keys are snake case and the persistence boundary maps them to the
+    sentence-case names the ``_`` schema publishes: first word capitalised,
+    ordinary words after it in lower case, established initialisms upper.
+    """
+
+    words = [INITIALISMS.get(word, word) for word in name.split("_")]
+    first = words[0]
+    if first not in INITIALISMS.values():
+        first = first[:1].upper() + first[1:]
+    return " ".join([first, *words[1:]])
+
 
 #: When the Registry row was last published — one value shared by every row a
 #: completed build writes, so two rows can be ordered against each other.
@@ -90,9 +133,9 @@ SIGNATURE = "signature"
 #:
 #: It advances only when the row is inserted. Every rebuild goes through an
 #: insert — a rebuilt object has its Registry claim removed before any physical
-#: work — so an object that was not rebuilt keeps the epoch it had, even if some
-#: other column of its row changed.
-BUILD_EPOCH = "build_epoch"
+#: work — so an object that was not rebuilt keeps the datetime it had, even if
+#: some other column of its row changed.
+BUILD_DATETIME = "build_datetime"
 
 #: Weaver's audit columns as this Delta table actually spells them. They are not
 #: business columns — the build appends them to every table it creates — but the
@@ -105,7 +148,12 @@ AUDIT_INSERT_COLUMN, AUDIT_UPDATE_COLUMN, AUDIT_DELETE_COLUMN = AUDIT_COLUMN_NAM
 
 @dataclass(frozen=True)
 class CatalogueColumn:
-    """One column of a catalogue table."""
+    """One column of a catalogue table.
+
+    ``name`` is the internal snake-case key every Python layer uses. ``public``
+    is how the ``_`` schema spells it, and is derived unless the public
+    vocabulary differs from the internal concept.
+    """
 
     name: str
     type: str = STRING
@@ -117,8 +165,43 @@ class CatalogueColumn:
     #: from the declaration — so it is created and described like any other
     #: column, but never appears in a projected row and never takes part in the
     #: comparison that decides whether a row changed. See
-    #: :data:`BUILD_EPOCH`, the only one.
+    #: :data:`BUILD_DATETIME`, the only one.
     published: bool = False
+    #: The public spelling, when derivation would not produce it.
+    public: str | None = None
+    #: Internal value to public value, for a column with a frozen vocabulary.
+    #: Outside the comparison because a column's name already determines it, and
+    #: a mapping would make the column unhashable.
+    vocabulary: Mapping[str, str] | None = field(default=None, compare=False)
+
+    @property
+    def public_name(self) -> str:
+        return self.public or public_column_name(self.name)
+
+    def to_public(self, value: object) -> object:
+        """One projected value as the ``_`` schema stores it."""
+
+        if self.vocabulary is None or value is None:
+            return value
+        try:
+            return self.vocabulary[str(value)]
+        except KeyError:
+            raise ValueError(
+                f"{self.name} does not accept {value!r}; expected one of "
+                + ", ".join(sorted(self.vocabulary))
+            ) from None
+
+    def from_public(self, value: object) -> object:
+        """One stored value as internal Python spells it."""
+
+        if self.vocabulary is None or value is None:
+            return value
+        for internal, public in self.vocabulary.items():
+            if public == value:
+                return internal
+        # A newer catalogue may hold a value this Weaver has no name for. It is
+        # data rather than a failure, so it is returned as written.
+        return value
 
 
 @dataclass(frozen=True)
@@ -202,6 +285,19 @@ class CatalogueTable:
             if column.name == name:
                 return column
         raise KeyError(f"{self.qualified} has no column {name!r}")
+
+    def public_name_of(self, name: str) -> str:
+        """The public spelling of one column, audit columns included."""
+
+        if name in AUDIT_COLUMN_NAMES:
+            return public_column_name(name)
+        return self.column(name).public_name
+
+    @property
+    def public_columns(self) -> tuple[str, ...]:
+        """Every physical column as the ``_`` schema spells it, in order."""
+
+        return tuple(self.public_name_of(name) for name in self.physical_columns)
 
 
 # --- the installation scope, shared by every table ---------------------------
@@ -336,27 +432,28 @@ REGISTRY = CatalogueTable(
         CatalogueColumn(
             "object_type",
             not_null=True,
+            vocabulary=OBJECT_TYPE_VOCABULARY,
             description=(
-                "What was installed: folder, table, view, file or stored_procedure."
+                "What was installed: Folder, Table, View, File or Stored procedure."
             ),
         ),
         CatalogueColumn(
             "object_role",
             not_null=True,
+            vocabulary=OBJECT_ROLE_VOCABULARY,
             description=(
-                "What the object is for: data holds or shapes rows; load does "
+                "What the object is for: Data holds or shapes rows; Load does "
                 "the work that fills one."
             ),
         ),
         _signature("the object's source file"),
         CatalogueColumn(
-            BUILD_EPOCH,
+            BUILD_DATETIME,
             TIMESTAMP,
             published=True,
             description=(
                 "When this row was published, shared by every row one completed "
-                "build wrote. Null for a row published before epochs existed, "
-                "which orders as older than any epoch."
+                "build wrote."
             ),
         ),
     ),
@@ -461,8 +558,8 @@ COLUMN_DICTIONARY = CatalogueTable(
     ),
 )
 
-INDEX_DICTIONARY = CatalogueTable(
-    name="IndexDictionary",
+KEY_DICTIONARY = CatalogueTable(
+    name="KeyDictionary",
     description=(
         "Declared logical keys — the primary key and any alternate keys. Neither "
         "is built and neither is enforced; they say which column sets identify a "
@@ -473,14 +570,17 @@ INDEX_DICTIONARY = CatalogueTable(
         SCOPE_ITEM_NAME,
         "schema_name",
         "object_name",
-        "index_type",
+        "key_type",
         "column_set",
     ),
     columns=(
         *_scope(),
         *_object(),
         CatalogueColumn(
-            "index_type", not_null=True, description="primary_key or unique."
+            "key_type",
+            not_null=True,
+            vocabulary=KEY_TYPE_VOCABULARY,
+            description="Primary key or Unique.",
         ),
         CatalogueColumn(
             "column_set",
@@ -494,48 +594,58 @@ INDEX_DICTIONARY = CatalogueTable(
 FOREIGN_KEY_DICTIONARY = CatalogueTable(
     name="ForeignKeyDictionary",
     description=(
-        "Declared relationships to parent objects — an ER model rather than "
+        "Declared relationships to primary objects — an ER model rather than "
         "database constraints. Nothing is enforced. Because a relationship has "
         "no name, the row is the edge: every column is part of the key, so two "
         "objects may be related several times over and an object may reference "
-        "itself. The parent is named by its own logical item."
+        "itself. The owning item scopes the foreign side; the primary side "
+        "carries item identity because it may cross items."
     ),
     key=(
         SCOPE_ITEM_TYPE,
         SCOPE_ITEM_NAME,
-        "schema_name",
-        "object_name",
-        "column_set",
-        "reference_item_type",
-        "reference_item_name",
-        "reference_schema_name",
-        "reference_object_name",
-        "reference_column_set",
+        "foreign_schema_name",
+        "foreign_object_name",
+        "foreign_column_set",
+        "primary_item_type",
+        "primary_item_name",
+        "primary_schema_name",
+        "primary_object_name",
+        "primary_column_set",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
-            "column_set",
+            "foreign_schema_name",
             not_null=True,
-            description="This object's columns, comma-separated in declared order.",
+            description="The schema of the object declaring the relationship.",
         ),
         CatalogueColumn(
-            "reference_item_type", not_null=True, description="The parent's item type."
-        ),
-        CatalogueColumn(
-            "reference_item_name", not_null=True, description="The parent's item name."
-        ),
-        CatalogueColumn(
-            "reference_schema_name", not_null=True, description="The parent's schema."
-        ),
-        CatalogueColumn(
-            "reference_object_name", not_null=True, description="The parent's name."
-        ),
-        CatalogueColumn(
-            "reference_column_set",
+            "foreign_object_name",
             not_null=True,
-            description="The parent's columns, paired in order with this object's.",
+            description="The name of the object declaring the relationship.",
+        ),
+        CatalogueColumn(
+            "foreign_column_set",
+            not_null=True,
+            description="The foreign columns, comma-separated in declared order.",
+        ),
+        CatalogueColumn(
+            "primary_item_type", not_null=True, description="The primary item's type."
+        ),
+        CatalogueColumn(
+            "primary_item_name", not_null=True, description="The primary item's name."
+        ),
+        CatalogueColumn(
+            "primary_schema_name", not_null=True, description="The primary schema."
+        ),
+        CatalogueColumn(
+            "primary_object_name", not_null=True, description="The primary object."
+        ),
+        CatalogueColumn(
+            "primary_column_set",
+            not_null=True,
+            description="The primary columns, paired in order with the foreign ones.",
         ),
         _signature("the object's source file"),
     ),
@@ -558,9 +668,10 @@ TEST_DICTIONARY = CatalogueTable(
         CatalogueColumn(
             "test_type",
             not_null=True,
+            vocabulary=TEST_TYPE_VOCABULARY,
             description=(
-                "test compares an expected relation with an actual one; "
-                "assumption returns the rows that contradict it."
+                "Test compares an expected relation with an actual one; "
+                "Assumption returns the rows that contradict it."
             ),
         ),
         *_described(what="validation"),
@@ -580,30 +691,50 @@ TEST_DICTIONARY = CatalogueTable(
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
-        "One row per resolved dependency edge, scoped to the consuming item and "
-        "keeping the reference exactly as the author wrote it. Crossing items or "
-        "engines is an alias, recorded separately, not a dependency that quietly "
-        "changes namespace."
+        "One row per resolved dependency edge, scoped to the referencing item. "
+        "The referenced side is the edge Weaver resolved; the authored spelling "
+        "is kept alongside it. Crossing items or engines is an alias, recorded "
+        "separately, not a dependency that quietly changes namespace."
     ),
     key=(
         SCOPE_ITEM_TYPE,
         SCOPE_ITEM_NAME,
-        "schema_name",
-        "object_name",
-        "dependency_name",
+        "referencing_schema_name",
+        "referencing_object_name",
+        "dependency_reference",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
-            "dependency_name",
+            "referencing_schema_name",
+            not_null=True,
+            description="The schema of the object declaring the dependency.",
+        ),
+        CatalogueColumn(
+            "referencing_object_name",
+            not_null=True,
+            description="The name of the object declaring the dependency.",
+        ),
+        CatalogueColumn(
+            "dependency_reference",
             not_null=True,
             description="The dependency exactly as the owning document wrote it.",
         ),
         CatalogueColumn(
-            "is_within_item",
-            BOOLEAN,
-            description="Whether the producer is owned by the same logical item.",
+            "referenced_item_type",
+            description="The referenced item's type, when the edge resolved.",
+        ),
+        CatalogueColumn(
+            "referenced_item_name",
+            description="The referenced item's name, when the edge resolved.",
+        ),
+        CatalogueColumn(
+            "referenced_schema_name",
+            description="The referenced schema, when the edge resolved.",
+        ),
+        CatalogueColumn(
+            "referenced_object_name",
+            description="The referenced object, when the edge resolved.",
         ),
         _signature("the owning object's source file"),
     ),
@@ -660,7 +791,7 @@ DICTIONARY_TABLES = (
     FOLDER_DICTIONARY,
     TABLE_DICTIONARY,
     COLUMN_DICTIONARY,
-    INDEX_DICTIONARY,
+    KEY_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     TEST_DICTIONARY,
     DEPENDENCY,
@@ -673,6 +804,116 @@ DICTIONARY_TABLES = (
 CATALOGUE_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
+
+
+# --- operational evidence -----------------------------------------------------
+
+#: How a settled unit of work ended.
+RESULT_VOCABULARY = {
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "skipped": "Skipped",
+    "blocked": "Blocked",
+}
+
+
+@dataclass(frozen=True)
+class EvidenceTable:
+    """A Weaver-owned ``_`` table that records what happened rather than what is
+    installed.
+
+    It carries no signature, is keyed on a surrogate rather than on installation
+    scope, and is append-oriented — so it shares the public-name machinery with
+    :class:`CatalogueTable` but none of its reconciliation invariants.
+    """
+
+    name: str
+    description: str
+    columns: tuple[CatalogueColumn, ...]
+
+    @property
+    def qualified(self) -> str:
+        return f"{CATALOGUE_SCHEMA}.{self.name}"
+
+    @property
+    def column_names(self) -> tuple[str, ...]:
+        return tuple(column.name for column in self.columns)
+
+    def column(self, name: str) -> CatalogueColumn:
+        for column in self.columns:
+            if column.name == name:
+                return column
+        raise KeyError(f"{self.qualified} has no column {name!r}")
+
+    def public_name_of(self, name: str) -> str:
+        return self.column(name).public_name
+
+    @property
+    def public_columns(self) -> tuple[str, ...]:
+        return tuple(column.public_name for column in self.columns)
+
+
+LOG = EvidenceTable(
+    name="Log",
+    description=(
+        "One row per settled unit of Weaver work. Operational evidence rather "
+        "than installed state, so it is append-oriented and is not reconciled "
+        "against a declaration."
+    ),
+    columns=(
+        CatalogueColumn(
+            "log_sk",
+            not_null=True,
+            description=(
+                "A meaningless immutable surrogate row key. Generated where the "
+                "row is, because a Fabric Warehouse has no identity column and "
+                "several sessions may append at once."
+            ),
+        ),
+        CatalogueColumn(
+            "workflow_id",
+            not_null=True,
+            description=(
+                "Correlates every row one workflow produced. A composed run "
+                "shares one value across its operations."
+            ),
+        ),
+        CatalogueColumn(
+            "task_type", not_null=True, description="The kind of work that settled."
+        ),
+        CatalogueColumn("target_type", description="The physical target's type."),
+        CatalogueColumn("target_name", description="The physical target's name."),
+        CatalogueColumn("schema_name", description="The object's schema."),
+        CatalogueColumn("object_name", description="The object's name."),
+        CatalogueColumn(
+            "result",
+            not_null=True,
+            vocabulary=RESULT_VOCABULARY,
+            description="Succeeded, Failed, Skipped or Blocked.",
+        ),
+        CatalogueColumn(
+            "started_datetime", TIMESTAMP, description="When the work started."
+        ),
+        CatalogueColumn(
+            "completed_datetime", TIMESTAMP, description="When the work settled."
+        ),
+        CatalogueColumn(
+            "duration_milliseconds",
+            BIGINT,
+            description="How long the work took, in milliseconds.",
+        ),
+        CatalogueColumn("message", description="Concise human-readable information."),
+        CatalogueColumn(
+            "details", description="Structured task-specific detail, as JSON."
+        ),
+        CatalogueColumn(
+            AUDIT_INSERT_COLUMN,
+            TIMESTAMP,
+            not_null=True,
+            description="When the row was written.",
+        ),
+    ),
+)
 
 
 def table(name: str) -> CatalogueTable:

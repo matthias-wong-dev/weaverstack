@@ -17,7 +17,7 @@ from .tables import (
     DEPENDENCY,
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
-    INDEX_DICTIONARY,
+    KEY_DICTIONARY,
     OBJECT_TYPES,
     REGISTRY,
     TABLE_DICTIONARY,
@@ -68,9 +68,17 @@ class CatalogueClaim:
 _COMMON_OBJECT_RULES = (
     CatalogueClaimRule(REGISTRY),
     CatalogueClaimRule(COLUMN_DICTIONARY),
-    CatalogueClaimRule(INDEX_DICTIONARY),
-    CatalogueClaimRule(FOREIGN_KEY_DICTIONARY),
-    CatalogueClaimRule(DEPENDENCY),
+    CatalogueClaimRule(KEY_DICTIONARY),
+    # A relationship table names both sides, so the owning object is found under
+    # the side it declares rather than under a bare schema/object pair.
+    CatalogueClaimRule(
+        FOREIGN_KEY_DICTIONARY,
+        predicate_columns=("foreign_schema_name", "foreign_object_name"),
+    ),
+    CatalogueClaimRule(
+        DEPENDENCY,
+        predicate_columns=("referencing_schema_name", "referencing_object_name"),
+    ),
 )
 
 # Each Registry object type requires an ownership declaration before reconciliation.

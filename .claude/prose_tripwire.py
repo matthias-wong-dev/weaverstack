@@ -7,7 +7,6 @@ import re
 import subprocess
 import sys
 
-
 PATTERNS = {
     "the whole point": re.compile(r"\bthe whole point\b", re.IGNORECASE),
     "the key point": re.compile(r"\bthe key point\b", re.IGNORECASE),
@@ -15,7 +14,9 @@ PATTERNS = {
     "obviously": re.compile(r"\bobviously\b", re.IGNORECASE),
     "simply": re.compile(r"\bsimply\b", re.IGNORECASE),
     "merely": re.compile(r"\bmerely\b", re.IGNORECASE),
-    "this is not X; it is Y": re.compile(r"\bthis is not\b.+\b(it is|it's)\b", re.IGNORECASE),
+    "this is not X; it is Y": re.compile(
+        r"\bthis is not\b.+\b(it is|it's)\b", re.IGNORECASE
+    ),
 }
 SKIP = {"AGENTS.md", "CLAUDE.md", ".claude/prose_tripwire.py"}
 
@@ -59,7 +60,9 @@ def main() -> int:
             continue
         for label, pattern in PATTERNS.items():
             if pattern.search(text):
-                prompts.append(f"{path}:{line_number}: review '{label}': {text.strip()}")
+                prompts.append(
+                    f"{path}:{line_number}: review '{label}': {text.strip()}"
+                )
 
     if prompts:
         print("Prose review prompts (review context; these are not failures):")

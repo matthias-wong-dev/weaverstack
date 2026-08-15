@@ -272,8 +272,9 @@ resolves it against a named destination, defaulting to the target:
 
 ```python
 build_env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")
-build_env.query("SELECT * FROM {{object:_.Registry}}",
-                destination=build_env.weaver_destination)
+build_env.query(
+    "SELECT * FROM {{object:_.Registry}}", destination=build_env.weaver_destination
+)
 ```
 
 See the master CLI plan for the Fabric contract these tests enforce, including

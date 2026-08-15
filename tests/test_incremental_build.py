@@ -499,13 +499,13 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
     )
 
 
-def _dated(rows, item_text, schema, name, epoch):
-    """Stamp one Registry row with a build epoch, as a publication would."""
+def _dated(rows, item_text, schema, name, build_datetime):
+    """Stamp one Registry row with a build build_datetime, as a publication would."""
 
     item = WeaverItemId.parse(item_text)
     tables = dict(rows[item])
     tables[REGISTRY.name] = tuple(
-        {**row, "build_epoch": epoch}
+        {**row, "build_datetime": build_datetime}
         if (row["schema_name"], row["object_name"]) == (schema, name)
         else row
         for row in tables[REGISTRY.name]
@@ -593,13 +593,13 @@ def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
 
 
 def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
-    """Upgrading from a catalogue written before epochs existed must not rebuild
+    """Upgrading from a catalogue written before build datetimes existed must not rebuild
     the estate. Both rows read as null, and null is not newer than null."""
 
     repository = _repository(_dependency_estate(tmp_path))
     registered = Catalogue(_alias_catalogue(repository)).registered
 
-    assert all(document.build_epoch is None for document in registered.values())
+    assert all(document.build_datetime is None for document in registered.values())
     assert (
         stale_alias_destinations(
             repository,
@@ -614,7 +614,7 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
     """A producer rebuilt by an *earlier* build is unchanged to this one.
 
     Binding it changes nothing: its signature matches the repository, so the
-    descendant walk never starts from it, and only the epochs record that it
+    descendant walk never starts from it, and only the build datetimes record that it
     moved after the alias was made. Were the comparison skipped whenever the
     producer happened to be bound, that estate would stay stale forever.
     """
@@ -668,7 +668,7 @@ def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
 
 def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
     """Generating twice must give the same bytes, or a bundle could not be
-    compared against another built from the same source. The epoch is a token in
+    compared against another built from the same source. The build_datetime is a token in
     the payload for exactly this reason — the installer resolves it, not the
     planner."""
 
@@ -691,8 +691,8 @@ def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
     )
     payload = store.read(bundle.location.join(*registry.payload.split("/"))).decode()
 
-    assert "{{epoch}}" in payload
-    assert "build_epoch" in payload
+    assert "{{build_datetime}}" in payload
+    assert "build_datetime" in payload
 
 
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):

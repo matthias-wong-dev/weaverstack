@@ -300,21 +300,21 @@ starts from a node whose declaration changed, and a producer rebuilt by some
 earlier build is, to this one, entirely unchanged.
 
 **Deferral falls out of it.** Build only the producer and nothing about the
-consumer is touched: its alias keeps its old epoch and stays stale until the
+consumer is touched: its alias keeps its old build_datetime and stays stale until the
 consumer is next built, when the comparison selects it.
 
-The epoch is set on **insert and never on update**. Every rebuild reaches the
+The build_datetime is set on **insert and never on update**. Every rebuild reaches the
 merge as an insert, because a rebuilt object has its Registry claim deleted before
 any physical work — so an update can only be a row whose projection moved while
 the object stood still, and dating it would claim a rebuild that never happened.
 
-It is written as an `{{epoch}}` token resolved once per installation, not a
+It is written as an `{{build_datetime}}` token resolved once per installation, not a
 literal frozen at generation time and not `current_timestamp()`. A literal would
 give the same repository different payload bytes every run and destroy bundle
 identity; a clock call is read per statement, and one build publishes Registry
 rows in several statements, so an alias and its source could be dated apart and
-then order against each other. A row written before epochs existed reads as null,
-which orders as older than any epoch and is not compared against another null.
+then order against each other. A row written before build datetimes existed reads as null,
+which orders as older than any build_datetime and is not compared against another null.
 
 ## 8. Impact determination
 
@@ -325,7 +325,7 @@ node through its transitive descendants:
 flowchart TD
     R["Incoming documents and alias destinations"]
     C["Reconciled Registry"]
-    E["Stale aliases, by build epoch"]
+    E["Stale aliases, by build build_datetime"]
 
     R --> I["determine_impact"]
     C --> I

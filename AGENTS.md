@@ -348,9 +348,9 @@ assert not seen.schema("weaver_dwg")
 rather than a call per question:
 
 ```python
-assert env.query("SHOW TABLES IN ...")          # one round trip
-assert env.schema_exists("DWG")                  # another
-assert not env.schema_exists("DWG", weaver)      # another
+assert env.query("SHOW TABLES IN ...")  # one round trip
+assert env.schema_exists("DWG")  # another
+assert not env.schema_exists("DWG", weaver)  # another
 ```
 
 This is cheaper, but the reason it is *better* is accuracy. Separate calls

@@ -238,8 +238,11 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
     assert row["item_type"] == "Warehouse"
     assert row["item_name"] == "Reporting"
-    assert row["dependency_name"] == "Sales.PortableCustomer"
-    assert row["is_within_item"] is False
+    assert row["dependency_reference"] == "Sales.PortableCustomer"
+    # The author wrote a local name; resolution followed the alias across, so
+    # the row keeps both the spelling and the item the edge actually reached.
+    assert row["referenced_item_type"] == "Lakehouse"
+    assert row["referenced_item_name"] == "Curated"
 
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
@@ -295,7 +298,7 @@ class _Shaped(_FakeCatalogue):
 
 
 def test_a_registry_without_the_epoch_column_is_refused_by_name():
-    """It can be read but not written — the merge sets the epoch on every insert.
+    """It can be read but not written — the merge sets the build_datetime on every insert.
 
     Failing here says which column of which table is wrong. Letting it through
     would move the failure into the install, where it arrives as an engine
@@ -305,9 +308,9 @@ def test_a_registry_without_the_epoch_column_is_refused_by_name():
     from weaver.catalogue.state import read_catalogue_state
     from weaver.errors import BuildError
 
-    older = [name for name in REGISTRY.physical_columns if name != "build_epoch"]
+    older = [name for name in REGISTRY.physical_columns if name != "build_datetime"]
 
-    with pytest.raises(BuildError, match=r"Registry\.build_epoch"):
+    with pytest.raises(BuildError, match=r"Registry\.build_datetime"):
         read_catalogue_state(_Shaped({"Registry": older}), ())
 
 

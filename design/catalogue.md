@@ -71,12 +71,12 @@ plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 | Table | One row per | Notes |
 |---|---|---|
 | `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
-| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows, `load` for something that does the work of filling one, and `test` or `assumption` for the runnable form of a validation. `build_epoch` dates the build that published the row. |
+| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows, `load` for something that does the work of filling one, and `test` or `assumption` for the runnable form of a validation. `build_datetime` dates the build that published the row. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
 | `_.FolderDictionary` | managed folder | Keeps the folder's two-part identity, and its file key — the scope of what Weaver manages inside it. |
 | `_.ColumnDictionary` | described column | Purely descriptive: the columns an author wrote a note about, plus Weaver's surrogate. Not every column. |
-| `_.IndexDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
+| `_.KeyDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
 | `_.TestDictionary` | Test or Assumption | The **logical** authored validation — `test_type`, description and the declared `primary_key`. The procedure or module it compiles to is a physical artefact and is certified in `_.Registry`; there is no Registry row under the logical validation ID. See [validation](validation.md). |
 | `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
@@ -152,8 +152,8 @@ desired catalogue, followed by an idempotent merge for desired rows.
 The desired catalogue is derived in three steps, each one idea:
 
 ```python
-logical     = Catalogue.from_repository(repository)   # everything the source declares
-certified   = retaining(logical, repository, ids)     # what this build actually proved
+logical = Catalogue.from_repository(repository)  # everything the source declares
+certified = retaining(logical, repository, ids)  # what this build actually proved
 publishable = for_targets(certified, repository, ids, kinds)
 ```
 
@@ -166,7 +166,7 @@ Publication is then a diff:
 
 ```python
 changes = current.diff(publishable)
-dml     = changes.render_dml(installation=...)
+dml = changes.render_dml(installation=...)
 ```
 
 `current` produces the report of new, changed, unchanged, and removed rows.
@@ -179,7 +179,7 @@ the reader's prior state; the targeted diff tests assert that this produces
 byte-identical statements for different persisted catalogues.
 
 Nothing about a binding reaches the projection. Target name, Weaver version, the
-Installation row and the publication epoch are supplied at render time, because
+Installation row and the publication build_datetime are supplied at render time, because
 they are things a *build* knows and a repository does not.
 
 Generation does not let the catalogue's *state* reach the plan. It briefly did, to
@@ -206,7 +206,7 @@ An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by 
 comparison of every non-key column, so rebuilding unchanged Weaver document writes nothing and
 does not move `row_update_datetime`.
 
-`build_epoch` is supplied by the installer, excluded from the merge
+`build_datetime` is supplied by the installer, excluded from the merge
 comparison, and written only on insert. Including it in the comparison would
 update every row on every build because the value changes for each publication.
 
@@ -310,11 +310,11 @@ with the same schema and name.
 ### A Lakehouse has two addresses, and a build needs both
 
 ```python
-location = resolver.lakehouse_spark_location(target)   # where the bytes are
+location = resolver.lakehouse_spark_location(target)  # where the bytes are
 location.table_path("Sales", "Customer")
 location.folder_path("Sales", "Export")
 
-destination = resolver.spark_destination(target)       # what it is called
+destination = resolver.spark_destination(target)  # what it is called
 destination.qualify("Sales", "Customer")
 ```
 

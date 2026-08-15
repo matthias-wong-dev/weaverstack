@@ -194,5 +194,5 @@ def test_the_only_payload_token_left_is_the_publication_epoch():
 
     public = {name for name in vars(tokens) if not name.startswith("_")}
 
-    assert "EPOCH_TOKEN" in public
+    assert "BUILD_DATETIME_TOKEN" in public
     assert not {"OBJECT", "SCHEMA", "expand", "object_token", "schema_token"} & public

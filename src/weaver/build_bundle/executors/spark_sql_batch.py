@@ -10,7 +10,7 @@ import json
 from typing import Any
 
 from ...errors import InstallError
-from ...spark.tokens import substitute_epoch
+from ...spark.tokens import substitute_build_datetime
 from ..models import InstallAction
 from .base import InstallationContext
 
@@ -43,12 +43,12 @@ class SparkSqlBatchExecutor:
             raise InstallError(
                 f"spark_sql_batch action {action.id!r} must contain SQL strings"
             )
-        # The epoch first: it is scoped to this installation rather than to a
+        # The build_datetime first: it is scoped to this installation rather than to a
         # destination, and ``expand`` rejects every token it does not itself
         # resolve — so one left behind here would be reported as an unresolvable
         # name instead of quietly reaching the engine.
         resolved = [
-            substitute_epoch(statement.strip(), context.epoch)
+            substitute_build_datetime(statement.strip(), context.build_datetime)
             for statement in statements
         ]
         context.spark_sql_batch(resolved, exact_case=True)

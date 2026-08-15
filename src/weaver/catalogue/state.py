@@ -24,7 +24,7 @@ from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_typ
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
-    BUILD_EPOCH,
+    BUILD_DATETIME,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     INSTALLATION,
@@ -55,7 +55,7 @@ class Catalogue:
 
     ``rows`` is the row data by item and table. ``registered`` is the certified
     documents derived from the Registry rows — identity, type, signature and
-    publication epoch, without the audit columns, which no build decision reads.
+    publication build_datetime, without the audit columns, which no build decision reads.
 
     ``present_tables`` records which catalogue tables physically exist: a claim
     can only be raised against a table that is there, or reconciliation would
@@ -168,7 +168,7 @@ class Catalogue:
         transform it later.
 
         It carries no binding — no target name, Weaver version, Installation
-        row, publication epoch, or Registry certification for an alias
+        row, publication build_datetime, or Registry certification for an alias
         destination, because an alias is a view in a Warehouse and a table in a
         Lakehouse and this does not know which.
         """
@@ -355,8 +355,8 @@ class RegisteredDocument:
     #: planning has to read what the row says.
     object_role: str = ROLE_DATA
     #: When the build that last certified this object published it. ``None`` for
-    #: a row written before epochs existed, which orders as older than any epoch.
-    build_epoch: object = None
+    #: a row written before build datetimes existed, which orders as older than any build_datetime.
+    build_datetime: object = None
 
     @property
     def is_runtime_artefact(self) -> bool:
@@ -431,7 +431,7 @@ def _registered_documents(
                 object_type,
                 signature,
                 object_role,
-                row.get(BUILD_EPOCH),
+                row.get(BUILD_DATETIME),
             )
             prior = registered.get(identity)
             if prior is not None and prior != document:

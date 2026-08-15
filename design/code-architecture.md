@@ -79,11 +79,11 @@ these per workspace, so a `build` and the `load` that follows share them.
 Callers ask for *capabilities*, never for transports:
 
 ```python
-session.execute_python(program)          # here, or across to Fabric
-session.execute_spark_sql(statement)     # this host's Spark, wherever it is
+session.execute_python(program)  # here, or across to Fabric
+session.execute_spark_sql(statement)  # this host's Spark, wherever it is
 session.execute_tsql(statement, target)  # a Warehouse, over TDS
-session.store(workspace)                 # files
-session.resolver(workspace)              # names → physical items
+session.store(workspace)  # files
+session.resolver(workspace)  # names → physical items
 ```
 
 Domain code does not access `session.livy`; doing so would couple it to Fabric
