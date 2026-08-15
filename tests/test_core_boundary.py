@@ -73,7 +73,7 @@ def test_the_cli_source_never_names_spark():
             if f"import {name}" in source or f"from {name}" in source:
                 offenders.append(f"{module.name}: {name}")
     assert not offenders, (
-        f"the CLI imports Spark, which [cli] does not install: {offenders}"
+        f"the CLI imports Spark, which is not installed with it: {offenders}"
     )
 
 

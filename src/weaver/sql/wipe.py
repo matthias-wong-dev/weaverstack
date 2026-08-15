@@ -6,7 +6,7 @@ from __future__ import annotations
 def generate_warehouse_wipe_sql() -> str:
     """Return deterministic SQL that removes supported user-created objects.
 
-    This is ported from the legacy Weaver Warehouse implementation:
+    Ported from the legacy implementation's Warehouse backend:
     ``src/weaver_runtime/dbrep/sql/templates/admin/wipe.sql`` for object
     enumeration and ordering, plus ``_drop_user_schemas`` in
     ``src/weaver_runtime/dbrep/sql/backend.py`` for schema cleanup.

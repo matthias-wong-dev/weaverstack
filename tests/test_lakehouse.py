@@ -389,9 +389,9 @@ def test_a_session_that_raises_for_unset_settings_is_not_fatal():
 
 
 def test_the_inferred_root_is_spelled_exactly_as_the_fabric_one():
-    """Repeated because the core imports without the fabric extra; kept identical here."""
+    """Repeated because the core imports without `requests`; kept identical here."""
 
-    pytest.importorskip("requests", reason="install the [cli] extra")
+    pytest.importorskip("requests")
     from weaver.fabric.onelake import abfss_root
     from weaver.lakehouse import _ABFSS_ROOT
 
