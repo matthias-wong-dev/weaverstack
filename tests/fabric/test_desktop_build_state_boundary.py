@@ -13,6 +13,10 @@ package was still load-bearing, whatever the session happened to have installed.
 Load's Python primitives are a different matter and still need the wheel — a
 deployed module is imported where Spark is. What is asserted here is the state a
 *build* reads before it plans.
+
+The same fact stated as a requirement: a build names no Fabric Environment. An
+Environment is what carries the published Weaver, and a build imports it
+nowhere, so the last test here runs one against a workspace that has none.
 """
 
 from __future__ import annotations
@@ -136,3 +140,39 @@ def test_a_lakehouse_inventory_lists_views_over_spark_sql(
     # a failure — and it is the answer a first build depends on.
     assert catalogue.views("NoSuchSchemaHere") == ()
     assert catalogue.schema_exists("NoSuchSchemaHere") is False
+
+
+def test_a_build_runs_against_a_workspace_naming_no_environment(
+    fabric_workspace, clean_disposable_warehouse, tmp_path_factory
+):
+    """The requirement, made real: a whole build with `environment` unset.
+
+    A Warehouse-only estate, so nothing here even starts Spark — the objects are
+    T-SQL and the catalogue they are registered in is a Warehouse. What would
+    have failed before is the refusal itself, which came before any Fabric call
+    and did not depend on what the build turned out to need.
+    """
+
+    from dataclasses import replace
+
+    from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
+
+    import weaver
+    from weaver.sessions import ConsoleSession
+
+    without_environment = replace(fabric_workspace, environment=None)
+    assert without_environment.environment is None
+
+    estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("no-env"))
+    warehouse = f"Warehouse/{clean_disposable_warehouse.item.name}"
+
+    with ConsoleSession(workspace=without_environment) as session:
+        built = weaver.build(
+            str(estate.path),
+            bind=[f"{warehouse}=Reporting"],
+            session=session,
+        )
+
+    assert built.status == "succeeded", [
+        (failure.action_id, failure.message) for failure in built.errors
+    ]
