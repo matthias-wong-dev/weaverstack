@@ -16,7 +16,7 @@ from typing import Iterable, Mapping, Sequence
 
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..errors import BuildError
-from ..spark.tokens import BUILD_DATETIME_TOKEN
+from ..tokens import BUILD_DATETIME_TOKEN
 from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,

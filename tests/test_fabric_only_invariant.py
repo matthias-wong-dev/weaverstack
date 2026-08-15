@@ -191,7 +191,7 @@ def test_the_only_payload_token_left_is_the_publication_epoch():
     bytes on every run, and a bundle's identity is its bytes.
     """
 
-    from weaver.spark import tokens
+    from weaver import tokens
 
     public = {name for name in vars(tokens) if not name.startswith("_")}
 

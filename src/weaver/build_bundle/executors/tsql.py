@@ -14,7 +14,7 @@ import json
 from typing import Any
 
 from ...errors import InstallError
-from ...spark.tokens import substitute_build_datetime
+from ...tokens import substitute_build_datetime
 from ..models import InstallAction
 from .base import InstallationContext
 

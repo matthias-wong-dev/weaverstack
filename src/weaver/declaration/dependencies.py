@@ -162,7 +162,7 @@ class LocatedReference:
     rewrite it. Build needs that: a two-part name in a view body resolves through
     whatever catalogue the session is currently pointed at, so the planner
     replaces each managed reference with a name that says which Lakehouse it
-    means (see :mod:`weaver.spark.tokens`).
+    means (see :mod:`weaver.tokens`).
     """
 
     reference: RelationReference

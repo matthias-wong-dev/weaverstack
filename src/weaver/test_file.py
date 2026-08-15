@@ -184,13 +184,13 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
 def _run_spark(session, document, target: PhysicalTargetRef):
     """Run the authored Spark SQL program through the same runtime a module uses."""
 
+    from . import tokens
     from .lakehouse import lakehouse_for
     from .runtime.spark_sql_validation import (
         read_spark_sql_assumption,
         read_spark_sql_test,
     )
     from .runtime.test_compare import compare
-    from .spark import tokens
     from .targets import ItemRef
 
     if session.spark() is None:

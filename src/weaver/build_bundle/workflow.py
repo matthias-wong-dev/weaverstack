@@ -215,7 +215,11 @@ def _read_catalogue(*, session, workspace, required):
 
 
 def session_catalogue(session, workspace, item: ItemRef):
-    """Catalogue operations against one Lakehouse, run through the Session.
+    """Spark catalogue operations against one Lakehouse, through the Session.
+
+    A destination Lakehouse's *views* live only in the Spark catalogue, so
+    reading its inventory needs Spark. The Weaver catalogue does not come
+    through here: it is a Warehouse, read over TDS.
 
     The one construction, both positions: in a session the statements run
     against its Spark, from a desktop they cross. Nothing above it can tell.
@@ -532,8 +536,11 @@ def read_reconciled_catalogue(
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver catalogue")
-    catalogue = session_catalogue(session, workspace, workspace.catalogue_item)
-    state = read_catalogue_state(catalogue, sorted(items, key=str))
+    from ..catalogue.connection import catalogue_connection
+
+    state = read_catalogue_state(
+        catalogue_connection(session, workspace), sorted(items, key=str)
+    )
     return reconcile_catalogue_state(state, inventories=inventories)
 
 
