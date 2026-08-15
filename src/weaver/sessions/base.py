@@ -320,8 +320,9 @@ class Session(ABC):
         """Run one T-SQL statement against a named Warehouse, over TDS.
 
         A statement, not a question: nothing comes back. Asking is
-        :meth:`query_tsql`. Reading a result set from a statement that produces
-        several answers with whichever came first, which is how a failing check
+        :meth:`query_tsql`, and a batch that answers more than once needs
+        ``query_result_sets`` — reading only the first result set of several
+        answers with whichever came back first, which is how a failing check
         reports as passing.
         """
 
