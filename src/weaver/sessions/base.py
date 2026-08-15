@@ -533,19 +533,19 @@ class Session(ABC):
     def close(self) -> None:
         """Release every resource this Session acquired, and nothing it was given.
 
-        Closing is the durability barrier for asynchronous logging: every
-        flusher is flushed and closed before the resources it writes through go
-        away. A row accepted by a Session that closed normally is in the
-        Warehouse.
+        Closing is the durability barrier for asynchronous logging, so the order
+        here is the guarantee. A flusher writes *through this Session*, and a
+        closed Session refuses to hand out a scope — so the flushers drain while
+        the Session is still open, and only then is it marked closed and its
+        resources released. Marking it closed first would fail exactly the
+        writes this barrier exists to complete, and only under enough load for
+        the worker to still be behind.
         """
 
         self.stop_presenting()
         with self._scope_lock:
             if self._closed:
                 return
-            self._closed = True
-            scopes = list(self._scopes.values())
-            self._scopes.clear()
             flushers = list(self._flushers.values())
             self._flushers.clear()
         failures = []
@@ -554,6 +554,13 @@ class Session(ABC):
                 flusher.close()
             except Exception as exc:  # noqa: BLE001 - re-raised once, below
                 failures.append(exc)
+
+        with self._scope_lock:
+            if self._closed:
+                return
+            self._closed = True
+            scopes = list(self._scopes.values())
+            self._scopes.clear()
         for scope in scopes:
             scope.close()
         if self._owns_executor:

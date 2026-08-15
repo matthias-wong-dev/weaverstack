@@ -234,6 +234,44 @@ def test_session_close_writes_every_accepted_row():
     assert flusher.submitted == 4
 
 
+def test_the_final_flush_happens_while_the_session_can_still_write():
+    """The order in `Session.close` *is* the durability guarantee.
+
+    A flusher writes through the Session, and a closed Session refuses to hand
+    out a scope. So marking the Session closed before draining would fail
+    exactly the writes the barrier exists to complete — and only when the worker
+    is still behind, which is to say only under load.
+    """
+
+    written_while_open: list[bool] = []
+    session = _session()
+    holding = threading.Event()
+    release = threading.Event()
+    flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
+
+    def write(_statement: str) -> None:
+        # Held until `close` is under way, so the write lands *during* the
+        # barrier rather than before it — which is the only moment the ordering
+        # is observable, and the moment a busy run is always in.
+        holding.set()
+        release.wait(timeout=5)
+        # What a real Session does here is ask for a scope, which a closed one
+        # refuses. Recorded rather than raised so a failure names the cause.
+        written_while_open.append(not session.closed)
+
+    flusher._execute = write
+    flusher.submit(a_row())
+    assert holding.wait(timeout=5), "the worker never reached the write"
+
+    # Let go a moment after close has begun.
+    threading.Timer(0.2, release.set).start()
+    session.close()
+
+    assert written_while_open == [True], (
+        "the row was written after the Session had been marked closed"
+    )
+
+
 def test_a_closed_session_hands_out_no_flusher():
     session = _session()
     session.close()
