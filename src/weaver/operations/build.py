@@ -6,33 +6,20 @@ so importing ``weaver`` does not require Spark, Fabric credentials, or the CLI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-import tempfile
-import uuid
-from typing import Iterable, Mapping, Sequence
+from typing import Sequence
 
-from ..errors import BuildError, CommandError, WeaverError
+from ..errors import BuildError, CommandError
 from ..locations import Location
+
 # Position — whether this process is inside the Fabric session it addresses, and
 # what Spark it would use if it were — is the first half of "where am I
 # running", so a Session owns it. Kept under the names this module already uses.
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
 from ..store import FilesystemStore, Store
-from ..targets import (
-    ItemRef,
-    WarehouseTarget,
-    parse_physical_target,
-    physical_item,
-    physical_kind,
-)
-from ..workspaces import FabricWorkspace, Workspace
-from .workspace import (
-    _current_fabric_workspace,
-    _operation_workspace,
-    _with_inferred_control_lakehouse,
-    current_workspace,
-)
+from ..workspaces import Workspace
+from .workspace import operation_workspace
 
 
 @dataclass(frozen=True)
@@ -128,28 +115,14 @@ def build(
     is left open; omitted, this operation creates and closes one.
     """
 
-    resolved_workspace = _operation_workspace(
+    resolved_workspace = operation_workspace(
+        "build",
         workspace=workspace,
-        workspace_config=workspace_config,
         catalogue=catalogue,
         environment=environment,
+        workspace_config=workspace_config,
         session=session,
     )
-    if catalogue is not None:
-        # An explicit argument outranks a configured or already-resolved value,
-        # so a notebook can override what it inferred without rebuilding the
-        # Workspace it inferred it into.
-        resolved_workspace = replace(
-            resolved_workspace,
-            catalogue=str(catalogue),
-        )
-    resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
-    if not resolved_workspace.catalogue:
-        raise CommandError(
-            "build needs a Weaver control Lakehouse: pass catalogue=, "
-            "give one in workspace configuration, or run inside a Fabric "
-            "notebook with one attached as the default Lakehouse"
-        )
 
     selected = _item_bindings(bind, resolved_workspace)
     from ..build_bundle.targets import LakehouseBinding, effective_item_bindings
@@ -168,7 +141,6 @@ def build(
     # This complete parse and pure request validation is deliberately above all
     # control-plane creation, Spark start, REST item resolution, and Livy work.
     from ..build_bundle.workflow import prepare_repository, validate_build_request
-
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(
@@ -177,6 +149,7 @@ def build(
         validate_build_request(
             prepared.repository, bindings, control_lakehouse=control
         )
+        _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             arguments = dict(
                 repository=prepared.repository,
@@ -186,21 +159,42 @@ def build(
                 bundle_name=bundle,
                 source=source_location.value,
             )
-            with opened.task("Build", str(resolved_workspace.workspace)):
-                if opened.executes_here(resolved_workspace):
-                    # The emulator and a notebook alike: this process is already
-                    # where the data engineering happens, so the build runs here.
-                    return _build_in_process(
-                        resolved_workspace, session=opened, **arguments
-                    )
-                return _build_desktop_fabric(
-                    resolved_workspace, session=opened, **arguments
-                )
+            with opened.task("Build", resolved_workspace.workspace):
+                return _run_build(resolved_workspace, session=opened, **arguments)
+
+
+def _preflight(workspace: Workspace, bindings, *, session) -> None:
+    """Prove the workspace can host this build, before anything expensive opens.
+
+    Only from a desktop: inside Fabric the items are already resolvable and one
+    workspace listing would be a REST round trip for what the session can see.
+    Every item this build needs is proved from that one listing, so a missing
+    target costs a call rather than a Livy session and a Spark traceback about
+    a catalogue.
+    """
+
+    if _inside_fabric_session(workspace):
+        return
+    if not workspace.environment:
+        # Checked before preflight, because preflight is several REST calls and
+        # this needs none. A build renders Spark SQL for the catalogue whatever
+        # else it does, so it always crosses.
+        from ..fabric.livy import missing_environment
+
+        raise CommandError(missing_environment(workspace))
+    from ..fabric.preflight import preflight_fabric_targets
+
+    preflight_fabric_targets(
+        bindings,
+        workspace=workspace.workspace,
+        control_item=workspace.catalogue_item,
+        environment=workspace.environment,
+    )
 
 
 def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
     if source is None:
-        if not isinstance(workspace, FabricWorkspace) or not _inside_fabric_session(workspace):
+        if not _inside_fabric_session(workspace):
             source = "."
         else:
             # Fabric exposes built-in Notebook Resources as the notebook's
@@ -208,7 +202,7 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
             source = Path.cwd()
     location = source if isinstance(source, Location) else Location(str(source))
     if location.value.startswith("abfss://"):
-        if not isinstance(workspace, FabricWorkspace) or not _inside_fabric_session(workspace):
+        if not _inside_fabric_session(workspace):
             raise CommandError(
                 "an abfss repository source can be read only inside a Fabric session"
             )
@@ -270,7 +264,7 @@ def _result_from_item_build(source, bindings, result) -> BuildResult:
     )
 
 
-def _build_in_process(
+def _run_build(
     workspace,
     *,
     session,
@@ -281,10 +275,18 @@ def _build_in_process(
     bundle_name,
     source,
 ) -> BuildResult:
-    """One build, where this process is already where the data is.
+    """One build, wherever this process happens to be.
 
-    Which Spark, which store and which resolver are the Session's answers, so a
-    notebook build takes the same path a desktop build does.
+    .. code-block:: text
+
+        read the build state    → through Session capabilities, per part
+        Builder                 → the bundle this estate needs
+        Installer               → each action to the capability it needs
+
+    The Session answers which Spark, which store and which resolver, so a
+    notebook build and a desktop build take this path unchanged. What differs
+    between them is what surrounds it: a desktop proves its items exist over
+    REST first, which :func:`build` does before opening anything.
     """
 
     from ..build_bundle import (
@@ -316,126 +318,6 @@ def _build_in_process(
             archive=_archive_location(resolver, bundle_name),
         )
     return _result_from_item_build(source, bindings, result)
-
-
-
-
-def _build_desktop_fabric(
-    workspace,
-    *,
-    session,
-    repository,
-    source_store,
-    bindings,
-    control_lakehouse,
-    bundle_name,
-    source,
-) -> BuildResult:
-    """One build driven from a console.
-
-    .. code-block:: text
-
-        read the build state    → through Session capabilities, per part
-        plan the bundle         → here, in Python
-        install the bundle      → here, each action to the capability it needs
-
-    Each part of the state read asks for only what it needs — a Warehouse
-    inventory over TDS, a Lakehouse's objects from storage, the catalogue and
-    its views as Spark SQL — and each is timed as its own Step.
-
-    Nothing is packed to install. ``--bundle`` keeps a build record, written
-    after the install and read by nobody in this path.
-    """
-
-    if not workspace.environment:
-        # Checked before preflight, because preflight is several REST calls and
-        # this needs none. A build renders Spark SQL for the catalogue whatever
-        # else it does, so it always crosses.
-        from ..fabric.livy import missing_environment
-
-        raise CommandError(missing_environment(workspace))
-    from ..build_bundle import (
-        Installer,
-        catalogue_items_for_build,
-        generate_item_build_bundle,
-        persist_bundle_archive,
-        read_build_state,
-    )
-    from ..catalogue.state import reconcile_catalogue_state
-    from ..fabric.preflight import preflight_fabric_targets
-    # Above the session, deliberately. Every item this build needs is proved to
-    # exist from one workspace listing, so a missing target costs a REST call
-    # rather than a Livy session and a Spark traceback about a catalogue.
-    preflight_fabric_targets(
-        bindings,
-        workspace=workspace.workspace,
-        control_item=workspace.catalogue_item,
-        environment=workspace.environment,
-    )
-    resolver = session.resolver(workspace)
-    transport_store = session.transport_store(workspace)
-    retained_archive = _archive_location(resolver, bundle_name)
-
-    # No wrapping Step: `read_build_state` opens one per part it reads, and a
-    # Step inside a Step would make a fourth level of a hierarchy that has
-    # three. What a reader wants is the parts — the catalogue and the
-    # inventories are separately slow, and separately fixable.
-    state = read_build_state(
-        bindings,
-        required_catalogue_items=catalogue_items_for_build(repository, bindings),
-        session=session,
-        workspace=workspace,
-    )
-    reconciliation = reconcile_catalogue_state(
-        state.catalogue, inventories=state.target_inventories
-    )
-    with tempfile.TemporaryDirectory(prefix="weaver-cli-build-") as temporary:
-        root = Path(temporary)
-        with session.step("Build bundle"):
-            bundle = generate_item_build_bundle(
-                repository,
-                bindings=bindings,
-                output=Location((root / "bundle").as_posix()),
-                store=source_store,
-                target_inventories=state.target_inventories,
-                catalogue=reconciliation.catalogue,
-                stale_claims=reconciliation.stale_claims,
-                control_lakehouse=control_lakehouse,
-            )
-        with session.step("Install"):
-            # The Installer runs here, so nothing is packed to install: the
-            # deployed Python tree goes straight to OneLake. The archive below
-            # is a retained build record, not a delivery mechanism.
-            report = Installer(session, workspace=workspace).install(bundle).to_mapping()
-        if retained_archive is not None:
-            with session.step("Retain bundle", bundle.bundle_id):
-                local_archive = Location((root / "install.weaver.zip").as_posix())
-                persist_bundle_archive(bundle, local_archive, store=FilesystemStore())
-                transport_store.make_directory(resolver.build_bundles_root)
-                transport_store.write(
-                    retained_archive, FilesystemStore().read(local_archive)
-                )
-
-    assert bundle is not None and report is not None
-    return BuildResult(
-        source=source,
-        items=tuple(str(binding.item) for binding in bindings.entries),
-        bundle_id=bundle.bundle_id,
-        archive=retained_archive.value if retained_archive else None,
-        status=report["status"],
-        errors=tuple(
-            BuildFailure(
-                action["action_id"],
-                action.get("error_type"),
-                action.get("error_message"),
-                artefact=action.get("resource_node_id"),
-                source_path=action.get("source_path"),
-            )
-            for sequence in report.get("sequences", ())
-            for action in sequence.get("actions", ())
-            if action.get("status") == "failed"
-        ),
-    )
 
 
 def _binding_text(binding) -> str:

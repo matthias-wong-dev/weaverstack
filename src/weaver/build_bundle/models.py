@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .targets import BoundTarget
 from .changes import TargetChange
 from .incremental import BuildSelection
+from .targets import BoundTarget
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"

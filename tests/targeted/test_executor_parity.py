@@ -24,7 +24,7 @@ EXECUTORS = pathlib.Path(__file__).resolve().parents[2] / "src" / "weaver" / "bu
 #: Names that would mean an executor is deciding *where* it is rather than doing
 #: its job. Acquisition belongs to the factories; behaviour belongs here.
 ENVIRONMENT_TELLS = {
-    "FabricWorkspace",
+    "Workspace",
     "LocalWorkspace",
     "FabricStore",
     "FilesystemStore",

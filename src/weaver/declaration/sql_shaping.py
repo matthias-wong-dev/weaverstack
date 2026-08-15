@@ -19,17 +19,16 @@ answer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from string import Template
 
 from sqlparse import tokens as T
 
 from ..sql_statements import SqlToken as _FlatToken
 from ..sql_statements import flatten_with_offsets as _flatten_with_offsets
-
 
 SQL_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 

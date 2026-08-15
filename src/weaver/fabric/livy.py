@@ -284,7 +284,6 @@ class LivySession:
         """
 
         from ..errors import CommandError
-        from ..targets import ItemRef
         from .resolution import FabricResolver
         from .resources import LAKEHOUSE
 

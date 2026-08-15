@@ -21,18 +21,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..errors import WeaverError
-from .result import RunFailure, reports_outcome
+from .resolution import ENDPOINT_REFRESH
 from .result import (
     DISPATCH_EXCEPTION,
     ENDPOINT_REFRESH_FAILURE,
+    FAILED,
     PRIMITIVE_FAILURE,
     PRIMITIVE_REJECTS,
     RESULT_CONTRACT_INVALID,
+    SUCCEEDED,
+    SUCCEEDED_WITH_REJECTS,
+    RunFailure,
     error,
+    reports_outcome,
     warning,
 )
-from .resolution import ENDPOINT_REFRESH
-from .result import FAILED, SUCCEEDED, SUCCEEDED_WITH_REJECTS
 
 
 @dataclass(frozen=True)

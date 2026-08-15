@@ -11,7 +11,6 @@ from .metadata import ObjectId
 from .model import (
     FILES,
     ItemDependency,
-    RepositoryAlias,
     WeaverDocumentId,
     WeaverItemId,
     WeaverRepository,

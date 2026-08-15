@@ -11,9 +11,10 @@ import codecs
 import hashlib
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ..errors import DiscoveryError
-from ..objects import BASE_CLASSES, BASE_CLASS_NAMES
+from ..objects import BASE_CLASS_NAMES, BASE_CLASSES
 from .dependencies import (
     PythonImport,
     RelationReference,
@@ -27,17 +28,21 @@ from .metadata import (
     SPARK_SQL,
     SQL,
     TABLE,
-    TEST,
     VIEW,
     ObjectId,
     SesDocument,
-    namespace_for_target,
-    target_kind_for,
-    parse_document,
     extract_python_metadata,
     extract_sql_metadata_and_body,
+    namespace_for_target,
+    parse_document,
+    target_kind_for,
 )
 from .model import LAKEHOUSE, WeaverDocumentId
+
+if TYPE_CHECKING:  # names used only in annotations
+    from .ddl import GeneratedDdl
+    from .load import GeneratedLoad
+    from .validation import GeneratedValidation
 
 PYTHON_SUFFIX = ".py"
 SQL_SUFFIX = ".sql"
@@ -665,11 +670,15 @@ def _check_sql_table_program(
     if language == SPARK_SQL:
         from .spark_sql_program import (
             parse_spark_sql_program as parse,
+        )
+        from .spark_sql_program import (
             validate_query_contract as validate,
         )
     else:
         from .tsql_program import (
             parse_tsql_program as parse,
+        )
+        from .tsql_program import (
             validate_query_contract as validate,
         )
 

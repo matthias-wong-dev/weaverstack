@@ -33,6 +33,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.catalogue_actions import desired_catalogue
@@ -41,10 +42,9 @@ from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
+from weaver.spark import FabricSparkTarget
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from support.workspaces import WORKSPACE
-from weaver.spark import FabricSparkTarget
 
 WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 

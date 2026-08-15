@@ -15,9 +15,9 @@ Revision notes:
   - 2026-07-23 Created.
 """
 
-from .Files.Sales__OrderExport import Sales__OrderExport
-
 from weaver import Table
+
+from .Files.Sales__OrderExport import Sales__OrderExport
 
 
 class Sales__Customer(Table):

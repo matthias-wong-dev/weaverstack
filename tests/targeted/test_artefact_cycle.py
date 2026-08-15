@@ -64,15 +64,15 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.workspaces import WORKSPACE
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
 from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
-from support.workspaces import WORKSPACE
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 LAKEHOUSE_TARGET_NAME = "Sales_LH"
 WAREHOUSE_TARGET_NAME = "Reporting_WH"
@@ -274,6 +274,7 @@ def converged(repository, tmp_path, *, inventories, catalogue):
     """
 
     from factories import estate_inventories
+
     from weaver.catalogue.state import reconcile_catalogue_state
 
     reconciled = reconcile_catalogue_state(catalogue, inventories=inventories)

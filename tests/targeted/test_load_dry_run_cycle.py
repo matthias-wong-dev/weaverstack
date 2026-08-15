@@ -17,14 +17,19 @@ them changes anything about the orchestration this module is about.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
+from factories import (
+    installed_catalogue,
+    installed_inventories,
+    load_estate,
+    load_estate_bindings,
+)
+from support.workspaces import given_workspace
 
-from weaver.run import RunState
-from weaver.operations.load import run_load
+from weaver.fabric.resolution import FabricResolver
 from weaver.load_plan import ENDPOINT_REFRESH, PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
@@ -33,17 +38,11 @@ from weaver.load_report import (
     TASK_SUCCEEDED,
     VALIDATED,
 )
-from weaver.store import FilesystemStore
-from weaver.fabric.resolution import FabricResolver
-from support.workspaces import InventoryClient
-from support.workspaces import given_resolver, given_workspace
+from weaver.operations.load import run_load
+from weaver.run import RunState
 
-from factories import (
-    installed_catalogue,
-    installed_inventories,
-    load_estate,
-    load_estate_bindings,
-)
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")

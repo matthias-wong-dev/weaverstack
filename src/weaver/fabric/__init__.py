@@ -8,17 +8,6 @@ from __future__ import annotations
 
 from .capacity import CapacityAction, CapacityError, capacity_command, run_capacity_action
 from .client import FabricClient, FabricError
-from .livy import (
-    LivyError,
-    LivySession,
-    LivyStatementError,
-    LivySessionInfo,
-    StatementResult,
-    WorkspaceLivySession,
-    emit_source,
-    list_livy_sessions,
-    list_workspace_livy_sessions,
-)
 from .environment import (
     InstallResult,
     build_wheel,
@@ -26,9 +15,17 @@ from .environment import (
     install,
     missing_from_environment,
 )
-from .resolution import FabricResolver
-from .session import FabricSessionResolver
-from .store import FabricStore
+from .livy import (
+    LivyError,
+    LivySession,
+    LivySessionInfo,
+    LivyStatementError,
+    StatementResult,
+    WorkspaceLivySession,
+    emit_source,
+    list_livy_sessions,
+    list_workspace_livy_sessions,
+)
 from .onelake import (
     OneLakeDfsClient,
     abfss_root,
@@ -36,13 +33,14 @@ from .onelake import (
     onelake_url,
     parse_onelake,
 )
+from .resolution import FabricResolver
 from .resources import (
     LAKEHOUSE,
-    WAREHOUSE,
     SQL_ENDPOINT,
+    WAREHOUSE,
     Item,
     ItemNotFoundError,
-    Workspace,
+    WorkspaceItem,
     create_lakehouse,
     create_warehouse,
     delete_item,
@@ -51,6 +49,7 @@ from .resources import (
     list_items,
     refresh_sql_endpoint_metadata,
 )
+from .session import FabricSessionResolver
 from .sql import (
     FABRIC_SQL_AUDIENCE,
     desktop_sql_executor,
@@ -58,6 +57,7 @@ from .sql import (
     fabric_sql_executor,
     fabric_sql_pool,
 )
+from .store import FabricStore
 
 __all__ = [
     "CapacityAction",
@@ -88,7 +88,7 @@ __all__ = [
     "parse_onelake",
     "FabricClient",
     "FabricError",
-    "Workspace",
+    "WorkspaceItem",
     "Item",
     "ItemNotFoundError",
     "LAKEHOUSE",

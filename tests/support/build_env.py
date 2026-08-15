@@ -14,20 +14,19 @@ the same either side.
 from __future__ import annotations
 
 import re
-
-import shutil
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-import pytest
-from .observation import Observation, observation_from, observe_body
-
-from weaver.targets import ItemRef
 from weaver.store import Store
+from weaver.targets import ItemRef
+
+from .observation import Observation, observation_from, observe_body
 from .workspaces import WORKSPACE
+
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.workspaces import Workspace
 
 
 @dataclass(frozen=True)

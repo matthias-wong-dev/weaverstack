@@ -28,8 +28,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.workspaces import mounted_lakehouse
 
-from weaver import Folder, Lakehouse
+from weaver import Folder
 from weaver.errors import LoadError
 from weaver.runtime.folder_load import StagingFolder
 
@@ -82,7 +83,7 @@ def export(tmp_path):
     Sales__Export.static = False
     Sales__Export.seen = []
     return Sales__Export(
-        object(), lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
     )
 
 

@@ -449,12 +449,14 @@ load
 
 Every command executes against a resolved Workspace.
 
-A Workspace identifies:
+A Workspace is one Microsoft Fabric workspace, and identifies:
 
-- Workspace
-- Weaver Lakehouse
-- Environment (Fabric)
-- Local or Fabric host
+- the workspace, by name
+- the Weaver Lakehouse holding the catalogue
+- the Fabric Environment Spark work attaches
+
+It says where the resources are. Where Weaver's own code runs is a Session
+question, not a property of the Workspace.
 
 For example:
 

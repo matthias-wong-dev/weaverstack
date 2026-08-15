@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from typing import Iterator, Mapping
 
 from ..errors import CommandError
-from ..workspaces import FabricWorkspace, Workspace
+from ..workspaces import Workspace
 from .base import Session
 
 
@@ -35,8 +35,6 @@ def inside_fabric_session(workspace: Workspace) -> bool:
     another is a console caller as far as that other workspace is concerned.
     """
 
-    if not isinstance(workspace, FabricWorkspace):
-        return False
     try:
         from notebookutils import runtime
     except ImportError:
@@ -68,9 +66,8 @@ def session_for(workspace: Workspace | None, **kwargs) -> Session:
     """The Session this host would use for ``workspace``.
 
     Inside the Fabric session being addressed, that is a
-    :class:`~weaver.sessions.notebook.NotebookSession`; everywhere else — a
-    desktop reaching into Fabric, and the local emulator alike — it is a
-    :class:`~weaver.sessions.console.ConsoleSession`.
+    :class:`~weaver.sessions.notebook.NotebookSession`; from a desktop reaching
+    into Fabric, a :class:`~weaver.sessions.console.ConsoleSession`.
     """
 
     if workspace is not None and inside_fabric_session(workspace):

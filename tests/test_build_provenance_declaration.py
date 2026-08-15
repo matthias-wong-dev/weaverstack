@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import hashlib
 
-import pytest
 import yaml
 
 from weaver.build_bundle import (

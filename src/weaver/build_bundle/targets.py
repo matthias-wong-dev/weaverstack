@@ -15,11 +15,14 @@ bundle.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-from ..targets import ItemRef
-from ..errors import BuildError
 from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
+from ..errors import BuildError
+from ..targets import ItemRef
+
+if TYPE_CHECKING:  # names used only in annotations
+    from ..spark import FabricSparkTarget
 
 #: Target kinds a bound target may name. They mirror the Weaver document target kinds but
 #: live here because a bundle is read without importing the Weaver document vocabulary.
@@ -333,14 +336,14 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
 
     if not isinstance(text, str) or text.count("=") > 1:
         raise BuildError(
-            "a binding must be TypedPhysical/Name or TypedPhysical/Name=Logical/Item"
+            "a binding must be Lakehouse/Physical or Lakehouse/Physical=LogicalName"
         )
     physical_text, separator, logical_text = text.partition("=")
     physical_text = physical_text.strip()
     logical_text = logical_text.strip()
     if not physical_text or (separator and not logical_text):
         raise BuildError(
-            "a binding must be Lakehouse/Name or Lakehouse/Name=LogicalItem"
+            "a binding must be Lakehouse/Physical or Lakehouse/Physical=LogicalName"
         )
 
     physical_type, physical = _parse_physical_item(physical_text)
@@ -360,7 +363,7 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
         if workspace is None:
             raise BuildError(
                 f"binding {physical_text!r} needs a Workspace configuration default "
-                "or an explicit =Logical/Item"
+                "or an explicit =LogicalName"
             )
         item = workspace.declaration_for(physical_type, physical.name).item
     if item.item_type != physical_type:

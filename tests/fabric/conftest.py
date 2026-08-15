@@ -19,31 +19,24 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 import pytest
 from support.build_env import (
-    PopulatedLakehouse,
     BuildEnv,
     InstallOutcome,
-    InstalledEstate,
     Journey,
-    Step,
-    _bindings_for,
+    PopulatedLakehouse,
     _install_estate,
-    _outcome_from_report,
     _upload_tree,
 )
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.livy_telemetry import LEDGER, OUTSIDE_A_TEST, CountedLivySession
-from support.observation import Observation, observation_from, observe_body
 
-from weaver.workspaces import Workspace
 from weaver.targets import ItemRef
-from weaver.store import Store
-from weaver.spark import SparkCatalogue
+from weaver.workspaces import Workspace
 
 WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
 #: The permanent suite workspace. A default rather than a required export: the
@@ -300,9 +293,9 @@ def environment_name():
 def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
     """A workspace that names the Environment Weaver was installed into."""
 
-    from weaver.workspaces import FabricWorkspace
+    from weaver.workspaces import Workspace
 
-    return FabricWorkspace(
+    return Workspace(
         workspace=fabric_workspace_item.name,
         catalogue=f"Lakehouse/{fabric_catalogue.name}",
         environment=environment_name,
@@ -466,14 +459,14 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
     Warehouse and must still wait. They simply cost nothing on the runs after.
     """
 
-    from weaver.targets import WarehouseTarget
     from weaver.fabric import (
-        FabricResolver,
         WAREHOUSE,
+        FabricResolver,
         create_warehouse,
         desktop_sql_executor,
         find_item,
     )
+    from weaver.targets import WarehouseTarget
 
     started = time.monotonic()
     timings: dict[str, float] = {}
@@ -661,13 +654,13 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
         warehouse_view,
     )
 
-    from weaver.targets import ItemRef
-    from weaver.physical_wipe import wipe_sql_target
     from weaver.build_bundle import execute_install_action, plan_item_build
     from weaver.build_bundle.executors.base import (
         InstallationContext,
         ResolvedTarget,
     )
+    from weaver.physical_wipe import wipe_sql_target
+    from weaver.targets import ItemRef
 
     wipe_sql_target(
         disposable_warehouse.target,
@@ -832,8 +825,8 @@ def populated_fabric_lakehouse(
             removal.
             """
 
-            from weaver.targets import DeltaTarget
             from weaver.physical_wipe import wipe_delta_target
+            from weaver.targets import DeltaTarget
 
             report = wipe_delta_target(
                 DeltaTarget(lakehouse=target), fabric_workspace, store=store
@@ -952,7 +945,7 @@ def _fabric_build_context(
 
     def _workspace_literal() -> str:
         return (
-            f"FabricWorkspace(workspace={workspace.workspace!r}, "
+            f"Workspace(workspace={workspace.workspace!r}, "
             f"catalogue={workspace.catalogue!r}, "
             f"environment={workspace.environment!r})"
         )
@@ -976,7 +969,7 @@ def _fabric_build_context(
         )
         body = (
             "from weaver.targets import ItemRef\n"
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             "from weaver.declaration.model import WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
@@ -1027,7 +1020,7 @@ def _fabric_build_context(
         # re-resolves the name to the session-native path.
         bundle_name = bundle.location.name
         body = (
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.build_bundle import Installer, load_bundle\n"
             "from weaver.sessions import NotebookSession\n"
@@ -1084,7 +1077,7 @@ def _fabric_build_context(
         """
 
         preamble = (
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             "from weaver.targets import ItemRef\n"
             "from weaver.resolution import resolver_for, store_for\n"
             f"workspace = {_workspace_literal()}\n"
@@ -1241,9 +1234,9 @@ def _warehouse_build_env(
     reads results back for assertions; it never plans and never compiles a bundle locally.
     """
 
-    from weaver.targets import ItemRef as _ItemRef
     from weaver.build_bundle import BuildBundle, BuildPlan
     from weaver.fabric import FabricResolver, OneLakeDfsClient
+    from weaver.targets import ItemRef as _ItemRef
 
     resolver = FabricResolver(fabric_workspace, client=None)
     store = OneLakeDfsClient()
@@ -1257,7 +1250,7 @@ def _warehouse_build_env(
 
     def _workspace_literal() -> str:
         return (
-            f"FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+            f"Workspace(workspace={fabric_workspace.workspace!r}, "
             f"catalogue={fabric_workspace.catalogue!r}, "
             f"environment={fabric_workspace.environment!r})"
         )
@@ -1282,7 +1275,7 @@ def _warehouse_build_env(
         )
         body = (
             "from weaver.targets import ItemRef\n"
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             "from weaver.declaration.model import WeaverItemId\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.declaration import parse_item_repository\n"
@@ -1330,7 +1323,7 @@ def _warehouse_build_env(
         # session identity, so no executor is injected.
         bundle_name = bundle.location.name
         body = (
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
             "from weaver.build_bundle import Installer, load_bundle\n"
             "from weaver.sessions import NotebookSession\n"

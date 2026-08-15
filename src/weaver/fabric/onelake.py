@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import timezone
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
 
 from ..errors import CommandError

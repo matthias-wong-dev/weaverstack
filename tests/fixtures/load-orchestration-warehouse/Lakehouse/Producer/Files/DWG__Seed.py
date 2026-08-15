@@ -9,7 +9,6 @@ File key: "*.csv"
 
 Incremental: false
 """
-from pathlib import Path
 
 from weaver import Folder
 

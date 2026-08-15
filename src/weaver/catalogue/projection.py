@@ -28,7 +28,6 @@ from ..declaration.metadata import (
     TABLE,
     TEST,
     VIEW,
-    ObjectId,
     Reference,
 )
 from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
@@ -44,7 +43,6 @@ from .tables import (
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     INDEX_DICTIONARY,
-    INSTALLATION,
     KEY_PRIMARY,
     KEY_UNIQUE,
     REGISTRY,

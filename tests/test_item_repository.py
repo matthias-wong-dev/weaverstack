@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.declaration import parse_item_repository
+from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 from weaver.errors import DiscoveryError
 from weaver.locations import Location
-from weaver.declaration import parse_item_repository
-from weaver.catalogue.tables import CATALOGUE_TABLES
-from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 
 
 def _write(root: Path, relative: str, text: str) -> None:

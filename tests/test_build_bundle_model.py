@@ -16,16 +16,14 @@ from dataclasses import replace
 import pytest
 import yaml
 
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    InstallAction,
     BuildBatch,
     BuildPlan,
-    BuildSequence,
     BuildSelection,
+    BuildSequence,
     Impact,
+    InstallAction,
     OmittedNode,
     compute_bundle_id,
     load_bundle,
@@ -33,8 +31,10 @@ from weaver.build_bundle import (
     plan_to_yaml,
     write_bundle,
 )
-from weaver.errors import BuildError
 from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
+from weaver.errors import BuildError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 

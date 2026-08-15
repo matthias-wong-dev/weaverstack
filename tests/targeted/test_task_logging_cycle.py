@@ -21,6 +21,8 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+from factories import full_estate
+from support.workspaces import given_resolver, given_workspace
 
 from weaver.catalogue.builtin import LOG_FOLDER_ID, LOG_PATH
 from weaver.catalogue.state import Catalogue
@@ -31,7 +33,6 @@ from weaver.errors import CommandError
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from support.workspaces import given_resolver, given_workspace
 from weaver.task_logging import (
     COMPLETE_STEP,
     DATE_PARTITION,
@@ -40,8 +41,6 @@ from weaver.task_logging import (
     log_folder,
     open_task_log,
 )
-
-from factories import full_estate
 
 LOG_IDENTITY = "Lakehouse/_weaver/Files/_.Log"
 

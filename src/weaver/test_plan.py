@@ -22,7 +22,7 @@ from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
 from .catalogue.tables import DEPENDENCY, TEST_DICTIONARY
-from .declaration.metadata import ASSUMPTION, ObjectId, TEST
+from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import WeaverDocumentId, WeaverItemId
 from .errors import ValidationError
 from .etl import validation_artefact_id

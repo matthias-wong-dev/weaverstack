@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import argparse
 import io
-from pathlib import Path
 
 import pytest
+from support.workspaces import given_workspace
 
-from weaver.errors import BuildError, CommandError
+from weaver.errors import BuildError
 from weaver.sessions import ConsoleSession
-from support.workspaces import given_resolver, given_workspace
 from weaver_cli.main import _resolve_workspace, _with_command_overrides
 from weaver_cli.shell import run_shell
 

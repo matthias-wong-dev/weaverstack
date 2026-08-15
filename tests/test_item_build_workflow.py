@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import zipfile
 import json
+import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 from support.sessions import given_session
+from support.workspaces import WORKSPACE, given_resolver, given_workspace
+from test_item_repository import _estate
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     BuildState,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
-    build_uploaded_item_repository,
     build_item_repository_source,
     generate_item_build_bundle,
     install_bundle_archive,
@@ -26,16 +23,14 @@ from weaver.build_bundle import (
     persist_bundle_archive,
     timestamped_archive_name,
 )
-from weaver.errors import BuildError
+from weaver.build_bundle.prune import TargetInventory, read_lakehouse_inventory
+from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
-from weaver.build_bundle.prune import TargetInventory
-from weaver.build_bundle.prune import read_lakehouse_inventory
-from weaver.catalogue.state import Catalogue, Reconciliation
-from support.workspaces import given_resolver, given_workspace
-
-from test_item_repository import _estate
-from support.workspaces import WORKSPACE
+from weaver.errors import BuildError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 class CountingStore:
@@ -150,8 +145,9 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
         for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    result = build_uploaded_item_repository(
+    result = build_item_repository_source(
         root,
+        source_store=remote,
         bindings=_bindings(),
         session=given_session(
             store=remote,
@@ -191,7 +187,7 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
 
 
 def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch):
-    repository = parse_item_repository(
+    parse_item_repository(
         Location(str(_estate(tmp_path))), store=FilesystemStore()
     )
     unknown = ItemBindings(
@@ -296,8 +292,9 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
         for entry in FilesystemStore().list(root, recursive=True)
         if not entry.is_directory
     }
-    result = build_uploaded_item_repository(
+    result = build_item_repository_source(
         root,
+        source_store=remote,
         bindings=_bindings(),
         session=given_session(
             store=remote,

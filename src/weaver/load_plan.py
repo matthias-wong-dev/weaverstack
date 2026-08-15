@@ -67,6 +67,22 @@ class PhysicalTargetRef:
     kind: str
     name: str
 
+    @classmethod
+    def of(cls, target) -> "PhysicalTargetRef":
+        """The reference one typed physical target makes.
+
+        The single conversion from the typed vocabulary — ``DeltaTarget`` and
+        ``WarehouseTarget`` — into the two words a plan and a catalogue row
+        carry. Every operation that names a target goes through it.
+        """
+
+        from .targets import DeltaTarget, physical_item
+
+        return cls(
+            kind=LAKEHOUSE_TARGET if isinstance(target, DeltaTarget) else WAREHOUSE_TARGET,
+            name=physical_item(target).name,
+        )
+
     def __str__(self) -> str:
         return f"{_GRAMMAR_KIND[self.kind]}/{self.name}"
 

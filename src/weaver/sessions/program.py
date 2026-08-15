@@ -1,8 +1,8 @@
 """One unit of Python work, spelled for both sides of the physical boundary.
 
-Some work has to happen where the data is. In a notebook or against the local
-emulator that is a function call; from a desktop reaching into Fabric it is
-Python shipped into a Livy session. A :class:`RemoteProgram` carries both
+Some work has to happen where the data is. In a notebook that is a function
+call; from a desktop reaching into Fabric it is Python shipped into a Livy
+session. A :class:`RemoteProgram` carries both
 spellings so the caller chooses neither:
 
 .. code-block:: text

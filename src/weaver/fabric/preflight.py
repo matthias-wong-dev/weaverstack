@@ -26,11 +26,10 @@ from .resources import (
     LAKEHOUSE,
     WAREHOUSE,
     Item,
-    Workspace,
+    WorkspaceItem,
     find_workspace,
     list_items,
 )
-
 
 #: A binding's target kind, as the Fabric item type the workspace must hold it
 #: as. Two vocabularies that happen to name the same two things, so the mapping
@@ -66,7 +65,7 @@ class RequiredItem:
 class Preflight:
     """What the workspace holds, and the resolved identity of each requirement."""
 
-    workspace: Workspace
+    workspace: WorkspaceItem
     resolved: dict[str, Item]
 
     def item(self, name: str, item_type: str) -> Item:

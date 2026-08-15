@@ -16,9 +16,9 @@ Revision notes:
   - 2026-07-31 Created.
 """
 
-from weaver import Table
-
 from DWG__Customer import DWG__Customer
+
+from weaver import Table
 
 
 class DWG__Order(Table):

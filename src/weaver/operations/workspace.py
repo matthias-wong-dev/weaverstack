@@ -9,13 +9,12 @@ because four operations answering it four ways is four places for it to drift.
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 from typing import Mapping
 
 from ..errors import CommandError
 from ..sessions.host import active_spark as _active_spark
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
-from ..workspaces import FabricWorkspace, Workspace
+from ..workspaces import Workspace
 
 
 def _operation_workspace(
@@ -81,6 +80,42 @@ def _operation_workspace(
 
 
 
+def operation_workspace(
+    operation: str,
+    *,
+    workspace=None,
+    catalogue=None,
+    environment=None,
+    workspace_config=None,
+    session=None,
+    needs_catalogue: bool = True,
+) -> Workspace:
+    """The workspace one operation means, resolved once for all of them.
+
+    Every operation asks the same question and used to answer it in its own
+    words. What differs between them is only whether the control Lakehouse is
+    required: a wipe can empty a target without one, everything else reads or
+    writes the catalogue.
+    """
+
+    resolved = _with_inferred_control_lakehouse(
+        _operation_workspace(
+            workspace=workspace,
+            workspace_config=workspace_config,
+            catalogue=catalogue,
+            environment=environment,
+            session=session,
+        )
+    )
+    if needs_catalogue and not resolved.catalogue:
+        raise CommandError(
+            f"{operation} needs a Weaver control Lakehouse: pass catalogue=, "
+            "give one in workspace configuration, or run inside a Fabric "
+            "notebook with one attached as the default Lakehouse"
+        )
+    return resolved
+
+
 def current_workspace() -> Workspace:
     """The workspace this code is running in, discovered rather than named.
 
@@ -99,7 +134,7 @@ def current_workspace() -> Workspace:
 
 
 
-def _current_fabric_workspace() -> FabricWorkspace:
+def _current_fabric_workspace() -> Workspace:
     try:
         from notebookutils import runtime
     except ImportError as exc:
@@ -114,13 +149,13 @@ def _current_fabric_workspace() -> FabricWorkspace:
     name = context.get("currentWorkspaceName")
     if not name:
         raise CommandError("Fabric runtime context carries no current workspace")
-    return FabricWorkspace(workspace=str(name))
+    return Workspace(workspace=str(name))
 
 
 
 
 def _with_inferred_control_lakehouse(workspace: Workspace) -> Workspace:
-    if workspace.catalogue or not isinstance(workspace, FabricWorkspace):
+    if workspace.catalogue:
         return workspace
     if not _inside_fabric_session(workspace):
         return workspace

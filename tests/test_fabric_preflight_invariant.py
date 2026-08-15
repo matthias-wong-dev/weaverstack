@@ -30,7 +30,6 @@ from weaver.fabric.preflight import (
     required_items,
 )
 from weaver.targets import ItemRef
-from support.workspaces import WORKSPACE
 
 WORKSPACE = "Analytics"
 

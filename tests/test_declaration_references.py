@@ -11,11 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-from pathlib import Path
-
-from weaver.store import FilesystemStore
-from weaver.locations import Location
-from weaver.errors import DiscoveryError
 from weaver.declaration import (
     IDENTITY_COLUMN_NOTE,
     declared_column_notes,
@@ -23,6 +18,9 @@ from weaver.declaration import (
     resolve_text,
 )
 from weaver.declaration.model import WeaverDocumentId
+from weaver.errors import DiscoveryError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 ITEM = "Lakehouse/Raw"
 

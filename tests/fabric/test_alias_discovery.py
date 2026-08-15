@@ -34,6 +34,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     """The action reports how long it waited, which is the behaviour itself."""
 
     from test_cross_item_alias import action_of, generate, run_from_here, upload
+
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 

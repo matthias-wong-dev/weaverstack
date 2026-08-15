@@ -15,13 +15,12 @@ brew install azure-cli                  # macOS
 # Linux:   curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
 # Windows: winget install Microsoft.AzureCLI
 az login
-pip install -e '.[test,cli]'
+pip install -e '.[dev]'
 ```
 
-`[test]` is the suite — core tests plus these Fabric ones, which need
-credentials and HTTP. `[cli]` adds `weaver install`, needed below to publish the
-Environment. Fabric supplies Spark where authored runtime code executes, so
-nothing here needs a JVM.
+`[dev]` adds pytest and ruff. Everything else — the Fabric transports, the
+`weaver` command, `weaver install` — is in the package itself. Fabric supplies
+Spark where authored runtime code executes, so nothing here needs a JVM.
 
 `az login` is the only authentication Weaver needs — see
 [CLI usage](cli-usage.md#signing-in-to-azure) for what it does and why the

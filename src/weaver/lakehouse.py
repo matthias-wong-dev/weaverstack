@@ -79,26 +79,23 @@ class Lakehouse:
 
         Two roots, because Spark takes ``abfss://`` while ``open()`` and
         ``pathlib`` cannot parse a URL — and a Folder's authored code is
-        ordinary Python that writes files.
-
-        Locally the two are the same directory. In Fabric, Weaver mounts its own
-        root and returns the mount path; a write through it is a write to
-        OneLake, visible at once at the ``abfss://`` address.
+        ordinary Python that writes files. Weaver mounts its own root and
+        returns the mount path; a write through it is a write to OneLake,
+        visible at once at the ``abfss://`` address.
 
         Session-scoped and never to be stored: Fabric spells it
         ``/synfs/notebook/<session id>/…``, valid only inside the session that
         made it. Durable identity is ``spark_root``.
         """
 
-        return _files_root(self.name, self.spark_root)
+        return _join(_mounted(self.name, self.spark_root), FILES_AREA)
 
     def folder_path(self, schema: str, name: str) -> Path:
         """Where one folder object's files live, as *Python* addresses them.
 
         A real :class:`pathlib.Path`, because a Folder's authored code globs,
-        opens and writes files. Locally the directory itself; in OneLake,
-        Weaver's mount of the resolved root, so a write through it is a write to
-        OneLake.
+        opens and writes files: Weaver's mount of the resolved OneLake root, so
+        a write through it is a write to OneLake.
 
         Session-scoped like :meth:`files_root`, and never to be stored.
         """
@@ -236,16 +233,6 @@ _MOUNT_POINT = "/weaver/{item}"
 MOUNT_OPTIONS = {"fileCacheTimeout": 0}
 
 
-def _files_root(name: str, spark_root: str) -> str:
-    """``Files`` as a path ``open()`` understands, for whichever host this is."""
-
-    if not spark_root.startswith("abfss://"):
-        # The emulator: storage already *is* a filesystem, so the two roots are
-        # the same directory and there is nothing to mount.
-        return _join(spark_root, FILES_AREA)
-    return _join(_mounted(name, spark_root), FILES_AREA)
-
-
 def _mounted(name: str, spark_root: str) -> str:
     """Mount this Lakehouse's OneLake root, or reuse the mount already made.
 
@@ -370,9 +357,21 @@ def _text(value: Any) -> str:
 
 
 def _root(value: Any, *, what: str) -> str:
+    """A Lakehouse root is a OneLake address, because a Lakehouse is in OneLake.
+
+    Checked here so a path that looks like storage cannot stand in for
+    one: everything below assumes a mount is available for the Files area and an
+    ``abfss://`` URL is what Spark reads.
+    """
+
     if not isinstance(value, str) or not value.strip():
         raise LoadError(f"a Lakehouse {what} must be a non-empty string, got {value!r}")
-    return value.strip().replace("\\", "/").rstrip("/")
+    cleaned = value.strip().replace("\\", "/").rstrip("/")
+    if not cleaned.startswith("abfss://"):
+        raise LoadError(
+            f"a Lakehouse {what} must be a OneLake abfss:// address, got {value!r}"
+        )
+    return cleaned
 
 
 def _areas(name: str, root: str) -> LakehouseSparkLocation:

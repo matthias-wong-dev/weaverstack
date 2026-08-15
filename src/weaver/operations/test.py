@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Sequence
 
 from ..errors import CommandError, ValidationError
-from ..load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
-from ..targets import ItemRef, WarehouseTarget, parse_physical_target
-from ..test_plan import InstalledValidation, ValidationEstate, validation_order
+from ..load_plan import PhysicalTargetRef
+from ..targets import parse_physical_target
 from ..test_report import (
     FAILED,
     INVALID,
@@ -22,7 +21,7 @@ from ..test_report import (
     ValidationRunReport,
     run_status,
 )
-from ..workspaces import FabricWorkspace, Workspace
+from .workspace import operation_workspace
 
 TASK_TYPE = "test"
 
@@ -55,15 +54,15 @@ def test(
         )
 
     requested = _requested(targets)
-    resolved = _resolve_workspace(
+    resolved = operation_workspace(
+        "test",
         workspace=workspace,
         catalogue=catalogue,
         environment=environment,
         workspace_config=workspace_config,
-        requested=requested,
         session=session,
     )
-    refs = tuple(_physical_ref(target) for target in requested)
+    refs = tuple(PhysicalTargetRef.of(target) for target in requested)
 
     from ..sessions.host import use_or_create_session
 
@@ -130,8 +129,7 @@ def run_test(
             durable=False,
         )
 
-    from ..run import RunRequest, Runner, RunState
-
+    from ..run import Runner, RunRequest, RunState
     from ..run.state import read_installed_catalogue
 
     with session.step("Read catalogue"):
@@ -306,47 +304,6 @@ def _requested(targets: str | Sequence[str]):
         parse_physical_target(value, what="test target", error=CommandError)
         for value in values
     )
-
-
-def _resolve_workspace(
-    *,
-    workspace: str | None,
-    catalogue: str | None,
-    environment: str | None = None,
-    workspace_config: str | Path | None,
-    requested,
-    session=None,
-) -> Workspace:
-    from dataclasses import replace
-
-    from .workspace import _operation_workspace, _with_inferred_control_lakehouse
-
-    resolved = _operation_workspace(
-        workspace=workspace,
-        workspace_config=workspace_config,
-        catalogue=catalogue,
-        environment=environment,
-        session=session,
-    )
-    if catalogue is not None:
-        resolved = replace(
-            resolved,
-            catalogue=str(catalogue),
-        )
-    resolved = _with_inferred_control_lakehouse(resolved)
-    if not resolved.catalogue:
-        raise CommandError(
-            "test needs a Weaver control Lakehouse: pass catalogue=, give "
-            "one in workspace configuration, or run inside a Fabric notebook "
-            "with one attached as the default Lakehouse"
-        )
-    return resolved
-
-
-def _physical_ref(target) -> PhysicalTargetRef:
-    from .load import _physical_ref as reference
-
-    return reference(target)
 
 
 __all__ = ["TASK_TYPE", "run_test", "test"]

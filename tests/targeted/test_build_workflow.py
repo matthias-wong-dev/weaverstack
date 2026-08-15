@@ -17,18 +17,15 @@ reached and reported is.
 from __future__ import annotations
 
 import pytest
-from support.sessions import given_session
 from factories import (
-    Catalogue,
     item_bindings,
     lakehouse_table,
     single_document_repository,
     target_inventory,
 )
+from support.sessions import given_session
+from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     LakehouseBinding,
     build_item_repository,
@@ -36,8 +33,9 @@ from weaver.build_bundle import (
 )
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue as RealCatalogue
-from support.workspaces import given_resolver, given_workspace
-from support.workspaces import WORKSPACE
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 class RecordingExecutor:

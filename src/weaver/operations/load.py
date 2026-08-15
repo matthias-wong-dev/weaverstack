@@ -8,36 +8,27 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Sequence
 
 from ..errors import CommandError, LoadError
 from ..load_plan import (
     ENDPOINT_REFRESH,
-    LAKEHOUSE_TARGET,
-    WAREHOUSE_TARGET,
     InstalledEstate,
-    LoadDag,
     PhysicalTargetRef,
     load_dag,
 )
 from ..load_report import (
     BLOCKED,
     FAILED,
-    LoadNodeReport,
-    LoadRunReport,
     SEVERITY_ERROR,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
-    final_status,
+    LoadNodeReport,
+    LoadRunReport,
 )
 from ..targets import (
-    DeltaTarget,
-    ItemRef,
-    WarehouseTarget,
     parse_physical_target,
-    physical_item,
 )
-from ..workspaces import FabricWorkspace, Workspace
 
 #: The task type this operation writes evidence under.
 TASK_TYPE = "load"
@@ -85,32 +76,17 @@ def load(
     )
     selected_names = _load_names(names)
 
-    from dataclasses import replace
 
-    from .workspace import _operation_workspace, _with_inferred_control_lakehouse
+    from .workspace import operation_workspace
 
-    resolved_workspace = _operation_workspace(
+    resolved_workspace = operation_workspace(
+        "load",
         workspace=workspace,
-        workspace_config=workspace_config,
         catalogue=catalogue,
         environment=environment,
+        workspace_config=workspace_config,
         session=session,
     )
-    if catalogue is not None:
-        # An explicit argument outranks a configured or already-resolved value,
-        # so a caller can override what it inferred without rebuilding the
-        # Workspace it inferred it into.
-        resolved_workspace = replace(
-            resolved_workspace,
-            catalogue=str(catalogue),
-        )
-    resolved_workspace = _with_inferred_control_lakehouse(resolved_workspace)
-    if not resolved_workspace.catalogue:
-        raise CommandError(
-            "load needs a Weaver control Lakehouse: pass catalogue=, "
-            "give one in workspace configuration, or run inside a Fabric "
-            "notebook with one attached as the default Lakehouse"
-        )
 
     from ..sessions.host import use_or_create_session
 
@@ -121,7 +97,7 @@ def load(
             return run_load(
                 opened,
                 workspace=resolved_workspace,
-                requested=tuple(_physical_ref(target) for target in requested),
+                requested=tuple(PhysicalTargetRef.of(target) for target in requested),
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -155,8 +131,8 @@ def run_load(
     """
 
     from ..run import (
-        RunRequest,
         Runner,
+        RunRequest,
         RunState,
         can_refresh,
         dispatch_primitive,
@@ -425,13 +401,6 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
     }
 
 
-def _physical_ref(target) -> PhysicalTargetRef:
-    return PhysicalTargetRef(
-        kind=LAKEHOUSE_TARGET if isinstance(target, DeltaTarget) else WAREHOUSE_TARGET,
-        name=physical_item(target).name,
-    )
-
-
 def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
     """Normalise the notebook convenience spelling into the request contract."""
 
@@ -441,12 +410,6 @@ def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
     if not values:
         raise CommandError("load names= needs at least one Schema.Object")
     return tuple(str(value) for value in values)
-
-
-# --- acquiring capabilities ---------------------------------------------------
-#
-# The one part that differs between the emulator, a desktop process and a Fabric
-# session. Everything above this line is the same code in all three.
 
 
 __all__ = ["TASK_TYPE", "load", "run_load"]

@@ -14,11 +14,11 @@ from abc import ABC, abstractmethod
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Iterator, Sequence
 
 from ..errors import CommandError
 from ..targets import ItemRef
-from ..workspaces import FabricWorkspace, Workspace
+from ..workspaces import Workspace
 from .resources import Resource
 from .telemetry import SessionTelemetry
 
@@ -42,7 +42,7 @@ def workspace_context(workspace: Workspace) -> tuple:
 #: consumer: choosing which run scope to open, because a run's deployed modules
 #: are imported where Spark is. Everything else asks for a capability instead.
 
-#: Weaver is running where the data is: a notebook, or the local emulator.
+#: Weaver is running where the data is: a Fabric notebook.
 IN_SESSION = "in_session"
 #: This process reaches into a workspace it is not running inside.
 ACROSS_BOUNDARY = "across_boundary"
@@ -98,9 +98,9 @@ class Session(ABC):
     """A reusable execution scope: resolution, resources and host capabilities.
 
     Concrete hosts are :class:`~weaver.sessions.console.ConsoleSession` — Weaver
-    driven from a console process, against either a local emulator or a Fabric
-    workspace — and :class:`~weaver.sessions.notebook.NotebookSession`, where
-    Weaver is itself executing inside the Fabric host.
+    on a desktop, reaching into Fabric — and
+    :class:`~weaver.sessions.notebook.NotebookSession`, where Weaver is itself
+    executing inside Fabric.
     """
 
     def __init__(
@@ -609,10 +609,6 @@ def run_spark_statements(spark: Any, statements: Sequence[str]) -> list[dict]:
     return [row.asDict() for row in spark.sql(statements[-1]).collect()]
 
 
-def is_fabric(workspace: Workspace) -> bool:
-    return isinstance(workspace, FabricWorkspace)
-
-
 __all__ = [
     "ACROSS_BOUNDARY",
     "IN_SESSION",
@@ -623,7 +619,6 @@ __all__ = [
     "ReportingFrame",
     "Session",
     "WorkspaceScope",
-    "is_fabric",
     "run_spark_statements",
     "workspace_context",
 ]

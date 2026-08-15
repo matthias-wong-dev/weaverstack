@@ -147,7 +147,6 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
     """
 
     from .declaration.tsql_validation import generate_tsql_validation_batch
-
     from .targets import ItemRef as _ItemRef
     from .targets import WarehouseTarget as _WarehouseTarget
 

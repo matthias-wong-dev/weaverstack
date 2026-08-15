@@ -12,7 +12,6 @@ Schema:
   CustomerName: string
 """
 
-from .Files.Raw__Orders import Raw__Orders
 
 from weaver import Table
 

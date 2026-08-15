@@ -1,4 +1,8 @@
-"""Provide ConsoleSession capabilities for local and Fabric workspaces.
+"""A Session for Weaver running on a desktop, reaching into Fabric.
+
+Every capability crosses: Spark SQL and Python over Livy, storage over OneLake,
+T-SQL over TDS, everything else over REST. There is no Spark session here — see
+:mod:`weaver.sessions.notebook` for the position that has one.
 
 Resources are cached per workspace for reuse across commands.
 """
@@ -11,8 +15,8 @@ from typing import Any, Sequence
 
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
-from ..workspaces import FabricWorkspace, Workspace
-from .base import TASK, Session, WorkspaceScope, run_spark_statements
+from ..workspaces import Workspace
+from .base import TASK, Session, WorkspaceScope
 from .program import RemoteProgram
 from .resources import Resource
 
@@ -56,7 +60,6 @@ class ConsoleSession(Session):
         self,
         *,
         livy: Any = None,
-        spark: Any = None,
         store: Any = None,
         resolver: Any = None,
         progress: Any = None,
@@ -71,7 +74,6 @@ class ConsoleSession(Session):
         # operation first reached Fabric.
         self._given_credential = checked_credential(credential)
         self._given_livy = livy
-        self._given_spark = spark
         self._given_store = store
         self._given_resolver = resolver
         #: Where the timing tree is written. stderr by default, because stdout
@@ -296,7 +298,6 @@ class ConsoleSession(Session):
             telemetry=self.telemetry,
             executor=self._executor,
             livy=self._given_livy,
-            spark=self._given_spark,
             store=self._given_store,
             resolver=self._given_resolver,
             credential=self._given_credential,
@@ -330,18 +331,9 @@ class ConsoleSession(Session):
         return self.scope(workspace).warm(required)
 
     def executes_here(self, workspace: Workspace | None = None) -> bool:
-        """Whether this process is already where the data engineering happens."""
+        """A console is never where the data engineering happens; it crosses."""
 
-        return self.scope(workspace).executes_here
-
-    def spark(self, workspace: Workspace | None = None):
-        """The live Spark session, where this process is where the data is.
-
-        A boundary accessor for in-process work, not a transport. A console
-        reaching into Fabric has none of its own and says so.
-        """
-
-        return self.scope(workspace).spark()
+        return False
 
     # --- host-neutral capabilities ------------------------------------------
 
@@ -357,9 +349,6 @@ class ConsoleSession(Session):
         # program's name above the frame that asked for it — two lines, one
         # duration. The cost is still recorded in telemetry.
         scope = self.scope(workspace)
-        if scope.executes_here:
-            with self.telemetry.timing(f"python.{program.name}"):
-                return program.call()
         # A program is Python that imports Weaver where Spark is, so this is the
         # one crossing that waits on `weaver install`. Spark SQL and TDS reach
         # the same workspace without it.
@@ -390,14 +379,6 @@ class ConsoleSession(Session):
         if not ordered:
             return []
         scope = self.scope(workspace)
-        if scope.executes_here:
-            from ..build_bundle.executors.spark_case import exact_identifier_case
-
-            spark = scope.spark()
-            with self.telemetry.timing("spark.sql"):
-                with exact_identifier_case(spark, enabled=exact_case):
-                    return run_spark_statements(spark, ordered)
-
         # Spelled out rather than imported on the far side: this is a Session
         # capability, and reaching into the build package for a context manager
         # would point the dependency the wrong way for a two-line conf dance.
@@ -463,7 +444,6 @@ class ConsoleScope(WorkspaceScope):
         workspace: Workspace,
         *,
         livy: Any = None,
-        spark: Any = None,
         credential: Any = None,
         **kwargs,
     ) -> None:
@@ -477,27 +457,22 @@ class ConsoleScope(WorkspaceScope):
         self._transport_store = None
         self._version_checked = False
 
-        if isinstance(workspace, FabricWorkspace):
-            self.auth: Resource | None = self.track(
-                Resource(
-                    "auth",
-                    self._acquire_token_provider,
-                    executor=self.executor,
-                    telemetry=self.telemetry,
-                )
+        self.auth: Resource = self.track(
+            Resource(
+                "auth",
+                self._acquire_token_provider,
+                executor=self.executor,
+                telemetry=self.telemetry,
             )
-            self.livy: Resource | None = self.track(
-                self._given_or_acquired(
-                    "livy",
-                    livy,
-                    self._acquire_livy,
-                    release=lambda session: session.close(),
-                )
+        )
+        self.livy: Resource = self.track(
+            self._given_or_acquired(
+                "livy",
+                livy,
+                self._acquire_livy,
+                release=lambda session: session.close(),
             )
-        else:
-            raise CommandError(
-                f"a console session cannot address a {type(workspace).__name__}"
-            )
+        )
 
     def _given_or_acquired(self, name, given, acquire, *, release) -> Resource:
         """A resource this scope acquires, or one it was handed and must not close.
@@ -518,17 +493,6 @@ class ConsoleScope(WorkspaceScope):
         return Resource(
             name, lambda: given, executor=self.executor, telemetry=self.telemetry
         )
-
-    # --- position -----------------------------------------------------------
-
-    @property
-    def executes_here(self) -> bool:
-        """Whether the data engineering happens in this process.
-
-        Always False for a console: it prepares work and crosses into Fabric.
-        """
-
-        return False
 
     def warm(self, required=None) -> "WarmUp":
         """Start acquiring what the next command will probably want, and say what.
@@ -575,16 +539,11 @@ class ConsoleScope(WorkspaceScope):
     def resolver(self):
         with self._lock:
             if self._resolver is None:
-                if isinstance(self.workspace, FabricWorkspace):
-                    from ..fabric.resolution import FabricResolver
+                from ..fabric.resolution import FabricResolver
 
-                    self._resolver = FabricResolver(
-                        self.workspace, client=self._fabric_client()
-                    )
-                else:
-                    from ..resolution import resolver_for
-
-                    self._resolver = resolver_for(self.workspace)
+                self._resolver = FabricResolver(
+                    self.workspace, client=self._fabric_client()
+                )
             return self._resolver
 
     @property
@@ -594,24 +553,19 @@ class ConsoleScope(WorkspaceScope):
         A store the Session was given wins outright; the caller owns it and is
         holding it open.
 
-        Otherwise the emulator's is the filesystem, which is both the
-        within-workspace store and the way in. A console addressing Fabric has
-        no within-workspace store at all — ``FabricStore`` is NotebookUtils,
-        which exists only inside a session — so its store is the DFS transport.
+        Otherwise it is the DFS transport. A console has no within-workspace
+        store at all — ``FabricStore`` goes through NotebookUtils, which exists
+        only inside a session.
         """
 
         if self._store is not None:
             return self._store
-        if self.executes_here:
-            return super().store
         return self.transport_store
 
     @property
     def transport_store(self):
         """How a console writes into a workspace it is not running inside."""
 
-        if self.executes_here:
-            return super().store
         with self._lock:
             if self._transport_store is None:
                 from ..fabric import OneLakeDfsClient
@@ -640,14 +594,6 @@ class ConsoleScope(WorkspaceScope):
         provider = self.token_provider()
         provider()  # pay the acquisition here, in the background, once
         return provider
-
-    # --- Spark --------------------------------------------------------------
-
-    def spark(self):
-        raise CommandError(
-            "a console reaching into Fabric has no Spark session of its own; "
-            "cross with execute_spark_sql or execute_python instead"
-        )
 
     # --- Livy ---------------------------------------------------------------
 

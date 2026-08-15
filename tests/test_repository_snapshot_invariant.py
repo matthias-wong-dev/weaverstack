@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from test_item_repository import _estate
 
 from weaver.build_bundle.workflow import (
     _snapshot_name,
@@ -27,8 +28,6 @@ from weaver.build_bundle.workflow import (
 from weaver.errors import BuildError
 from weaver.locations import Location
 from weaver.store import FilesystemStore
-
-from test_item_repository import _estate
 
 
 def test_a_filesystem_source_is_copied_rather_than_read_in_place(tmp_path):

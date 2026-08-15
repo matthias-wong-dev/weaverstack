@@ -9,7 +9,6 @@ no Spark and no credentials.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,8 +17,7 @@ from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.sessions import ConsoleSession, workspace_context
 from weaver.sessions.console import ConsoleScope
-from weaver.workspaces import FabricWorkspace, TargetDeclaration
-from support.workspaces import given_resolver, given_workspace
+from weaver.workspaces import TargetDeclaration, Workspace
 
 
 @pytest.fixture
@@ -29,14 +27,14 @@ def console():
             yield session
 
 
-def _other(name="B_Workspace") -> FabricWorkspace:
+def _other(name="B_Workspace") -> Workspace:
     """A second workspace, so a scope claim is about two of them."""
 
     return _fabric(name)
 
 
-def _fabric(name="A_Workspace") -> FabricWorkspace:
-    return FabricWorkspace(
+def _fabric(name="A_Workspace") -> Workspace:
+    return Workspace(
         workspace=name, catalogue="Lakehouse/Weaver", environment="weaver"
     )
 
@@ -103,7 +101,7 @@ def test_a_session_started_without_a_workspace_never_gains_one():
 
 def test_context_identity_ignores_which_targets_were_declared():
     plain = _fabric()
-    with_targets = FabricWorkspace(
+    with_targets = Workspace(
         workspace="A_Workspace",
         catalogue="Lakehouse/Weaver",
         environment="weaver",
@@ -118,7 +116,7 @@ def test_context_identity_ignores_which_targets_were_declared():
 
 
 def test_a_different_control_lakehouse_is_a_different_context():
-    other = FabricWorkspace(
+    other = Workspace(
         workspace="A_Workspace", catalogue="Lakehouse/Other", environment="weaver"
     )
 
@@ -133,20 +131,16 @@ def test_a_console_reaching_into_fabric_does_not_execute_here(console):
     assert console.executes_here(_fabric()) is False
 
 
-def test_a_console_reaching_into_fabric_has_no_spark_of_its_own(console):
-    with pytest.raises(CommandError, match="cross with execute_spark_sql or execute_python"):
-        console.spark(_fabric())
+def test_a_console_has_no_spark_object_at_all(console):
+    """Not a Spark session that refuses — nothing to reach for.
 
+    A console prepares work and crosses; Spark is on the other side of that
+    crossing. Anything here holding a SparkSession would be a second execution
+    position hidden inside the desktop one.
+    """
 
-def test_a_console_cannot_address_a_workspace_kind_it_has_no_host_for(console):
-    class Elsewhere:
-        workspace = "somewhere"
-        workspace_type = "elsewhere"
-        catalogue = None
-        environment = None
-
-    with pytest.raises(CommandError, match="cannot address"):
-        console.scope(Elsewhere())
+    assert not hasattr(console, "spark")
+    assert console.executes_here(_fabric()) is False
 
 
 # --- reporting context ------------------------------------------------------

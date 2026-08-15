@@ -6,7 +6,7 @@ execution statuses.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .runtime.load_result import LoadResult
@@ -82,10 +82,12 @@ from .run.result import (  # noqa: E402 - the vocabulary this report projects
     SEVERITY_INFO,
     SEVERITY_WARNING,
     TARGET_MISSING,
-    RunMessage as LoadMessage,
     error,
     info,
     warning,
+)
+from .run.result import (  # noqa: E402 - same block, split by the formatter
+    RunMessage as LoadMessage,
 )
 
 

@@ -13,9 +13,6 @@ it has to be behind that item and ahead of any later item layer. A global tail
 would leave a consumer's Warehouse view created against metadata that had not
 caught up.
 
-It is planned host-independently. The emulator has no SQL analytics endpoint,
-and the executor skips rather than inventing a local equivalent.
-
 Placement is this module's business; the refresh itself belongs to
 :mod:`weaver.build_bundle.executors.sql_endpoint_refresh`.
 """
@@ -25,10 +22,10 @@ from __future__ import annotations
 from typing import Iterable
 
 from ..declaration.model import WeaverItemId
-from .models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, InstallAction, BuildBatch
+from .models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, BuildBatch, InstallAction
 from .physical import DELTA_MUTATING_KINDS
 from .stages import REFRESH, PlannedStage
-from .targets import BoundTarget, WAREHOUSE_TARGET
+from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Everything that leaves a Lakehouse's endpoint metadata stale. Alias creation
 #: is here because a OneLake shortcut *is* a new table in the destination.

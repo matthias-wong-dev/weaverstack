@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
+
+if TYPE_CHECKING:  # names used only in annotations
+    from .targets import ItemRef
 
 #: The one item type a catalogue may name today. Typed values are accepted for
 #: both so the grammar is stable, and a Warehouse catalogue is refused with the
@@ -35,8 +38,8 @@ def _catalogue_value(value: object) -> str:
     kind, _, name = value.partition("/")
     if kind != CATALOGUE_KIND:
         raise ConfigError(
-            f"the catalogue is a {CATALOGUE_KIND} today, so {value!r} cannot be "
-            "used; moving it to a Warehouse is separate work"
+            f"catalogue must name a {CATALOGUE_KIND}, for example "
+            f"{CATALOGUE_KIND}/Weaver; got {value!r}"
         )
     return f"{CATALOGUE_KIND}/{validate_name(name, what='catalogue')}"
 
@@ -82,19 +85,26 @@ def _target_declarations(
 
 @dataclass(frozen=True, kw_only=True)
 class Workspace:
-    """The configuration one workspace carries, whatever it is addressed for."""
+    """One Microsoft Fabric workspace, and the configuration it carries.
 
+    Identifies where the resources are. It does not say where Weaver's own code
+    runs — desktop or notebook is a Session question.
+    """
+
+    workspace: str
     environment: str | None = None
-    #: Where the control plane lives, typed: ``Lakehouse/Weaver``. Typed because
-    #: the catalogue is a Lakehouse today and a later migration may make it a
-    #: Warehouse — and when it does, this value changes without the name
-    #: changing again.
+    #: Where the control plane lives, typed: ``Lakehouse/Weaver``. Typed so the
+    #: value says which kind of item it names rather than relying on the field's
+    #: name to imply it.
     catalogue: str | None = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     lakehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
     warehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "workspace", validate_name(self.workspace, what="workspace")
+        )
         if self.environment is not None:
             object.__setattr__(
                 self,
@@ -148,19 +158,6 @@ class Workspace:
             raise ConfigError(
                 f"physical target {plural}/{physical_name} is not configured"
             ) from exc
-
-
-@dataclass(frozen=True, kw_only=True)
-class FabricWorkspace(Workspace):
-    """One Microsoft Fabric workspace."""
-
-    workspace: str
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        object.__setattr__(
-            self, "workspace", validate_name(self.workspace, what="workspace")
-        )
 
     def settings_for_warehouse(self, name: str) -> ExecutionSettings:
         declaration = self.warehouses.get(name)

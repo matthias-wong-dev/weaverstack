@@ -18,6 +18,7 @@ from .render import (
 )
 from .tables import CatalogueTable
 
+
 def read_table(
     catalogue: Any,
     table: CatalogueTable,

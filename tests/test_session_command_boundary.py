@@ -32,7 +32,7 @@ import pytest
 
 from weaver.errors import WeaverError
 from weaver.sessions.console import ConsoleScope, ConsoleSession
-from weaver.workspaces import FabricWorkspace
+from weaver.workspaces import Workspace
 from weaver_cli.main import build_parser
 
 
@@ -136,8 +136,8 @@ def _weaver_python(session):
     return [code for code in session.submitted if "import weaver" in code]
 
 
-def _workspace() -> FabricWorkspace:
-    return FabricWorkspace(
+def _workspace() -> Workspace:
+    return Workspace(
         workspace="My Workspace", catalogue="Lakehouse/Weaver", environment="weaver"
     )
 

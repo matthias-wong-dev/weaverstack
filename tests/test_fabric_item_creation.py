@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from weaver.errors import CommandError
-from weaver.fabric.resources import LAKEHOUSE, Workspace, create_lakehouse
+from weaver.fabric.resources import LAKEHOUSE, WorkspaceItem, create_lakehouse
 
-WORKSPACE = Workspace(id="workspace-id", name="Analytics")
+WORKSPACE = WorkspaceItem(id="workspace-id", name="Analytics")
 
 
 class _CreateClient:

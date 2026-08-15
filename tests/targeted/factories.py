@@ -20,13 +20,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
+from support.workspaces import WORKSPACE
+
 from weaver.build_bundle import (
-    InstallAction,
     BuildBatch,
     BuildPlan,
+    InstallAction,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
@@ -34,13 +33,13 @@ from weaver.build_bundle import (
     compute_bundle_id,
     write_bundle,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
-from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
-from weaver.build_bundle.stages import PlannedStage
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
+from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
@@ -48,8 +47,9 @@ from weaver.etl import (
     item_runtime_artefacts,
     load_schemas,
 )
-from support.workspaces import WORKSPACE
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 #: Neutral names, per the environment-neutrality rule: no product, workspace or
 #: tenant may be inferable from a fixture.

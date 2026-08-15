@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.folder import FolderExecutor
 from weaver.build_bundle.models import (
@@ -17,7 +15,8 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
-from support.workspaces import given_resolver, given_workspace
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 def _context(tmp_path):

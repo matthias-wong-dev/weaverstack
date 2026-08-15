@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.run import RunRequest, Runner, RunState
+from weaver.run import Runner, RunRequest, RunState
 from weaver.run.graph import RunGraph, RunNode
 from weaver.run.result import (
     BLOCKED,
     FAILED,
+    INVALID,
     PENDING,
     RUN_FAILED,
     RUN_PARTIALLY_SUCCEEDED,
     RUN_SUCCEEDED,
-    INVALID,
     RUN_SUCCEEDED_WITH_REJECTS,
     SKIPPED,
     SUCCEEDED,
@@ -706,8 +706,8 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
     """``node_id`` is an identifier and reads like one. This is the line
     somebody watches go past, so it is a verb and a physical id."""
 
-    from weaver.run.runner import node_label
     from weaver.run.resolution import ENDPOINT_REFRESH
+    from weaver.run.runner import node_label
 
     load = RunNode(
         node_id="load:Lakehouse/Sales/Sales.Customer",

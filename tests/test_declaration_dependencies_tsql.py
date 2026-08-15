@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
-
 from weaver.declaration import extract_sql_references
 
 

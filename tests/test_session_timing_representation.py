@@ -366,8 +366,8 @@ def test_a_run_s_timings_ride_its_completion_document(session):
     intended and what each step did; how long a step took is a property of
     that step, not a second kind of record."""
 
-    from weaver.operations.load import _completion_document
     from weaver.load_report import LoadRunReport
+    from weaver.operations.load import _completion_document
 
     with session.task("Load"):
         with session.step("Execute"):
@@ -396,8 +396,8 @@ def test_a_completion_document_without_timings_still_has_the_key(session):
     """A caller that recorded none says so, rather than omitting the field and
     making every reader handle its absence."""
 
-    from weaver.operations.load import _completion_document
     from weaver.load_report import LoadRunReport
+    from weaver.operations.load import _completion_document
 
     document = _completion_document(
         LoadRunReport(

@@ -11,27 +11,26 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from support.sessions import given_installer
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     BoundTarget,
-    InstallAction,
     BuildBatch,
     BuildPlan,
-    BuildSequence,
     BuildSelection,
+    BuildSequence,
     Impact,
+    InstallAction,
     compute_bundle_id,
     load_bundle,
     write_bundle,
 )
-from support.sessions import given_installer
-
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
 from weaver.errors import BuildError
-from support.workspaces import given_resolver, given_workspace
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 TARGET = BoundTarget(id="lakehouse-Sales_LH", kind="lakehouse", item_id="Sales_LH")
 

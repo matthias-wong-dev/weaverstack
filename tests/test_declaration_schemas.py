@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from weaver.locations import Location
-from weaver.errors import DiscoveryError
 from weaver.declaration import (
     SchemaSes,
     is_schema_file,
-    parse_schema_document,
     parse_item_repository,
+    parse_schema_document,
     read_schema_document,
 )
+from weaver.errors import DiscoveryError
+from weaver.locations import Location
 
 
 def parse(text: str, path: str = "_schemas/Sales.yml") -> SchemaSes:

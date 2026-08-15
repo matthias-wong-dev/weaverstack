@@ -15,8 +15,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from factories import (
+    installed_catalogue,
+    installed_inventories,
+    load_estate,
+    load_estate_bindings,
+)
 
-from weaver.load_plan import LoadDag, PhysicalTargetRef
+from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
     DISPATCH_LOCATION_MISSING,
@@ -24,15 +30,7 @@ from weaver.load_report import (
     TARGET_MISSING,
     VALIDATED,
 )
-from weaver.run import RunRequest, RunState, Runner
-from support.workspaces import given_resolver, given_workspace
-
-from factories import (
-    installed_catalogue,
-    installed_inventories,
-    load_estate,
-    load_estate_bindings,
-)
+from weaver.run import Runner, RunRequest, RunState
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -42,12 +40,6 @@ DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"
 EXPORT = "load:Lakehouse/Raw_LH/Sales.Export"
 REFRESH = "refresh:Lakehouse/Raw_LH"
 SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
-
-
-def local_resolver() -> LocalResolver:
-    return LocalResolver(
-        given_workspace(catalogue="Lakehouse/Weaver_LH")
-    )
 
 
 class Resolutions:

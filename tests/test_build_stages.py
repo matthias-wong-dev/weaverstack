@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.build_bundle.models import InstallAction, BuildBatch
+from weaver.build_bundle.models import BuildBatch, InstallAction
 from weaver.build_bundle.stages import (
     ALIAS,
     BUILD,

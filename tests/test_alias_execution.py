@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
-import json
-
 import pytest
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.build_bundle.executors import alias as alias_module
 from weaver.build_bundle.executors import AliasExecutor
+from weaver.build_bundle.executors import alias as alias_module
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.models import CREATE_ALIAS, REFRESH_SQL_ENDPOINT, InstallAction
+from weaver.build_bundle.models import CREATE_ALIAS, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
+from weaver.spark import FabricSparkTarget
 from weaver.store import Entry, FilesystemStore
 from weaver.targets import ItemRef
-from weaver.spark import FabricSparkTarget
-from support.workspaces import given_resolver, given_workspace
 
 SOURCE_TARGET_ID = "Lakehouse-Raw--lakehouse-Raw_Dev"
 DESTINATION_TARGET_ID = "Lakehouse-Curated--lakehouse-Curated_Dev"

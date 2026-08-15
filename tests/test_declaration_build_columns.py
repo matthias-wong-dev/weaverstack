@@ -12,9 +12,9 @@ import textwrap
 
 import pytest
 
-from weaver.errors import BuildError
 from weaver.declaration import SPARK_SQL, SQL, parse_document
 from weaver.declaration.columns import metadata_column_references, resolve_build_columns
+from weaver.errors import BuildError
 
 
 def _doc(yaml_text: str, *, language: str = SQL):

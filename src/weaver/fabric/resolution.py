@@ -8,7 +8,6 @@ name without asking the workspace again.
 from __future__ import annotations
 
 from ..errors import CommandError
-from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, FabricWorkspace
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
 from ..spark import FabricSparkTarget
@@ -20,6 +19,7 @@ from ..targets import (
     WarehouseTarget,
     validate_name,
 )
+from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Workspace
 from .client import ONELAKE_DFS, FabricClient
 from .onelake import abfss_root, lakehouse_artifact_segment
 from .resources import (
@@ -27,7 +27,6 @@ from .resources import (
     SQL_ENDPOINT,
     WAREHOUSE,
     Item,
-    Workspace,
     find_item,
     find_workspace,
     refresh_sql_endpoint_metadata,
@@ -39,15 +38,11 @@ class FabricResolver:
 
     def __init__(
         self,
-        workspace: FabricWorkspace,
+        workspace: Workspace,
         *,
         client: FabricClient | None = None,
         base_url: str = ONELAKE_DFS,
     ) -> None:
-        if not isinstance(workspace, FabricWorkspace):
-            raise CommandError(
-                f"FabricResolver needs a FabricWorkspace, got {type(workspace).__name__}"
-            )
         self.configuration = workspace
         self.client = client or FabricClient()
         self.base_url = base_url.rstrip("/")

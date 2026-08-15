@@ -13,7 +13,6 @@ from typing import Iterable, Mapping, Sequence
 
 from ..errors import CommandError
 from ..locations import Location
-from ..store import Store
 from ..targets import (
     ItemRef,
     WarehouseTarget,
@@ -22,7 +21,7 @@ from ..targets import (
     physical_kind,
 )
 from ..workspaces import Workspace
-from .workspace import _operation_workspace
+from .workspace import operation_workspace
 
 
 @dataclass(frozen=True)
@@ -125,12 +124,16 @@ def wipe(
     parsed = tuple(WipeTarget.parse(value) for value in values)
     if not parsed:
         raise CommandError("wipe needs at least one target")
-    resolved_workspace = _operation_workspace(
+    resolved_workspace = operation_workspace(
+        "wipe",
         workspace=workspace,
-        workspace_config=workspace_config,
         catalogue=catalogue,
         environment=environment,
+        workspace_config=workspace_config,
         session=session,
+        # A wipe empties a physical item, which needs no control plane. The
+        # catalogue only comes into it if `--unbind-from` asks for the claims.
+        needs_catalogue=False,
     )
     from ..sessions.host import use_or_create_session
 

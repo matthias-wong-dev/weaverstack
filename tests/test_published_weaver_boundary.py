@@ -19,7 +19,7 @@ import pytest
 from weaver.errors import CommandError
 from weaver.sessions.console import ConsoleScope, ConsoleSession
 from weaver.sessions.program import RemoteProgram
-from weaver.workspaces import FabricWorkspace
+from weaver.workspaces import Workspace
 
 
 class _Livy:
@@ -56,7 +56,7 @@ def desktop(monkeypatch):
     )
     livy = _Livy()
     session = ConsoleSession(
-        workspace=FabricWorkspace(
+        workspace=Workspace(
             workspace="Analytics", catalogue="Lakehouse/Weaver", environment="weaver"
         ),
         livy=livy,
@@ -115,7 +115,7 @@ def test_a_workspace_naming_no_environment_is_told_to_name_one():
 
     from weaver.fabric.livy import missing_environment
 
-    message = missing_environment(FabricWorkspace(workspace="Analytics"))
+    message = missing_environment(Workspace(workspace="Analytics"))
 
     assert "Analytics" in message
     assert "Livy" in message
@@ -137,7 +137,7 @@ def test_a_scope_with_no_livy_says_so_rather_than_asserting_nothing(monkeypatch)
         ConsoleScope, "resolver", property(lambda self: SimpleNamespace(workspace=None))
     )
     session = ConsoleSession(
-        workspace=FabricWorkspace(
+        workspace=Workspace(
             workspace="Analytics", catalogue="Lakehouse/Weaver", environment="weaver"
         )
     )

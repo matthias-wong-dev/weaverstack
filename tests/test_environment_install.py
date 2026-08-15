@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from weaver.errors import CommandError
 from weaver.fabric import environment as env_mod
+from weaver.fabric.client import FabricClient, FabricError
 from weaver.fabric.environment import (
     _version_from_wheel,
     delete_stale_wheels,
@@ -23,9 +25,7 @@ from weaver.fabric.environment import (
     read_staging,
     staged_wheels,
 )
-from weaver.errors import CommandError
-from weaver.fabric.client import FabricClient, FabricError
-from weaver.fabric.resources import Item, ItemNotFoundError, Workspace
+from weaver.fabric.resources import Item, ItemNotFoundError, WorkspaceItem
 
 
 def test_only_weaver_wheels_are_recognised():
@@ -97,7 +97,7 @@ def test_environment_creation_only_follows_item_not_found(monkeypatch):
 
     with pytest.raises(CommandError, match="duplicate"):
         find_or_create_environment(
-            Workspace("ws1", "WS"), "weaver", client=_NeverCreateClient()
+            WorkspaceItem("ws1", "WS"), "weaver", client=_NeverCreateClient()
         )
 
 
@@ -125,7 +125,7 @@ def test_environment_creation_follows_item_not_found(monkeypatch):
     client = _CreateClient()
 
     item, created = find_or_create_environment(
-        Workspace("ws1", "WS"), "weaver", client=client
+        WorkspaceItem("ws1", "WS"), "weaver", client=client
     )
 
     assert (item.id, created, client.created) == ("env1", True, True)
@@ -187,7 +187,7 @@ def _wire(monkeypatch, *, published: dict, staged: dict, state: str, wheel_name:
 
     monkeypatch.setattr(env_mod, "build_wheel", lambda root=None, **k: Path(f"dist/{wheel_name}"))
     monkeypatch.setattr(
-        env_mod, "find_workspace", lambda name, client=None: env_mod.Workspace("ws1", name)
+        env_mod, "find_workspace", lambda name, client=None: env_mod.WorkspaceItem("ws1", name)
     )
     monkeypatch.setattr(
         env_mod,

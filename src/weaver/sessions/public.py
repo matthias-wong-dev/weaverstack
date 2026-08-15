@@ -9,7 +9,7 @@ Session out, and each operation given it rather than opening its own.
 
     with weaver.session(
         workspace="Sales Analytics",
-        catalogue="Weaver",
+        catalogue="Lakehouse/Weaver",
         environment="weaver",
     ) as session:
         weaver.build(".", bind="Lakehouse/SalesDev=Sales", session=session)
@@ -47,7 +47,7 @@ def session(
     """One reusable Session for a workspace named the way a caller names it.
 
     ``workspace`` is a Fabric workspace name, or an already-resolved
-    :class:`~weaver.workspaces.FabricWorkspace` when a caller has one.
+    :class:`~weaver.workspaces.Workspace` when a caller has one.
     ``workspace_config`` reads the same file the CLI's ``--workspace-config``
     does, and explicit arguments win over it.
 

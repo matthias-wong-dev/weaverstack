@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pytest
+from support.workspaces import mounted_lakehouse
 
 from weaver import Assumption, Folder, Lakehouse, Table, Test, View, WeaverObject
 from weaver.errors import LoadError
@@ -157,14 +157,17 @@ def test_a_dependency_inherits_the_session_and_the_lakehouse(spark):
 def test_a_dependency_resolves_against_the_callers_environment(spark):
     """Same class, two destinations — whichever the dependent was given."""
 
-    other = Lakehouse(name="Sales_Prod", spark_root="/srv/.local/Sales_Prod")
+    other = Lakehouse(
+        name="Sales_Prod",
+        spark_root="abfss://ws@onelake.dfs.fabric.microsoft.com/prod",
+    )
 
     Sales__Customer(Sales__Order(spark, lakehouse=LAKEHOUSE)).dataframe()
     Sales__Customer(Sales__Order(spark, lakehouse=other)).dataframe()
 
     assert [path for _, path in spark.read.calls] == [
         "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Customer",
-        "/srv/.local/Sales_Prod/Tables/Sales/Customer",
+        "abfss://ws@onelake.dfs.fabric.microsoft.com/prod/Tables/Sales/Customer",
     ]
 
 
@@ -232,13 +235,12 @@ def test_a_view_is_read_by_name_because_it_has_no_path(spark):
 def test_a_folder_is_addressed_as_a_filesystem_path(spark, tmp_path):
     """A Folder's authored code writes ordinary files, so it needs a real path.
 
-    On a filesystem host that is the directory itself. In OneLake it is a mount
-    of the root Weaver resolved, which is what lets the same authored code run
-    in both places unchanged.
+    A mount of the root Weaver resolved, so authored code that globs and opens
+    files addresses OneLake through ordinary Python.
     """
 
     export = Sales__OrderExport(
-        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+        spark, lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
     )
 
     assert export.path() == tmp_path / "Files/Sales/OrderExport"
@@ -249,17 +251,21 @@ def test_a_folder_hands_spark_a_string_and_python_a_path(spark, tmp_path):
     """Neither consumer can use the other's spelling, so there are two methods."""
 
     export = Sales__OrderExport(
-        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+        spark, lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
     )
 
     assert isinstance(export.path(), Path)
     assert isinstance(export.spark_path(), str)
-    assert export.path().as_posix() == export.spark_path()
+    # Two spellings of one folder, and they are not interchangeable: Python
+    # opens files under the mount, Spark reads them at the OneLake address.
+    assert export.path() == tmp_path / "Files/Sales/OrderExport"
+    assert export.spark_path().startswith("abfss://")
+    assert export.spark_path().endswith("/Files/Sales/OrderExport")
 
 
 def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
     export = Sales__OrderExport(
-        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+        spark, lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
     )
 
     assert export._staging_path() == tmp_path / "Files/Sales/OrderExport_Staging"
@@ -273,7 +279,7 @@ def test_staging_is_issued_by_a_load_and_asking_outside_one_says_so(spark, tmp_p
     """
 
     export = Sales__OrderExport(
-        spark, lakehouse=Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+        spark, lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
     )
 
     with pytest.raises(LoadError, match="only available while a load is running"):
@@ -375,7 +381,7 @@ def test_the_authoring_module_imports_without_spark():
 
 
 def test_the_base_classes_are_registered_by_kind():
-    from weaver.objects import BASE_CLASSES, BASE_CLASS_NAMES
+    from weaver.objects import BASE_CLASS_NAMES, BASE_CLASSES
 
     assert BASE_CLASSES == {
         "Folder": Folder,

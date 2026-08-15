@@ -25,21 +25,27 @@ engines.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import json
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from factories import (
+    installed_catalogue,
+    installed_inventories,
+    load_estate,
+    load_estate_bindings,
+)
+from support.workspaces import InventoryClient, given_workspace
 
 from weaver.errors import LoadError
-from weaver.run import RunState
-from weaver.operations.load import run_load
+from weaver.fabric.resolution import FabricResolver
+from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
     FAILED,
     PENDING,
-    SKIPPED,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
     TASK_FAILED,
@@ -47,20 +53,14 @@ from weaver.load_report import (
     TASK_SUCCEEDED_WITH_REJECTS,
     LoadResult,
 )
-from weaver.load_plan import PhysicalTargetRef
 from weaver.locations import Location
+from weaver.operations.load import run_load
+from weaver.run import RunState
 from weaver.store import FilesystemStore
-from weaver.task_logging import COMPLETE_STEP, PLAN_FILE, open_task_log
-from weaver.fabric.resolution import FabricResolver
-from support.workspaces import InventoryClient
-from support.workspaces import given_resolver, given_workspace
+from weaver.task_logging import COMPLETE_STEP, PLAN_FILE
 
-from factories import (
-    installed_catalogue,
-    installed_inventories,
-    load_estate,
-    load_estate_bindings,
-)
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
@@ -111,7 +111,7 @@ def session(tmp_path):
     bindings = load_estate_bindings()
     workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
     from support.sessions import given_session
-    from weaver.targets import ItemRef
+
     from weaver.task_logging import log_folder
 
     resolver = Refreshing(

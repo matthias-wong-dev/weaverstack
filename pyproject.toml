@@ -41,6 +41,7 @@ dependencies = [
 #   pytest -m fabric            plus a workspace, a capacity and `az login`
 dev = [
     "pytest>=8.4",
+    "ruff>=0.14",
 ]
 
 [project.scripts]
@@ -86,3 +87,26 @@ addopts = [
     "-m",
     "not fabric and not provision and not full_integration",
 ]
+
+
+# Mechanical hygiene only: unused and duplicate imports, undefined names, dead
+# formatting. Nothing about types or style opinions — what this catches is
+# debris, which review should not have to.
+[tool.ruff]
+line-length = 96
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Fabric notebook content: `spark` and `display` are injected by the host, and
+# its cells are imports interleaved with code by definition.
+"examples/workspaces/**/notebook-content.py" = ["F821", "E402"]
+# Authored fixtures are Weaver documents, not modules of this package.
+"tests/fixtures/**" = ["F821", "F841", "E402"]
+# Public namespaces re-export deliberately.
+"src/weaver/__init__.py" = ["F401"]
+"src/weaver/fabric/__init__.py" = ["F401"]
+"src/weaver/build_bundle/__init__.py" = ["F401"]
+"src/weaver/sessions/__init__.py" = ["F401"]

@@ -30,18 +30,18 @@ from __future__ import annotations
 import ast
 
 import pytest
+from support.workspaces import given_workspace
 
 from weaver.errors import CommandError
-from weaver.runtime import session_scopes
-from weaver.sessions.base import Session
 from weaver.run.runtime_boundary import (
     DirectRunScope,
     FabricRunScope,
     LazyRunScope,
     open_runtime_scope,
 )
-from weaver.workspaces import FabricWorkspace
-from support.workspaces import given_resolver, given_workspace
+from weaver.runtime import session_scopes
+from weaver.sessions.base import Session
+from weaver.workspaces import Workspace
 
 
 @pytest.fixture(autouse=True)
@@ -158,7 +158,7 @@ def _answer_for(name: str):
 
 
 def _fabric():
-    return FabricWorkspace(
+    return Workspace(
         workspace="My Workspace", catalogue="Lakehouse/Weaver", environment="weaver"
     )
 
@@ -209,7 +209,7 @@ def _validation():
     """One Lakehouse validation, as the Runner hands it to a scope."""
 
     from weaver.declaration.metadata import ObjectId
-    from weaver.declaration.model import WeaverItemId, WeaverDocumentId
+    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
     from weaver.etl import validation_artefact_id
     from weaver.load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
     from weaver.test_plan import InstalledValidation
@@ -310,7 +310,7 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
 
     submitted = _sources(session)["run_python_primitive"]
     assert "NotebookSession(workspace=workspace, spark=spark)" in submitted
-    assert submitted.index("workspace = FabricWorkspace") < submitted.index(
+    assert submitted.index("workspace = Workspace") < submitted.index(
         "NotebookSession"
     ), "the workspace must be defined before the session that takes it"
 
@@ -416,9 +416,9 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
     scope-opening crossing for work that is entirely T-SQL.
     """
 
-    from weaver.load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+    from weaver.load_plan import WAREHOUSE_TARGET, PhysicalTargetRef
     from weaver.run.dispatch import dispatch_primitive
     from weaver.run.graph import RunNode
 
@@ -455,13 +455,13 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
 def test_a_warehouse_validation_opens_no_scope_either():
     """A Warehouse validation is a procedure, and TDS reaches it from here."""
 
-    from weaver.load_plan import PhysicalTargetRef, WAREHOUSE_TARGET
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import (
         PROCEDURE_SHAPE,
         WeaverDocumentId,
         WeaverItemId,
     )
+    from weaver.load_plan import WAREHOUSE_TARGET, PhysicalTargetRef
     from weaver.run.dispatch import dispatch_primitive
     from weaver.run.graph import RunNode
     from weaver.test_plan import InstalledValidation

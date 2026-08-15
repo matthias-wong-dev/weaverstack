@@ -15,11 +15,10 @@ import types
 
 import pytest
 
-from weaver.workspaces import FabricWorkspace
-from weaver.fabric import livy
-from weaver.fabric import client
+from weaver.fabric import client, livy
 from weaver.fabric.livy import LivySession, environment_bootstrap
 from weaver.fabric.resources import Item
+from weaver.workspaces import Workspace
 
 
 class _FakeResolver:
@@ -46,7 +45,7 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
         "weaver.fabric.resources.find_item",
         lambda ws, name, *, item_type, client: Item("env99", name, item_type, ws.id),
     )
-    workspace = FabricWorkspace(workspace="WS", catalogue="Lakehouse/Weaver", environment="Weaver")
+    workspace = Workspace(workspace="WS", catalogue="Lakehouse/Weaver", environment="Weaver")
 
     session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
@@ -100,7 +99,7 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
 def test_a_workspace_without_an_environment_is_an_error():
     from weaver.errors import CommandError
 
-    workspace = FabricWorkspace(workspace="WS", catalogue="Lakehouse/Weaver")
+    workspace = Workspace(workspace="WS", catalogue="Lakehouse/Weaver")
 
     with pytest.raises(CommandError, match="environment"):
         LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")

@@ -22,8 +22,7 @@ import pytest
 
 from weaver.sessions.console import ConsoleScope, ConsoleSession
 from weaver.sessions.notebook import NotebookSession
-from weaver.workspaces import FabricWorkspace
-from support.workspaces import given_resolver, given_workspace
+from weaver.workspaces import Workspace
 
 CASE_KEY = "spark.sql.caseSensitive"
 
@@ -111,7 +110,7 @@ def desktop(monkeypatch):
     def make(payload=None):
         livy = _Livy(payload)
         session = ConsoleSession(
-            workspace=FabricWorkspace(
+            workspace=Workspace(
                 workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
             ),
             livy=livy,
@@ -127,7 +126,7 @@ def notebook():
 
     def make(spark):
         return NotebookSession(
-            workspace=FabricWorkspace(
+            workspace=Workspace(
                 workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
             ),
             spark=spark,

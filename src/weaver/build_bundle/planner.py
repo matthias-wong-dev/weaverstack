@@ -35,6 +35,7 @@ from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
+from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
 from .aliases import plan_item_aliases
@@ -47,12 +48,11 @@ from .catalogue_actions import (
 from .endpoints import item_refresh_stage
 from .incremental import select_build, stale_alias_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
-from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from .physical import (
     item_build_stages,
+    item_drop_stages,
     item_load_removals,
     item_load_stages,
-    item_drop_stages,
     item_prune_stage,
     item_schema_stage,
 )

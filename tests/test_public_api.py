@@ -58,7 +58,7 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
 def test_internal_composition_seams_are_not_top_level_attributes():
     internal = {
         "Workspace",
-        "FabricWorkspace",
+        "Workspace",
         "LocalWorkspace",
         "Location",
         "Store",
@@ -76,7 +76,6 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "wipe_lakehouse",
         "wipe_sql_target",
         "generate_item_build_bundle",
-        "build_uploaded_item_repository",
         "install_bundle_archive",
         "prepare_catalogue",
         "initialise_catalogue",

@@ -19,9 +19,9 @@
 
 # CELL ********************
 
-import weaver
-
 from pathlib import Path
+
+import weaver
 
 repository = Path("builtin") / "repository"
 

@@ -54,14 +54,14 @@ from factories import (
     lakehouse_test,
     single_document_repository,
 )
-from support.sessions import given_session
 
+from support.sessions import given_session
+from support.workspaces import given_resolver, given_workspace
 from weaver.etl import item_runtime_artefacts
 from weaver.load_plan import PhysicalTargetRef
 from weaver.run import RunState
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from support.workspaces import given_resolver, given_workspace
 
 #: The schema these artefacts are declared in, so a thin node is recognisable in
 #: a report as trivial rather than mistaken for an estate someone cared about.

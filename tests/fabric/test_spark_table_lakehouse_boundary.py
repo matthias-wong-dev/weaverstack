@@ -45,6 +45,7 @@ def spark_table_estate(
     from typing import Any
 
     from factories import bound_target
+
     from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
     from weaver.build_bundle.installer import Installer

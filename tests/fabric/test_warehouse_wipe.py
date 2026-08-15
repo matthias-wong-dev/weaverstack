@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from sql_support import CatalogObject, populate_warehouse, system_schemas, user_objects
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]

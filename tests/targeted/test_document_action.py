@@ -15,6 +15,7 @@ import hashlib
 
 import pytest
 from factories import (
+    bound_target,
     document_id,
     folder_document,
     lakehouse_table,
@@ -25,7 +26,6 @@ from factories import (
 )
 
 from weaver.build_bundle import render_document_build_action
-from factories import bound_target
 
 
 def _render(repository, identity: str):

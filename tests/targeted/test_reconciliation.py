@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import pytest
 from factories import (
-    ITEM,
     FixtureCatalogue,
     FixtureInventory,
     document_id,
@@ -240,6 +239,7 @@ def test_a_generated_procedure_is_reconciled_against_the_procedures_read():
         item="Warehouse/Reporting",
     )
     from factories import item_id
+
     from weaver.catalogue.state import reconcile_catalogue_state
 
     held = reconcile_catalogue_state(

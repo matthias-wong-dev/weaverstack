@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from weaver.workspaces import FabricWorkspace
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.sql_endpoint_refresh import (
     SqlEndpointRefreshExecutor,
@@ -16,7 +12,10 @@ from weaver.build_bundle.models import InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.fabric.client import FabricClient
 from weaver.fabric.resolution import FabricResolver
-from weaver.fabric.resources import Item, SQL_ENDPOINT, refresh_sql_endpoint_metadata
+from weaver.fabric.resources import SQL_ENDPOINT, Item, refresh_sql_endpoint_metadata
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
+from weaver.workspaces import Workspace
 
 
 def _action():
@@ -122,7 +121,7 @@ def test_fabric_resolver_uses_the_typed_endpoint_paired_with_the_lakehouse():
 
     client = Client(response)
     resolver = FabricResolver(
-        FabricWorkspace(workspace="Analytics"), client=client
+        Workspace(workspace="Analytics"), client=client
     )
 
     result = resolver.refresh_sql_endpoint(ItemRef("Sales"))

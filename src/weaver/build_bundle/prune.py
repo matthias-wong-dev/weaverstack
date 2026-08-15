@@ -10,29 +10,39 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from ..catalogue.tables import CATALOGUE_SCHEMA
-from ..etl import LOAD_ROOT
-from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
+from ..etl import LOAD_ROOT
 from ..store import Store
 from ..targets import ItemRef
+from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
+from .changes import (
+    FOLDER as FOLDER_KIND,
+)
+from .changes import (
+    FOLDER_SCHEMA as FOLDER_SCHEMA_KIND,
+)
+from .changes import (
+    SCHEMA as SCHEMA_KIND,
+)
+from .changes import (
+    TABLE as TABLE_KIND,
+)
+from .changes import (
+    VIEW as VIEW_KIND,
+)
+from .changes import (
+    TargetChange,
+    removed,
+)
 from .models import (
     PRUNE_FOLDER,
     PRUNE_SCHEMA,
     PRUNE_TABLE,
     PRUNE_VIEW,
     InstallAction,
-)
-from .changes import (
-    FOLDER as FOLDER_KIND,
-    FOLDER_SCHEMA as FOLDER_SCHEMA_KIND,
-    SCHEMA as SCHEMA_KIND,
-    TABLE as TABLE_KIND,
-    VIEW as VIEW_KIND,
-    TargetChange,
-    removed,
 )
 from .payloads import sha256_hex
 from .targets import BoundTarget

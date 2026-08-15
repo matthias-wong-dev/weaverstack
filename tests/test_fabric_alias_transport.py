@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-from weaver.errors import CommandError
-from weaver.fabric.client import FabricError
-from weaver.fabric.resources import SQL_ENDPOINT, refresh_sql_endpoint_metadata
 from weaver.fabric.resources import LAKEHOUSE, Item
 from weaver.fabric.shortcuts import create_shortcut, delete_shortcut
 

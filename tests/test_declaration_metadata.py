@@ -6,7 +6,6 @@ import textwrap
 
 import pytest
 
-from weaver.errors import MetadataError
 from weaver.declaration import (
     ASSUMPTION,
     AUDIT_COLUMNS,
@@ -21,6 +20,7 @@ from weaver.declaration import (
     parse_python_document,
     parse_sql_document,
 )
+from weaver.errors import MetadataError
 
 # Fixtures follow the layout convention: a blank line between subsections, so
 # the convention is learned by reading rather than by being told.

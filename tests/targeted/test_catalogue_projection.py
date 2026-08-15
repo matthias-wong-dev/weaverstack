@@ -195,6 +195,7 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
     """
 
     from factories import alias_repository
+
     from weaver.catalogue.tables import ALIAS
 
     repository = alias_repository(tmp_path / "repo")
@@ -331,6 +332,7 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     """
 
     from factories import full_estate
+
     from weaver.catalogue.tables import OBJECT_TYPES
 
     repository = full_estate(tmp_path / "repo")
@@ -350,6 +352,7 @@ def test_every_declared_object_and_artefact_is_registered(tmp_path):
     """
 
     from factories import ITEM, WAREHOUSE_ITEM, full_estate, item_id
+
     from weaver.etl import item_load_artefacts
 
     repository = full_estate(tmp_path / "repo")

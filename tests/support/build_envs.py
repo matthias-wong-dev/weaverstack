@@ -8,9 +8,9 @@ second conftest.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-import shutil
 from typing import Mapping
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"

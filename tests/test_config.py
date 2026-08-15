@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from weaver.workspaces import FabricWorkspace
 from weaver.config import load_workspace, parse_workspace
 from weaver.errors import ConfigError
+from weaver.workspaces import Workspace
 
 
 def test_a_workspace_is_named_and_nothing_else_is_required():
     workspace = parse_workspace({"workspace": "Analytics"})
-    assert isinstance(workspace, FabricWorkspace)
+    assert isinstance(workspace, Workspace)
     assert workspace.workspace == "Analytics"
 
 

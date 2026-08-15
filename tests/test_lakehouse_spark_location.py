@@ -15,11 +15,11 @@ construction.
 from __future__ import annotations
 
 import pytest
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.targets import ItemRef
 from weaver.errors import IdentityError
 from weaver.locations import LakehouseSparkLocation
-from support.workspaces import given_resolver, given_workspace
+from weaver.targets import ItemRef
 
 
 @pytest.fixture

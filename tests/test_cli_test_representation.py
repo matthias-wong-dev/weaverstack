@@ -13,7 +13,6 @@ The verdict is the exit code and the evidence is the output, which is what makes
 from __future__ import annotations
 
 import importlib
-
 import json
 
 import pytest

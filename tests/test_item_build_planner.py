@@ -8,31 +8,32 @@ import shutil
 import pytest
 from factories import lakehouse_catalogue
 from support.sessions import given_installer
+from support.workspaces import WORKSPACE
+from test_item_dependencies import _dependency_estate
+from test_item_repository import _estate, _folder, _schema, _write
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
 from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
     WarehouseBinding,
-    generate_item_build_bundle as _generate_item_build_bundle,
     load_bundle,
 )
-from weaver.errors import BuildError
-from weaver.declaration import parse_item_repository
-from weaver.declaration.model import WeaverItemId
+from weaver.build_bundle import (
+    generate_item_build_bundle as _generate_item_build_bundle,
+)
 from weaver.build_bundle.prune import (
     TargetInventory,
     read_lakehouse_inventory,
     read_warehouse_inventory,
 )
 from weaver.catalogue.state import Catalogue
-
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate, _folder, _schema, _write
-from support.workspaces import WORKSPACE
+from weaver.declaration import parse_item_repository
+from weaver.declaration.model import WeaverItemId
+from weaver.errors import BuildError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 
 class _AliasInventory:

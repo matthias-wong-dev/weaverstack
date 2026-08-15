@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Iterable, Mapping
 
 import yaml
@@ -16,23 +16,23 @@ import yaml
 from ..errors import DiscoveryError, IdentityError, MetadataError
 from ..locations import Location
 from ..store import FilesystemStore, Store
+from .dependencies import PythonImport
 from .graph import Graph
+from .item_dependencies import resolve_item_dependencies
 from .metadata import (
     ASSUMPTION,
     DELTA_TARGET,
     FOLDER_TARGET,
-    LAKEHOUSE_NAMESPACE,
     PYTHON,
     SQL_TARGET,
     TEST,
-    WAREHOUSE_NAMESPACE,
     ObjectId,
+    _UniqueKeyLoader,
 )
 from .model import (
     FILES,
     ITEM_TYPES,
     LAKEHOUSE,
-    WAREHOUSE,
     RepositoryAlias,
     WeaverDocumentId,
     WeaverItem,
@@ -40,18 +40,13 @@ from .model import (
     WeaverRepository,
     WeaverSchemaId,
 )
-from .metadata import _UniqueKeyLoader
-from .schemas import SchemaSes, is_schema_file, read_schema_document
+from .references import validate_repository_metadata
+from .schemas import SchemaSes, read_schema_document
 from .source import (
-    PYTHON_ID_SEPARATOR,
     SourceDocument,
     language_for_filename,
-    object_id_for_filename,
     read_source_document,
 )
-from .dependencies import PythonImport
-from .references import validate_repository_metadata
-from .item_dependencies import resolve_item_dependencies
 
 #: Never read, never installed.
 IGNORED_DIRECTORIES = frozenset(

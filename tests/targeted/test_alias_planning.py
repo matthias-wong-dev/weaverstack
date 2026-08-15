@@ -19,14 +19,11 @@ from __future__ import annotations
 
 import pytest
 from factories import (
-    FixtureCatalogue,
     alias_repository,
     bound_target,
     document_id,
-    item_bindings,
     item_id,
     registered_document,
-    registry_row,
     target_inventory,
 )
 

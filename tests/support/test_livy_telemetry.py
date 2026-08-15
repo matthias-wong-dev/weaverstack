@@ -9,6 +9,7 @@ and the workspace only has to supply real statements.
 from __future__ import annotations
 
 import pytest
+
 from .livy_telemetry import OUTSIDE_A_TEST, CountedLivySession, LivyLedger
 
 

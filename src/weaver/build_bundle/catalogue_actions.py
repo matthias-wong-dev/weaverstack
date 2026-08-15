@@ -23,8 +23,8 @@ from .models import (
     PUBLISH_CATALOGUE,
     PUBLISH_REGISTRY,
     REFRESH_SQL_ENDPOINT,
-    InstallAction,
     BuildBatch,
+    InstallAction,
 )
 from .payloads import sha256_hex
 from .stages import CATALOGUE, PlannedStage

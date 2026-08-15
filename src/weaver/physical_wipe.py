@@ -11,11 +11,11 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .errors import CommandError
-from .workspaces import Workspace
 from .locations import Location
 from .resolution import TABLES_AREA, resolver_for, store_for
 from .store import Store
 from .targets import FILES_AREA, DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
+from .workspaces import Workspace
 
 
 @dataclass(frozen=True)
@@ -88,9 +88,6 @@ def _remove_shortcuts(
     being taken away from a directory being deleted — they are not the same act,
     and only one of them destroys data.
 
-    An environment with no shortcuts to remove offers no capability and this
-    answers nothing: the emulator's links are removed by the storage sweep, which
-    unlinks rather than follows.
     """
 
     enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)

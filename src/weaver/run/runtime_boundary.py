@@ -15,7 +15,6 @@ from typing import Any, Protocol
 
 from ..sessions.program import RemoteProgram
 
-
 #: How a dead interpreter announces itself. The Livy states Weaver already
 #: treats as "this session is finished" (``LivySession.active``), plus the
 #: resource layer's own word for a capability it could not hand over.
@@ -260,7 +259,7 @@ class FabricRunScope:
                 return here(**arguments)
 
         source = (
-            "from weaver.workspaces import FabricWorkspace\n"
+            "from weaver.workspaces import Workspace\n"
             f"from {here.__module__} import {name}\n"
             f"workspace = {_workspace_literal(workspace)}\n"
             f"{preamble}"
@@ -289,7 +288,7 @@ def _workspace_literal(workspace) -> str:
     if workspace is None:
         return "None"
     return (
-        f"FabricWorkspace(workspace={workspace.workspace!r}, "
+        f"Workspace(workspace={workspace.workspace!r}, "
         f"catalogue={workspace.catalogue!r}, "
         f"environment={workspace.environment!r})"
     )

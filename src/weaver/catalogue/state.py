@@ -19,8 +19,8 @@ from ..declaration.model import (
     WeaverItemId,
 )
 from ..errors import BuildError
-from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from ..spark.catalogue import is_absent
+from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
@@ -122,7 +122,7 @@ class Catalogue:
 
     @classmethod
     def from_mapping(cls, mapping) -> "Catalogue":
-        """Reconstruct catalogue state without querying a target locally."""
+        """Reconstruct catalogue state from a payload, querying nothing."""
 
         version = mapping.get("format_version")
         if version != 1:
@@ -232,7 +232,7 @@ class CatalogueChanges:
         """``{item: (TableChanges, ...)}`` — reporting only, never statements."""
 
         from .reconcile import compare
-        from .tables import DICTIONARY_TABLES, INSTALLATION, REGISTRY
+        from .tables import DICTIONARY_TABLES, REGISTRY
 
         tables = (*DICTIONARY_TABLES, INSTALLATION, REGISTRY)
         report = {}

@@ -20,7 +20,7 @@ from .resources import (
     ENVIRONMENT,
     Item,
     ItemNotFoundError,
-    Workspace,
+    WorkspaceItem,
     find_item,
     find_workspace,
 )
@@ -161,7 +161,7 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
 
 
 def find_or_create_environment(
-    workspace: Workspace, name: str, *, client: FabricClient
+    workspace: WorkspaceItem, name: str, *, client: FabricClient
 ) -> tuple[Item, bool]:
     """The named Environment, created if it does not yet exist.
 
@@ -189,7 +189,7 @@ def find_or_create_environment(
 
 
 def _await_environment(
-    workspace: Workspace, name: str, *, client: FabricClient, timeout: float = 120.0
+    workspace: WorkspaceItem, name: str, *, client: FabricClient, timeout: float = 120.0
 ) -> Item:
     deadline = time.time() + timeout
     while time.time() < deadline:

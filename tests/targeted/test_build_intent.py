@@ -20,21 +20,20 @@ import pytest
 from factories import (
     ITEM,
     WAREHOUSE_ITEM,
-    FixtureInventory,
     estate_bindings,
     estate_inventories,
     full_estate,
     item_id,
     target_inventory,
 )
-
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
-from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE, TargetChange
-from weaver.catalogue.state import Catalogue
 from support.workspaces import WORKSPACE
+
+from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
+from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE
+from weaver.catalogue.state import Catalogue
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
 #: Actions that change a target. Anything here must be accounted for by a
 #: change; anything not here is either catalogue work, which does not touch the

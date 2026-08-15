@@ -249,7 +249,6 @@ def render_merge(
     _check_scope(table, rows, scope)
     _check_unique_keys(table, rows)
 
-    columns = table.column_names
     source = _source_relation(table, rows)
 
     on = " AND ".join(

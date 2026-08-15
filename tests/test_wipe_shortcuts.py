@@ -14,9 +14,9 @@ import sys
 
 import pytest
 
-from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 from weaver.fabric.shortcuts import Shortcut
 from weaver.physical_wipe import wipe_delta_target, wipe_folder_target, wipe_lakehouse
+from weaver.targets import DeltaTarget, FolderTarget
 
 WIPE_MODULE = sys.modules["weaver.physical_wipe"]
 

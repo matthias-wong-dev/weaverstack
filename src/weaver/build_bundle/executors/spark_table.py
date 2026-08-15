@@ -27,9 +27,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ...errors import InstallError
 from ...declaration.columns import validate_build_columns
-from ...declaration.metadata import AUDIT_COLUMNS, audit_column_name, PYTHON
+from ...declaration.metadata import AUDIT_COLUMNS, PYTHON, audit_column_name
+from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
 

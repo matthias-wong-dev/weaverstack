@@ -37,9 +37,9 @@ from pathlib import Path
 import pytest
 from factories import item_id, single_document_repository, warehouse_table
 
-from weaver.targets import ItemRef
 from weaver.build_bundle.executors.base import ResolvedTarget
 from weaver.build_bundle.prune import read_warehouse_inventory
+from weaver.targets import ItemRef
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
@@ -157,10 +157,10 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
     """
 
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.targets import ItemRef, WarehouseTarget\n"
         "from weaver.resolution import resolver_for\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "resolver = resolver_for(workspace)\n"
@@ -195,12 +195,12 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
 
     warehouse = clean_disposable_warehouse
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.sessions import NotebookSession\n"
         "from weaver.build_bundle.targets import BoundTarget\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
@@ -228,7 +228,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
     """
 
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import Installer, execute_install_action\n"
@@ -236,7 +236,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
         "from weaver.build_bundle.models import InstallAction\n"
         "from weaver.build_bundle.targets import BoundTarget\n"
         "from weaver.build_bundle.executors.base import InstallationContext\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
@@ -285,17 +285,17 @@ def test_the_session_native_store_reads_back_what_it_wrote(
 
     This is the capability the parity argument is weakest about, and the reason
     it gets its own probe. `OneLakeDfsClient` is how a *desktop* crosses into
-    OneLake; `store_for(FabricWorkspace)` inside a session returns something
+    OneLake; `store_for(Workspace)` inside a session returns something
     else entirely. Exercising the DFS client from the checkout says nothing about
     whether the session-native one writes, lists and deletes the same way — and
     the folder executor and the Files-area alias both go through it.
     """
 
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"
@@ -348,11 +348,12 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     desktop read the tests above rely on.
     """
 
-    from weaver.physical_wipe import wipe_sql_target
+    from factories import FixtureCatalogue, item_bindings
+
     from weaver.build_bundle import generate_item_build_bundle
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
-    from factories import FixtureCatalogue, item_bindings
+    from weaver.physical_wipe import wipe_sql_target
 
     resolver = FabricResolver(fabric_workspace)
     store = OneLakeDfsClient()
@@ -393,7 +394,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         control_item=fabric_workspace.catalogue_item,
         workspace_name=fabric_workspace.workspace,
     )
-    inventory = read_warehouse_inventory(
+    read_warehouse_inventory(
         warehouse_target(warehouse).bound, sql=warehouse.executor
     )
     item = item_id(ITEM)
@@ -418,7 +419,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
             inventories[binding.item] = read_lakehouse_inventory(
                 bound, resolver=resolver, store=store
             )
-    bundle = generate_item_build_bundle(
+    generate_item_build_bundle(
         repository,
         bindings=bindings,
         output=resolver.build_bundle("whrow3"),
@@ -438,13 +439,13 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     )
 
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.targets import ItemRef\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import Installer, load_bundle\n"
         "from weaver.sessions import NotebookSession\n"
         "from weaver.build_bundle.prune import read_warehouse_inventory\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"

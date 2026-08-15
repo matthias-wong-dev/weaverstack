@@ -225,7 +225,7 @@ def test_the_procedure_returns_the_result_contract_through_its_signature():
 
     for column in RESULT_COLUMNS:
         assert f"@{column} " in payload
-        assert f"= null output" in payload
+        assert "= null output" in payload
         assert f"set @{column} = " in payload
     assert "as succeeded" not in payload
 

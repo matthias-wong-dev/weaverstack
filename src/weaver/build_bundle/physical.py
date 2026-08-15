@@ -7,7 +7,6 @@ nothing here reaches across items or chooses a sequence number.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, replace
 from typing import Mapping
 
@@ -17,28 +16,42 @@ from ..errors import BuildError
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
 from .changes import (
     FILE as FILE_KIND,
+)
+from .changes import (
     FOLDER as FOLDER_KIND,
+)
+from .changes import (
     SCHEMA as SCHEMA_KIND,
+)
+from .changes import (
     STORED_PROCEDURE as PROCEDURE_KIND,
+)
+from .changes import (
     TABLE as TABLE_KIND,
+)
+from .changes import (
     VIEW as VIEW_KIND,
+)
+from .changes import (
     added as change_added,
+)
+from .changes import (
     removed as change_removed,
 )
 from .models import (
     BUILD_FOLDER,
     BUILD_PROCEDURE,
-    DELETE_FILE,
-    DROP_PROCEDURE,
-    WRITE_FILE,
     BUILD_TABLE,
     BUILD_VIEW,
     CREATE_SCHEMA,
+    DELETE_FILE,
     DROP_FOLDER,
+    DROP_PROCEDURE,
     DROP_TABLE,
     DROP_VIEW,
-    InstallAction,
+    WRITE_FILE,
     BuildBatch,
+    InstallAction,
 )
 from .payloads import sha256_hex
 from .prune import managed_sets, render_inventory_prune

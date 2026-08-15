@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import base64
+import time
 from dataclasses import dataclass
 from pathlib import Path
-import time
 
 from ..errors import CommandError
 from .client import FabricClient, FabricError
@@ -146,11 +146,12 @@ def run_notebook(
     attached_environment = find_item(
         physical_workspace, environment, item_type=ENVIRONMENT, client=client
     )
-    reference = lambda item: {
-        "referenceType": "ById",
-        "itemId": item.id,
-        "workspaceId": physical_workspace.id,
-    }
+    def reference(item) -> dict:
+        return {
+            "referenceType": "ById",
+            "itemId": item.id,
+            "workspaceId": physical_workspace.id,
+        }
     payload = {
         "executionData": {
             "compute": "Spark",

@@ -7,9 +7,9 @@ declaring a requirement does not acquire it.
 
 from __future__ import annotations
 
-#: A Fabric credential. Everything that crosses needs one; the emulator needs none.
+#: A Fabric credential. Everything that crosses needs one.
 AUTH = "auth"
-#: Turning a logical name into a physical item, over REST or locally.
+#: Turning a logical name into a physical item, over REST.
 RESOLVER = "resolver"
 #: The file transport — reading and writing a Lakehouse's Files area.
 ONELAKE = "onelake"

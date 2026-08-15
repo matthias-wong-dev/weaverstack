@@ -21,8 +21,6 @@ import textwrap
 import pytest
 
 from weaver.declaration import read_source_document
-from weaver.spark import FabricSparkTarget
-from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
 from weaver.declaration.ddl import (
     SPARK_SQL_EXECUTOR,
     SPARK_SQL_EXTENSION,
@@ -30,6 +28,8 @@ from weaver.declaration.ddl import (
     SPARK_TABLE_EXTENSION,
     GeneratedDdl,
 )
+from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
+from weaver.spark import FabricSparkTarget
 
 
 def _doc(relative_path: str, text: str, item_type: str = LAKEHOUSE):

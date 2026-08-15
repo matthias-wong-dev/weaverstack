@@ -87,7 +87,6 @@ def read_installed_catalogue(*, session, workspace=None):
 
     from ..build_bundle.workflow import session_catalogue
     from ..catalogue.state import read_installed_catalogue as read
-    from ..targets import ItemRef
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
@@ -168,7 +167,6 @@ def open_run_log(session, *, workspace=None, task_type: str):
     same event.
     """
 
-    from ..targets import ItemRef
     from ..task_logging import log_folder, open_task_log
 
     workspace = workspace if workspace is not None else session.workspace

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from test_item_dependencies import _dependency_estate
+from test_item_repository import _estate
 
-from weaver.locations import Location
-from weaver.declaration import parse_item_repository
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.catalogue.projection import (
     CatalogueProjection,
     project_alias_registry,
@@ -23,9 +22,9 @@ from weaver.catalogue.tables import (
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
 )
-
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate
+from weaver.declaration import parse_item_repository
+from weaver.declaration.model import WeaverItemId
+from weaver.locations import Location
 from weaver.spark import FabricSparkTarget
 
 #: The Weaver Lakehouse every catalogue statement is addressed to.
@@ -369,9 +368,8 @@ def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
     """
 
     from weaver.catalogue.state import read_catalogue_state
-    from weaver.errors import BuildError
-
     from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.errors import BuildError
 
     all_but_one = [
         table.name for table in CATALOGUE_TABLES if table.name != "TableDictionary"

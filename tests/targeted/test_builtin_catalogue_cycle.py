@@ -20,13 +20,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from support.sessions import given_session
 from factories import (
     item_bindings,
     lakehouse_table,
     single_document_repository,
     target_inventory,
 )
+from support.sessions import given_session
+from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
     LakehouseBinding,
@@ -39,8 +40,6 @@ from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.model import WeaverItemId
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from support.workspaces import given_resolver, given_workspace
-from support.workspaces import WORKSPACE
 
 BUILTIN = WeaverItemId.parse("Lakehouse/_weaver")
 

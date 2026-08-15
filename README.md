@@ -18,16 +18,17 @@ certifies each object in the central catalogue only once it has built.
 ## Installation
 
 ```bash
-pip install weaverstack        # core, for a Fabric Environment or notebook
-pip install 'weaverstack[cli]' # plus the optional desktop CLI
+pip install weaverstack
 ```
+
+One install, both positions: the same package runs in a Fabric notebook and
+drives Fabric from a desktop, and the `weaver` command comes with it.
 
 Requires Python 3.11 or later. Tested on macOS, Linux and Windows across Python
 3.11 and 3.12.
 
 No JDK and no Spark install: Fabric supplies Spark where authored runtime code
-executes, and a desktop reaches it through the Session. The CLI and the whole
-Fabric path run natively on all three platforms.
+executes, and a desktop reaches it through the Session.
 
 ## CLI lifecycle
 

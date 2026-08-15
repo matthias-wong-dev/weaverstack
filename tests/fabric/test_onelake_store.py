@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.locations import Location
-from weaver.store import Store
 from weaver.errors import CommandError
 from weaver.fabric import OneLakeDfsClient, onelake_url, parse_onelake
-from weaver.store import StoreError
+from weaver.locations import Location
+from weaver.store import Store, StoreError
 
 pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 

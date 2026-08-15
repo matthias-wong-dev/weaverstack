@@ -21,6 +21,15 @@ from .render import (
     sorted_rows,
     typed_literal,
 )
+from .state import (
+    Catalogue,
+    Reconciliation,
+    RegisteredDocument,
+    for_targets,
+    read_catalogue_state,
+    reconcile_catalogue_state,
+    retaining,
+)
 from .tables import (
     ALIAS,
     AUDIT_COLUMN_NAMES,
@@ -47,15 +56,6 @@ from .tables import (
     CatalogueColumn,
     CatalogueTable,
     table,
-)
-from .state import (
-    RegisteredDocument,
-    Catalogue,
-    Reconciliation,
-    for_targets,
-    retaining,
-    read_catalogue_state,
-    reconcile_catalogue_state,
 )
 
 __all__ = [

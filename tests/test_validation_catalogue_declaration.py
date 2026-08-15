@@ -10,12 +10,17 @@ materialised there.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from test_validation_repository_declaration import (
+    _python_assumption,
+    _python_test,
+    _schema,
+    _table,
+    _write,
+)
 
 from weaver.catalogue.projection import project_item_catalogue
-from weaver.catalogue.state import Catalogue, RegisteredDocument
+from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     DEPENDENCY,
     REGISTRY,
@@ -28,17 +33,9 @@ from weaver.catalogue.tables import (
     TEST_DICTIONARY,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
 from weaver.locations import Location
-
-from test_validation_repository_declaration import (
-    _python_assumption,
-    _python_test,
-    _schema,
-    _table,
-    _write,
-)
 
 ITEM = WeaverItemId.parse("Lakehouse/Sales")
 

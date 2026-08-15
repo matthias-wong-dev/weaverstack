@@ -9,7 +9,6 @@ from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .workspaces import (
     ExecutionSettings,
-    FabricWorkspace,
     TargetDeclaration,
     Workspace,
 )
@@ -58,7 +57,7 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
         "warehouses": _targets(payload.get("warehouses"), item_type=WAREHOUSE),
     }
     try:
-        return FabricWorkspace(**common)
+        return Workspace(**common)
     except TypeError as exc:
         raise ConfigError(f"Workspace configuration is incomplete: {exc}") from exc
 
@@ -95,7 +94,7 @@ def resolve_workspace(
         "lakehouses": configured.lakehouses if configured is not None else {},
         "warehouses": configured.warehouses if configured is not None else {},
     }
-    return FabricWorkspace(**common)
+    return Workspace(**common)
 
 
 

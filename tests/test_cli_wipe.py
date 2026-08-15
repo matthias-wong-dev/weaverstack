@@ -5,10 +5,10 @@ from __future__ import annotations
 import importlib
 
 import pytest
+from support.workspaces import given_workspace
 
-from weaver.locations import Location
-from support.workspaces import given_resolver, given_workspace
 from weaver import WipeReport, WipeResult
+from weaver.locations import Location
 from weaver_cli import main
 from weaver_cli.main import build_parser
 

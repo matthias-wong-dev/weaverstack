@@ -315,10 +315,10 @@ def _fabric_cli_workspace(args: argparse.Namespace):
     """Resolve the Fabric-only values shared by notebook CLI utilities."""
 
     from weaver.errors import CommandError
-    from weaver.workspaces import FabricWorkspace
+    from weaver.workspaces import Workspace
 
     workspace = _resolve_workspace(args)
-    if not isinstance(workspace, FabricWorkspace):
+    if not isinstance(workspace, Workspace):
         raise CommandError("A Fabric Workspace is required for notebook commands.")
     return workspace
 
@@ -355,7 +355,11 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     from weaver.fabric.notebooks import run_notebook
 
     workspace = _fabric_cli_workspace(args)
-    lakehouse = args.lakehouse or workspace.catalogue
+    # The item name, not the typed configuration value: `run_notebook` resolves
+    # this as a Lakehouse display name, and `Lakehouse/Weaver` is not one.
+    lakehouse = args.lakehouse or (
+        workspace.catalogue_item.name if workspace.catalogue else None
+    )
     if not lakehouse:
         raise CommandError(
             "A Lakehouse is required to run this notebook. "
@@ -402,10 +406,10 @@ def handle_install(args: argparse.Namespace) -> int:
 
     from weaver.errors import CommandError
     from weaver.sessions.host import use_or_create_session
-    from weaver.workspaces import FabricWorkspace
+    from weaver.workspaces import Workspace
 
     workspace = _resolve_workspace(args)
-    if not isinstance(workspace, FabricWorkspace):
+    if not isinstance(workspace, Workspace):
         raise CommandError("A Fabric Workspace is required to install Weaver.")
     if not workspace.environment:
         raise CommandError(
@@ -511,7 +515,7 @@ def _desktop_store(workspace):
     """The store a desktop command uses to reach a workspace.
 
     Reaching into Fabric is a crossing, so the CLI constructs the
-    OneLakeDfsClient here — core never turns a FabricWorkspace into a DFS client.
+    OneLakeDfsClient here — core never turns a Workspace into a DFS client.
     """
 
     from weaver.fabric import OneLakeDfsClient
@@ -555,8 +559,6 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
 
     from dataclasses import replace
 
-    from weaver.errors import CommandError
-    from weaver.targets import ItemRef
 
 
     overrides = {}
@@ -783,11 +785,10 @@ def _run_load(
 ):
     """One load, decided here and dispatched where each primitive lives.
 
-    There is one call now. `weaver.load` reads the estate through Session
-    capabilities, builds the graph locally and dispatches each node to whatever
-    can run it — TDS for a Warehouse procedure, the run's remote scope for a
-    deployed Python module — so the desktop, a notebook and the emulator differ
-    only in what the Session answers.
+    `weaver.load` reads the estate through Session capabilities, builds the
+    graph here and dispatches each node to whatever can run it — TDS for a
+    Warehouse procedure, the run's remote scope for a deployed Python module —
+    so a desktop and a notebook differ only in what the Session answers.
 
     What this module still owns is the *preflight*: rejecting a mistyped target
     over one REST call, before anything expensive is acquired.

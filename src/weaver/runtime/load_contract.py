@@ -6,12 +6,12 @@ import inspect
 from dataclasses import dataclass
 
 from ..declaration.metadata import (
-    DEFAULT_DELETE_THRESHOLD,
-    DEFAULT_STABILITY_ROWS,
-    DEFAULT_UPDATE_THRESHOLD,
     AUDIT_DELETE,
     AUDIT_INSERT,
     AUDIT_UPDATE,
+    DEFAULT_DELETE_THRESHOLD,
+    DEFAULT_STABILITY_ROWS,
+    DEFAULT_UPDATE_THRESHOLD,
     FOLDER,
     PYTHON,
     TABLE,

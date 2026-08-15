@@ -11,7 +11,6 @@ from typing import Any, Mapping
 
 from ..errors import WeaverError
 
-
 # --- the contract a result must meet ------------------------------------------
 
 

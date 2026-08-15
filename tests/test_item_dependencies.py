@@ -3,12 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
-from weaver.errors import BuildError, GraphError
-from weaver.locations import Location
-from weaver.declaration import project_bound_documents, parse_item_repository
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-
 from test_item_repository import (
     _estate,
     _folder,
@@ -16,6 +10,11 @@ from test_item_repository import (
     _warehouse_table,
     _write,
 )
+
+from weaver.declaration import parse_item_repository, project_bound_documents
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.errors import BuildError, GraphError
+from weaver.locations import Location
 
 
 def _dependency_estate(tmp_path):

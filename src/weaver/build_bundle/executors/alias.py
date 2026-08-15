@@ -5,18 +5,11 @@ and the object in another item it stands for. Both are resolved through the
 environment, the same way every other action's destination is, so the bundle
 carries no path from the machine that wrote it.
 
-The *form* the pointer takes is transport:
-
-``Fabric``
-    a OneLake shortcut in the destination Lakehouse, created through the
-    workspace's own API.
-``the local emulator``
-    a filesystem link beside the destination's other tables, so the emulator's
-    ``Tables/`` area keeps mirroring OneLake — plus the catalogue registration
-    Fabric performs for itself.
+The pointer is a OneLake shortcut in the destination Lakehouse, created through
+the workspace's own API.
 
 Which alias, over what, is settled in the manifest; how a name is made to point
-somewhere is the environment's business. An alias holds no data, so an existing
+somewhere is the transport's business. An alias holds no data, so an existing
 one is replaced rather than treated as a collision: a build has to run twice.
 
 **The action is not finished until the alias can be read.** Fabric creates a

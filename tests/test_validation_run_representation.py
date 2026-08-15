@@ -135,8 +135,8 @@ def _ran(validation, executor=None, *, collect=False):
 
     from types import SimpleNamespace
 
-    from weaver.run.outcome import settle
     from weaver.operations.test import _as_validation_node
+    from weaver.run.outcome import settle
 
     node = SimpleNamespace(
         node_id=str(validation.logical),
@@ -412,7 +412,7 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
         def files_root(self):
             return "/tmp/files"
 
-    original_lakehouse = execution.__dict__.get("lakehouse_for")
+    execution.__dict__.get("lakehouse_for")
     import weaver.lakehouse as lakehouse_module
     import weaver.runtime.python_context as context_module
 
@@ -439,8 +439,8 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
 def test_a_dry_run_dispatches_nothing():
     executor = _Executor({"missing_count": 9, "unexpected_count": 9})
 
-    from weaver.run import RunRequest, RunState, Runner
     from weaver.catalogue.state import Catalogue
+    from weaver.run import Runner, RunRequest, RunState
 
     validation = _validation()
     runner = Runner(

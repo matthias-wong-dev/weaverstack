@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.store import FilesystemStore
-from weaver.locations import Location
-from weaver.errors import DiscoveryError, MetadataError
 from weaver.declaration import PYTHON, SPARK_SQL, parse_document, parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
+from weaver.errors import DiscoveryError, MetadataError
+from weaver.locations import Location
+from weaver.store import FilesystemStore
 
 REGISTRY = """\
 /*

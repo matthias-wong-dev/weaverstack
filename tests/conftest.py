@@ -9,13 +9,12 @@ marker and build their own in ``tests/fabric``.
 
 from __future__ import annotations
 
+import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path
+from pathlib import Path as _Path
 
 import pytest
-
-import sys as _sys
-from pathlib import Path as _Path
 
 # The narrow fixture constructors are shared by every layer — pure Python,
 # local Spark and Fabric all build their inputs the same way — so they are
@@ -154,9 +153,9 @@ class Lakehouses:
 
 
 def _lakehouses(root: Path, *, weaver: str, target: str, extra=()) -> Lakehouses:
-    from weaver.store import FilesystemStore
-
     from support.workspaces import given_resolver, given_workspace
+
+    from weaver.store import FilesystemStore
 
     workspace = given_workspace(catalogue=f"Lakehouse/{weaver}")
     resolver = given_resolver(

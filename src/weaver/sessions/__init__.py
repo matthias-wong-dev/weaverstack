@@ -27,8 +27,8 @@ from .notebook import NotebookScope, NotebookSession
 from .program import RemoteProgram
 from .public import session
 from .resources import Resource, ResourceError, ResourceState
-from .testing import RecordedCall, TestSession
 from .telemetry import Measure, SessionTelemetry
+from .testing import RecordedCall, TestSession
 
 __all__ = [
     "ConsoleScope",

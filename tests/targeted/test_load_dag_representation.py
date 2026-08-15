@@ -15,27 +15,6 @@ them would leave the refusals untested.
 from __future__ import annotations
 
 import pytest
-
-from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import (
-    ALIAS,
-    DEPENDENCY,
-    INSTALLATION,
-    REGISTRY,
-)
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.errors import LoadError
-from weaver.load_plan import (
-    ENDPOINT_REFRESH,
-    PYTHON_FOLDER,
-    PYTHON_TABLE,
-    WAREHOUSE_PROCEDURE,
-    InstalledEstate,
-    LoadDag,
-    PhysicalTargetRef,
-    load_dag,
-)
-
 from factories import (
     LOAD_CONSUMER,
     LOAD_CONSUMER_TARGET,
@@ -50,6 +29,20 @@ from factories import (
     load_estate_bindings,
     schema_document,
     warehouse_table,
+)
+
+from weaver.catalogue.state import Catalogue
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.errors import LoadError
+from weaver.load_plan import (
+    ENDPOINT_REFRESH,
+    PYTHON_FOLDER,
+    PYTHON_TABLE,
+    WAREHOUSE_PROCEDURE,
+    InstalledEstate,
+    LoadDag,
+    PhysicalTargetRef,
+    load_dag,
 )
 
 RAW = PhysicalTargetRef("lakehouse", LOAD_PRODUCER_TARGET)

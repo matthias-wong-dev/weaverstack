@@ -48,10 +48,10 @@ from weaver.build_bundle import (
     plan_item_build,
     write_bundle,
 )
+from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.incremental import BuildSelection, Impact
 from weaver.build_bundle.stages import enumerate_stages
 from weaver.declaration.metadata import DELTA_TARGET
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
@@ -202,14 +202,14 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     assert planned_order, "the bundle planned no physical work to install"
 
     payload = livy_session.run(
-        "from weaver.workspaces import FabricWorkspace\n"
+        "from weaver.workspaces import Workspace\n"
         "from weaver.resolution import resolver_for, store_for\n"
         "from weaver.build_bundle import Installer, load_bundle\n"
         "from weaver.sessions import NotebookSession\n"
         "from weaver.build_bundle.prune import read_lakehouse_inventory\n"
         "from weaver.build_bundle.workflow import session_catalogue\n"
         "from weaver.targets import ItemRef\n"
-        f"workspace = FabricWorkspace(workspace={fabric_workspace.workspace!r}, "
+        f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
         f"environment={fabric_workspace.environment!r})\n"
         "store = store_for(workspace)\n"

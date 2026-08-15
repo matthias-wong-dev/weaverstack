@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 from factories import (
-    FixtureCatalogue,
     ITEM,
     WAREHOUSE_ITEM,
+    FixtureCatalogue,
     folder_document,
     item_id,
     lakehouse_table,
@@ -28,7 +28,6 @@ from factories import (
     warehouse_view,
 )
 
-from weaver.locations import Location
 from weaver.build_bundle.incremental import select_build
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
@@ -39,6 +38,7 @@ from weaver.etl import (
     item_load_artefacts,
     load_artefacts,
 )
+from weaver.locations import Location
 
 CUSTOMER = "DWG.Customer"
 SUMMARY = "DWG.Summary"

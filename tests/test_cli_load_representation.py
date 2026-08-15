@@ -21,7 +21,6 @@ of the boundary is what was submitted and what was made of the answer.
 from __future__ import annotations
 
 import importlib
-
 import json
 
 import pytest

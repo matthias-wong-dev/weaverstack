@@ -28,7 +28,7 @@ import weaver
 import weaver.operations.build
 import weaver.operations.workspace
 from weaver.errors import BuildError, CommandError
-from weaver.workspaces import FabricWorkspace
+from weaver.workspaces import Workspace
 
 
 @pytest.fixture
@@ -67,14 +67,13 @@ def captured(monkeypatch):
 
         return _stop
 
-    # Two seams rather than three: the emulator and a Fabric notebook are both
-    # "this process is already where the data is", and the Session is what makes
-    # them one path.
+    # One seam, because there is one build: what the Session answers is what
+    # differs between a notebook and a desktop, not which algorithm runs.
+    monkeypatch.setattr(weaver.operations.build, "_run_build", capture("build"))
+    # Preflight is a different claim — that a build proves its items exist before
+    # opening anything — and has its own tests below.
     monkeypatch.setattr(
-        weaver.operations.build, "_build_in_process", capture("in_process")
-    )
-    monkeypatch.setattr(
-        weaver.operations.build, "_build_desktop_fabric", capture("desktop")
+        weaver.operations.build, "_preflight", lambda *a, **k: None
     )
     return seen
 
@@ -167,7 +166,7 @@ def test_an_operation_given_a_resolved_workspace_says_to_open_a_session(
     between them.
     """
 
-    workspace = FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Configured")
+    workspace = Workspace(workspace="Demo", catalogue="Lakehouse/Configured")
 
     with pytest.raises(CommandError, match="weaver.session"):
         _build(repository, workspace=workspace)
@@ -205,7 +204,7 @@ def test_a_desktop_caller_needs_no_workspace_object(captured, repository, tmp_pa
     with pytest.raises(Halt):
         _build(repository, workspace="Analytics", catalogue="Lakehouse/Weaver")
 
-    assert captured["mode"] == "desktop"
+    assert captured["mode"] == "build"
     assert captured["workspace"].workspace == "Analytics"
     assert captured["workspace"].catalogue == "Lakehouse/Weaver"
 
@@ -249,7 +248,7 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
 
     with pytest.raises(CommandError, match="nothing to add"):
         weaver.session(
-            workspace=FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Weaver"),
+            workspace=Workspace(workspace="Demo", catalogue="Lakehouse/Weaver"),
             workspace_config=config,
         )
 

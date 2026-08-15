@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from weaver.store import Entry, FilesystemStore, Store
-from weaver.locations import Location
 from weaver.errors import CommandError
-from weaver.store import StoreError
+from weaver.locations import Location
+from weaver.store import Entry, FilesystemStore, Store, StoreError
 
 
 @pytest.fixture

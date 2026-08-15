@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from weaver.catalogue.tables import INSTALLATION
-from weaver.unbind import plan_unbind, unbind_targets
 from weaver.spark import FabricSparkTarget
+from weaver.unbind import plan_unbind, unbind_targets
 
 #: The Weaver Lakehouse every catalogue statement is addressed to.
 WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from weaver.targets import ItemRef
-from weaver.store import FilesystemStore
-from weaver.locations import Location
+from support.workspaces import WORKSPACE
+from test_item_dependencies import _dependency_estate
+from test_item_repository import _estate, _folder, _table, _write
+
 from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
@@ -37,10 +39,12 @@ from weaver.catalogue.state import (
 from weaver.catalogue.tables import REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.locations import Location
+from weaver.store import FilesystemStore
+from weaver.targets import ItemRef
 
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate, _folder, _table, _write
-from support.workspaces import WORKSPACE
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.catalogue.state import ReconciledCatalogue
 
 
 def _repository(root):

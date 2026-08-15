@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.targets import DeltaTarget, FolderTarget, WarehouseTarget
-from weaver.locations import Location
 from weaver import wipe as public_wipe
+from weaver.errors import CommandError
+from weaver.fabric.resources import ItemNotFoundError
+from weaver.locations import Location
 from weaver.operations.wipe import (
     WipeReport as PublicWipeReport,
+)
+from weaver.operations.wipe import (
     WipeTarget,
 )
 from weaver.physical_wipe import wipe, wipe_folder_target
-from weaver.errors import CommandError
 from weaver.sql import SqlExecutionError
-from support.workspaces import given_resolver, given_workspace
-from weaver.fabric.resources import ItemNotFoundError
+from weaver.targets import FolderTarget, WarehouseTarget
 
 
 def folder_target(name: str = "Sales_LH/Files") -> FolderTarget:
@@ -193,7 +194,7 @@ def test_public_wipe_rejects_partial_lakehouse_targets(value):
 
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
-    workspace = None
+    None
     monkeypatch.setattr(
         operations,
         "_wipe_one",

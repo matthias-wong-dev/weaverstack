@@ -74,21 +74,12 @@ Session on a desktop    → cross for it: Livy, OneLake over HTTPS, TDS, REST
 workspace. Above that, `build`, `load`, `test` and `wipe` are the same code in
 both, which is the property the whole arrangement exists to keep.
 
-There was a third position once: a filesystem emulator standing in for a
-workspace on a laptop. It was removed, because a payload now carries the final
-four-part Fabric name a build decided, and nothing but Fabric can execute one of
-those. The fast suite decides against a `TestSession` instead — a real
-implementation of the Session contract that records what a host was asked to do
-and never interprets it.
+The fast suite decides against a `TestSession`: a real implementation of the
+Session contract that records what a host was asked to do and never interprets
+it. It models no Spark, no Delta and no Fabric catalogue, so nothing it proves
+can be true only of a fake.
 
-The older form of this rule said core must operate only within the environment
-it executes in, and that only the CLI and test infrastructure may cross. The
-intent survives — operation code still contains no `if isinstance(workspace, …)`
-— but the crossing now belongs to the Session rather than to the CLI, so an
-operation can be *given* one that reaches into Fabric without knowing that it
-does.
-
-A `FabricWorkspace` identifies the workspace the resources live in. It does **not**
+A `Workspace` identifies the workspace the resources live in. It does **not**
 say whether access happens through desktop HTTP clients or inside a session. A
 build bundle binds target kind, item identifiers and the display names four-part
 Spark naming is spelled with — never a discriminator for where Weaver is running.
@@ -108,22 +99,21 @@ So the storage picture has two parts, and they must not be conflated:
 | CLI | Fabric workspace | `OneLakeDfsClient` |
 | Fabric integration tests | Fabric workspace | `OneLakeDfsClient` |
 
-`OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is **not** the Fabric equivalent of
-`FilesystemStore`. It is how the desktop crosses in, constructed explicitly by the
-caller that crosses. Inside Fabric, `store_for(FabricWorkspace)` returns the
-session-native `FabricStore`; from a desktop that construction fails rather
-than silently substituting DFS.
+`OneLakeDfsClient` (ADLS Gen2 DFS over HTTPS) is how the desktop crosses in,
+constructed explicitly by the caller that crosses. Inside Fabric, `store_for`
+returns the session-native `FabricStore`; from a desktop that construction fails
+rather than silently substituting DFS.
 
-`FilesystemStore` is named for the transport it is, and it survived the emulator
-because it was never part of it: a build reads its repository through one
-wherever it runs, because every incoming source tree is copied to a temporary
-filesystem snapshot before it is parsed. That copy is unconditional — see `_temp_copy` in
-`weaver.build_bundle.workflow`. A source already on this filesystem is copied
-too, so a build never reads a tree the caller can still edit underneath it.
+`FilesystemStore` is named for the transport it is: a build reads its repository
+through one wherever it runs, because every incoming source tree is copied to a
+temporary filesystem snapshot before it is parsed. That copy is unconditional —
+see `_temp_copy` in `weaver.build_bundle.workflow`. A source already on this
+filesystem is copied too, so a build never reads a tree the caller can still
+edit underneath it.
 
-Above resolution and the store, nothing knows which host it is running on. An
-`if isinstance(workspace, …)` in core operation code means the abstraction is being
-broken; the fix belongs in the factories, or in the CLI that does the crossing.
+Above resolution and the store, nothing knows which host it is running on. Code
+that asks means the abstraction is being broken; the fix belongs in the
+factories, or in the CLI that does the crossing.
 
 **Credential choice is a caller's policy, not the core's.** Core accepts an
 injected credential and otherwise uses the library default without pinning the
@@ -131,14 +121,12 @@ chain. The CLI and the Fabric test infrastructure call `prefer_cli_credential()`
 themselves; importing or using the core imposes no credential choice.
 
 
-### Fabric is the reference, and now the only one
+### Fabric is the reference
 
 **Weaver is Fabric-first.** The behaviour that must be right is the behaviour
-*inside* Fabric. This used to be a warning against contorting Fabric to match
-what was convenient in an emulator; with the emulator gone the rule reads more
-simply, but the direction it protects is the same. What the fast suite may do
-without a tenant is *decide* — render, plan, reconcile — and what it must never
-do is model what Fabric would answer.
+*inside* Fabric. What the fast suite may do without a tenant is *decide* —
+render, plan, reconcile — and what it must never do is model what Fabric would
+answer.
 
 Concretely, for anything with two phases (as the build bundle has *generate* then
 *install*): **both phases decide against the target environment's real state.**
@@ -147,38 +135,32 @@ session. From a desktop it has to be *read across first*, and then planned
 against, which is what `read_build_state` does before the Builder is handed
 anything.
 
-This wording used to be stronger: both phases must *run in* the target
-environment, and anything else was row 2 dressed as row 3. That came from a real
-failure — bundle generation on the desktop with `spark=None` could not see
-catalogue views, so it could not prune them. Worth being precise about what went
-wrong there, because it was **planning blind**, not planning on a laptop. A
-planner given the real catalogue and the real inventories reaches the same bundle
-wherever its process happens to be; a planner given `None` does not. So the
-invariant is about the state, and the location was never the thing.
+The invariant is about the *state*, not the location. A planner given the real
+catalogue and the real inventories reaches the same bundle wherever its process
+happens to be; a planner given `None` does not, and once did — bundle generation
+that could not see catalogue views could not prune them. Planning blind is the
+failure this guards against.
 
-When a Fabric behaviour is awkward, the question is still "how does local emulate
-this?", never "how does Fabric bend to what local already does?".
+### Two positions, both first-class
 
-### Two positions, both meant to be first-class
+A user can open a Fabric notebook, `pip install weaverstack`, and work. That is
+the product, and it is what distinguishes Weaver from tools that demand an
+orchestration environment of their own.
 
-A user should be able to open a Fabric notebook, `pip install weaverstack`, and
-work. That is the product, and it is what distinguishes Weaver from tools that
-demand an orchestration environment of their own.
+The other half is **everything driveable from a desktop**, with Fabric reached
+through Livy, TDS, OneLake and REST, each crossing carrying a small clear script
+rather than an operation. Not two products — one, in two positions, because the
+doers do not know which one they are in.
 
-The other half is the one being built towards: **everything driveable from a
-desktop**, with Fabric reached only through Livy, TDS, OneLake and REST, each
-crossing carrying a small clear script rather than an operation. Not two products
-— one, in two positions, because the doers do not know which one they are in.
+There is one `build`, one `load` and one `test`. Every build action runs in the
+`Installer` wherever that is, and the state a build plans against is read the
+same way — the catalogue and a Lakehouse's views are Spark SQL, a Lakehouse's
+objects are storage, a Warehouse is TDS. So a desktop `weaver build` needs no
+published wheel: nothing it submits imports Weaver.
 
-Build is there. Every build action runs in the `Installer` wherever that is, and
-the state a build plans against is read the same way — the catalogue and a
-Lakehouse's views are Spark SQL, a Lakehouse's objects are storage, a Warehouse
-is TDS. So a desktop `weaver build` needs no published wheel: nothing it submits
-imports Weaver.
-
-What still crosses as a program is a run's Python primitives, which are deployed
+What crosses as a program is a run's Python primitives, which are deployed
 modules imported where Spark is. `weaver load` therefore requires the published
-wheel, and that is the remaining gap.
+wheel.
 
 **A Fabric test that runs Weaver on the laptop tests the desktop position, not
 the in-Fabric one** — that is what the `remote` and `hosted` markers are for, and
@@ -272,23 +254,22 @@ environments, plans, runners, coordinators or execution paths standing beside
 their replacements unless an explicit, temporary migration boundary requires it —
 and then only until that migration lands.
 
-The refactor that established the four doers — `Session`, `Builder`, `Installer`,
-`Runner` — retired these, and they are gone rather than deprecated:
+These are gone rather than deprecated, and named here so a retirement stays
+retired once nobody remembers why the name was a problem:
 
 ```text
-InstallationEnvironment
-LoadEnvironment
-LoadPlan as the runtime owner
-ResolvedLoadPlan
-execute_load_plan orchestration
-separate load/test orchestration engines
-old/new action terminology
-operation-local resolver/resource ownership
+InstallationEnvironment            LocalWorkspace
+LoadEnvironment                    LocalResolver
+LoadPlan as the runtime owner      FabricWorkspace (there is one Workspace)
+ResolvedLoadPlan                   SparkNaming / SparkDestination
+execute_load_plan orchestration    is_fabric
+separate load/test engines         a per-position build
+old/new action terminology         build_uploaded_item_repository
+operation-local resource ownership
 ```
 
-`tests/test_public_api.py` and `tests/test_remote_program_invariant.py` name each
-one and fail if it comes back — which is how a retirement stays retired once
-nobody remembers why the name was a problem.
+`tests/test_fabric_only_invariant.py`, `tests/test_public_api.py` and
+`tests/test_remote_program_invariant.py` name them and fail if one comes back.
 
 Temporary compatibility while intermediate commits land is fine. Obsolete
 architecture left layered underneath the new architecture is not.

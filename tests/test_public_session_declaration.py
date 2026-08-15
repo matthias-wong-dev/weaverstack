@@ -18,7 +18,7 @@ import pytest
 import weaver
 from weaver.errors import CommandError, ConfigError
 from weaver.sessions import ConsoleSession
-from weaver.workspaces import FabricWorkspace
+from weaver.workspaces import Workspace
 
 
 def test_the_public_name_is_a_callable_rather_than_a_module():
@@ -40,7 +40,7 @@ def test_a_named_workspace_is_enough(desktop_credential):
 
 
 def test_a_resolved_workspace_is_taken_as_it_is(desktop_credential):
-    workspace = FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Weaver")
+    workspace = Workspace(workspace="Demo", catalogue="Lakehouse/Weaver")
 
     with weaver.session(workspace=workspace) as opened:
         assert opened.workspace is workspace
@@ -56,7 +56,7 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused(
 
     with pytest.raises(CommandError, match="nothing to add"):
         weaver.session(
-            workspace=FabricWorkspace(workspace="Demo"),
+            workspace=Workspace(workspace="Demo"),
             workspace_config=config,
         )
 

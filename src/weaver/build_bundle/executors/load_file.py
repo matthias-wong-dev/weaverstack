@@ -34,8 +34,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...declaration.load import SPARK_LOAD_EXTENSION as MODULE_EXTENSION
-from ...declaration.spark_sql_module import GENERATED_MODULE_MARKER
 from ...errors import InstallError
 from ...targets import FolderTarget
 from ..models import DELETE_FILE, WRITE_FILE, InstallAction

@@ -19,13 +19,13 @@ from __future__ import annotations
 from typing import Any
 
 from weaver.sessions import TestSession
-from weaver.workspaces import FabricWorkspace
+from weaver.workspaces import Workspace
 
 from .workspaces import TARGET_LAKEHOUSE, WEAVER_LAKEHOUSE
 
 #: Somewhere for a Session that will never reach a workspace to call home. Used
 #: where the claim is about installer semantics and the workspace is incidental.
-NOWHERE = FabricWorkspace(workspace="Demo", catalogue="Lakehouse/Weaver")
+NOWHERE = Workspace(workspace="Demo", catalogue="Lakehouse/Weaver")
 
 
 def given_session(

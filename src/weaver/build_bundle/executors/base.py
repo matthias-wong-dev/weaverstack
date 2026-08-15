@@ -34,8 +34,7 @@ class ResolvedTarget:
     because Fabric answers them separately:
 
     ``location``
-        the physical roots — where the bytes are. An ``abfss://`` URL on Fabric, a
-        directory locally.
+        the physical roots — where the bytes are, as an ``abfss://`` URL.
     ``destination``
         the catalogue name — what a statement calls it, as Fabric's four-part
         ``workspace.lakehouse.schema.object``.

@@ -29,6 +29,7 @@ from .tables import (
     CatalogueTable,
 )
 
+
 @dataclass(frozen=True)
 class TableChanges:
     """What reconciling one table would do. Reporting only — see the module note."""

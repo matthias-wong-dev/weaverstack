@@ -6,8 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver.workspaces import FabricWorkspace
-from weaver.targets import WarehouseTarget
 from weaver.errors import CommandError
 from weaver.fabric.auth import SQL_SCOPE
 from weaver.fabric.sql import (
@@ -16,6 +14,8 @@ from weaver.fabric.sql import (
     fabric_sql_pool,
 )
 from weaver.sql import SqlEndpoint
+from weaver.targets import WarehouseTarget
+from weaver.workspaces import Workspace
 
 
 class Resolver:
@@ -34,7 +34,7 @@ def test_desktop_authentication_uses_the_injected_credential_and_sql_scope(monke
     monkeypatch.setattr("weaver.fabric.sql.get_token", token)
     pool = desktop_sql_pool(
         WarehouseTarget.parse("Reporting"),
-        FabricWorkspace(workspace="Analytics"),
+        Workspace(workspace="Analytics"),
         resolver=Resolver(),
         credential=credential,
         connection_factory=lambda endpoint, authentication: (
@@ -62,7 +62,7 @@ def test_fabric_authentication_uses_notebookutils_not_the_desktop_chain(monkeypa
 
     pool = fabric_sql_pool(
         WarehouseTarget.parse("Reporting"),
-        FabricWorkspace(workspace="Analytics"),
+        Workspace(workspace="Analytics"),
         resolver=resolver,
         credentials=credentials,
         connection_factory=lambda endpoint, authentication: (
@@ -81,5 +81,5 @@ def test_fabric_authentication_fails_clearly_outside_fabric():
     with pytest.raises(CommandError, match="only inside"):
         fabric_sql_pool(
             WarehouseTarget.parse("Reporting"),
-            FabricWorkspace(workspace="Analytics"),
+            Workspace(workspace="Analytics"),
         )

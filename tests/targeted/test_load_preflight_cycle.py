@@ -31,30 +31,31 @@ being flattened into a guess. That is the last section below.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-
-from weaver.errors import CommandError
-from weaver.run.result import RunError
-from weaver.operations.load import run_load
-from weaver.run.state import read_target_inventories
-from weaver.run import RunState
-from weaver.load_plan import PhysicalTargetRef
-from weaver.load_report import TASK_SUCCEEDED
-from weaver.fabric.resolution import FabricResolver
-from support.workspaces import InventoryClient
-from support.workspaces import given_resolver, given_workspace
-
 from factories import (
     installed_catalogue,
     installed_inventories,
     load_estate,
     load_estate_bindings,
 )
+from support.workspaces import InventoryClient, given_workspace
+
+from weaver.errors import CommandError
+from weaver.fabric.resolution import FabricResolver
+from weaver.load_plan import PhysicalTargetRef
+from weaver.load_report import TASK_SUCCEEDED
+from weaver.operations.load import run_load
+from weaver.run import RunState
+from weaver.run.result import RunError
+from weaver.run.state import read_target_inventories
 from weaver.store import FilesystemStore
+
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")

@@ -13,7 +13,7 @@ answered by reading the recorded statement.
 
 .. code-block:: python
 
-    session = TestSession(workspace=FabricWorkspace(workspace="Demo"))
+    session = TestSession(workspace=Workspace(workspace="Demo"))
     session.answer_spark_sql("SHOW TABLES IN ...", [{"tableName": "customer"}])
     weaver.build(".", session=session)
     assert "CREATE SCHEMA" in session.spark_sql[0]

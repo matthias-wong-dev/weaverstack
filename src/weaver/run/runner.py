@@ -10,12 +10,12 @@ from typing import Callable, Sequence
 from .graph import RunGraph, graph_for
 from .result import (
     BLOCKED,
-    SUCCEEDED_WITH_REJECTS,
     FAILED,
     INVALID,
     PENDING,
     SKIPPED,
     SUCCEEDED,
+    SUCCEEDED_WITH_REJECTS,
     VALIDATED,
     RunNodeResult,
     RunResult,

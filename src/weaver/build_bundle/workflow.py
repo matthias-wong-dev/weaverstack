@@ -17,31 +17,29 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterator, Mapping
 
-from ..errors import BuildError
-from ..locations import Location
-from ..declaration.model import WeaverItemId, WeaverRepository
-from ..declaration.repository import parse_item_repository
-from ..store import FilesystemStore, Store
-from ..targets import ItemRef
-from .bundle import BuildBundle, load_bundle
-from .builder import Builder
-from .installer import Installer
-from .planner import generate_item_build_bundle
-from .models import BuildPlan
-from .report import InstallationReport
-from .targets import ItemBindings, LakehouseBinding
-from .targets import WAREHOUSE_TARGET
-from .prune import (
-    TargetInventory,
-    read_lakehouse_inventory,
-    read_warehouse_inventory,
-)
 from ..catalogue.state import (
     Catalogue,
     Reconciliation,
     read_catalogue_state,
     reconcile_catalogue_state,
 )
+from ..declaration.model import WeaverItemId, WeaverRepository
+from ..declaration.repository import parse_item_repository
+from ..errors import BuildError
+from ..locations import Location
+from ..store import FilesystemStore, Store
+from ..targets import ItemRef
+from .builder import Builder
+from .bundle import BuildBundle, load_bundle
+from .installer import Installer
+from .models import BuildPlan
+from .prune import (
+    TargetInventory,
+    read_lakehouse_inventory,
+    read_warehouse_inventory,
+)
+from .report import InstallationReport
+from .targets import WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
 
 ARCHIVE_SUFFIX = ".weaver.zip"
 
@@ -453,34 +451,6 @@ def build_item_repository(
         )
 
 
-def build_uploaded_item_repository(
-    repository_root: Location,
-    *,
-    bindings: ItemBindings,
-    session,
-    workspace=None,
-    control_lakehouse: LakehouseBinding,
-    archive: Location | None = None,
-    archive_store: Store | None = None,
-    sql_by_item=None,
-    executors=None,
-) -> ItemBuildResult:
-    """Compatibility wrapper for a repository stored with the target estate."""
-
-    return build_item_repository_source(
-        repository_root,
-        source_store=session.store(workspace or session.workspace),
-        bindings=bindings,
-        session=session,
-        workspace=workspace,
-        control_lakehouse=control_lakehouse,
-        archive=archive,
-        archive_store=archive_store,
-        sql_by_item=sql_by_item,
-        executors=executors,
-    )
-
-
 def build_item_repository_source(
     source: Location,
     *,
@@ -561,15 +531,7 @@ def read_reconciled_catalogue(
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
-    from ..spark import SparkCatalogue
-    from ..targets import ItemRef
-
-    catalogue = SparkCatalogue(
-        session.spark(workspace),
-        session.resolver(workspace).spark_destination(
-            workspace.catalogue_item
-        ),
-    )
+    catalogue = session_catalogue(session, workspace, workspace.catalogue_item)
     state = read_catalogue_state(catalogue, sorted(items, key=str))
     return reconcile_catalogue_state(state, inventories=inventories)
 

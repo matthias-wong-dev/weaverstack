@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from weaver.workspaces import FabricWorkspace
-from weaver.targets import ItemRef
-from weaver.locations import Location
-from weaver.store import Store
 from weaver.errors import CommandError
 from weaver.fabric import FabricSessionResolver, FabricStore
+from weaver.locations import Location
+from weaver.store import Store
+from weaver.targets import ItemRef
+from weaver.workspaces import Workspace
 
 
 class _LakehouseUtils:
@@ -40,7 +40,7 @@ def _runtime(name="Analytics"):
 def test_session_resolution_stays_in_the_current_workspace():
     lakehouse = _LakehouseUtils()
     resolver = FabricSessionResolver(
-        FabricWorkspace(workspace="Analytics"),
+        Workspace(workspace="Analytics"),
         runtime=_runtime(),
         lakehouse=lakehouse,
     )
@@ -73,7 +73,7 @@ def test_a_lakehouse_resolves_to_what_authored_code_addresses():
     from weaver import lakehouse_for
 
     resolver = FabricSessionResolver(
-        FabricWorkspace(workspace="Analytics"),
+        Workspace(workspace="Analytics"),
         runtime=_runtime(),
         lakehouse=_NamedLakehouses(),
     )
@@ -93,7 +93,7 @@ def test_a_lakehouse_resolves_to_what_authored_code_addresses():
 def test_session_resolution_refuses_a_different_configured_workspace():
     with pytest.raises(CommandError, match="not configured Workspace"):
         FabricSessionResolver(
-            FabricWorkspace(workspace="Other"),
+            Workspace(workspace="Other"),
             runtime=_runtime(),
             lakehouse=_LakehouseUtils(),
         )

@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import pathlib
 import uuid
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from weaver.fabric.resolution import FabricResolver
-from weaver.workspaces import FabricWorkspace
+from weaver.workspaces import Workspace
+
+if TYPE_CHECKING:  # names used only in annotations
+    from weaver.lakehouse import Lakehouse
 
 WORKSPACE = "Demo"
 #: The Lakehouse the catalogue lives in, as an item name.
@@ -114,10 +117,10 @@ def given_workspace(
     catalogue: str | None = CATALOGUE,
     environment: str | None = None,
     **rest,
-) -> FabricWorkspace:
+) -> Workspace:
     """One Fabric workspace configuration, with neutral names."""
 
-    return FabricWorkspace(
+    return Workspace(
         workspace=workspace,
         catalogue=catalogue,
         environment=environment,
@@ -127,7 +130,7 @@ def given_workspace(
 
 def given_resolver(
     *,
-    workspace: FabricWorkspace | str = WORKSPACE,
+    workspace: Workspace | str = WORKSPACE,
     lakehouses: Iterable[str] = (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE),
     warehouses: Iterable[str] = (),
     root: object = None,
@@ -142,7 +145,7 @@ def given_resolver(
 
     configuration = (
         workspace
-        if isinstance(workspace, FabricWorkspace)
+        if isinstance(workspace, Workspace)
         else given_workspace(workspace=workspace)
     )
     items = [(LAKEHOUSE_TYPE, name) for name in lakehouses]
@@ -167,3 +170,23 @@ __all__ = [
     "given_resolver",
     "given_workspace",
 ]
+
+
+def mounted_lakehouse(name: str, directory) -> "Lakehouse":
+    """A Fabric Lakehouse whose Files area is this directory.
+
+    A Lakehouse lives in OneLake and its Files area is reached through a Fabric
+    mount, so authored Python can open and write there. That mount is the one
+    boundary a fast test may stand in for: registering the directory as the
+    mount point makes `files_root()` answer without a Fabric session, and every
+    other property of the Lakehouse stays what it is in production.
+
+    Nothing here makes a directory into a Lakehouse. `spark_root` is a real
+    OneLake address, and Spark paths are composed from it as they always are.
+    """
+
+    from weaver.lakehouse import _MOUNTS, Lakehouse
+
+    root = f"abfss://ws@onelake.dfs.fabric.microsoft.com/{name}"
+    _MOUNTS[root] = str(directory)
+    return Lakehouse(name=name, spark_root=root)

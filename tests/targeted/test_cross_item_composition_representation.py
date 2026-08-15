@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 from factories import FixtureCatalogue, item_bindings, target_inventory
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE
+from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
     LakehouseBinding,
@@ -32,7 +33,6 @@ from weaver.declaration import parse_item_repository
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-from support.workspaces import WORKSPACE
 
 LAKEHOUSE = "Sales_LH"
 WAREHOUSE = "Reporting_WH"

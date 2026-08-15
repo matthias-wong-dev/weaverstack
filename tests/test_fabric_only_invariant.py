@@ -48,6 +48,14 @@ RETIRED = (
     "WORKSPACE_TYPES",
     "spark_schema",
     "drop_local_destination_catalogue",
+    # One workspace, so no name distinguishes it from another kind.
+    "FabricWorkspace",
+    "is_fabric",
+    # One build, so no name distinguishes a position's own version of it.
+    "_build_in_process",
+    "_build_desktop_fabric",
+    # Compatibility wrappers, deleted with the migration they spanned.
+    "build_uploaded_item_repository",
 )
 
 

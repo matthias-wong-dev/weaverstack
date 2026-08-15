@@ -1,15 +1,15 @@
-"""Prepare a Weaver Lakehouse and run the compatibility initialisation path.
+"""Prepare the Weaver Lakehouse a build needs before it can hold a catalogue.
 
-The package-owned ``_weaver`` item creates catalogue tables through ordinary
-build actions. This module provisions a missing Fabric item or local emulator
-skeleton; it does not create catalogue tables directly.
+The package-owned ``_weaver`` item creates the catalogue tables through ordinary
+build actions. This provisions the Fabric item they live in; it creates no
+catalogue tables of its own.
 """
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-import tempfile
 from typing import Any
 
 from .build_bundle.models import BuildPlan
@@ -20,10 +20,8 @@ from .catalogue.tables import CATALOGUE_TABLES
 from .declaration.model import WeaverItemId
 from .errors import CommandError
 from .locations import Location
-from .resolution import resolver_for
 from .store import FilesystemStore, Store
 from .targets import ItemRef
-from .workspaces import FabricWorkspace
 
 
 @dataclass(frozen=True)
@@ -74,30 +72,27 @@ def prepare_catalogue(
     if not workspace.catalogue:
         raise CommandError("initialise requires a configured Weaver Lakehouse")
     name = workspace.catalogue
-    if isinstance(workspace, FabricWorkspace):
-        from .fabric.resources import (
-            LAKEHOUSE,
-            ItemNotFoundError,
-            create_lakehouse,
-            find_item,
-            find_workspace,
-        )
+    from .fabric.resources import (
+        LAKEHOUSE,
+        ItemNotFoundError,
+        create_lakehouse,
+        find_item,
+        find_workspace,
+    )
 
-        physical_workspace = find_workspace(workspace.workspace, client=client)
-        try:
-            find_item(physical_workspace, name, item_type=LAKEHOUSE, client=client)
-        except ItemNotFoundError:
-            create_lakehouse(physical_workspace, name, client=client)
-            created = True
-        else:
-            if not exists_ok:
-                raise CommandError(
-                    f"Weaver Lakehouse {name!r} already exists; pass --exists-ok"
-                )
-            created = False
-        return PreparedWeaverLakehouse(workspace.workspace, name, created)
-
-    raise CommandError(f"unsupported Workspace type: {type(workspace).__name__}")
+    physical_workspace = find_workspace(workspace.workspace, client=client)
+    try:
+        find_item(physical_workspace, name, item_type=LAKEHOUSE, client=client)
+    except ItemNotFoundError:
+        create_lakehouse(physical_workspace, name, client=client)
+        created = True
+    else:
+        if not exists_ok:
+            raise CommandError(
+                f"Weaver Lakehouse {name!r} already exists; pass --exists-ok"
+            )
+        created = False
+    return PreparedWeaverLakehouse(workspace.workspace, name, created)
 
 
 def _session_around(workspace, *, spark, store):

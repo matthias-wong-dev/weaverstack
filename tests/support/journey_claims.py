@@ -36,11 +36,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 
-import pytest
-from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
-
-from weaver.targets import FolderTarget
 from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
+from weaver.targets import FolderTarget
 
 #: `full_integration` is this file's *only* selector — it carries neither `spark`
 #: nor `fabric`, so `pytest -m fabric` runs the targeted probes and leaves the

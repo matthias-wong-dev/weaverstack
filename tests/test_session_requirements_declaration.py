@@ -128,14 +128,14 @@ class _Resource:
 
 def _scope(monkeypatch):
     from weaver.sessions.console import ConsoleScope
-    from weaver.workspaces import FabricWorkspace
+    from weaver.workspaces import Workspace
 
     monkeypatch.setattr(
         "weaver.fabric.auth.credential",
         lambda: (_ for _ in ()).throw(AssertionError("no credential in this test")),
     )
     scope = ConsoleScope.__new__(ConsoleScope)
-    scope.workspace = FabricWorkspace(
+    scope.workspace = Workspace(
         workspace="W", catalogue="Lakehouse/Weaver", environment="weaver"
     )
     scope.auth = _Resource()

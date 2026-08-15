@@ -24,16 +24,15 @@ from collections.abc import Callable
 from typing import Any
 
 from weaver.fabric import (
-    FabricClient,
     LAKEHOUSE,
     WAREHOUSE,
+    FabricClient,
     create_lakehouse,
     create_warehouse,
     find_item,
     find_workspace,
 )
 from weaver.fabric.auth import prefer_cli_credential
-
 
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 

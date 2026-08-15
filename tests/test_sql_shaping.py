@@ -18,7 +18,6 @@ from weaver.declaration.sql_shaping import (
     render_sql_template,
 )
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "sql"
 
 

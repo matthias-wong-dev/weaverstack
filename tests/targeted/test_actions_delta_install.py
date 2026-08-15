@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from factories import (
     FakeSpark,
     FakeSql,
@@ -29,11 +28,11 @@ from factories import (
     resolved_target,
     warehouse_context,
 )
+from support.workspaces import given_resolver, given_workspace
 
-from weaver.locations import Location
 from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.executors import default_executors
-from support.workspaces import given_resolver, given_workspace
+from weaver.locations import Location
 
 VIEW_SQL = b"CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS SELECT 1\n"
 
@@ -323,6 +322,7 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
 
 def _load_action(*, kind: str, relative: str, payload: str | None):
     from factories import ITEM
+
     from weaver.etl import LOAD_ROOT
 
     return build_action(

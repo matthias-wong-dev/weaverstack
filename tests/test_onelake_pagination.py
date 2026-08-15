@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from weaver.locations import Location
 from weaver.fabric.onelake import OneLakeDfsClient
+from weaver.locations import Location
 
 
 class _Response:
@@ -25,7 +25,6 @@ class _Response:
 
 def _store(monkeypatch, headers, paths):
     store = OneLakeDfsClient(token="fake-token")
-    import weaver.fabric.onelake as onelake
 
     def fake_request(method, url, **kwargs):
         return _Response(headers, paths)

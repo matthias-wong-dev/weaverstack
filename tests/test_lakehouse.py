@@ -6,13 +6,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from support.workspaces import given_resolver, given_workspace, mounted_lakehouse
 
-from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 from weaver import Lakehouse, lakehouse_for
 from weaver.errors import LoadError
 from weaver.lakehouse import MOUNT_OPTIONS, default_lakehouse
 from weaver.spark import FabricSparkTarget
-from support.workspaces import given_resolver, given_workspace
+from weaver.targets import DeltaTarget, FolderTarget, ItemRef
 
 
 @dataclass
@@ -37,24 +37,6 @@ def test_one_root_carries_both_lakehouse_areas():
     assert lakehouse.location.files_root == "abfss://ws@host/lh/Files"
 
 
-def test_a_folder_hangs_off_the_same_root_as_a_table_locally(tmp_path):
-    """On a filesystem host the two roots *are* one directory.
-
-    This is why the emulator never showed that a Folder needs something a table
-    does not: locally there is nothing to distinguish.
-    """
-
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
-
-    assert lakehouse.table_path("Sales", "Order") == (
-        f"{tmp_path.as_posix()}/Tables/Sales/Order"
-    )
-    assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
-    assert lakehouse.folder_spark_path("Sales", "Export") == (
-        f"{tmp_path.as_posix()}/Files/Sales/Export"
-    )
-
-
 def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
     """The distinction the two methods exist to keep.
 
@@ -62,21 +44,18 @@ def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
     can; Spark cannot use that at all, so it is handed a string it can parse.
     """
 
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=str(tmp_path))
+    lakehouse = mounted_lakehouse("Sales_LH", tmp_path)
 
     assert isinstance(lakehouse.folder_path("Sales", "Export"), Path)
     assert isinstance(lakehouse.folder_spark_path("Sales", "Export"), str)
 
 
-def test_a_trailing_separator_does_not_double_up(tmp_path):
-    lakehouse = Lakehouse(name="Sales_LH", spark_root=f"{tmp_path.as_posix()}/")
+def test_a_trailing_separator_does_not_double_up():
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/")
 
-    assert lakehouse.table_path("Sales", "Order") == (
-        f"{tmp_path.as_posix()}/Tables/Sales/Order"
-    )
-    assert lakehouse.folder_path("Sales", "Export") == tmp_path / "Files/Sales/Export"
+    assert lakehouse.table_path("Sales", "Order") == "abfss://ws@host/lh/Tables/Sales/Order"
     assert lakehouse.folder_spark_path("Sales", "Export") == (
-        f"{tmp_path.as_posix()}/Files/Sales/Export"
+        "abfss://ws@host/lh/Files/Sales/Export"
     )
 
 
@@ -201,10 +180,22 @@ def test_a_root_must_be_a_real_root():
         Lakehouse(name="Sales_LH", spark_root="  ")
 
 
+def test_a_root_that_is_not_onelake_is_refused():
+    """A Lakehouse is in OneLake, so a directory cannot stand in for one.
+
+    Its Files area is reached through a Fabric mount and its tables through an
+    ``abfss://`` URL; a local path would satisfy neither and would fail later,
+    somewhere that could not say why.
+    """
+
+    with pytest.raises(LoadError, match="abfss://"):
+        Lakehouse(name="Sales_LH", spark_root="/srv/lh")
+
+
 def test_a_path_segment_that_escaped_its_parent_is_refused():
     """The same guard the resolved locations apply — these strings become paths."""
 
-    lakehouse = Lakehouse(name="Sales_LH", spark_root="/srv/lh")
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
     with pytest.raises(Exception, match="path segment"):
         lakehouse.table_path("Sales", "../../etc")
@@ -233,7 +224,7 @@ def test_the_attached_lakehouse_is_the_one_named_two_part():
 def test_a_supplied_destination_is_what_names_objects():
     lakehouse = Lakehouse(
         name="Sales_LH",
-        spark_root="/srv/.local/Sales_LH",
+        spark_root="abfss://ws@host/Sales_LH",
         destination=FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH"),
     )
 

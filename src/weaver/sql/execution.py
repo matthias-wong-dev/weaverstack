@@ -259,7 +259,6 @@ def _output_parameter_batch(
     a caller and are the one part of this text that is not Weaver's own.
     """
 
-    locals_ = [f"@weaver_out_{name}" for name, _type in outputs]
     declares = "\n".join(
         f"declare @weaver_out_{name} {type_name};" for name, type_name in outputs
     )

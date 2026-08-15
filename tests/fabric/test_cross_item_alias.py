@@ -41,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from factories import FixtureCatalogue, alias_repository, item_id
+from factories import FixtureCatalogue, alias_repository
 
 from weaver.targets import ItemRef
 
@@ -192,6 +192,7 @@ def alias_estate(
     """The alias action, run from here against real Fabric."""
 
     from factories import item_bindings
+
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
@@ -418,6 +419,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     """
 
     from factories import alias_repository, item_bindings
+
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 

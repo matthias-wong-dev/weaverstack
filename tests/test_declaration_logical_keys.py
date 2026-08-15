@@ -15,8 +15,8 @@ import textwrap
 
 import pytest
 
-from weaver.errors import MetadataError
 from weaver.declaration import PYTHON, SQL, ObjectId, parse_document
+from weaver.errors import MetadataError
 
 TABLE = """
 Table ID: Sales.Order

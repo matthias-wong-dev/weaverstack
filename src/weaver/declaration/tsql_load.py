@@ -8,6 +8,12 @@ rows remain in the reject table for inspection.
 from __future__ import annotations
 
 from ..errors import DiscoveryError
+from ..runtime.load_contract import (
+    REASON_BLANK_PK,
+    REASON_DUPLICATE_PK,
+    REJECTION_REASON,
+    LoadContract,
+)
 from .metadata import (
     AUDIT_COLUMNS,
     AUDIT_LIVE_DELETE_DATETIME,
@@ -15,12 +21,6 @@ from .metadata import (
 )
 from .sql_shaping import insert_select_into, render_sql_template, temp_table_name
 from .tsql_program import TsqlProgram, parse_tsql_program, validate_query_contract
-from ..runtime.load_contract import (
-    REASON_BLANK_PK,
-    REASON_DUPLICATE_PK,
-    REJECTION_REASON,
-    LoadContract,
-)
 
 #: The column a staged row's duplicate rank lands in. Named to be unmistakably
 #: Weaver's: it sits beside the author's own columns in a real table, so a name

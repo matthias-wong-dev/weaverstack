@@ -11,9 +11,6 @@ All of it is a set difference plus a rendering, so none of it needs an engine.
 
 from __future__ import annotations
 
-import json
-
-import pytest
 from factories import bound_target, document_id, item_id, target_inventory
 
 from weaver.build_bundle.physical import item_schema_stage
