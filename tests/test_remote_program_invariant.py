@@ -191,3 +191,30 @@ def _only_in_prose(source: str, word: str) -> bool:
     for text in quoted:
         stripped = stripped.replace(text, "")
     return word not in stripped
+
+
+def test_only_the_run_boundary_submits_a_program():
+    """Which crossing waits on `weaver install`, held to one.
+
+    A program is Python that imports Weaver where Spark is, so submitting one
+    asserts the published wheel. Spark SQL, TDS and storage reach the same
+    workspace without it, which is what lets a desktop build run against a
+    workspace nothing has been installed into.
+
+    A build that started submitting programs would put a publish back in front
+    of every build, and would do it silently.
+    """
+
+    allowed = {"src/weaver/run/runtime_boundary.py"}
+    callers = set()
+    for path in sorted((ROOT / "src").rglob("*.py")):
+        relative = path.relative_to(ROOT).as_posix()
+        if relative.startswith("src/weaver/sessions/"):
+            continue  # a Session implements the capability rather than using it
+        if "execute_python" in path.read_text(encoding="utf-8"):
+            callers.add(relative)
+
+    assert callers == allowed, (
+        "submitting a program is what requires `weaver install`; keep it to the "
+        f"run boundary, or say here why another crossing needs the wheel: {sorted(callers)}"
+    )

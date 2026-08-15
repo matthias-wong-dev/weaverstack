@@ -298,8 +298,12 @@ def test_a_desktop_build_without_an_environment_fails_before_preflight(
 
     monkeypatch.setattr(preflight_module, "preflight_fabric_targets", explode)
 
-    with pytest.raises(CommandError, match="requires an Environment"):
+    with pytest.raises(CommandError, match="Fabric Environment") as raised:
         _build(repository, workspace="Analytics", catalogue="Lakehouse/Weaver")
+
+    # What is missing is an Environment to attach, not a published wheel: a
+    # build's Spark SQL imports nothing.
+    assert "weaver install" not in str(raised.value)
 
 
 def test_a_repository_error_is_reported_before_any_fabric_call(

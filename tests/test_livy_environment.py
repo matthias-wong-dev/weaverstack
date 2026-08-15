@@ -1,9 +1,12 @@
-"""LivySession chooses its bootstrap from the workspace, without touching Fabric.
+"""LivySession attaches its Environment from the workspace, without touching Fabric.
 
-A workspace that names a ``environment`` attaches that Environment and boots
-with a plain ``import weaver``; a workspace without one falls back to shipping the
-package into the Lakehouse. Both branches are exercised here with a fake
-resolver, so no workspace or capacity is needed.
+A workspace that names an ``environment`` attaches it; one that does not is an
+error, because a Livy session is how Spark work crosses and it has nothing to
+attach. Starting the session asserts no Weaver install — that is
+:meth:`~weaver.fabric.livy.LivySession.ensure_weaver`, submitted by a crossing
+that carries a body importing Weaver.
+
+Exercised with a fake resolver, so no workspace or capacity is needed.
 """
 
 from __future__ import annotations
@@ -47,8 +50,10 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
     session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
     assert session.environment_id == "env99"
-    assert "import weaver" in session.bootstrap
-    assert "notebookutils" not in session.bootstrap
+    # Only the emit helper: a session carries Spark SQL as readily as a program,
+    # and asserting the install here would put a publish in front of both.
+    assert "import weaver" not in session.bootstrap
+    assert "def emit(" in session.bootstrap
 
 
 def test_start_attaches_the_environment_as_a_spark_conf(monkeypatch):

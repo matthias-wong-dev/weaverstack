@@ -55,7 +55,6 @@ class ConsoleSession(Session):
     def __init__(
         self,
         *,
-        require_weaver: bool = True,
         livy: Any = None,
         spark: Any = None,
         store: Any = None,
@@ -65,7 +64,6 @@ class ConsoleSession(Session):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.require_weaver = require_weaver
         from ..fabric.auth import checked_credential
 
         # Checked here, where it was supplied. A Session acquires its token
@@ -297,7 +295,6 @@ class ConsoleSession(Session):
             workspace,
             telemetry=self.telemetry,
             executor=self._executor,
-            require_weaver=self.require_weaver,
             livy=self._given_livy,
             spark=self._given_spark,
             store=self._given_store,
@@ -363,6 +360,10 @@ class ConsoleSession(Session):
         if scope.executes_here:
             with self.telemetry.timing(f"python.{program.name}"):
                 return program.call()
+        # A program is Python that imports Weaver where Spark is, so this is the
+        # one crossing that waits on `weaver install`. Spark SQL and TDS reach
+        # the same workspace without it.
+        scope.ensure_weaver()
         scope.check_published_version(self.warn)
         return scope.livy_run(
             program.source,
@@ -461,14 +462,12 @@ class ConsoleScope(WorkspaceScope):
         self,
         workspace: Workspace,
         *,
-        require_weaver: bool = True,
         livy: Any = None,
         spark: Any = None,
         credential: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(workspace, **kwargs)
-        self.require_weaver = require_weaver
         self.name = str(getattr(workspace, "workspace", workspace))
         self._sql: dict[str, Resource] = {}
         #: The credential this scope authenticates with. None means the library
@@ -669,11 +668,18 @@ class ConsoleScope(WorkspaceScope):
         session = LivySession.for_workspace(
             self.workspace,
             resolver=self.resolver,
-            require_weaver=self.require_weaver,
             token=self.token_provider(),
         )
         session.start()
         return session
+
+    def ensure_weaver(self) -> None:
+        """Assert the Livy session can import the published Weaver."""
+
+        if self.livy is None:
+            raise CommandError("this workspace has no Livy session")
+        with self.telemetry.timing("livy.ensure_weaver"):
+            self.livy.get().ensure_weaver()
 
     def check_published_version(self, warn) -> None:
         """Compare this checkout's Weaver with the one published in the workspace.

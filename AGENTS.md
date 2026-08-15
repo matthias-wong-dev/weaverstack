@@ -415,7 +415,8 @@ say whether a published wheel is required. Not whether Livy is involved, and not
 where the orchestration runs: a decomposed desktop operation orchestrates here
 *and* imports the wheel on the far side, so it is `hosted`. A Spark body that
 does not import Weaver needs a session, not a published package, which is why
-`LivySession.for_workspace` takes `require_weaver`. Creating a shortcut,
+starting a Livy session asserts neither: `LivySession.ensure_weaver` is called
+by the crossing that submits a program, and by nothing else. Creating a shortcut,
 refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
 run from the checkout against the real workspace and stay `remote`.
 

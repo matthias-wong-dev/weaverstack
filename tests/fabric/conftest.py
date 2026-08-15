@@ -361,12 +361,7 @@ def livy_session(fabric_workspace, fabric_client):
             )
 
     try:
-        # The session does not assert the wheel: a body that needs Weaver
-        # imports it and fails on its own terms, which is both more precise
-        # and what lets a test use Spark without needing a publish.
-        session = LivySession.for_workspace(
-            fabric_workspace, require_weaver=False
-        )
+        session = LivySession.for_workspace(fabric_workspace)
     except CommandError as exc:
         pytest.skip(f"{exc}; run `weaver install` into the Environment first")
     started = time.monotonic()
@@ -423,9 +418,7 @@ def weaver_session(fabric_workspace, livy_session):
 
     from weaver.sessions import ConsoleSession
 
-    with ConsoleSession(
-        workspace=fabric_workspace, livy=livy_session, require_weaver=False
-    ) as session:
+    with ConsoleSession(workspace=fabric_workspace, livy=livy_session) as session:
         yield session
         print(f"\n{session.telemetry.report()}")
 
@@ -441,7 +434,7 @@ def fresh_weaver_session(fabric_workspace):
 
     from weaver.sessions import ConsoleSession
 
-    with ConsoleSession(workspace=fabric_workspace, require_weaver=False) as session:
+    with ConsoleSession(workspace=fabric_workspace) as session:
         yield session
 
 

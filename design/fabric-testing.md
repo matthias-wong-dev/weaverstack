@@ -105,8 +105,9 @@ involved and not about where the orchestration runs. Creating a OneLake shortcut
 is a REST call, refreshing an endpoint is another, wiping a Lakehouse is
 directory removal, and a Warehouse is reached over TDS, all of which work from
 this checkout against a real workspace. Even a Spark body is `remote` if it does
-not import Weaver, which is why `LivySession.for_workspace` takes
-`require_weaver`.
+not import Weaver, which is why starting a Livy session does not assert the
+install: `LivySession.ensure_weaver` is called by the crossing that submits a
+program, and by nothing else.
 
 What earns `hosted` is needing the installed package. That covers tests whose
 subject *is* the wheel: that it acquires its own capabilities from the

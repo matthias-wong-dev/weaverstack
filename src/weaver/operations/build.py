@@ -348,9 +348,12 @@ def _build_desktop_fabric(
     """
 
     if not workspace.environment:
-        raise CommandError(
-            "Fabric build requires an Environment in workspace configuration"
-        )
+        # Checked before preflight, because preflight is several REST calls and
+        # this needs none. A build renders Spark SQL for the catalogue whatever
+        # else it does, so it always crosses.
+        from ..fabric.livy import missing_environment
+
+        raise CommandError(missing_environment(workspace))
     from ..build_bundle import (
         Installer,
         catalogue_items_for_build,

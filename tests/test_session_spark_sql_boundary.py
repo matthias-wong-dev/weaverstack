@@ -115,7 +115,6 @@ def desktop(monkeypatch):
                 workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
             ),
             livy=livy,
-            require_weaver=False,
         )
         return session, livy
 

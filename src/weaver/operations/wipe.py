@@ -272,10 +272,9 @@ def unbind_catalogue_claims(
 
     with use_or_create_session(session, workspace=workspace) as opened:
         if not opened.executes_here(workspace) and not workspace.environment:
-            raise CommandError(
-                "Fabric catalogue unbind requires an Environment in workspace "
-                "configuration"
-            )
+            from ..fabric.livy import missing_environment
+
+            raise CommandError(missing_environment(workspace))
         catalogue = session_catalogue(
             opened, workspace, workspace.catalogue_item
         )
