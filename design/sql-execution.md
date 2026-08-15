@@ -55,7 +55,12 @@ Warehouse display name is the database name.
 Both modes call `mssql_python.connect()` with the validated connection string:
 
 ```python
-(f"Server={server},1433;Database={database};Encrypt=yes;TrustServerCertificate=no;")
+(
+    f"Server={server},1433;"
+    f"Database={database};"
+    "Encrypt=yes;"
+    "TrustServerCertificate=no;"
+)
 ```
 
 The current access token is UTF-16-LE encoded and passed through

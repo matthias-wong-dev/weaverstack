@@ -156,8 +156,8 @@ desired catalogue, followed by an idempotent merge for desired rows.
 The desired catalogue is derived in three steps, each one idea:
 
 ```python
-logical = Catalogue.from_repository(repository)  # everything the source declares
-certified = retaining(logical, repository, ids)  # what this build actually proved
+logical     = Catalogue.from_repository(repository)   # everything the source declares
+certified   = retaining(logical, repository, ids)     # what this build actually proved
 publishable = for_targets(certified, repository, ids, kinds)
 ```
 
@@ -312,11 +312,11 @@ with the same schema and name.
 ### A Lakehouse has two addresses, and a build needs both
 
 ```python
-location = resolver.lakehouse_spark_location(target)  # where the bytes are
+location = resolver.lakehouse_spark_location(target)   # where the bytes are
 location.table_path("Sales", "Customer")
 location.folder_path("Sales", "Export")
 
-destination = resolver.spark_destination(target)  # what it is called
+destination = resolver.spark_destination(target)       # what it is called
 destination.qualify("Sales", "Customer")
 ```
 
