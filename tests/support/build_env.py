@@ -234,6 +234,10 @@ class BuildEnv:
     #: The destination Lakehouse being built. The catalogue is a Warehouse and
     #: is reached over TDS, so it has no Spark destination to carry here.
     destination: Any = None
+    #: Where this environment writes a bundle, by name. A bundle needs OneLake
+    #: and the catalogue has none, so the environment says where rather than
+    #: leaving a caller to guess.
+    bundle_location: Callable[[str], Any] = None
     #: Every Lakehouse this fixture bound, by the item that owns it. Empty unless
     #: the fixture asked for more than one — a cross-item alias is the only thing
     #: that does, and it needs both ends addressable to prove the alias points

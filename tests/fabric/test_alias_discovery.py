@@ -64,6 +64,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
             repository, item="Warehouse/_weaver"
         ),
         name="aliasdiscovery",
+        staging=producer.name,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
 

@@ -622,7 +622,7 @@ def _corrupt(env, bundle):
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(
-        env.resolver.build_bundle("broken"),
+        env.bundle_location("broken"),
         plan=plan,
         payloads=payloads,
         store=store,

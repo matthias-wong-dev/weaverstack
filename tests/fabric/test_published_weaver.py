@@ -35,7 +35,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
-from conftest import staged_repository_root
+from conftest import staged_bundle, staged_bundle_source, staged_repository_root
 from factories import item_id, single_document_repository, warehouse_table
 
 from weaver.build_bundle.executors.base import ResolvedTarget
@@ -425,7 +425,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     generate_item_build_bundle(
         repository,
         bindings=bindings,
-        output=resolver.build_bundle("whrow3"),
+        output=staged_bundle(resolver, fabric_target_lakehouse.name, "whrow3"),
         store=store,
         target_inventories=inventories,
         # The control item's own catalogue documents are already installed, so
@@ -455,7 +455,9 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         "resolver = resolver_for(workspace)\n"
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
         "installer = Installer(session)\n"
-        f"bundle = load_bundle(resolver.build_bundle('whrow3'), store=store)\n"
+        f"bundle = load_bundle("
+        f"{staged_bundle_source(fabric_target_lakehouse.name, 'whrow3')}, "
+        "store=store)\n"
         "report = installer.install(bundle)\n"
         # The same session, its own identity, reading the target back.
         "target = next(t for t in bundle.plan.targets if t.kind == 'warehouse')\n"

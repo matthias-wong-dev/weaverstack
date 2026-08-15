@@ -153,19 +153,45 @@ FIXED_ITEMS = {
 }
 
 
-#: Where the suite stages a repository, beneath a Lakehouse's Files. The
-#: catalogue used to hold one and cannot: it is a Warehouse. Staging is all it
-#: ever was, so any Lakehouse will do — the tests name one they already have.
+#: Where the suite stages what it needs OneLake for, beneath a Lakehouse's
+#: Files. The catalogue used to hold both and cannot: it is a Warehouse, and has
+#: no Files area. Neither is product behaviour — a repository is a caller's own
+#: path and a bundle is kept only when a caller asks — so any Lakehouse will do,
+#: and the tests name one they already have.
 WEAVER_ITEMS_AREA = "weaver_items"
+BUILD_BUNDLES_AREA = "build_bundles"
+
+
+def _staged(resolver, lakehouse, area: str):
+    from weaver.targets import ItemRef
+
+    item = lakehouse if isinstance(lakehouse, ItemRef) else ItemRef(str(lakehouse))
+    return resolver.files_root(item) / area
 
 
 def staged_repository_root(resolver, lakehouse):
     """Where a test's repository is uploaded, for a build to read it back."""
 
-    from weaver.targets import ItemRef
+    return _staged(resolver, lakehouse, WEAVER_ITEMS_AREA)
 
-    item = lakehouse if isinstance(lakehouse, ItemRef) else ItemRef(str(lakehouse))
-    return resolver.files_root(item) / WEAVER_ITEMS_AREA
+
+def staged_bundle(resolver, lakehouse, name: str):
+    """Where a test writes a generated bundle, and reads it back to install."""
+
+    from weaver.targets import validate_name
+
+    return _staged(resolver, lakehouse, BUILD_BUNDLES_AREA) / validate_name(
+        name, what="bundle name"
+    )
+
+
+def staged_bundle_source(lakehouse, name: str) -> str:
+    """The same location, as source a submitted program can evaluate."""
+
+    return (
+        f"resolver.files_root(ItemRef({str(lakehouse)!r}))"
+        f" / {BUILD_BUNDLES_AREA!r} / {name!r}"
+    )
 
 
 def _fixed_name(role: str) -> str:
@@ -1044,7 +1070,7 @@ def _fabric_build_context(
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
-            f"    output=resolver.build_bundle({bundle_name!r}),\n"
+            f"    output={staged_bundle_source(target.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims)\n"
@@ -1057,7 +1083,9 @@ def _fabric_build_context(
         plan = BuildPlan.from_mapping(payload["plan"])
         # A desktop-addressed (https) handle to the same physical bundle, so the
         # test can read it and the install can re-resolve it by name in-session.
-        return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
+        return BuildBundle(
+            location=staged_bundle(resolver, target.name, payload["name"]), plan=plan
+        )
 
     def install(bundle) -> InstallOutcome:
         # Generation wrote the bundle through the session's abfss path. The
@@ -1075,7 +1103,8 @@ def _fabric_build_context(
             # The workspace is what lets a Warehouse batch acquire SQL on the
             # session's own identity. A Lakehouse-only bundle never asks.
             "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
-            f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
+            f"bundle = load_bundle({staged_bundle_source(target.name, bundle_name)}, "
+            "store=store)\n"
             "report = installer.install(bundle)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
             "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
@@ -1179,6 +1208,7 @@ def _fabric_build_context(
         seed_orphans=seed_orphans,
         run_schema_exists=schema_exists,
         run_python=run_python,
+        bundle_location=lambda name: staged_bundle(resolver, target.name, name),
     )
 
 
@@ -1381,7 +1411,7 @@ def _warehouse_build_env(
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
-            f"    output=resolver.build_bundle({bundle_name!r}),\n"
+            f"    output={staged_bundle_source(weaver.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims)\n"
@@ -1392,7 +1422,9 @@ def _warehouse_build_env(
             session, "Warehouse bundle generation", body
         ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
-        return BuildBundle(location=resolver.build_bundle(payload["name"]), plan=plan)
+        return BuildBundle(
+            location=staged_bundle(resolver, weaver.name, payload["name"]), plan=plan
+        )
 
     def install(bundle) -> InstallOutcome:
         # Installation runs IN Fabric too; the Warehouse SQL comes from the
@@ -1407,7 +1439,8 @@ def _warehouse_build_env(
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
             "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
-            f"bundle = load_bundle(resolver.build_bundle({bundle_name!r}), store=store)\n"
+            f"bundle = load_bundle({staged_bundle_source(weaver.name, bundle_name)}, "
+            "store=store)\n"
             "report = installer.install(bundle)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
             "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "

@@ -32,6 +32,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from conftest import staged_bundle, staged_bundle_source
 from factories import (
     FixtureInventory,
     bound_target,
@@ -152,7 +153,7 @@ def physical_bundle(
         target_changes=target_changes,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
-    location = resolver.build_bundle(BUNDLE)
+    location = staged_bundle(resolver, target_name, BUNDLE)
     if store.exists(location):
         store.delete(location, recursive=True)
     return write_bundle(location, plan=plan, payloads=payloads, store=store)
@@ -221,7 +222,9 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         "resolver = resolver_for(workspace)\n"
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
         "installer = Installer(session)\n"
-        f"bundle = load_bundle(resolver.build_bundle({BUNDLE!r}), store=store)\n"
+        f"bundle = load_bundle("
+        f"{staged_bundle_source(lakehouse.name, BUNDLE)}, "
+        "store=store)\n"
         "report = installer.install(bundle)\n"
         "target = bundle.plan.targets[0]\n"
         "seen = read_lakehouse_inventory(target, resolver=resolver, store=store,\n"

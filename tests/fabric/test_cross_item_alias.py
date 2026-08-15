@@ -41,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import staged_repository_root
+from conftest import staged_bundle, staged_repository_root
 from factories import FixtureCatalogue, alias_repository
 
 from weaver.targets import ItemRef
@@ -67,7 +67,16 @@ def upload(store, root, source: Path) -> None:
 
 
 def generate(
-    *, workspace, resolver, store, repository, bindings, catalogue, name, sql=None
+    *,
+    workspace,
+    resolver,
+    store,
+    repository,
+    bindings,
+    catalogue,
+    name,
+    staging,
+    sql=None,
 ):
     """One bundle, planned on the desktop. Pure Python; no session, no Livy.
 
@@ -78,7 +87,7 @@ def generate(
     """
 
     from weaver.build_bundle import (
-        LakehouseBinding,
+        WarehouseBinding,
         effective_item_bindings,
         generate_item_build_bundle,
     )
@@ -104,12 +113,12 @@ def generate(
     return generate_item_build_bundle(
         repository,
         bindings=bindings,
-        output=resolver.build_bundle(name),
+        output=staged_bundle(resolver, staging, name),
         store=store,
         target_inventories=inventories,
         catalogue=catalogue,
-        catalogue_binding=LakehouseBinding(
-            lakehouse=workspace.catalogue_item,
+        catalogue_binding=WarehouseBinding(
+            warehouse=workspace.catalogue_item,
             workspace_name=workspace.workspace,
         ),
     )
@@ -223,6 +232,7 @@ def alias_estate(
             repository, item="Warehouse/_weaver"
         ),
         name="aliasaction",
+        staging=producer.name,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
     _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
@@ -474,6 +484,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
             repository, item="Warehouse/_weaver"
         ),
         name="whalias",
+        staging=producer.name,
         sql=warehouse.executor,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
