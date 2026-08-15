@@ -244,7 +244,7 @@ healed — because its claims may be perfectly true about a Lakehouse this build
 cannot see, and deleting them would destroy the record of a real installation.
 
 A physical target can retain Registry rows for every logical item bound to it.
-For an intentional shared target, reset the control plane with
+For an intentional shared target, reset the catalogue with
 `weaver.wipe(..., unbind_from=...)` rather than unbinding individual residue;
 the next build bootstraps the catalogue from the built-in item.
 

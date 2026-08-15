@@ -120,7 +120,7 @@ weaver build \
 From Python inside the target environment, `weaver.build(source, bind=...)` is
 the ordinary source-neutral operation. It copies
 a remote source once to a session-local temporary directory when required, parses it,
-ensures the control plane, reads target and catalogue state, reconciles, and
+ensures the catalogue, reads target and catalogue state, reconciles, and
 then calls internal planner and installer seams. The generated bundle contains
 only frozen outputs — every statement, every deployed file, every hash — and no
 copy of the source, so installation cannot reopen or reinterpret the repository

@@ -259,11 +259,10 @@ Lakehouse will accept the name as a relation, and the consumer's very next
 statement failed with *"neither a view nor a table"*. The alias action now waits
 for a real read to succeed before reporting success.
 
-**The session attaches to the target Lakehouse**, because Fabric creates a Spark session against one —
-the control plane is the fixed attachment, destinations are the variable data
-plane. It used to attach to the *target*, and that made the suite structurally
-unable to fail: a two-part `Schema.Object` happened to land in the right place,
-and the assertion then read it back through the same session catalogue, so a
+**The session attaches to a Lakehouse**, because Fabric creates a Spark session
+against one. Which Lakehouse carries no meaning, so a two-part `Schema.Object`
+would land wherever the session happened to be — and an assertion reading it
+back through the same session would agree with itself. So a
 table written to the wrong Lakehouse would have been read from the wrong Lakehouse
 and passed. Under the real attachment an unqualified name lands in the control
 plane, so every statement has to name its Lakehouse — and so does every assertion.

@@ -271,7 +271,7 @@ def item_load_artefacts(
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's load artefacts, derived from what it declares.
 
-    The built-in ``Warehouse/_weaver`` owns none: it is Weaver's control plane
+    The built-in ``Warehouse/_weaver`` owns none: it is Weaver's catalogue
     rather than a user ETL package. Excluded here rather than downstream, so
     "does the catalogue have a load layer?" has one answer.
     """

@@ -90,7 +90,7 @@ class Workspace:
 
     workspace: str
     environment: str | None = None
-    #: Where the control plane lives, typed: ``Warehouse/Weaver``. Typed so the
+    #: Where the Weaver catalogue lives, typed: ``Warehouse/Weaver``. Typed so the
     #: value says which kind of item it names rather than relying on the field's
     #: name to imply it.
     catalogue: str | None = None

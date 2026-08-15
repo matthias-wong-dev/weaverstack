@@ -367,7 +367,7 @@ class RegisteredDocument:
         return self.object_role in VALIDATION_ROLES
 
 
-#: Catalogue tables introduced after the first release of the control plane.
+#: Catalogue tables introduced after the first release of the catalogue.
 #:
 #: An estate built by an older Weaver has every other table and not these: an
 #: upgrade rather than damage, and indistinguishable from the physical state

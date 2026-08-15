@@ -24,11 +24,10 @@ The phases, in the order they must run:
 ``broken``     last, because a failing install leaves the estate part-built and
                nothing after it could rely on what it found
 
-**Every assertion names the Lakehouse it is about.** The session is attached to
-one Lakehouse and the build writes to a different one, so a query for a
-bare ``DWG.Customer`` would ask the control plane. ``env.query`` resolves object
-tokens against a named destination, so a read can only succeed where the write
-actually landed.
+**Every assertion names the Lakehouse it is about.** A bare ``DWG.Customer``
+asks whichever Lakehouse the session is attached to, which is not a claim about
+where the build wrote. ``env.query`` resolves object tokens against a named
+destination, so a read can only succeed where the write actually landed.
 """
 
 from __future__ import annotations

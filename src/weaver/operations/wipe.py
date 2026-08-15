@@ -127,7 +127,7 @@ def wipe(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
-        # A wipe empties a physical item, which needs no control plane. The
+        # A wipe empties a physical item, which needs no catalogue. The
         # catalogue only comes into it if `--unbind-from` asks for the claims.
         needs_catalogue=False,
     )

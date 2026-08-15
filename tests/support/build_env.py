@@ -300,9 +300,9 @@ class BuildEnv:
         ``queries``, ``schemas`` and ``tables`` are mappings of evidence name to,
         respectively, a statement, a schema name and a ``Schema.Object`` pair. A
         value may instead be a ``(text, destination)`` pair, so one observation
-        can span the destination Lakehouse *and* the control plane — the pairing
-        that proves a build wrote where it claimed and nowhere else, and which
-        two calls could never make about the same instant.
+        can span two destinations — the pairing that proves a build wrote where
+        it claimed and nowhere else, and which two calls could never make about
+        the same instant.
 
         Ask ``tables`` rather than ``queries`` where *absent* is a legitimate
         answer: a SELECT against a missing table raises instead of reporting.

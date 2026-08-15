@@ -139,7 +139,7 @@ to `abfss:/`. Nothing caught it because no test had ever *run* those objects'
 
 **A control item that could not see its own folders.** `read_lakehouse_inventory`
 excluded the whole Files area for `_weaver`, which stopped being true the moment
-the control plane declared a folder there — and an artefact the inventory cannot
+Weaver declared a folder there — and an artefact the inventory cannot
 observe is disproved by every reconciliation, so the build recreated it forever.
 
 **A mount that outlived what was done to OneLake behind it.** A wipe over DFS is

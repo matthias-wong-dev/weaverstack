@@ -166,11 +166,9 @@ def build(repository, tmp_path):
 def physical(bundle, estate_targets) -> list[str]:
     """Physical actions against the *estate*, which is what "no work" is about.
 
-    The control-plane Lakehouse is excluded, and only it. Its endpoint refresh is
-    unconditional like the publication it follows — the catalogue's own tables
-    were just written to, so its analytics endpoint has to catch up whether or
-    not the estate changed. Counting it would make a correct no-op build look
-    like work, and hiding it by kind would hide a real estate refresh too.
+    The catalogue's own target is excluded, and only it: a build always writes
+    its catalogue, so counting that would make a correct no-op build look like
+    work.
     """
 
     return [
@@ -212,7 +210,7 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     The estate here is already correct, so no physical action is expected — but
     a bundle with no actions *whatever* would satisfy the two tests above for
     entirely the wrong reason. This pins what is left: everything the build still
-    does is catalogue work against the control plane, and nothing else has crept
+    does is catalogue work, and nothing else has crept
     in under the cover of a quiet plan.
 
     Publication is a difference now, so what appears here depends on what the

@@ -245,8 +245,8 @@ class FabricResolver:
         """One destination Lakehouse's ``abfss://`` roots, for Spark to address.
 
         Built from :meth:`spark_root`, which exists precisely so a session never
-        needs the item attached. The session stays attached to the Weaver
-        Lakehouse — the control plane — and destinations are reached explicitly.
+        needs the item attached. A session's own attachment carries no meaning,
+        and destinations are reached explicitly.
         """
 
         root = self.spark_root(item).rstrip("/")

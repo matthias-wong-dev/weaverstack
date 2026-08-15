@@ -257,7 +257,7 @@ It is not a workflow engine, and is not meant to become one: no conditionals,
 no parallelism, no variables, no retries, no project-root discovery. Commands
 run in order and stop at the first failure.
 
-## Install and control-plane bootstrap
+## Install and catalogue bootstrap
 
 Install Weaver into a Fabric Environment:
 

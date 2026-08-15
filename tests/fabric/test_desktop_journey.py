@@ -60,7 +60,7 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     warehouse = f"Warehouse/{disposable_warehouse.item.name}"
 
     # From empty, so the build's own certification decides everything after it.
-    # The catalogue stays: it is the run's control plane, shared with every other
+    # The catalogue stays: it is shared with every other
     # module, and this journey's claims on it go with `unbind_from`.
     weaver.wipe(
         [lakehouse, warehouse],
