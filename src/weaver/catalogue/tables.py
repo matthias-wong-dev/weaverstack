@@ -151,9 +151,10 @@ def public_column_name(name: str) -> str:
 #: some other column of its row changed.
 BUILD_DATETIME = "build_datetime"
 
-#: Weaver's audit columns as this Delta table actually spells them. They are not
-#: business columns — the build appends them to every table it creates — but the
-#: catalogue writes them, so it has to know them.
+#: Weaver's audit columns, as internal keys. They are not business columns — the
+#: build appends them to every table it creates — but the catalogue writes them,
+#: so it has to know them. The ``_`` schema spells them like any other column,
+#: through :func:`public_column_name`.
 AUDIT_COLUMN_NAMES = tuple(
     audit_column_name(logical, SPARK_SQL) for logical in AUDIT_COLUMNS
 )

@@ -358,13 +358,13 @@ def prune_installation(
     Registry goes first, so no row is left certified while what described it is
     gone.
 
-    Several installations go in one statement per table, because each ``DELETE``
-    is a Delta transaction that rewrites files and costs seconds whether it
-    removes one row or a thousand.
+    Several installations go in one statement per table, because a statement is
+    a round trip to the Warehouse whether it removes one row or a thousand.
     """
 
     # Uncertify first, remove dependent dictionaries next, and remove the
-    # installation root last. Delta does not enforce foreign keys, so this is
-    # the explicit ordered equivalent of ON DELETE CASCADE.
+    # installation root last. A Fabric Warehouse declares foreign keys without
+    # enforcing them, so this is the explicit ordered equivalent of
+    # ON DELETE CASCADE.
     ordered = (REGISTRY, *reversed(DICTIONARY_TABLES), INSTALLATION)
     return tuple(render_delete_scope(table, scope=scope) for table in ordered)
