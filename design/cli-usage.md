@@ -29,7 +29,6 @@ file:
 ```bash
 weaver build ./estate \
   --workspace Analytics \
-  --environment weaver \
   --catalogue Warehouse/Weaver \
   --bind Lakehouse/Sales=Sales
 ```
@@ -274,8 +273,9 @@ build.
 The catalogue Warehouse itself must already exist. It is a Fabric workspace item,
 so creating one is provisioning rather than building, and a build against a
 missing catalogue Warehouse fails preflight instead of quietly making one. A
-desktop build proves it — along with the Environment and every bound Lakehouse
-and Warehouse — from a single workspace listing before it starts a Livy session.
+desktop build proves it — along with every bound Lakehouse and Warehouse, and
+the Environment where one is named — from a single workspace listing before it
+starts a Livy session.
 
 ## Build
 
@@ -308,6 +308,12 @@ objects as storage, a Warehouse over TDS — and planning happens here against
 that state. Every build action runs in the Installer, wherever that is. Weaver
 running inside Fabric prepares, plans and installs in the session it is already
 in.
+
+A build needs no `--environment`. What it submits to Spark is SQL that imports
+nothing, so it runs on the workspace's default runtime; `load`, `test` and the
+other commands that run Weaver inside Fabric name the Environment
+`weaver install` published to. A build binding only Warehouses starts no Spark
+session at all.
 
 Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 `--bundle <name>` to choose its name.

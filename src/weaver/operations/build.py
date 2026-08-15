@@ -170,13 +170,6 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
 
     if _inside_fabric_session(workspace):
         return
-    if not workspace.environment:
-        # Checked before preflight, because preflight is several REST calls and
-        # this needs none. A build renders Spark SQL for the catalogue whatever
-        # else it does, so it always crosses.
-        from ..fabric.livy import missing_environment
-
-        raise CommandError(missing_environment(workspace))
     from ..fabric.preflight import preflight_fabric_targets
 
     preflight_fabric_targets(

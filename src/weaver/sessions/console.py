@@ -622,6 +622,12 @@ class ConsoleScope(WorkspaceScope):
 
         if self.livy is None:
             raise CommandError("this workspace has no Livy session")
+        if not self.workspace.environment:
+            # Before `livy.get()`, which starts a Spark session this work could
+            # not use anyway.
+            from ..fabric.livy import missing_environment
+
+            raise CommandError(missing_environment(self.workspace))
         with self.telemetry.timing("livy.ensure_weaver"):
             self.livy.get().ensure_weaver()
 

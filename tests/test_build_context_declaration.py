@@ -231,22 +231,27 @@ def test_a_failed_preflight_does_not_create_a_livy_session(
         )
 
 
-def test_a_desktop_build_without_an_environment_fails_before_preflight(
-    repository, monkeypatch
-):
+def test_a_desktop_build_needs_no_environment(repository, monkeypatch):
+    """A build's Spark SQL imports nothing, so it needs no published wheel.
+
+    Refusing here put a publish in front of every build, including a
+    Warehouse-only one that starts no Spark session at all.
+    """
+
     from weaver.fabric import preflight as preflight_module
 
-    def explode(*args, **kwargs):
-        raise AssertionError("preflight ran without an Environment to check")
+    seen = {}
 
-    monkeypatch.setattr(preflight_module, "preflight_fabric_targets", explode)
+    def record(*args, **kwargs):
+        seen.update(kwargs)
+        raise Halt()
 
-    with pytest.raises(CommandError, match="Fabric Environment") as raised:
+    monkeypatch.setattr(preflight_module, "preflight_fabric_targets", record)
+
+    with pytest.raises(Halt):
         _build(repository, workspace="Analytics", catalogue="Warehouse/Weaver")
 
-    # What is missing is an Environment to attach, not a published wheel: a
-    # build's Spark SQL imports nothing.
-    assert "weaver install" not in str(raised.value)
+    assert seen["environment"] is None
 
 
 def test_a_repository_error_is_reported_before_any_fabric_call(tmp_path, monkeypatch):

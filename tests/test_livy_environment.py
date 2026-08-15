@@ -1,10 +1,11 @@
 """LivySession attaches its Environment from the workspace, without touching Fabric.
 
-A workspace that names an ``environment`` attaches it; one that does not is an
-error, because a Livy session is how Spark work crosses and it has nothing to
-attach. Starting the session asserts no Weaver install — that is
+A workspace that names an ``environment`` attaches it; one that does not starts
+on the workspace's default runtime, which is all a body of Spark SQL needs.
+Starting the session asserts no Weaver install — that is
 :meth:`~weaver.fabric.livy.LivySession.ensure_weaver`, submitted by a crossing
-that carries a body importing Weaver.
+that carries a body importing Weaver, and the one place a missing Environment
+is refused.
 
 Exercised with a fake resolver, so no workspace or capacity is needed.
 """
@@ -114,13 +115,34 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
     assert "conf" not in create
 
 
-def test_a_workspace_without_an_environment_is_an_error():
+def test_a_workspace_without_an_environment_starts_on_the_default_runtime():
+    """A build's statements import nothing, so they need no published wheel.
+
+    Refusing here would put a five-minute publish in front of `weaver build`,
+    which submits Spark SQL and never `import weaver`.
+    """
+
+    session = LivySession.for_workspace(
+        _spark_workspace(), resolver=_FakeResolver(), token="t"
+    )
+
+    assert session.environment_id is None
+
+
+def test_importing_weaver_without_an_environment_is_an_error(monkeypatch):
+    """The need is stated where it arises: an Environment is what carries Weaver."""
+
     from weaver.errors import CommandError
 
-    workspace = _spark_workspace()
+    session = LivySession.for_workspace(
+        _spark_workspace(), resolver=_FakeResolver(), token="t"
+    )
+    monkeypatch.setattr(
+        type(session), "run", lambda self, code, **kw: pytest.fail("submitted anyway")
+    )
 
-    with pytest.raises(CommandError, match="environment"):
-        LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
+    with pytest.raises(CommandError, match="--environment"):
+        session.ensure_weaver()
 
 
 def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
