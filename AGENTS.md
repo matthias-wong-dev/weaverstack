@@ -366,11 +366,9 @@ after a build or refresh, a failure stopping later work, a repository mutated
 between generation and installation, prune or wipe changing the estate. The
 protocol tests in `test_livy_import.py` show both halves of that judgement.
 
-The helpers live in `tests/fabric/observation.py`, and both transports run the
-same body — local Spark in-process, Fabric over Livy — so what the local suite
-proves is the code Fabric runs. Neither hides the call: every submission is
-counted by `tests/fabric/livy_telemetry.py` and pytest prints a breakdown at the
-end of the run.
+The helpers live in `tests/fabric/observation.py`. Nothing hides the call: every
+submission is counted by `tests/fabric/livy_telemetry.py` and pytest prints a
+breakdown at the end of the run.
 
 ```text
 ================================ Livy transport ================================
@@ -396,7 +394,7 @@ pytest                      # pure Python, no JVM and no tenant
 pytest -m fabric            # every test against a real Fabric workspace
 pytest -m "fabric and remote" # no published wheel needed
 pytest -m "fabric and hosted" # needs the wheel published to the Environment
-pytest -m full_integration  # the comprehensive Fabric lifecycle journey
+pytest -m full_integration  # the lifecycle journeys, one per position
 pytest -m provision         # Fabric item lifecycle
 ```
 
@@ -407,7 +405,7 @@ Every marker says *what a test needs*:
 | `fabric` | a workspace; carried by every Fabric test |
 | `remote` | a workspace, and no published wheel |
 | `hosted` | a workspace **and** the wheel published to the Environment |
-| `full_integration` | the composed lifecycle journey |
+| `full_integration` | a composed lifecycle journey |
 | `provision` | creates and deletes Fabric items |
 
 `remote` and `hosted` are the distinction that keeps the loop legible, and they
@@ -423,11 +421,12 @@ run from the checkout against the real workspace and stay `remote`.
 Position is worth recording, but it belongs in a test's docstring. A marker says
 what a run costs, and the cost of `hosted` is a five-minute publish.
 
-`full_integration` is the Fabric lifecycle journey alone — one test. The
-journey is the most expensive thing in the suite and should **rarely be where
+`full_integration` is the lifecycle journeys alone — one per position, since
+composing is a claim about a position and not a claim a position can borrow.
+A journey is the most expensive thing in the suite and should **rarely be where
 a defect is found for the first time**: syntax, selection, planning, action
 rendering, execution and reconciliation are all meant to be proven below it.
-Making it run by exception keeps the routine Fabric run about components.
+Making them run by exception keeps the routine Fabric run about components.
 
 Isolation therefore comes from **emptying** an item rather than from having a new
 one. That is not a weaker guarantee, but it is a different one, so the cleaning

@@ -193,7 +193,7 @@ The following capabilities cross the boundary to a physical environment.
 A `Session` decides how each capability is met, based on where the code is
 running:
 
-| | notebook / emulator | desktop → Fabric |
+| | in a Fabric notebook | desktop → Fabric |
 |---|---|---|
 | `execute_python` | call it | submit over Livy |
 | `execute_spark_sql`, `execute_spark_sql_batch` | `spark.sql(...)` | submit over Livy |
@@ -288,10 +288,10 @@ Because the decisions are pure and the handoffs are values, most behaviour is
 testable without a tenant:
 
 ```text
-pytest                             pure Python, about a second, no JDK, no cloud
-pytest -m spark                    local Spark and Delta, needs a JDK
+pytest                             pure Python, about a second, no JVM, no cloud
 pytest -m "fabric and remote"      real workspace, no published wheel
 pytest -m "fabric and hosted"      real workspace and the published wheel
+pytest -m full_integration         the composed lifecycle journeys
 ```
 
 The `remote` and `hosted` markers say whether a Fabric test needs the wheel

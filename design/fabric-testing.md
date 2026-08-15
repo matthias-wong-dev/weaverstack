@@ -18,11 +18,10 @@ az login
 pip install -e '.[test,cli]'
 ```
 
-`[test]` is the suite without a JVM — core tests plus these Fabric ones, which
-need credentials and HTTP but no Spark. `[cli]` adds `weaver install`, needed
-below to publish the Environment. Use `[dev]` instead only if you also want
-local Spark; it pulls in PySpark, which is a few hundred megabytes, builds from
-source and does nothing without a JDK.
+`[test]` is the suite — core tests plus these Fabric ones, which need
+credentials and HTTP. `[cli]` adds `weaver install`, needed below to publish the
+Environment. Fabric supplies Spark where authored runtime code executes, so
+nothing here needs a JVM.
 
 `az login` is the only authentication Weaver needs — see
 [CLI usage](cli-usage.md#signing-in-to-azure) for what it does and why the
@@ -223,20 +222,19 @@ Terminal output records item creation, endpoint readiness, first SQL
 connection, first `select 1`, fixture population, Livy startup, Fabric wipe,
 Warehouse deletion, and total fixture lifetime.
 
-## Native Fabric builds run entirely in Fabric
+## Both phases plan against real state
 
-`tests/fabric/test_build_bundle.py` runs the same four behavioural tests in
-Fabric and its local emulator, selected by an indirect `build_env` parameter
-(`local`/`fabric`). It is the reference for the Fabric-first rule: **both phases
-of a build — *generate* and *install* — run in the target environment.** On
-Fabric that is inside the Livy session, against the native Spark catalogue: the
-test places an explicit repository source under a test-only OneLake location,
-then its Livy programs parse that source, generate the bundle, and install it.
-In the emulator the same logical workflow runs in-process against local Spark
-from an explicit local repository root.
-This exercises the native Fabric path. The separate desktop CLI path intentionally
-plans locally after a Fabric state read, then hands a frozen archive back for
-installation.
+The Fabric build contexts are the reference for the Fabric-first rule: **both
+phases of a build — *generate* and *install* — decide against the target
+environment's real state.** With Weaver running in Fabric that state is right
+there, so the test places an explicit repository source under a test-only
+OneLake location and its Livy programs parse it, generate the bundle and install
+it, all inside the session against the native Spark catalogue.
+
+From a desktop the same state is read across first — the catalogue and a
+Lakehouse's views as Spark SQL, its objects as storage, a Warehouse over TDS —
+and planning happens here against what came back. What differs is where the
+process runs, not what it plans against.
 
 Both Lakehouses are created **schema-enabled**: the target so a managed table
 lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver
@@ -254,7 +252,7 @@ Three things only a real workspace answers, and this is where they are answered:
 a OneLake shortcut is a workspace API call rather than a file operation; the
 shortcut has to be created after the table it points at exists; and a Lakehouse's
 SQL analytics endpoint lags its Delta tables, so an item that mutated Delta is
-closed by a refresh the emulator can only skip.
+closed by a refresh.
 
 It also found the asynchrony: Fabric returns from the shortcut call before the
 Lakehouse will accept the name as a relation, and the consumer's very next
@@ -291,11 +289,10 @@ locally and on Fabric, and so a Fabric run costs as little as possible.
 `install_repo`, `generate`, `install`, `run_query`, `run_columns` and `seed_orphans`
 — with the transport hidden behind them, plus the two destinations
 the environment addresses. A test body drives it and never mentions Livy, Spark or
-ODBC. Three environments implement it:
+ODBC. Two environments implement it:
 
 | fixture | generation | installation | reads back with |
 |---|---|---|---|
-| `local_build_env` | in-process | in-process | local Spark |
 | `fabric_build_env` | in the Livy session | in the Livy session | in-session Spark |
 | `warehouse_estate` | in the Livy session | in the Livy session, over Weaver's Fabric-native SQL | desktop T-SQL (assertions only) |
 
@@ -354,21 +351,19 @@ preconditions for those tiers.
 
 | | command | needs |
 |---|---|---|
-| core | `pytest` | nothing — under twenty seconds |
-| local Spark | `pytest -m spark` | a JDK and the `[spark]` extra |
+| core | `pytest` | nothing — a couple of minutes |
 | Fabric, remote | `pytest -m "fabric and remote"` | `az login`, a workspace, a running capacity |
 | Fabric, hosted | `pytest -m "fabric and hosted"` | the above **and** `weaver install` |
-| the journey | `pytest -m full_integration` | the above |
+| the journeys | `pytest -m full_integration` | the above |
 
-The default run excludes every optional tier, so a contributor with neither a JVM
-nor a tenant still gets a green build. The first three are the development loop
-and none of them publishes anything.
+The default run excludes every optional tier, so a contributor without a tenant
+still gets a green build. The first two are the development loop and neither
+publishes anything.
 
-Marker, directory and fixture agree: `-m spark` collects only `tests/spark`, and
-the Fabric tiers only `tests/fabric`. That is enforced by where a test lives
-rather than by convention — a module under `tests/fabric` answering to `-m spark`
-would load the Fabric conftest, and with it a workspace, a credential and a
-session.
+Marker and directory agree: the Fabric tiers collect only `tests/fabric`. That is
+enforced by where a test lives rather than by convention — a module placed there
+loads the Fabric conftest, and with it a workspace, a credential and a session,
+whatever its marker says.
 
 ## Fabric platform behaviour
 
@@ -380,6 +375,22 @@ from inside a session. `DELETE ?recursive=true` is supported.
 This matters to Weaver's design: `Store.move_within_store` exists as a
 first-class operation precisely so an implementation *can* choose a cheap
 rename. On OneLake it cannot, and must copy.
+
+**A long desktop operation outlives its connections.** A build polls the Livy
+API for as long as the build takes, and over ten minutes a single connection is
+likely to be refused outright — `WinError 10061` on Windows — while the Spark
+work it is watching carries on unaffected.
+
+`_call` therefore retries with a short backoff, and what it may retry depends on
+how far the request got. A read can always be repeated. Anything else only when
+the connection was never established, which urllib3 reports as
+`NewConnectionError` or `ConnectTimeoutError`: the server has not seen the
+request, so sending it again cannot run a statement twice. A failure after the
+request left this machine is reported rather than repeated, because whether
+Fabric acted on it is no longer knowable.
+
+Found by the desktop journey, which failed four times in a row at four different
+points before this.
 
 **The Lakehouse SQL endpoint lags behind Delta schema changes.** After tables
 appear or change, a Warehouse cross-database view can fail with

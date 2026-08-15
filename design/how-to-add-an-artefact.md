@@ -90,8 +90,8 @@ One test per action kind, executing it against a real engine and inspecting what
 it made.
 
 ```text
-tests/spark/boundary/test_actions_delta.py       real Spark
-tests/fabric/test_warehouse_action_primitive.py  real Fabric, over TDS, no Livy
+tests/fabric/test_spark_table_lakehouse_boundary.py  real Spark, over Livy
+tests/fabric/test_warehouse_action_primitive.py      real Fabric, over TDS, no Livy
 ```
 
 Named `test_<kind>_action_<what it proves>`, so a test names both the kind and
@@ -136,7 +136,7 @@ layer that owns the missing declaration or lifecycle behaviour.
 | layer | cost | what belongs there |
 |---|---|---|
 | pure Python | milliseconds | every decision: derivation, signatures, selection, planning, intent |
-| local Spark | seconds | does the engine agree — types, nullability, a view that resolves |
+| a Fabric workspace | minutes | does the engine agree — types, nullability, a view that resolves |
 | Fabric, TDS | seconds | the same, where only Fabric can answer, without a session |
 | Fabric, Livy | ~40s a session | one thing: does a whole bundle install, in order |
 

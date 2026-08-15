@@ -326,14 +326,9 @@ CREATE TABLE `Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer` …
 ```
 
 One session can create, read and drop through that name in any Lakehouse in the
-workspace, and can build a view in one over a table in another. The local
-emulator has one namespace level and cannot be given another, so it folds the
-Lakehouse into that level — `` `sales_lh__sales`.`Customer` `` — which is not
-Fabric syntax and is not meant to be. What it reproduces is the property: two
-destinations declaring a schema of the same name stay apart. Storage is untouched
-by the folding. The folded schema uses the local catalogue's canonical lower-case
-spelling; the emulator keeps declared object names exact-case and therefore uses
-case-sensitive analysis for its Spark session.
+workspace, and can build a view in one over a table in another. Two destinations
+declaring a schema of the same name therefore stay apart without either naming
+the other.
 
 Both are needed and neither substitutes for the other: a folder is created at a
 path and has no catalogue name, while a view exists only as a name and has no path
@@ -370,6 +365,15 @@ receive no physical action. `Prohibit Rebuild` suppresses only the physical
 replacement of an existing object, while the incoming catalogue projection still
 advances. Planned creates and managed drops are strict, so an unexpected physical
 collision fails rather than being hidden.
+
+## The catalogue lives in a Lakehouse
+
+The control plane is a Lakehouse, and every table above is Delta read and
+written through Spark SQL. Moving it to a Warehouse is separate future work and
+is not part of the Fabric-only refactor: it changes the transport every
+catalogue read and write uses, the concurrency the Registry can assume, and what
+a build needs before it can plan. Nothing in this document should be read as
+preparing for that move.
 
 ## See also
 

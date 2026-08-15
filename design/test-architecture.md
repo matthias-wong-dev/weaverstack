@@ -16,18 +16,17 @@ The rest of this document applies that rule to the repository test suite.
 
 | command | needs | collects | what it is for |
 |---|---|---|---|
-| `pytest` | nothing | ~2040 | contracts, rendering, planning, binding — the development loop |
-| `pytest -m spark` | a JDK | ~250 | Delta, the Spark catalogue, deployed-module execution |
-| `pytest -m "fabric and remote"` | a workspace | ~80 | one narrow question a real Fabric can answer, with nothing published |
-| `pytest -m "fabric and hosted"` | a workspace **and a published wheel** | ~30 | Weaver running *inside* Fabric — the product's own position |
-| `pytest -m full_integration` | a workspace and a published wheel | 1 | composition only |
+| `pytest` | nothing | ~2800 | contracts, rendering, planning, binding — the development loop |
+| `pytest -m "fabric and remote"` | a workspace | ~100 | one narrow question a real Fabric can answer, with nothing published |
+| `pytest -m "fabric and hosted"` | a workspace **and a published wheel** | ~40 | Weaver running *inside* Fabric, and a desktop that imports it there |
+| `pytest -m full_integration` | a workspace and a published wheel | 2 | composition only, one journey per position |
 | `pytest -m provision` | permission to create and delete items | 4 | Fabric's resource management, not Weaver's |
 
 Markers are peers; none implies another. Each says *what a test needs*, so a
 selection is honest about its cost.
 
-The first three are the development loop, and **none of them publishes
-anything** — that is the point. A five-minute `weaver install` between a
+The first two are the development loop, and **neither publishes anything** —
+that is the point. A five-minute `weaver install` between a
 developer and finding out a REST body was malformed is a five-minute penalty on
 every mistake.
 
@@ -37,14 +36,13 @@ every mistake.
 tests/
   targeted/          pure Python, by seam — narrow fixture constructors live here
   support/           shared harness: build env, observation, Livy ledger, claims
-  spark/             local Spark, incl. boundary/ for interface fidelity
   fabric/            a real workspace, and nothing that does not need one
 ```
 
 Marker, directory, fixture and transport describe the same thing. That is not
-tidiness: a module under `tests/fabric` that answered to `-m spark` loaded the
-Fabric conftest, and with it a workspace, a credential and a session — so the two
-names described different sets and neither was honest.
+tidiness: a module under `tests/fabric` collects the Fabric conftest, and with it
+a workspace, a credential and a session, so a module placed there answers for
+that cost whatever its marker says.
 
 `tests/support` holds what belongs to neither transport: the build environment a
 test drives, and the claims two transports both make. A module that spans both is
@@ -104,8 +102,8 @@ real estate cannot do.
 **Round-trip pairing.** Build from a repository, read the state back, and assert
 it equals what the fixture constructor produces. It is the strongest form of
 boundary claim, because it justifies every pure-Python assertion that uses the
-same constructor. `spark/boundary/test_inventory_fidelity.py` and
-`test_catalogue_fidelity.py` are these.
+same constructor. `fabric/test_desktop_build_state_boundary.py` and
+`fabric/test_item_catalogue_fabric.py` are these, one per position.
 
 ## What only Fabric has caught, and why
 

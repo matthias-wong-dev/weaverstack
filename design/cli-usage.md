@@ -10,29 +10,26 @@ pip install 'weaverstack[cli]'
 weaver --help
 ```
 
-Fabric commands use the identity from `az login`. Local commands need no Azure
-credentials.
+Commands use the identity from `az login`.
 
 ## Workspace resolution
 
 Commands accept the applicable subset of:
 
 ```text
---workspace <Fabric-name-or-local-folder>
---workspace-type <fabric|local>
+--workspace <Fabric-workspace-name>
 --workspace-config <path>
 --environment <Fabric-Environment>
 --catalogue <control-Lakehouse>
 ```
 
-`workspace_type` defaults to `fabric`. Explicit CLI values override the one
-Workspace described by the configuration file. A local Workspace is simply a
-folder path:
+Explicit CLI values override the one Workspace described by the configuration
+file:
 
 ```bash
 weaver build ./estate \
-  --workspace .local \
-  --workspace-type local \
+  --workspace Analytics \
+  --environment weaver \
   --catalogue Lakehouse/Weaver \
   --bind Lakehouse/Sales=Sales
 ```
@@ -42,7 +39,6 @@ the keys and their default logical bindings are the values:
 
 ```yaml
 workspace: Analytics
-workspace_type: fabric
 environment: Runtime
 catalogue: Lakehouse/Control
 
@@ -52,7 +48,8 @@ warehouses:
   Reporting_Dev: Warehouse/Reporting
 ```
 
-See [`examples/env.yml`](../examples/env.yml) for the expanded form.
+See [`examples/weaver_example.yml`](../examples/weaver_example.yml) for the
+expanded form, including per-target execution settings.
 
 ## Session
 
@@ -96,8 +93,7 @@ borrowing another workspace's Environment.
 **The prompt does not wait for Fabric.** Where a workspace is known at startup,
 the credential and the Livy session are acquired in the background; the first
 command that needs Spark waits on that startup rather than beginning a second
-one, which matters on a capacity that permits exactly one. A local workspace
-warms its JVM the same way.
+one, which matters on a capacity that permits exactly one.
 
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
@@ -289,7 +285,7 @@ Bindings are physical-first:
 ```bash
 weaver build \
   ./estate \
-  --workspace-config examples/env.yml \
+  --workspace-config examples/weaver_example.yml \
   --bind Lakehouse/Sales_Dev \
   --bind Warehouse/Reporting_Dev=Alternative
 ```
@@ -307,12 +303,12 @@ Unchanged objects receive no physical action; selected changes use an explicit
 drop followed by a strict create. `Prohibit Rebuild` protects an existing
 physical object while allowing its incoming catalogue metadata to advance.
 
-For a local CLI targeting Fabric, parsing and request validation happen first;
-one Environment-backed Livy session then returns authoritative build state,
-planning happens locally, and a completed archive is uploaded under
-`Files/cli/<execution-id>/` for one in-session install call. Native Fabric builds
-still prepare, plan, and install in-session. Local targets run in-process against
-the emulator. Warehouses remain Fabric-only.
+From a desktop, parsing and request validation happen first; the build state is
+then read across — the catalogue and a Lakehouse's views as Spark SQL, its
+objects as storage, a Warehouse over TDS — and planning happens here against
+that state. Every build action runs in the Installer, wherever that is. Weaver
+running inside Fabric prepares, plans and installs in the session it is already
+in.
 
 Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 `--bundle <name>` to choose its name.
@@ -322,7 +318,7 @@ Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 Run the installed Tests and Assumptions in one or more physical targets:
 
 ```bash
-weaver test Lakehouse/Sales --workspace-config examples/env.yml
+weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
 The exit code is the verdict — non-zero when anything failed or could not be
@@ -384,7 +380,7 @@ with `--unbind-from` (or the configured control Lakehouse).
 weaver wipe \
   Lakehouse/Sales_Dev \
   Warehouse/Reporting_Dev \
-  --workspace-config examples/env.yml \
+  --workspace-config examples/weaver_example.yml \
   --unbind-from Control \
   --dry-run
 ```
