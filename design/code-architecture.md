@@ -339,10 +339,29 @@ execution require measurement.
 weaver/sessions/         the Session contract, hosts, resources, capabilities
 weaver/declaration/      parsing authored files into a WeaverRepository
 weaver/build_bundle/     Builder, BuildBundle, Installer, executors
-weaver/run/              Runner, RunGraph, RunState, dispatch
-weaver/catalogue/        the control plane: what is installed, and its tables
+weaver/run/              Runner, RunGraph, RunState, dispatch, run evidence
+weaver/catalogue/        what is installed, its tables, and how they persist
 weaver_cli/              argument parsing and rendering, and nothing else
 ```
+
+Inside `weaver/catalogue/` the split is between what the catalogue *is* and how
+it is stored:
+
+```text
+tables.py       the fixed shape: tables, columns, keys, public names, vocabularies
+projection.py   what a repository declares, as rows
+state.py        what is persisted, and the diff between the two
+reconcile.py    which statements a build emits, and in what order
+render.py       those statements as T-SQL
+tsql.py         identifier quoting, literals and types — the only module that
+                knows SQL syntax
+connection.py   reading `_` over TDS, and what an absent table means
+flusher.py      appending to `_.Log` without waiting for the Warehouse
+```
+
+Everything above `render.py` holds plain Python values under internal
+snake-case keys. The public sentence-case names and the stored vocabularies the
+`_` schema publishes exist only at that boundary.
 
 The CLI resolves a workspace, calls the API, renders the result, and chooses an
 exit code. `tests/test_core_boundary.py` prevents it from acquiring core
