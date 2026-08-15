@@ -437,7 +437,7 @@ emit({
     "real": real,
     "log": sorted(
         entry.location.value.rsplit("/", 1)[-1]
-        for entry in store.list(Location(real["task_log"]))
+        for entry in store.list(Location(real["workflow_id"]))
         if not entry.is_directory
     ),
 })
@@ -479,7 +479,7 @@ def _assert_loaded(env, seen) -> None:
     assert all(node["status"] == "validated" for node in dry["nodes"])
     assert all(node["dispatch_location"] for node in dry["nodes"])
     # Dry run is validation only: no evidence, because nothing happened.
-    assert dry["task_log"] is None
+    assert dry["workflow_id"] is None
 
     # The two views own no load work, so the graph is the folder and the three
     # tables — and the order is the one the dependencies force.
@@ -558,7 +558,7 @@ def _assert_task_log(env, seen) -> None:
     # And the task wrote beneath it. Matched on the item-relative part, because
     # the run addressed it as its own environment does and the desktop addresses
     # the same bytes differently.
-    assert f"/Files/_/{LOG_FOLDER}/task_date=" in real["task_log"]
+    assert f"/Files/_/{LOG_FOLDER}/task_date=" in real["workflow_id"]
 
     written = seen["log"]
     assert "plan.json" in written
@@ -668,7 +668,7 @@ emit({
     "named": named,
     "log": sorted(
         entry.location.value.rsplit("/", 1)[-1]
-        for entry in store.list(Location(everything["task_log"]))
+        for entry in store.list(Location(everything["workflow_id"]))
         if not entry.is_directory
     ),
 })

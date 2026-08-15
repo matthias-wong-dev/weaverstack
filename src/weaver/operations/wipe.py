@@ -257,19 +257,16 @@ def unbind_catalogue_claims(
 
     Two callers want it: ``weaver unbind``, and the tail of a ``wipe`` that
     emptied a target the catalogue still claims. Reading and deleting are both
-    Spark SQL, so the statements go through the Session.
+    T-SQL against the catalogue Warehouse, so neither needs Spark and the
+    statements go through the Session.
     """
 
-    from ..build_bundle.workflow import session_catalogue
+    from ..catalogue.connection import catalogue_connection
     from ..sessions.host import use_or_create_session
     from ..unbind import unbind_targets
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not opened.executes_here(workspace) and not workspace.environment:
-            from ..fabric.livy import missing_environment
-
-            raise CommandError(missing_environment(workspace))
-        catalogue = session_catalogue(opened, workspace, workspace.catalogue_item)
+        catalogue = catalogue_connection(opened, workspace)
         return unbind_targets(
             catalogue, lakehouses=lakehouses, warehouses=warehouses
         ).to_mapping()

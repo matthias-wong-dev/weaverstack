@@ -70,7 +70,7 @@ def test_wipe_requires_a_typed_target():
 
 def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     cli = importlib.import_module("weaver_cli.main")
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+    workspace = given_workspace(catalogue="Warehouse/Control")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
     calls = []
 
@@ -103,7 +103,7 @@ def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch)
     """
 
     cli = importlib.import_module("weaver_cli.main")
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+    workspace = given_workspace(catalogue="Warehouse/Control")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
     calls = []
 
@@ -137,7 +137,7 @@ def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):
     """The listing is the question. Remove it and there is nothing to agree to."""
 
     cli = importlib.import_module("weaver_cli.main")
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+    workspace = given_workspace(catalogue="Warehouse/Control")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
@@ -154,7 +154,7 @@ def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):
 
 def test_noninteractive_wipe_needs_yes(monkeypatch, capsys):
     cli = importlib.import_module("weaver_cli.main")
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+    workspace = given_workspace(catalogue="Warehouse/Control")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
     monkeypatch.setattr("weaver.wipe", lambda *_args, **_kwargs: _result(dry_run=True))
     assert main(["wipe", "Lakehouse/Sales", "--workspace", "/tmp/local"]) == 1

@@ -14,6 +14,7 @@ import json
 from typing import Any
 
 from ...errors import InstallError
+from ...spark.tokens import substitute_build_datetime
 from ..models import InstallAction
 from .base import InstallationContext
 
@@ -76,6 +77,12 @@ class TSqlBatchExecutor:
             raise InstallError(
                 f"tsql_batch action {action.id!r} payload must be an array of statements"
             )
+        # The build datetime is scoped to this installation rather than to a
+        # target, so it is the one value a frozen payload cannot carry and is
+        # resolved here. A statement that names it and gets none is refused
+        # rather than reaching the engine with the token still in it.
         for statement in statements:
-            context.sql.execute_script(statement)
+            context.sql.execute_script(
+                substitute_build_datetime(statement, context.build_datetime)
+            )
         return {"statements": len(statements)}

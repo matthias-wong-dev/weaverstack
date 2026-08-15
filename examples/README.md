@@ -39,7 +39,7 @@ weaver.wipe(
     [
         "Lakehouse/Sales",
         "Warehouse/Reporting",
-        "Lakehouse/Weaver",
+        "Warehouse/Weaver",
     ]
 )
 

@@ -75,8 +75,7 @@ def after(repository, *names, current=None):
         repository,
         {document_id(name) for name in names},
         {item: target},
-        control_target=target,
-        control_destination=WEAVER,
+        catalogue_target=target,
         current=current,
     )
 
@@ -94,8 +93,7 @@ def test_a_build_that_removes_nothing_writes_no_deletes(repository):
     stage = render_catalogue_before_build(
         FixtureCatalogue.from_registry_rows(),
         (),
-        control_target=bound_target(),
-        control_destination=WEAVER,
+        catalogue_target=bound_target(),
     )
 
     assert stage is None
@@ -109,8 +107,7 @@ def test_an_objects_claims_are_deleted_when_it_is_being_dropped(repository):
     stage = render_catalogue_before_build(
         catalogue,
         {document_id(CUSTOMER)},
-        control_target=bound_target(),
-        control_destination=WEAVER,
+        catalogue_target=bound_target(),
     )
 
     assert stage is not None
@@ -137,8 +134,7 @@ def test_the_registry_claim_is_deleted_before_the_dictionaries(repository):
         render_catalogue_before_build(
             catalogue,
             {document_id(CUSTOMER)},
-            control_target=bound_target(),
-            control_destination=WEAVER,
+            catalogue_target=bound_target(),
         )
     )
 
@@ -153,8 +149,7 @@ def test_a_claim_the_catalogue_never_held_produces_no_delete(repository):
     stage = render_catalogue_before_build(
         FixtureCatalogue.from_registry_rows(),
         {document_id(CUSTOMER)},
-        control_target=bound_target(),
-        control_destination=WEAVER,
+        catalogue_target=bound_target(),
     )
 
     assert stage is None
@@ -177,8 +172,7 @@ def test_claims_disproved_by_reconciliation_are_deleted_too(repository):
     stage = render_catalogue_before_build(
         reconciled.catalogue,
         (),  # this build drops nothing itself
-        control_target=bound_target(),
-        control_destination=WEAVER,
+        catalogue_target=bound_target(),
         stale_claims=reconciled.stale_claims,
     )
 
@@ -218,13 +212,18 @@ def test_the_registry_is_published_in_its_own_later_stage(repository):
     assert slugs.index("publish-catalogue") < slugs.index("publish-registry")
 
 
-def test_publication_closes_with_a_control_endpoint_refresh(repository):
-    """The catalogue is Delta like anything else, and its next reader — a report,
-    a GUI, the next build — reaches it through the endpoint."""
+def test_publication_ends_with_the_registry_and_nothing_after_it(repository):
+    """Nothing closes the build.
+
+    Catalogue rows are written over TDS into the Warehouse that holds them, so
+    they are readable as soon as they commit. There is no endpoint standing
+    between the write and the next reader to refresh.
+    """
 
     stages = after(repository, CUSTOMER)
 
-    assert stages[-1].slug == "refresh-control-endpoint"
+    assert stages[-1].slug == "publish-registry"
+    assert not any("refresh" in stage.slug for stage in stages)
 
 
 def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
@@ -293,7 +292,7 @@ def test_every_published_statement_is_scoped_to_its_item(repository):
     lines = statements(after(repository, CUSTOMER)[0])
 
     assert lines
-    assert all("`item_name` = 'Sales'" in line for line in lines)
+    assert all("[Item name] = N'Sales'" in line for line in lines)
 
 
 def test_the_publication_epoch_stays_a_token(repository):

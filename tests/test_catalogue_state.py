@@ -159,7 +159,7 @@ def test_claim_deletion_uses_the_rule_predicate_columns():
         predicate_columns=("owned_schema", "owned_object"),
     )
 
-    statement = _claim_statements((CatalogueClaim(identity, rule),), WEAVER)[0]
+    statement = _claim_statements((CatalogueClaim(identity, rule),))[0]
 
     assert "`owned_schema` = 'Sales'" in statement
     assert "`owned_object` = 'Customer'" in statement

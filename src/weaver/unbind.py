@@ -47,15 +47,9 @@ def plan_unbind(
         key=str,
     )
     # One pass over the tables for every selected installation, rather than one
-    # pass per installation: a DELETE costs a Delta transaction whether it
-    # removes one row or all of them, so the statement count is the cost.
-    statements = (
-        prune_installation(
-            InstallationScopes(tuple(scopes)), destination=catalogue.destination
-        )
-        if scopes
-        else ()
-    )
+    # pass per installation: a DELETE costs a transaction whether it removes one
+    # row or all of them, so the statement count is the cost.
+    statements = prune_installation(InstallationScopes(tuple(scopes))) if scopes else ()
     targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
     return UnbindResult(
         targets=targets,
@@ -69,5 +63,5 @@ def unbind_targets(catalogue, *, lakehouses=(), warehouses=()) -> UnbindResult:
 
     result = plan_unbind(catalogue, lakehouses=lakehouses, warehouses=warehouses)
     for statement in result.statements:
-        catalogue.sql(statement)
+        catalogue.execute(statement)
     return result

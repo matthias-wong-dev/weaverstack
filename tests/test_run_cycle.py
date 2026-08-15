@@ -533,8 +533,8 @@ def test_a_result_does_not_claim_to_know_where_evidence_was_written():
 
     result = runner(nodes=[node("a")]).run(dispatch=controlled({}))
 
-    assert "task_log" not in result.to_mapping()
-    assert not hasattr(result, "task_log")
+    assert "workflow_id" not in result.to_mapping()
+    assert not hasattr(result, "workflow_id")
 
 
 def test_a_run_state_round_trips_through_its_mapping():

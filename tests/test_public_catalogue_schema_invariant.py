@@ -181,7 +181,9 @@ LOG_COLUMNS = (
     "Duration milliseconds",
     "Message",
     "Details",
-    "Row insert datetime",
+    # Weaver's audit trio, appended to every table it builds. Only the insert
+    # datetime means anything for an append-oriented table.
+    *AUDIT,
 )
 
 

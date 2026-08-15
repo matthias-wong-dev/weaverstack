@@ -30,7 +30,6 @@ from weaver.catalogue.state import read_catalogue_state
 from weaver.catalogue.tables import CATALOGUE_TABLES, REGISTRY
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
-from weaver.spark import FabricSparkTarget
 
 
 class CountingCatalogue:
@@ -41,19 +40,14 @@ class CountingCatalogue:
         self.reads: list[str] = []
         self.statements: list[str] = []
 
-    # --- the SparkCatalogue surface the reader uses ---------------------------
+    # --- the CatalogueConnection surface the reader uses ----------------------
 
-    #: The Weaver Lakehouse this catalogue is addressed to. A statement names
-    #: its object in full, exactly as the reader will send it.
-    destination = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
-
-    def qualify(self, schema: str, name: str) -> str:
-        return self.destination.qualify(schema, name)
-
-    def columns_of(self, name: str) -> tuple[str, ...]:
-        table = {t.name: t for t in CATALOGUE_TABLES}[name.rsplit(".", 1)[1].strip("`")]
+    def columns_of(self, table) -> dict[str, str] | None:
         self.reads.append(table.name)
-        return tuple(table.physical_columns)
+        return {
+            table.public_name_of(name).casefold(): table.public_name_of(name)
+            for name in table.physical_columns
+        }
 
     def rows(self, statement: str) -> list[dict]:
         self.statements.append(statement)
@@ -82,7 +76,7 @@ class CountingCatalogue:
 
 def _table_of(statement: str) -> str:
     return next(
-        table.name for table in CATALOGUE_TABLES if f".`{table.name}`" in statement
+        table.name for table in CATALOGUE_TABLES if f"[{table.name}]" in statement
     )
 
 

@@ -72,11 +72,11 @@ def registry_changes(changes):
 
 
 def statements(current, desired) -> list[str]:
-    return list(publish(current, desired, destination=WEAVER).statements)
+    return list(publish(current, desired).statements)
 
 
 def registry_statements(current, desired) -> list[str]:
-    return list(publish(current, desired, destination=WEAVER).registry.statements)
+    return list(publish(current, desired).registry.statements)
 
 
 # --- the report reads both sides ----------------------------------------------
@@ -133,7 +133,7 @@ def test_a_catalogue_that_already_matches_produces_no_statements(repository):
 
     desired = desired_from(repository, CUSTOMER, ORDER)
 
-    assert publish(Catalogue(rows=desired.rows), desired, destination=WEAVER).is_noop
+    assert publish(Catalogue(rows=desired.rows), desired).is_noop
     assert statements(Catalogue(rows=desired.rows), desired) == []
 
 
@@ -205,7 +205,7 @@ def test_every_statement_stays_scoped_to_the_item(repository):
     lines = statements(current, desired_from(repository, CUSTOMER))
 
     assert lines
-    assert all("`item_name` = 'Sales'" in line for line in lines)
+    assert all("[Item name] = N'Sales'" in line for line in lines)
 
 
 def test_an_installation_the_build_did_not_name_is_never_touched(repository):
@@ -228,9 +228,7 @@ def test_an_installation_the_build_did_not_name_is_never_touched(repository):
 def test_registry_statements_are_kept_separate_from_the_rest(repository):
     """Registry is written last, in its own barrier, so it is returned apart."""
 
-    result = publish(
-        Catalogue(rows={}), desired_from(repository, CUSTOMER), destination=WEAVER
-    )
+    result = publish(Catalogue(rows={}), desired_from(repository, CUSTOMER))
 
     assert result.registry.statements
     assert all(
@@ -293,7 +291,7 @@ def test_an_unchanged_table_beside_a_changed_one_stays_silent(repository):
         for item, tables in desired.rows.items()
     }
 
-    result = publish(Catalogue(rows=current_rows), desired, destination=WEAVER)
+    result = publish(Catalogue(rows=current_rows), desired)
 
     assert result.registry.statements, "the changed table publishes"
     assert all(plan.is_noop for plan in result.dictionaries), (

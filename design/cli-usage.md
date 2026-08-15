@@ -30,7 +30,7 @@ file:
 weaver build ./estate \
   --workspace Analytics \
   --environment weaver \
-  --catalogue Lakehouse/Weaver \
+  --catalogue Warehouse/Weaver \
   --bind Lakehouse/Sales=Sales
 ```
 
@@ -40,7 +40,7 @@ the keys and their default logical bindings are the values:
 ```yaml
 workspace: Analytics
 environment: Runtime
-catalogue: Lakehouse/Control
+catalogue: Warehouse/Control
 
 lakehouses:
   Sales_Dev: Lakehouse/Sales
@@ -82,7 +82,7 @@ resources per workspace it is asked about.
 
 **A workspace given at startup is inherited** by commands that name none, which
 is why the example above repeats no `--workspace`. Flags a command *does* give
-are applied on top, so `build --catalogue Lakehouse/Other` overrides the control
+are applied on top, so `build --catalogue Warehouse/Other` overrides the control
 Lakehouse without restating the workspace. Naming a different `--workspace`
 addresses that one instead, with its own resources.
 
@@ -187,7 +187,7 @@ end of the build in front of it.
 Name the Weaver Lakehouse alongside the destinations:
 
 ```bash
-weaver wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --yes
+weaver wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --yes
 ```
 
 `wipe` removes the physical contents of what it is given, then deletes the
@@ -266,7 +266,7 @@ weaver install --workspace Analytics --environment Runtime
 ```
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
-by the ordinary build: `Lakehouse/_weaver` is composed into every parsed
+by the ordinary build: `Warehouse/_weaver` is composed into every parsed
 repository, bound to the configured Weaver Lakehouse, and its tables are created
 by ordinary planned actions. A full reset is therefore a wipe followed by a
 build.
@@ -293,7 +293,7 @@ Without `=`, the physical target uses its configured logical default. With `=`,
 the right side is an invocation-only logical override. Lakehouse and Warehouse
 types must match.
 
-Every build adds the implicit binding from `Lakehouse/_weaver` to the configured
+Every build adds the implicit binding from `Warehouse/_weaver` to the configured
 Weaver Lakehouse. Catalogue publication is mandatory and registry certification
 is last. Every build treats the repository as authoritative: a document removed
 from it loses its catalogue claims and its physical object is pruned. The build

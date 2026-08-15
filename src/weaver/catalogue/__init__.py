@@ -8,18 +8,15 @@ covers them without a namespace column.
 
 from __future__ import annotations
 
+from .connection import CatalogueConnection, catalogue_connection
 from .render import (
     InstallationScope,
     Row,
     column_set,
-    identifier,
-    literal,
-    qualified_name,
     render_delete_obsolete,
     render_delete_scope,
     render_merge,
     sorted_rows,
-    typed_literal,
 )
 from .state import (
     Catalogue,
@@ -86,15 +83,13 @@ __all__ = [
     "SIGNATURE",
     "TABLE_DICTIONARY",
     "column_set",
-    "identifier",
-    "literal",
-    "qualified_name",
+    "CatalogueConnection",
+    "catalogue_connection",
     "render_delete_obsolete",
     "render_delete_scope",
     "render_merge",
     "sorted_rows",
     "table",
-    "typed_literal",
     "RegisteredDocument",
     "Catalogue",
     "Reconciliation",

@@ -24,7 +24,7 @@ from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
-    LakehouseBinding,
+    WarehouseBinding,
     effective_item_bindings,
     generate_item_build_bundle,
 )
@@ -66,7 +66,7 @@ def plan(repository, tmp_path_factory):
         store=FilesystemStore(),
         target_inventories=inventories,
         catalogue=FixtureCatalogue.from_registry_rows(),
-        control_lakehouse=LakehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE),
+        catalogue_binding=WarehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE),
     )
     return bundle.plan
 

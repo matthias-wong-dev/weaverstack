@@ -254,28 +254,16 @@ def _reported(
         else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
     )
     if log is not None:
-        log.write_plan(
-            {
-                "requested": [str(target) for target in requested],
-                "selection": selection,
-                "planned": [node.logical_id for node in nodes],
-                "started_at": started.isoformat(),
-            }
-        )
         for node in nodes:
-            # The mapping, never the node — a mapping has no diagnostics on it,
-            # so no discrepancy row can reach a durable record by accident.
-            log.write_step(node.kind.casefold(), node.to_mapping())
+            log.submit(node)
 
     report = ValidationRunReport(
         status=status,
         nodes=tuple(nodes),
-        task_log=None if log is None else log.root.value,
+        workflow_id=None if log is None else log.workflow_id,
         started_at=started.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
     )
-    if log is not None:
-        log.write_completion({"status": status, **report.totals()})
     if strict and status in (FAILED, INVALID):
         raise ValidationError(
             _failure_message(report),

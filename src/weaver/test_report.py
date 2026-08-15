@@ -110,7 +110,7 @@ class ValidationRunReport:
 
     status: str
     nodes: tuple[ValidationNodeReport, ...] = ()
-    task_log: str | None = None
+    workflow_id: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
 
@@ -169,7 +169,7 @@ class ValidationRunReport:
                 ValidationNodeReport.from_mapping(node)
                 for node in payload.get("nodes") or ()
             ),
-            task_log=payload.get("task_log"),
+            workflow_id=payload.get("workflow_id"),
             started_at=payload.get("started_at"),
             finished_at=payload.get("finished_at"),
         )
@@ -179,7 +179,7 @@ class ValidationRunReport:
             "status": self.status,
             "nodes": [node.to_mapping() for node in self.nodes],
             "totals": self.totals(),
-            "task_log": self.task_log,
+            "workflow_id": self.workflow_id,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }

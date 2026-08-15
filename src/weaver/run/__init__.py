@@ -26,6 +26,7 @@ Seven modules, and each is a step of that line rather than a fragment of one:
 from __future__ import annotations
 
 from .dispatch import can_refresh, dispatch_primitive
+from .evidence import RunLog, new_workflow_id, open_run_log
 from .graph import RunGraph, RunNode, graph_for
 from .result import (
     RunError,
@@ -36,7 +37,7 @@ from .result import (
     run_status,
 )
 from .runner import LOAD, TEST, Runner, RunRequest
-from .state import RunState, open_run_log, read_run_state
+from .state import RunState, read_run_state
 
 __all__ = [
     "LOAD",
@@ -54,6 +55,8 @@ __all__ = [
     "reports_outcome",
     "dispatch_primitive",
     "graph_for",
+    "RunLog",
+    "new_workflow_id",
     "open_run_log",
     "read_run_state",
     "run_status",

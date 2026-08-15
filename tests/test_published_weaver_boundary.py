@@ -57,7 +57,7 @@ def desktop(monkeypatch):
     livy = _Livy()
     session = ConsoleSession(
         workspace=Workspace(
-            workspace="Analytics", catalogue="Lakehouse/Weaver", environment="weaver"
+            workspace="Analytics", catalogue="Warehouse/Weaver", environment="weaver"
         ),
         livy=livy,
     )
@@ -138,7 +138,7 @@ def test_a_scope_with_no_livy_says_so_rather_than_asserting_nothing(monkeypatch)
     )
     session = ConsoleSession(
         workspace=Workspace(
-            workspace="Analytics", catalogue="Lakehouse/Weaver", environment="weaver"
+            workspace="Analytics", catalogue="Warehouse/Weaver", environment="weaver"
         )
     )
     scope = session.scope(None)

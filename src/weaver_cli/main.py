@@ -352,7 +352,7 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
 
     workspace = _fabric_cli_workspace(args)
     # The item name, not the typed configuration value: `run_notebook` resolves
-    # this as a Lakehouse display name, and `Lakehouse/Weaver` is not one.
+    # this as a Lakehouse display name, and `Warehouse/Weaver` is not one.
     lakehouse = args.lakehouse or (
         workspace.catalogue_item.name if workspace.catalogue else None
     )
@@ -461,32 +461,10 @@ def _add_workspace_args(
     parser.add_argument("--workspace-config", help="Workspace configuration file.")
     parser.add_argument("--environment", help="Fabric Environment name.")
     if include_catalogue:
-        parser.add_argument("--catalogue", help="Weaver Lakehouse name.")
-
-
-def _log_link(task_log) -> str:
-    """Where a person goes to read what a run wrote.
-
-    Called *Logs* rather than *evidence*: the folder is durable proof, and the
-    module that writes it can go on calling it that, but a line under a finished
-    command is telling someone where to look.
-
-    The stored address is OneLake DFS, which a browser answers with an
-    authentication error — a link that looks helpful and is not. This is the
-    portal spelling of the same folder. Best-effort: if anything about the
-    address is unexpected, the original is better than nothing.
-    """
-
-    if not task_log:
-        return ""
-    try:
-        from weaver.fabric.onelake import browsable_url
-        from weaver.store import Location
-
-        value = task_log if isinstance(task_log, Location) else Location(str(task_log))
-        return browsable_url(value)
-    except Exception:  # noqa: BLE001 - a link is never worth failing a report for
-        return str(task_log)
+        parser.add_argument(
+            "--catalogue",
+            help="Where the Weaver catalogue lives, for example Warehouse/Weaver.",
+        )
 
 
 def _prefer_desktop_credential() -> None:
@@ -758,8 +736,8 @@ def _load_once(args: argparse.Namespace) -> int:
         if getattr(exc, "report", None) is not None:
             _print_load(exc.report)
         print(f"error: {exc}", file=sys.stderr)
-        if getattr(exc, "task_log", None):
-            print(f"  Logs: {_log_link(exc.task_log)}", file=sys.stderr)
+        if getattr(exc, "workflow_id", None):
+            print(f"  Workflow: {exc.workflow_id}", file=sys.stderr)
         return 1
 
     if args.json:
@@ -866,7 +844,10 @@ def _print_load(report) -> None:
     print(f"{mode} {report.status}: {', '.join(report.requested)}\n")
     for node in report.nodes:
         counts = ""
-        if node.result is not None:
+        # A node that failed before it moved any rows carries a failure rather
+        # than a count, and asking one for rows read is how a rendered report
+        # turns a clear error into an AttributeError.
+        if node.result is not None and hasattr(node.result, "rows_read"):
             counts = (
                 f"  (read {node.result.rows_read}, "
                 f"+{node.result.rows_inserted} "
@@ -878,8 +859,8 @@ def _print_load(report) -> None:
         for message in node.messages:
             if message.severity != "info":
                 print(f"      {message.severity}: {message.message}")
-    if report.task_log:
-        print(f"\n  Logs: {_log_link(report.task_log)}")
+    if report.workflow_id:
+        print(f"\n  Workflow: {report.workflow_id}")
 
 
 def handle_test(args: argparse.Namespace) -> int:
@@ -968,8 +949,8 @@ def _print_test(report) -> None:
         f"\n  {totals['passed']} passed, {totals['failed']} failed, "
         f"{totals['invalid']} could not run"
     )
-    if report.task_log:
-        print(f"  Logs: {_log_link(report.task_log)}")
+    if report.workflow_id:
+        print(f"  Workflow: {report.workflow_id}")
 
     # Print requested diagnostic rows after the summary.
     for node in report.nodes:

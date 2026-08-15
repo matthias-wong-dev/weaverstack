@@ -33,14 +33,14 @@ def test_the_public_name_is_a_callable_rather_than_a_module():
 
 
 def test_a_named_workspace_is_enough(desktop_credential):
-    with weaver.session(workspace="Demo", catalogue="Lakehouse/Weaver") as opened:
+    with weaver.session(workspace="Demo", catalogue="Warehouse/Weaver") as opened:
         assert isinstance(opened, ConsoleSession)
         assert opened.workspace.workspace == "Demo"
-        assert opened.workspace.catalogue == "Lakehouse/Weaver"
+        assert opened.workspace.catalogue == "Warehouse/Weaver"
 
 
 def test_a_resolved_workspace_is_taken_as_it_is(desktop_credential):
-    workspace = Workspace(workspace="Demo", catalogue="Lakehouse/Weaver")
+    workspace = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
 
     with weaver.session(workspace=workspace) as opened:
         assert opened.workspace is workspace
@@ -64,25 +64,25 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused(
 def test_configuration_supplies_what_was_not_named(tmp_path, desktop_credential):
     config = tmp_path / "workspace.yml"
     config.write_text(
-        "workspace: Demo\ncatalogue: Lakehouse/Configured\nenvironment: weaver\n",
+        "workspace: Demo\ncatalogue: Warehouse/Configured\nenvironment: weaver\n",
         encoding="utf-8",
     )
 
     with weaver.session(workspace_config=config) as opened:
-        assert opened.workspace.catalogue == "Lakehouse/Configured"
+        assert opened.workspace.catalogue == "Warehouse/Configured"
         assert opened.workspace.environment == "weaver"
 
 
 def test_an_explicit_value_wins_over_the_configured_one(tmp_path, desktop_credential):
     config = tmp_path / "workspace.yml"
     config.write_text(
-        "workspace: Demo\ncatalogue: Lakehouse/Configured\n", encoding="utf-8"
+        "workspace: Demo\ncatalogue: Warehouse/Configured\n", encoding="utf-8"
     )
 
     with weaver.session(
-        workspace_config=config, catalogue="Lakehouse/Explicit"
+        workspace_config=config, catalogue="Warehouse/Explicit"
     ) as opened:
-        assert opened.workspace.catalogue == "Lakehouse/Explicit"
+        assert opened.workspace.catalogue == "Warehouse/Explicit"
 
 
 def test_naming_no_workspace_says_which_value_is_missing():
@@ -98,13 +98,13 @@ def test_opening_a_session_acquires_nothing(desktop_credential):
     the cost this exists to remove.
     """
 
-    with weaver.session(workspace="Demo", catalogue="Lakehouse/Weaver") as opened:
+    with weaver.session(workspace="Demo", catalogue="Warehouse/Weaver") as opened:
         assert opened.telemetry.counters.get("session.scopes", 0) == 0
         assert opened.telemetry.counters.get("resolve.item", 0) == 0
 
 
 def test_a_closed_session_says_so_rather_than_reopening(desktop_credential):
-    opened = weaver.session(workspace="Demo", catalogue="Lakehouse/Weaver")
+    opened = weaver.session(workspace="Demo", catalogue="Warehouse/Weaver")
     opened.close()
 
     assert opened.closed

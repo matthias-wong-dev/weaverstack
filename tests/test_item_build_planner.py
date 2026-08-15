@@ -126,8 +126,8 @@ def generate_item_build_bundle(repository, **kwargs):
     kwargs.setdefault("target_inventories", inventories)
     kwargs.setdefault("catalogue", Catalogue({}))
     kwargs.setdefault(
-        "control_lakehouse",
-        LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        "catalogue_binding",
+        WarehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     return _generate_item_build_bundle(repository, **kwargs)
 
@@ -781,7 +781,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -895,21 +895,21 @@ def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
             bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
             output=Location(str(tmp_path / "bundle")),
             store=FilesystemStore(),
-            control_lakehouse=None,
+            catalogue_binding=None,
         )
 
 
 def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     repository = _repository(_estate(tmp_path))
-    control = LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
+    control = WarehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
     bundle = generate_item_build_bundle(
         repository,
         bindings=ItemBindings(
-            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+            (ItemBinding(WeaverItemId.parse("Warehouse/_weaver"), control),)
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        control_lakehouse=control,
+        catalogue_binding=control,
     )
 
     physical = [

@@ -98,6 +98,20 @@ BOOLEAN = "boolean"
 TIMESTAMP = "timestamp"
 BIGINT = "bigint"
 
+#: How each logical type is spelled in the Warehouse the catalogue lives in.
+#: A string defaults to an identifier's width; a column holding prose or a list
+#: says so with :attr:`CatalogueColumn.sql_type`.
+WAREHOUSE_TYPES = {
+    STRING: "varchar(128)",
+    BOOLEAN: "bit",
+    TIMESTAMP: "datetime2(6)",
+    BIGINT: "bigint",
+}
+
+#: Wide enough for prose an author wrote, and for a comma-separated column set.
+PROSE_TYPE = "varchar(4000)"
+LIST_TYPE = "varchar(1000)"
+
 #: The signature column, on every table.
 SIGNATURE = "signature"
 
@@ -173,10 +187,16 @@ class CatalogueColumn:
     #: Outside the comparison because a column's name already determines it, and
     #: a mapping would make the column unhashable.
     vocabulary: Mapping[str, str] | None = field(default=None, compare=False)
+    #: The Warehouse type, where an identifier's width is not enough.
+    sql_type: str | None = None
 
     @property
     def public_name(self) -> str:
         return self.public or public_column_name(self.name)
+
+    @property
+    def warehouse_type(self) -> str:
+        return self.sql_type or WAREHOUSE_TYPES[self.type]
 
     def to_public(self, value: object) -> object:
         """One projected value as the ``_`` schema stores it."""
@@ -349,7 +369,11 @@ def _described(*, what: str) -> tuple[CatalogueColumn, ...]:
     """
 
     return (
-        CatalogueColumn("description", description=f"What this {what} is."),
+        CatalogueColumn(
+            "description",
+            sql_type=PROSE_TYPE,
+            description=f"What this {what} is.",
+        ),
         CatalogueColumn(
             "description_reference",
             description=(
@@ -362,7 +386,11 @@ def _described(*, what: str) -> tuple[CatalogueColumn, ...]:
 
 def _lineage() -> tuple[CatalogueColumn, ...]:
     return (
-        CatalogueColumn("lineage", description="Where this object's data comes from."),
+        CatalogueColumn(
+            "lineage",
+            sql_type=PROSE_TYPE,
+            description="Where this object's data comes from.",
+        ),
         CatalogueColumn(
             "lineage_reference",
             description="The $Schema.Object the lineage was copied from, if any.",
@@ -487,10 +515,12 @@ TABLE_DICTIONARY = CatalogueTable(
         *_lineage(),
         CatalogueColumn(
             "primary_key",
+            sql_type=LIST_TYPE,
             description="The primary key's columns, in declared order.",
         ),
         CatalogueColumn(
             "not_null_columns",
+            sql_type=LIST_TYPE,
             description="Columns declared not null, beyond the primary key.",
         ),
         CatalogueColumn(
@@ -499,6 +529,7 @@ TABLE_DICTIONARY = CatalogueTable(
         ),
         CatalogueColumn(
             "comparison_columns",
+            sql_type=LIST_TYPE,
             description="Columns whose change drives an upsert.",
         ),
         *_behaviour(),
@@ -521,6 +552,7 @@ FOLDER_DICTIONARY = CatalogueTable(
         *_lineage(),
         CatalogueColumn(
             "file_key",
+            sql_type=LIST_TYPE,
             description="The glob patterns Weaver manages, in declared order.",
         ),
         *_behaviour(),
@@ -585,6 +617,7 @@ KEY_DICTIONARY = CatalogueTable(
         CatalogueColumn(
             "column_set",
             not_null=True,
+            sql_type=LIST_TYPE,
             description="The key's columns, comma-separated in declared order.",
         ),
         _signature("the object's source file"),
@@ -628,6 +661,7 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
         CatalogueColumn(
             "foreign_column_set",
             not_null=True,
+            sql_type=LIST_TYPE,
             description="The foreign columns, comma-separated in declared order.",
         ),
         CatalogueColumn(
@@ -645,6 +679,7 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
         CatalogueColumn(
             "primary_column_set",
             not_null=True,
+            sql_type=LIST_TYPE,
             description="The primary columns, paired in order with the foreign ones.",
         ),
         _signature("the object's source file"),
@@ -677,6 +712,7 @@ TEST_DICTIONARY = CatalogueTable(
         *_described(what="validation"),
         CatalogueColumn(
             "primary_key",
+            sql_type=LIST_TYPE,
             description=(
                 "A Test's declared key, comma-separated in declared order. It "
                 "correlates the two sides of the comparison and does not change "
@@ -718,6 +754,7 @@ DEPENDENCY = CatalogueTable(
         CatalogueColumn(
             "dependency_reference",
             not_null=True,
+            sql_type=LIST_TYPE,
             description="The dependency exactly as the owning document wrote it.",
         ),
         CatalogueColumn(
@@ -825,6 +862,11 @@ class EvidenceTable:
     It carries no signature, is keyed on a surrogate rather than on installation
     scope, and is append-oriented — so it shares the public-name machinery with
     :class:`CatalogueTable` but none of its reconciliation invariants.
+
+    Weaver's audit trio is appended by the ordinary build, as it is to every
+    table Weaver creates. Only ``row_insert_datetime`` carries meaning for an
+    append-oriented table; the other two are inert here and are not written
+    twice for having a name.
     """
 
     name: str
@@ -837,7 +879,15 @@ class EvidenceTable:
 
     @property
     def column_names(self) -> tuple[str, ...]:
+        """The declared columns — those a caller supplies."""
+
         return tuple(column.name for column in self.columns)
+
+    @property
+    def physical_columns(self) -> tuple[str, ...]:
+        """Every column the built table has: declared, then the audit trio."""
+
+        return self.column_names + AUDIT_COLUMN_NAMES
 
     def column(self, name: str) -> CatalogueColumn:
         for column in self.columns:
@@ -846,11 +896,13 @@ class EvidenceTable:
         raise KeyError(f"{self.qualified} has no column {name!r}")
 
     def public_name_of(self, name: str) -> str:
+        if name in AUDIT_COLUMN_NAMES:
+            return public_column_name(name)
         return self.column(name).public_name
 
     @property
     def public_columns(self) -> tuple[str, ...]:
-        return tuple(column.public_name for column in self.columns)
+        return tuple(self.public_name_of(name) for name in self.physical_columns)
 
 
 LOG = EvidenceTable(
@@ -902,15 +954,15 @@ LOG = EvidenceTable(
             BIGINT,
             description="How long the work took, in milliseconds.",
         ),
-        CatalogueColumn("message", description="Concise human-readable information."),
         CatalogueColumn(
-            "details", description="Structured task-specific detail, as JSON."
+            "message",
+            sql_type=PROSE_TYPE,
+            description="Concise human-readable information.",
         ),
         CatalogueColumn(
-            AUDIT_INSERT_COLUMN,
-            TIMESTAMP,
-            not_null=True,
-            description="When the row was written.",
+            "details",
+            sql_type=PROSE_TYPE,
+            description="Structured task-specific detail, as JSON.",
         ),
     ),
 )

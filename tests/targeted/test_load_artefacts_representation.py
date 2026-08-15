@@ -165,7 +165,7 @@ def test_the_generated_folder_document_does_not_deploy_itself(estate):
 def test_the_builtin_catalogue_item_has_no_load_layer(estate):
     """Weaver's own control plane is not a user ETL package."""
 
-    assert item_load_artefacts(estate, item=item_id("Lakehouse/_weaver")) == ()
+    assert item_load_artefacts(estate, item=item_id("Warehouse/_weaver")) == ()
 
 
 def test_each_artefact_is_typed_as_what_it_physically_is(estate):

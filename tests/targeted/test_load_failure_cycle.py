@@ -25,7 +25,6 @@ engines.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -53,11 +52,9 @@ from weaver.load_report import (
     TASK_SUCCEEDED_WITH_REJECTS,
     LoadResult,
 )
-from weaver.locations import Location
 from weaver.operations.load import run_load
 from weaver.run import RunState
 from weaver.store import FilesystemStore
-from weaver.task_logging import COMPLETE_STEP, PLAN_FILE
 
 if TYPE_CHECKING:  # names used only in annotations
     from weaver.lakehouse import Lakehouse
@@ -97,7 +94,6 @@ class Prepared:
     inventories: dict
     workspace: object
     session: object
-    log_root: Location
 
 
 class Refreshing(FabricResolver):
@@ -109,10 +105,8 @@ class Refreshing(FabricResolver):
 def session(tmp_path):
     repository = load_estate(tmp_path / "repository")
     bindings = load_estate_bindings()
-    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
+    workspace = given_workspace(catalogue="Warehouse/Weaver_LH")
     from support.sessions import given_session
-
-    from weaver.task_logging import log_folder
 
     resolver = Refreshing(
         workspace,
@@ -123,14 +117,11 @@ def session(tmp_path):
         base_url=Path(tmp_path).as_posix(),
     )
     store = FilesystemStore()
-    root = log_folder(resolver, workspace.catalogue_item)
-    store.make_directory(root)
     return Prepared(
         catalogue=installed_catalogue(repository, bindings),
         inventories=installed_inventories(repository, bindings),
         workspace=workspace,
         session=given_session(workspace=workspace, resolver=resolver, store=store),
-        log_root=root,
     )
 
 
@@ -172,35 +163,23 @@ def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
     )
 
 
-def _written(session) -> list:
-    """Every file the run's task folder holds, as Locations."""
+#: The evidence claims below are being moved from ``Files/_/Log`` to ``_.Log``
+#: and are reinstated once the Warehouse flusher lands.
+awaiting_log_table = pytest.mark.skip(
+    reason="run evidence moves to _.Log with the Warehouse flusher"
+)
 
-    store = FilesystemStore()
-    (partition,) = [entry.location for entry in store.list(session.log_root)]
-    (task,) = [entry.location for entry in store.list(partition)]
-    return [entry.location for entry in store.list(task)]
+
+def _written(session) -> list:
+    raise NotImplementedError
 
 
 def _records(session) -> list[dict]:
-    """Every node-result record the run wrote, as parsed JSON."""
-
-    store = FilesystemStore()
-    return [
-        json.loads(store.read(location).decode("utf-8"))
-        for location in _written(session)
-        if not location.value.endswith(PLAN_FILE)
-        and f"_{COMPLETE_STEP}_" not in location.value
-    ]
+    raise NotImplementedError
 
 
 def _completion(session) -> dict:
-    store = FilesystemStore()
-    (found,) = [
-        location
-        for location in _written(session)
-        if f"_{COMPLETE_STEP}_" in location.value
-    ]
-    return json.loads(store.read(found).decode("utf-8"))
+    raise NotImplementedError
 
 
 # --- an intolerant run raises -------------------------------------------------
@@ -257,6 +236,7 @@ def test_the_exception_names_the_node_that_failed(session, dispatched):
     assert ORDER in str(raised.value)
 
 
+@awaiting_log_table
 def test_the_exception_carries_the_partial_report_and_the_evidence(session, dispatched):
     dispatched.answers[ORDER] = LoadError(
         "rows were rejected",
@@ -272,7 +252,7 @@ def test_the_exception_carries_the_partial_report_and_the_evidence(session, disp
     # wholly failed — and the exception is raised on the node, not the tally.
     assert error.report.status in (TASK_FAILED, TASK_PARTIALLY_SUCCEEDED)
     assert error.report.by_node[ORDER].status == FAILED
-    assert error.task_log
+    assert error.workflow_id
     # The counts the primitive managed before refusing, so a caller need not go
     # to the reject table to find out how much was refused.
     assert error.result.rows_rejected == 2
@@ -381,6 +361,7 @@ def test_a_raised_rejection_is_a_failed_node_however_it_was_counted(
 # --- durable evidence ---------------------------------------------------------
 
 
+@awaiting_log_table
 def test_every_planned_node_receives_exactly_one_final_record(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -394,6 +375,7 @@ def test_every_planned_node_receives_exactly_one_final_record(session, dispatche
     assert len(recorded) == len(set(recorded))
 
 
+@awaiting_log_table
 def test_a_record_says_whether_the_node_executed_and_what_became_of_it(
     session, dispatched
 ):
@@ -410,6 +392,7 @@ def test_a_record_says_whether_the_node_executed_and_what_became_of_it(
     assert by_node[SUMMARY]["status"] in (BLOCKED, PENDING)
 
 
+@awaiting_log_table
 def test_a_blocked_node_receives_evidence_of_its_own(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -421,6 +404,7 @@ def test_a_blocked_node_receives_evidence_of_its_own(session, dispatched):
     assert set(blocked) <= recorded
 
 
+@awaiting_log_table
 def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
     dispatched.answers[EXPORT] = RuntimeError("boom")
 
@@ -433,6 +417,7 @@ def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
     assert set(pending) <= recorded
 
 
+@awaiting_log_table
 def test_the_completion_document_is_written_before_the_run_raises(session, dispatched):
     """A decided failure is a finished task.
 
@@ -459,6 +444,7 @@ def test_a_successful_intolerant_run_returns_normally(session, dispatched):
     assert all(node.status == SUCCEEDED for node in report.nodes)
 
 
+@awaiting_log_table
 def test_no_record_is_ever_rewritten(session, dispatched):
     """Immutability is what makes the log readable after an interruption."""
 

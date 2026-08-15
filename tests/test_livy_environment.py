@@ -46,7 +46,7 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
         lambda ws, name, *, item_type, client: Item("env99", name, item_type, ws.id),
     )
     workspace = Workspace(
-        workspace="WS", catalogue="Lakehouse/Weaver", environment="Weaver"
+        workspace="WS", catalogue="Warehouse/Weaver", environment="Weaver"
     )
 
     session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
@@ -103,7 +103,7 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
 def test_a_workspace_without_an_environment_is_an_error():
     from weaver.errors import CommandError
 
-    workspace = Workspace(workspace="WS", catalogue="Lakehouse/Weaver")
+    workspace = Workspace(workspace="WS", catalogue="Warehouse/Weaver")
 
     with pytest.raises(CommandError, match="environment"):
         LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")

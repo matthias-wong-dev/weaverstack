@@ -474,7 +474,7 @@ weaver build \
     ./estate \
     --workspace MyWorkspace \
     --environment Weaver \
-    --catalogue Lakehouse/Weaver \
+    --catalogue Warehouse/Weaver \
     --bind Lakehouse/Raw
 ```
 

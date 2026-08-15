@@ -6,7 +6,7 @@ This document defines the authoritative central catalogue: its ownership,
 records, reconciliation, and certification behaviour.
 
 The catalogue scopes installations by `(item_type, item_name)`, projects each
-item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
+item's own `alias.yml`, and builds generated `Warehouse/_weaver` through the
 ordinary planner.
 
 For every successfully built object, the catalogue records the metadata declared
@@ -115,12 +115,12 @@ recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-Weaver composes `Lakehouse/_weaver` in memory from the authoritative table
+Weaver composes `Warehouse/_weaver` in memory from the authoritative table
 definitions and parses the generated schema and source files through the same
 static readers used for authored content. The ordinary item planner and installer
 build the result; authored source is unchanged.
 
-Every build implicitly binds `Lakehouse/_weaver` to the control Lakehouse.
+Every build implicitly binds `Warehouse/_weaver` to the control Lakehouse.
 Missing tables are classified as new and created before the same bundle reaches
 the catalogue tail. Certified unchanged tables emit no physical action, so their
 existing rows remain in place.

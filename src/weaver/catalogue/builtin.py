@@ -1,7 +1,8 @@
-"""Generate the built-in ``Lakehouse/_weaver`` catalogue declaration item.
+"""Generate the built-in ``Warehouse/_weaver`` catalogue declaration item.
 
 The item is composed into parsed repositories and built through ordinary planner
-and installer paths. Its definitions are rendered from catalogue table metadata.
+and installer paths. Its definitions are rendered from catalogue table metadata,
+in the public spelling the ``_`` schema publishes.
 """
 
 from __future__ import annotations
@@ -9,26 +10,21 @@ from __future__ import annotations
 import textwrap
 from dataclasses import replace
 
-from .tables import CATALOGUE_SCHEMA, CATALOGUE_TABLES, CatalogueColumn, CatalogueTable
+from ..declaration.model import WAREHOUSE, WeaverItemId
+from .tables import (
+    CATALOGUE_SCHEMA,
+    CATALOGUE_TABLES,
+    LOG,
+    CatalogueColumn,
+    CatalogueTable,
+)
 
 #: The reserved item Weaver generates and manages inside the declaration.
-ITEM_ROOT = "Lakehouse/_weaver"
+#: A Warehouse: the catalogue is reached over TDS, and nothing about reading or
+#: writing it needs a Spark session.
+BUILTIN_ITEM = WeaverItemId(WAREHOUSE, "_weaver")
+ITEM_ROOT = str(BUILTIN_ITEM)
 SCHEMA_PATH = f"{ITEM_ROOT}/schemas/{CATALOGUE_SCHEMA}.yml"
-
-#: The folder every top-level Weaver task writes its evidence beneath, and the
-#: document that declares it. ``_`` + ``__`` + ``Log`` spells ``___Log``, which
-#: the parser reads as ``_.Log`` — see
-#: :func:`weaver.declaration.source.python_id_parts`.
-LOG_FOLDER = "Log"
-LOG_FOLDER_ID = f"{CATALOGUE_SCHEMA}.{LOG_FOLDER}"
-LOG_PATH = f"{ITEM_ROOT}/Files/{CATALOGUE_SCHEMA}{'__'}{LOG_FOLDER}.py"
-
-#: Where the folder puts its files, relative to the Weaver Lakehouse's ``Files``
-#: area. Derived from the identity exactly as any Folder's location is, so the
-#: logger addresses the *declared* folder rather than a path it happens to know.
-LOG_ROOT = f"{CATALOGUE_SCHEMA}/{LOG_FOLDER}"
-
-_LOG_CLASS = f"{CATALOGUE_SCHEMA}{'__'}{LOG_FOLDER}"
 
 #: One sentence, the same on every table, saying where the rows come from. It is
 #: not boilerplate: "never loaded" is the fact that makes ``Static: true``
@@ -39,8 +35,14 @@ LINEAGE = (
     "load."
 )
 
+LOG_LINEAGE = (
+    "Appended by Weaver's own runs as each unit of work settles. Never "
+    "authored, never projected from a declaration, and never populated by a "
+    "load."
+)
+
 SCHEMA_DESCRIPTION = (
-    "Weaver's own control plane. These tables record what Weaver has built and "
+    "Weaver's own catalogue. These tables record what Weaver has built and "
     "what it certifies as installed; they are declared as ordinary Weaver document and built "
     "by Weaver itself, and are never authored or loaded by hand."
 )
@@ -81,7 +83,7 @@ def _folded(key: str, text: str, *, indent: int = 0) -> str:
 
 
 def render_schema_file() -> str:
-    """The ``_schemas/_.yml`` declaration for the catalogue schema."""
+    """The ``schemas/_.yml`` declaration for the catalogue schema."""
 
     return (
         f"Schema ID: {CATALOGUE_SCHEMA}\n"
@@ -93,29 +95,24 @@ def render_schema_file() -> str:
 def _body(table: CatalogueTable) -> str:
     """A query that declares the shape and returns no rows.
 
-    ``where 1 = 0`` with no ``FROM`` is valid Spark SQL and is the whole trick: the
-    executor resolves the query's schema to create the table, and resolving a
-    schema reads no rows. Build creates structure; this is the smallest possible
-    statement that describes one.
-
-    Terminated, like every other authored Spark SQL statement: what Weaver
-    generates has to satisfy the rule Weaver enforces, or the built-in item
-    would be the one repository nobody could have written by hand.
+    ``where 1 = 0`` with no ``FROM`` is valid T-SQL, and is what lets a build
+    create the table without reading anything: the engine resolves the query's
+    shape, and resolving a shape reads no rows.
     """
 
     def line(column: CatalogueColumn, first: bool) -> str:
         lead = "select" if first else "     ,"
-        return f"{lead} cast(null as {column.type}) as `{column.name}`"
+        return f"{lead} cast(null as {column.warehouse_type}) as [{column.public_name}]"
 
     lines = [line(column, index == 0) for index, column in enumerate(table.columns)]
-    return "\n".join(lines) + "\n where 1 = 0;\n"
+    return "\n".join(lines) + "\n where 1 = 0\n"
 
 
 def render_source(table: CatalogueTable) -> str:
     """The complete Weaver document source file for one catalogue table."""
 
     not_null = [
-        column.name
+        column.public_name
         for column in table.columns
         if column.not_null and column.name not in table.key
     ]
@@ -130,18 +127,21 @@ def render_source(table: CatalogueTable) -> str:
         # The key is declared as the primary key, so the catalogue's own tables
         # describe themselves: Weaver document makes key columns not null, and the projection
         # records the key in the catalogue like any other object's.
-        f"Primary key: {', '.join(table.key)}",
+        "Primary key: " + ", ".join(table.public_name_of(name) for name in table.key),
     ]
     if not_null:
         sections.append("Not null:\n" + "\n".join(f"  - {name}" for name in not_null))
     sections.append(
         "Schema:\n"
-        + "\n".join(f"  {column.name}: {column.type}" for column in table.columns)
+        + "\n".join(
+            f"  {column.public_name}: {column.warehouse_type}"
+            for column in table.columns
+        )
     )
     sections.append(
         "Column notes:\n"
         + "\n".join(
-            _folded(column.name, column.description, indent=2)
+            _folded(column.public_name, column.description, indent=2)
             for column in table.columns
         )
     )
@@ -150,54 +150,48 @@ def render_source(table: CatalogueTable) -> str:
     return f"/*\n{header}\n*/\n{_body(table)}"
 
 
-def render_log_file() -> str:
-    """The declaration for ``Files/_/Log`` — where task evidence is written.
+def render_log_source() -> str:
+    """The ``_.Log`` declaration — operational evidence, not installed state.
 
-    The folder is declared so normal build, inventory, and prune behaviour owns
-    its lifecycle. The logger resolves the folder rather than composing a path.
-
-    ``Static: true`` because nothing loads into it: a task writes its own
-    evidence beneath it, exactly as a Folder object's authored code writes files
-    into its destination. ``Incremental: false`` for the same reason the runtime
-    tree declares it — the folder itself accumulates nothing that Weaver claims
-    file by file.
-
-    ``File key`` claims everything beneath, because everything beneath *is*
-    Weaver's — task evidence and nothing else. It is an accurate statement of
-    ownership rather than a licence to delete: nothing loads this folder, and a
-    written task file is never rewritten.
+    Declared as an ordinary table so normal build, inventory and prune own its
+    lifecycle. Nothing reconciles its rows: they are appended by a run and never
+    projected from a declaration, which is what ``Static: true`` records.
     """
 
-    return f'''\
-"""
-Folder ID: {LOG_FOLDER_ID}
-
-Description: >-
-  Where every top-level Weaver task — wipe, mirror, build, load and test —
-  writes its immutable evidence. One folder per task, partitioned by the UTC
-  date the task started.
-
-Lineage: >-
-  Written by Weaver's own task logger as each top-level task runs. Never
-  authored, and never populated by a load.
-
-File key: "**/*"
-
-Incremental: false
-
-Static: true
-"""
-from weaver import Folder
-
-
-class {_LOG_CLASS}(Folder):
-    def read(self):
-        return self.staging_folder(), []
-'''
+    sections = [
+        f"Table ID: {LOG.qualified}",
+        _folded("Description", LOG.description),
+        _folded("Lineage", LOG_LINEAGE),
+        "Dependencies: []",
+        "Static: true",
+        "Prohibit rebuild: true",
+        f"Primary key: {LOG.public_name_of('log_sk')}",
+        "Not null:\n"
+        + "\n".join(
+            f"  - {column.public_name}"
+            for column in LOG.columns
+            # The key is already not null by being the key.
+            if column.not_null and column.name != "log_sk"
+        ),
+        "Schema:\n"
+        + "\n".join(
+            f"  {column.public_name}: {column.warehouse_type}" for column in LOG.columns
+        ),
+        "Column notes:\n"
+        + "\n".join(
+            _folded(column.public_name, column.description, indent=2)
+            for column in LOG.columns
+        ),
+    ]
+    header = "\n\n".join(sections)
+    return f"/*\n{header}\n*/\n{_body(LOG)}"
 
 
 def render_item_sources() -> dict[str, str]:
-    sources = {SCHEMA_PATH: render_schema_file(), LOG_PATH: render_log_file()}
+    sources = {
+        SCHEMA_PATH: render_schema_file(),
+        f"{ITEM_ROOT}/{LOG.qualified}.sql": render_log_source(),
+    }
     for table in CATALOGUE_TABLES:
         documented = replace(
             table,
@@ -205,7 +199,7 @@ def render_item_sources() -> dict[str, str]:
                 replace(
                     column,
                     description=column.description
-                    or f"The catalogue value for {column.name.replace('_', ' ')}.",
+                    or f"The catalogue value for {column.public_name}.",
                 )
                 for column in table.columns
             ),

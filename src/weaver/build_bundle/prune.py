@@ -17,7 +17,7 @@ from ..errors import BuildError
 from ..etl import LOAD_ROOT
 from ..store import Store
 from ..targets import ItemRef
-from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
+from ..workspaces import CLI_AREA
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
@@ -48,7 +48,7 @@ from .payloads import sha256_hex
 from .targets import BoundTarget
 
 #: Weaver-owned Files areas excluded from prune.
-_RESERVED_FILES_AREAS = frozenset({BUILD_BUNDLES_AREA, CLI_AREA})
+_RESERVED_FILES_AREAS = frozenset({CLI_AREA})
 
 #: Delta schemas excluded from prune because Weaver does not manage them.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})

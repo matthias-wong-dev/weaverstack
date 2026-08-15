@@ -297,7 +297,7 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
 
     return Workspace(
         workspace=fabric_workspace_item.name,
-        catalogue=f"Lakehouse/{fabric_catalogue.name}",
+        catalogue=f"Warehouse/{fabric_catalogue.name}",
         environment=environment_name,
     )
 
@@ -676,7 +676,6 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
         ),
         lakehouse=ItemRef(disposable_warehouse.item.name),
         location=None,
-        destination=None,
     )
 
     def run(repository, *, inventory=None, rebuild=False, build=True):
@@ -996,7 +995,7 @@ def _fabric_build_context(
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
-            "    store=store, control_lakehouse=control,\n"
+            "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
@@ -1131,7 +1130,6 @@ def _fabric_build_context(
         seed_orphans=seed_orphans,
         run_schema_exists=schema_exists,
         run_python=run_python,
-        destination=destination,
         weaver_destination=weaver_destination,
     )
 
@@ -1323,7 +1321,7 @@ def _warehouse_build_env(
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output=resolver.build_bundle({bundle_name!r}),\n"
-            "    store=store, control_lakehouse=control,\n"
+            "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "

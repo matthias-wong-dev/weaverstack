@@ -2,19 +2,16 @@
 
 Every operation answers the same question before it does anything, and answers
 it from names: an explicit argument, then workspace configuration, then the
-Session's own context, then — inside a Fabric notebook — what the notebook is
-attached to. Shared, because four operations answering it four ways is four
-places for it to drift.
+Session's own context, then the workspace a Fabric notebook is running in.
+Shared, because four operations answering it four ways is four places for it to
+drift.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Mapping
 
 from ..errors import CommandError
-from ..sessions.host import active_spark as _active_spark
-from ..sessions.host import inside_fabric_session as _inside_fabric_session
 from ..workspaces import Workspace
 
 
@@ -28,7 +25,7 @@ def _operation_workspace(
         an explicit workspace name
           → a workspace configuration file
             → the Session's own workspace
-              → what the notebook is attached to
+              → the workspace the notebook runs in
                 → a configuration error naming what is missing
 
     The Session's default context lets a command inside ``weaver session`` omit
@@ -91,26 +88,23 @@ def operation_workspace(
 ) -> Workspace:
     """The workspace one operation means, resolved once for all of them.
 
-    Every operation asks the same question and used to answer it in its own
-    words. What differs between them is only whether the control Lakehouse is
+    What differs between operations is only whether the catalogue is
     required: a wipe can empty a target without one, everything else reads or
     writes the catalogue.
     """
 
-    resolved = _with_inferred_control_lakehouse(
-        _operation_workspace(
-            workspace=workspace,
-            workspace_config=workspace_config,
-            catalogue=catalogue,
-            environment=environment,
-            session=session,
-        )
+    resolved = _operation_workspace(
+        workspace=workspace,
+        workspace_config=workspace_config,
+        catalogue=catalogue,
+        environment=environment,
+        session=session,
     )
     if needs_catalogue and not resolved.catalogue:
         raise CommandError(
-            f"{operation} needs a Weaver control Lakehouse: pass catalogue=, "
-            "give one in workspace configuration, or run inside a Fabric "
-            "notebook with one attached as the default Lakehouse"
+            f"{operation} needs a Weaver catalogue: pass "
+            "catalogue='Warehouse/Weaver', or give one in workspace "
+            "configuration"
         )
     return resolved
 
@@ -126,9 +120,7 @@ def current_workspace() -> Workspace:
     guessing.
     """
 
-    return _with_inferred_control_lakehouse(
-        _operation_workspace(workspace=None, workspace_config=None)
-    )
+    return _operation_workspace(workspace=None, workspace_config=None)
 
 
 def _current_fabric_workspace() -> Workspace:
@@ -147,20 +139,3 @@ def _current_fabric_workspace() -> Workspace:
     if not name:
         raise CommandError("Fabric runtime context carries no current workspace")
     return Workspace(workspace=str(name))
-
-
-def _with_inferred_control_lakehouse(workspace: Workspace) -> Workspace:
-    if workspace.catalogue:
-        return workspace
-    if not _inside_fabric_session(workspace):
-        return workspace
-    from ..lakehouse import default_lakehouse
-
-    spark = _active_spark()
-    # Typed on the way in, because what a notebook's attachment gives is a
-    # bare name and the field is a typed one.
-    from ..workspaces import CATALOGUE_KIND
-
-    return replace(
-        workspace, catalogue=f"{CATALOGUE_KIND}/{default_lakehouse(spark).name}"
-    )

@@ -19,13 +19,11 @@ from ..declaration.model import (
     WeaverItemId,
 )
 from ..errors import BuildError
-from ..spark.catalogue import is_absent
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
     BUILD_DATETIME,
-    CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     INSTALLATION,
     OBJECT_ROLES,
@@ -460,16 +458,12 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     missing: set[str] = set()
     incompatible: list[str] = []
     for table in CATALOGUE_TABLES:
-        name = catalogue.qualify(CATALOGUE_SCHEMA, table.name)
-        try:
-            columns = catalogue.columns_of(name)
-        except Exception as exc:
-            if is_absent(exc):
-                missing.add(table.name)
-                continue
-            raise
+        columns = catalogue.columns_of(table)
+        if columns is None:
+            missing.add(table.name)
+            continue
         present.add(table.name)
-        folded = {column.casefold() for column in columns}
+        folded = set(columns)
         # Published columns are required too, and deliberately: the merge writes
         # one on every insert, so a catalogue without it can be *read* but not
         # *written*. Exempting it here would let planning succeed and push the
@@ -478,11 +472,17 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
         # catalogue's shape. The reader's null tolerance answers a different
         # question — a column that exists but predates some rows — and both hold
         # at once: require the column, tolerate the value.
+        # Compared in the public spelling, because that is what the Warehouse
+        # holds; the internal keys never reach a physical schema.
         required = {
-            name.casefold()
+            table.public_name_of(name).casefold(): table.public_name_of(name)
             for name in table.column_names + table.published_column_names
         }
-        absent_columns = sorted(required - folded)
+        absent_columns = sorted(
+            public
+            for folded_name, public in required.items()
+            if folded_name not in folded
+        )
         if absent_columns:
             incompatible.append(f"{table.name}.{absent_columns[0]}")
     if incompatible:

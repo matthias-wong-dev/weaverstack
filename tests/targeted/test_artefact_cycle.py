@@ -66,7 +66,10 @@ from factories import (
 )
 from support.workspaces import WORKSPACE
 
-from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
+from weaver.build_bundle import (
+    WarehouseBinding,
+    generate_item_build_bundle,
+)
 from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
@@ -153,7 +156,7 @@ def build(repository, tmp_path):
         },
         # Production, not a fixture: the desired catalogue the build itself uses.
         catalogue=Catalogue.from_repository(repository),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -288,7 +291,7 @@ def converged(repository, tmp_path, *, inventories, catalogue):
         target_inventories=inventories,
         catalogue=reconciled.catalogue,
         stale_claims=reconciled.stale_claims,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )

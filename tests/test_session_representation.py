@@ -34,7 +34,7 @@ def _other(name="B_Workspace") -> Workspace:
 
 
 def _fabric(name="A_Workspace") -> Workspace:
-    return Workspace(workspace=name, catalogue="Lakehouse/Weaver", environment="weaver")
+    return Workspace(workspace=name, catalogue="Warehouse/Weaver", environment="weaver")
 
 
 # --- identity ---------------------------------------------------------------
@@ -103,7 +103,7 @@ def test_context_identity_ignores_which_targets_were_declared():
     plain = _fabric()
     with_targets = Workspace(
         workspace="A_Workspace",
-        catalogue="Lakehouse/Weaver",
+        catalogue="Warehouse/Weaver",
         environment="weaver",
         lakehouses={
             "Sales": TargetDeclaration(item=WeaverItemId.parse("Lakehouse/Sales")),
@@ -117,7 +117,7 @@ def test_context_identity_ignores_which_targets_were_declared():
 
 def test_a_different_control_lakehouse_is_a_different_context():
     other = Workspace(
-        workspace="A_Workspace", catalogue="Lakehouse/Other", environment="weaver"
+        workspace="A_Workspace", catalogue="Warehouse/Other", environment="weaver"
     )
 
     assert workspace_context(_fabric()) != workspace_context(other)

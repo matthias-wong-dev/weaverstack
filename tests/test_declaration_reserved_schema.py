@@ -14,7 +14,7 @@ for that, and both were over-broad rather than load-bearing:
 statement about *ownership* rather than a return of the naming rule: it holds the
 runtime tree a load is deployed into and the schema generated load procedures
 live in, both of which Weaver generates and prunes. The package-owned
-``Lakehouse/_weaver`` still declares its catalogue there, because it is the item
+``Warehouse/_weaver`` still declares its catalogue there, because it is the item
 that owns it. Any other underscore schema is authored freely, which is what these
 tests check.
 

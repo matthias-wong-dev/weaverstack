@@ -32,7 +32,7 @@ from ..declaration.repository import WeaverRepository
 from ..locations import Location
 from ..store import Store
 from .bundle import BuildBundle
-from .targets import ItemBindings, LakehouseBinding
+from .targets import ItemBindings, WarehouseBinding
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class Builder:
     repository: WeaverRepository
     state: Any
     bindings: ItemBindings
-    control_lakehouse: LakehouseBinding
+    catalogue_binding: WarehouseBinding
     source_store: Store
 
     def build(self, *, output: Location | None = None) -> BuildBundle:
@@ -59,7 +59,7 @@ class Builder:
         from .workflow import validate_build_request
 
         validate_build_request(
-            self.repository, self.bindings, control_lakehouse=self.control_lakehouse
+            self.repository, self.bindings, catalogue_binding=self.catalogue_binding
         )
         reconciliation = reconcile_catalogue_state(
             self.state.catalogue, inventories=self.state.target_inventories
@@ -74,7 +74,7 @@ class Builder:
             target_inventories=self.state.target_inventories,
             catalogue=reconciliation.catalogue,
             stale_claims=reconciliation.stale_claims,
-            control_lakehouse=self.control_lakehouse,
+            catalogue_binding=self.catalogue_binding,
         )
 
     def build_in_temporary(self, prefix: str = "weaver-build-"):

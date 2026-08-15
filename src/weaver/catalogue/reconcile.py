@@ -117,9 +117,7 @@ class CatalogueReconciliation:
         )
 
 
-def reconcile(
-    projection: CatalogueProjection, *, destination
-) -> CatalogueReconciliation:
+def reconcile(projection: CatalogueProjection) -> CatalogueReconciliation:
     """Authoritative scoped replacement of one installation, from its projection.
 
     Not the build path: a build publishes a difference (:func:`publish`), so an
@@ -136,15 +134,13 @@ def reconcile(
     return CatalogueReconciliation(
         scope=scope,
         dictionaries=tuple(
-            _for_table(table, projection.for_table(table), scope, destination)
+            _for_table(table, projection.for_table(table), scope)
             for table in DICTIONARY_TABLES
         ),
         installation=_for_table(
-            INSTALLATION, projection.for_table(INSTALLATION), scope, destination
+            INSTALLATION, projection.for_table(INSTALLATION), scope
         ),
-        registry=_for_table(
-            REGISTRY, projection.for_table(REGISTRY), scope, destination
-        ),
+        registry=_for_table(REGISTRY, projection.for_table(REGISTRY), scope),
     )
 
 
@@ -152,14 +148,11 @@ def _for_table(
     table: CatalogueTable,
     rows: Sequence[Row],
     scope: InstallationScope,
-    destination,
 ) -> TableReconciliation:
     return TableReconciliation(
         table=table,
-        delete=render_delete_obsolete(
-            table, rows, scope=scope, destination=destination
-        ),
-        merge=render_merge(table, rows, scope=scope, destination=destination),
+        delete=render_delete_obsolete(table, rows, scope=scope),
+        merge=render_merge(table, rows, scope=scope),
     )
 
 
@@ -224,7 +217,7 @@ class CataloguePublication:
         return not self.statements
 
 
-def publish(current, desired, *, destination) -> CataloguePublication:
+def publish(current, desired) -> CataloguePublication:
     """The statements that move ``current`` to ``desired``, table by table.
 
     Read it as *persisted* → *certified*. Only the items ``desired`` names are
@@ -234,23 +227,15 @@ def publish(current, desired, *, destination) -> CataloguePublication:
 
     return CataloguePublication(
         dictionaries=tuple(
-            _publish_table(
-                table, current=current, desired=desired, destination=destination
-            )
+            _publish_table(table, current=current, desired=desired)
             for table in DICTIONARY_TABLES
         ),
-        installation=_publish_table(
-            INSTALLATION, current=current, desired=desired, destination=destination
-        ),
-        registry=_publish_table(
-            REGISTRY, current=current, desired=desired, destination=destination
-        ),
+        installation=_publish_table(INSTALLATION, current=current, desired=desired),
+        registry=_publish_table(REGISTRY, current=current, desired=desired),
     )
 
 
-def _publish_table(
-    table: CatalogueTable, *, current, desired, destination
-) -> TablePublication:
+def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublication:
     """One table's delete and merge, across every scope that needs them.
 
     The two take different row sets, and conflating them loses data. The merge
@@ -285,14 +270,11 @@ def _publish_table(
             table,
             keep,
             scope=InstallationScopes(tuple(delete_scopes)),
-            destination=destination,
         )
 
     merge = None
     if changed:
-        merge = render_merge(
-            table, changed, scope=_scopes_of(changed), destination=destination
-        )
+        merge = render_merge(table, changed, scope=_scopes_of(changed))
 
     return TablePublication(table=table, delete=delete, merge=merge)
 
@@ -365,7 +347,7 @@ def summarise(
 
 
 def prune_installation(
-    scope: InstallationScope | InstallationScopes, *, destination
+    scope: InstallationScope | InstallationScopes,
 ) -> tuple[str, ...]:
     """Remove whole installations, in dependency-safe order.
 
@@ -385,7 +367,4 @@ def prune_installation(
     # installation root last. Delta does not enforce foreign keys, so this is
     # the explicit ordered equivalent of ON DELETE CASCADE.
     ordered = (REGISTRY, *reversed(DICTIONARY_TABLES), INSTALLATION)
-    return tuple(
-        render_delete_scope(table, scope=scope, destination=destination)
-        for table in ordered
-    )
+    return tuple(render_delete_scope(table, scope=scope) for table in ordered)

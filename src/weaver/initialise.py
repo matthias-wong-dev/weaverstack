@@ -122,7 +122,7 @@ def initialise_catalogue(
 
     A compatibility wrapper and nothing more. It owns no catalogue DDL, no
     catalogue publication and no control-plane preparation: it selects no
-    authored item, and the built-in ``Lakehouse/_weaver`` that every build
+    authored item, and the built-in ``Warehouse/_weaver`` that every build
     injects is therefore the whole of what it builds.
 
     Ordinary builds do not call this. They inject the same item and bind it the
@@ -139,7 +139,7 @@ def initialise_catalogue(
     bindings = ItemBindings(
         (
             ItemBinding(
-                WeaverItemId.parse("Lakehouse/_weaver"),
+                WeaverItemId.parse("Warehouse/_weaver"),
                 control,
             ),
         )
@@ -164,12 +164,12 @@ def initialise_catalogue(
                 bindings=bindings,
                 session=opened,
                 workspace=workspace,
-                control_lakehouse=control,
+                catalogue_binding=control,
                 output=output,
             )
 
     return InitialiseResult(
-        item="Lakehouse/_weaver",
+        item="Warehouse/_weaver",
         catalogue=catalogue.name,
         plan=result.plan,
         report=result.report,

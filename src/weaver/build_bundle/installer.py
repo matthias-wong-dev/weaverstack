@@ -331,7 +331,7 @@ def _run_sequence(
     # The sequence is the unit worth naming, and it already carries the words:
     # the planner wrote "publish catalogue dictionaries and installations" when
     # it built these, and nothing was showing it. A batch apiece described its
-    # executors instead — "Lakehouse/Weaver: views" for what is plainly the
+    # executors instead — "Warehouse/Weaver: views" for what is plainly the
     # catalogue being updated — which is the mechanism dressed up as an answer.
     # The target belongs on the line, not in the detail. "Build dependency
     # layer" appears once per layer, so four identical lines with four different

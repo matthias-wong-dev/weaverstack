@@ -13,6 +13,7 @@ from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
+    WarehouseBinding,
     determine_impact,
     generate_item_build_bundle,
 )
@@ -293,7 +294,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         store=store,
         target_inventories=_raw_inventory(repository),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -402,7 +403,7 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
             repository, alias_installed=alias_installed
         ),
         catalogue=Catalogue(rows),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -705,7 +706,7 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
         store=store,
         target_inventories=_raw_inventory(repository),
         catalogue=_catalogue(repository, "Lakehouse/Raw"),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -744,7 +745,7 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         catalogue=_catalogue(
             repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
         ),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -811,7 +812,7 @@ select 1 as Id
         store=store,
         target_inventories=_raw_inventory(installed),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -861,7 +862,7 @@ def test_registered_document_removed_from_repository_is_uncertified_before_prune
         store=store,
         target_inventories=inventories,
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )

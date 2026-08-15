@@ -216,7 +216,7 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
     store = FilesystemStore()
     location = Location(str(tmp_path / "refresh-bundle"))
     bundle = write_bundle(location, plan=plan, payloads={}, store=store)
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
 
     class WithoutRefresh:
         """A resolver that resolves, and cannot refresh an endpoint."""
@@ -285,7 +285,7 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     bundle = write_bundle(
         Location(str(tmp_path / "refresh-bundle")), plan=plan, payloads={}, store=store
     )
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
 
     installer = given_installer(
         workspace=workspace, store=store, resolver=given_resolver(workspace=workspace)

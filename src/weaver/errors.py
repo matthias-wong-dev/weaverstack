@@ -40,7 +40,7 @@ class LoadError(WeaverError):
     ``report``
         the run as far as it got, when orchestration raised: which nodes
         succeeded, failed, or never started.
-    ``task_log``
+    ``workflow_id``
         where that run's durable evidence was written.
     """
 
@@ -50,12 +50,12 @@ class LoadError(WeaverError):
         *,
         result: object | None = None,
         report: object | None = None,
-        task_log: str | None = None,
+        workflow_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.result = result
         self.report = report
-        self.task_log = task_log
+        self.workflow_id = workflow_id
 
 
 class ValidationError(WeaverError):

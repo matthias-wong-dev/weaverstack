@@ -30,7 +30,7 @@ from support.sessions import given_session
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
-    LakehouseBinding,
+    WarehouseBinding,
     build_item_repository,
     effective_item_bindings,
 )
@@ -41,7 +41,7 @@ from weaver.declaration.model import WeaverItemId
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
-BUILTIN = WeaverItemId.parse("Lakehouse/_weaver")
+BUILTIN = WeaverItemId.parse("Warehouse/_weaver")
 
 
 class RecordingExecutor:
@@ -65,7 +65,7 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     store = FilesystemStore()
     resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
@@ -119,8 +119,8 @@ def _build(estate):
         session=estate["session"],
         executors=estate["executors"],
         source_store=estate["store"],
-        control_lakehouse=LakehouseBinding(
-            lakehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
+        catalogue_binding=WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
         ),
     )
     return bindings, result
@@ -135,7 +135,7 @@ def test_the_repository_carries_the_builtin_item_without_it_being_authored(estat
     assert BUILTIN in identities
 
 
-def test_the_builtin_item_is_bound_to_the_control_lakehouse_automatically():
+def test_the_builtin_item_is_bound_to_the_catalogue_warehouse_automatically():
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
         control_item=ItemRef("Weaver"),
@@ -143,8 +143,8 @@ def test_the_builtin_item_is_bound_to_the_control_lakehouse_automatically():
     )
 
     binding = bindings.by_item[BUILTIN]
-    assert isinstance(binding.target, LakehouseBinding)
-    assert binding.target.lakehouse.name == "Weaver"
+    assert isinstance(binding.target, WarehouseBinding)
+    assert binding.target.warehouse.name == "Weaver"
 
 
 # --- and the ordinary planner creates the catalogue from nothing --------------

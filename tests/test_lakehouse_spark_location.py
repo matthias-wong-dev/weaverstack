@@ -25,7 +25,7 @@ from weaver.targets import ItemRef
 @pytest.fixture
 def resolver(tmp_path):
     return given_resolver(
-        workspace=given_workspace(catalogue="Lakehouse/Weaver"),
+        workspace=given_workspace(catalogue="Warehouse/Weaver"),
         lakehouses=("Weaver", "Lakehouse_A", "Lakehouse_B", "Sales_LH"),
     )
 
@@ -155,7 +155,7 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
 
     from weaver.build_bundle.targets import BoundTarget
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     resolver = given_resolver(
         workspace=workspace,
         lakehouses=("Weaver", "Lakehouse_A", "Lakehouse_B", "Sales_LH"),
@@ -181,7 +181,7 @@ def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
 
     from weaver.build_bundle.targets import BoundTarget
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     resolver = given_resolver(
         workspace=workspace,
         lakehouses=("Weaver", "Lakehouse_A", "Lakehouse_B", "Sales_LH"),

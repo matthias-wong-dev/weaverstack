@@ -26,7 +26,7 @@ FIXTURE = Location(str(Path(__file__).parent / "fixtures" / "estate-item"))
 
 #: Weaver generates this item into every declaration. It is covered by its own
 #: tests; here it would only add noise to assertions about authored content.
-BUILTIN = "Lakehouse/_weaver"
+BUILTIN = "Warehouse/_weaver"
 
 
 @pytest.fixture(scope="module")

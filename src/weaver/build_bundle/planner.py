@@ -63,7 +63,7 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
-from .targets import WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
+from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
 
 
 def generate_item_build_bundle(
@@ -75,11 +75,11 @@ def generate_item_build_bundle(
     target_inventories: Mapping[WeaverItemId, TargetInventory] | None = None,
     catalogue: Catalogue,
     stale_claims: tuple = (),
-    control_lakehouse: LakehouseBinding,
+    catalogue_binding: WarehouseBinding,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
-    if control_lakehouse is None:
+    if catalogue_binding is None:
         raise BuildError("every build needs an explicit control-plane Lakehouse")
     by_item = bindings.by_item
     if not by_item:
@@ -146,10 +146,9 @@ def generate_item_build_bundle(
     selected_for_build = set(selection.selected_for_build)
     removed = set(registered) - selected_ids
 
-    control_target = _control_target(control_lakehouse, targets)
-    control_destination = control_target.spark_target
-    if all(target.id != control_target.id for target in targets):
-        targets = targets + (control_target,)
+    catalogue_target = _catalogue_target(catalogue_binding, targets)
+    if all(target.id != catalogue_target.id for target in targets):
+        targets = targets + (catalogue_target,)
 
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
@@ -166,8 +165,7 @@ def generate_item_build_bundle(
     catalogue_before = render_catalogue_before_build(
         catalogue,
         removed | selected_for_drop,
-        control_target=control_target,
-        control_destination=control_destination,
+        catalogue_target=catalogue_target,
         stale_claims=stale_claims,
     )
     if catalogue_before is not None:
@@ -209,8 +207,7 @@ def generate_item_build_bundle(
             repository,
             selected_ids - uncertified,
             target_by_item,
-            control_target=control_target,
-            control_destination=control_destination,
+            catalogue_target=catalogue_target,
             # The catalogue as the claim deletions above will leave it, not as
             # it was read — see `without_claims`.
             current=catalogue_after_deletions,
@@ -449,7 +446,7 @@ def plan_item_build(
     )
 
 
-def _control_target(binding: LakehouseBinding, targets):
+def _catalogue_target(binding: WarehouseBinding, targets):
     physical = binding.to_bound_target()
     for target in targets:
         if target.kind == physical.kind and target.item_id == physical.item_id:

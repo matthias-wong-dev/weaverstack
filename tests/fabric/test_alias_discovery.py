@@ -59,7 +59,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         repository=repository,
         bindings=item_bindings((PRODUCER, producer.name), (CONSUMER, consumer.name)),
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
         name="aliasdiscovery",
     )

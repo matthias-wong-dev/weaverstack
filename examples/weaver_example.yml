@@ -1,7 +1,7 @@
 # One file describes one Workspace. Fabric is the only workspace there is.
 workspace: Weaver Example
 environment: weaver
-catalogue: Lakehouse/Weaver
+catalogue: Warehouse/Weaver
 
 execution:
   parallel_workers: 4

@@ -97,7 +97,7 @@ def session(tmp_path):
     bindings = load_estate_bindings()
     from support.sessions import given_session
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver_LH")
+    workspace = given_workspace(catalogue="Warehouse/Weaver_LH")
 
     class Refuses:
         """Any write here is a dry run that wrote something."""
@@ -202,16 +202,16 @@ def test_load_dry_run_emits_the_normal_run_report_shape(session):
     assert report.requested == ("Lakehouse/Raw_LH", "Warehouse/Reporting_WH")
     assert report.started_at and report.finished_at
     # The shape a real run returns, minus the two things only a real run has.
-    assert report.task_id is None
-    assert report.task_log is None
+    assert report.workflow_id is None
+    assert report.workflow_id is None
     assert set(report.to_mapping()) == {
         "requested",
         "status",
         "dry_run",
         "fault_tolerant",
         "workspace",
-        "task_id",
-        "task_log",
+        "workflow_id",
+        "workflow_id",
         "started_at",
         "finished_at",
         "order",
@@ -262,8 +262,8 @@ def test_load_dry_run_writes_no_task_log(session):
 
     report = dry_run(session)
 
-    assert report.task_log is None
-    assert report.task_log is None
+    assert report.workflow_id is None
+    assert report.workflow_id is None
 
 
 def test_load_dry_run_creates_no_task_log_folder(session, tmp_path):

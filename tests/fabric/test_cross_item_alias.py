@@ -107,7 +107,7 @@ def generate(
         store=store,
         target_inventories=inventories,
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=LakehouseBinding(
             lakehouse=workspace.catalogue_item,
             workspace_name=workspace.workspace,
         ),
@@ -218,7 +218,7 @@ def alias_estate(
         repository=repository,
         bindings=bindings,
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
         name="aliasaction",
     )
@@ -468,7 +468,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
             (WAREHOUSE_CONSUMER, warehouse.item.name),
         ),
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
         name="whalias",
         sql=warehouse.executor,

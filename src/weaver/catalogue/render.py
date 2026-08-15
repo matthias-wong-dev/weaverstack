@@ -1,7 +1,12 @@
-"""Render catalogue projections as deterministic SQL statements.
+"""Render catalogue projections as deterministic T-SQL statements.
 
-Publication timestamps are supplied at installation time and are excluded from
-projection comparison.
+The catalogue is a set of Warehouse tables under ``_``, so every statement here
+is T-SQL and reaches the Warehouse over TDS. Publication timestamps are supplied
+at installation time and are excluded from projection comparison.
+
+Layers above hold plain Python values under internal snake-case keys. The
+translation into the public column names and stored vocabularies the ``_`` schema
+publishes happens here and nowhere else.
 """
 
 from __future__ import annotations
@@ -16,18 +21,20 @@ from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,
     AUDIT_UPDATE_COLUMN,
-    BOOLEAN,
-    CATALOGUE_SCHEMA,
     ITEM_SCOPE_COLUMNS,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
-    TIMESTAMP,
     CatalogueTable,
+    public_column_name,
 )
+from .tsql import TIMESTAMP_TYPE, identifier, literal, qualified_name, typed_literal
 
 #: A row as projected: column name to value. Values are ``str``, ``bool`` or
 #: ``None`` — nothing needing a renderer of its own.
 Row = Mapping[str, object]
+
+#: What T-SQL spells "now".
+NOW = "SYSDATETIME()"
 
 
 @dataclass(frozen=True)
@@ -59,7 +66,7 @@ class InstallationScope:
     def predicate_for(self, qualifier: str = "") -> str:
         prefix = f"{qualifier}." if qualifier else ""
         return " AND ".join(
-            f"{prefix}{identifier(column)} = {literal(value)}"
+            f"{prefix}{identifier(public_column_name(column))} = {literal(value)}"
             for column, value in self.values.items()
         )
 
@@ -143,59 +150,6 @@ class InstallationScopes:
         return ", ".join(str(scope) for scope in self.scopes)
 
 
-def identifier(name: str) -> str:
-    """A back-tick quoted Spark identifier, safe for spaces and keywords."""
-
-    return "`" + name.replace("`", "``") + "`"
-
-
-def qualified_name(table: CatalogueTable, destination) -> str:
-    """How a rendered statement names one catalogue table.
-
-    Not ``_.Registry``: the catalogue is in the Weaver Lakehouse while a build's
-    other statements are aimed at a destination, so a name resolved through the
-    session's current catalogue would record the build wherever the session
-    happened to point. The Weaver Lakehouse's own destination names it here, so
-    the statement carries the address it runs against.
-    """
-
-    return destination.qualify(CATALOGUE_SCHEMA, table.name)
-
-
-def literal(value: object) -> str:
-    """One value as a Spark SQL literal.
-
-    Spark's parser treats a backslash as an escape, so both it and the quote are
-    escaped. Booleans and nulls render as themselves rather than as strings.
-    """
-
-    if value is None:
-        return "NULL"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
-        return f"'{escaped}'"
-    if isinstance(value, (int, float)):
-        return repr(value)
-    raise TypeError(
-        f"catalogue values are strings, booleans or null, not {type(value).__name__}"
-    )
-
-
-def typed_literal(value: object, column_type: str) -> str:
-    """One value, cast to its declared type.
-
-    A ``MERGE`` source is a ``SELECT`` union whose schema comes from its first
-    branch, so an uncast null would type a column by accident and a later branch
-    could fail to match the target.
-    """
-
-    if column_type == BOOLEAN and value is not None and not isinstance(value, bool):
-        raise TypeError(f"expected a boolean for a {column_type} column, got {value!r}")
-    return f"CAST({literal(value)} AS {column_type.upper()})"
-
-
 def column_set(columns: Iterable[str]) -> str | None:
     """A comma-separated column set, declared order preserved.
 
@@ -206,6 +160,26 @@ def column_set(columns: Iterable[str]) -> str | None:
 
     joined = ", ".join(columns)
     return joined or None
+
+
+# --- null-safe comparison -----------------------------------------------------
+#
+# T-SQL has no null-safe equality operator, and the catalogue is full of nullable
+# columns. Written out rather than approximated, because both halves are wrong in
+# a way that is silent: `a = b` skips rows where either side is null, and
+# `NOT (a = b)` is UNKNOWN — not TRUE — when exactly one side is.
+
+
+def _same(left: str, right: str) -> str:
+    return f"({left} = {right} OR ({left} IS NULL AND {right} IS NULL))"
+
+
+def _differs(left: str, right: str) -> str:
+    return (
+        f"({left} <> {right}"
+        f" OR ({left} IS NULL AND {right} IS NOT NULL)"
+        f" OR ({left} IS NOT NULL AND {right} IS NULL))"
+    )
 
 
 # --- statements ---------------------------------------------------------------
@@ -220,12 +194,15 @@ def sorted_rows(table: CatalogueTable, rows: Iterable[Row]) -> tuple[Row, ...]:
     return tuple(sorted(rows, key=sort_key))
 
 
+def _public(table: CatalogueTable, name: str) -> str:
+    return identifier(table.public_name_of(name))
+
+
 def render_merge(
     table: CatalogueTable,
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
-    destination,
 ) -> str | None:
     """A scoped ``MERGE`` that inserts new rows and updates changed ones.
 
@@ -252,7 +229,8 @@ def render_merge(
     source = _source_relation(table, rows)
 
     on = " AND ".join(
-        f"target.{identifier(name)} <=> source.{identifier(name)}" for name in table.key
+        _same(f"target.{_public(table, name)}", f"source.{_public(table, name)}")
+        for name in table.key
     )
     # The target side is narrowed to this installation as well as matched on the
     # key. The key already carries the scope, so this is belt and braces — and it
@@ -261,28 +239,26 @@ def render_merge(
 
     comparison = table.comparison_columns
     changed = " OR ".join(
-        f"NOT (target.{identifier(name)} <=> source.{identifier(name)})"
+        _differs(f"target.{_public(table, name)}", f"source.{_public(table, name)}")
         for name in comparison
     )
     updates = ", ".join(
         [
-            f"target.{identifier(name)} = source.{identifier(name)}"
+            f"target.{_public(table, name)} = source.{_public(table, name)}"
             for name in comparison
         ]
-        + [f"target.{identifier(AUDIT_UPDATE_COLUMN)} = current_timestamp()"]
+        + [f"target.{_public(table, AUDIT_UPDATE_COLUMN)} = {NOW}"]
     )
 
     # Named rather than positional: the audit columns are appended by the build in
     # a fixed order, and pairing values to that order by position would put the
     # sentinel in the wrong column the day the order changed.
     supplied = {
-        AUDIT_INSERT_COLUMN: "current_timestamp()",
-        AUDIT_UPDATE_COLUMN: "current_timestamp()",
+        AUDIT_INSERT_COLUMN: NOW,
+        AUDIT_UPDATE_COLUMN: NOW,
         # A live row's delete datetime is a sentinel maximum, never null — all
         # three audit columns are physically not null.
-        AUDIT_DELETE_COLUMN: (
-            f"CAST({literal(AUDIT_LIVE_DELETE_DATETIME)} AS {TIMESTAMP.upper()})"
-        ),
+        AUDIT_DELETE_COLUMN: literal(AUDIT_LIVE_DELETE_DATETIME, "timestamp"),
     }
     # A published column appears here and in *no* other clause. Not in the source
     # relation, because no projection knows it; not in the comparison, because a
@@ -291,61 +267,60 @@ def render_merge(
     # statement.
     supplied.update(
         {
-            name: f"CAST('{BUILD_DATETIME_TOKEN}' AS {TIMESTAMP.upper()})"
+            name: f"CAST('{BUILD_DATETIME_TOKEN}' AS {TIMESTAMP_TYPE})"
             for name in table.published_column_names
         }
     )
-    insert_columns = ", ".join(identifier(name) for name in table.physical_columns)
+    insert_columns = ", ".join(_public(table, name) for name in table.physical_columns)
     insert_values = ", ".join(
-        supplied[name] if name in supplied else f"source.{identifier(name)}"
+        supplied[name] if name in supplied else f"source.{_public(table, name)}"
         for name in table.physical_columns
     )
 
     return (
-        f"MERGE INTO {qualified_name(table, destination)} AS target\n"
+        f"MERGE INTO {qualified_name(table)} AS target\n"
         f"USING (\n"
         f"        {source}\n"
         f") AS source\n"
         f"   ON {scoped}\n"
         f"  AND {on}\n"
         f"WHEN MATCHED AND ({changed}) THEN UPDATE SET {updates}\n"
-        f"WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})\n"
+        f"WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values});\n"
     )
 
 
 def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
-    """The merge source: one ``VALUES`` relation, cast by an enclosing projection.
+    """The merge source: one table value constructor, cast by a projection over it.
 
-    Not one ``SELECT`` of cast literals per row chained with ``UNION ALL``:
-    Spark generates Java for the plan, a method's bytecode may not exceed 64 KB,
-    and a union of a hundred projections exceeds it. The catalogue's own
-    ``ColumnDictionary`` was enough to break the bootstrap with ``Code grows
-    beyond 64 KB``.
-
-    One ``VALUES`` relation is a single plan node however many rows it carries,
-    so the casts move outward into one projection over it. The values are bare
-    literals — ``VALUES`` unifies a column's type across rows, all-null becoming
-    void — and the enclosing ``CAST`` settles it either way.
+    The casts sit outside rather than in every row. A ``VALUES`` constructor
+    unifies each column's type across its rows, so an all-null column would take
+    whatever type the engine inferred and could fail to match the target; one
+    enclosing ``CAST`` settles it whatever the rows hold.
     """
 
     tuples = ",\n                    ".join(
-        "(" + ", ".join(literal(row.get(name)) for name in table.column_names) + ")"
+        "("
+        + ", ".join(
+            typed_literal(row.get(name), table.column(name))
+            for name in table.column_names
+        )
+        + ")"
         for row in rows
     )
-    # Positional names for the raw relation, so a column called `repository` in the
-    # values cannot be confused with the aliased output of the same name.
+    # Positional names for the raw relation, so a value column cannot be confused
+    # with the aliased output of the same name.
     raw = [f"c{index}" for index, _name in enumerate(table.column_names)]
     projected = ", ".join(
-        f"CAST({identifier(raw[index])} AS {table.column(name).type.upper()})"
-        f" AS {identifier(name)}"
+        f"CAST({identifier(raw[index])} AS {table.column(name).warehouse_type})"
+        f" AS {_public(table, name)}"
         for index, name in enumerate(table.column_names)
     )
     names = ", ".join(identifier(name) for name in raw)
     return (
         f"SELECT {projected}\n"
-        f"          FROM VALUES\n"
+        f"          FROM (VALUES\n"
         f"                    {tuples}\n"
-        f"               AS source_values({names})"
+        f"               ) AS source_values({names})"
     )
 
 
@@ -354,7 +329,6 @@ def render_delete_obsolete(
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
-    destination,
 ) -> str | None:
     """A scoped ``DELETE`` of everything in this installation the rows do not claim.
 
@@ -374,7 +348,7 @@ def render_delete_obsolete(
     rows = sorted_rows(table, rows)
     _check_scope(table, rows, scope)
     if not rows:
-        return f"DELETE FROM {qualified_name(table, destination)}\n WHERE {scope.predicate}\n"
+        return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
     beyond = tuple(name for name in table.key if name not in scope.columns)
     if not beyond:
@@ -392,14 +366,17 @@ def render_delete_obsolete(
     keep = "\n           OR ".join(
         "("
         + " AND ".join(
-            f"{identifier(name)} <=> {typed_literal(row.get(name), table.column(name).type)}"
+            _same(
+                _public(table, name),
+                typed_literal(row.get(name), table.column(name)),
+            )
             for name in identity
         )
         + ")"
         for row in rows
     )
     return (
-        f"DELETE FROM {qualified_name(table, destination)}\n"
+        f"DELETE FROM {qualified_name(table)}\n"
         f" WHERE {scope.predicate}\n"
         f"   AND NOT (\n"
         f"              {keep}\n"
@@ -411,7 +388,6 @@ def render_delete_scope(
     table: CatalogueTable,
     *,
     scope: InstallationScope | InstallationScopes,
-    destination,
 ) -> str:
     """A scoped ``DELETE`` of whole installations from one table.
 
@@ -420,17 +396,15 @@ def render_delete_scope(
     opinion about it.
     """
 
-    return (
-        f"DELETE FROM {qualified_name(table, destination)}\n WHERE {scope.predicate}\n"
-    )
+    return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
 
 def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
     """Refuse a merge whose source holds two rows with one key.
 
-    Delta fails a ``MERGE`` when several source rows match one target row, and
-    it fails at install time, long after the bundle was reviewed. Caught here it
-    is a generation error naming the table and the key.
+    T-SQL refuses a ``MERGE`` when several source rows match one target row, and
+    it refuses at install time, long after the bundle was reviewed. Caught here
+    it is a generation error naming the table and the key.
     """
 
     seen: dict[tuple, int] = {}

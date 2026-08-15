@@ -81,7 +81,7 @@ def test_a_files_document_needs_no_catalogue_schema():
 
 
 def test_another_items_documents_are_not_this_items_schemas():
-    planned = stage("Lakehouse/Other/DWG.Thing")
+    planned = stage("Warehouse/Other/DWG.Thing")
 
     assert planned is None
 

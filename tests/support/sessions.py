@@ -25,7 +25,7 @@ from .workspaces import TARGET_LAKEHOUSE, WEAVER_LAKEHOUSE
 
 #: Somewhere for a Session that will never reach a workspace to call home. Used
 #: where the claim is about installer semantics and the workspace is incidental.
-NOWHERE = Workspace(workspace="Demo", catalogue="Lakehouse/Weaver")
+NOWHERE = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
 
 
 def given_session(

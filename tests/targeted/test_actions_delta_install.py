@@ -309,7 +309,7 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
 
     from weaver.store import FilesystemStore
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     return installation_context(
         store=FilesystemStore(),
         # Rooted on this test's own filesystem, so what the resolver names is

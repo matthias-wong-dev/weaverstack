@@ -1,18 +1,20 @@
-"""Rendering catalogue rows as scoped, deterministic Spark SQL.
+"""Rendering catalogue rows as scoped, deterministic T-SQL.
 
-Three properties are load-bearing and each is tested directly rather than
+Four properties are load-bearing and each is tested directly rather than
 incidentally:
 
 - **determinism** — the same rows render the same bytes, whatever order they
   arrive in, because a bundle's identity is a hash of its payloads;
-- **scope** — every statement names one repository and one target type, so a
-  Lakehouse build cannot express a change to a Warehouse row;
-- **explicit values** — nulls are typed, quotes and backslashes survive, and
-  booleans are booleans rather than the strings that look like them.
+- **scope** — every statement names one logical item, so a build of one item
+  cannot express a change to another's row;
+- **explicit values** — nulls are typed, quotes survive, and booleans reach a
+  ``bit`` as ``1`` and ``0`` rather than as the strings that look like them;
+- **the public spelling** — statements carry the ``_`` schema's own column names
+  and stored vocabularies, never the internal snake-case keys.
 
-The clock is the deliberate exception: ``current_timestamp()`` is rendered as a
-call, because a rendered instant would change a payload on every run and destroy
-the bundle identity that review and certification depend on.
+The clock is the deliberate exception: ``SYSDATETIME()`` is rendered as a call,
+because a rendered instant would change a payload on every run and destroy the
+bundle identity that review and certification depend on.
 """
 
 from __future__ import annotations
@@ -28,19 +30,12 @@ from weaver.catalogue import (
     TABLE_DICTIONARY,
     InstallationScope,
     column_set,
-    identifier,
-    literal,
     render_delete_obsolete,
     render_delete_scope,
     render_merge,
     sorted_rows,
-    typed_literal,
 )
-from weaver.spark import FabricSparkTarget
-
-#: The Weaver Lakehouse every catalogue statement is addressed to.
-WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
-
+from weaver.catalogue.tsql import identifier, literal, typed_literal
 
 LAKEHOUSE_SCOPE = InstallationScope(item_type="Lakehouse", item_name="Raw")
 WAREHOUSE_SCOPE = InstallationScope(item_type="Warehouse", item_name="Reporting")
@@ -58,58 +53,68 @@ def registry_row(name: str, *, item_name: str = "Raw", signature: str = "abc"):
     }
 
 
+def public(table, name: str) -> str:
+    """A column as the statement spells it."""
+
+    return identifier(table.public_name_of(name))
+
+
 # --- literals and identifiers ------------------------------------------------
 
 
-def test_a_string_is_quoted():
-    assert literal("Sales") == "'Sales'"
+def test_a_string_is_quoted_as_unicode():
+    assert literal("Sales") == "N'Sales'"
 
 
-def test_a_quote_is_escaped():
-    assert literal("O'Brien") == "'O\\'Brien'"
+def test_a_quote_is_doubled():
+    assert literal("O'Brien") == "N'O''Brien'"
 
 
-def test_a_backslash_is_escaped_because_spark_treats_it_as_one():
-    # Spark's default parser escapes with a backslash, so an unescaped one would
-    # consume the character after it — silently changing a stored value.
-    assert literal("C:\\path") == "'C:\\\\path'"
+def test_a_backslash_is_an_ordinary_character():
+    """T-SQL has no backslash escape, so doubling one would change the value."""
+
+    assert literal("C:\\path") == "N'C:\\path'"
 
 
 def test_a_null_is_null_not_the_word():
     assert literal(None) == "NULL"
 
 
-def test_a_boolean_is_a_boolean():
-    assert literal(True) == "true"
-    assert literal(False) == "false"
+def test_a_boolean_reaches_a_bit_as_a_number():
+    assert literal(True) == "1"
+    assert literal(False) == "0"
 
 
 def test_a_boolean_is_not_rendered_as_a_string():
-    assert literal(True) != "'true'"
+    assert literal(True) != "N'true'"
 
 
 def test_a_value_of_an_unsupported_type_is_refused():
-    with pytest.raises(TypeError, match="strings, booleans or null"):
+    with pytest.raises(TypeError, match="not dict"):
         literal({"a": 1})
-
-
-def test_every_value_is_cast_to_its_declared_type():
-    assert typed_literal("Sales", "string") == "CAST('Sales' AS STRING)"
-    assert typed_literal(None, "string") == "CAST(NULL AS STRING)"
-    assert typed_literal(True, "boolean") == "CAST(true AS BOOLEAN)"
 
 
 def test_a_non_boolean_in_a_boolean_column_is_refused():
     with pytest.raises(TypeError, match="expected a boolean"):
-        typed_literal("yes", "boolean")
+        literal("yes", "boolean")
 
 
-def test_an_identifier_is_back_tick_quoted():
-    assert identifier("Order id") == "`Order id`"
+def test_an_identifier_is_bracket_quoted():
+    """The public names carry spaces by design, so quoting is not optional."""
+
+    assert identifier("Order id") == "[Order id]"
 
 
-def test_a_back_tick_in_an_identifier_is_doubled():
-    assert identifier("we`ird") == "`we``ird`"
+def test_a_closing_bracket_in_an_identifier_is_doubled():
+    assert identifier("we]ird") == "[we]]ird]"
+
+
+def test_a_stored_value_is_written_in_its_public_vocabulary():
+    """The internal key never reaches the Warehouse."""
+
+    assert typed_literal("stored_procedure", REGISTRY.column("object_type")) == (
+        "N'Stored procedure'"
+    )
 
 
 def test_a_column_set_preserves_declared_order():
@@ -124,36 +129,50 @@ def test_an_empty_column_set_is_null_not_an_empty_string():
     assert column_set([]) is None
 
 
+# --- the public spelling ------------------------------------------------------
+
+
+def test_a_statement_names_the_catalogue_in_two_parts():
+    """The connection is already open against the catalogue Warehouse."""
+
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
+    assert "MERGE INTO [_].[Registry]" in statement
+
+
+def test_a_statement_carries_the_public_column_names():
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
+    assert "[Item type]" in statement
+    assert "[Object name]" in statement
+    assert "[Build datetime]" in statement
+    # And never the internal spelling.
+    assert "[item_type]" not in statement
+    assert "[object_name]" not in statement
+
+
 # --- determinism -------------------------------------------------------------
 
 
 def test_rows_render_in_key_order_whatever_order_they_arrive_in():
     forwards = [registry_row("Alpha"), registry_row("Beta"), registry_row("Gamma")]
     backwards = list(reversed(forwards))
-    assert render_merge(
-        REGISTRY, forwards, scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    ) == render_merge(
-        REGISTRY,
-        backwards,
-        scope=LAKEHOUSE_SCOPE,
-        destination=WEAVER,
+    assert render_merge(REGISTRY, forwards, scope=LAKEHOUSE_SCOPE) == render_merge(
+        REGISTRY, backwards, scope=LAKEHOUSE_SCOPE
     )
 
 
 def test_the_same_rows_render_the_same_bytes():
     rows = [registry_row("Alpha"), registry_row("Beta")]
-    first = render_merge(REGISTRY, rows, scope=LAKEHOUSE_SCOPE, destination=WEAVER)
-    second = render_merge(
-        REGISTRY, list(rows), scope=LAKEHOUSE_SCOPE, destination=WEAVER
+
+    assert render_merge(REGISTRY, rows, scope=LAKEHOUSE_SCOPE) == render_merge(
+        REGISTRY, list(rows), scope=LAKEHOUSE_SCOPE
     )
-    assert first == second
 
 
 def test_sorting_is_by_the_key_and_tolerates_a_null():
-    rows = [
-        {**registry_row("Beta")},
-        {**registry_row("Alpha")},
-    ]
+    rows = [{**registry_row("Beta")}, {**registry_row("Alpha")}]
+
     assert [row["object_name"] for row in sorted_rows(REGISTRY, rows)] == [
         "Alpha",
         "Beta",
@@ -167,14 +186,13 @@ def test_the_clock_is_a_call_not_a_rendered_instant():
     still stamping the row.
     """
 
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
-    assert "current_timestamp()" in statement
-    assert statement.count("current_timestamp()") == 3  # one update, two inserts
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
+    assert "SYSDATETIME()" in statement
+    assert statement.count("SYSDATETIME()") == 3  # one update, two inserts
 
 
-# --- the published build build_datetime ------------------------------------------------
+# --- the published build datetime ---------------------------------------------
 
 
 def _clauses(statement: str) -> tuple[str, str, str]:
@@ -186,20 +204,18 @@ def _clauses(statement: str) -> tuple[str, str, str]:
     return statement[:matched], guard, update
 
 
-def test_the_epoch_is_a_token_so_the_payload_stays_frozen():
+def test_the_build_datetime_is_a_token_so_the_payload_stays_frozen():
     """Same reason the clock is a call: a rendered instant would give the same
     repository different bytes every run, and a bundle's identity is its bytes.
     The installer resolves it, once, for the whole run."""
 
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
 
-    assert "CAST('{{build_datetime}}' AS TIMESTAMP)" in statement
+    assert "CAST('{{build_datetime}}' AS datetime2(6))" in statement
     assert statement.count("{{build_datetime}}") == 1
 
 
-def test_the_epoch_is_written_on_insert_and_nowhere_else():
+def test_the_build_datetime_is_written_on_insert_and_nowhere_else():
     """The decision the whole freshness comparison rests on.
 
     Every object a build actually rebuilds arrives here as an insert — it is new,
@@ -208,19 +224,17 @@ def test_the_epoch_is_written_on_insert_and_nowhere_else():
     build would claim a rebuild that never happened.
     """
 
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
     source, guard, update = _clauses(statement)
 
-    assert "build_datetime" not in source, "not projected — no row carries one"
-    assert "build_datetime" not in guard, "not compared — it differs every build"
-    assert "build_datetime" not in update, "not updated — only an insert dates a row"
-    assert "`build_datetime`" in statement[statement.index("WHEN NOT MATCHED") :]
+    assert "Build datetime" not in source, "not projected — no row carries one"
+    assert "Build datetime" not in guard, "not compared — it differs every build"
+    assert "Build datetime" not in update, "not updated — only an insert dates a row"
+    assert "[Build datetime]" in statement[statement.index("WHEN NOT MATCHED") :]
 
 
-def test_a_table_without_a_published_column_is_rendered_exactly_as_before():
-    """Only Registry carries an build_datetime. Nothing else gained a column."""
+def test_a_table_without_a_published_column_carries_no_token():
+    """Only Registry carries a build datetime. Nothing else gained a column."""
 
     row = {
         "item_type": "Lakehouse",
@@ -234,35 +248,30 @@ def test_a_table_without_a_published_column_is_rendered_exactly_as_before():
         "referenced_object_name": "Order",
         "signature": "abc",
     }
-    statement = render_merge(
-        DEPENDENCY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_merge(DEPENDENCY, [row], scope=LAKEHOUSE_SCOPE)
 
     assert "{{build_datetime}}" not in statement
-    assert "build_datetime" not in statement
+    assert "Build datetime" not in statement
 
 
 # --- scope -------------------------------------------------------------------
 
 
 def test_a_merge_is_scoped_to_one_installation_on_the_target_side():
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
-    assert "target.`item_type` = 'Lakehouse'" in statement
-    assert "target.`item_name` = 'Raw'" in statement
-    assert "warehouse" not in statement
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
+    assert "target.[Item type] = N'Lakehouse'" in statement
+    assert "target.[Item name] = N'Raw'" in statement
+    assert "Warehouse" not in statement
 
 
 def test_a_delete_is_scoped_to_one_installation():
     statement = render_delete_obsolete(
-        REGISTRY,
-        [registry_row("Alpha")],
-        scope=LAKEHOUSE_SCOPE,
-        destination=WEAVER,
+        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE
     )
-    assert "`item_type` = 'Lakehouse' AND `item_name` = 'Raw'" in statement
-    assert "warehouse" not in statement
+
+    assert "[Item type] = N'Lakehouse' AND [Item name] = N'Raw'" in statement
+    assert "Warehouse" not in statement
 
 
 def test_the_same_object_in_another_item_renders_a_different_statement():
@@ -273,18 +282,16 @@ def test_the_same_object_in_another_item_renders_a_different_statement():
     predicate.
     """
 
-    raw = render_merge(
-        REGISTRY, [registry_row("Customer")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    raw = render_merge(REGISTRY, [registry_row("Customer")], scope=LAKEHOUSE_SCOPE)
     curated = render_merge(
         REGISTRY,
         [registry_row("Customer", item_name="Curated")],
         scope=InstallationScope(item_type="Lakehouse", item_name="Curated"),
-        destination=WEAVER,
     )
+
     assert raw != curated
-    assert "'Curated'" not in raw
-    assert "'Raw'" not in curated
+    assert "N'Curated'" not in raw
+    assert "N'Raw'" not in curated
 
 
 def test_a_row_from_another_installation_cannot_be_rendered():
@@ -295,14 +302,14 @@ def test_a_row_from_another_installation_cannot_be_rendered():
             REGISTRY,
             [registry_row("Customer", item_name="Curated")],
             scope=LAKEHOUSE_SCOPE,
-            destination=WEAVER,
         )
 
 
 def test_a_row_from_another_item_cannot_be_rendered():
     stray = {**registry_row("Customer"), "item_name": "Other"}
+
     with pytest.raises(ValueError, match="do not belong to installation"):
-        render_merge(REGISTRY, [stray], scope=LAKEHOUSE_SCOPE, destination=WEAVER)
+        render_merge(REGISTRY, [stray], scope=LAKEHOUSE_SCOPE)
 
 
 def test_the_guard_applies_to_deletes_too():
@@ -311,7 +318,6 @@ def test_the_guard_applies_to_deletes_too():
             REGISTRY,
             [registry_row("Customer", item_name="Curated")],
             scope=LAKEHOUSE_SCOPE,
-            destination=WEAVER,
         )
 
 
@@ -321,30 +327,55 @@ def test_the_guard_applies_to_deletes_too():
 def test_a_matched_unchanged_row_is_a_no_op():
     """The matched branch is guarded by a comparison of every non-key column.
 
-    So rebuilding unchanged Weaver document writes nothing and does not advance
-    ``row_update_datetime`` — which is what makes a rebuild idempotent from the
-    catalogue's point of view.
+    So rebuilding an unchanged Weaver document writes nothing and does not
+    advance ``Row update datetime`` — which is what makes a rebuild idempotent
+    from the catalogue's point of view.
     """
 
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
     assert "WHEN MATCHED AND (" in statement
     for column in REGISTRY.comparison_columns:
-        assert f"NOT (target.`{column}` <=> source.`{column}`)" in statement
+        name = public(REGISTRY, column)
+        assert f"target.{name} <> source.{name}" in statement
+
+
+def test_the_comparison_is_null_safe_in_both_directions():
+    """T-SQL has no null-safe operator, and half a comparison is silently wrong.
+
+    ``a <> b`` is UNKNOWN when either side is null, so a column that became null
+    — or stopped being null — would never be seen as changed.
+    """
+
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+    _source, guard, _update = _clauses(statement)
+    name = public(REGISTRY, "object_type")
+
+    assert (
+        f"({name} IS NULL AND source.{name} IS NOT NULL)"
+        in guard.replace("target.", "")
+        or f"(target.{name} IS NULL AND source.{name} IS NOT NULL)" in guard
+    )
+    assert f"(target.{name} IS NOT NULL AND source.{name} IS NULL)" in guard
+
+
+def test_the_merge_key_match_is_null_safe():
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+    name = public(REGISTRY, "object_name")
+
+    assert f"(target.{name} IS NULL AND source.{name} IS NULL)" in statement
 
 
 def test_an_update_advances_only_the_update_datetime():
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
     update = statement.split("WHEN MATCHED")[1].split("WHEN NOT MATCHED")[0]
-    assert "target.`row_update_datetime` = current_timestamp()" in update
+
+    assert "target.[Row update datetime] = SYSDATETIME()" in update
     # The insert datetime is when the row first appeared and must not move.
-    assert "row_insert_datetime" not in update
+    assert "Row insert datetime" not in update
     # Nor may an update rewrite the key it matched on.
     for key in REGISTRY.key:
-        assert f"target.`{key}` = source" not in update
+        assert f"target.{public(REGISTRY, key)} = source" not in update
 
 
 def test_an_insert_supplies_every_physical_column_including_the_live_sentinel():
@@ -354,18 +385,25 @@ def test_an_insert_supplies_every_physical_column_including_the_live_sentinel():
     what makes an "as at" read a single range predicate.
     """
 
-    statement = render_merge(
-        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
     insert = statement.split("WHEN NOT MATCHED")[1]
+
     for column in REGISTRY.physical_columns:
-        assert f"`{column}`" in insert
-    assert "CAST('9999-12-31 23:59:59.999999' AS TIMESTAMP)" in insert
+        assert public(REGISTRY, column) in insert
+    assert "CAST('9999-12-31 23:59:59.999999' AS datetime2(6))" in insert
+
+
+def test_a_merge_is_terminated():
+    """T-SQL requires it, and an unterminated MERGE is a syntax error."""
+
+    statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
+
+    assert statement.rstrip().endswith(";")
 
 
 def test_nothing_to_merge_renders_no_statement():
     # A caller emits no action rather than an empty one.
-    assert render_merge(REGISTRY, [], scope=LAKEHOUSE_SCOPE, destination=WEAVER) is None
+    assert render_merge(REGISTRY, [], scope=LAKEHOUSE_SCOPE) is None
 
 
 # --- deleting the obsolete ---------------------------------------------------
@@ -376,11 +414,11 @@ def test_an_obsolete_delete_keeps_exactly_the_rows_projected():
         REGISTRY,
         [registry_row("Alpha"), registry_row("Beta")],
         scope=LAKEHOUSE_SCOPE,
-        destination=WEAVER,
     )
+
     assert "AND NOT (" in statement
-    assert "`object_name` <=> CAST('Alpha' AS STRING)" in statement
-    assert "`object_name` <=> CAST('Beta' AS STRING)" in statement
+    assert "[Object name] = N'Alpha'" in statement
+    assert "[Object name] = N'Beta'" in statement
 
 
 def test_an_installation_that_projects_nothing_still_deletes_its_rows():
@@ -390,23 +428,20 @@ def test_an_installation_that_projects_nothing_still_deletes_its_rows():
     lose those rows, so the empty case is a scoped delete rather than a no-op.
     """
 
-    statement = render_delete_obsolete(
-        REGISTRY, [], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
-    assert statement.strip().endswith("'Raw'")
+    statement = render_delete_obsolete(REGISTRY, [], scope=LAKEHOUSE_SCOPE)
+
+    assert statement.strip().endswith("N'Raw'")
     assert "NOT (" not in statement
 
 
 def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
     statement = render_delete_obsolete(
-        REGISTRY,
-        [registry_row("Alpha")],
-        scope=LAKEHOUSE_SCOPE,
-        destination=WEAVER,
+        REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE
     )
     lines = statement.splitlines()
-    assert lines[0].startswith("DELETE FROM `Demo`.`Weaver`.`_`.`Registry`")
-    assert lines[1].strip().startswith("WHERE `item_type` =")
+
+    assert lines[0].startswith("DELETE FROM [_].[Registry]")
+    assert lines[1].strip().startswith("WHERE [Item type] =")
 
 
 # --- the explicit prune scopes ----------------------------------------------
@@ -426,27 +461,23 @@ def test_the_installation_table_has_no_obsolete_row_to_delete():
         "weaver_version": "0.1.0",
         "signature": "abc",
     }
-    assert (
-        render_delete_obsolete(
-            INSTALLATION, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-        )
-        is None
-    )
+
+    assert render_delete_obsolete(INSTALLATION, [row], scope=LAKEHOUSE_SCOPE) is None
 
 
 def test_an_installation_projecting_nothing_is_still_deleted():
     """The empty case is how an installation is removed, so it must still render."""
 
-    statement = render_delete_obsolete(
-        INSTALLATION, [], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_delete_obsolete(INSTALLATION, [], scope=LAKEHOUSE_SCOPE)
+
     assert statement is not None
-    assert "`item_type` = 'Lakehouse' AND `item_name` = 'Raw'" in statement
+    assert "[Item type] = N'Lakehouse' AND [Item name] = N'Raw'" in statement
 
 
 def test_installation_prune_removes_one_scope_and_names_it():
-    statement = render_delete_scope(REGISTRY, scope=LAKEHOUSE_SCOPE, destination=WEAVER)
-    assert "`item_type` = 'Lakehouse' AND `item_name` = 'Raw'" in statement
+    statement = render_delete_scope(REGISTRY, scope=LAKEHOUSE_SCOPE)
+
+    assert "[Item type] = N'Lakehouse' AND [Item name] = N'Raw'" in statement
     assert "NOT (" not in statement
 
 
@@ -473,22 +504,21 @@ def test_a_table_dictionary_row_renders_its_nulls_and_booleans():
         "prohibit_rebuild": False,
         "signature": "deadbeef",
     }
-    statement = render_merge(
-        TABLE_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
-    # The values are bare literals in one VALUES relation; the enclosing projection
-    # casts each column to its declared type. So a null is a typed null by
-    # construction, whichever row it sits in.
-    values = statement.split("FROM VALUES")[1].split("AS source_values")[0]
+    statement = render_merge(TABLE_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE)
+    # The values are bare literals in one table value constructor; the enclosing
+    # projection casts each column to its declared type. So a null is a typed
+    # null by construction, whichever row it sits in.
+    values = statement.split("FROM (VALUES")[1].split("AS source_values")[0]
+
     assert "NULL" in values
-    assert "false" in values and "true" in values
-    assert "'Customer name, Region'" in values
+    assert "0" in values and "1" in values
+    assert "N'Customer name, Region'" in values
     for name, type_ in (
-        ("not_null_columns", "STRING"),
-        ("is_incremental", "BOOLEAN"),
-        ("is_static", "BOOLEAN"),
+        ("not_null_columns", "varchar(1000)"),
+        ("is_incremental", "bit"),
+        ("is_static", "bit"),
     ):
-        assert f"AS {type_}) AS `{name}`" in statement
+        assert f"AS {type_}) AS {public(TABLE_DICTIONARY, name)}" in statement
 
 
 def test_a_relationship_row_compares_only_its_signature():
@@ -501,23 +531,21 @@ def test_a_relationship_row_compares_only_its_signature():
     row = {
         "item_type": "Lakehouse",
         "item_name": "Raw",
-        "schema_name": "Sales",
-        "object_name": "Order",
-        "column_set": "Customer id",
-        "reference_item_type": "Lakehouse",
-        "reference_item_name": "Raw",
-        "reference_schema_name": "Sales",
-        "reference_object_name": "Customer",
-        "reference_column_set": "Customer id",
+        "foreign_schema_name": "Sales",
+        "foreign_object_name": "Order",
+        "foreign_column_set": "Customer id",
+        "primary_item_type": "Lakehouse",
+        "primary_item_name": "Raw",
+        "primary_schema_name": "Sales",
+        "primary_object_name": "Customer",
+        "primary_column_set": "Customer id",
         "signature": "abc",
     }
-    statement = render_merge(
-        FOREIGN_KEY_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
-    assert (
-        "WHEN MATCHED AND (NOT (target.`signature` <=> source.`signature`))"
-        in statement
-    )
+    statement = render_merge(FOREIGN_KEY_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE)
+    _source, guard, _update = _clauses(statement)
+
+    assert "[Signature]" in guard
+    assert "[Primary object name]" not in guard
 
 
 def test_a_composite_key_delete_names_every_key_column():
@@ -530,11 +558,12 @@ def test_a_composite_key_delete_names_every_key_column():
         "column_set": "Order number",
         "signature": "abc",
     }
-    statement = render_delete_obsolete(
-        KEY_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
+    statement = render_delete_obsolete(KEY_DICTIONARY, [row], scope=LAKEHOUSE_SCOPE)
+
     for column in ("schema_name", "object_name", "key_type", "column_set"):
-        assert f"`{column}` <=>" in statement
+        assert f"{public(KEY_DICTIONARY, column)} =" in statement
+    # And the frozen vocabulary, not the internal value.
+    assert "N'Unique'" in statement
 
 
 def test_an_installation_row_updates_the_target_name_without_a_new_key():
@@ -552,11 +581,10 @@ def test_an_installation_row_updates_the_target_name_without_a_new_key():
         "weaver_version": "0.1.0",
         "signature": "abc",
     }
-    statement = render_merge(
-        INSTALLATION, [row], scope=LAKEHOUSE_SCOPE, destination=WEAVER
-    )
-    assert "NOT (target.`target_name` <=> source.`target_name`)" in statement
-    assert "target.`target_name` = source.`target_name`" in statement
+    statement = render_merge(INSTALLATION, [row], scope=LAKEHOUSE_SCOPE)
+
+    assert "target.[Target name] <> source.[Target name]" in statement
+    assert "target.[Target name] = source.[Target name]" in statement
 
 
 def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
@@ -574,9 +602,8 @@ def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
         "referenced_object_name": None,
         "signature": "abc",
     }
-    statement = render_merge(
-        DEPENDENCY, [row], scope=WAREHOUSE_SCOPE, destination=WEAVER
-    )
-    values = statement.split("FROM VALUES")[1].split("AS source_values")[0]
-    assert "'Sales_LH.Sales.Customer'" in values
+    statement = render_merge(DEPENDENCY, [row], scope=WAREHOUSE_SCOPE)
+    values = statement.split("FROM (VALUES")[1].split("AS source_values")[0]
+
+    assert "N'Sales_LH.Sales.Customer'" in values
     assert "NULL" in values

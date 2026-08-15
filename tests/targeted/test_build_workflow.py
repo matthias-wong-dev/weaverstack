@@ -64,7 +64,7 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     store = FilesystemStore()
     resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
@@ -127,7 +127,7 @@ def build(estate, **overrides):
         "session": estate["session"],
         "executors": estate["executors"],
         "source_store": estate["store"],
-        "control_lakehouse": LakehouseBinding(
+        "catalogue_binding": LakehouseBinding(
             lakehouse=ItemRef("Weaver"), workspace_name="Demo"
         ),
     }

@@ -285,6 +285,6 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
         ),
     )
 
-    public_wipe("Lakehouse/Sales", workspace="Demo", catalogue="Lakehouse/Control")
-    public_wipe("Lakehouse/Control", workspace="Demo", catalogue="Lakehouse/Control")
-    assert calls == [("Lakehouse/Control", ("Lakehouse/Sales",))]
+    public_wipe("Lakehouse/Sales", workspace="Demo", catalogue="Warehouse/Control")
+    public_wipe("Warehouse/Control", workspace="Demo", catalogue="Warehouse/Control")
+    assert calls == [("Warehouse/Control", ("Lakehouse/Sales",))]

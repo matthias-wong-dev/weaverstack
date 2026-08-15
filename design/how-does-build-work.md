@@ -143,7 +143,7 @@ alias would be planned before its own source was built.
 
 Bindings are typed. A Lakehouse item binds to a Lakehouse and a Warehouse item
 binds to a Warehouse; Weaver never infers a destructive target from a bare
-display name. The package-owned `Lakehouse/_weaver` item is bound implicitly to
+display name. The package-owned `Warehouse/_weaver` item is bound implicitly to
 the mandatory control Lakehouse.
 
 ## 4a. Aliases

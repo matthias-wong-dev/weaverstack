@@ -63,7 +63,7 @@ real = weaver.load(requested, dry_run=False, fault_tolerant=False)
 store = store_for(workspace)
 log = sorted(
     entry.location.value.rsplit("/", 1)[-1]
-    for entry in store.list(Location(real.task_log))
+    for entry in store.list(Location(real.workflow_id))
     if not entry.is_directory
 )
 
@@ -71,7 +71,7 @@ emit({{
     "dry": dry.to_mapping(),
     "real": real.to_mapping(),
     "log": log,
-    "task_log": real.task_log,
+    "workflow_id": real.workflow_id,
 }})
 """
 
@@ -164,7 +164,7 @@ def test_every_node_resolves_to_its_exact_installed_primitive(orchestrated):
         assert "/_/Load/" in location
     assert all(node["status"] == "validated" for node in nodes.values())
     assert not any(node["executed"] for node in nodes.values())
-    assert seen["dry"]["task_log"] is None
+    assert seen["dry"]["workflow_id"] is None
 
 
 # --- and then executed --------------------------------------------------------
@@ -240,7 +240,7 @@ def test_the_real_task_wrote_one_coherent_log_under_the_declared_folder(orchestr
     # The task wrote beneath it, matched on the item-relative part: a session
     # names a Lakehouse by item id and the desktop by display name, so the two
     # spellings of one location agree only from `Files/` down.
-    assert "/Files/_/Log/task_date=" in seen["task_log"]
+    assert "/Files/_/Log/task_date=" in seen["workflow_id"]
 
     written = seen["log"]
     assert "plan.json" in written
