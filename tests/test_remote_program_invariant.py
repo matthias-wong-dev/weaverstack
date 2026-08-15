@@ -121,11 +121,17 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
     # constructed on the far side. Every build action now runs where the
     # Installer already is, so nothing crosses but the statements themselves,
     # and no program should name it again.
+    # The names the whole refactor retired come from one register, because a
+    # body carrying one fails only when Fabric runs it — minutes into a suite,
+    # rather than in the check that renamed it.
+    from test_fabric_only_invariant import RETIRED
+
     retired = (
         "InstallationEnvironment",
         "install_bundle(",
         "install_actions(",
         "execute_action(",
+        *RETIRED,
     )
     offenders = [
         f"{where}:{line}: names {name}"
