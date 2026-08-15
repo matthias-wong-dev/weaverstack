@@ -11,7 +11,7 @@ that fail the test if anything reaches them, which is the only way to assert
 "nothing ran" rather than "nothing appeared to run".
 
 The session is prepared rather than acquired. Workspace resolution, Spark and TDS
-are what differ between the emulator, a desktop and a Fabric session, and none of
+are what differ between a desktop and a Fabric session, and none of
 them changes anything about the orchestration this module is about.
 """
 

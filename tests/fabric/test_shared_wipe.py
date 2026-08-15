@@ -1,9 +1,8 @@
 """The populated-Lakehouse wipe, against a real Fabric Lakehouse.
 
-A thin wrapper. The claim lives in `tests/support/wipe_claims.py` and its local
-twin is `tests/spark/test_local_wipe.py`; what only Fabric answers is that the
-same wipe holds where OneLake has a `dbo` schema Weaver never created and must
-not remove.
+A thin wrapper. The claim lives in `tests/support/wipe_claims.py`; what only
+Fabric answers is that the wipe holds where OneLake has a `dbo` schema Weaver
+never created and must not remove.
 
 Driven from this checkout. `wipe_delta_target` takes its store as an argument and
 removes directories — it never needed the installed package, only a real

@@ -16,9 +16,9 @@ from pathlib import Path as _Path
 
 import pytest
 
-# The narrow fixture constructors are shared by every layer — pure Python,
-# local Spark and Fabric all build their inputs the same way — so they are
-# importable from anywhere in the suite rather than copied per directory.
+# The narrow fixture constructors are shared by every layer — the core suite
+# and the Fabric one build their inputs the same way — so they are importable
+# from anywhere in the suite rather than copied per directory.
 _sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
 
 
@@ -100,7 +100,7 @@ def _sql_statements(name: str, tables_root: str) -> tuple[str, ...]:
 
 @pytest.fixture
 def lakehouse_sql_statements():
-    """Shared DDL/DML renderer for local Spark and Fabric Livy fixtures."""
+    """Shared DDL/DML renderer for the fixtures that seed a Lakehouse."""
 
     return _sql_statements
 

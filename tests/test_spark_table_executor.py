@@ -1,9 +1,9 @@
 """The ``spark_table`` executor, driven with a fake capability — no JVM.
 
 The install-time behaviour (describe the query, validate, create the table) is
-proven end to end against real Delta in ``tests/spark/test_sql_table_build.py``
-and against a real Lakehouse in ``tests/fabric/test_spark_table_build.py``. These
-tests pin the executor's own logic cheaply: what it asks Spark, what SQL it
+proven end to end against a real Lakehouse in
+``tests/fabric/test_spark_table_lakehouse_boundary.py``. These tests pin the
+executor's own logic cheaply: what it asks Spark, what SQL it
 generates, and that it surfaces every column violation the plan lists — without
 paying for a Spark session.
 

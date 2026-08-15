@@ -147,7 +147,7 @@ def test_load_resolution_resolves_an_endpoint_refresh_target(estate):
 
 
 def test_load_resolution_reports_a_refresh_the_host_cannot_perform(estate):
-    """An emulator has no endpoint. That is an absence, not a fault."""
+    """A target with no endpoint is an absence, not a fault."""
 
     resolved = resolve(estate, can_refresh=False).by_id[REFRESH]
 

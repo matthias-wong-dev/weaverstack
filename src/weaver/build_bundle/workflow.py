@@ -39,7 +39,7 @@ from .prune import (
     read_warehouse_inventory,
 )
 from .report import InstallationReport
-from .targets import WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
+from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
 
 ARCHIVE_SUFFIX = ".weaver.zip"
 
@@ -157,12 +157,9 @@ def validate_build_request(
         )
     builtin = WeaverItemId.parse("Lakehouse/_weaver")
     binding = bindings.by_item.get(builtin)
-    if binding is not None and not isinstance(binding.target, LakehouseBinding):
+    if binding is not None and binding.target.kind != LAKEHOUSE_TARGET:
         raise BuildError("Lakehouse/_weaver requires a Lakehouse binding")
-    if (
-        binding is not None
-        and binding.target.lakehouse.name != control_lakehouse.lakehouse.name
-    ):
+    if binding is not None and binding.target.item.name != control_lakehouse.item.name:
         raise BuildError(
             "Lakehouse/_weaver must be bound to the explicit control-plane Lakehouse"
         )

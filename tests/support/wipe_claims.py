@@ -8,9 +8,7 @@ from __future__ import annotations
 
 #: What a wipe leaves behind in the Tables area. A schema-enabled Fabric
 #: Lakehouse is created holding ``dbo``; Fabric owns it and nothing recreates it,
-#: so a wipe empties it rather than removing it. The local emulator never had one,
-#: which is why this is a subset rather than an equality — the same assertion has
-#: to hold where the default schema exists and where it does not.
+#: so a wipe empties it rather than removing it.
 KEPT = {"dbo"}
 
 

@@ -174,7 +174,7 @@ LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
 #: spanning both catches it — and the endpoint-refresh barrier that keeps them
 #: in step exists nowhere else.
 #:
-#: Fabric only, and not because of cost: the emulator has no Warehouse.
+#: A Warehouse, so a real workspace is the only place this can run.
 CROSS_ITEM_JOURNEY_FIXTURE = SesFixture(
     _FIXTURES / "cross-item-journey", ("Lakehouse/Sales", "Warehouse/Reporting")
 )
@@ -186,9 +186,9 @@ DESKTOP_JOURNEY_NAMES = {
     "Lakehouse/Sales": "Lakehouse/Stock",
     "Warehouse/Reporting": "Warehouse/Analysis",
 }
-#: A producer and the consumer that aliases it, in two Lakehouses. The emulator
-#: materialises the alias as a filesystem link where Fabric makes a OneLake
-#: shortcut, so the same body proves incremental alias behaviour either side.
+#: A producer and the consumer that aliases it, in two Lakehouses — the one
+#: thing a single destination cannot express, since an alias needs something to
+#: point across to.
 CROSS_ITEM_ALIAS_FIXTURE = SesFixture(
     _FIXTURES / "cross-item-alias",
     ("Lakehouse/Raw", "Lakehouse/Curated"),

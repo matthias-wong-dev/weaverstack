@@ -8,16 +8,16 @@ three full generate-and-installs.
 
 What only Fabric can answer is what happens when the plan *runs*:
 
-**A OneLake shortcut is a workspace API call**, not a file operation, so the
-emulator's filesystem link proves nothing about it.
+**A OneLake shortcut is a workspace API call**, not a file operation, so only
+asking the workspace proves one exists.
 
 **Fabric creates a shortcut synchronously and discovers it asynchronously** — the
 consumer's next statement failed with "neither a view nor a table" until the
 alias action learned to wait for a real read to succeed.
 
 **A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
-item that mutated Delta is closed by a refresh. The emulator has no endpoint and
-skips it, so the refresh is unexercised until here.
+item that mutated Delta is closed by a refresh. Nothing below a real workspace
+exercises that refresh.
 
 So the bundle is generated *here*, in pure Python, and **only the alias action is
 run** out of it — not the estate around it. Schemas, tables, views, catalogue
@@ -311,8 +311,8 @@ def alias_estate(
 def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     """Asked of the workspace, not of the plan: the shortcut is really there.
 
-    A OneLake shortcut is an API call. Nothing local — not the emulator's
-    filesystem link, not the planned action — stands in for asking Fabric.
+    A OneLake shortcut is an API call, and the planned action does not stand in
+    for asking Fabric whether one is there.
     """
 
     consumer = alias_estate["consumer"]

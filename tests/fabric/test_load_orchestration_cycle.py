@@ -1,8 +1,8 @@
 """Load orchestration across the one boundary only Fabric has.
 
-Its local twin (``tests/spark/test_local_load_orchestration_cycle.py``) proves the
-composition over three Lakehouse dispatch kinds. What it cannot prove is the
-crossing, because the emulator has no SQL analytics endpoint to cross:
+Composition over three Lakehouse dispatch kinds is decided without a tenant.
+What needs one is the crossing, because only a real Lakehouse has a SQL
+analytics endpoint to cross:
 
 .. code-block:: text
 

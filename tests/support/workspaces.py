@@ -139,8 +139,8 @@ def given_resolver(
 
     ``root`` moves what it resolves onto a real filesystem, so a test about a
     store can write what it resolves and read it back. That is the resolver's
-    own ``base_url`` parameter, not an emulator: the arithmetic above it is
-    unchanged, and what differs is only where OneLake is.
+    own ``base_url`` parameter: the arithmetic above it is unchanged, and what
+    differs is only where OneLake is.
     """
 
     configuration = (

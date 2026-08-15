@@ -17,10 +17,10 @@ from .spark import FabricSparkTarget, identifier
 from .targets import FILES_AREA, ItemRef
 
 #: The Spark-facing root of a Fabric item. The same template as
-#: :func:`weaver.fabric.onelake.abfss_root`, repeated because the core imports
-#: without the optional ``fabric`` extra and a notebook must be able to infer its
-#: own Lakehouse with nothing installed beyond Weaver. ``test_lakehouse`` asserts
-#: the two stay identical.
+#: :func:`weaver.fabric.onelake.abfss_root`, repeated so that inferring an
+#: attached Lakehouse needs no import from ``weaver.fabric`` — this module is
+#: reached by authored object code, which should pull in no transport.
+#: ``test_lakehouse`` asserts the two stay identical.
 _ABFSS_ROOT = "abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}"
 
 #: Session settings Fabric sets for the attached Lakehouse. Read in order; the

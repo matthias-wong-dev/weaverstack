@@ -3,8 +3,7 @@
 Fakes rather than a session: every call an authored object makes is an ordinary
 one on the Spark object it was handed, so the assertions here are about *which*
 call is made with *which* address. That a real session and a real Delta table
-answer those calls is proved under ``pytest -m spark`` in
-``tests/spark/test_authored_objects.py``.
+answer those calls is proved in ``tests/fabric``.
 """
 
 from __future__ import annotations

@@ -57,14 +57,17 @@ def load(
     targets. It is an operator override: only those nodes run, without dependency
     expansion or dependency ordering.
 
-    Every value resolves as ``build`` resolves it:
+    ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
+    ``build`` resolves them; ``session`` is where an already-resolved
+    ``Workspace`` travels.
 
     .. code-block:: text
 
-        an explicit argument
+        an explicit name
           → a workspace configuration file
-            → what the notebook is attached to
-              → a configuration error naming what is missing
+            → the Session's own workspace
+              → what the notebook is attached to
+                → a configuration error naming what is missing
     """
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)

@@ -9,8 +9,8 @@ import time
 import weaver
 from weaver.errors import WeaverError
 
-#: The capacity verbs, kept here so the parser needs no Fabric import — a
-#: CLI-only install without the [fabric] extra must still build its parser.
+#: The capacity verbs, kept here so building the parser imports nothing from
+#: `weaver.fabric` — `weaver --help` should not pay for a transport.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 #: Named in help text. Spelled out here rather than imported at module scope so
@@ -314,15 +314,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _fabric_cli_workspace(args: argparse.Namespace):
-    """Resolve the Fabric-only values shared by notebook CLI utilities."""
+    """Resolve the workspace the notebook utilities act in."""
 
-    from weaver.errors import CommandError
-    from weaver.workspaces import Workspace
-
-    workspace = _resolve_workspace(args)
-    if not isinstance(workspace, Workspace):
-        raise CommandError("A Fabric Workspace is required for notebook commands.")
-    return workspace
+    return _resolve_workspace(args)
 
 
 def handle_notebook_push(args: argparse.Namespace) -> int:
@@ -408,11 +402,8 @@ def handle_install(args: argparse.Namespace) -> int:
 
     from weaver.errors import CommandError
     from weaver.sessions.host import use_or_create_session
-    from weaver.workspaces import Workspace
 
     workspace = _resolve_workspace(args)
-    if not isinstance(workspace, Workspace):
-        raise CommandError("A Fabric Workspace is required to install Weaver.")
     if not workspace.environment:
         raise CommandError(
             "A Fabric Environment is required to install Weaver. "
@@ -840,8 +831,11 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
 
     from weaver.errors import CommandError
     from weaver.fabric import FabricResolver, ItemNotFoundError
-    from weaver.fabric.resources import LAKEHOUSE, WAREHOUSE
-    from weaver.targets import DeltaTarget, parse_physical_target, physical_item
+    from weaver.targets import (
+        parse_physical_target,
+        physical_item,
+        physical_kind,
+    )
 
     if session is not None:
 
@@ -853,7 +847,7 @@ def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
     absent = []
     for value in targets:
         target = parse_physical_target(value, what="load target", error=CommandError)
-        item_type = LAKEHOUSE if isinstance(target, DeltaTarget) else WAREHOUSE
+        item_type = physical_kind(target)
         try:
             resolve(physical_item(target), item_type=item_type)
         except ItemNotFoundError:

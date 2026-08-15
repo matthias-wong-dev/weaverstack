@@ -305,7 +305,7 @@ def test_an_artefact_that_was_never_installed_fails_before_it_is_dispatched():
 
 
 def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
-    """The emulator has no SQL analytics endpoint. That is an absence, not a fault."""
+    """A target with no SQL analytics endpoint is an absence, not a fault."""
 
     made = runner(
         nodes=[

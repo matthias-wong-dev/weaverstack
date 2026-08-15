@@ -1,9 +1,10 @@
 """Which workspace an operation means, resolved once for all of them.
 
-Every operation answers the same question before it does anything: an explicit
-argument, then an already-resolved Workspace, then workspace configuration,
-then — inside a Fabric notebook only — the session's own context. Shared
-because four operations answering it four ways is four places for it to drift.
+Every operation answers the same question before it does anything, and answers
+it from names: an explicit argument, then workspace configuration, then the
+Session's own context, then — inside a Fabric notebook — what the notebook is
+attached to. Shared, because four operations answering it four ways is four
+places for it to drift.
 """
 
 from __future__ import annotations
@@ -24,9 +25,9 @@ def _operation_workspace(
 
     .. code-block:: text
 
-        an explicit workspace argument
+        an explicit workspace name
           → a workspace configuration file
-            → the Session's default context
+            → the Session's own workspace
               → what the notebook is attached to
                 → a configuration error naming what is missing
 

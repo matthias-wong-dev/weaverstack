@@ -11,9 +11,8 @@ and what it does with a two-phase installer reading ``sys.columns`` are its
 answers, not ours — which is why the semantics are established here rather than
 inferred from a local approximation.
 
-The outcomes match ``tests/spark/test_python_load_primitive.py`` deliberately.
-Two engines, one set of load semantics; if the two files disagree, the semantics
-have diverged.
+The outcomes match what a Lakehouse load produces, deliberately: two engines,
+one set of load semantics. If they disagree, the semantics have diverged.
 
 **One estate, and one execution per sequence.** Every round trip to a Warehouse
 costs seconds, so what this file is careful about is not how many assertions it

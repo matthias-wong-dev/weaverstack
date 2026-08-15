@@ -97,7 +97,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
     )
 
 
-# --- the emulator: a filesystem link ------------------------------------------
+# --- the shortcut ------------------------------------------------------------
 
 
 def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):

@@ -97,22 +97,22 @@ def build(
     bundle: str | None = None,
     session=None,
 ) -> BuildResult:
-    """Build an authored repository using simple notebook-facing values.
+    """Build an authored repository.
 
-    Every value resolves the same way: an explicit argument, then an
-    already-resolved typed ``Workspace``, then workspace configuration, then —
-    inside a Fabric notebook only — the session's own context. Anything still
-    unresolved is an error stated in one sentence.
+    Every value is a *name*: ``workspace``, ``catalogue`` and ``environment``
+    are strings, resolved the same way each operation resolves them — an
+    explicit argument, then workspace configuration, then the Session's own
+    context, then, inside a Fabric notebook, what the notebook is attached to.
+    Anything still unresolved is an error stated in one sentence.
 
-    ``workspace=None`` means the current Fabric session. A typed ``Workspace``
-    arrives already resolved, so configuration is never layered over it.
+    ``catalogue`` names the Weaver control Lakehouse, typed:
+    ``Lakehouse/Weaver``. Inside a notebook it defaults to the attached
+    Lakehouse, which is the control Lakehouse only and becomes an authored
+    target only if a binding says so.
 
-    ``catalogue`` names the Weaver control Lakehouse. Inside a notebook it
-    defaults to the attached Lakehouse, which is the control Lakehouse only and
-    becomes an authored target only if a binding says so.
-
-    ``session`` is a Session to run in. Supplied, its resources are reused and it
-    is left open; omitted, this operation creates and closes one.
+    ``session`` is a Session to run in, and is where an already-resolved
+    ``Workspace`` travels. Supplied, its resources are reused and it is left
+    open; omitted, this operation creates and closes one.
     """
 
     resolved_workspace = operation_workspace(

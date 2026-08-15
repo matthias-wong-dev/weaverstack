@@ -1461,9 +1461,8 @@ def warehouse_estate(
 
 # --- the estates a Fabric test drives ----------------------------------------
 #
-# Fabric-only, deliberately. Their local halves live in `tests/spark`, built from
-# the same `tests/support` machinery. A single parametrised fixture spanning both
-# transports is what used to make `pytest -m spark` reach into this file, and
+# Fabric-only, deliberately, and built from the same `tests/support` machinery a
+# test without a tenant uses. A module placed here collects this conftest, and
 # with it a workspace, a credential and a session.
 
 

@@ -4,30 +4,26 @@ This is a *primitive* test, and its claim is developer-facing: someone in a
 Fabric session can import a deployed object and run its load, with no planner,
 no catalogue orchestration and no estate-level entry point in the way.
 
-That is also why it is ``hosted``. The subject is the API the *wheel
-installed in the session* offers — that `.load()` exists there and behaves —
-rather than the load semantics underneath it, which are proved locally in
-``tests/spark`` for a fraction of the cost.
+That is also why it is ``hosted``. The subject is the API the *wheel installed
+in the session* offers — that `.load()` exists there and behaves — rather than
+the load semantics underneath it, which the core suite proves for a fraction of
+the cost.
 
-These are the claims local Spark cannot make, and the branch learned that the
-expensive way. In the emulator ``Files`` is an ordinary directory, so a folder
-load against ``tmp_path`` exercises the same code with none of the risk; and
-deployed modules sit flat in a temp directory, so an import that could never
-work from a real runtime tree succeeds. Fabric differs in exactly the two ways
-that broke:
+Two things about Fabric make these claims impossible to prove anywhere cheaper,
+and both once passed against a directory and failed against a workspace:
 
 .. code-block:: text
 
-    Files is object storage      -> a Folder needs a mount, not a URL
+    Files is object storage        -> a Folder needs a mount, not a URL
     the tree is a deployed package -> imports resolve as Files.* and lib.*
 
 So this file asserts only what needs OneLake to be true. Everything about *load
-semantics* — rejection, thresholds, incremental policy — is proved locally in
-``tests/spark``, and repeating it here would buy nothing for several minutes.
+semantics* — rejection, thresholds, incremental policy — is decided without a
+tenant, and repeating it here would buy nothing for several minutes.
 
 One submission, one evidence payload, per the suite's rule: every question about
-the installed estate goes in one body and the assertions run locally against
-what it brings back.
+the installed estate goes in one body and the assertions run here against what
+it brings back.
 
 It therefore carries ``fabric`` and ``hosted``: the first says where the
 resources are, the second says where Weaver runs. The platform question

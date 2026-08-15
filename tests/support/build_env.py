@@ -1,14 +1,11 @@
 """The build environment a test drives, independent of transport.
 
-`BuildEnv` hides *where* a build runs behind callables, so one set of assertions
-serves local Spark and Fabric alike. It lives here rather than in either
-transport's conftest because it belongs to neither: putting it in the Fabric one
-is what left local Spark tests importing Fabric fixtures, and made `-m spark`
-and `tests/fabric/` describe different things.
+`BuildEnv` hides *how* a build reaches its estate behind callables, so a test
+body names what it is asserting rather than Livy, Spark or ODBC. It lives here
+rather than in `tests/fabric/conftest.py` so that a test importing it does not
+thereby acquire a workspace, a credential and a session.
 
-Each transport supplies the callables — `tests/support/local_build.py` for the
-emulator, `tests/fabric/conftest.py` for a session — and what a test writes is
-the same either side.
+`tests/fabric/conftest.py` supplies the callables.
 """
 
 from __future__ import annotations
@@ -293,7 +290,7 @@ class BuildEnv:
         inside them — sets what this suite costs. Six ``query`` calls describing
         one moment are six waits for the same answer; this submits their bodies
         together and returns one payload, which the test then asserts against
-        locally.
+        in this process.
 
         That is not only cheaper, it is more accurate. Separate calls interrogate
         a *mutable remote estate* at six different instants, so a claim about

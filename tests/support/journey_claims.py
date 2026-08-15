@@ -147,11 +147,10 @@ def _readable(env, seen) -> None:
 
 # --- the body a developer's own code runs --------------------------------------
 #
-# One round trip into the environment. The body is a single string run wherever
-# the environment runs — in this process against local Spark, or inside a Fabric
-# session over Livy — so what is asserted is genuinely the same code either side.
-# Its only transport-dependent line is ``resolver``, which the environment binds
-# before the body starts.
+# One round trip into the environment. The body is a single string, run inside
+# the Fabric session over Livy, so what is asserted is the code a developer's own
+# object would run. Its only environment-dependent line is ``resolver``, which
+# the environment binds before the body starts.
 #
 # The classes are declared in the body rather than imported from the installed
 # repository because importing one is the load executor's job, and that does not
@@ -329,9 +328,9 @@ def _assert_authored_objects_reach_the_build(env) -> None:
     )
     assert reached["empty_columns"] == reached["order_columns"]
 
-    # Object identity resolves through the Lakehouse's own root. Staging access
-    # is transport-specific: a local path in the emulator and a session mount in
-    # Fabric, both naming the same Files-relative object.
+    # Object identity resolves through the Lakehouse's own root, and staging
+    # through the session's mount of it — the same Files-relative object,
+    # addressed as Spark reads it and as Python opens it.
     assert reached["folder_spark_path"] == reached["resolved_folder_path"]
     assert reached["folder_path"].endswith("/Files/Raw/CustomerCsv")
     assert reached["staging_path"].endswith("/Files/Raw/CustomerCsv_Staging")
@@ -799,8 +798,7 @@ def drive(journey):
 # added here is the composition: a Delta table published into a Warehouse
 # through an alias, materialised there, and reconciled against its source.
 #
-# Fabric only, and not for cost: a `LocalWorkspace` has no Warehouse, so there
-# is no emulator twin to run this against.
+# A Warehouse, so a real workspace is the only place this can run.
 
 CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
 

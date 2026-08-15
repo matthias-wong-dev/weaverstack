@@ -33,10 +33,8 @@ wheel: :mod:`weaver.runtime.session_scopes` and :mod:`weaver.run.entry` inside
 the Fabric session. The orchestration is here; what is imported over there is
 the published package.
 
-This is the file that used to run against the local emulator, where ``Files``
-was a directory and a deployed module sat flat in a temporary folder. Neither is
-true of OneLake, so the claim moved rather than being dropped — see
-``tests/test_coverage_debt_invariant.py`` for why that mattered.
+``Files`` is object storage and a deployed module sits in a package tree, so a
+dispatch that resolved against a directory would prove nothing about either.
 """
 
 from __future__ import annotations

@@ -193,7 +193,7 @@ submission costs seconds; the statements inside it cost almost nothing.
 > local.
 
 Gather every question about one moment into one body, submit it once, assert
-against what comes back — see `tests/fabric/observation.py`. Split calls only
+against what comes back — see `tests/support/observation.py`. Split calls only
 where the *boundary between them* is the subject: before versus after a
 transition, a failure stopping later work, prune changing the estate.
 

@@ -225,11 +225,10 @@ class ItemBinding:
     target: LakehouseBinding | WarehouseBinding
 
     def __post_init__(self) -> None:
-        expected = LAKEHOUSE if isinstance(self.target, LakehouseBinding) else WAREHOUSE
-        if self.item.item_type != expected:
+        if self.item.item_type != self.target.physical_kind:
             raise BuildError(
                 f"logical item {self.item} requires a {self.item.item_type} binding, "
-                f"not {type(self.target).__name__}"
+                f"not a {self.target.physical_kind} one"
             )
 
     def to_bound_target(self) -> BoundTarget:
@@ -264,12 +263,7 @@ class ItemBindings:
                 )
             seen.add(binding.item)
             target = binding.target
-            key = (
-                LAKEHOUSE if isinstance(target, LakehouseBinding) else WAREHOUSE,
-                target.lakehouse.name
-                if isinstance(target, LakehouseBinding)
-                else target.warehouse.name,
-            )
+            key = (target.physical_kind, target.item.name)
             if key in physical:
                 raise BuildError(
                     f"physical {key[0]} target is bound more than once: {key[1]}"
@@ -328,8 +322,9 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
 
     ``Lakehouse/Sales`` uses the configured default. The self-contained form
     ``Lakehouse/SalesDev=Sales`` needs no configured target declaration: the
-    left-hand side is typed and supplies the type for both sides, so the
-    logical item is named alone.
+    physical Lakehouse ``SalesDev`` holds the logical item ``Sales``. The
+    left-hand side is typed and supplies the type for both, so the logical item
+    is named alone.
 
     That is why a typed right-hand side is refused rather than accepted and
     checked. ``Lakehouse/SalesDev=Warehouse/Sales`` is not a binding whose
@@ -351,8 +346,8 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
     physical_type, physical = _parse_physical_item(physical_text)
     if separator:
         # The left-hand side supplies the type for both, so the right names the
-        # logical item alone. `Lakehouse/SalesDev=Sales` said the same
-        # word twice and let the two disagree; this cannot.
+        # logical item alone. Spelling it `=Lakehouse/Sales` would say the type
+        # twice and let the two disagree.
         if "/" in logical_text:
             raise BuildError(
                 f"a binding's logical item is named without a type: write "

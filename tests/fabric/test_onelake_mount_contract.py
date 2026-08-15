@@ -91,7 +91,7 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
 #: it was told about and then fails to remove the directory, as ``ENOTEMPTY``.
 #:
 #: Only reproducible when one session outlives a change made behind it, which is
-#: the Fabric suite's shape and never the emulator's.
+#: the Fabric suite's shape.
 MOUNT_COHERENCE = r"""
 import notebookutils
 from pathlib import Path

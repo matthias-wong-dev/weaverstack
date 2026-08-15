@@ -3,8 +3,7 @@
 ``cross-item-journey`` is the journey estate plus the Warehouse that reports on
 it: a Delta table published into the Warehouse through an alias, materialised
 there, viewed, and reconciled against its source by a Test. It is the one shape
-no single-target estate can express, and the emulator cannot hold it at all —
-a ``LocalWorkspace`` has no Warehouse.
+no single-target estate can express.
 
 So the *order* a build gives it is asserted here, in pure Python, where a plan is
 a value and no engine is needed. What that leaves for Fabric is whether the
@@ -131,7 +130,7 @@ def test_the_warehouse_side_is_reached_over_tds(plan):
     """A Warehouse alias is a T-SQL view over the endpoint, not a shortcut.
 
     Which is why this estate is Fabric-only in a way the Lakehouse journey is
-    not: the emulator has Delta and a filesystem, and no Warehouse at all.
+    not.
     """
 
     by_target = {

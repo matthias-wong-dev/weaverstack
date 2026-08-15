@@ -44,9 +44,8 @@ DEFERRED = {
     "drop_procedure": "generated load procedures land in a later branch",
 }
 
-#: Kinds whose Delta-side execution test went with the local Spark tier. Each
-#: still has a Fabric test naming the same claim, or is waiting for one in the
-#: acceptance milestone; they are recorded here rather than quietly dropped,
+#: Kinds whose Delta-side execution needs a real Lakehouse and is still waiting
+#: for the test that gives it one. Recorded here rather than quietly dropped,
 #: because a checklist that lost an entry would read as covered.
 AWAITING_FABRIC = {
     "build_folder": "the Delta-side folder execution test needs a real Lakehouse",

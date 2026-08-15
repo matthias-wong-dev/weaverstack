@@ -336,7 +336,7 @@ execution require measurement.
 ## Where to look in the code
 
 ```text
-weaver/session/          the Session contract, hosts, resources, capabilities
+weaver/sessions/         the Session contract, hosts, resources, capabilities
 weaver/declaration/      parsing authored files into a WeaverRepository
 weaver/build_bundle/     Builder, BuildBundle, Installer, executors
 weaver/run/              Runner, RunGraph, RunState, dispatch

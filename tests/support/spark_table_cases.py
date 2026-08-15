@@ -6,10 +6,10 @@ It asks with ``DESCRIBE QUERY``, in the same submission as whatever setup the
 query needs, and then renders the ``CREATE TABLE`` here and sends that.
 
 The cases below are what makes that answer trustworthy, and they are held in one
-place because both positions have to agree about them: the emulator running the
-executor in process, and a desktop running it against a real Lakehouse with only
-the statements crossing. A type that survived one and not the other would be a
-difference between environments rather than a property of the build.
+place because both positions have to agree about them: Weaver running the
+executor inside Fabric, and a desktop running it with only the statements
+crossing. A type that survived one and not the other would be a difference
+between positions rather than a property of the build.
 
 Each case is a frozen instruction, exactly as ``weaver.declaration.ddl`` writes
 one, plus what the built table must then look like.

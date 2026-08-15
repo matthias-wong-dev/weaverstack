@@ -6,9 +6,9 @@ them is decided in this process: column validation, the physical columns, the
 DDL. Nothing imports Weaver on the far side, which is why this is ``remote``.
 
 ``DESCRIBE QUERY`` replaced reading a ``DataFrame``'s schema, and the swap is
-only safe if Fabric answers it the same way. The cases are shared with
-``tests/spark/boundary/test_spark_table_shape_boundary.py`` so the emulator and a
-real Lakehouse are held to one set of expectations:
+only safe if Fabric answers it the same way. The cases live in
+``tests/support/spark_table_cases.py``, so what is rendered without a tenant and
+what a real Lakehouse builds are held to one set of expectations:
 
 * every structural type a document can declare survives to the built table;
 * a query reading a temporary view its own setup registered resolves, which it

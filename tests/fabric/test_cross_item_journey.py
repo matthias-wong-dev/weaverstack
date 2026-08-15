@@ -4,8 +4,8 @@ A thin wrapper: every assertion lives in `tests/support/journey_claims.py`,
 because the claims are about a build lifecycle and not about a transport. What
 this file supplies is the estate.
 
-Fabric only, and not for cost: a `LocalWorkspace` has no Warehouse, so this
-composition has no emulator twin. The order the build gives it is asserted
+A Warehouse, so a real workspace is the only place this can run. The order the
+build gives it is asserted
 without an engine in `tests/targeted/test_cross_item_composition_representation.py`;
 what is left for a real workspace is whether the statements that order produces
 are accepted, and whether the two sides reconcile once loaded.

@@ -81,7 +81,7 @@ def test_wiping_an_empty_target_is_quiet(lakehouses):
 def test_wiping_a_lakehouse_that_does_not_exist_says_so(lakehouses):
     """Absent is not empty.
 
-    The emulator answered an unknown name with an empty directory, so a wipe of
+    A store that answered an unknown name with an empty directory made a wipe of
     something that was never created looked quiet. Fabric resolves an item or
     does not, and a destructive command aimed at a name nothing answers to
     should say that rather than report success over nothing.

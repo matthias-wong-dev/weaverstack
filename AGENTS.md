@@ -210,9 +210,9 @@ through the store directly and looked like it was testing `wipe`.
 
 These are enforced by `tests/test_core_boundary.py`:
 
-- **Core never imports the CLI.** `weaver_cli` is an optional extra; a core
-  import of it would break a Fabric Environment install. The dependency runs one
-  way, CLI → core.
+- **Core never imports the CLI.** `weaver_cli` parses arguments and prints;
+  a core import of it would put a desktop concern inside the package a Fabric
+  Environment runs. The dependency goes one way, CLI → core.
 - **The core is importable without PySpark and without Fabric credentials.**
   PySpark, `azure-identity` and `mssql-python` are lazy imports confined to the
   modules that execute against those systems.
@@ -313,13 +313,12 @@ tenant; these names are neither product behaviour nor tenant-specific, and every
 one is overridable by environment variable, so another tenant runs the suite by
 exporting its own.
 
-Fixed items remove *variance*, not time — and the distinction was learned the
-hard way, having been claimed twice before it was measured. Provisioning cost
-about seven seconds in a twenty-four minute run. What reuse removes is the tail
-risk (an endpoint wait that is unbounded, and which the harness tolerates ten
-minutes for) and the artifact churn that makes Fabric's namespace resolver
-intermittently report `Artifact not found` for an item that demonstrably exists.
-The suite's real cost is bundle generate/install round trips through Livy.
+Fixed items remove *variance* rather than time. Creating an item is quick; what
+reuse removes is the tail risk — an endpoint wait that is unbounded, and which
+the harness tolerates ten minutes for — and the artifact churn that makes
+Fabric's namespace resolver intermittently report `Artifact not found` for an
+item that demonstrably exists. The suite's cost is bundle generate/install
+round trips through Livy.
 
 Item *lifecycle* cover — creating and deleting Lakehouses — is marked
 `provision` and opted into separately from ordinary Fabric work. It exercises Fabric's
@@ -366,7 +365,7 @@ after a build or refresh, a failure stopping later work, a repository mutated
 between generation and installation, prune or wipe changing the estate. The
 protocol tests in `test_livy_import.py` show both halves of that judgement.
 
-The helpers live in `tests/fabric/observation.py`. Nothing hides the call: every
+The helpers live in `tests/support/observation.py`. Nothing hides the call: every
 submission is counted by `tests/fabric/livy_telemetry.py` and pytest prints a
 breakdown at the end of the run.
 

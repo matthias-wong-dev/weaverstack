@@ -8,14 +8,12 @@ claim about one moment; it is several claims about several, and a later one can
 be true of state an earlier one never saw.
 
 So the shape here is: gather every question about a moment into one body, submit
-it once, bring back one payload, and assert against it locally. Assertion
-messages stay local and readable, the estate is interrogated once, and the
-evidence can be kept on the step it belongs to rather than re-read later.
+it once, bring back one payload, and assert against it here. Assertion messages
+stay readable, the estate is interrogated once, and the evidence can be kept on
+the step it belongs to rather than re-read later.
 
 The bodies are *text* rather than code called directly, because they have to run
-where the estate is — in this process against local Spark, or inside a Fabric
-session over Livy. Both transports send the same string, so what the local suite
-proves is the same code Fabric runs.
+where the estate is: inside a Fabric session, submitted over Livy.
 """
 
 from __future__ import annotations

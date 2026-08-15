@@ -31,7 +31,6 @@ EXECUTORS = (
 #: its job. Acquisition belongs to the factories; behaviour belongs here.
 ENVIRONMENT_TELLS = {
     "Workspace",
-    "LocalWorkspace",
     "FabricStore",
     "FilesystemStore",
     "OneLakeDfsClient",
