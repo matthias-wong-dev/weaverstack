@@ -251,7 +251,7 @@ def render_catalogue_after_build(
 
     # The publication is a genuine diff against what is persisted: a table whose
     # rows are all unchanged produces no statement, so an identical second build
-    # appends nothing here and the endpoint refresh below is not reached.
+    # appends nothing here.
     publication = publish(current or Catalogue(rows={}), desired)
 
     # Registry last, in its own barrier — taken from the structure rather than
