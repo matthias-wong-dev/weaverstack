@@ -209,23 +209,76 @@ def _optional_text(value: Any) -> str | None:
     return None if value is None or value == "" else str(value)
 
 
+#: How many times a request is retried when the transport fails, and how long to
+#: wait between attempts. A build polls the Livy API for as long as the build
+#: takes, so over ten minutes a single refused connection is likely.
+CONNECTION_ATTEMPTS = 4
+CONNECTION_BACKOFF = 2.0
+
+
+def _never_sent(exc: BaseException) -> bool:
+    """Whether a transport failure happened before the request left this machine.
+
+    A connection that was never established carries nothing: the server has not
+    seen the request, so sending it again cannot run a statement twice. Once the
+    request is on the wire that is no longer knowable, and a failure there is
+    reported rather than repeated.
+    """
+
+    try:
+        from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+    except ImportError:  # pragma: no cover - requests vendors urllib3
+        return False
+    # requests reports the cause several ways: chained, as the argument it was
+    # constructed with, or as a MaxRetryError's `reason`. All three are walked,
+    # because which one appears depends on where urllib3 gave up.
+    frontier = [exc]
+    seen: set[int] = set()
+    while frontier:
+        current = frontier.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, (NewConnectionError, ConnectTimeoutError)):
+            return True
+        frontier.extend([current.__cause__, current.__context__])
+        frontier.extend(arg for arg in current.args if isinstance(arg, BaseException))
+        reason = getattr(current, "reason", None)
+        if isinstance(reason, BaseException):
+            frontier.append(reason)
+    return False
+
+
 def _call(method: str, url: str, token: str, payload: Any = None,
           expected: tuple[int, ...] = (200, 201, 202)) -> dict:
     import requests
 
-    response = requests.request(
-        method,
-        url,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        data=json.dumps(payload) if payload is not None else None,
-        timeout=120,
-    )
-    if response.status_code not in expected:
-        raise LivyError(
-            f"{method} {url} returned {response.status_code}: "
-            f"{response.text.strip()[:400] or 'no body'}"
-        )
-    return response.json() if response.content else {}
+    for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        try:
+            response = requests.request(
+                method,
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload) if payload is not None else None,
+                timeout=120,
+            )
+        except requests.exceptions.RequestException as exc:
+            # A read can be repeated whatever went wrong; anything else only
+            # when the request demonstrably never arrived.
+            repeatable = method == "GET" or _never_sent(exc)
+            if not repeatable or attempt == CONNECTION_ATTEMPTS:
+                raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
+            time.sleep(CONNECTION_BACKOFF * attempt)
+            continue
+        if response.status_code not in expected:
+            raise LivyError(
+                f"{method} {url} returned {response.status_code}: "
+                f"{response.text.strip()[:400] or 'no body'}"
+            )
+        return response.json() if response.content else {}
 
 
 class LivySession:

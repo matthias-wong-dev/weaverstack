@@ -69,6 +69,45 @@ class SesFixture:
             shutil.copytree(self.path, destination, ignore=_NOT_COPIED)
         return replace(self, path=destination)
 
+    def renamed(self, root: Path, names: Mapping[str, str]) -> "SesFixture":
+        """The same declaration, under different logical item names.
+
+        The catalogue is keyed by logical item, so two estates sharing an item
+        name describe the same registered objects and building one makes the
+        other's rows look rebuilt. An estate that needs an identity of its own
+        takes it here rather than by checking the same documents in twice.
+
+        ``names`` maps whole item ids — ``{"Lakehouse/Sales": "Lakehouse/Stock"}``.
+        Directories are renamed and every text file is rewritten, because a
+        document may name another item: an alias says which item it crosses to.
+        """
+
+        copied = self.disposable(root)
+        for old, new in names.items():
+            source = copied.path / old
+            if source.is_dir():
+                source.rename(copied.path / new)
+        for path in sorted(copied.path.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:  # a fixture's own binary data
+                continue
+            rewritten = text
+            for old, new in names.items():
+                rewritten = rewritten.replace(old, new)
+            if rewritten != text:
+                path.write_text(rewritten, encoding="utf-8")
+        return replace(
+            copied,
+            items=tuple(names.get(item, item) for item in copied.items),
+            lakehouse_names={
+                names.get(item, item): lakehouse
+                for item, lakehouse in copied.lakehouse_names.items()
+            },
+        )
+
 
 #: The declaration fixtures a build env can install. One place, so no test
 #: hard-codes a path and both transports draw the same source.
@@ -143,6 +182,14 @@ LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
 CROSS_ITEM_JOURNEY_FIXTURE = SesFixture(
     _FIXTURES / "cross-item-journey", ("Lakehouse/Sales", "Warehouse/Reporting")
 )
+#: The same estate under its own logical item names, for the desktop journey.
+#: Identity rather than content is what it needs: the two journeys drive the
+#: same documents from opposite positions, and sharing item names would make
+#: each look to the catalogue like a rebuild of the other.
+DESKTOP_JOURNEY_NAMES = {
+    "Lakehouse/Sales": "Lakehouse/Stock",
+    "Warehouse/Reporting": "Warehouse/Analysis",
+}
 #: A producer and the consumer that aliases it, in two Lakehouses. The emulator
 #: materialises the alias as a filesystem link where Fabric makes a OneLake
 #: shortcut, so the same body proves incremental alias behaviour either side.

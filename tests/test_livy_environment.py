@@ -103,3 +103,98 @@ def test_a_workspace_without_an_environment_is_an_error():
 
     with pytest.raises(CommandError, match="environment"):
         LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
+
+
+# --- a long build outlives a broken connection --------------------------------
+
+
+def test_a_read_is_retried_when_the_connection_fails(monkeypatch):
+    """A build polls for as long as it runs, so one refused connection is likely.
+
+    The work being watched is unaffected by a connection that never arrived, so
+    asking again gets the answer rather than failing a ten-minute build.
+    """
+
+    import requests
+
+    attempts = []
+
+    def flaky(method, url, **kwargs):
+        attempts.append(method)
+        if len(attempts) < 3:
+            raise requests.exceptions.ConnectionError("connection refused")
+        return types.SimpleNamespace(
+            status_code=200, content=b"{}", json=lambda: {"state": "idle"}
+        )
+
+    monkeypatch.setattr(livy, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(requests, "request", flaky)
+
+    assert livy._call("GET", "https://example/sessions/1", "t") == {"state": "idle"}
+    assert len(attempts) == 3
+
+
+def test_a_submission_is_retried_when_it_never_reached_fabric(monkeypatch):
+    """A connection that was never established carries nothing.
+
+    The server has not seen the request, so sending it again cannot run a
+    statement twice — which is what makes a refused connection safe to repeat
+    for a POST as well as a read.
+    """
+
+    import requests
+    from urllib3.exceptions import NewConnectionError
+
+    attempts = []
+
+    def flaky(method, url, **kwargs):
+        attempts.append(method)
+        if len(attempts) < 2:
+            raise requests.exceptions.ConnectionError(
+                NewConnectionError(None, "connection refused")
+            )
+        return types.SimpleNamespace(
+            status_code=200, content=b"{}", json=lambda: {"id": 7}
+        )
+
+    monkeypatch.setattr(livy, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(requests, "request", flaky)
+
+    assert livy._call("POST", "https://example/sessions", "t", payload={}) == {"id": 7}
+    assert attempts == ["POST", "POST"]
+
+
+def test_a_submission_that_left_this_machine_is_not_retried(monkeypatch):
+    """Once the request is on the wire, whether Fabric acted on it is unknowable.
+
+    Sending it again could start a second session or run a statement twice, so
+    the failure is reported instead.
+    """
+
+    import requests
+
+    attempts = []
+
+    def broke(method, url, **kwargs):
+        attempts.append(method)
+        raise requests.exceptions.ConnectionError("connection reset")
+
+    monkeypatch.setattr(requests, "request", broke)
+
+    with pytest.raises(livy.LivyError, match="could not be reached"):
+        livy._call("POST", "https://example/sessions", "t", payload={})
+
+    assert attempts == ["POST"]
+
+
+def test_a_read_that_keeps_failing_says_so(monkeypatch):
+    import requests
+
+    def refused(method, url, **kwargs):
+        raise requests.exceptions.ConnectionError("connection refused")
+
+    monkeypatch.setattr(livy, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(requests, "request", refused)
+
+    with pytest.raises(livy.LivyError, match="could not be reached"):
+        livy._call("GET", "https://example/sessions/1", "t")
