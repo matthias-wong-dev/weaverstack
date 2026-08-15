@@ -5,9 +5,11 @@ the build that writes the catalogue is the build that creates it, and a missing
 column is upgrade, where a newer Weaver compares against a table an older one
 created.
 
-Everything else propagates. A permission error or a broken connection read as
-"no rows" would tell the next build that nothing is catalogued, and that is a
-licence to remove an estate.
+Neither is recognised from a failure. The connection asks the ``_`` schema what
+it holds, once, and a table or column absent from that answer is absent —
+so a permission error or a broken connection stays a failure rather than
+reading as "no rows", which would tell the next build that nothing is
+catalogued. That is a licence to remove an estate.
 """
 
 from __future__ import annotations
@@ -17,51 +19,6 @@ from typing import Any
 from .render import InstallationScope, InstallationScopes, Row
 from .tables import CatalogueTable
 from .tsql import identifier, qualified_name
-
-#: What the engine calls a name it cannot resolve. Recognised by number rather
-#: than by message text, which is localised and reworded between versions.
-#:
-#: 208 — Invalid object name. 2812 — could not find stored procedure, which is
-#: how a two-part name that resolves to nothing is sometimes reported.
-ABSENT_OBJECT_ERRORS = (208, 2812)
-#: 207 — Invalid column name. Only ever reached if the column probe below is
-#: bypassed, and kept so a caller that does so still reads an upgrade as one.
-ABSENT_COLUMN_ERROR = 207
-
-
-def is_absent(exception: BaseException) -> bool:
-    """Whether this failure means "no such table" rather than "the read failed".
-
-    Recognised from the engine's own error number. Message text is not evidence:
-    it is localised, and a permission failure phrased unluckily would otherwise
-    read as an empty catalogue.
-    """
-
-    for value in _error_numbers(exception):
-        if value in ABSENT_OBJECT_ERRORS:
-            return True
-    return False
-
-
-def _error_numbers(exception: BaseException) -> tuple[int, ...]:
-    """Every SQL error number this exception carries, however it carries it."""
-
-    found: list[int] = []
-    seen: set[int] = set()
-    current: BaseException | None = exception
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        for attribute in ("number", "sqlstate", "errno"):
-            value = getattr(current, attribute, None)
-            if isinstance(value, int):
-                found.append(value)
-        for argument in getattr(current, "args", ()):
-            if isinstance(argument, int):
-                found.append(argument)
-            elif isinstance(argument, (list, tuple)):
-                found.extend(part for part in argument if isinstance(part, int))
-        current = current.__cause__ or current.__context__
-    return tuple(found)
 
 
 def read_table(
