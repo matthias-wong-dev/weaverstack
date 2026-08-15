@@ -46,6 +46,25 @@ implementation, not invention: port proven algorithms rather than re-deriving
 them, and spend design attention on the control plane, which is the genuinely
 new part.
 
+## The shape
+
+```text
+Workspace       one Fabric workspace configuration
+
+Session         ConsoleSession   desktop → Fabric
+                NotebookSession  already in Fabric
+                TestSession      records the same contract
+
+build           resolve request → read BuildState → Builder → Installer
+load / test     resolve request → read RunState   → Runner
+
+Fabric          Resolver, REST, OneLake, Livy, TDS
+```
+
+Anything substantially more complicated than that needs a concrete reason to
+exist. There is one workspace type, one build, one place a workspace is
+resolved, and one conversion into the physical target vocabulary.
+
 ## The core abstraction
 
 This is the thing that is hard to hold in your head, and the thing most likely

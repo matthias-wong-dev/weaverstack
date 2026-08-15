@@ -198,8 +198,8 @@ running:
 | `execute_python` | call it | submit over Livy |
 | `execute_spark_sql`, `execute_spark_sql_batch` | `spark.sql(...)` | submit over Livy |
 | `execute_tsql` | TDS | TDS |
-| `store` | filesystem / `notebookutils` | OneLake over HTTPS |
-| `resolver` | local | Fabric REST |
+| `store` | `notebookutils` | OneLake over HTTPS |
+| `resolver` | Fabric REST | Fabric REST |
 
 Every install action runs in the `Installer`, in whichever position that is. An
 executor reaches for the capability its work needs and the Session decides what
@@ -246,28 +246,28 @@ its run could let a later run import modules that a rebuild replaced.
 
 ## Why it is arranged this way
 
-### Remote and local run the same code
+### Both positions run the same code
 
 The runtime components do not depend on where they execute. Changing the
-`Session` lets the same `Builder` and `Installer` run in a notebook or from a
-laptop against the same workspace. The notebook and desktop entry points use the
-same implementation.
-
-Both execution positions are supported:
+`Session` lets the same `Builder` and `Installer` run in a notebook or on a
+desktop against the same workspace:
 
 ```text
-in a notebook     Weaver runs in the session. Everything is local to it.
+in a notebook     Weaver runs in the session, and reaches everything from
+                  inside it.
 
-from a desktop    Weaver runs on your machine. Fabric is reached only through
-                  Livy, TDS, OneLake and REST — and each crossing carries a
-                  small, clear script rather than an operation.
+from a desktop    Weaver runs on your machine. Fabric is reached through Livy,
+                  TDS, OneLake and REST — and each crossing carries a small,
+                  clear script rather than an operation.
 ```
 
-Both positions use the same code and support complete workflows.
+There is one `build`, one `load` and one `test`. What surrounds a build differs
+between the positions — a desktop proves its items exist over REST first — but
+the build itself is one path.
 
-A whole build works in both positions. Its actions and the state it plans
-against are all statements, storage or TDS, so nothing it submits imports Weaver
-and a desktop build needs no published wheel.
+Its actions and the state it plans against are all statements, storage or TDS,
+so nothing it submits imports Weaver and a desktop build needs no published
+wheel.
 
 One thing still crosses as a program: `weaver.run.entry`, for a run's deployed
 Python primitives. A desktop `weaver load` therefore requires `weaver install` to
