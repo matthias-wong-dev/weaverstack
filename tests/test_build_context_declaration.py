@@ -90,7 +90,7 @@ def repository(tmp_path):
 
 
 def _build(repository, **kwargs):
-    return weaver.build(str(repository), bind="Lakehouse/Sales_LH=Lakehouse/Sales", **kwargs)
+    return weaver.build(str(repository), bind="Lakehouse/Sales_LH=Sales", **kwargs)
 
 
 # --- notebook inference -------------------------------------------------------
@@ -302,6 +302,6 @@ def test_a_repository_error_is_reported_before_any_fabric_call(
     with pytest.raises(BuildError):
         weaver.build(
             str(empty),
-            bind="Lakehouse/Sales_LH=Lakehouse/Sales",
+            bind="Lakehouse/Sales_LH=Sales",
             workspace=workspace,
         )

@@ -69,8 +69,8 @@ build_result = weaver.build(
     repository,
     weaver_lakehouse="Weaver",    
     bind=[
-        "Lakehouse/Sales=Lakehouse/Sales",
-        "Warehouse/Reporting=Warehouse/Reporting",
+        "Lakehouse/Sales=Sales",
+        "Warehouse/Reporting=Reporting",
     ],
 )
 

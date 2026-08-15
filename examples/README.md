@@ -44,8 +44,8 @@ weaver.wipe([
 result = weaver.build(
     repository,
     bind=[
-        "Lakehouse/Sales=Lakehouse/Sales",
-        "Warehouse/Reporting=Warehouse/Reporting",
+        "Lakehouse/Sales=Sales",
+        "Warehouse/Reporting=Reporting",
     ],
 )
 

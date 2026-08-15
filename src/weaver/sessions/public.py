@@ -12,7 +12,7 @@ Session out, and each operation given it rather than opening its own.
         catalogue="Weaver",
         environment="weaver",
     ) as session:
-        weaver.build(".", bind="Lakehouse/SalesDev=Lakehouse/Sales", session=session)
+        weaver.build(".", bind="Lakehouse/SalesDev=Sales", session=session)
         weaver.load("Lakehouse/SalesDev", session=session)
         weaver.test("Lakehouse/SalesDev", session=session)
 

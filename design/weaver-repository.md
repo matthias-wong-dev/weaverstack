@@ -110,8 +110,8 @@ From the CLI:
 ```bash
 weaver build \
   ./estate \
-  --bind Lakehouse/Raw_Dev=Lakehouse/Raw \
-  --bind Warehouse/Reporting_Dev=Warehouse/Reporting \
+  --bind Lakehouse/Raw_Dev=Raw \
+  --bind Warehouse/Reporting_Dev=Reporting \
   --workspace Analytics --environment Runtime \
   --catalogue Lakehouse/Control
 ```

@@ -572,8 +572,8 @@ Where the logical and physical names differ, an explicit mapping may be supplied
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw_DEV=Lakehouse/Raw \
-    --bind Warehouse/Reporting_DEV=Warehouse/Reporting
+    --bind Lakehouse/Raw_DEV=Raw \
+    --bind Warehouse/Reporting_DEV=Reporting
 ```
 
 The build process performs the following steps.

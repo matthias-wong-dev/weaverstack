@@ -31,7 +31,7 @@ DEV = """\
 compose:
   dev:
     - weaver wipe Lakehouse/Sales Warehouse/Reporting
-    - weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    - weaver build ./repository --bind Lakehouse/Sales=Sales
     - weaver load Warehouse/Reporting
     - weaver test Warehouse/Reporting
 """
@@ -246,7 +246,7 @@ def test_every_command_runs_in_order_with_its_arguments(
     assert len(calls) == 4
     assert calls[0].targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
     assert calls[1].repository == "./repository"
-    assert calls[1].item_bindings == ["Lakehouse/Sales=Lakehouse/Sales"]
+    assert calls[1].item_bindings == ["Lakehouse/Sales=Sales"]
     assert calls[2].targets == ["Warehouse/Reporting"]
     assert calls[3].targets == ["Warehouse/Reporting"]
 

@@ -90,10 +90,9 @@ def main(argv: list[str] | None = None) -> int:
 
         built = weaver.build(
             str(ESTATE),
-            bind=[
-                f"{lakehouse}=Lakehouse/Sales",
-                f"{warehouse}=Warehouse/Reporting",
-            ],
+            # The physical side is typed and supplies the type for both, so
+            # the logical item is named alone.
+            bind=[f"{lakehouse}=Sales", f"{warehouse}=Reporting"],
             session=session,
         )
         print(f"build {built.status}: bundle {built.bundle_id}")

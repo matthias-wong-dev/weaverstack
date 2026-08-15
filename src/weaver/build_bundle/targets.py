@@ -321,8 +321,14 @@ def effective_item_bindings(
 def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
     """Parse a typed physical selector with an optional logical override.
 
-    ``Lakehouse/Sales`` uses the configured default.  The self-contained form
-    ``Lakehouse/Sales=Lakehouse/Raw`` needs no configured target declaration.
+    ``Lakehouse/Sales`` uses the configured default. The self-contained form
+    ``Lakehouse/SalesDev=Sales`` needs no configured target declaration: the
+    left-hand side is typed and supplies the type for both sides, so the
+    logical item is named alone.
+
+    That is why a typed right-hand side is refused rather than accepted and
+    checked. ``Lakehouse/SalesDev=Warehouse/Sales`` is not a binding whose
+    types disagree — it is a sentence that cannot be written.
     """
 
     if not isinstance(text, str) or text.count("=") > 1:
@@ -334,12 +340,22 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
     logical_text = logical_text.strip()
     if not physical_text or (separator and not logical_text):
         raise BuildError(
-            "a binding must be TypedPhysical/Name or TypedPhysical/Name=Logical/Item"
+            "a binding must be Lakehouse/Name or Lakehouse/Name=LogicalItem"
         )
 
     physical_type, physical = _parse_physical_item(physical_text)
     if separator:
-        item = WeaverItemId.parse(logical_text)
+        # The left-hand side supplies the type for both, so the right names the
+        # logical item alone. `Lakehouse/SalesDev=Sales` said the same
+        # word twice and let the two disagree; this cannot.
+        if "/" in logical_text:
+            raise BuildError(
+                f"a binding's logical item is named without a type: write "
+                f"{physical_text}={logical_text.rpartition('/')[2]} rather than "
+                f"{physical_text}={logical_text}. The physical side already says "
+                f"this is a {physical_type}"
+            )
+        item = WeaverItemId(physical_type, logical_text)
     else:
         if workspace is None:
             raise BuildError(

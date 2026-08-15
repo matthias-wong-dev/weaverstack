@@ -10,7 +10,7 @@ waited a minute for it, and closed it on the way out — so a developer running
 .. code-block:: text
 
     weaver> wipe  Lakehouse/Sales
-    weaver> build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    weaver> build ./repository --bind Lakehouse/Sales=Sales
     weaver> load  Lakehouse/Sales
     weaver> test  Lakehouse/Sales
 

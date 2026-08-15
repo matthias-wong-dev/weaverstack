@@ -34,7 +34,7 @@ weaver build ./estate \
   --workspace .local \
   --workspace-type local \
   --catalogue Lakehouse/Weaver \
-  --bind Lakehouse/Sales=Lakehouse/Sales
+  --bind Lakehouse/Sales=Sales
 ```
 
 A configuration is shorthand for the same values. Physical target names are
@@ -70,7 +70,7 @@ Starting resources in the background...
 Commands are the ordinary CLI commands. `exit` to leave.
 
 weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
-weaver> build . --bind Lakehouse/Sales=Lakehouse/Sales
+weaver> build . --bind Lakehouse/Sales=Sales
 weaver> load Lakehouse/Sales Warehouse/Reporting
 weaver> test Lakehouse/Sales
 weaver> exit
@@ -218,7 +218,7 @@ bindings and targets the last one had. `compose.yml` writes the sequence down:
 compose:
   dev:
     - weaver wipe Lakehouse/Sales Warehouse/Reporting
-    - weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+    - weaver build ./repository --bind Lakehouse/Sales=Sales
     - weaver load Warehouse/Reporting
     - weaver test Warehouse/Reporting
 ```
@@ -234,7 +234,7 @@ The sequence is displayed and confirmed before anything runs:
 Compose: dev  (compose.yml)
 
 1. weaver wipe Lakehouse/Sales Warehouse/Reporting
-2. weaver build ./repository --bind Lakehouse/Sales=Lakehouse/Sales
+2. weaver build ./repository --bind Lakehouse/Sales=Sales
 3. weaver load Warehouse/Reporting
 4. weaver test Warehouse/Reporting
 
@@ -302,7 +302,7 @@ weaver build \
   ./estate \
   --workspace-config examples/env.yml \
   --bind Lakehouse/Sales_Dev \
-  --bind Warehouse/Reporting_Dev=Warehouse/Alternative
+  --bind Warehouse/Reporting_Dev=Alternative
 ```
 
 Without `=`, the physical target uses its configured logical default. With `=`,
