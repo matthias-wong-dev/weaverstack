@@ -418,15 +418,24 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
                 bound, sql=warehouse.executor
             )
         else:
-            # The catalogue is read for real, over TDS from here.
-            # An empty inventory would be a lie rather than a simplification —
-            # the catalogue schema is already there, and claiming otherwise makes
-            # the planner emit a create that the session then rejects.
-            from weaver.build_bundle.prune import read_lakehouse_inventory
+            # The catalogue, read for real over TDS from here. An empty
+            # inventory would be a lie rather than a simplification — its
+            # tables are already there, and claiming otherwise makes the planner
+            # emit creates the session then rejects.
+            from weaver.fabric import desktop_sql_executor
+            from weaver.targets import WarehouseTarget
 
-            inventories[binding.item] = read_lakehouse_inventory(
-                bound, resolver=resolver, store=store
+            catalogue_sql = desktop_sql_executor(
+                WarehouseTarget(warehouse=fabric_workspace.catalogue_item),
+                fabric_workspace,
+                resolver=resolver,
             )
+            try:
+                inventories[binding.item] = read_warehouse_inventory(
+                    bound, sql=catalogue_sql
+                )
+            finally:
+                catalogue_sql.close()
     generate_item_build_bundle(
         repository,
         bindings=bindings,

@@ -134,3 +134,74 @@ def test_the_reserved_schema_is_the_one_weaver_claims():
 
     assert CATALOGUE_SCHEMA == "_"
     assert all(table.qualified.startswith("_.") for table in CATALOGUE_TABLES)
+
+
+# --- what the catalogue item's inventory may see ------------------------------
+
+
+class _Warehouse:
+    """A Warehouse holding Weaver's `_` and a user's own schemas beside it."""
+
+    OBJECTS = [
+        {"schema_name": "_", "object_name": "Registry", "object_type": "U "},
+        {"schema_name": "_", "object_name": "Log", "object_type": "U "},
+        {"schema_name": "Finance", "object_name": "Ledger", "object_type": "U "},
+        {"schema_name": "Finance", "object_name": "OpenLedger", "object_type": "V "},
+        {"schema_name": "Sales", "object_name": "LoadCustomer", "object_type": "P "},
+    ]
+    SCHEMAS = [{"name": "_"}, {"name": "Finance"}, {"name": "Sales"}]
+
+    def query(self, statement: str):
+        return self.SCHEMAS if "sys.schemas" in statement else self.OBJECTS
+
+
+def _inventory(*, logical_item_name: str):
+    from weaver.build_bundle.prune import read_warehouse_inventory
+    from weaver.build_bundle.targets import BoundTarget
+
+    return read_warehouse_inventory(
+        BoundTarget(
+            id="warehouse-Curated",
+            kind="warehouse",
+            item_id="Curated",
+            item_name="Curated",
+            logical_item_type="Warehouse",
+            logical_item_name=logical_item_name,
+        ),
+        sql=_Warehouse(),
+    )
+
+
+def test_the_catalogue_items_inventory_sees_only_the_reserved_schema():
+    """The whole of the shared-host guarantee, at the point it is decided.
+
+    Prune offers an item everything its inventory can see. So an inventory for
+    the catalogue item that could see `Finance` would offer a user's tables to
+    an item that never declared them — and prune would remove them, correctly,
+    having been told they were the item's to manage.
+
+    Caught against a real Warehouse, which had a neighbour's schema in it and
+    did not afterwards.
+    """
+
+    seen = _inventory(logical_item_name="_weaver")
+
+    assert seen.schemas == ("_",)
+    assert seen.tables == ("_.Log", "_.Registry")
+    assert not any("Finance" in name for name in seen.tables + seen.views)
+    assert not seen.procedures
+
+
+def test_an_ordinary_item_still_sees_the_whole_warehouse():
+    """The restriction is the catalogue item's alone.
+
+    An ordinary item bound to a Warehouse must go on seeing everything it could
+    be managing, or prune would stop reconciling the estate.
+    """
+
+    seen = _inventory(logical_item_name="Reporting")
+
+    assert set(seen.schemas) == {"_", "Finance", "Sales"}
+    assert "Finance.Ledger" in seen.tables
+    assert "Finance.OpenLedger" in seen.views
+    assert "Sales.LoadCustomer" in seen.procedures

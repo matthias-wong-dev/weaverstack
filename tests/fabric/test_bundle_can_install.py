@@ -264,7 +264,6 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         target_id="target-1",
         kind="lakehouse",
         target_name=lakehouse.name,
-        staging_name=fabric_staging_lakehouse.name,
     )
     for field in ("tables", "views", "schemas", "folders", "files"):
         assert _folded(payload[field]) == _folded(getattr(declared, field)), field
