@@ -1,9 +1,8 @@
 """Shared build-environment wiring for the transport-neutral build tests.
 
 Both the environment fixtures (in ``conftest``) and the test bodies draw from
-here, so a fixture path or the local/Fabric parametrisation is defined exactly
-once. This is a plain helper module (imported like ``sql_support``), not a
-second conftest.
+here, so a fixture path is defined exactly once. This is a plain helper module
+(imported like ``sql_support``), not a second conftest.
 """
 
 from __future__ import annotations

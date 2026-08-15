@@ -3,7 +3,7 @@
 The estate is installed once and each move after it is an incremental build over
 a target that is already correct, so a whole build lifecycle costs roughly what a
 single install used to. It replaces three module estates that each paid a full
-install to ask what a *first* build does — the question the local suite already
+install to ask what a *first* build does — the question the fast suite already
 answers, and not the one incremental logic lives in.
 
 **One test, not many, and that is the point.** Each phase asserts the physical
@@ -247,7 +247,7 @@ def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> No
     # A name alone cannot say which Lakehouse answered, so the storage is asked.
     # Case-insensitively and not by exact path: the physical name is the
     # workspace's to choose, and Fabric lowercases a managed table's directory
-    # exactly as the local metastore does.
+    # exactly as a case-folding metastore does.
     stored = {
         entry.name.lower()
         for entry in env.store.list(env.resolver.tables_root(env.target).join("DWG"))

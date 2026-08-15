@@ -97,8 +97,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 def fabric_workspace_item():
     """The suite's workspace — ``PYTEST_WORKSPACE`` unless one is named."""
 
-    pytest.importorskip("azure.identity", reason="install the [fabric] extra")
-    pytest.importorskip("requests", reason="install the [fabric] extra")
+    pytest.importorskip("azure.identity", reason="pip install weaverstack")
+    pytest.importorskip("requests", reason="pip install weaverstack")
 
     # Credential choice is caller policy, not core's; the test infra is a caller.
     from weaver.fabric.auth import prefer_cli_credential
@@ -324,10 +324,8 @@ def environment_name():
 def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
     """A workspace that names the Environment Weaver was installed into."""
 
-    from weaver.workspaces import Workspace
-
     from weaver.declaration.model import WeaverItemId
-    from weaver.workspaces import TargetDeclaration
+    from weaver.workspaces import TargetDeclaration, Workspace
 
     return Workspace(
         workspace=fabric_workspace_item.name,

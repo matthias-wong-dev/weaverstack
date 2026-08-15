@@ -312,11 +312,11 @@ with the same schema and name.
 ### A Lakehouse has two addresses, and a build needs both
 
 ```python
-location = resolver.lakehouse_spark_location(target)   # where the bytes are
+location = resolver.lakehouse_spark_location(target)  # where the bytes are
 location.table_path("Sales", "Customer")
 location.folder_path("Sales", "Export")
 
-destination = resolver.spark_destination(target)       # what it is called
+destination = resolver.spark_destination(target)  # what it is called
 destination.qualify("Sales", "Customer")
 ```
 

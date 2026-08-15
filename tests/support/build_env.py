@@ -97,7 +97,7 @@ class Journey:
     The suite's cost is *estates*, not assertions: a module-scoped Fabric estate
     is one full generate-and-install, and six checks over it cost exactly what
     one does. The old shape therefore paid an install per module and could only
-    ever ask "what did a first build do?" — which is the question the local suite
+    ever ask "what did a first build do?" — which is the question the fast suite
     already answers, and not the one incremental logic lives in.
 
     A journey inverts that. It installs once, then *moves* the estate — change a

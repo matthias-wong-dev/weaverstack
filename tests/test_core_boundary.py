@@ -58,8 +58,8 @@ def test_the_cli_depends_on_the_core():
 
 # --- the CLI is usable without Spark -----------------------------------------
 #
-# `pip install 'weaverstack[cli]'` is the one command a friend tester runs, and
-# it installs no PySpark. The core is held to this above; the CLI is the surface
+# `pip install weaverstack` is the one command a friend tester runs, and it
+# installs no PySpark. The core is held to this above; the CLI is the surface
 # that person actually touches, so it is held to it too.
 
 CLI = Path(__file__).resolve().parents[1] / "src" / "weaver_cli"

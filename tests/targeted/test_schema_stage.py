@@ -56,7 +56,7 @@ def test_a_schema_the_target_already_holds_is_not():
 def test_the_comparison_ignores_case():
     """The physical name's case is the workspace's to choose.
 
-    Fabric and the local metastore both fold identifiers, so comparing exactly
+    Fabric folds identifiers, so comparing exactly
     would ask for a schema that is already there — and `CREATE SCHEMA` without
     `IF NOT EXISTS` fails on it.
     """
