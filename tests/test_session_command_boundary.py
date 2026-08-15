@@ -110,23 +110,34 @@ def transport(monkeypatch):
         "resolver",
         property(lambda self: _PresentResolver(self.workspace)),
     )
+    # The catalogue is a Warehouse, reached over TDS rather than Livy. Answered
+    # with nothing, which is an empty catalogue — see `_answer_for`. Counted, so
+    # a command that stopped reading the estate cannot pass for the wrong reason.
+    from weaver.sessions.console import ConsoleSession
+
+    _CountingLivy.queried = []
+    monkeypatch.setattr(
+        ConsoleSession,
+        "query_tsql",
+        lambda self, statement, **kwargs: _CountingLivy.queried.append(statement) or [],
+    )
+    monkeypatch.setattr(
+        ConsoleSession, "execute_tsql", lambda self, statement, **kwargs: None
+    )
     return _CountingLivy
 
 
 def _answer_for(code: str):
     """What the far side would emit for each program a run submits.
 
-    An empty catalogue, deliberately: these tests are about which resources a
-    run of commands acquires, not about what it finds. A load against an estate
-    that claims nothing stops early and still crosses exactly once, which is the
-    whole of what is being counted.
+    The catalogue itself is answered over TDS and is empty, deliberately: these
+    tests are about which resources a run of commands acquires, not about what
+    it finds. A load against an estate that claims nothing stops early, which is
+    what is being counted.
     """
 
-    from weaver.catalogue.state import Catalogue
     from weaver.unbind import UnbindResult
 
-    if "_catalogue_here" in code:
-        return Catalogue({}).to_mapping()
     if "unbind_targets" in code:
         return UnbindResult(
             targets=("Lakehouse/Sales",), logical_items=(), statements=()
@@ -163,8 +174,13 @@ def _run(session, parser, words: list[str]) -> None:
         pass
 
 
-def test_a_run_of_commands_in_one_session_starts_one_livy(transport, capsys):
-    """The claim the console's banner makes, asserted rather than assumed."""
+def test_reading_the_catalogue_starts_no_livy_at_all(transport, capsys):
+    """The catalogue is a Warehouse, so asking it what is installed is TDS.
+
+    A Spark session costs a minute to start and a capacity's only slot. Neither
+    of these commands finds anything to run, so neither has any Spark work — and
+    a run with no Spark work must not pay for a Spark session.
+    """
 
     parser = build_parser()
 
@@ -172,7 +188,8 @@ def test_a_run_of_commands_in_one_session_starts_one_livy(transport, capsys):
         _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
 
-    assert transport.acquired == 1
+    assert transport.acquired == 0
+    assert transport.submitted == []
 
 
 def test_each_command_still_did_its_own_work(transport, capsys):
@@ -188,9 +205,9 @@ def test_each_command_still_did_its_own_work(transport, capsys):
         _run(session, parser, ["load", "Lakehouse/Sales", "--dry-run"])
         _run(session, parser, ["test", "Lakehouse/Sales", "--dry-run"])
 
-    # Each command reached the estate, and none of them imported Weaver to do
-    # it: reading the catalogue is Spark SQL.
-    assert any("SELECT" in code for code in transport.submitted), (
+    # Each command reached the estate over TDS, and none of them imported
+    # Weaver to do it: reading the catalogue is T-SQL against the Warehouse.
+    assert any("SELECT" in statement for statement in transport.queried), (
         "the estate was never read, so this passes for the wrong reason"
     )
     assert _weaver_python(transport) == []
@@ -236,7 +253,9 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
     except WeaverError:
         pass
 
-    assert transport.acquired == 1
+    # It opened one and closed it, and needed no Spark to read the catalogue.
+    assert transport.acquired == 0
+    assert transport.queried
 
 
 # --- the invariant that keeps it true ----------------------------------------

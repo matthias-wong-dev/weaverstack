@@ -163,23 +163,47 @@ def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
     )
 
 
-#: The evidence claims below are being moved from ``Files/_/Log`` to ``_.Log``
-#: and are reinstated once the Warehouse flusher lands.
-awaiting_log_table = pytest.mark.skip(
-    reason="run evidence moves to _.Log with the Warehouse flusher"
-)
+def _log_statements(session) -> list[str]:
+    """Every ``_.Log`` append the run made, flushed and read back.
+
+    The whole path, not a shortcut through it: the Runner constructed the rows,
+    the Session-managed flusher batched them, and the Session executed the
+    T-SQL. Flushed here because a caller that never waited is exactly what the
+    flusher promises — the rows are in flight until something asks.
+    """
+
+    session.session.flush()
+    return [
+        statement
+        for call in session.session.calls
+        if call.kind == "tsql"
+        for statement in call.body
+        if "INSERT INTO [_].[Log]" in statement
+    ]
 
 
-def _written(session) -> list:
-    raise NotImplementedError
+def _recorded_nodes(session) -> list[str]:
+    """The node each appended row is about, in the order they were written."""
+
+    statements = "\n".join(_log_statements(session))
+    found = [
+        (statements.index(node), node)
+        for node in (ORDER, DAILY, EXPORT, REFRESH, SUMMARY)
+        if node in statements
+    ]
+    return [node for _at, node in sorted(found)]
 
 
-def _records(session) -> list[dict]:
-    raise NotImplementedError
+def _result_for(session, node_id: str) -> str:
+    """The public ``[Result]`` value one node's row carries."""
 
-
-def _completion(session) -> dict:
-    raise NotImplementedError
+    for statement in _log_statements(session):
+        for row in statement.split("),\n"):
+            if node_id in row:
+                for value in ("Succeeded", "Failed", "Blocked", "Skipped"):
+                    if f"N'{value}'" in row:
+                        return value
+    raise AssertionError(f"no _.Log row was written for {node_id}")
 
 
 # --- an intolerant run raises -------------------------------------------------
@@ -236,7 +260,6 @@ def test_the_exception_names_the_node_that_failed(session, dispatched):
     assert ORDER in str(raised.value)
 
 
-@awaiting_log_table
 def test_the_exception_carries_the_partial_report_and_the_evidence(session, dispatched):
     dispatched.answers[ORDER] = LoadError(
         "rows were rejected",
@@ -361,7 +384,6 @@ def test_a_raised_rejection_is_a_failed_node_however_it_was_counted(
 # --- durable evidence ---------------------------------------------------------
 
 
-@awaiting_log_table
 def test_every_planned_node_receives_exactly_one_final_record(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -369,72 +391,72 @@ def test_every_planned_node_receives_exactly_one_final_record(session, dispatche
         _run(session)
 
     planned = [node.node_id for node in raised.value.report.nodes]
-    recorded = [record["node_id"] for record in _records(session)]
+    recorded = _recorded_nodes(session)
 
     assert sorted(recorded) == sorted(planned)
     assert len(recorded) == len(set(recorded))
 
 
-@awaiting_log_table
-def test_a_record_says_whether_the_node_executed_and_what_became_of_it(
-    session, dispatched
-):
+def test_a_record_says_what_became_of_the_node(session, dispatched):
+    """The frozen public vocabulary, and the node's own detail beside it."""
+
     dispatched.answers[ORDER] = RuntimeError("boom")
 
     with pytest.raises(LoadError):
         _run(session)
 
-    by_node = {record["node_id"]: record for record in _records(session)}
+    assert _result_for(session, ORDER) == "Failed"
+    assert _result_for(session, SUMMARY) in ("Blocked", "Skipped")
+    # And the detail a reader needs that no single value carries: whether the
+    # node touched the target at all.
+    statements = "\n".join(_log_statements(session))
+    assert "executed" in statements
 
-    assert by_node[ORDER]["executed"] is True
-    assert by_node[ORDER]["status"] == FAILED
-    assert by_node[SUMMARY]["executed"] is False
-    assert by_node[SUMMARY]["status"] in (BLOCKED, PENDING)
 
-
-@awaiting_log_table
 def test_a_blocked_node_receives_evidence_of_its_own(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
     report = _run(session, fault_tolerant=True)
     blocked = [n.node_id for n in report.nodes if n.status == BLOCKED]
-    recorded = {record["node_id"] for record in _records(session)}
 
     assert blocked
-    assert set(blocked) <= recorded
+    assert set(blocked) <= set(_recorded_nodes(session))
+    assert _result_for(session, blocked[0]) == "Blocked"
 
 
-@awaiting_log_table
 def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
+    """Never reached is an outcome, and it is not the same as blocked."""
+
     dispatched.answers[EXPORT] = RuntimeError("boom")
 
     with pytest.raises(LoadError) as raised:
         _run(session)
 
     pending = [n.node_id for n in raised.value.report.nodes if n.status == PENDING]
-    recorded = {record["node_id"] for record in _records(session)}
 
-    assert set(pending) <= recorded
+    assert set(pending) <= set(_recorded_nodes(session))
+    for node in pending:
+        assert _result_for(session, node) == "Skipped"
 
 
-@awaiting_log_table
-def test_the_completion_document_is_written_before_the_run_raises(session, dispatched):
-    """A decided failure is a finished task.
+def test_every_node_is_recorded_before_the_run_raises(session, dispatched):
+    """A decided failure is a finished task, and its evidence is complete.
 
-    The absence of a completion document has to keep meaning *interrupted* — a
-    crash, a lost session — rather than "an ordinary load failed", or the one
-    signal that distinguishes them is spent on the common case.
+    There is no completion row to look for — a workflow is its rows. So what
+    has to hold is that every planned node was already recorded when the run
+    raised, or "no row for this node" would mean both *interrupted* and *an
+    ordinary load failed*.
     """
 
     dispatched.answers[ORDER] = RuntimeError("boom")
 
-    with pytest.raises(LoadError):
+    with pytest.raises(LoadError) as raised:
         _run(session)
 
-    completion = _completion(session)
-
-    assert completion["final_status"] in (TASK_FAILED, TASK_PARTIALLY_SUCCEEDED)
-    assert completion["failed_steps"] >= 1
+    assert sorted(_recorded_nodes(session)) == sorted(
+        node.node_id for node in raised.value.report.nodes
+    )
+    assert _result_for(session, ORDER) == "Failed"
 
 
 def test_a_successful_intolerant_run_returns_normally(session, dispatched):
@@ -444,8 +466,7 @@ def test_a_successful_intolerant_run_returns_normally(session, dispatched):
     assert all(node.status == SUCCEEDED for node in report.nodes)
 
 
-@awaiting_log_table
-def test_no_record_is_ever_rewritten(session, dispatched):
+def test_the_log_is_appended_to_and_never_updated(session, dispatched):
     """Immutability is what makes the log readable after an interruption."""
 
     dispatched.answers[ORDER] = RuntimeError("boom")
@@ -453,6 +474,9 @@ def test_no_record_is_ever_rewritten(session, dispatched):
     with pytest.raises(LoadError):
         _run(session)
 
-    names = [location.value.rsplit("/", 1)[-1] for location in _written(session)]
+    statements = _log_statements(session)
 
-    assert len(names) == len(set(names))
+    assert statements
+    assert all(statement.startswith("INSERT INTO") for statement in statements)
+    assert not any("UPDATE" in statement for statement in statements)
+    assert not any("DELETE" in statement for statement in statements)

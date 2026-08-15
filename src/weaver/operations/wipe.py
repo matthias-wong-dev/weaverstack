@@ -163,19 +163,17 @@ def wipe(
             # entirely — deleting rows from tables that are about to be removed
             # is work nobody needs.
             control_name = str(control).rpartition("/")[2] if control else None
-            whole_lakehouses = {
-                target.physical_name
-                for target in parsed
-                if target.item_type == "Lakehouse"
-            }
-            if not dry_run and control and control_name not in whole_lakehouses:
+            # Either type: the catalogue is a Warehouse, and a wipe of the
+            # Warehouse holding it is exactly the case this skips.
+            whole_items = {target.physical_name for target in parsed}
+            if not dry_run and control and control_name not in whole_items:
                 # `unbind_from` names an item; the workspace field is typed.
-                # Both mean one Lakehouse, so the field is written typed.
+                # Both mean one Warehouse, so the field is written typed.
                 catalogue_workspace = replace(
                     resolved_workspace,
                     catalogue=control
                     if "/" in str(control)
-                    else f"Lakehouse/{control}",
+                    else f"Warehouse/{control}",
                 )
                 with opened.step("Unbind catalogue claims"):
                     unbound = _unbind_physical_targets(

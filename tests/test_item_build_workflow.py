@@ -253,7 +253,14 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     )
 
 
-def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
+def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
+    """Weaver owns one Files area in a destination, and prune must not claim it.
+
+    There used to be three. The other two held the workspace declaration and
+    retained build bundles, and both belonged to a catalogue Lakehouse that no
+    longer exists — so an ordinary folder of either name is now an ordinary
+    folder.
+    """
 
     workspace = given_workspace(catalogue="Warehouse/Control")
     resolver = given_resolver(
@@ -278,7 +285,7 @@ def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
     inventory = read_lakehouse_inventory(target, resolver=resolver, store=store)
 
     assert "cli" not in inventory.folder_schemas
-    assert "build_bundles" not in inventory.folder_schemas
+    assert "build_bundles" in inventory.folder_schemas
     assert "weaver_items" in inventory.folder_schemas
 
 

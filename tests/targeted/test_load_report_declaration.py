@@ -163,11 +163,12 @@ def test_the_graph_survives_as_edges_rather_than_lists():
     assert isinstance(crossed.order, tuple)
 
 
-def test_the_evidence_pointer_survives():
+def test_the_workflow_identity_survives():
+    """What correlates a run's `_.Log` rows has to reach the caller intact."""
+
     crossed = _crossed(_report())
 
     assert crossed.workflow_id == "abc123"
-    assert crossed.workflow_id.endswith("20260807T091522.000000Z_load_abc123")
 
 
 def test_a_dry_run_report_crosses_with_its_absences_intact():

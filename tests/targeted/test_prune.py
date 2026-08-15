@@ -223,7 +223,7 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
     )
     other = single_document_repository(
         root,
-        item="Warehouse/Other",
+        item="Lakehouse/Other",
         documents={"DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")},
     )
 
@@ -232,9 +232,9 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
         {
             key
             for key in other.source_documents
-            if key.item == item_id("Warehouse/Other")
+            if key.item == item_id("Lakehouse/Other")
         },
-        item=item_id("Warehouse/Other"),
+        item=item_id("Lakehouse/Other"),
         target=bound_target(),
         inventory=target_inventory(
             schemas=("DWG",), tables=("DWG.Neighbour", "DWG.Customer")

@@ -24,10 +24,10 @@ if TYPE_CHECKING:  # names used only in annotations
     from weaver.lakehouse import Lakehouse
 
 WORKSPACE = "Demo"
-#: The Lakehouse the catalogue lives in, as an item name.
-WEAVER_LAKEHOUSE = "Weaver"
+#: The Warehouse the Weaver catalogue lives in, as an item name.
+WEAVER_WAREHOUSE = "Weaver"
 #: And as the workspace's typed catalogue value.
-CATALOGUE = f"Lakehouse/{WEAVER_LAKEHOUSE}"
+CATALOGUE = f"Warehouse/{WEAVER_WAREHOUSE}"
 TARGET_LAKEHOUSE = "Sales_LH"
 
 LAKEHOUSE_TYPE = "Lakehouse"
@@ -131,7 +131,7 @@ def given_workspace(
 def given_resolver(
     *,
     workspace: Workspace | str = WORKSPACE,
-    lakehouses: Iterable[str] = (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE),
+    lakehouses: Iterable[str] = (WEAVER_WAREHOUSE, TARGET_LAKEHOUSE),
     warehouses: Iterable[str] = (),
     root: object = None,
 ) -> FabricResolver:
@@ -165,7 +165,7 @@ __all__ = [
     "InventoryClient",
     "TARGET_LAKEHOUSE",
     "CATALOGUE",
-    "WEAVER_LAKEHOUSE",
+    "WEAVER_WAREHOUSE",
     "WORKSPACE",
     "given_resolver",
     "given_workspace",

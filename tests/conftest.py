@@ -25,7 +25,7 @@ _sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
 from weaver.targets import ItemRef
 
 WORKSPACE = "Demo"
-WEAVER_LAKEHOUSE = "Weaver"
+WEAVER_WAREHOUSE = "Weaver"
 TARGET_LAKEHOUSE = "Sales_LH"
 LAKEHOUSE_SQL = Path(__file__).parent / "fixtures" / "local-lakehouse"
 
@@ -183,7 +183,7 @@ def _lakehouses(root: Path, *, weaver: str, target: str, extra=()) -> Lakehouses
 def lakehouses(tmp_path: Path) -> Lakehouses:
     """One workspace per test, because a test's own tree costs almost nothing."""
 
-    return _lakehouses(tmp_path, weaver=WEAVER_LAKEHOUSE, target=TARGET_LAKEHOUSE)
+    return _lakehouses(tmp_path, weaver=WEAVER_WAREHOUSE, target=TARGET_LAKEHOUSE)
 
 
 @pytest.fixture
@@ -205,7 +205,7 @@ def more_lakehouses(tmp_path: Path):
 
     def build(*names: str) -> Lakehouses:
         return _lakehouses(
-            tmp_path, weaver=WEAVER_LAKEHOUSE, target=TARGET_LAKEHOUSE, extra=names
+            tmp_path, weaver=WEAVER_WAREHOUSE, target=TARGET_LAKEHOUSE, extra=names
         )
 
     return build
