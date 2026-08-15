@@ -56,9 +56,10 @@ def loaded(fabric_lakehouse_estate, weaver_session):
 
     env = fabric_lakehouse_estate.env
     before = _counts(weaver_session)
+    # No workspace argument: the Session carries this env's context, which is
+    # the same object it was opened with.
     report = weaver.load(
         [f"Lakehouse/{env.target.name}"],
-        workspace=env.workspace,
         session=weaver_session,
     )
     return report, _spent(before, _counts(weaver_session))

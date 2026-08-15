@@ -17,6 +17,7 @@ import pytest
 
 from weaver.workspaces import FabricWorkspace
 from weaver.fabric import livy
+from weaver.fabric import client
 from weaver.fabric.livy import LivySession, environment_bootstrap
 from weaver.fabric.resources import Item
 
@@ -127,7 +128,7 @@ def test_a_read_is_retried_when_the_connection_fails(monkeypatch):
             status_code=200, content=b"{}", json=lambda: {"state": "idle"}
         )
 
-    monkeypatch.setattr(livy, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(client, "time", types.SimpleNamespace(sleep=lambda _: None))
     monkeypatch.setattr(requests, "request", flaky)
 
     assert livy._call("GET", "https://example/sessions/1", "t") == {"state": "idle"}
@@ -157,7 +158,7 @@ def test_a_submission_is_retried_when_it_never_reached_fabric(monkeypatch):
             status_code=200, content=b"{}", json=lambda: {"id": 7}
         )
 
-    monkeypatch.setattr(livy, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(client, "time", types.SimpleNamespace(sleep=lambda _: None))
     monkeypatch.setattr(requests, "request", flaky)
 
     assert livy._call("POST", "https://example/sessions", "t", payload={}) == {"id": 7}
@@ -193,7 +194,7 @@ def test_a_read_that_keeps_failing_says_so(monkeypatch):
     def refused(method, url, **kwargs):
         raise requests.exceptions.ConnectionError("connection refused")
 
-    monkeypatch.setattr(livy, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(client, "time", types.SimpleNamespace(sleep=lambda _: None))
     monkeypatch.setattr(requests, "request", refused)
 
     with pytest.raises(livy.LivyError, match="could not be reached"):
