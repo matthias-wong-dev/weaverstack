@@ -637,8 +637,12 @@ immediately after its physical work and before any dependent item starts. A
 Warehouse item has no endpoint of its own to refresh, and an item whose only work
 was a folder or a schema has changed nothing the endpoint describes.
 
-The refresh is planned host-independently, like the rest of the bundle. The
-Nothing closes the build: catalogue rows are written over TDS into the Warehouse that holds them, and are readable when they commit.
+The refresh is planned host-independently, like the rest of the bundle.
+
+Nothing closes the build. Catalogue publication used to be followed by a refresh
+of its own, because the catalogue was Delta and its next reader came through an
+endpoint. It is a Warehouse now, written over TDS, and a committed row is
+readable.
 
 The installer validates bundle shape and payload hashes, resolves the already
 bound targets in its own environment, executes actions, and writes the install
