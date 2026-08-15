@@ -34,7 +34,7 @@ from typing import Mapping
 
 from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
 
-#: The schema Weaver's own control plane lives in, inside the Weaver Lakehouse.
+#: The schema the Weaver catalogue lives in, inside its Warehouse.
 #: One character, reserved, and never touched by an application build's prune.
 CATALOGUE_SCHEMA = "_"
 

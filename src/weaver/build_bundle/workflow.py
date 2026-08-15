@@ -186,7 +186,7 @@ def read_build_state(
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
+        raise BuildError("every build needs a Workspace with a Weaver catalogue")
 
     with session.step("Read target inventories"):
         inventories = read_target_inventories(
@@ -507,7 +507,7 @@ def read_reconciled_catalogue(
     workspace=None,
     repository=None,
 ) -> Reconciliation:
-    """Read the Weaver Lakehouse catalogue and prove selected claims physically.
+    """Read the Weaver catalogue and prove selected claims physically.
 
     The read covers the bound items and, when a ``repository`` is given, the
     items that *produce* what those items alias. Those producers are not being
@@ -531,7 +531,7 @@ def read_reconciled_catalogue(
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
+        raise BuildError("every build needs a Workspace with a Weaver catalogue")
     catalogue = session_catalogue(session, workspace, workspace.catalogue_item)
     state = read_catalogue_state(catalogue, sorted(items, key=str))
     return reconcile_catalogue_state(state, inventories=inventories)

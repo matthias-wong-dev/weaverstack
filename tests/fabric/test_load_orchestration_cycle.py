@@ -52,20 +52,25 @@ SEED = "DWG.Seed"
 #: separately would be two claims about two instants.
 BODY = """
 import weaver
-from weaver.locations import Location
-from weaver.resolution import store_for
+from weaver.sessions.host import use_or_create_session
 
 requested = ["Lakehouse/{lakehouse}", "Warehouse/{warehouse}"]
 
 dry = weaver.load(requested, dry_run=True, fault_tolerant=False)
 real = weaver.load(requested, dry_run=False, fault_tolerant=False)
 
-store = store_for(workspace)
-log = sorted(
-    entry.location.value.rsplit("/", 1)[-1]
-    for entry in store.list(Location(real.workflow_id))
-    if not entry.is_directory
-)
+# The rows this run appended, read back from the catalogue Warehouse. Read in
+# the same body as the run: `_.Log` is written asynchronously and the barrier is
+# the Session closing, so a reader in another crossing could see a partial tail.
+with use_or_create_session(None, workspace=workspace) as session:
+    from weaver.catalogue.connection import catalogue_connection
+
+    rows = catalogue_connection(session, workspace).rows(
+        "select [Task type], [Target type], [Target name], [Schema name], "
+        "[Object name], [Result] from [_].[Log] "
+        "where [Workflow ID] = N'" + str(real.workflow_id) + "'"
+    )
+    log = [dict(row) for row in rows]
 
 emit({{
     "dry": dry.to_mapping(),
@@ -228,22 +233,20 @@ def test_the_upstream_delta_rows_exist_and_the_folder_materialised(orchestrated)
 # --- the evidence it left behind ----------------------------------------------
 
 
-def test_the_real_task_wrote_one_coherent_log_under_the_declared_folder(orchestrated):
-    env, seen = orchestrated
+def test_the_real_run_wrote_one_coherent_workflow_into_the_log(orchestrated):
+    """One row per settled node, correlated by the run's own Workflow ID.
 
-    from weaver.task_logging import log_folder
+    No plan row and no completion row: a workflow *is* its rows.
+    """
 
-    # `_.Log` is an ordinary Weaver folder artefact, so the desktop finds it
-    # where the build installed it — asked over OneLake DFS, which is how a
-    # desktop addresses the same bytes.
-    assert env.store.exists(log_folder(env.resolver, env.weaver))
-    # The task wrote beneath it, matched on the item-relative part: a session
-    # names a Lakehouse by item id and the desktop by display name, so the two
-    # spellings of one location agree only from `Files/` down.
-    assert "/Files/_/Log/task_date=" in seen["workflow_id"]
-
+    _env, seen = orchestrated
     written = seen["log"]
-    assert "plan.json" in written
-    assert sum("_refresh_" in name for name in written) == 1
-    assert sum("_load_" in name for name in written) == 3
-    assert sum("_complete_" in name for name in written) == 1
+
+    assert seen["workflow_id"]
+    assert all(row["Task type"] == "load" for row in written)
+    # Three loads and the endpoint refresh between them, and nothing else.
+    assert len(written) == 4
+    assert sum(row["Object name"] is None for row in written) == 1
+    assert {row["Result"] for row in written} == {"Succeeded"}
+    # Physical identity, which is what a log records.
+    assert {row["Target type"] for row in written} == {"Lakehouse", "Warehouse"}

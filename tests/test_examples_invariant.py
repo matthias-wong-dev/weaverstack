@@ -24,6 +24,10 @@ EXAMPLES = ROOT / "examples"
 #: reader could plausibly have copied from an older example.
 RETIRED_SPELLINGS = (
     "weaver_lakehouse",
+    # The catalogue is a Warehouse, and a run's evidence is rows in `_.Log`.
+    "Files/_/Log",
+    "task_logging",
+    "IndexDictionary",
     "workspace_type",
     "FabricWorkspace",
     "LocalWorkspace",

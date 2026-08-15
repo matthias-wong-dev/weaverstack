@@ -889,9 +889,9 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     assert "Lakehouse-Raw--lakehouse-Raw_Dev" in refreshed
 
 
-def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
+def test_catalogue_requires_an_explicit_catalogue_warehouse(tmp_path):
     repository = _repository(_estate(tmp_path))
-    with pytest.raises(BuildError, match="control-plane Lakehouse"):
+    with pytest.raises(BuildError, match="catalogue Warehouse"):
         generate_item_build_bundle(
             repository,
             bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),

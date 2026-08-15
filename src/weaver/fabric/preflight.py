@@ -6,7 +6,7 @@ than a sentence about the item. So a desktop Fabric build asks the workspace
 what it holds first, and starts nothing until every required item is found with
 the type its binding implies.
 
-Preflight reads and never creates: a missing Weaver Lakehouse is a failure here,
+Preflight reads and never creates: a missing catalogue Warehouse is a failure here,
 because creating a workspace item is provisioning rather than building.
 
 The workspace's items are listed once and every target resolved from that one
@@ -48,7 +48,7 @@ class PreflightError(BuildError):
 class RequiredItem:
     """One item a build needs, and what it needs it to be.
 
-    ``role`` is what the item is *to this build* — the Weaver Lakehouse, a bound
+    ``role`` is what the item is *to this build* — the Weaver catalogue, a bound
     target, the Environment. It exists so the report says why the item was
     wanted, which is the part a reader needs in order to act on it.
     """
@@ -82,12 +82,12 @@ def required_items(
 
     Derived from the bindings rather than from configuration, so a target a
     binding names is checked even when nothing in the workspace file mentions
-    it. The Weaver Lakehouse is included as a Lakehouse like any other — it is
-    only special in what it holds.
+    it. The catalogue's Warehouse is included as a Warehouse like any other —
+    it is only special in what it holds.
     """
 
     wanted: list[RequiredItem] = [
-        RequiredItem(str(control_item), LAKEHOUSE, "Weaver Lakehouse")
+        RequiredItem(str(control_item), WAREHOUSE, "Weaver catalogue")
     ]
     if environment:
         wanted.append(RequiredItem(environment, ENVIRONMENT, "Environment"))

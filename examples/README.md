@@ -57,7 +57,7 @@ assert result.succeeded
 Inside Fabric, Weaver automatically discovers:
 
 -   the current workspace
--   the attached Weaver control Lakehouse
+-   the configured Weaver catalogue
 
 No workspace configuration file is required.
 

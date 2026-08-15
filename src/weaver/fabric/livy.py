@@ -132,6 +132,27 @@ class WorkspaceLivySession:
         return self.session.active
 
 
+def _spark_home(workspace):
+    """The Lakehouse a Spark session attaches to, from the workspace's own.
+
+    The first configured one, by name, so a workspace answers the same way
+    twice. Which it is does not affect where work lands — every generated
+    statement names its Lakehouse — so a stable answer is all that is wanted.
+    """
+
+    from ..errors import CommandError
+    from ..targets import ItemRef
+
+    configured = sorted(getattr(workspace, "lakehouses", ()) or ())
+    if not configured:
+        raise CommandError(
+            "starting a Spark session needs a Lakehouse to attach to, and this "
+            "Workspace configures none. Add the Lakehouse the work is for to "
+            "`lakehouses`, or do the work in a Warehouse, which needs no Spark."
+        )
+    return ItemRef(configured[0])
+
+
 def sessions_url(
     workspace_id: str,
     lakehouse_id: str,
@@ -272,28 +293,41 @@ class LivySession:
         return self._token_source()
 
     @classmethod
-    def for_workspace(cls, workspace, *, resolver=None, **kwargs) -> "LivySession":
-        """A session against a workspace's Weaver Lakehouse.
+    def for_workspace(
+        cls, workspace, *, resolver=None, lakehouse=None, **kwargs
+    ) -> "LivySession":
+        """A session attached to one of the workspace's Lakehouses.
 
-        The session is created against the Weaver Lakehouse with the workspace's
-        ``environment`` attached, so a body that imports Weaver finds what
-        ``weaver install`` published. Nothing is copied into the workspace.
+        Fabric creates a Spark session *against a Lakehouse* — its id is in the
+        Livy URL — so a session needs one to live in. Which one does not affect
+        where work lands: every statement Weaver generates names the Lakehouse
+        it is about, in full. The attachment is a home, not a destination.
+
+        The home is named — by the caller, or by the workspace's own configured
+        Lakehouses. A workspace that configures none is doing Warehouse-only
+        work and has no reason to start Spark at all, which is what the error
+        says.
+
+        The workspace's ``environment`` is attached, so a body that imports
+        Weaver finds what ``weaver install`` published. Nothing is copied into
+        the workspace.
 
         Starting the session does not assert that the Environment carries a
         usable Weaver. Submitting Spark to a workspace and running the installed
         package are two different needs, and only the second one waits on a wheel
         publish; :meth:`ensure_weaver` is where that need is stated.
-
-        An Environment is required to name what the session attaches to, and a
-        workspace without one is an error rather than a silent default runtime.
         """
 
         from ..errors import CommandError
+        from ..targets import ItemRef
         from .resolution import FabricResolver
         from .resources import LAKEHOUSE
 
         resolver = resolver or FabricResolver(workspace)
-        home = resolver.resolve(workspace.catalogue_item, item_type=LAKEHOUSE)
+        home_item = lakehouse if lakehouse is not None else _spark_home(workspace)
+        if isinstance(home_item, str):
+            home_item = ItemRef(home_item)
+        home = resolver.resolve(home_item, item_type=LAKEHOUSE)
 
         environment_id = kwargs.pop("environment_id", None)
         if environment_id is None:

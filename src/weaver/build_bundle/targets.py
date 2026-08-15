@@ -91,7 +91,7 @@ class BoundTarget:
         """What to call this target on screen: ``Lakehouse/Sales``.
 
         The *physical* item, always. A logical name is the estate's own
-        vocabulary and some of it is internal — the control Lakehouse is the
+        vocabulary and some of it is internal — the catalogue Warehouse is the
         logical item ``_weaver``, which means nothing to somebody watching a
         build write to a Lakehouse they know as ``Weaver``. ``id`` is worse
         still: ``Lakehouse-_weaver--lakehouse-Weaver``.

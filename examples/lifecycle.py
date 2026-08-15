@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         environment=options.environment,
     ) as session:
         # Everything from empty, unless the caller asked to keep what is there.
-        # The control Lakehouse goes too: wipe skips the catalogue unbind
+        # The catalogue Warehouse goes too: wipe skips the catalogue unbind
         # entirely when the catalogue itself is going, because deleting rows
         # from tables that are about to be removed is work nobody needs.
         if not options.keep:

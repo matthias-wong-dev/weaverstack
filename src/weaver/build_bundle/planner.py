@@ -15,7 +15,6 @@ layers and plans each item as one coherent group of stages:
         consumer item C          prune, drops, schemas, aliases, documents, refresh
 
     final batched catalogue publication
-    Weaver Lakehouse SQL endpoint refresh
 
 Items in the same layer share their barriers, one batch each, because nothing
 orders them against each other. Items in different layers never do: a consumer's
@@ -80,7 +79,7 @@ def generate_item_build_bundle(
     """Freeze the one incremental build model into an installable bundle."""
 
     if catalogue_binding is None:
-        raise BuildError("every build needs an explicit control-plane Lakehouse")
+        raise BuildError("every build needs an explicit catalogue Warehouse")
     by_item = bindings.by_item
     if not by_item:
         raise BuildError("at least one Weaver item must be bound")

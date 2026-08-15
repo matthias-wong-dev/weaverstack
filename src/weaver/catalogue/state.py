@@ -46,7 +46,7 @@ _FILES_PREFIX = "Files/"
 class Catalogue:
     """The catalogue the build reads and reasons about.
 
-    One class whatever produced it: read from the Weaver Lakehouse in
+    One class whatever produced it: read from the catalogue Warehouse in
     production, or built directly from Registry rows or a repository in a test.
     Incremental selection, alias staleness and claim collection all work from
     ``registered`` and ``rows``, so they are pure Python.
@@ -152,7 +152,7 @@ class Catalogue:
 
     @classmethod
     def from_catalogue(cls, catalogue: Any, items) -> "Catalogue":
-        """The persisted catalogue, read over Spark from the Weaver Lakehouse."""
+        """The persisted catalogue, read over TDS from its Warehouse."""
 
         return read_catalogue_state(catalogue, items)
 
@@ -439,7 +439,7 @@ def _registered_documents(
 
 
 def read_catalogue_state(catalogue: Any, items) -> Catalogue:
-    """Read the catalogue from the Weaver Lakehouse, for the items named.
+    """Read the catalogue from its Warehouse, for the items named.
 
     A missing table is either a first run or damage, and what tells them apart
     is whether anything else is there: every table missing is bootstrap and

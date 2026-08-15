@@ -387,7 +387,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
 
     repository = parse_item_repository(root, store=store)
     bindings = item_bindings((ITEM, warehouse.item.name))
-    from weaver.build_bundle import LakehouseBinding, effective_item_bindings
+    from weaver.build_bundle import WarehouseBinding, effective_item_bindings
 
     bindings = effective_item_bindings(
         bindings,
@@ -428,10 +428,10 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         # create them again, and the session rejects tables that exist. Nothing
         # is certified for the Warehouse item, which is what makes it build.
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
-        control_lakehouse=LakehouseBinding(
-            lakehouse=fabric_workspace.catalogue_item,
+        catalogue_binding=WarehouseBinding(
+            warehouse=fabric_workspace.catalogue_item,
             workspace_name=fabric_workspace.workspace,
         ),
     )

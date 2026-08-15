@@ -105,10 +105,9 @@ def build(
     context, then, inside a Fabric notebook, what the notebook is attached to.
     Anything still unresolved is an error stated in one sentence.
 
-    ``catalogue`` names the Weaver control Lakehouse, typed:
-    ``Warehouse/Weaver``. Inside a notebook it defaults to the attached
-    Lakehouse, which is the control Lakehouse only and becomes an authored
-    target only if a binding says so.
+    ``catalogue`` names where the Weaver catalogue lives, typed:
+    ``Warehouse/Weaver``. Weaver owns the ``_`` schema of that Warehouse and
+    nothing else in it, so it may be one of your own.
 
     ``session`` is a Session to run in, and is where an already-resolved
     ``Workspace`` travels. Supplied, its resources are reused and it is left

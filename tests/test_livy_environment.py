@@ -21,6 +21,22 @@ from weaver.fabric.resources import Item
 from weaver.workspaces import Workspace
 
 
+def _spark_workspace(**changes) -> Workspace:
+    """A workspace that can start Spark: a catalogue, and a Lakehouse to live in."""
+
+    from weaver.declaration.model import WeaverItemId
+    from weaver.workspaces import TargetDeclaration
+
+    return Workspace(
+        workspace="WS",
+        catalogue="Warehouse/Weaver",
+        lakehouses={
+            "Sales_LH": TargetDeclaration(item=WeaverItemId.parse("Lakehouse/Sales"))
+        },
+        **changes,
+    )
+
+
 class _FakeResolver:
     def __init__(self):
         self.workspace = types.SimpleNamespace(id="ws1", name="WS")
@@ -45,9 +61,7 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
         "weaver.fabric.resources.find_item",
         lambda ws, name, *, item_type, client: Item("env99", name, item_type, ws.id),
     )
-    workspace = Workspace(
-        workspace="WS", catalogue="Warehouse/Weaver", environment="Weaver"
-    )
+    workspace = _spark_workspace(environment="Weaver")
 
     session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
@@ -103,9 +117,27 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
 def test_a_workspace_without_an_environment_is_an_error():
     from weaver.errors import CommandError
 
-    workspace = Workspace(workspace="WS", catalogue="Warehouse/Weaver")
+    workspace = _spark_workspace()
 
     with pytest.raises(CommandError, match="environment"):
+        LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
+
+
+def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
+    """Fabric creates a Spark session against a Lakehouse, so one has to exist.
+
+    It used to be the Weaver Lakehouse. The catalogue is a Warehouse now, so the
+    home comes from the workspace's own Lakehouses — and a workspace that
+    configures none is doing Warehouse work, which needs no Spark at all.
+    """
+
+    from weaver.errors import CommandError
+
+    workspace = Workspace(
+        workspace="WS", catalogue="Warehouse/Weaver", environment="Weaver"
+    )
+
+    with pytest.raises(CommandError, match="needs a Lakehouse to attach to"):
         LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
 

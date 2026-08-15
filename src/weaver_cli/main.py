@@ -359,7 +359,7 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     if not lakehouse:
         raise CommandError(
             "A Lakehouse is required to run this notebook. "
-            "Use --lakehouse or configure a Weaver Lakehouse for this workspace."
+            "Use --lakehouse or configure a Lakehouse for this workspace."
         )
     if not workspace.environment:
         raise CommandError(
@@ -499,7 +499,7 @@ def _resolve_workspace(args: argparse.Namespace):
 
     Inside ``weaver session`` a command that names no workspace inherits the one
     the session was started with, and flags it *does* give are applied on top —
-    so ``build --catalogue Other`` overrides the control Lakehouse
+    so ``build --catalogue Other`` overrides the catalogue
     without having to restate the workspace. A command naming its own
     ``--workspace`` addresses that one instead, in its own scope.
 

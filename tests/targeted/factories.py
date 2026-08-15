@@ -902,7 +902,7 @@ def single_document_repository(
     reaches beyond ``DWG`` — a Files folder under ``Raw``, say.
 
     One thing to know before asserting over ``repository.source_documents``: a
-    parsed repository *always* carries the builtin ``Lakehouse/_weaver``
+    parsed repository *always* carries the builtin ``Warehouse/_weaver``
     catalogue documents as well as the ones written here. Look documents up by
     identity rather than iterating, or the answer will be about the catalogue.
     """

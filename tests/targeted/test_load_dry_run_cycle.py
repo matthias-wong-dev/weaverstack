@@ -266,10 +266,19 @@ def test_load_dry_run_writes_no_task_log(session):
     assert report.workflow_id is None
 
 
-def test_load_dry_run_creates_no_task_log_folder(session, tmp_path):
-    dry_run(session)
+def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
+    """A row for work nobody did would be evidence of a load that never ran."""
 
-    assert not (tmp_path / "estate" / "Weaver_LH" / "Files" / "_" / "Log").exists()
+    dry_run(session)
+    session.session.flush()
+
+    assert not [
+        statement
+        for call in session.session.calls
+        if call.kind == "tsql"
+        for statement in call.body
+        if "[_].[Log]" in statement
+    ]
 
 
 # --- and what it reports when the estate is wrong -----------------------------
