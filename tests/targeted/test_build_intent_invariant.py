@@ -26,6 +26,7 @@ from factories import (
     item_id,
     target_inventory,
 )
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
@@ -103,6 +104,7 @@ def actions_on(plan, target_id: str):
 
 
 @pytest.mark.parametrize("item", [ITEM, WAREHOUSE_ITEM])
+@weaver_test()
 def test_every_action_that_touches_a_target_is_declared(repository, tmp_path, item):
     """The guard that makes the summary worth writing.
 
@@ -122,6 +124,7 @@ def test_every_action_that_touches_a_target_is_declared(repository, tmp_path, it
 
 
 @pytest.mark.parametrize("item", [ITEM, WAREHOUSE_ITEM])
+@weaver_test()
 def test_every_declared_change_names_an_action_that_runs(repository, tmp_path, item):
     """The other direction, and the one that catches a summary of good intentions.
 
@@ -138,6 +141,7 @@ def test_every_declared_change_names_an_action_that_runs(repository, tmp_path, i
     assert declared - performed == set(), sorted(declared - performed)
 
 
+@weaver_test()
 def test_no_change_is_attributed_to_the_wrong_target(repository, tmp_path):
     """A change lands in the section of the target its action runs against.
 
@@ -154,6 +158,7 @@ def test_no_change_is_attributed_to_the_wrong_target(repository, tmp_path):
             assert by_action[change.action_id] == target_id, change
 
 
+@weaver_test()
 def test_both_item_types_declare_something(repository, tmp_path):
     """Guard the parametrisation: an empty section would satisfy both directions.
 
@@ -167,6 +172,7 @@ def test_both_item_types_declare_something(repository, tmp_path):
         assert plan.target_changes.get(target_id_of(item)), item
 
 
+@weaver_test()
 def test_a_warehouse_declares_the_kinds_only_it_has(repository, tmp_path):
     """The reason this is parametrised rather than run once.
 
@@ -186,6 +192,7 @@ def test_a_warehouse_declares_the_kinds_only_it_has(repository, tmp_path):
     )
 
 
+@weaver_test()
 def test_a_lakehouse_declares_the_kinds_only_it_has(repository, tmp_path):
     plan = build(repository, tmp_path).plan
     changes = plan.target_changes[target_id_of(ITEM)]
@@ -197,6 +204,7 @@ def test_a_lakehouse_declares_the_kinds_only_it_has(repository, tmp_path):
 # --- the summary as a record --------------------------------------------------
 
 
+@weaver_test()
 def test_the_summary_travels_in_the_manifest(repository, tmp_path):
     """Inside the hashed plan, not beside it.
 
@@ -215,6 +223,7 @@ def test_the_summary_travels_in_the_manifest(repository, tmp_path):
     assert "target_changes" in plan.to_mapping()
 
 
+@weaver_test()
 def test_the_summary_is_part_of_bundle_identity(repository, tmp_path):
     """Changing what a build claims it will do changes what the build *is*."""
 
@@ -235,6 +244,7 @@ def test_the_summary_is_part_of_bundle_identity(repository, tmp_path):
     assert compute_bundle_id(tampered) != compute_bundle_id(plan)
 
 
+@weaver_test()
 def test_a_declared_change_is_a_shape_the_inventory_can_hold(repository, tmp_path):
     """Every kind names a collection a real inventory reports.
 

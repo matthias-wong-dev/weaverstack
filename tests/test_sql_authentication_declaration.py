@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric.auth import SQL_SCOPE
@@ -23,6 +24,7 @@ class Resolver:
         return SqlEndpoint("server.example", target.warehouse.name)
 
 
+@weaver_test()
 def test_desktop_authentication_uses_the_injected_credential_and_sql_scope(monkeypatch):
     credential = object()
     calls = []
@@ -49,6 +51,7 @@ def test_desktop_authentication_uses_the_injected_credential_and_sql_scope(monke
     pool.close()
 
 
+@weaver_test()
 def test_fabric_authentication_uses_notebookutils_not_the_desktop_chain(monkeypatch):
     from weaver.fabric.session import FabricSessionResolver
 
@@ -77,6 +80,7 @@ def test_fabric_authentication_uses_notebookutils_not_the_desktop_chain(monkeypa
     pool.close()
 
 
+@weaver_test()
 def test_fabric_authentication_fails_clearly_outside_fabric():
     with pytest.raises(CommandError, match="only inside"):
         fabric_sql_pool(

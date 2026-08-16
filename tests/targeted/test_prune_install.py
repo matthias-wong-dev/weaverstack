@@ -30,6 +30,7 @@ from factories import (
     spark_view,
     target_inventory,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.physical import item_prune_stage
 from weaver.build_bundle.prune import managed_sets
@@ -84,6 +85,7 @@ def prune_targets(stage) -> set[str]:
 # --- desired state ------------------------------------------------------------
 
 
+@weaver_test()
 def test_the_keep_set_is_what_the_item_declares(estate):
     """Each declaration lands in the set matching its physical form."""
 
@@ -101,6 +103,7 @@ def test_the_keep_set_is_what_the_item_declares(estate):
     assert managed.folders == frozenset({"raw.customercsv", "_.load"})
 
 
+@weaver_test()
 def test_the_keep_set_is_per_physical_side(estate):
     """Asking for the Warehouse side of a Lakehouse item keeps no objects.
 
@@ -117,6 +120,7 @@ def test_the_keep_set_is_per_physical_side(estate):
     assert managed.folders == frozenset({"raw.customercsv", "_.load"})
 
 
+@weaver_test()
 def test_the_keep_set_and_an_inventory_are_the_same_shape(estate):
     """Why the diff is a set difference at all, asserted rather than assumed.
 
@@ -149,6 +153,7 @@ def stage_for(repository, inventory, *, item=ITEM):
     )
 
 
+@weaver_test()
 def test_an_estate_that_already_matches_is_left_entirely_alone(estate):
     """The claim that most needed a real build, now a one-liner.
 
@@ -161,6 +166,7 @@ def test_an_estate_that_already_matches_is_left_entirely_alone(estate):
     assert stage is None
 
 
+@weaver_test()
 def test_an_object_the_item_does_not_declare_is_removed(estate):
     stage = stage_for(
         estate,
@@ -171,6 +177,7 @@ def test_an_object_the_item_does_not_declare_is_removed(estate):
     assert any("OldTable" in node for node in prune_targets(stage))
 
 
+@weaver_test()
 def test_an_undeclared_view_folder_and_schema_are_each_removed(estate):
     stage = stage_for(
         estate,
@@ -185,6 +192,7 @@ def test_an_undeclared_view_folder_and_schema_are_each_removed(estate):
     assert set(prune_kinds(stage)) >= {"prune_view", "prune_folder", "prune_schema"}
 
 
+@weaver_test()
 def test_an_empty_inventory_prunes_nothing_rather_than_everything(estate):
     """Nothing there is nothing to remove — not everything to remove.
 
@@ -198,6 +206,7 @@ def test_an_empty_inventory_prunes_nothing_rather_than_everything(estate):
     assert stage is None
 
 
+@weaver_test()
 def test_a_declared_schema_is_never_pruned_even_when_empty(estate):
     """The schema is desired state; that nothing is in it yet is not a reason."""
 
@@ -209,6 +218,7 @@ def test_a_declared_schema_is_never_pruned_even_when_empty(estate):
 # --- item scoping -------------------------------------------------------------
 
 
+@weaver_test()
 def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
     """One item is diffed against one target, and reaches no further.
 
@@ -278,6 +288,7 @@ def warehouse_estate(tmp_path):
     return parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_a_freshly_built_warehouse_is_pruned_of_nothing(warehouse_estate):
     """The claim the Fabric tier was making alone, one layer down and free.
 
@@ -316,6 +327,7 @@ def test_a_freshly_built_warehouse_is_pruned_of_nothing(warehouse_estate):
     assert stage is None
 
 
+@weaver_test()
 def test_the_procedure_schema_is_in_the_keep_set(warehouse_estate):
     """Stated directly, so a failure names the keep-set rather than the stage."""
 

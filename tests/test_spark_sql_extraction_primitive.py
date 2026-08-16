@@ -14,6 +14,7 @@ and counts are proved once, against Python-authored tables, and inherited.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration.metadata import ObjectId
 from weaver.errors import LoadError
@@ -57,6 +58,7 @@ def _contract(*, primary_key=KEY, incremental: bool = False) -> LoadContract:
 # --- what reaches the session -------------------------------------------------
 
 
+@weaver_test()
 def test_every_statement_is_submitted_once_in_source_order():
     session = _Session()
 
@@ -77,6 +79,7 @@ def test_every_statement_is_submitted_once_in_source_order():
     ]
 
 
+@weaver_test()
 def test_statements_are_submitted_without_their_separators():
     session = _Session()
 
@@ -88,6 +91,7 @@ def test_statements_are_submitted_without_their_separators():
 # --- what comes back ----------------------------------------------------------
 
 
+@weaver_test()
 def test_one_query_stages_and_claims_no_deletes():
     session = _Session()
 
@@ -103,6 +107,7 @@ def test_one_query_stages_and_claims_no_deletes():
     assert deletes is None
 
 
+@weaver_test()
 def test_two_queries_stage_and_name_the_keys_to_delete():
     session = _Session()
 
@@ -116,6 +121,7 @@ def test_two_queries_stage_and_name_the_keys_to_delete():
     assert deletes.statement == "select `Customer id` from gone"
 
 
+@weaver_test()
 def test_a_setup_statement_between_the_queries_does_not_become_one():
     session = _Session()
 
@@ -136,11 +142,13 @@ def test_a_setup_statement_between_the_queries_does_not_become_one():
 # --- what is refused ----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_primitive_with_no_program_is_refused_by_name():
     with pytest.raises(LoadError, match="carries no program"):
         read_spark_sql(_Session(), sql="", contract=_contract())
 
 
+@weaver_test()
 def test_an_unterminated_program_is_refused_before_anything_runs():
     session = _Session()
 
@@ -150,6 +158,7 @@ def test_an_unterminated_program_is_refused_before_anything_runs():
     assert session.submitted == []
 
 
+@weaver_test()
 def test_a_program_that_produces_nothing_is_refused_before_anything_runs():
     session = _Session()
 
@@ -163,6 +172,7 @@ def test_a_program_that_produces_nothing_is_refused_before_anything_runs():
     assert session.submitted == []
 
 
+@weaver_test()
 def test_a_non_incremental_table_may_not_name_explicit_deletes():
     with pytest.raises(LoadError, match="non-incremental table cannot name"):
         read_spark_sql(
@@ -172,6 +182,7 @@ def test_a_non_incremental_table_may_not_name_explicit_deletes():
         )
 
 
+@weaver_test()
 def test_a_delete_query_returning_more_than_the_key_is_refused():
     session = _Session(columns={"gone": ("Customer id", "Amount")})
 
@@ -183,6 +194,7 @@ def test_a_delete_query_returning_more_than_the_key_is_refused():
         )
 
 
+@weaver_test()
 def test_a_delete_query_missing_part_of_the_key_is_refused():
     session = _Session(columns={"gone": ("Customer id",)})
 
@@ -196,6 +208,7 @@ def test_a_delete_query_missing_part_of_the_key_is_refused():
         )
 
 
+@weaver_test()
 def test_a_delete_query_naming_the_key_in_another_order_is_accepted():
     session = _Session(columns={"gone": ("Order id", "Customer id")})
 

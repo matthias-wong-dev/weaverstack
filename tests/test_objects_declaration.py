@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
 from weaver import Assumption, Folder, Lakehouse, Table, Test, View, WeaverObject
@@ -97,6 +98,7 @@ def spark() -> FakeSpark:
 # --- construction -----------------------------------------------------------
 
 
+@weaver_test()
 def test_an_object_binds_a_session_and_a_resolved_lakehouse(spark):
     order = Sales__Order(spark, lakehouse=LAKEHOUSE)
 
@@ -105,11 +107,13 @@ def test_an_object_binds_a_session_and_a_resolved_lakehouse(spark):
     assert order.spark_root == "abfss://ws@onelake.dfs.fabric.microsoft.com/lh"
 
 
+@weaver_test()
 def test_the_session_is_mandatory():
     with pytest.raises(LoadError, match="needs the Spark session"):
         Sales__Order(None, lakehouse=LAKEHOUSE)
 
 
+@weaver_test()
 def test_a_lakehouse_name_is_refused(spark):
     """Resolving a name needs a workspace resolver, which authored code has not."""
 
@@ -117,16 +121,19 @@ def test_a_lakehouse_name_is_refused(spark):
         Sales__Order(spark, lakehouse="Sales_LH")
 
 
+@weaver_test()
 def test_an_unresolved_lakehouse_is_refused(spark):
     with pytest.raises(LoadError, match="takes a resolved Lakehouse, got dict"):
         Sales__Order(spark, lakehouse={"name": "Sales_LH"})
 
 
+@weaver_test()
 def test_no_lakehouse_and_no_attachment_fails_rather_than_guessing(spark):
     with pytest.raises(LoadError, match="no Lakehouse is attached"):
         Sales__Order(spark)
 
 
+@weaver_test()
 def test_the_notebook_case_infers_the_attached_lakehouse():
     spark = FakeSpark(
         settings={
@@ -145,6 +152,7 @@ def test_the_notebook_case_infers_the_attached_lakehouse():
 # --- depending on another object --------------------------------------------
 
 
+@weaver_test()
 def test_a_dependency_inherits_the_session_and_the_lakehouse(spark):
     order = Sales__Order(spark, lakehouse=LAKEHOUSE)
 
@@ -154,6 +162,7 @@ def test_a_dependency_inherits_the_session_and_the_lakehouse(spark):
     assert customer.lakehouse is order.lakehouse
 
 
+@weaver_test()
 def test_a_dependency_resolves_against_the_callers_environment(spark):
     """Same class, two destinations — whichever the dependent was given."""
 
@@ -174,6 +183,7 @@ def test_a_dependency_resolves_against_the_callers_environment(spark):
 # --- identity ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_identity_comes_from_the_class_name(spark):
     order = Sales__Order(spark, lakehouse=LAKEHOUSE)
 
@@ -181,6 +191,7 @@ def test_identity_comes_from_the_class_name(spark):
     assert order.object_id == "Sales.Order"
 
 
+@weaver_test()
 def test_a_class_that_names_no_object_says_so(spark):
     class Order(Table):
         def read(self):
@@ -193,6 +204,7 @@ def test_a_class_that_names_no_object_says_so(spark):
 # --- tables -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_table_reads_its_own_delta_files(spark):
     Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe()
 
@@ -201,6 +213,7 @@ def test_a_table_reads_its_own_delta_files(spark):
     ]
 
 
+@weaver_test()
 def test_a_dependencys_table_is_read_the_same_way(spark):
     order = Sales__Order(spark, lakehouse=LAKEHOUSE)
 
@@ -214,6 +227,7 @@ def test_a_dependencys_table_is_read_the_same_way(spark):
     ]
 
 
+@weaver_test()
 def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
     empty = Sales__Order(spark, lakehouse=LAKEHOUSE).empty_dataframe()
 
@@ -227,6 +241,7 @@ def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
     ("returned", "expected_deletes"),
     [(object(), None), ((object(), ["Customer id"]), ["Customer id"])],
 )
+@weaver_test()
 def test_a_table_load_passes_normalised_read_results_to_the_runtime(
     spark, monkeypatch, returned, expected_deletes
 ):
@@ -272,6 +287,7 @@ def test_a_table_load_passes_normalised_read_results_to_the_runtime(
 # --- views ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_view_is_read_by_name_because_it_has_no_path(spark):
     Sales__Enriched(spark, lakehouse=LAKEHOUSE).dataframe()
 
@@ -281,6 +297,7 @@ def test_a_view_is_read_by_name_because_it_has_no_path(spark):
 # --- folders ----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_folder_is_addressed_as_a_filesystem_path(spark, tmp_path):
     """A Folder's authored code writes ordinary files, so it needs a real path.
 
@@ -296,6 +313,7 @@ def test_a_folder_is_addressed_as_a_filesystem_path(spark, tmp_path):
     assert isinstance(export.path(), Path)
 
 
+@weaver_test()
 def test_a_folder_hands_spark_a_string_and_python_a_path(spark, tmp_path):
     """Neither consumer can use the other's spelling, so there are two methods."""
 
@@ -312,6 +330,7 @@ def test_a_folder_hands_spark_a_string_and_python_a_path(spark, tmp_path):
     assert export.spark_path().endswith("/Files/Sales/OrderExport")
 
 
+@weaver_test()
 def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
     export = Sales__OrderExport(
         spark, lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
@@ -320,6 +339,7 @@ def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
     assert export._staging_path() == tmp_path / "Files/Sales/OrderExport_Staging"
 
 
+@weaver_test()
 def test_staging_is_available_outside_a_load(spark, tmp_path):
 
     export = Sales__OrderExport(
@@ -333,6 +353,7 @@ def test_staging_is_available_outside_a_load(spark, tmp_path):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(
     spark, monkeypatch
 ):
@@ -369,6 +390,7 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(
 # --- the surface is only what is documented ---------------------------------
 
 
+@weaver_test()
 def test_read_must_be_implemented(spark):
     class Sales__Unfinished(Table):
         pass
@@ -390,12 +412,14 @@ def test_read_must_be_implemented(spark):
         "is_incremental",
     ],
 )
+@weaver_test()
 def test_the_context_era_surface_is_gone(removed):
     """Removed outright rather than deprecated — pre-alpha, and one API is enough."""
 
     assert not any(hasattr(base, removed) for base in (WeaverObject, Table, View))
 
 
+@weaver_test()
 def test_the_folder_keeps_only_the_methods_it_documents():
     assert not hasattr(Folder, "folder_path")
     # The Spark-meaning-of-path() era. `path()` is now the filesystem spelling,
@@ -407,6 +431,7 @@ def test_the_folder_keeps_only_the_methods_it_documents():
     assert callable(Folder.staging_folder)
 
 
+@weaver_test()
 def test_there_is_no_ambient_resolver_or_context():
     import weaver
     import weaver.objects as objects
@@ -419,6 +444,7 @@ def test_there_is_no_ambient_resolver_or_context():
 # --- the module stays light -------------------------------------------------
 
 
+@weaver_test()
 def test_the_authoring_module_imports_without_spark():
     import subprocess
     import sys
@@ -436,6 +462,7 @@ def test_the_authoring_module_imports_without_spark():
     assert result.stdout.strip() == "False"
 
 
+@weaver_test()
 def test_the_base_classes_are_registered_by_kind():
     from weaver.objects import BASE_CLASS_NAMES, BASE_CLASSES
 
@@ -449,6 +476,7 @@ def test_the_base_classes_are_registered_by_kind():
     assert BASE_CLASS_NAMES == {"Folder", "Table", "View", "Test", "Assumption"}
 
 
+@weaver_test()
 def test_every_authored_object_shares_one_base():
     assert issubclass(Folder, WeaverObject)
     assert issubclass(Table, WeaverObject)

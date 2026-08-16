@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import IdentityError
 from weaver.targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
@@ -19,6 +20,7 @@ ROUND_TRIP = [
 @pytest.mark.parametrize(
     "kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP]
 )
+@weaver_test()
 def test_parse_then_str_is_identity(kind, text):
     assert str(kind.parse(text)) == text
 
@@ -26,14 +28,17 @@ def test_parse_then_str_is_identity(kind, text):
 @pytest.mark.parametrize(
     "kind,text", ROUND_TRIP, ids=[f"{k.__name__}:{t}" for k, t in ROUND_TRIP]
 )
+@weaver_test()
 def test_parsing_is_stable(kind, text):
     assert kind.parse(text) == kind.parse(str(kind.parse(text)))
 
 
+@weaver_test()
 def test_folder_target_names_a_lakehouse_and_its_files_area():
     assert FolderTarget.parse("Sales/Files").lakehouse == ItemRef("Sales")
 
 
+@weaver_test()
 def test_folder_target_refuses_anything_beneath_the_files_area():
     """A folder object lands at Files/<Schema>/<Object>, derived from its identity.
 
@@ -45,26 +50,31 @@ def test_folder_target_refuses_anything_beneath_the_files_area():
         FolderTarget.parse("Sales/Files/Extracts")
 
 
+@weaver_test()
 def test_folder_target_requires_the_files_area():
     with pytest.raises(IdentityError, match="Files"):
         FolderTarget.parse("Sales/Tables/Thing")
 
 
+@weaver_test()
 def test_folder_target_requires_more_than_a_lakehouse():
     with pytest.raises(IdentityError, match="folder target"):
         FolderTarget.parse("Sales")
 
 
+@weaver_test()
 def test_delta_target_rejects_an_explicit_tables_area():
     with pytest.raises(IdentityError, match="implicit"):
         DeltaTarget.parse("Sales/Tables")
 
 
+@weaver_test()
 def test_warehouse_target_rejects_a_path():
     with pytest.raises(IdentityError):
         WarehouseTarget.parse("Reporting/dbo")
 
 
+@weaver_test()
 def test_the_same_name_serves_different_slots():
     """Kind comes from the slot, never from the string."""
     assert (
@@ -74,15 +84,18 @@ def test_the_same_name_serves_different_slots():
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "a\\b", "a:b", "a*b", "..", "a|b"])
+@weaver_test()
 def test_illegal_names_are_rejected(bad):
     with pytest.raises(IdentityError):
         ItemRef.parse(bad)
 
 
+@weaver_test()
 def test_surrounding_whitespace_is_normalised():
     assert ItemRef("  Sales  ").name == "Sales"
 
 
+@weaver_test()
 def test_identities_are_immutable():
     target = DeltaTarget.parse("Sales")
     with pytest.raises(Exception):
@@ -95,6 +108,7 @@ def test_identities_are_immutable():
 # for both sides, so the logical item is named alone.
 
 
+@weaver_test()
 def test_a_binding_types_both_sides_from_the_physical_one():
     from weaver.build_bundle.targets import parse_item_binding
 
@@ -104,6 +118,7 @@ def test_a_binding_types_both_sides_from_the_physical_one():
     assert binding.target.item.name == "SalesDev"
 
 
+@weaver_test()
 def test_a_warehouse_binding_reads_the_same_way():
     from weaver.build_bundle.targets import parse_item_binding
 
@@ -113,6 +128,7 @@ def test_a_warehouse_binding_reads_the_same_way():
     assert binding.target.item.name == "ReportingDev"
 
 
+@weaver_test()
 def test_the_same_bare_name_under_two_types_is_two_items():
     """`Lakehouse/Sales` and `Warehouse/Sales` are distinct logical items.
 
@@ -128,6 +144,7 @@ def test_the_same_bare_name_under_two_types_is_two_items():
     assert lakehouse.item != warehouse.item
 
 
+@weaver_test()
 def test_a_typed_logical_item_is_refused_and_says_what_to_write():
     """Not a type mismatch to check — a sentence that cannot be written.
 
@@ -144,6 +161,7 @@ def test_a_typed_logical_item_is_refused_and_says_what_to_write():
         parse_item_binding("Lakehouse/SalesDev=Lakehouse/Sales")
 
 
+@weaver_test()
 def test_a_logical_item_of_the_wrong_type_cannot_be_smuggled_in():
     import pytest
 

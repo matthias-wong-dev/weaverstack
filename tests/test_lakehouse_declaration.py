@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace, mounted_lakehouse
 
 from weaver import Lakehouse, lakehouse_for
@@ -30,6 +31,7 @@ class FakeSpark:
 # --- one root, both areas ---------------------------------------------------
 
 
+@weaver_test()
 def test_one_root_carries_both_lakehouse_areas():
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
@@ -40,6 +42,7 @@ def test_one_root_carries_both_lakehouse_areas():
     assert lakehouse.location.files_root == "abfss://ws@host/lh/Files"
 
 
+@weaver_test()
 def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
     """The distinction the two methods exist to keep.
 
@@ -53,6 +56,7 @@ def test_a_folder_path_is_a_real_path_and_a_spark_path_is_a_string(tmp_path):
     assert isinstance(lakehouse.folder_spark_path("Sales", "Export"), str)
 
 
+@weaver_test()
 def test_a_trailing_separator_does_not_double_up():
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh/")
 
@@ -68,6 +72,7 @@ def test_a_trailing_separator_does_not_double_up():
 # --- two roots, because two things read them --------------------------------
 
 
+@weaver_test()
 def test_a_table_is_addressed_by_the_spark_root_in_fabric():
     """Spark reads abfss natively, so a table needs nothing else."""
 
@@ -79,6 +84,7 @@ def test_a_table_is_addressed_by_the_spark_root_in_fabric():
     )
 
 
+@weaver_test()
 def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
     """A Folder's authored code is ordinary Python, and `open()` cannot read a URL.
 
@@ -118,6 +124,7 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
     assert mounted == {"/weaver/lh": ("abfss://ws@host/lh", MOUNT_OPTIONS)}
 
 
+@weaver_test()
 def test_the_mount_caches_nothing(monkeypatch):
     """The repair for a mount that disagrees with the storage behind it.
 
@@ -150,6 +157,7 @@ def test_the_mount_caches_nothing(monkeypatch):
     assert options["fileCacheTimeout"] == 0
 
 
+@weaver_test()
 def test_the_mount_is_made_once_per_session(monkeypatch):
     """Fabric refuses a second mount of the same point, and there is no need."""
 
@@ -176,6 +184,7 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
     assert calls == ["/weaver/lh"]
 
 
+@weaver_test()
 def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypatch):
     import weaver.lakehouse as module
 
@@ -188,11 +197,13 @@ def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypat
         lakehouse.folder_path("Sales", "Export")
 
 
+@weaver_test()
 def test_a_root_must_be_a_real_root():
     with pytest.raises(LoadError, match="must be a non-empty string"):
         Lakehouse(name="Sales_LH", spark_root="  ")
 
 
+@weaver_test()
 def test_a_root_that_is_not_onelake_is_refused():
     """A Lakehouse is in OneLake, so a directory cannot stand in for one.
 
@@ -205,6 +216,7 @@ def test_a_root_that_is_not_onelake_is_refused():
         Lakehouse(name="Sales_LH", spark_root="/srv/lh")
 
 
+@weaver_test()
 def test_a_path_segment_that_escaped_its_parent_is_refused():
     """The same guard the resolved locations apply — these strings become paths."""
 
@@ -217,6 +229,7 @@ def test_a_path_segment_that_escaped_its_parent_is_refused():
 # --- naming -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_lakehouse_with_no_destination_will_not_name_an_object():
     """A bare Schema.Object resolves through whatever is attached — the anti-pattern."""
 
@@ -226,6 +239,7 @@ def test_a_lakehouse_with_no_destination_will_not_name_an_object():
         lakehouse.qualify("Sales", "Order")
 
 
+@weaver_test()
 def test_the_attached_lakehouse_is_the_one_named_two_part():
     spark = FakeSpark(
         settings={"trident.workspace.id": "ws-id", "trident.lakehouse.id": "lh-id"}
@@ -234,6 +248,7 @@ def test_the_attached_lakehouse_is_the_one_named_two_part():
     assert default_lakehouse(spark).qualify("Sales", "Order") == "`Sales`.`Order`"
 
 
+@weaver_test()
 def test_a_supplied_destination_is_what_names_objects():
     lakehouse = Lakehouse(
         name="Sales_LH",
@@ -247,6 +262,7 @@ def test_a_supplied_destination_is_what_names_objects():
 # --- resolved by name, through a resolver -----------------------------------
 
 
+@weaver_test()
 def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
     resolver = given_resolver(workspace=given_workspace(catalogue="Warehouse/Weaver"))
 
@@ -258,6 +274,7 @@ def test_a_resolver_resolves_a_lakehouse_by_name(tmp_path: Path):
     assert lakehouse.qualify("Sales", "Order") == ("`Demo`.`Sales_LH`.`Sales`.`Order`")
 
 
+@weaver_test()
 def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
     resolver = given_resolver(workspace=given_workspace(catalogue="Warehouse/Weaver"))
 
@@ -266,6 +283,7 @@ def test_a_name_is_accepted_as_a_string_there_and_only_there(tmp_path: Path):
     )
 
 
+@weaver_test()
 def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Path):
     """One layout, reached by the two transports a Lakehouse has.
 
@@ -291,6 +309,7 @@ def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Pa
     assert store_path.endswith("/Tables/Sales/Order")
 
 
+@weaver_test()
 def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path):
     resolver = given_resolver(workspace=given_workspace(catalogue="Warehouse/Weaver"))
     lakehouse = lakehouse_for(resolver, ItemRef("Sales_LH"))
@@ -312,6 +331,7 @@ def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path)
 # --- inferred from the session ----------------------------------------------
 
 
+@weaver_test()
 def test_the_attached_lakehouse_comes_from_the_sessions_own_settings():
     spark = FakeSpark(
         settings={
@@ -329,6 +349,7 @@ def test_the_attached_lakehouse_comes_from_the_sessions_own_settings():
     )
 
 
+@weaver_test()
 def test_an_unnamed_attachment_falls_back_to_its_id():
     spark = FakeSpark(
         settings={"trident.workspace.id": "ws-id", "trident.lakehouse.id": "lh-id"}
@@ -337,6 +358,7 @@ def test_an_unnamed_attachment_falls_back_to_its_id():
     assert default_lakehouse(spark).name == "lh-id"
 
 
+@weaver_test()
 def test_the_notebook_runtime_answers_when_the_session_does_not(monkeypatch):
     """A host that carries the context but not the session settings."""
 
@@ -360,11 +382,13 @@ def test_the_notebook_runtime_answers_when_the_session_does_not(monkeypatch):
     )
 
 
+@weaver_test()
 def test_no_attachment_fails_immediately():
     with pytest.raises(LoadError, match="no Lakehouse is attached"):
         default_lakehouse(FakeSpark())
 
 
+@weaver_test()
 def test_an_attachment_with_no_workspace_fails_rather_than_composing_a_root():
     spark = FakeSpark(settings={"trident.lakehouse.id": "lh-id"})
 
@@ -372,6 +396,7 @@ def test_an_attachment_with_no_workspace_fails_rather_than_composing_a_root():
         default_lakehouse(spark)
 
 
+@weaver_test()
 def test_a_session_that_raises_for_unset_settings_is_not_fatal():
     class Strict:
         @property
@@ -388,6 +413,7 @@ def test_a_session_that_raises_for_unset_settings_is_not_fatal():
 # --- the one repeated constant ----------------------------------------------
 
 
+@weaver_test()
 def test_the_inferred_root_is_spelled_exactly_as_the_fabric_one():
     """Repeated because the core imports without `requests`; kept identical here."""
 

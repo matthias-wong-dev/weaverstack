@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from test_item_dependencies_declaration import _dependency_estate
 from test_item_repository_declaration import _estate, _table, _warehouse_table, _write
 
@@ -16,6 +17,7 @@ def _layers(repository):
     return [[str(item) for item in layer] for layer in repository.item_layers]
 
 
+@weaver_test()
 def test_every_item_is_placed_in_exactly_one_layer(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     placed = [item for layer in repository.item_layers for item in layer]
@@ -26,6 +28,7 @@ def test_every_item_is_placed_in_exactly_one_layer(tmp_path):
     assert len(placed) == len(set(placed))
 
 
+@weaver_test()
 def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
     """``Warehouse/Reporting`` aliases ``Lakehouse/Curated``, so it comes after it."""
 
@@ -39,6 +42,7 @@ def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
     assert layer_of["Lakehouse/Curated"] < layer_of["Warehouse/Reporting"]
 
 
+@weaver_test()
 def test_an_unused_alias_still_orders_its_two_items(tmp_path):
     """The alias itself has to be materialised after its source exists.
 
@@ -63,6 +67,7 @@ def test_an_unused_alias_still_orders_its_two_items(tmp_path):
     assert layer_of["Lakehouse/Raw"] < layer_of["Lakehouse/Curated"]
 
 
+@weaver_test()
 def test_independent_items_share_one_layer(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
 
@@ -71,6 +76,7 @@ def test_independent_items_share_one_layer(tmp_path):
     ]
 
 
+@weaver_test()
 def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
     """Two items that alias each other's *different* objects.
 
@@ -117,6 +123,7 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_a_within_item_dependency_creates_no_item_edge(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     raw = WeaverItemId.parse("Lakehouse/Raw")

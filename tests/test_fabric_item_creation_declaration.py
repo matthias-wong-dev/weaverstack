@@ -14,6 +14,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric.resources import LAKEHOUSE, WorkspaceItem, create_lakehouse
@@ -45,6 +46,7 @@ class _CreateClient:
         )
 
 
+@weaver_test()
 def test_a_lakehouse_is_created_with_schemas_enabled():
     """The catalogue lives in a schema called ``_``; without this it cannot exist.
 
@@ -74,6 +76,7 @@ def test_a_lakehouse_is_created_with_schemas_enabled():
     )
 
 
+@weaver_test()
 def test_a_name_fabric_has_not_released_yet_reports_why():
     """A deleted item's name is held for some minutes, and 409 is the symptom."""
 

@@ -18,6 +18,7 @@ import textwrap
 import types
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration.metadata import (
     PYTHON,
@@ -64,6 +65,7 @@ def _module(docstring: str, name: str = "Sales__Customer"):
 # --- derived from the declaration -------------------------------------------
 
 
+@weaver_test()
 def test_the_contract_carries_what_a_load_needs_and_no_more():
     contract = LoadContract.from_document(_document(TABLE_HEADER))
 
@@ -75,6 +77,7 @@ def test_the_contract_carries_what_a_load_needs_and_no_more():
     assert contract.identity_column is None
 
 
+@weaver_test()
 def test_declared_comparison_columns_narrow_the_change_test():
     contract = LoadContract.from_document(
         _document(TABLE_HEADER + "\nComparison columns: Amount\n")
@@ -83,6 +86,7 @@ def test_declared_comparison_columns_narrow_the_change_test():
     assert contract.comparison_columns == ("Amount",)
 
 
+@weaver_test()
 def test_a_warehouse_table_carries_its_identity_column():
     """Only a Warehouse table has one, so only this contract names it.
 
@@ -102,6 +106,7 @@ def test_a_warehouse_table_carries_its_identity_column():
 # --- what follows from the key ----------------------------------------------
 
 
+@weaver_test()
 def test_no_primary_key_means_full_replacement():
     header = TABLE_HEADER.replace("Primary key: Customer id\n", "")
     contract = LoadContract.from_document(_document(header))
@@ -110,6 +115,7 @@ def test_no_primary_key_means_full_replacement():
     assert contract.deletes_absent_rows is False
 
 
+@weaver_test()
 def test_a_keyed_load_deletes_rows_the_source_stopped_producing():
     contract = LoadContract.from_document(_document(TABLE_HEADER))
 
@@ -117,6 +123,7 @@ def test_a_keyed_load_deletes_rows_the_source_stopped_producing():
     assert contract.deletes_absent_rows is True
 
 
+@weaver_test()
 def test_an_incremental_load_never_deletes():
     """Absence from an incremental source says nothing about existence.
 
@@ -132,6 +139,7 @@ def test_an_incremental_load_never_deletes():
     assert contract.deletes_absent_rows is False
 
 
+@weaver_test()
 def test_a_folder_contract_carries_its_file_key_and_policy():
     header = """
     Folder ID: Raw.CustomerCsv
@@ -151,6 +159,7 @@ def test_a_folder_contract_carries_its_file_key_and_policy():
     assert contract.replaces_wholesale is True
 
 
+@weaver_test()
 def test_a_folder_is_not_a_table_and_says_so():
     folder = _document(
         """
@@ -170,12 +179,14 @@ def test_a_folder_is_not_a_table_and_says_so():
 # --- read result -------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_single_read_value_means_no_explicit_deletes():
     staged = object()
 
     assert normalise_read_result(staged) == (staged, None)
 
 
+@weaver_test()
 def test_an_explicit_read_pair_is_preserved():
     staged, deletes = object(), object()
 
@@ -183,6 +194,7 @@ def test_an_explicit_read_pair_is_preserved():
 
 
 @pytest.mark.parametrize("returned", [(), (object(),), (object(), object(), object())])
+@weaver_test()
 def test_a_malformed_explicit_read_tuple_is_refused(returned):
     with pytest.raises(LoadError, match="return data, or \\(data, deletes\\)"):
         normalise_read_result(returned)
@@ -191,6 +203,7 @@ def test_a_malformed_explicit_read_tuple_is_refused(returned):
 # --- read from an installed module ------------------------------------------
 
 
+@weaver_test()
 def test_an_installed_module_carries_its_own_contract():
     """The whole point: a deployed module is sufficient by itself.
 
@@ -206,6 +219,7 @@ def test_an_installed_module_carries_its_own_contract():
     assert contract.primary_key == ("Customer id",)
 
 
+@weaver_test()
 def test_an_indented_docstring_reads_the_same_as_the_repository_reads_it():
     """A module docstring is indented in the file; the contract must not care.
 
@@ -226,6 +240,7 @@ def test_an_indented_docstring_reads_the_same_as_the_repository_reads_it():
     assert contract.comparison_columns == ("Amount",)
 
 
+@weaver_test()
 def test_a_module_edited_after_deployment_is_read_as_it_now_stands():
     """Metadata changes are visible immediately, with no rebuild in between.
 
@@ -242,11 +257,13 @@ def test_a_module_edited_after_deployment_is_read_as_it_now_stands():
     assert LoadContract.from_document(document_for_module(module)).incremental is True
 
 
+@weaver_test()
 def test_a_module_with_no_metadata_block_is_refused_by_name():
     with pytest.raises(LoadError, match="Sales__Customer carries no Weaver metadata"):
         document_for_module(_module(""))
 
 
+@weaver_test()
 def test_the_runtime_parser_still_refuses_a_broken_contract():
     """Runtime parsing is narrower than the repository's, not laxer.
 
@@ -261,6 +278,7 @@ def test_the_runtime_parser_still_refuses_a_broken_contract():
 
 
 @pytest.mark.parametrize("language", [PYTHON, SPARK_SQL])
+@weaver_test()
 def test_a_delta_table_contract_never_names_an_identity_column(language):
     header = TABLE_HEADER + ("\nDependencies: []\n" if language == SPARK_SQL else "")
     contract = LoadContract.from_document(_document(header, language=language))

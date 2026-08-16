@@ -25,6 +25,7 @@ from factories import (
     target_inventory,
     warehouse_table,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import plan_item_build
 from weaver.declaration import parse_item_repository
@@ -100,6 +101,7 @@ def actions_of(planned, phase: str):
 # --- where the layer sits -----------------------------------------------------
 
 
+@weaver_test()
 def test_load_is_the_last_thing_an_item_does(lakehouse):
     """The ordering claim, and the only one the layer makes.
 
@@ -120,6 +122,7 @@ def test_load_is_the_last_thing_an_item_does(lakehouse):
     assert phases(planned).count("load") == 1
 
 
+@weaver_test()
 def test_an_item_with_no_selected_load_work_gets_no_layer(lakehouse):
     """A phase with nothing to do is not a barrier, and takes no number."""
 
@@ -132,6 +135,7 @@ def test_an_item_with_no_selected_load_work_gets_no_layer(lakehouse):
 # --- what it installs ---------------------------------------------------------
 
 
+@weaver_test()
 def test_each_artefact_becomes_one_action_carrying_its_own_bytes(lakehouse):
     """The bundle carries the content, so the installer never reopens source."""
 
@@ -148,6 +152,7 @@ def test_each_artefact_becomes_one_action_carrying_its_own_bytes(lakehouse):
     assert b"class DWG__Customer" in payloads[action.payload]
 
 
+@weaver_test()
 def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     """It needs no executor of its own: a create-or-alter is a script, and the
     T-SQL executor runs the script it is given without knowing what it builds."""
@@ -173,6 +178,7 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     assert actions[0].resource_node_id.endswith("procedure:_/Load Sales.Customer")
 
 
+@weaver_test()
 def test_the_procedure_schema_is_created_in_the_ordinary_schema_phase(warehouse):
     """`_` is a managed schema, not a reserved word.
 
@@ -209,6 +215,7 @@ def test_the_procedure_schema_is_created_in_the_ordinary_schema_phase(warehouse)
 # --- what it removes ----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_source_that_stopped_claiming_its_file_removes_it(lakehouse):
     """Driven by the previous Registry row, because the inventory diff cannot
     reach individual files inside the runtime tree."""
@@ -226,6 +233,7 @@ def test_a_source_that_stopped_claiming_its_file_removes_it(lakehouse):
     assert actions[0].payload is None
 
 
+@weaver_test()
 def test_a_removed_procedure_is_dropped_by_name(warehouse):
     gone = document_id(f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Retired")
     item = item_id(WAREHOUSE_ITEM)
@@ -254,6 +262,7 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
     assert statement == "drop procedure if exists [_].[Load Sales.Retired];\n"
 
 
+@weaver_test()
 def test_a_removed_table_is_not_mistaken_for_a_load_artefact(lakehouse):
     """Scoped by what the Registry says each object *is*.
 

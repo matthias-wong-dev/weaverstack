@@ -17,6 +17,7 @@ build would fail somewhere far from the cause.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import REGISTRY
 from weaver.errors import CommandError
@@ -59,6 +60,7 @@ def fabric(monkeypatch):
     return type("Fabric", (), {"created": created, "present": present})
 
 
+@weaver_test()
 def test_a_missing_warehouse_is_provisioned(fabric):
     prepared = prepare_catalogue(WORKSPACE)
 
@@ -66,6 +68,7 @@ def test_a_missing_warehouse_is_provisioned(fabric):
     assert fabric.created == ["Weaver"]
 
 
+@weaver_test()
 def test_an_existing_warehouse_is_used_rather_than_refused(fabric):
     """A Warehouse already holding a user's schemas is an ordinary host.
 
@@ -81,6 +84,7 @@ def test_an_existing_warehouse_is_used_rather_than_refused(fabric):
     assert fabric.created == []
 
 
+@weaver_test()
 def test_preparing_twice_provisions_once(fabric):
     first = prepare_catalogue(WORKSPACE)
     second = prepare_catalogue(WORKSPACE)
@@ -90,6 +94,7 @@ def test_preparing_twice_provisions_once(fabric):
     assert fabric.created == ["Weaver"]
 
 
+@weaver_test()
 def test_a_workspace_naming_no_catalogue_says_so(fabric):
     with pytest.raises(CommandError, match="configured Weaver catalogue"):
         prepare_catalogue(Workspace(workspace="Demo"))
@@ -111,6 +116,7 @@ class _Empty:
         raise AssertionError("nothing should be read from a table that is absent")
 
 
+@weaver_test()
 def test_an_absent_table_reads_as_no_rows_rather_than_a_failure():
     """Bootstrap: the build that writes the catalogue is the build that creates it."""
 
@@ -119,6 +125,7 @@ def test_an_absent_table_reads_as_no_rows_rather_than_a_failure():
     assert read_table(_Empty(), REGISTRY) == ()
 
 
+@weaver_test()
 def test_an_empty_catalogue_is_not_a_missing_warehouse():
     """The distinction, stated as the two answers a caller gets.
 

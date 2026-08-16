@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from support.weaver_test import weaver_test
+
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 CLAIMS = frozenset(
@@ -30,6 +32,7 @@ def _test_modules() -> set[str]:
     return {path.relative_to(ROOT).as_posix() for path in TESTS.rglob("test_*.py")}
 
 
+@weaver_test()
 def test_every_test_module_names_a_claim():
     unnamed = sorted(
         path for path in _test_modules() if not MODULE_NAME.fullmatch(Path(path).name)
@@ -40,6 +43,7 @@ def test_every_test_module_names_a_claim():
     )
 
 
+@weaver_test()
 def test_no_module_takes_a_claim_the_taxonomy_retired():
     named = sorted(
         path for path in _test_modules() if RETIRED_NAME.fullmatch(Path(path).name)

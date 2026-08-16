@@ -9,6 +9,7 @@ fails clearly when no SQL executor was supplied.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.executors.base import InstallationContext
 from weaver.build_bundle.executors.tsql import TSqlExecutor
@@ -38,6 +39,7 @@ def _context(sql):
     return InstallationContext(resolver=None, store=None, target=None, sql=sql)
 
 
+@weaver_test()
 def test_the_whole_script_is_run_as_one_script():
     sql = _FakeSql()
     script = "set nocount on;\ncreate table [Wh].[CustomerReport] (...);\n"
@@ -47,11 +49,13 @@ def test_the_whole_script_is_run_as_one_script():
     assert details["statement_first_line"] == "set nocount on;"
 
 
+@weaver_test()
 def test_a_missing_sql_executor_is_a_clear_install_error():
     with pytest.raises(InstallError, match="needs a SQL executor"):
         TSqlExecutor().execute(ACTION, b"create table x;", _context(None))
 
 
+@weaver_test()
 def test_a_missing_payload_is_a_clear_install_error():
     with pytest.raises(InstallError, match="has no payload"):
         TSqlExecutor().execute(ACTION, None, _context(_FakeSql()))

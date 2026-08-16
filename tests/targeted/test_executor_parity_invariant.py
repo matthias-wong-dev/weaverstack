@@ -18,6 +18,7 @@ import ast
 import pathlib
 
 import pytest
+from support.weaver_test import weaver_test
 
 EXECUTORS = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -50,6 +51,7 @@ def executor_modules():
     )
 
 
+@weaver_test()
 def test_there_are_executors_to_check():
     """A guard on the guard: an empty glob would pass every test below."""
 
@@ -57,6 +59,7 @@ def test_there_are_executors_to_check():
 
 
 @pytest.mark.parametrize("module", executor_modules(), ids=lambda path: path.stem)
+@weaver_test()
 def test_an_executor_never_names_a_transport(module):
     """No executor mentions a workspace kind, a store class or a resolver class.
 

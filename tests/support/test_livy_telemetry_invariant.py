@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from support.weaver_test import weaver_test
+
 from .livy_telemetry import OUTSIDE_A_TEST, CountedLivySession, LivyLedger
 
 
@@ -39,12 +41,14 @@ class FakeSession:
         self.closed = True
 
 
+@weaver_test()
 def test_a_ledger_with_no_calls_reports_nothing():
     """A run that never reached Fabric must not print an empty transport banner."""
 
     assert LivyLedger().report() == []
 
 
+@weaver_test()
 def test_every_submission_is_counted_against_the_running_test():
     ledger = LivyLedger()
     session = CountedLivySession(FakeSession(), ledger)
@@ -66,6 +70,7 @@ def test_every_submission_is_counted_against_the_running_test():
     }
 
 
+@weaver_test()
 def test_a_call_made_outside_a_test_is_still_counted():
     """Session-scoped fixtures submit statements too, and they are not free."""
 
@@ -75,6 +80,7 @@ def test_a_call_made_outside_a_test_is_still_counted():
     assert [nodeid for nodeid, _n, _s in ledger.by_test()] == [OUTSIDE_A_TEST]
 
 
+@weaver_test()
 def test_the_body_and_its_output_reach_the_session_unchanged():
     """The proxy measures the call; it must not alter what is run or returned."""
 
@@ -88,6 +94,7 @@ def test_the_body_and_its_output_reach_the_session_unchanged():
     assert result.text == "__weaver_result__{}"
 
 
+@weaver_test()
 def test_a_failing_statement_is_counted_and_still_raises():
     """A round trip that errored was still paid for, and must not be swallowed."""
 
@@ -102,6 +109,7 @@ def test_a_failing_statement_is_counted_and_still_raises():
     assert ledger.calls[0].label == "probe"
 
 
+@weaver_test()
 def test_returned_output_size_is_recorded():
     """A consolidated payload trades call count for output size; show both."""
 
@@ -114,6 +122,7 @@ def test_returned_output_size_is_recorded():
     assert ledger.calls[0].code_bytes == len("emit(1)\n")
 
 
+@weaver_test()
 def test_everything_but_run_passes_through_to_the_real_session():
     """The proxy is transparent: fixtures set attributes and close the session."""
 
@@ -127,6 +136,7 @@ def test_everything_but_run_passes_through_to_the_real_session():
     assert inner.closed is True
 
 
+@weaver_test()
 def test_the_report_names_calls_elapsed_and_the_worst_caller():
     ledger = LivyLedger()
     ledger.startup_seconds = 30.0

@@ -30,6 +30,7 @@ import io
 import os
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions import ConsoleSession
 from weaver.sessions.base import STEP, SUBSTEP, TASK
@@ -48,6 +49,7 @@ def names(session):
 # --- the hierarchy ------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_frame_records_what_it_cost(session):
     with session.task("Build"):
         pass
@@ -58,6 +60,7 @@ def test_a_frame_records_what_it_cost(session):
     assert frame.elapsed >= 0
 
 
+@weaver_test()
 def test_an_open_frame_has_an_age_rather_than_an_elapsed_time(session):
     """The only honest way to hold it: work that is still running has no
     duration, it has an age."""
@@ -69,6 +72,7 @@ def test_an_open_frame_has_an_age_rather_than_an_elapsed_time(session):
     assert frame.elapsed is not None
 
 
+@weaver_test()
 def test_frames_nest_and_carry_their_depth(session):
     with session.task("Build"):
         with session.step("Install"):
@@ -82,6 +86,7 @@ def test_frames_nest_and_carry_their_depth(session):
     assert kinds["Sales.Customer"] == SUBSTEP
 
 
+@weaver_test()
 def test_a_child_closes_before_its_parent(session):
     with session.task("Build"):
         with session.step("Install"):
@@ -90,6 +95,7 @@ def test_a_child_closes_before_its_parent(session):
     assert names(session) == ["Install", "Build"]
 
 
+@weaver_test()
 def test_nothing_is_left_open_after_a_task(session):
     with session.task("Build"):
         with session.step("Install"):
@@ -101,6 +107,7 @@ def test_nothing_is_left_open_after_a_task(session):
 # --- failure ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_failure_closes_every_frame_it_unwound(session):
     """The frame that fails is not the only one that stops."""
 
@@ -116,6 +123,7 @@ def test_a_failure_closes_every_frame_it_unwound(session):
     assert all(frame.failed for frame in session.timings)
 
 
+@weaver_test()
 def test_an_interrupt_closes_its_frames_and_travels_on(session):
     """Ctrl-C is the operator saying stop. The timing of cancelled work is
     still the timing of work that happened."""
@@ -129,6 +137,7 @@ def test_an_interrupt_closes_its_frames_and_travels_on(session):
     assert names(session) == ["Execute", "Load"]
 
 
+@weaver_test()
 def test_a_frame_can_be_failed_from_inside_without_an_exception(session):
     """A run node's failure is data, not an exception — and it still reads as
     a failure in the timings."""
@@ -144,6 +153,7 @@ def test_a_frame_can_be_failed_from_inside_without_an_exception(session):
 # --- what a reader gets -------------------------------------------------------
 
 
+@weaver_test()
 def test_a_frame_serialises_for_a_log_or_a_report(session):
     with session.task("Build", "My Workspace"):
         pass
@@ -156,6 +166,7 @@ def test_a_frame_serialises_for_a_log_or_a_report(session):
     assert isinstance(mapping["seconds"], float)
 
 
+@weaver_test()
 def test_the_console_writes_a_tree_a_person_can_read():
     out = io.StringIO()
     with ConsoleSession(progress=out) as session:
@@ -175,6 +186,7 @@ def test_the_console_writes_a_tree_a_person_can_read():
     assert all(line.rstrip().endswith("s") for line in lines[1:])
 
 
+@weaver_test()
 def test_a_failed_task_is_marked_as_one():
     out = io.StringIO()
     with ConsoleSession(progress=out) as session:
@@ -185,6 +197,7 @@ def test_a_failed_task_is_marked_as_one():
     assert "✗ Build" in out.getvalue()
 
 
+@weaver_test()
 def test_progress_can_be_silenced_entirely():
     """A library caller is not a console, and must not be printed at."""
 
@@ -195,6 +208,7 @@ def test_progress_can_be_silenced_entirely():
         assert session.timings, "silencing output must not stop recording"
 
 
+@weaver_test()
 def test_progress_never_reaches_stdout(capsys):
     """stdout is the command's answer, and several commands emit JSON on it."""
 
@@ -233,6 +247,7 @@ def _screen(raw: str) -> list[str]:
     return lines
 
 
+@weaver_test()
 def test_an_open_frame_is_named_while_it_is_still_running():
     """The point of the feature: a slow Step is visible during the wait."""
 
@@ -245,6 +260,7 @@ def test_an_open_frame_is_named_while_it_is_still_running():
     assert "⋯ Unbind catalogue claims" in during
 
 
+@weaver_test()
 def test_the_live_line_reports_the_innermost_open_frame():
     """A Task names the command, which the heading already said. The useful
     answer to "what is it doing" is the smallest thing in flight."""
@@ -261,6 +277,7 @@ def test_the_live_line_reports_the_innermost_open_frame():
     assert latest.split()[1] == "Lakehouse/Sales/DWG.Customer"
 
 
+@weaver_test()
 def test_the_live_line_is_erased_and_leaves_no_trace_in_the_transcript():
     """It is a thing on a screen, not a thing in a log."""
 
@@ -275,6 +292,7 @@ def test_the_live_line_is_erased_and_leaves_no_trace_in_the_transcript():
     assert [line.split()[-1] for line in lines[1:]] == ["0.0s", "0.0s"]
 
 
+@weaver_test()
 def test_durations_line_up_however_long_the_names_are(monkeypatch):
     """A long object name must not shove its own duration out of the column.
 
@@ -302,6 +320,7 @@ def test_durations_line_up_however_long_the_names_are(monkeypatch):
     assert len({len(line) for line in timed}) == 1, timed
 
 
+@weaver_test()
 def test_the_column_never_narrows_below_its_floor(monkeypatch):
     """A very narrow terminal gets a wrapped line rather than a squashed one."""
 
@@ -315,6 +334,7 @@ def test_the_column_never_narrows_below_its_floor(monkeypatch):
     session.close()
 
 
+@weaver_test()
 def test_the_elapsed_figure_moves_while_nothing_else_happens():
     """Without a ticker the line is painted only when some other frame opens or
     closes — which, for the long waits that most need it, is never."""
@@ -332,6 +352,7 @@ def test_the_elapsed_figure_moves_while_nothing_else_happens():
     assert repaints > 1
 
 
+@weaver_test()
 def test_a_stream_that_cannot_be_rewritten_gets_the_completed_lines_only():
     """Piped, redirected or captured: a log file and a test transcript are
     exactly what they were before any of this existed."""
@@ -348,6 +369,7 @@ def test_a_stream_that_cannot_be_rewritten_gets_the_completed_lines_only():
     assert "Unbind catalogue claims" in printed
 
 
+@weaver_test()
 def test_closing_the_session_takes_the_live_line_down():
     out = _Tty()
     session = ConsoleSession(progress=out)
@@ -361,6 +383,7 @@ def test_closing_the_session_takes_the_live_line_down():
 # --- durable evidence ---------------------------------------------------------
 
 
+@weaver_test()
 def test_a_run_s_timings_ride_its_completion_document(session):
     """Not a file of their own. The evidence folder already says what a task
     intended and what each step did; how long a step took is a property of
@@ -392,6 +415,7 @@ def test_a_run_s_timings_ride_its_completion_document(session):
     assert all(entry["seconds"] is not None for entry in document["timings"])
 
 
+@weaver_test()
 def test_a_completion_document_without_timings_still_has_the_key(session):
     """A caller that recorded none says so, rather than omitting the field and
     making every reader handle its absence."""
@@ -411,6 +435,7 @@ def test_a_completion_document_without_timings_still_has_the_key(session):
 # --- the two ledgers are separate ---------------------------------------------
 
 
+@weaver_test()
 def test_logical_timing_and_transport_timing_are_kept_apart(session):
     """Neither can be derived from the other, so neither is folded into it."""
 
@@ -423,6 +448,7 @@ def test_logical_timing_and_transport_timing_are_kept_apart(session):
     assert "Build" not in session.telemetry.measures
 
 
+@weaver_test()
 def test_a_child_line_says_what_it_is_doing_not_only_what_to():
     """Children print above their parent, so a bare object name arrives before
     the Step it belongs to and reads as a stray line under the Task.

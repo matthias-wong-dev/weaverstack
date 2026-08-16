@@ -25,6 +25,7 @@ support.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import PYTHON, SPARK_SQL, parse_document, parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
@@ -120,6 +121,7 @@ def _repo(tmp_path, files: dict[str, str], schemas=("_Control",)):
     )
 
 
+@weaver_test()
 def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):
     repo = _repo(tmp_path, {"_Control.Registry.sql": REGISTRY})
     document = repo["_Control.Registry"]
@@ -129,11 +131,13 @@ def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):
     assert repo.support_files == ()
 
 
+@weaver_test()
 def test_an_underscore_schema_must_still_be_declared(tmp_path):
     with pytest.raises(DiscoveryError, match="is not declared by item"):
         _repo(tmp_path, {"_Control.Registry.sql": REGISTRY}, schemas=("Sales",))
 
 
+@weaver_test()
 def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
     """The one name an ordinary item may not author into.
 
@@ -148,6 +152,7 @@ def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
         _repo(tmp_path, {"_.Registry.sql": registry}, schemas=("_",))
 
 
+@weaver_test()
 def test_a_misnamed_object_file_is_an_error_not_quietly_demoted(tmp_path):
     # No leading underscore, so it is judged an object file on its suffix and its
     # stem is then reported as wrong. Demoting it to support would hide a typo.
@@ -169,17 +174,20 @@ def _registry_metadata(*, with_dependencies: bool = True) -> str:
     )
 
 
+@weaver_test()
 def test_an_empty_dependencies_list_is_an_explicit_none():
     document = parse_document(_registry_metadata(), language=SPARK_SQL)
     assert document.dependencies == ()
     assert document.declares_dependencies
 
 
+@weaver_test()
 def test_a_spark_sql_object_must_still_say_something():
     with pytest.raises(MetadataError, match=r"Dependencies: \[\]"):
         parse_document(_registry_metadata(with_dependencies=False), language=SPARK_SQL)
 
 
+@weaver_test()
 def test_an_explicit_none_suppresses_discovery(tmp_path):
     """`Dependencies: []` replaces discovery rather than falling back to it.
 
@@ -207,6 +215,7 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     assert repo.dependency_graph.upstream_of(f"{ITEM}/Sales.Ignored") == ()
 
 
+@weaver_test()
 def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
     from weaver.declaration import effective_dependencies
 
@@ -224,6 +233,7 @@ def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
     ] == ["Sales.Order"]
 
 
+@weaver_test()
 def test_the_retired_audit_spelling_is_still_reserved():
     from weaver.declaration import parse_document as parse
 

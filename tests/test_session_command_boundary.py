@@ -29,6 +29,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import WeaverError
 from weaver.sessions.console import ConsoleScope, ConsoleSession
@@ -174,6 +175,7 @@ def _run(session, parser, words: list[str]) -> None:
         pass
 
 
+@weaver_test()
 def test_reading_the_catalogue_starts_no_livy_at_all(transport, capsys):
     """The catalogue is a Warehouse, so asking it what is installed is TDS.
 
@@ -192,6 +194,7 @@ def test_reading_the_catalogue_starts_no_livy_at_all(transport, capsys):
     assert transport.submitted == []
 
 
+@weaver_test()
 def test_each_command_still_did_its_own_work(transport, capsys):
     """One session is only worth having if the commands still ran in it.
 
@@ -213,6 +216,7 @@ def test_each_command_still_did_its_own_work(transport, capsys):
     assert _weaver_python(transport) == []
 
 
+@weaver_test()
 def test_no_command_ships_its_whole_run_across(transport):
     """What the decomposition removed, asserted so it cannot come back.
 
@@ -231,6 +235,7 @@ def test_no_command_ships_its_whole_run_across(transport):
     assert not any("weaver.test(" in code for code in transport.submitted)
 
 
+@weaver_test()
 def test_a_command_given_no_session_still_works_on_its_own(transport):
     """A one-shot invocation owns the Session it opens, and closes it."""
 
@@ -261,6 +266,7 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
 # --- the invariant that keeps it true ----------------------------------------
 
 
+@weaver_test()
 def test_only_the_session_opens_a_livy_session():
     """Who may reach for the transport, read off the source.
 

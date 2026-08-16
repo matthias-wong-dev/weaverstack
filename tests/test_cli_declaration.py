@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver_cli import main
 
 
+@weaver_test()
 def test_bare_invocation_prints_help(capsys):
     assert main([]) == 0
     assert "usage: weaver" in capsys.readouterr().out
 
 
+@weaver_test()
 def test_help_exits_cleanly(capsys):
     with pytest.raises(SystemExit) as exit_info:
         main(["--help"])
@@ -19,6 +22,7 @@ def test_help_exits_cleanly(capsys):
     assert "usage: weaver" in capsys.readouterr().out
 
 
+@weaver_test()
 def test_version_reports_the_distribution(capsys):
     with pytest.raises(SystemExit) as exit_info:
         main(["--version"])
@@ -33,6 +37,7 @@ TARGET_COMMANDS = ("wipe", "load", "test")
 
 
 @pytest.mark.parametrize("command", TARGET_COMMANDS)
+@weaver_test()
 def test_a_target_oriented_command_takes_its_targets_positionally(command):
     """The three commands that operate on named targets spell them one way.
 
@@ -52,6 +57,7 @@ def test_a_target_oriented_command_takes_its_targets_positionally(command):
 
 
 @pytest.mark.parametrize("command", TARGET_COMMANDS)
+@weaver_test()
 def test_a_target_oriented_command_needs_at_least_one_target(command):
     from weaver_cli.main import build_parser
 
@@ -59,6 +65,7 @@ def test_a_target_oriented_command_needs_at_least_one_target(command):
         build_parser().parse_args([command])
 
 
+@weaver_test()
 def test_no_target_oriented_command_still_offers_the_old_spelling(capsys):
     """Pre-alpha, so the inconsistent spelling is gone rather than aliased.
 

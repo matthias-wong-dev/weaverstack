@@ -15,6 +15,7 @@ construction.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
 from weaver.errors import IdentityError
@@ -41,6 +42,7 @@ def _spark_root(resolver, name: str) -> str:
     return resolver.spark_root(ItemRef(name))
 
 
+@weaver_test()
 def test_a_target_resolves_to_its_two_roots(resolver):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
     root = _spark_root(resolver, "Sales_LH")
@@ -51,6 +53,7 @@ def test_a_target_resolves_to_its_two_roots(resolver):
     assert location.files_root == f"{root}/Files"
 
 
+@weaver_test()
 def test_a_table_is_addressed_under_the_tables_root(resolver):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
     root = _spark_root(resolver, "Sales_LH")
@@ -58,12 +61,14 @@ def test_a_table_is_addressed_under_the_tables_root(resolver):
     assert location.schema_root("Sales") == f"{root}/Tables/Sales"
 
 
+@weaver_test()
 def test_a_folder_is_addressed_under_the_files_root(resolver):
     location = resolver.lakehouse_spark_location(ItemRef("Sales_LH"))
     root = _spark_root(resolver, "Sales_LH")
     assert location.folder_path("Sales", "Export") == f"{root}/Files/Sales/Export"
 
 
+@weaver_test()
 def test_two_destinations_resolve_separately(resolver):
     """The property the whole abstraction exists for.
 
@@ -87,6 +92,7 @@ def test_two_destinations_resolve_separately(resolver):
     )
 
 
+@weaver_test()
 def test_the_catalogue_resolves_like_any_other_item(resolver):
     """It is the attached one, not a special case of resolution.
 
@@ -100,6 +106,7 @@ def test_the_catalogue_resolves_like_any_other_item(resolver):
 
 
 @pytest.mark.parametrize("bad", ["..", ".", "", "  ", "a/b", "a\\b"])
+@weaver_test()
 def test_a_segment_that_could_escape_the_lakehouse_is_refused(resolver, bad):
     """These strings become paths Spark writes through.
 
@@ -115,6 +122,7 @@ def test_a_segment_that_could_escape_the_lakehouse_is_refused(resolver, bad):
         location.folder_path("Sales", bad)
 
 
+@weaver_test()
 def test_roots_are_strings_because_spark_addresses_them_not_the_store():
     """Deliberately not ``Location``.
 
@@ -133,6 +141,7 @@ def test_roots_are_strings_because_spark_addresses_them_not_the_store():
     assert location.table_path("Sales", "Customer").startswith("abfss://")
 
 
+@weaver_test()
 def test_a_trailing_separator_on_a_root_does_not_double(resolver):
     location = LakehouseSparkLocation(
         item="Sales_LH", tables_root="/root/Tables/", files_root="/root/Files/"
@@ -144,6 +153,7 @@ def test_a_trailing_separator_on_a_root_does_not_double(resolver):
 # --- the installer resolves it once, and executors receive it -----------------
 
 
+@weaver_test()
 def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
     """An executor must not derive its own path — that is a planning decision.
 
@@ -176,6 +186,7 @@ def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
     from support.sessions import given_installer
 
@@ -193,6 +204,7 @@ def test_a_warehouse_target_has_no_lakehouse_roots(tmp_path):
     assert resolved.location is None
 
 
+@weaver_test()
 def test_a_resolver_without_the_method_is_not_a_failure(tmp_path):
     """The actions that need roots fail explicitly; resolution does not pre-empt them."""
 
@@ -213,6 +225,7 @@ def test_a_resolver_without_the_method_is_not_a_failure(tmp_path):
 # --- a bundle never carries one ----------------------------------------------
 
 
+@weaver_test()
 def test_a_bound_target_carries_no_resolved_root():
     """Roots are derived at install time, deliberately.
 

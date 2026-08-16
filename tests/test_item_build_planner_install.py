@@ -8,6 +8,7 @@ import shutil
 import pytest
 from factories import lakehouse_catalogue
 from support.sessions import given_installer
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_item_dependencies_declaration import _dependency_estate
 from test_item_repository_declaration import _estate, _folder, _schema, _write
@@ -132,6 +133,7 @@ def generate_item_build_bundle(repository, **kwargs):
     return _generate_item_build_bundle(repository, **kwargs)
 
 
+@weaver_test()
 def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
     repository = _repository(_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -162,6 +164,7 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
     )
 
 
+@weaver_test()
 def test_same_physical_item_cannot_be_bound_twice(tmp_path):
     with pytest.raises(
         BuildError, match="physical Lakehouse target is bound more than once"
@@ -174,6 +177,7 @@ def test_same_physical_item_cannot_be_bound_twice(tmp_path):
         )
 
 
+@weaver_test()
 def test_at_least_one_binding_is_required(tmp_path):
     repository = _repository(_estate(tmp_path))
     with pytest.raises(BuildError, match="at least one Weaver item"):
@@ -185,6 +189,7 @@ def test_at_least_one_binding_is_required(tmp_path):
         )
 
 
+@weaver_test()
 def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
     """An alias needs a bound source: there is otherwise nothing to point at.
 
@@ -231,6 +236,7 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
     assert "PortableCustomer" not in payload
 
 
+@weaver_test()
 def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     store = FilesystemStore()
@@ -267,6 +273,7 @@ def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
     )
 
 
+@weaver_test()
 def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
     root = _dependency_estate(tmp_path)
     _write(
@@ -311,6 +318,7 @@ def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
     }
 
 
+@weaver_test()
 def test_an_alias_is_materialised_before_the_documents_that_use_it(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -338,6 +346,7 @@ def test_an_alias_is_materialised_before_the_documents_that_use_it(tmp_path):
     )
 
 
+@weaver_test()
 def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -358,6 +367,7 @@ def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
     assert at["schema-Warehouse--Reporting-Sales"] < at["aliases-Warehouse--Reporting"]
 
 
+@weaver_test()
 def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     item = WeaverItemId.parse("Warehouse/Reporting")
@@ -383,6 +393,7 @@ def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
     assert "Warehouse--Reporting-prune-table-Sales.Ghost" in pruned
 
 
+@weaver_test()
 def test_authored_three_part_name_is_preserved_in_payload(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -401,6 +412,7 @@ def test_authored_three_part_name_is_preserved_in_payload(tmp_path):
     assert any("Raw_LH.Sales.Customer" in payload for payload in payloads)
 
 
+@weaver_test()
 def test_bundle_identity_is_deterministic_for_same_repository_and_bindings(tmp_path):
     repository = _repository(_estate(tmp_path))
     bindings = ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),))
@@ -432,6 +444,7 @@ class _Resolver:
         return None
 
 
+@weaver_test()
 def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
     root = _estate(tmp_path)
     repository = _repository(root)
@@ -464,6 +477,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
     assert report.status == "succeeded"
 
 
+@weaver_test()
 def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
     tmp_path, lakehouses
 ):
@@ -504,6 +518,7 @@ def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
     )
 
 
+@weaver_test()
 def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
     tmp_path, lakehouses
 ):
@@ -535,6 +550,7 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
     )
 
 
+@weaver_test()
 def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakehouses):
     lakehouses = more_lakehouses("Curated_Dev")
     repository = _repository(_estate(tmp_path))
@@ -573,6 +589,7 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakeh
     )
 
 
+@weaver_test()
 def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(
     tmp_path, more_lakehouses
 ):
@@ -608,6 +625,7 @@ def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(
 # --- item order is the outer build structure ---------------------------------
 
 
+@weaver_test()
 def test_sequence_numbers_describe_the_assembled_order_and_nothing_else(tmp_path):
     repository = _repository(_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -626,6 +644,7 @@ def test_sequence_numbers_describe_the_assembled_order_and_nothing_else(tmp_path
     assert numbers == list(range(1, len(numbers) + 1))
 
 
+@weaver_test()
 def test_a_consumer_items_whole_group_follows_its_producers(tmp_path):
     """The invariant multi-item build rests on, stated as barriers.
 
@@ -657,6 +676,7 @@ def test_a_consumer_items_whole_group_follows_its_producers(tmp_path):
     assert max(numbers["Curated"]) < min(numbers["Reporting"])
 
 
+@weaver_test()
 def test_independent_items_share_their_barriers(tmp_path):
     """Nothing orders two items in one layer, so they are not serialised."""
 
@@ -691,6 +711,7 @@ def _refreshed(bundle):
     }
 
 
+@weaver_test()
 def test_a_lakehouse_item_that_mutated_delta_is_closed_by_a_refresh(tmp_path):
     repository = _repository(_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -706,6 +727,7 @@ def test_a_lakehouse_item_that_mutated_delta_is_closed_by_a_refresh(tmp_path):
     assert _refreshed(bundle) >= {"Lakehouse-Raw--lakehouse-Raw_Dev"}
 
 
+@weaver_test()
 def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
     repository = _repository(_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -720,6 +742,7 @@ def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
     assert _refreshed(bundle) == set()
 
 
+@weaver_test()
 def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
     """A Folder is a directory in Files. The SQL endpoint describes tables."""
 
@@ -750,6 +773,7 @@ class _WarehouseInventory:
         return [{"name": "Sales"}]
 
 
+@weaver_test()
 def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
     repository = _repository(_estate(tmp_path))
     item = WeaverItemId.parse("Warehouse/Audit")
@@ -770,6 +794,7 @@ def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
     assert actions[0].id == "Warehouse--Audit-prune-table-Sales.Ghost"
 
 
+@weaver_test()
 def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     repository = _repository(_estate(tmp_path))
     bundle = generate_item_build_bundle(
@@ -817,6 +842,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     )
 
 
+@weaver_test()
 def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
     """The refresh moved from a global tail into each item's group.
 
@@ -864,6 +890,7 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     root = _estate(tmp_path)
     (root / "Lakehouse/Curated/Sales__Customer.py").unlink()
@@ -889,6 +916,7 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     assert "Lakehouse-Raw--lakehouse-Raw_Dev" in refreshed
 
 
+@weaver_test()
 def test_catalogue_requires_an_explicit_catalogue_warehouse(tmp_path):
     repository = _repository(_estate(tmp_path))
     with pytest.raises(BuildError, match="catalogue Warehouse"):
@@ -901,6 +929,7 @@ def test_catalogue_requires_an_explicit_catalogue_warehouse(tmp_path):
         )
 
 
+@weaver_test()
 def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     repository = _repository(_estate(tmp_path))
     control = WarehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)

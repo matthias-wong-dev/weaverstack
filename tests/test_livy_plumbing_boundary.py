@@ -6,6 +6,8 @@ returned value is told from printed output — verified without a workspace.
 
 from __future__ import annotations
 
+from support.weaver_test import weaver_test
+
 from weaver.fabric.livy import (
     RESULT_PREFIX,
     LivySessionInfo,
@@ -19,27 +21,32 @@ from weaver.fabric.resources import WorkspaceItem
 from weaver.workspaces import Workspace
 
 
+@weaver_test()
 def test_the_sessions_url_names_workspace_and_lakehouse():
     url = sessions_url("ws-id", "lh-id")
     assert "/workspaces/ws-id/lakehouses/lh-id/livyapi/" in url
     assert url.endswith("/sessions")
 
 
+@weaver_test()
 def test_a_returned_value_is_told_from_printed_output():
     text = f"some log line\n{RESULT_PREFIX}" + '{"removed": 2}\n' + "another line"
     assert _payload(text) == {"removed": 2}
 
 
+@weaver_test()
 def test_output_with_no_returned_value():
     assert _payload("just logging\n") is None
     assert StatementResult(text="x").returned is False
 
 
+@weaver_test()
 def test_the_last_returned_value_wins():
     text = f"{RESULT_PREFIX}" + '{"n": 1}\n' + f"{RESULT_PREFIX}" + '{"n": 2}\n'
     assert _payload(text) == {"n": 2}
 
 
+@weaver_test()
 def test_malformed_json_is_not_a_result():
     assert _payload(f"{RESULT_PREFIX}not json\n") is None
 
@@ -86,6 +93,7 @@ class _CollectionClient:
         }
 
 
+@weaver_test()
 def test_livy_collection_preserves_scheduler_details():
     sessions = list_livy_sessions("ws-id", "lh-2", client=_CollectionClient())
 
@@ -106,6 +114,7 @@ def test_livy_collection_preserves_scheduler_details():
     assert sessions[0].active is True
 
 
+@weaver_test()
 def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
     monkeypatch,
 ):
@@ -164,6 +173,7 @@ def _closing_session(api, monkeypatch, **kwargs):
     return session
 
 
+@weaver_test()
 def test_close_waits_for_the_session_to_report_itself_gone(monkeypatch):
     api = _Api(["shutting_down", "shutting_down", "dead"])
 
@@ -174,6 +184,7 @@ def test_close_waits_for_the_session_to_report_itself_gone(monkeypatch):
     assert [method for method, _ in api.calls] == ["DELETE", "GET", "GET", "GET"]
 
 
+@weaver_test()
 def test_close_stops_as_soon_as_the_session_is_no_longer_there(monkeypatch):
     """A 404 is the answer, not a failure: the slot is free."""
 
@@ -182,6 +193,7 @@ def test_close_stops_as_soon_as_the_session_is_no_longer_there(monkeypatch):
     assert [method for method, _ in api.calls] == ["DELETE", "GET"]
 
 
+@weaver_test()
 def test_a_close_that_cannot_be_confirmed_warns_rather_than_raises(monkeypatch, capsys):
     """The session is abandoned either way, and a teardown must not mask a result."""
 
@@ -192,6 +204,7 @@ def test_a_close_that_cannot_be_confirmed_warns_rather_than_raises(monkeypatch, 
     assert "did not report itself released" in capsys.readouterr().out
 
 
+@weaver_test()
 def test_closing_twice_is_harmless(monkeypatch):
     api = _Api([None])
     session = _closing_session(api, monkeypatch)

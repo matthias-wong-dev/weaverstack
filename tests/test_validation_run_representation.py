@@ -15,6 +15,7 @@ twice to get both counts and rows, so the fake executor counts its calls.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WeaverItemId
@@ -176,10 +177,12 @@ def _ran(validation, executor=None, *, collect=False):
 # --- which primitive ----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_warehouse_validation_is_reached_as_a_procedure():
     assert primitive_kind(_validation()) == WAREHOUSE_PROCEDURE
 
 
+@weaver_test()
 def test_a_lakehouse_validation_is_reached_as_a_module():
     validation = _validation(item=LAKEHOUSE, target=LAKEHOUSE_TARGET)
 
@@ -189,6 +192,7 @@ def test_a_lakehouse_validation_is_reached_as_a_module():
 # --- what a result means ------------------------------------------------------
 
 
+@weaver_test()
 def test_a_test_with_no_discrepancies_passes():
     executor = _Executor({"missing_count": 0, "unexpected_count": 0})
 
@@ -198,6 +202,7 @@ def test_a_test_with_no_discrepancies_passes():
     assert node.result.failure_count == 0
 
 
+@weaver_test()
 def test_a_test_with_discrepancies_fails_and_carries_both_counts():
     executor = _Executor({"missing_count": 2, "unexpected_count": 3})
 
@@ -208,6 +213,7 @@ def test_a_test_with_discrepancies_fails_and_carries_both_counts():
     assert node.result.failure_count == 5
 
 
+@weaver_test()
 def test_an_assumption_reads_its_own_count():
     executor = _Executor({"violation_count": 4})
 
@@ -220,6 +226,7 @@ def test_an_assumption_reads_its_own_count():
 # --- failing is not the same as not running -----------------------------------
 
 
+@weaver_test()
 def test_a_missing_primitive_is_invalid_rather_than_passing():
     """A Test that was never installed must not read as a Test that found nothing."""
 
@@ -231,6 +238,7 @@ def test_a_missing_primitive_is_invalid_rather_than_passing():
     assert not node.result.succeeded
 
 
+@weaver_test()
 def test_an_execution_failure_is_invalid_and_says_why():
     class _Broken(_Executor):
         def call_procedure(self, procedure, *, inputs=(), outputs=()):
@@ -243,6 +251,7 @@ def test_an_execution_failure_is_invalid_and_says_why():
     assert node.messages
 
 
+@weaver_test()
 def test_no_sql_capability_is_reported_against_the_validation():
     node = _ran(_validation(), None)
 
@@ -253,6 +262,7 @@ def test_no_sql_capability_is_reported_against_the_validation():
 # --- one failure does not stop the rest ---------------------------------------
 
 
+@weaver_test()
 def test_every_validation_reports_even_after_one_fails():
     class _Alternating(_Executor):
         def __init__(self):
@@ -274,6 +284,7 @@ def test_every_validation_reports_even_after_one_fails():
 # --- suppression --------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_whole_target_run_asks_the_procedure_to_stay_quiet():
     executor = _Executor({"missing_count": 0, "unexpected_count": 0})
 
@@ -282,6 +293,7 @@ def test_a_whole_target_run_asks_the_procedure_to_stay_quiet():
     assert executor.calls[0][1] == (("suppress_result_set", 1),)
 
 
+@weaver_test()
 def test_a_targeted_run_asks_for_the_rows():
     executor = _Executor(
         {"missing_count": 1, "unexpected_count": 0},
@@ -294,6 +306,7 @@ def test_a_targeted_run_asks_for_the_rows():
     assert node.diagnostics == ({"_weaver_side": "expected", "OrderId": 1},)
 
 
+@weaver_test()
 def test_a_targeted_run_executes_the_procedure_exactly_once():
     """Twice would compare data that could have changed in between."""
 
@@ -359,6 +372,7 @@ class _Aggregated:
         ]
 
 
+@weaver_test()
 def test_a_suppressed_spark_run_never_materialises_a_row():
     """The claim is about what is *not* done, so the frame refuses to be collected."""
 
@@ -419,6 +433,7 @@ def test_a_suppressed_spark_run_never_materialises_a_row():
 # --- dry run ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_dry_run_dispatches_nothing():
     executor = _Executor({"missing_count": 9, "unexpected_count": 9})
 
@@ -469,10 +484,12 @@ def _node(status, result=None):
         ([PLANNED, PLANNED], PLANNED),
     ],
 )
+@weaver_test()
 def test_the_run_takes_the_worst_status(statuses, expected):
     assert run_status([_node(status) for status in statuses]) == expected
 
 
+@weaver_test()
 def test_the_totals_aggregate_physical_counts():
     report = ValidationRunReport(
         status=FAILED,
@@ -495,6 +512,7 @@ def test_the_totals_aggregate_physical_counts():
     }
 
 
+@weaver_test()
 def test_a_node_mapping_carries_counts_and_never_rows():
     """What a task log and a transported report are allowed to hold."""
 
@@ -518,6 +536,7 @@ def test_a_node_mapping_carries_counts_and_never_rows():
     assert "_weaver_sk" not in str(mapping)
 
 
+@weaver_test()
 def test_a_report_survives_a_transport_round_trip_without_its_rows():
     node = ValidationNodeReport(
         logical_id="Lakehouse/Sales/Sales.X",
@@ -614,6 +633,7 @@ def _file_node(tmp_path, executor, **kwargs):
     )
 
 
+@weaver_test()
 def test_a_failing_source_test_reports_its_counts_not_a_diagnostic_row(tmp_path):
     """The regression: counts come from the projection, never the evidence."""
 
@@ -636,6 +656,7 @@ def test_a_failing_source_test_reports_its_counts_not_a_diagnostic_row(tmp_path)
     assert node.result.unexpected_count == 1
 
 
+@weaver_test()
 def test_a_source_run_returns_the_evidence_it_produced(tmp_path):
     executor = _BatchExecutor(
         (
@@ -649,6 +670,7 @@ def test_a_source_run_returns_the_evidence_it_produced(tmp_path):
     assert [row["OrderId"] for row in node.diagnostics] == [7]
 
 
+@weaver_test()
 def test_a_passing_source_test_has_only_its_projection(tmp_path):
     executor = _BatchExecutor((({"missing_count": 0, "unexpected_count": 0},),))
 
@@ -658,6 +680,7 @@ def test_a_passing_source_test_has_only_its_projection(tmp_path):
     assert node.diagnostics == ()
 
 
+@weaver_test()
 def test_a_source_dry_run_compiles_and_dispatches_nothing(tmp_path):
     """What *would* run — so the file is still compiled, and nothing executed."""
 

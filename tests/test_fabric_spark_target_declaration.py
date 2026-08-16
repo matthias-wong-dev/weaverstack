@@ -10,6 +10,7 @@ is attached to.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import IdentityError, InstallError
 from weaver.spark import FabricSparkTarget, SparkCatalogue
@@ -23,6 +24,7 @@ def fabric():
 # --- the native namespace -----------------------------------------------------
 
 
+@weaver_test()
 def test_an_object_is_qualified_with_all_four_parts(fabric):
     assert (
         fabric.qualify("Sales", "Customer")
@@ -30,10 +32,12 @@ def test_an_object_is_qualified_with_all_four_parts(fabric):
     )
 
 
+@weaver_test()
 def test_a_schema_is_qualified_with_the_three_that_name_it(fabric):
     assert fabric.qualified_schema("Sales") == "`Weaver`.`Play_Lakehouse_1`.`Sales`"
 
 
+@weaver_test()
 def test_creating_a_schema_names_the_lakehouse_and_no_path(fabric):
     """A schema-enabled Fabric Lakehouse pins its own storage and refuses one."""
 
@@ -45,6 +49,7 @@ def test_creating_a_schema_names_the_lakehouse_and_no_path(fabric):
     assert "LOCATION" not in statement
 
 
+@weaver_test()
 def test_two_lakehouses_are_different_places(fabric):
     other = FabricSparkTarget(workspace="Weaver", lakehouse="Play_Lakehouse_2")
 
@@ -54,6 +59,7 @@ def test_two_lakehouses_are_different_places(fabric):
 # --- what a name may contain --------------------------------------------------
 
 
+@weaver_test()
 def test_a_backtick_in_a_name_is_doubled_not_dropped():
     """Otherwise a crafted name would end the identifier and start syntax."""
 
@@ -65,6 +71,7 @@ def test_a_backtick_in_a_name_is_doubled_not_dropped():
 
 
 @pytest.mark.parametrize("name", ["Contoso Data", "Contoso.Data", "Sales-Reporting"])
+@weaver_test()
 def test_a_workspace_name_may_carry_what_fabric_allows(name):
     """Fabric workspace names hold spaces, dots and dashes, and quoting is enough.
 
@@ -81,11 +88,13 @@ def test_a_workspace_name_may_carry_what_fabric_allows(name):
 
 
 @pytest.mark.parametrize("empty", ["", "   "])
+@weaver_test()
 def test_an_empty_name_is_refused(empty):
     with pytest.raises(IdentityError):
         FabricSparkTarget(workspace=empty, lakehouse="Sales")
 
 
+@weaver_test()
 def test_a_name_that_is_not_a_string_is_refused():
     with pytest.raises(IdentityError):
         FabricSparkTarget(workspace=object(), lakehouse="Sales")
@@ -131,6 +140,7 @@ class _Spark:
         return None
 
 
+@weaver_test()
 def test_a_statement_runs_exactly_as_it_was_given(fabric):
     """Payloads arrive addressed, so the catalogue resolves nothing."""
 
@@ -141,6 +151,7 @@ def test_a_statement_runs_exactly_as_it_was_given(fabric):
     assert spark.executed == [statement]
 
 
+@weaver_test()
 def test_listing_views_asks_the_destination_not_the_session(fabric):
     spark = _Spark(
         listings={
@@ -154,6 +165,7 @@ def test_listing_views_asks_the_destination_not_the_session(fabric):
     assert SparkCatalogue(spark, fabric).views("Sales") == ("active",)
 
 
+@weaver_test()
 def test_listing_tables_takes_the_views_back_out(fabric):
     """``SHOW TABLES`` returns views as well — confirmed in a real workspace."""
 
@@ -172,12 +184,14 @@ def test_listing_tables_takes_the_views_back_out(fabric):
     assert SparkCatalogue(spark, fabric).tables("Sales") == ("customer",)
 
 
+@weaver_test()
 def test_a_schema_that_is_not_there_holds_nothing(fabric):
     """Fabric raises for an absent schema; an inventory wants "empty"."""
 
     assert SparkCatalogue(_Spark(), fabric).views("Sales") == ()
 
 
+@weaver_test()
 def test_a_failure_that_is_not_absence_still_propagates(fabric):
     class _Broken(_Spark):
         def sql(self, statement):
@@ -187,6 +201,7 @@ def test_a_failure_that_is_not_absence_still_propagates(fabric):
         SparkCatalogue(_Broken(), fabric).views("Sales")
 
 
+@weaver_test()
 def test_existence_is_asked_of_the_qualified_name(fabric):
     spark = _Spark(tables={"`Weaver`.`Play_Lakehouse_1`.`Sales`.`Customer`"})
     catalogue = SparkCatalogue(spark, fabric)
@@ -195,11 +210,13 @@ def test_existence_is_asked_of_the_qualified_name(fabric):
     assert not catalogue.exists("Sales", "Absent")
 
 
+@weaver_test()
 def test_a_catalogue_without_a_session_is_refused_at_construction(fabric):
     with pytest.raises(InstallError):
         SparkCatalogue(None, fabric)
 
 
+@weaver_test()
 def test_a_catalogue_can_run_statements_without_a_session(fabric):
     """From a desktop the statements cross and the reading stays here."""
 

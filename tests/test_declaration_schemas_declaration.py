@@ -6,6 +6,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import (
     SchemaSes,
@@ -25,12 +26,14 @@ def parse(text: str, path: str = "_schemas/Sales.yml") -> SchemaSes:
 # --- parsing -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_minimal_schema_declares_only_its_id():
     schema = parse("Schema ID: Sales")
     assert schema.schema_id == "Sales"
     assert schema.description is None
 
 
+@weaver_test()
 def test_a_schema_carries_a_multiline_description():
     schema = parse(
         """
@@ -44,26 +47,31 @@ def test_a_schema_carries_a_multiline_description():
     assert schema.description == "Curated sales objects,\nacross two lines."
 
 
+@weaver_test()
 def test_a_missing_id_is_refused():
     with pytest.raises(DiscoveryError, match="Schema ID is required"):
         parse("Description: no id here")
 
 
+@weaver_test()
 def test_a_blank_id_is_refused():
     with pytest.raises(DiscoveryError, match="Schema ID is required"):
         parse("Schema ID: '   '")
 
 
+@weaver_test()
 def test_a_dotted_id_is_refused():
     with pytest.raises(DiscoveryError, match="single bare name"):
         parse("Schema ID: Sales.Order")
 
 
+@weaver_test()
 def test_an_unknown_key_is_refused():
     with pytest.raises(DiscoveryError, match="unknown schema key"):
         parse("Schema ID: Sales\nColour: blue")
 
 
+@weaver_test()
 def test_a_non_mapping_is_refused():
     with pytest.raises(DiscoveryError, match="must be a YAML mapping"):
         parse("- just a list")
@@ -72,21 +80,25 @@ def test_a_non_mapping_is_refused():
 # --- filename identity -------------------------------------------------------
 
 
+@weaver_test()
 def test_the_filename_must_match_the_id():
     with pytest.raises(DiscoveryError, match="match exactly"):
         read_schema_document("_schemas/Sales.yml", b"Schema ID: Reporting")
 
 
+@weaver_test()
 def test_the_filename_match_is_case_sensitive():
     with pytest.raises(DiscoveryError, match="match exactly"):
         read_schema_document("_schemas/sales.yml", b"Schema ID: Sales")
 
 
+@weaver_test()
 def test_a_matching_filename_reads():
     schema = read_schema_document("_schemas/Sales.yml", b"Schema ID: Sales")
     assert schema.schema_id == "Sales"
 
 
+@weaver_test()
 def test_is_schema_file_only_matches_the_schemas_directory():
     assert is_schema_file("_schemas/Sales.yml")
     assert not is_schema_file("Sales.yml")
@@ -135,6 +147,7 @@ def build(tmp_path: Path, *, schemas: list[str], objects: dict[str, str]) -> Loc
     return Location(str(tmp_path))
 
 
+@weaver_test()
 def test_a_native_object_needs_its_schema_declared(tmp_path):
     root = build(
         tmp_path,
@@ -145,6 +158,7 @@ def test_a_native_object_needs_its_schema_declared(tmp_path):
         parse_item_repository(root)
 
 
+@weaver_test()
 def test_a_declared_schema_lets_the_object_read(tmp_path):
     root = build(
         tmp_path,
@@ -154,6 +168,7 @@ def test_a_declared_schema_lets_the_object_read(tmp_path):
     assert f"{ITEM}/Sales.Thing" in parse_item_repository(root).dependency_graph.nodes
 
 
+@weaver_test()
 def test_an_unused_schema_is_still_valid(tmp_path):
     root = build(
         tmp_path,
@@ -165,6 +180,7 @@ def test_an_unused_schema_is_still_valid(tmp_path):
     assert "Unused" in declared
 
 
+@weaver_test()
 def test_the_error_names_the_expected_schema_file(tmp_path):
     root = build(
         tmp_path,

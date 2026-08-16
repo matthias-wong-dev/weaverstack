@@ -7,6 +7,7 @@ import pytest
 from .weaver_test import WeaverTestDeclaration, weaver_test
 
 
+@weaver_test()
 def test_the_wrapper_exposes_its_declaration_and_generates_scope_markers():
     @weaver_test(remote=True, resources={"tds"})
     def declared():
@@ -21,6 +22,7 @@ def test_the_wrapper_exposes_its_declaration_and_generates_scope_markers():
     }
 
 
+@weaver_test()
 def test_invalid_declarations_are_rejected():
     with pytest.raises(ValueError, match="one scope"):
         weaver_test(remote=True, hosted=True)

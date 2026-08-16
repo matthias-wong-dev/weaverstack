@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import textwrap
 
+from support.weaver_test import weaver_test
+
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
 
@@ -59,6 +61,7 @@ VIEW = """
 # --- shared shape -----------------------------------------------------------
 
 
+@weaver_test()
 def test_the_script_is_self_contained():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
     # It creates its own temp shape table and drops it — no external state.
@@ -68,6 +71,7 @@ def test_the_script_is_self_contained():
     )
 
 
+@weaver_test()
 def test_the_query_runs_shape_only():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
     # Guarded so it returns columns and no rows, diverted into the temp table.
@@ -75,6 +79,7 @@ def test_the_query_runs_shape_only():
     assert "into #weaver_shape_Reporting_CustomerReport from" in content
 
 
+@weaver_test()
 def test_metadata_is_validated_inside_the_sql():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
     assert "N'Primary key' as metadata_kind" in content
@@ -84,6 +89,7 @@ def test_metadata_is_validated_inside_the_sql():
     assert "collate Latin1_General_BIN2" in content
 
 
+@weaver_test()
 def test_only_the_main_table_is_built():
     for source in (INFERRED, DECLARED):
         content = _ddl("Reporting.CustomerReport.sql", source).content
@@ -93,6 +99,7 @@ def test_only_the_main_table_is_built():
         assert "create or alter view" not in content.lower()
 
 
+@weaver_test()
 def test_every_audit_column_is_built_not_null():
     for source in (INFERRED, DECLARED):
         content = _ddl("Reporting.CustomerReport.sql", source).content
@@ -101,6 +108,7 @@ def test_every_audit_column_is_built_not_null():
         assert "[Row delete datetime] datetime2(6) not null" in content
 
 
+@weaver_test()
 def test_the_not_null_header_drives_inferred_nullability():
     source = """
         /*
@@ -128,6 +136,7 @@ def test_the_not_null_header_drives_inferred_nullability():
     assert "left join not_null_columns as nn" in content
 
 
+@weaver_test()
 def test_a_primary_key_constraint_is_added():
     for source in (INFERRED, DECLARED):
         content = _ddl("Reporting.CustomerReport.sql", source).content
@@ -145,6 +154,7 @@ def test_a_primary_key_constraint_is_added():
 # --- inferred vs declared ---------------------------------------------------
 
 
+@weaver_test()
 def test_inferred_builds_the_table_dynamically_from_temp_metadata():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
     # The physical types are computed server-side from the temp columns.
@@ -155,6 +165,7 @@ def test_inferred_builds_the_table_dynamically_from_temp_metadata():
     assert "varchar(200)" not in content
 
 
+@weaver_test()
 def test_declared_builds_the_table_from_the_declaration_and_validates_the_query():
     content = _ddl("Reporting.CustomerReport.sql", DECLARED).content
     # A static create over the declared types, plus the audit columns.
@@ -168,6 +179,7 @@ def test_declared_builds_the_table_from_the_declaration_and_validates_the_query(
     assert "case bt.base_type" not in content
 
 
+@weaver_test()
 def test_a_warehouse_view_is_a_strict_create_view():
     ddl = _ddl("Reporting.ActiveReport.sql", VIEW)
     assert ddl.content == (
@@ -205,6 +217,7 @@ IDENTITY_DECLARED = """
 """
 
 
+@weaver_test()
 def test_declared_identity_leads_as_a_native_identity_bigint():
     content = _ddl("Reporting.CustomerReport.sql", IDENTITY_DECLARED).content
     # The Warehouse generates the values, so the column says so and a load never
@@ -212,6 +225,7 @@ def test_declared_identity_leads_as_a_native_identity_bigint():
     assert "[CustomerKey] bigint identity not null" in content
 
 
+@weaver_test()
 def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     content = _ddl("Reporting.CustomerReport.sql", IDENTITY_INFERRED).content
     # Added as the leading column of the dynamically built table. It leads the
@@ -247,6 +261,7 @@ TWO_QUERY = """
 """
 
 
+@weaver_test()
 def test_the_table_is_shaped_from_the_staging_query_not_the_last_one():
     """Which SELECT the table *is* — the first result query, and only it.
 
@@ -262,6 +277,7 @@ def test_the_table_is_shaped_from_the_staging_query_not_the_last_one():
     assert "select CustomerName" not in content.split("into #weaver_delete_shape")[1]
 
 
+@weaver_test()
 def test_select_into_setup_keeps_its_own_destination():
     """Setup names where its rows go, so the build must not divert it."""
 
@@ -270,6 +286,7 @@ def test_select_into_setup_keeps_its_own_destination():
     assert "into #Working from [Sales_LH].[Sales].[Customer] where 1=0" in content
 
 
+@weaver_test()
 def test_the_delete_query_is_shaped_and_checked_against_the_primary_key():
     content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
 
@@ -278,6 +295,7 @@ def test_the_delete_query_is_shaped_and_checked_against_the_primary_key():
     assert "collate Latin1_General_BIN2" in content
 
 
+@weaver_test()
 def test_both_shape_tables_are_cleaned_up():
     content = _ddl("Reporting.CustomerReport.sql", TWO_QUERY).content
 
@@ -287,6 +305,7 @@ def test_both_shape_tables_are_cleaned_up():
     assert content.count("drop table #weaver_shape_Reporting_CustomerReport;") == 2
 
 
+@weaver_test()
 def test_a_one_query_table_shapes_nothing_for_deletion():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
 
@@ -297,6 +316,7 @@ def test_a_one_query_table_shapes_nothing_for_deletion():
 # --- determinism ------------------------------------------------------------
 
 
+@weaver_test()
 def test_generation_is_deterministic():
     assert _ddl("Reporting.CustomerReport.sql", INFERRED) == _ddl(
         "Reporting.CustomerReport.sql", INFERRED

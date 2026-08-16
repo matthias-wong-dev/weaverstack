@@ -13,6 +13,7 @@ carries a signature, and the columns the plan forbids are absent.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue import (
     ALIAS,
@@ -38,6 +39,7 @@ from weaver.catalogue import (
 ALL = CATALOGUE_TABLES
 
 
+@weaver_test()
 def test_there_are_exactly_eleven_catalogue_tables():
     assert [each.name for each in ALL] == [
         "SchemaDictionary",
@@ -54,6 +56,7 @@ def test_there_are_exactly_eleven_catalogue_tables():
     ]
 
 
+@weaver_test()
 def test_reconciliation_order_puts_registry_last():
     """The declared order is the order a build writes them.
 
@@ -67,6 +70,7 @@ def test_reconciliation_order_puts_registry_last():
     assert set(DICTIONARY_TABLES) == set(ALL) - {INSTALLATION, REGISTRY}
 
 
+@weaver_test()
 def test_every_table_lives_in_the_reserved_schema():
     assert CATALOGUE_SCHEMA == "_"
     for each in ALL:
@@ -74,6 +78,7 @@ def test_every_table_lives_in_the_reserved_schema():
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_every_key_opens_with_the_installation_scope(each: CatalogueTable):
     """Scope is identity, not an extra column beside it.
 
@@ -86,23 +91,27 @@ def test_every_key_opens_with_the_installation_scope(each: CatalogueTable):
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_key_columns_lead_in_key_order(each: CatalogueTable):
     assert each.column_names[: len(each.key)] == each.key
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_key_columns_are_not_null(each: CatalogueTable):
     for name in each.key:
         assert each.column(name).not_null, name
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_every_table_ends_with_a_signature(each: CatalogueTable):
     assert each.column_names[-1] == SIGNATURE
     assert each.column(SIGNATURE).not_null
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_the_audit_columns_are_physical_but_not_declared(each: CatalogueTable):
     """Weaver's audit columns are appended by build, so they are not business columns.
 
@@ -117,6 +126,7 @@ def test_the_audit_columns_are_physical_but_not_declared(each: CatalogueTable):
     )
 
 
+@weaver_test()
 def test_the_audit_columns_use_the_delta_snake_case_spelling():
     assert AUDIT_COLUMN_NAMES == (
         "row_insert_datetime",
@@ -126,6 +136,7 @@ def test_the_audit_columns_use_the_delta_snake_case_spelling():
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_comparison_columns_are_every_non_key_column(each: CatalogueTable):
     assert each.comparison_columns == tuple(
         name for name in each.column_names if name not in each.key
@@ -136,6 +147,7 @@ def test_comparison_columns_are_every_non_key_column(each: CatalogueTable):
 
 
 @pytest.mark.parametrize("each", ALL, ids=lambda each: each.name)
+@weaver_test()
 def test_every_column_declares_a_type_and_a_description(each: CatalogueTable):
     for column in each.columns:
         assert column.type in ("string", "boolean", "timestamp"), column.name
@@ -145,6 +157,7 @@ def test_every_column_declares_a_type_and_a_description(each: CatalogueTable):
 # --- the individual shapes ---------------------------------------------------
 
 
+@weaver_test()
 def test_installation_is_keyed_on_the_scope_alone():
     """One installation per repository per target type — so the key is the scope.
 
@@ -164,6 +177,7 @@ def test_installation_is_keyed_on_the_scope_alone():
     assert "target_name" in INSTALLATION.comparison_columns
 
 
+@weaver_test()
 def test_registry_says_what_and_what_for_and_nothing_about_the_source():
     assert REGISTRY.key == ("item_type", "item_name", "schema_name", "object_name")
     assert REGISTRY.column_names == (
@@ -180,6 +194,7 @@ def test_registry_says_what_and_what_for_and_nothing_about_the_source():
     assert not {"source_language", "source_path"} & set(REGISTRY.column_names)
 
 
+@weaver_test()
 def test_the_column_dictionary_is_purely_descriptive():
     """It describes columns an author wrote about, not the physical shape.
 
@@ -210,6 +225,7 @@ def test_the_column_dictionary_is_purely_descriptive():
     } & set(COLUMN_DICTIONARY.column_names)
 
 
+@weaver_test()
 def test_a_logical_key_is_identified_by_its_columns_not_a_name():
     """No index name, because nothing physical is built and names would be invented.
 
@@ -229,6 +245,7 @@ def test_a_logical_key_is_identified_by_its_columns_not_a_name():
     assert "is_unique" not in KEY_DICTIONARY.column_names
 
 
+@weaver_test()
 def test_a_relationship_row_is_the_whole_edge():
     """Every column is key, because a relationship has no name to be keyed by.
 
@@ -241,6 +258,7 @@ def test_a_relationship_row_is_the_whole_edge():
     assert "foreign_key_name" not in FOREIGN_KEY_DICTIONARY.column_names
 
 
+@weaver_test()
 def test_a_dependency_records_the_reference_exactly_as_authored():
     """The row keeps the author's spelling alongside the edge Weaver resolved.
 
@@ -260,6 +278,7 @@ def test_a_dependency_records_the_reference_exactly_as_authored():
     assert "referenced_object_name" in DEPENDENCY.column_names
 
 
+@weaver_test()
 def test_an_alias_is_keyed_by_the_name_its_own_item_presents():
     """The destination is the consuming item's own local name."""
 
@@ -277,6 +296,7 @@ def test_an_alias_is_keyed_by_the_name_its_own_item_presents():
     )
 
 
+@weaver_test()
 def test_the_table_dictionary_holds_tables_and_views_together():
     assert TABLE_DICTIONARY.column("object_type").not_null
     for expected in (
@@ -291,6 +311,7 @@ def test_the_table_dictionary_holds_tables_and_views_together():
         assert expected in TABLE_DICTIONARY.column_names
 
 
+@weaver_test()
 def test_a_folder_keeps_its_two_part_identity_and_its_file_key():
     assert FOLDER_DICTIONARY.key == (
         "item_type",
@@ -302,6 +323,7 @@ def test_a_folder_keeps_its_two_part_identity_and_its_file_key():
     assert "path" not in FOLDER_DICTIONARY.column_names
 
 
+@weaver_test()
 def test_the_schema_dictionary_describes_a_schema_within_one_installation():
     assert SCHEMA_DICTIONARY.key == ("item_type", "item_name", "schema_name")
 
@@ -309,10 +331,12 @@ def test_the_schema_dictionary_describes_a_schema_within_one_installation():
 # --- lookups and vocabulary --------------------------------------------------
 
 
+@weaver_test()
 def test_a_table_is_reachable_by_name():
     assert table("Registry") is REGISTRY
 
 
+@weaver_test()
 def test_an_unknown_table_name_lists_the_real_ones():
     with pytest.raises(KeyError, match="Registry"):
         table("Nonexistent")
@@ -321,6 +345,7 @@ def test_an_unknown_table_name_lists_the_real_ones():
 # --- the definition guards itself -------------------------------------------
 
 
+@weaver_test()
 def test_a_table_whose_key_omits_the_scope_cannot_be_declared():
     with pytest.raises(ValueError, match="logical item scope"):
         CatalogueTable(
@@ -335,6 +360,7 @@ def test_a_table_whose_key_omits_the_scope_cannot_be_declared():
         )
 
 
+@weaver_test()
 def test_a_table_whose_key_does_not_lead_cannot_be_declared():
     with pytest.raises(ValueError, match="key columns must lead"):
         CatalogueTable(
@@ -349,6 +375,7 @@ def test_a_table_whose_key_does_not_lead_cannot_be_declared():
         )
 
 
+@weaver_test()
 def test_a_table_without_a_trailing_signature_cannot_be_declared():
     with pytest.raises(ValueError, match="signature must be the last"):
         CatalogueTable(
@@ -362,6 +389,7 @@ def test_a_table_without_a_trailing_signature_cannot_be_declared():
         )
 
 
+@weaver_test()
 def test_a_nullable_key_column_cannot_be_declared():
     with pytest.raises(ValueError, match="must be not null"):
         CatalogueTable(
@@ -376,6 +404,7 @@ def test_a_nullable_key_column_cannot_be_declared():
         )
 
 
+@weaver_test()
 def test_a_signature_in_the_key_cannot_be_declared():
     """It must compare, because that is what makes a changed source file a changed row.
 

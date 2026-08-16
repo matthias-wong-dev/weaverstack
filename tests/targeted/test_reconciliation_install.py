@@ -23,6 +23,7 @@ from factories import (
     single_document_repository,
     target_inventory,
 )
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import reconcile_catalogue_state
 from weaver.errors import BuildError
@@ -37,6 +38,7 @@ def reconcile(catalogue, inventory):
 # --- the two agree ------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_claim_the_inventory_confirms_is_retained():
     result = reconcile(
         FixtureCatalogue.from_registry_rows(registry_row("DWG.Customer")),
@@ -47,6 +49,7 @@ def test_a_claim_the_inventory_confirms_is_retained():
     assert result.stale_claims == ()
 
 
+@weaver_test()
 def test_a_repository_and_its_installed_estate_agree_completely(tmp_path):
     """The "already built, nothing changed" pairing, in two lines.
 
@@ -71,6 +74,7 @@ def test_a_repository_and_its_installed_estate_agree_completely(tmp_path):
 # --- the two disagree ---------------------------------------------------------
 
 
+@weaver_test()
 def test_a_claim_the_inventory_disproves_becomes_stale():
     """The certification the Registry offered is withdrawn, not merely noted."""
 
@@ -84,6 +88,7 @@ def test_a_claim_the_inventory_disproves_becomes_stale():
     assert result.stale_claims
 
 
+@weaver_test()
 def test_a_disproved_claim_is_also_removed_from_the_rows():
     """The rows carry forward into republication, so a stale one must not."""
 
@@ -95,6 +100,7 @@ def test_a_disproved_claim_is_also_removed_from_the_rows():
     assert result.catalogue.rows[_item()]["Registry"] == ()
 
 
+@weaver_test()
 def test_only_the_disproved_claim_is_withdrawn():
     result = reconcile(
         FixtureCatalogue.from_registry_rows(
@@ -107,6 +113,7 @@ def test_only_the_disproved_claim_is_withdrawn():
     assert document_id("DWG.Order") not in result.catalogue.registered
 
 
+@weaver_test()
 def test_a_physical_object_with_no_claim_produces_no_deletes():
     """Reconciliation withdraws claims; it does not invent them.
 
@@ -123,6 +130,7 @@ def test_a_physical_object_with_no_claim_produces_no_deletes():
     assert result.stale_objects == ()
 
 
+@weaver_test()
 def test_an_item_with_no_inventory_has_nothing_disproved():
     """A build has no business retiring claims about a target it was not given.
 
@@ -142,6 +150,7 @@ def test_an_item_with_no_inventory_has_nothing_disproved():
 # --- the Registry has to be well formed ---------------------------------------
 
 
+@weaver_test()
 def test_a_registry_row_with_an_unsupported_object_type_is_rejected():
     """Weaver drops what it certified by the type it certified — never a guess."""
 
@@ -154,6 +163,7 @@ def test_a_registry_row_with_an_unsupported_object_type_is_rejected():
         )
 
 
+@weaver_test()
 def test_a_registry_row_without_a_signature_is_rejected():
     """No signature means no basis for deciding changed — and so no build."""
 
@@ -166,6 +176,7 @@ def test_a_registry_row_without_a_signature_is_rejected():
         )
 
 
+@weaver_test()
 def test_a_files_schema_is_understood_as_a_folder_claim():
     """`Files/Raw` in the Registry is the folder side, not a schema called that.
 
@@ -193,6 +204,7 @@ def _item():
 # --- what a load artefact's claim is tested against ---------------------------
 
 
+@weaver_test()
 def test_a_deployed_file_the_inventory_holds_is_retained():
     """The claim that keeps a runtime tree from being rebuilt every build.
 
@@ -213,6 +225,7 @@ def test_a_deployed_file_the_inventory_holds_is_retained():
     assert identity in result.catalogue.registered
 
 
+@weaver_test()
 def test_a_deployed_file_the_inventory_does_not_hold_is_disproved():
     """Deleted from the target behind Weaver's back, and noticed."""
 
@@ -228,6 +241,7 @@ def test_a_deployed_file_the_inventory_does_not_hold_is_disproved():
     assert identity not in result.catalogue.registered
 
 
+@weaver_test()
 def test_a_generated_procedure_is_reconciled_against_the_procedures_read():
     identity = document_id("Warehouse/Reporting/procedure:_/Load Sales.Customer")
     rows = FixtureCatalogue.from_registry_rows(

@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import PYTHON, SPARK_SQL, SQL, parse_item_repository
 from weaver.locations import Location
@@ -56,6 +57,7 @@ def authored(repository):
 # --- classification ----------------------------------------------------------
 
 
+@weaver_test()
 def test_every_object_is_classified_from_its_filename_and_item(authored):
     """The item picks the SQL dialect; the filename picks nothing but the name."""
 
@@ -72,6 +74,7 @@ def test_every_object_is_classified_from_its_filename_and_item(authored):
     }
 
 
+@weaver_test()
 def test_one_id_belongs_to_two_items_without_ambiguity(authored):
     """``Sales.Customer`` twice is two documents, not one name to disambiguate.
 
@@ -89,6 +92,7 @@ def test_one_id_belongs_to_two_items_without_ambiguity(authored):
 # --- metadata ----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_python_table_carries_its_full_contract(authored):
     document = authored["Lakehouse/Sales/Sales.Order"].document
     assert document.primary_key == ("Order id",)
@@ -102,6 +106,7 @@ def test_a_python_table_carries_its_full_contract(authored):
     ]
 
 
+@weaver_test()
 def test_a_folder_carries_its_file_key_and_defaults(authored):
     document = authored["Lakehouse/Sales/Files/Sales.OrderExport"].document
     assert document.file_keys == ("*.csv",)
@@ -109,6 +114,7 @@ def test_a_folder_carries_its_file_key_and_defaults(authored):
     assert document.prohibit_rebuild is True
 
 
+@weaver_test()
 def test_a_warehouse_object_defers_column_validation(authored):
     report = authored["Warehouse/Reporting/Reporting.OrderReport"].document
     assert report.defers_column_validation is True
@@ -119,12 +125,14 @@ def test_a_warehouse_object_defers_column_validation(authored):
     ]
 
 
+@weaver_test()
 def test_a_view_prohibits_rebuild_with_its_reason(authored):
     document = authored["Warehouse/Reporting/Reporting.OrderView"].document
     assert document.prohibit_rebuild is True
     assert "Row-level security" in document.notes
 
 
+@weaver_test()
 def test_a_spark_table_declares_schema_and_dependencies(authored):
     document = authored["Lakehouse/Sales/Sales.OrderSummary"].document
     assert [column.name for column in document.schema] == [
@@ -141,6 +149,7 @@ def test_a_spark_table_declares_schema_and_dependencies(authored):
 # --- structural --------------------------------------------------------------
 
 
+@weaver_test()
 def test_python_objects_name_their_class_for_the_file(authored):
     assert authored["Lakehouse/Sales/Sales.Order"].class_name == "Sales__Order"
     assert (
@@ -149,6 +158,7 @@ def test_python_objects_name_their_class_for_the_file(authored):
     )
 
 
+@weaver_test()
 def test_lib_files_travel_with_their_item_but_are_not_objects(repository):
     assert repository.support_files == ("Lakehouse/Sales/lib/dates.py",)
 
@@ -156,6 +166,7 @@ def test_lib_files_travel_with_their_item_but_are_not_objects(repository):
 # --- sql analysis ------------------------------------------------------------
 
 
+@weaver_test()
 def test_the_spark_table_stages_through_a_temporary_view(authored):
     analysis = authored["Lakehouse/Sales/Sales.OrderSummary"].sql_analysis
     assert analysis.statement_count == 2
@@ -163,12 +174,14 @@ def test_the_spark_table_stages_through_a_temporary_view(authored):
     assert analysis.permanent_ddl == ()
 
 
+@weaver_test()
 def test_the_warehouse_table_stages_through_a_temp_table(authored):
     analysis = authored["Warehouse/Reporting/Reporting.OrderReport"].sql_analysis
     assert analysis.statement_count == 2
     assert analysis.result_set_count == 1
 
 
+@weaver_test()
 def test_the_view_is_a_single_statement(authored):
     analysis = authored["Warehouse/Reporting/Reporting.OrderView"].sql_analysis
     assert analysis.statement_count == 1
@@ -178,6 +191,7 @@ def test_the_view_is_a_single_statement(authored):
 # --- discovered references ---------------------------------------------------
 
 
+@weaver_test()
 def test_references_across_every_language(authored):
     assert {
         name: sorted(str(r) for r in document.discovered_references)
@@ -197,16 +211,19 @@ def test_references_across_every_language(authored):
     }
 
 
+@weaver_test()
 def test_the_spark_temporary_view_is_not_a_reference(authored):
     document = authored["Lakehouse/Sales/Sales.OrderSummary"]
     assert "recent" not in str(document.discovered_references)
 
 
+@weaver_test()
 def test_the_warehouse_temp_table_is_not_a_reference(authored):
     document = authored["Warehouse/Reporting/Reporting.OrderReport"]
     assert "#recent" not in str(document.discovered_references)
 
 
+@weaver_test()
 def test_comments_in_the_fixtures_contribute_nothing(authored):
     """Both SQL fixtures mention a Legacy object in a comment."""
 
@@ -216,6 +233,7 @@ def test_comments_in_the_fixtures_contribute_nothing(authored):
         )
 
 
+@weaver_test()
 def test_a_declaration_sits_beside_what_was_discovered(authored):
     """Declaration overrides discovery; both are kept so a lint can compare."""
 
@@ -227,6 +245,7 @@ def test_a_declaration_sits_beside_what_was_discovered(authored):
 # --- the signature -----------------------------------------------------------
 
 
+@weaver_test()
 def test_the_signature_covers_every_file(repository, tmp_path):
     import shutil
 
@@ -240,6 +259,7 @@ def test_the_signature_covers_every_file(repository, tmp_path):
     assert parse_item_repository(Location(str(copy))).signature != repository.signature
 
 
+@weaver_test()
 def test_an_item_signature_moves_only_for_its_own_content(repository, tmp_path):
     import shutil
 
@@ -263,6 +283,7 @@ def test_an_item_signature_moves_only_for_its_own_content(repository, tmp_path):
 # --- the graph ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_the_declaration_orders_upstream_before_downstream(repository):
     order = repository.dependency_graph.order()
     assert order.index("Lakehouse/Sales/Files/Sales.OrderExport") < order.index(
@@ -276,6 +297,7 @@ def test_the_declaration_orders_upstream_before_downstream(repository):
     )
 
 
+@weaver_test()
 def test_the_layers_show_what_can_run_together(repository, authored):
     layers = tuple(
         tuple(node for node in layer if node in authored)
@@ -298,6 +320,7 @@ def test_the_layers_show_what_can_run_together(repository, authored):
     )
 
 
+@weaver_test()
 def test_a_physical_three_part_read_is_a_reference_not_an_edge(repository):
     """The Warehouse reads the Lakehouse by physical name, which stays outside.
 
@@ -319,6 +342,7 @@ def test_a_physical_three_part_read_is_a_reference_not_an_edge(repository):
     assert all(edge.is_within_item is False for edge in physical)
 
 
+@weaver_test()
 def test_a_two_part_name_resolves_inside_the_writers_own_item(repository):
     """``Sales.Customer`` in the Warehouse binds to the Warehouse's own table.
 
@@ -336,6 +360,7 @@ def test_a_two_part_name_resolves_inside_the_writers_own_item(repository):
     assert edge.is_within_item is True
 
 
+@weaver_test()
 def test_descendants_are_what_a_rebuild_would_uncertify(repository):
     assert set(
         repository.dependency_graph.descendants(

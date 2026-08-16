@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from test_item_repository_declaration import (
     _estate,
     _folder,
@@ -68,6 +69,7 @@ def _edge(repository, consumer: str, reference: str):
     )
 
 
+@weaver_test()
 def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
 
@@ -96,6 +98,7 @@ def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
     )
 
 
+@weaver_test()
 def test_lib_import_creates_no_object_edge(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     landing = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Landing")
@@ -105,6 +108,7 @@ def test_lib_import_creates_no_object_edge(tmp_path):
     )
 
 
+@weaver_test()
 def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     edge = _edge(
@@ -119,6 +123,7 @@ def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
     assert not edge.is_within_item
 
 
+@weaver_test()
 def test_the_alias_destination_is_its_own_node_between_source_and_consumer(tmp_path):
     """The graph is three hops where the published edge is two.
 
@@ -146,6 +151,7 @@ def test_the_alias_destination_is_its_own_node_between_source_and_consumer(tmp_p
     assert graph.descendants(alias) == (consumer,)
 
 
+@weaver_test()
 def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
     """It has to be materialised after the thing it points at exists, whether or
     not anything reads it yet."""
@@ -165,6 +171,7 @@ def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
     }
 
 
+@weaver_test()
 def test_published_dependency_edges_ignore_the_alias_node(tmp_path):
     """The graph gained a hop; the catalogue's dependency rows did not.
 
@@ -187,6 +194,7 @@ def test_published_dependency_edges_ignore_the_alias_node(tmp_path):
     assert not alias_edge.is_within_item
 
 
+@weaver_test()
 def test_three_part_sql_reference_is_preserved_as_physical(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     edge = _edge(
@@ -200,6 +208,7 @@ def test_three_part_sql_reference_is_preserved_as_physical(tmp_path):
     assert not edge.is_within_item
 
 
+@weaver_test()
 def test_sparse_projection_selects_only_exact_bound_items(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     selected = project_bound_documents(
@@ -212,12 +221,14 @@ def test_sparse_projection_selects_only_exact_bound_items(tmp_path):
     assert all(source.logical_id.item.item_name != "Curated" for source in selected)
 
 
+@weaver_test()
 def test_projection_requires_at_least_one_binding(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     with pytest.raises(BuildError, match="at least one Weaver item"):
         project_bound_documents(repository, [])
 
 
+@weaver_test()
 def test_dependency_cycle_across_items_is_rejected(tmp_path):
     root = _estate(tmp_path)
     curated = _table("Sales.Customer").replace(

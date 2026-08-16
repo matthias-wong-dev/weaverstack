@@ -19,6 +19,7 @@ import json
 import textwrap
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.ddl import (
@@ -68,6 +69,7 @@ Dependencies:
 """
 
 
+@weaver_test()
 def test_view_wraps_body_in_strict_create_view():
     ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl(destination=SALES)
 
@@ -78,11 +80,13 @@ def test_view_wraps_body_in_strict_create_view():
     )
 
 
+@weaver_test()
 def test_view_name_is_the_validated_object_id():
     ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl(destination=SALES)
     assert "VIEW `Demo`.`Sales_LH`.`DWG`.`ActiveCustomer` AS" in ddl.content
 
 
+@weaver_test()
 def test_view_preserves_the_body_apart_from_addressing_its_references():
     ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE).create_ddl(destination=SALES)
     assert ADDRESSED_BODY in ddl.content
@@ -93,6 +97,7 @@ def test_view_preserves_the_body_apart_from_addressing_its_references():
     assert "where IsActive = true" in ddl.content
 
 
+@weaver_test()
 def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
     """Three parts means the author named a physical thing. Weaver leaves it."""
 
@@ -113,6 +118,7 @@ def test_a_view_body_keeps_a_physically_qualified_reference_as_written():
     assert "`Other_LH`" not in ddl.content
 
 
+@weaver_test()
 def test_view_normalises_only_trailing_whitespace():
     ddl = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE + "\n   \n\t\n").create_ddl(
         destination=SALES
@@ -122,6 +128,7 @@ def test_view_normalises_only_trailing_whitespace():
     )
 
 
+@weaver_test()
 def test_view_has_exactly_one_create_and_none_in_the_source():
     doc = _doc("DWG.ActiveCustomer.sql", VIEW_SOURCE)
     ddl = doc.create_ddl(destination=SALES)
@@ -170,6 +177,7 @@ select count(*) as CustomerCount from DWG.Customer;
 """
 
 
+@weaver_test()
 def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl(destination=SALES)
 
@@ -188,6 +196,7 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
     assert "delta.columnMapping.mode" in ddl.content
 
 
+@weaver_test()
 def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     """A Spark SQL table's shape is only settled by running its query, so its
     payload is a deterministic instruction the ``spark_table`` executor completes
@@ -218,6 +227,7 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     assert payload["setup"] == []
 
 
+@weaver_test()
 def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
     """A body is not always one statement, and only one of them is the shape.
 
@@ -247,6 +257,7 @@ def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
     assert payload["source_query"] == "select count(*) as CustomerCount from live"
 
 
+@weaver_test()
 def test_an_inferred_spark_sql_table_carries_no_declared_columns():
     source = (
         SPARK_TABLE_SOURCE.split("Schema:")[0].rstrip()
@@ -292,11 +303,13 @@ select CustomerId from DWG.Customer
 """
 
 
+@weaver_test()
 def test_folder_has_no_create_ddl():
     with pytest.raises(NotImplementedError, match="Folder"):
         _doc("Raw__CustomerCsv.py", FOLDER_SOURCE).create_ddl(destination=SALES)
 
 
+@weaver_test()
 def test_tsql_object_routes_to_the_tsql_executor():
     from weaver.declaration.ddl import TSQL_EXECUTOR, TSQL_EXTENSION
 
@@ -315,6 +328,7 @@ def test_tsql_object_routes_to_the_tsql_executor():
         ("DWG__Customer.py", PY_TABLE_SOURCE),
     ],
 )
+@weaver_test()
 def test_create_ddl_is_deterministic(path, source):
     assert _doc(path, source).create_ddl(destination=SALES) == _doc(
         path, source

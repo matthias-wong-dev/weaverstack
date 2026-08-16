@@ -26,6 +26,7 @@ from factories import (
     registered_document,
     target_inventory,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import plan_item_build
 from weaver.build_bundle.aliases import plan_item_aliases
@@ -68,6 +69,7 @@ def plan_aliases(repository, *, selected=(ALIAS,)):
 # --- planning the alias itself ------------------------------------------------
 
 
+@weaver_test()
 def test_a_selected_alias_is_planned_as_one_action(estate):
     planned = plan_aliases(estate)
 
@@ -76,6 +78,7 @@ def test_a_selected_alias_is_planned_as_one_action(estate):
     assert kinds == ["create_alias"]
 
 
+@weaver_test()
 def test_an_unselected_alias_is_left_alone(estate):
     """Incremental selection applies to aliases exactly as to documents.
 
@@ -89,6 +92,7 @@ def test_an_unselected_alias_is_left_alone(estate):
     assert planned.stage is None
 
 
+@weaver_test()
 def test_a_retained_alias_still_reports_its_schema(estate):
     """The subtle one, and the reason schemas are reported separately.
 
@@ -102,6 +106,7 @@ def test_a_retained_alias_still_reports_its_schema(estate):
     assert planned.schemas == ("DWG",)
 
 
+@weaver_test()
 def test_an_alias_whose_source_item_is_unbound_is_omitted(estate):
     """It has no physical form under these bindings, so it cannot be planned.
 
@@ -122,6 +127,7 @@ def test_an_alias_whose_source_item_is_unbound_is_omitted(estate):
     assert document_id(ALIAS) in planned.omitted_destinations
 
 
+@weaver_test()
 def test_an_unmaterialisable_alias_is_withheld_from_certification(estate):
     """The whole-item view of the claim above."""
 
@@ -148,6 +154,7 @@ def test_an_unmaterialisable_alias_is_withheld_from_certification(estate):
 # --- ordering across items ----------------------------------------------------
 
 
+@weaver_test()
 def test_the_consumer_builds_its_view_after_the_alias_it_reads(estate):
     """Inside the consumer, the alias must exist before the view over it runs."""
 
@@ -177,6 +184,7 @@ def test_the_consumer_builds_its_view_after_the_alias_it_reads(estate):
     assert kinds.index("create_alias") < kinds.index("build_view")
 
 
+@weaver_test()
 def test_the_consumer_gets_its_own_endpoint_refresh(estate):
     """An item that mutated Delta is closed by a refresh, alias or not."""
 
@@ -222,6 +230,7 @@ def certified(repository, *names, build_datetime=None):
     }
 
 
+@weaver_test()
 def test_an_alias_is_stale_when_its_source_was_published_later(estate):
     """The half of cross-item freshness the dependency graph cannot answer.
 
@@ -243,6 +252,7 @@ def test_an_alias_is_stale_when_its_source_was_published_later(estate):
     assert document_id(ALIAS) in stale
 
 
+@weaver_test()
 def test_an_alias_published_after_its_source_is_current(estate):
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-01T00:00:00"),
@@ -256,6 +266,7 @@ def test_an_alias_published_after_its_source_is_current(estate):
     assert stale == ()
 
 
+@weaver_test()
 def test_a_missing_registry_row_is_not_staleness(estate):
     """Absent is *new*, which signature classification already handles.
 
@@ -272,6 +283,7 @@ def test_a_missing_registry_row_is_not_staleness(estate):
     assert stale == ()
 
 
+@weaver_test()
 def test_an_unbound_consumer_keeps_its_stale_alias(estate):
     """That is the deferral: a build acts only on items it was pointed at."""
 
@@ -290,6 +302,7 @@ def test_an_unbound_consumer_keeps_its_stale_alias(estate):
 # --- the incremental claim the Fabric suite used to buy with a whole build -----
 
 
+@weaver_test()
 def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     """An unchanged alias over an unchanged source must not be replaced.
 
@@ -312,6 +325,7 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     assert selection.selected_for_build == ()
 
 
+@weaver_test()
 def test_a_changed_source_reaches_the_alias_and_its_consumer(estate):
     """The graph carries a producer's change across the alias in one walk."""
 

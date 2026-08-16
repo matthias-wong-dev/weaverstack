@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 from factories import FixtureCatalogue, item_bindings, target_inventory
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
@@ -85,6 +86,7 @@ def _when(plan, ending: str) -> int:
     return matches[0]
 
 
+@weaver_test()
 def test_the_estate_declares_both_physical_sides(repository):
     """Neither half is inferable from the other, so both are declared."""
 
@@ -96,6 +98,7 @@ def test_the_estate_declares_both_physical_sides(repository):
     ] == [("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")]
 
 
+@weaver_test()
 def test_one_bundle_carries_both_targets(plan):
     """Installed together, so the ordering the build gives them is a real one."""
 
@@ -107,6 +110,7 @@ def test_one_bundle_carries_both_targets(plan):
     assert plan.omitted_nodes == ()
 
 
+@weaver_test()
 def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     """The composition claim: source, then barrier, then consumer.
 
@@ -126,6 +130,7 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     assert produced < refreshed < aliased < reported < viewed
 
 
+@weaver_test()
 def test_the_warehouse_side_is_reached_over_tds(plan):
     """A Warehouse alias is a T-SQL view over the endpoint, not a shortcut.
 
@@ -142,6 +147,7 @@ def test_the_warehouse_side_is_reached_over_tds(plan):
     assert by_target == {"Warehouse-Reporting": "tsql_batch"}
 
 
+@weaver_test()
 def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
     """What gives the run graph something to dispatch on the far side.
 
@@ -161,6 +167,7 @@ def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
     }
 
 
+@weaver_test()
 def test_the_catalogue_is_published_after_both_sides_are_built(plan):
     """One estate, one certification, and it comes last."""
 

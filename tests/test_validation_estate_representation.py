@@ -13,6 +13,7 @@ real estate would hold and never open a repository, a session or a target.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import DEPENDENCY, INSTALLATION, REGISTRY, TEST_DICTIONARY
@@ -144,6 +145,7 @@ def catalogue():
 # --- what the estate holds ----------------------------------------------------
 
 
+@weaver_test()
 def test_the_estate_comes_from_the_test_dictionary(catalogue):
     rows, _lake, _house = catalogue
 
@@ -155,6 +157,7 @@ def test_the_estate_comes_from_the_test_dictionary(catalogue):
     ]
 
 
+@weaver_test()
 def test_each_validation_carries_its_declared_contract(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -167,6 +170,7 @@ def test_each_validation_carries_its_declared_contract(catalogue):
     assert test.is_test
 
 
+@weaver_test()
 def test_an_assumption_reads_back_as_one(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -179,6 +183,7 @@ def test_an_assumption_reads_back_as_one(catalogue):
     assert assumption.description == "Every order carries a customer."
 
 
+@weaver_test()
 def test_the_logical_id_is_connected_to_its_computed_artefact(catalogue):
     """The one function that joins TestDictionary to Registry."""
 
@@ -193,6 +198,7 @@ def test_the_logical_id_is_connected_to_its_computed_artefact(catalogue):
     assert artefacts["Warehouse/Reporting/Sales.OrdersHaveCustomers"] == str(house)
 
 
+@weaver_test()
 def test_the_installed_primitive_supplies_the_object_type(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -204,6 +210,7 @@ def test_the_installed_primitive_supplies_the_object_type(catalogue):
     assert types == {"Lakehouse": "file", "Warehouse": "stored_procedure"}
 
 
+@weaver_test()
 def test_dependencies_are_associated_with_the_logical_validation(catalogue):
     """Not through Registry — there is no Registry row to go through."""
 
@@ -219,6 +226,7 @@ def test_dependencies_are_associated_with_the_logical_validation(catalogue):
 # --- a declared validation that was never installed ---------------------------
 
 
+@weaver_test()
 def test_a_missing_primitive_is_reported_rather_than_skipped(catalogue):
     """An estate with one fewer Test in it is the wrong answer."""
 
@@ -241,6 +249,7 @@ def test_a_missing_primitive_is_reported_rather_than_skipped(catalogue):
         validation.require_installed()
 
 
+@weaver_test()
 def test_an_installed_primitive_passes_the_check(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -249,6 +258,7 @@ def test_an_installed_primitive_passes_the_check(catalogue):
         validation.require_installed()
 
 
+@weaver_test()
 def test_a_validation_with_no_installation_row_is_refused(catalogue):
     """Registry without Installation means nobody knows where it lives."""
 
@@ -267,6 +277,7 @@ def test_a_validation_with_no_installation_row_is_refused(catalogue):
         ValidationEstate.from_catalogue(unbound)
 
 
+@weaver_test()
 def test_an_unknown_test_type_is_refused_rather_than_guessed(catalogue):
     rows, _lake, _house = catalogue
     broken = Catalogue(
@@ -287,6 +298,7 @@ def test_an_unknown_test_type_is_refused_rather_than_guessed(catalogue):
 # --- selection ----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_request_names_a_target_and_means_everything_installed_there(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -298,6 +310,7 @@ def test_a_request_names_a_target_and_means_everything_installed_there(catalogue
     ]
 
 
+@weaver_test()
 def test_both_targets_select_both(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -307,6 +320,7 @@ def test_both_targets_select_both(catalogue):
     assert len(selected) == 2
 
 
+@weaver_test()
 def test_naming_one_selects_only_it(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -316,6 +330,7 @@ def test_naming_one_selects_only_it(catalogue):
     assert found.qualified == "Sales.OrdersReconcile"
 
 
+@weaver_test()
 def test_naming_one_that_is_not_installed_is_an_error(catalogue):
     """Reporting nothing would answer a question nobody asked."""
 
@@ -326,6 +341,7 @@ def test_naming_one_that_is_not_installed_is_an_error(catalogue):
         estate.named("Sales.Absent", [LAKEHOUSE_TARGET])
 
 
+@weaver_test()
 def test_the_error_lists_what_is_installed(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
@@ -334,6 +350,7 @@ def test_the_error_lists_what_is_installed(catalogue):
         estate.named("Sales.Absent", [LAKEHOUSE_TARGET])
 
 
+@weaver_test()
 def test_the_order_is_stable(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)

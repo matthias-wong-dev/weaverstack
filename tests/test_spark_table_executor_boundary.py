@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.spark_table import SparkTableExecutor
@@ -151,6 +152,7 @@ def _run(capability, payload: bytes, *, destination=DESTINATION):
 # --- what reaches Spark, and how often ----------------------------------------
 
 
+@weaver_test()
 def test_the_shape_is_asked_for_rather_than_the_query_being_run():
     """``DESCRIBE QUERY`` answers the two things the executor takes from a query.
 
@@ -166,6 +168,7 @@ def test_the_shape_is_asked_for_rather_than_the_query_being_run():
     )
 
 
+@weaver_test()
 def test_setup_and_describe_travel_as_one_piece_of_work():
     """A temporary view registered in one session and read in another is not
     there, so the setup goes with the describe that depends on it."""
@@ -186,6 +189,7 @@ def test_setup_and_describe_travel_as_one_piece_of_work():
     ]
 
 
+@weaver_test()
 def test_a_table_is_built_in_exactly_two_reaches_for_spark():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload())
@@ -200,6 +204,7 @@ def test_a_table_is_built_in_exactly_two_reaches_for_spark():
     [FABRIC_DESTINATION, DESTINATION],
     ids=["fabric", "local"],
 )
+@weaver_test()
 def test_the_shape_and_the_create_share_one_case_scope(destination):
     """A table created as ``CustomerEnriched`` has to be readable by the next
     action in the same build, so both halves are analysed the same way."""
@@ -210,6 +215,7 @@ def test_the_shape_and_the_create_share_one_case_scope(destination):
     assert [exact_case for _statements, exact_case in capability.calls] == [True, True]
 
 
+@weaver_test()
 def test_nothing_is_dropped_to_make_room_for_a_case_variant():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload(), destination=FABRIC_DESTINATION)
@@ -222,6 +228,7 @@ def test_nothing_is_dropped_to_make_room_for_a_case_variant():
 # --- generation -------------------------------------------------------------
 
 
+@weaver_test()
 def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     details = _run(capability, _payload())
@@ -242,6 +249,7 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
+@weaver_test()
 def test_creation_names_the_destination_the_payload_was_addressed_to():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload())
@@ -249,6 +257,7 @@ def test_creation_names_the_destination_the_payload_was_addressed_to():
     assert capability.created.startswith(f"CREATE TABLE {CUSTOMER}")
 
 
+@weaver_test()
 def test_a_complex_query_type_reaches_the_created_table_unchanged():
     """Whatever ``DESCRIBE QUERY`` spells the type, that is the column's type."""
 
@@ -270,6 +279,7 @@ def test_a_complex_query_type_reaches_the_created_table_unchanged():
     assert "`Tags` map<string,int>" in statement
 
 
+@weaver_test()
 def test_the_not_null_header_marks_inferred_columns_not_null():
     capability = _Capability(
         [("CustomerId", "int"), ("CustomerName", "string"), ("Note", "string")]
@@ -288,6 +298,7 @@ def test_the_not_null_header_marks_inferred_columns_not_null():
     assert "`Note` string NOT NULL" not in statement
 
 
+@weaver_test()
 def test_a_delta_table_is_built_with_no_identity_column():
     """Identity is a Warehouse declaration, so nothing here materialises one.
 
@@ -305,6 +316,7 @@ def test_a_delta_table_is_built_with_no_identity_column():
     assert "generated" not in statement.lower()
 
 
+@weaver_test()
 def test_declared_table_uses_declared_types_and_nullability_not_the_query():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(
@@ -323,6 +335,7 @@ def test_declared_table_uses_declared_types_and_nullability_not_the_query():
     assert "`CustomerName` string,\n" in statement
 
 
+@weaver_test()
 def test_column_names_are_case_sensitive_against_the_declaration():
     capability = _Capability([("customerid", "int")])
     with pytest.raises(
@@ -341,6 +354,7 @@ def test_column_names_are_case_sensitive_against_the_declaration():
 # --- validation failures the plan enumerates --------------------------------
 
 
+@weaver_test()
 def test_a_declared_column_missing_from_the_query_fails_install():
     capability = _Capability([("CustomerId", "int")])
     with pytest.raises(
@@ -359,6 +373,7 @@ def test_a_declared_column_missing_from_the_query_fails_install():
         )
 
 
+@weaver_test()
 def test_an_undeclared_extra_query_column_fails_install():
     capability = _Capability([("CustomerId", "int"), ("Extra", "string")])
     with pytest.raises(BuildError, match="not in the declared schema"):
@@ -372,24 +387,28 @@ def test_an_undeclared_extra_query_column_fails_install():
         )
 
 
+@weaver_test()
 def test_case_colliding_query_output_names_fail_install():
     capability = _Capability([("CustomerId", "int"), ("customerid", "bigint")])
     with pytest.raises(BuildError, match="collide by name"):
         _run(capability, _payload(references=[]))
 
 
+@weaver_test()
 def test_a_primary_key_naming_a_missing_column_fails_install():
     capability = _Capability([("CustomerName", "string")])
     with pytest.raises(BuildError, match="Primary key names column 'CustomerId'"):
         _run(capability, _payload())
 
 
+@weaver_test()
 def test_a_query_column_colliding_with_an_audit_column_is_refused():
     capability = _Capability([("CustomerId", "int"), ("row_insert_datetime", "string")])
     with pytest.raises(InstallError, match="reserved for Weaver's audit columns"):
         _run(capability, _payload(references=[]))
 
 
+@weaver_test()
 def test_a_query_that_does_not_resolve_names_the_action_and_carries_spark():
     """The failure moved from running the query to describing it, and it still
     has to say which action failed and what Spark said about it."""
@@ -410,6 +429,7 @@ def test_a_query_that_does_not_resolve_names_the_action_and_carries_spark():
     )
 
 
+@weaver_test()
 def test_a_query_producing_no_columns_is_refused():
     capability = _Capability([])
 
@@ -417,6 +437,7 @@ def test_a_query_producing_no_columns_is_refused():
         _run(capability, _payload())
 
 
+@weaver_test()
 def test_a_failing_create_is_not_swallowed():
     capability = _Capability(
         [("CustomerId", "int"), ("CustomerName", "string")],
@@ -427,6 +448,7 @@ def test_a_failing_create_is_not_swallowed():
         _run(capability, _payload())
 
 
+@weaver_test()
 def test_no_way_to_run_a_statement_is_a_clear_install_error():
     with pytest.raises(InstallError, match="no Spark SQL capability"):
         _run(None, _payload())

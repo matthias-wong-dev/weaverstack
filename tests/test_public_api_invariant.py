@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+from support.weaver_test import weaver_test
+
 import weaver
 from weaver.errors import CommandError, WeaverError
 
 
+@weaver_test()
 def test_version_is_exposed():
     assert weaver.__version__
 
 
+@weaver_test()
 def test_error_hierarchy_has_one_root():
     assert issubclass(CommandError, WeaverError)
     assert issubclass(WeaverError, Exception)
 
 
+@weaver_test()
 def test_the_top_level_is_the_ordinary_notebook_surface_only():
     assert set(weaver.__all__) == {
         "__version__",
@@ -55,6 +60,7 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
     }
 
 
+@weaver_test()
 def test_internal_composition_seams_are_not_top_level_attributes():
     internal = {
         "Workspace",

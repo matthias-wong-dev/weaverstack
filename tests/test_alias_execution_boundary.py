@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
 from weaver.build_bundle.executors import AliasExecutor
@@ -100,6 +101,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
 # --- the shortcut ------------------------------------------------------------
 
 
+@weaver_test()
 def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
     context = _local_context(tmp_path)
 
@@ -135,6 +137,7 @@ class _ShortcutResolver:
         return {"shortcut": f"{path}/{name}"}
 
 
+@weaver_test()
 def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver)
@@ -158,6 +161,7 @@ class _FoldedSourceStore(FilesystemStore):
         return [Entry(location=location / "customer", is_directory=True)]
 
 
+@weaver_test()
 def test_a_shortcut_uses_the_source_tables_physical_case(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver, store=_FoldedSourceStore())
@@ -244,6 +248,7 @@ def _addressable_context(tmp_path, spark, resolver):
     )
 
 
+@weaver_test()
 def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
     tmp_path, monkeypatch
 ):
@@ -261,6 +266,7 @@ def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
     assert "addressable_after_seconds" in details
 
 
+@weaver_test()
 def test_a_shortcut_that_never_becomes_readable_fails_naming_itself(
     tmp_path, monkeypatch
 ):
@@ -274,6 +280,7 @@ def test_a_shortcut_that_never_becomes_readable_fails_naming_itself(
         AliasExecutor().execute(_action(), _payload(), context)
 
 
+@weaver_test()
 def test_a_files_alias_needs_no_readability_wait(tmp_path, monkeypatch):
     """A folder is a directory; there is no relation to become addressable."""
 
@@ -295,6 +302,7 @@ class _NoTransportStore(FilesystemStore):
     link = None
 
 
+@weaver_test()
 def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
     """An alias is a OneLake shortcut, so a host that cannot make one cannot
     materialise it — and says which action it could not perform."""
@@ -325,6 +333,7 @@ def _two_aliases() -> bytes:
     return json.dumps({"aliases": [first, second]}).encode("utf-8")
 
 
+@weaver_test()
 def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
     """The cost of an alias is the wait, so the waits must not serialise.
 
@@ -351,6 +360,7 @@ def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
     assert max(creates) < min(reads)
 
 
+@weaver_test()
 def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
     """T-SQL refuses a CREATE VIEW that is not first in its batch."""
 
@@ -394,6 +404,7 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
     ]
 
 
+@weaver_test()
 def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
     """A desktop has no Spark session and must still wait for discovery.
 
@@ -411,6 +422,7 @@ def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
     assert all("LIMIT 0" in statement for statement in asked.statements)
 
 
+@weaver_test()
 def test_the_probe_carries_weavers_identifier_case(tmp_path):
     """The scope has to travel with the statement: a desktop has no Spark to
     set a conf on, and a probe analysed under the session's default case is a

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_item_dependencies_declaration import _dependency_estate
 from test_item_repository_declaration import _estate, _folder, _table, _write
@@ -139,6 +140,7 @@ def _raw_inventory(repository, target="Raw_Target"):
     }
 
 
+@weaver_test()
 def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
     repository = _repository(_estate(tmp_path))
     raw = {
@@ -156,6 +158,7 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
     assert set(impact.to_mapping()) == {"new", "changed", "impacted_descendants"}
 
 
+@weaver_test()
 def test_changed_root_expands_through_same_item_descendants(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     raw = {
@@ -192,6 +195,7 @@ def _stale(rows, item_text: str, object_name: str) -> None:
     matched[0]["signature"] = "old-signature"
 
 
+@weaver_test()
 def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     """Impact crosses the alias, because the alias is in the graph.
 
@@ -215,6 +219,7 @@ def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     assert reporting in impact.impacted_descendants
 
 
+@weaver_test()
 def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
     """Deferral is now by construction rather than by rule.
 
@@ -236,6 +241,7 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
     assert reporting not in impact.impacted
 
 
+@weaver_test()
 def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path):
     root = _estate(tmp_path)
     # The catalogue as the *previous* build left it — projected before today's
@@ -417,6 +423,7 @@ def _alias_actions(bundle):
     ]
 
 
+@weaver_test()
 def test_an_unchanged_alias_is_not_replaced(tmp_path):
     """The behaviour this whole change exists for.
 
@@ -432,6 +439,7 @@ def test_an_unchanged_alias_is_not_replaced(tmp_path):
     assert _alias_actions(bundle) == []
 
 
+@weaver_test()
 def test_a_repointed_alias_is_replaced(tmp_path):
     """The declaration *is* the alias, so changing what it points at changes it."""
 
@@ -449,6 +457,7 @@ def test_a_repointed_alias_is_replaced(tmp_path):
     assert len(_alias_actions(bundle)) == 1
 
 
+@weaver_test()
 def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
     """Registered but not there: reconciliation drops the row, so it reads as new.
 
@@ -473,6 +482,7 @@ def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
     assert len(_alias_actions(bundle)) == 1
 
 
+@weaver_test()
 def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
     """Replacing an alias is the alias executor's job, not a drop and a build.
 
@@ -544,6 +554,7 @@ def _consumer_only_selection(repository, rows):
     )
 
 
+@weaver_test()
 def test_an_alias_is_stale_when_its_unbound_source_was_published_later(tmp_path):
     """The case the graph cannot answer.
 
@@ -564,6 +575,7 @@ def test_an_alias_is_stale_when_its_unbound_source_was_published_later(tmp_path)
     assert destination in selection.selected_for_build
 
 
+@weaver_test()
 def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
     """It joins the ordinary changed roots, so the ordinary walk does the rest —
     there is no separate cross-item descendant handling."""
@@ -580,6 +592,7 @@ def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
     assert consumer in selection.selected_for_build
 
 
+@weaver_test()
 def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
     """The ordinary case, and the one that has to stay cheap."""
 
@@ -593,6 +606,7 @@ def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
     assert selection.selected_for_build == ()
 
 
+@weaver_test()
 def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
     """Upgrading from a catalogue written before build datetimes existed must not rebuild
     the estate. Both rows read as null, and null is not newer than null."""
@@ -611,6 +625,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
     """A producer rebuilt by an *earlier* build is unchanged to this one.
 
@@ -634,6 +649,7 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
     ) == (WeaverDocumentId.parse(ALIAS_DESTINATION),)
 
 
+@weaver_test()
 def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
     """Deferral: only the producer is bound, so nothing about the consumer is
     touched and its alias stays stale until the consumer is next built."""
@@ -653,6 +669,7 @@ def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
     """End to end through the planner: the freshness comparison reaches the
     physical action, and reaches it as an alias action rather than a drop."""
@@ -667,6 +684,7 @@ def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
     assert len(_alias_actions(bundle)) == 1
 
 
+@weaver_test()
 def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
     """Generating twice must give the same bytes, or a bundle could not be
     compared against another built from the same source. The build_datetime is a token in
@@ -681,6 +699,7 @@ def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
     assert first.plan.bundle_id == second.plan.bundle_id
 
 
+@weaver_test()
 def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     store = FilesystemStore()
@@ -696,6 +715,7 @@ def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
     assert "build_datetime" in payload
 
 
+@weaver_test()
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
     repository = _repository(_estate(tmp_path))
     store = FilesystemStore()
@@ -724,6 +744,7 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
     assert restored.selection == bundle.plan.selection
 
 
+@weaver_test()
 def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_path):
     root = _dependency_estate(tmp_path)
     for name in ("Sales__Landing.py", "Sales__Archive.py", "Sales__Export.py"):
@@ -786,6 +807,7 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
     )
 
 
+@weaver_test()
 def test_managed_drop_uses_the_installed_type_when_an_object_changes_type(tmp_path):
     root = _estate(tmp_path)
     installed = _repository(root)
@@ -828,6 +850,7 @@ select 1 as Id
     )
 
 
+@weaver_test()
 def test_registered_document_removed_from_repository_is_uncertified_before_prune(
     tmp_path,
 ):

@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric import FabricSessionResolver, FabricStore
@@ -37,6 +38,7 @@ def _runtime(name="Analytics"):
     )
 
 
+@weaver_test()
 def test_session_resolution_stays_in_the_current_workspace():
     lakehouse = _LakehouseUtils()
     resolver = FabricSessionResolver(
@@ -61,6 +63,7 @@ class _NamedLakehouses:
         return SimpleNamespace(id=f"id-of-{name}", displayName=name)
 
 
+@weaver_test()
 def test_a_lakehouse_resolves_to_what_authored_code_addresses():
     """What ``lakehouse_for`` composes inside a session — attached or not.
 
@@ -90,6 +93,7 @@ def test_a_lakehouse_resolves_to_what_authored_code_addresses():
     assert lakehouse.qualify("Sales", "Order") == "`Analytics`.`Sales`.`Sales`.`Order`"
 
 
+@weaver_test()
 def test_session_resolution_refuses_a_different_configured_workspace():
     with pytest.raises(CommandError, match="not configured Workspace"):
         FabricSessionResolver(
@@ -130,6 +134,7 @@ class _Fs:
         return True
 
 
+@weaver_test()
 def test_fabric_store_lists_and_deletes_through_notebookutils():
     root = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Tables"
     fs = _Fs(root)
@@ -146,6 +151,7 @@ def test_fabric_store_lists_and_deletes_through_notebookutils():
     assert fs.deleted == [(f"{root}/Sales", True)]
 
 
+@weaver_test()
 def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decoding(
     tmp_path,
 ):

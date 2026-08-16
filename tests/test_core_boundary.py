@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from support.weaver_test import weaver_test
+
 CORE = Path(__file__).resolve().parents[1] / "src" / "weaver"
 
 FORBIDDEN_IN_CORE = ("weaver_cli", "pyspark", "delta")
@@ -19,10 +21,12 @@ def _core_modules() -> list[Path]:
     return sorted(CORE.rglob("*.py"))
 
 
+@weaver_test()
 def test_core_has_modules_to_check():
     assert _core_modules()
 
 
+@weaver_test()
 def test_core_source_never_names_the_cli_or_spark():
     offenders = []
     for module in _core_modules():
@@ -33,6 +37,7 @@ def test_core_source_never_names_the_cli_or_spark():
     assert not offenders, f"core imports it must not have: {offenders}"
 
 
+@weaver_test()
 def test_importing_the_core_does_not_load_the_cli_or_spark():
     probe = (
         "import sys, weaver;"
@@ -48,6 +53,7 @@ def test_importing_the_core_does_not_load_the_cli_or_spark():
     assert result.stdout.strip() == ""
 
 
+@weaver_test()
 def test_the_cli_depends_on_the_core():
     import importlib
 
@@ -65,6 +71,7 @@ def test_the_cli_depends_on_the_core():
 CLI = Path(__file__).resolve().parents[1] / "src" / "weaver_cli"
 
 
+@weaver_test()
 def test_the_cli_source_never_names_spark():
     offenders = []
     for module in sorted(CLI.rglob("*.py")):
@@ -77,6 +84,7 @@ def test_the_cli_source_never_names_spark():
     )
 
 
+@weaver_test()
 def test_the_cli_builds_and_runs_with_spark_unimportable():
     """The CLI parses and dispatches on a machine where PySpark cannot import.
 
@@ -104,6 +112,7 @@ def test_the_cli_builds_and_runs_with_spark_unimportable():
     assert result.stdout.strip().endswith("dispatched")
 
 
+@weaver_test()
 def test_the_two_role_vocabularies_are_one():
     """`weaver.etl` repeats the roles rather than importing them.
 

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 from support.sessions import given_session
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 from test_item_repository_declaration import _estate
 
@@ -135,6 +136,7 @@ def prepared_state(monkeypatch):
     )
 
 
+@weaver_test()
 def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
     tmp_path, prepared_state
 ):
@@ -164,6 +166,7 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
     assert not any(path.endswith("plan.yml") for path in remote.reads)
 
 
+@weaver_test()
 def test_explicit_local_source_does_not_use_the_target_store_for_repository_reads(
     tmp_path, prepared_state
 ):
@@ -186,6 +189,7 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
     assert target_store.reads == {}
 
 
+@weaver_test()
 def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch):
     parse_item_repository(Location(str(_estate(tmp_path))), store=FilesystemStore())
     unknown = ItemBindings(
@@ -215,6 +219,7 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
         )
 
 
+@weaver_test()
 def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     item = WeaverItemId.parse("Lakehouse/Raw")
     build_datetime = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
@@ -253,6 +258,7 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     )
 
 
+@weaver_test()
 def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
     """Weaver owns one Files area in a destination, and prune must not claim it.
 
@@ -287,6 +293,7 @@ def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
     assert "weaver_items" in inventory.folder_schemas
 
 
+@weaver_test()
 def test_direct_build_can_upload_one_archive_after_install_without_rereading_source(
     tmp_path, prepared_state
 ):
@@ -318,6 +325,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
     assert remote.writes == [archive.value]
 
 
+@weaver_test()
 def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
     root = Location(str(_estate(tmp_path)))
     store = FilesystemStore()
@@ -349,6 +357,7 @@ def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
         assert not any(name.startswith("repository/") for name in names)
 
 
+@weaver_test()
 def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path):
     root = Location(str(_estate(tmp_path)))
     store = FilesystemStore()
@@ -380,6 +389,7 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
     assert target.reads == {}
 
 
+@weaver_test()
 def test_archive_rejects_traversal_before_extracting(tmp_path):
     archive = tmp_path / "bad.weaver.zip"
     with zipfile.ZipFile(archive, "w") as zipped:
@@ -393,6 +403,7 @@ def test_archive_rejects_traversal_before_extracting(tmp_path):
     assert not (tmp_path / "outside.txt").exists()
 
 
+@weaver_test()
 def test_timestamped_archive_name_is_utc_and_has_the_weaver_suffix():
     at = datetime(2026, 7, 27, 1, 2, 3, 4, tzinfo=timezone.utc)
     assert timestamped_archive_name(at) == "20260727T010203000004Z.weaver.zip"

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions import ConsoleSession, SessionTelemetry
 
 
+@weaver_test()
 def test_a_resource_event_inherits_task_step_and_substep_context():
     with ConsoleSession(progress=False) as session:
         with session.task("Build"):
@@ -25,6 +27,7 @@ def test_a_resource_event_inherits_task_step_and_substep_context():
     assert not event.failed
 
 
+@weaver_test()
 def test_a_failed_external_operation_is_recorded_without_hiding_its_exception():
     telemetry = SessionTelemetry()
 
@@ -38,6 +41,7 @@ def test_a_failed_external_operation_is_recorded_without_hiding_its_exception():
     assert telemetry.by_resource()["tds"].failures == 1
 
 
+@weaver_test()
 def test_resource_and_semantic_aggregates_preserve_unattributed_work():
     telemetry = SessionTelemetry()
     with telemetry.external("rest", "get"):

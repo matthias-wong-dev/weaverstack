@@ -5,6 +5,7 @@ from __future__ import annotations
 import textwrap
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import (
     ASSUMPTION,
@@ -57,6 +58,7 @@ def parse(yaml_text: str, *, language: str = PYTHON):
 # --- identity and kind -----------------------------------------------------
 
 
+@weaver_test()
 def test_a_table_parses():
     document = parse(TABLE_YAML)
     assert document.kind == TABLE
@@ -64,6 +66,7 @@ def test_a_table_parses():
     assert document.primary_key == ("Order id",)
 
 
+@weaver_test()
 def test_exactly_one_id_key_is_required():
     with pytest.raises(MetadataError, match="exactly one"):
         parse("Description: x\nLineage: y")
@@ -71,11 +74,13 @@ def test_exactly_one_id_key_is_required():
         parse("Table ID: A.B\nView ID: A.C\nDescription: x\nLineage: y")
 
 
+@weaver_test()
 def test_the_id_must_be_two_parts():
     with pytest.raises(MetadataError, match="two-part"):
         parse("Table ID: Order\nDescription: x\nLineage: y")
 
 
+@weaver_test()
 def test_duplicate_keys_are_refused():
     with pytest.raises(MetadataError, match="duplicate"):
         parse(FOLDER_YAML + "\nDescription: again")
@@ -84,12 +89,14 @@ def test_duplicate_keys_are_refused():
 # --- unknown keys ----------------------------------------------------------
 
 
+@weaver_test()
 def test_unknown_keys_are_named_not_ignored():
     """A mistyped 'Primary Key' must not parse as no primary key at all."""
     with pytest.raises(MetadataError, match="Primary Key"):
         parse(TABLE_YAML + "\nPrimary Key: Order id")
 
 
+@weaver_test()
 def test_a_key_from_another_kind_names_the_kinds_that_have_it():
     """Naming them turns "unknown key" into "wrong kind of declaration"."""
     with pytest.raises(
@@ -98,11 +105,13 @@ def test_a_key_from_another_kind_names_the_kinds_that_have_it():
         parse(FOLDER_YAML + "\nPrimary key: Order id")
 
 
+@weaver_test()
 def test_retired_keys_explain_the_migration():
     with pytest.raises(MetadataError, match="Incremental"):
         parse(FOLDER_YAML + "\nAuto delete: true")
 
 
+@weaver_test()
 def test_load_mode_is_gone():
     with pytest.raises(MetadataError, match="Load mode"):
         parse(TABLE_YAML + "\nLoad mode: upsert")
@@ -111,16 +120,19 @@ def test_load_mode_is_gone():
 # --- text, placeholders and references -------------------------------------
 
 
+@weaver_test()
 def test_description_and_lineage_are_required():
     with pytest.raises(MetadataError, match="Description"):
         parse("Table ID: A.B\nLineage: y")
 
 
+@weaver_test()
 def test_placeholders_are_refused():
     with pytest.raises(MetadataError, match="placeholder"):
         parse("Folder ID: A.B\nDescription: TBD\nLineage: y\nFile key: '*'")
 
 
+@weaver_test()
 def test_a_whole_value_reference_is_a_reference():
     document = parse(
         TABLE_YAML.replace(
@@ -133,6 +145,7 @@ def test_a_whole_value_reference_is_a_reference():
     assert document.description.reference.column is None
 
 
+@weaver_test()
 def test_a_column_reference_carries_the_column():
     document = parse(
         TABLE_YAML.replace(
@@ -143,6 +156,7 @@ def test_a_column_reference_carries_the_column():
     assert document.description.reference.column == "Order date"
 
 
+@weaver_test()
 def test_mixed_prose_and_reference_is_refused():
     """A contract that is only sometimes machine-readable is not a contract."""
     with pytest.raises(MetadataError, match="not a mix"):
@@ -154,6 +168,7 @@ def test_mixed_prose_and_reference_is_refused():
         )
 
 
+@weaver_test()
 def test_a_literal_dollar_can_be_escaped():
     document = parse(
         TABLE_YAML.replace(
@@ -168,6 +183,7 @@ def test_a_literal_dollar_can_be_escaped():
 # --- notes and revision notes ----------------------------------------------
 
 
+@weaver_test()
 def test_notes_are_free_range():
     """Unpoliced by design — no reference parsing, no placeholder rules."""
     document = parse(
@@ -176,11 +192,13 @@ def test_notes_are_free_range():
     assert document.notes.startswith("Amounts are $AUD.")
 
 
+@weaver_test()
 def test_notes_must_not_be_blank_when_present():
     with pytest.raises(MetadataError, match="Notes"):
         parse(TABLE_YAML + "\nNotes: '   '")
 
 
+@weaver_test()
 def test_revision_notes_keep_their_date_and_note():
     document = parse(
         TABLE_YAML + "\nRevision notes:\n  - 2026-07-23 Added the amount column."
@@ -200,11 +218,13 @@ def test_revision_notes_keep_their_date_and_note():
         ("23.07.2026 note", "DD.MM.YYYY"),
     ],
 )
+@weaver_test()
 def test_any_consistent_date_spelling_is_accepted(entry, shape):
     document = parse(TABLE_YAML + f"\nRevision notes:\n  - {entry}")
     assert document.revision_date_format == shape
 
 
+@weaver_test()
 def test_mixing_date_formats_within_an_object_is_refused():
     with pytest.raises(MetadataError, match="mix date formats"):
         parse(
@@ -213,6 +233,7 @@ def test_mixing_date_formats_within_an_object_is_refused():
         )
 
 
+@weaver_test()
 def test_month_first_and_day_first_are_the_same_shape():
     """Indistinguishable, so Weaver checks the shape rather than the reading."""
     document = parse(
@@ -221,26 +242,31 @@ def test_month_first_and_day_first_are_the_same_shape():
     assert document.revision_date_format == "DD/MM/YYYY"
 
 
+@weaver_test()
 def test_an_entry_without_a_date_is_refused():
     with pytest.raises(MetadataError, match="must open with a date"):
         parse(TABLE_YAML + "\nRevision notes:\n  - Added the amount column.")
 
 
+@weaver_test()
 def test_an_entry_with_a_date_but_no_note_is_refused():
     with pytest.raises(MetadataError, match="no note"):
         parse(TABLE_YAML + "\nRevision notes:\n  - 2026-07-23")
 
 
+@weaver_test()
 def test_an_impossible_date_is_refused():
     with pytest.raises(MetadataError, match="real date"):
         parse(TABLE_YAML + "\nRevision notes:\n  - 2026-13-45 nonsense")
 
 
+@weaver_test()
 def test_revision_notes_must_be_a_list():
     with pytest.raises(MetadataError, match="YAML list"):
         parse(TABLE_YAML + "\nRevision notes: 2026-07-23 one note")
 
 
+@weaver_test()
 def test_notes_and_revision_notes_apply_to_every_kind():
     document = parse(
         FOLDER_YAML + "\nNotes: Free text.\nRevision notes:\n  - 2026-07-23 Created."
@@ -252,6 +278,7 @@ def test_notes_and_revision_notes_apply_to_every_kind():
 # --- column set versus column list -----------------------------------------
 
 
+@weaver_test()
 def test_a_column_set_is_comma_separated():
     document = parse(
         TABLE_YAML.replace("Primary key: Order id", "Primary key: Order id, Order date")
@@ -259,16 +286,19 @@ def test_a_column_set_is_comma_separated():
     assert document.primary_key == ("Order id", "Order date")
 
 
+@weaver_test()
 def test_a_column_set_refuses_a_yaml_list():
     with pytest.raises(MetadataError, match="column set"):
         parse(TABLE_YAML.replace("Primary key: Order id", "Primary key:\n  - Order id"))
 
 
+@weaver_test()
 def test_a_column_list_is_a_yaml_list():
     document = parse(TABLE_YAML + "\nNot null:\n  - Order date\n  - Amount")
     assert document.declared_not_null == ("Order date", "Amount")
 
 
+@weaver_test()
 def test_a_column_list_refuses_comma_separated_text():
     with pytest.raises(MetadataError, match="YAML list"):
         parse(TABLE_YAML + "\nNot null: Order date, Amount")
@@ -277,33 +307,39 @@ def test_a_column_list_refuses_comma_separated_text():
 # --- cross-column guards ---------------------------------------------------
 
 
+@weaver_test()
 def test_columns_must_exist_in_schema():
     with pytest.raises(MetadataError, match="not in Schema"):
         parse(TABLE_YAML.replace("Primary key: Order id", "Primary key: Ordr id"))
 
 
+@weaver_test()
 def test_not_null_repeating_the_primary_key_is_refused():
     with pytest.raises(MetadataError, match="already not null"):
         parse(TABLE_YAML + "\nNot null:\n  - Order id")
 
 
+@weaver_test()
 def test_comparison_columns_may_not_include_the_key():
     with pytest.raises(MetadataError, match="equal keys by definition"):
         parse(TABLE_YAML + "\nComparison columns: Order id, Amount")
 
 
+@weaver_test()
 def test_comparison_columns_require_a_primary_key():
     without_key = TABLE_YAML.replace("Primary key: Order id\n", "")
     with pytest.raises(MetadataError, match="require a Primary key"):
         parse(without_key + "\nComparison columns: Amount")
 
 
+@weaver_test()
 def test_incremental_requires_a_primary_key():
     without_key = TABLE_YAML.replace("Primary key: Order id\n", "")
     with pytest.raises(MetadataError, match="requires a Primary key"):
         parse(without_key + "\nIncremental: true")
 
 
+@weaver_test()
 def test_static_and_incremental_stand_together():
     """Incremental shapes the load; Static decides whether it is invoked."""
     document = parse(TABLE_YAML + "\nIncremental: true\nStatic: true")
@@ -315,16 +351,19 @@ def test_static_and_incremental_stand_together():
     assert folder.static
 
 
+@weaver_test()
 def test_audit_column_names_are_reserved():
     with pytest.raises(MetadataError, match="reserved"):
         parse(TABLE_YAML + "\n  Row_insert_datetime: timestamp")
 
 
+@weaver_test()
 def test_identity_is_a_single_column():
     with pytest.raises(MetadataError, match="single column"):
         parse(TABLE_YAML + "\nIdentity: Order id, Order date")
 
 
+@weaver_test()
 def test_identity_is_an_engine_generated_bigint_column():
     """The Identity header names a surrogate the Warehouse generates: a not-null
     bigint outside the business schema, which no load ever inserts into."""
@@ -346,6 +385,7 @@ def test_identity_is_an_engine_generated_bigint_column():
     assert "OrderKey" not in {column.name for column in document.schema}
 
 
+@weaver_test()
 def test_identity_must_not_be_declared_in_schema():
     """The identity column is Weaver's own, so declaring it is a collision.
 
@@ -357,6 +397,7 @@ def test_identity_must_not_be_declared_in_schema():
         parse(TABLE_YAML + "\nIdentity: Amount", language=SQL)
 
 
+@weaver_test()
 def test_the_primary_key_may_not_be_the_identity_column():
     """A load could never match on it, so every run would insert duplicates.
 
@@ -375,6 +416,7 @@ def test_the_primary_key_may_not_be_the_identity_column():
 
 
 @pytest.mark.parametrize("language", [PYTHON, SPARK_SQL])
+@weaver_test()
 def test_a_delta_table_may_not_declare_identity(language):
     """Identity is a Warehouse declaration.
 
@@ -396,6 +438,7 @@ def test_a_delta_table_may_not_declare_identity(language):
 # --- defaults --------------------------------------------------------------
 
 
+@weaver_test()
 def test_folder_defaults_to_incremental_and_prohibited_rebuild():
     document = parse(FOLDER_YAML)
     assert document.kind == FOLDER
@@ -403,12 +446,14 @@ def test_folder_defaults_to_incremental_and_prohibited_rebuild():
     assert document.prohibit_rebuild is True
 
 
+@weaver_test()
 def test_a_table_defaults_to_neither():
     document = parse(TABLE_YAML)
     assert document.is_incremental is False
     assert document.prohibit_rebuild is False
 
 
+@weaver_test()
 def test_prohibit_rebuild_works_on_views():
     """Admins add security to views; a rebuild would lose it."""
     document = parse(
@@ -419,6 +464,7 @@ def test_prohibit_rebuild_works_on_views():
     assert document.prohibit_rebuild is True
 
 
+@weaver_test()
 def test_incremental_is_refused_on_a_view():
     with pytest.raises(MetadataError, match="View"):
         parse(
@@ -426,15 +472,18 @@ def test_incremental_is_refused_on_a_view():
         )
 
 
+@weaver_test()
 def test_not_null_includes_the_primary_key():
     document = parse(TABLE_YAML + "\nNot null:\n  - Order date")
     assert document.not_null == ("Order id", "Order date")
 
 
+@weaver_test()
 def test_comparison_columns_default_to_every_non_key_column():
     assert parse(TABLE_YAML).comparison_columns == ("Order date", "Amount")
 
 
+@weaver_test()
 def test_a_narrower_comparison_set_is_kept():
     document = parse(TABLE_YAML + "\nComparison columns: Order date")
     assert document.comparison_columns == ("Order date",)
@@ -443,6 +492,7 @@ def test_a_narrower_comparison_set_is_kept():
 # --- audit columns ---------------------------------------------------------
 
 
+@weaver_test()
 def test_declared_schema_stays_exactly_what_was_written():
     document = parse(TABLE_YAML)
     assert [column.name for column in document.schema] == [
@@ -452,6 +502,7 @@ def test_declared_schema_stays_exactly_what_was_written():
     ]
 
 
+@weaver_test()
 def test_the_effective_schema_adds_the_audit_columns():
     document = parse(TABLE_YAML)
     assert [column.name for column in document.effective_schema][-3:] == [
@@ -461,6 +512,7 @@ def test_the_effective_schema_adds_the_audit_columns():
     ]
 
 
+@weaver_test()
 def test_a_warehouse_table_keeps_the_spaced_audit_names():
     document = parse(
         "Table ID: Sales.Order\nDescription: x\nLineage: y\nPrimary key: Order id",
@@ -469,12 +521,14 @@ def test_a_warehouse_table_keeps_the_spaced_audit_names():
     assert [column.name for column in document.audit_columns] == list(AUDIT_COLUMNS)
 
 
+@weaver_test()
 def test_every_audit_column_is_not_null():
     """Weaver populates all three on every loaded row, so none may be null."""
     document = parse(TABLE_YAML)
     assert [column.not_null for column in document.audit_columns] == [True, True, True]
 
 
+@weaver_test()
 def test_folders_have_no_audit_columns():
     assert parse(FOLDER_YAML).audit_columns == ()
 
@@ -482,11 +536,13 @@ def test_folders_have_no_audit_columns():
 # --- schema declaration by representation ----------------------------------
 
 
+@weaver_test()
 def test_a_delta_table_must_declare_schema():
     with pytest.raises(MetadataError, match="must declare Schema"):
         parse("Table ID: A.B\nDescription: x\nLineage: y")
 
 
+@weaver_test()
 def test_a_warehouse_table_may_declare_schema():
     """T-SQL tables may declare a schema; when they do it is authoritative and
     validated now, exactly like a Delta table's."""
@@ -500,6 +556,7 @@ def test_a_warehouse_table_may_declare_schema():
     ]
 
 
+@weaver_test()
 def test_a_warehouse_table_defers_column_validation():
     document = parse(
         "Table ID: Sales.Order\nDescription: x\nLineage: y\nPrimary key: Order id",
@@ -509,6 +566,7 @@ def test_a_warehouse_table_defers_column_validation():
     assert document.primary_key == ("Order id",)
 
 
+@weaver_test()
 def test_a_delta_table_validates_now():
     assert parse(TABLE_YAML).defers_column_validation is False
 
@@ -516,6 +574,7 @@ def test_a_delta_table_validates_now():
 # --- column notes ----------------------------------------------------------
 
 
+@weaver_test()
 def test_column_notes_attach_to_declared_columns():
     document = parse(
         TABLE_YAML + "\nColumn notes:\n  Amount: Order total including tax."
@@ -524,17 +583,20 @@ def test_column_notes_attach_to_declared_columns():
     assert amount.note.literal == "Order total including tax."
 
 
+@weaver_test()
 def test_column_notes_may_reference_another_object():
     document = parse(TABLE_YAML + "\nColumn notes:\n  Amount: $Sales.Invoice[Amount]")
     amount = next(column for column in document.schema if column.name == "Amount")
     assert amount.note.reference.column == "Amount"
 
 
+@weaver_test()
 def test_column_notes_must_name_declared_columns():
     with pytest.raises(MetadataError, match="not in Schema"):
         parse(TABLE_YAML + "\nColumn notes:\n  Amont: typo")
 
 
+@weaver_test()
 def test_a_warehouse_object_describes_columns_without_a_schema():
     document = parse(
         "Table ID: Sales.Order\nDescription: x\nLineage: y\n"
@@ -547,16 +609,19 @@ def test_a_warehouse_object_describes_columns_without_a_schema():
 # --- folders ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_folder_must_declare_file_keys():
     with pytest.raises(MetadataError, match="File key"):
         parse("Folder ID: A.B\nDescription: x\nLineage: y")
 
 
+@weaver_test()
 def test_file_keys_may_not_traverse():
     with pytest.raises(MetadataError, match="traverse"):
         parse(FOLDER_YAML.replace('File key: "*.csv"', 'File key: "../*.csv"'))
 
 
+@weaver_test()
 def test_not_null_columns_are_marked_on_the_schema():
     document = parse(TABLE_YAML + "\nNot null:\n  - Amount")
     marked = {column.name for column in document.schema if column.not_null}
@@ -566,16 +631,19 @@ def test_not_null_columns_are_marked_on_the_schema():
 # --- extraction ------------------------------------------------------------
 
 
+@weaver_test()
 def test_python_metadata_comes_from_the_module_docstring():
     source = f'"""{TABLE_YAML}"""\n\nclass Order:\n    pass\n'
     assert parse_python_document(source).qualified == "Sales.Order"
 
 
+@weaver_test()
 def test_a_python_object_without_a_docstring_is_refused():
     with pytest.raises(MetadataError, match="docstring"):
         parse_python_document("class Order:\n    pass\n")
 
 
+@weaver_test()
 def test_sql_metadata_comes_from_the_opening_comment():
     source = (
         "/*\nTable ID: Sales.Order\nDescription: x\nLineage: y\n*/\n"
@@ -586,6 +654,7 @@ def test_sql_metadata_comes_from_the_opening_comment():
     assert body.startswith("select 1")
 
 
+@weaver_test()
 def test_sql_without_a_metadata_block_is_refused():
     with pytest.raises(MetadataError, match="metadata block"):
         parse_sql_document("select 1\n")
@@ -612,12 +681,14 @@ Schema:
 """
 
 
+@weaver_test()
 def test_a_spark_sql_table_parses():
     document = parse(SPARK_YAML, language=SPARK_SQL)
     assert document.language == SPARK_SQL
     assert document.dependencies[0].qualified == "Sales.Order"
 
 
+@weaver_test()
 def test_a_spark_sql_table_may_omit_schema():
     """Unlike Python, a Spark SQL table has a query, so it may omit Schema and
     take its shape from the query at build (how-does-build-work §2)."""
@@ -629,6 +700,7 @@ def test_a_spark_sql_table_may_omit_schema():
     assert document.primary_key == ("Customer id",)
 
 
+@weaver_test()
 def test_a_spark_sql_table_may_declare_schema():
     """When a Spark SQL table declares a schema it is authoritative, like Python's."""
     document = parse(SPARK_YAML, language=SPARK_SQL)
@@ -636,6 +708,7 @@ def test_a_spark_sql_table_may_declare_schema():
     assert document.defers_column_validation is False
 
 
+@weaver_test()
 def test_a_spark_sql_object_must_declare_dependencies():
     """Its query may read by path, which cannot resolve back to an object."""
     without = SPARK_YAML.replace("Dependencies:\n  - Sales.Order\n", "")
@@ -643,6 +716,7 @@ def test_a_spark_sql_object_must_declare_dependencies():
         parse(without, language=SPARK_SQL)
 
 
+@weaver_test()
 def test_a_spark_sql_table_uses_the_delta_audit_spelling():
     document = parse(SPARK_YAML, language=SPARK_SQL)
     assert [column.name for column in document.audit_columns] == [
@@ -652,6 +726,7 @@ def test_a_spark_sql_table_uses_the_delta_audit_spelling():
     ]
 
 
+@weaver_test()
 def test_a_spark_sql_view_is_a_real_object():
     """Fabric Lakehouse views persist in the metastore."""
     document = parse(
@@ -663,25 +738,30 @@ def test_a_spark_sql_view_is_a_real_object():
     assert document.audit_columns == ()
 
 
+@weaver_test()
 def test_dependencies_are_optional_for_python_and_sql():
     assert parse(TABLE_YAML).dependencies == ()
 
 
+@weaver_test()
 def test_declared_dependencies_are_two_part_names():
     with pytest.raises(MetadataError, match="two-part"):
         parse(TABLE_YAML + "\nDependencies:\n  - Order")
 
 
+@weaver_test()
 def test_an_object_may_not_depend_on_itself():
     with pytest.raises(MetadataError, match="cannot depend on itself"):
         parse(TABLE_YAML + "\nDependencies:\n  - Sales.Order")
 
 
+@weaver_test()
 def test_dependencies_may_not_repeat():
     with pytest.raises(MetadataError, match="repeats"):
         parse(TABLE_YAML + "\nDependencies:\n  - Sales.Customer\n  - Sales.Customer")
 
 
+@weaver_test()
 def test_dependencies_must_be_a_list():
     with pytest.raises(MetadataError, match="YAML list"):
         parse(TABLE_YAML + "\nDependencies: Sales.Customer")
@@ -709,6 +789,7 @@ Description: Orders contain data up to the expected business date.
 """
 
 
+@weaver_test()
 def test_a_test_parses():
     document = parse(TEST_YAML)
     assert document.kind == TEST
@@ -717,6 +798,7 @@ def test_a_test_parses():
     assert document.is_validation
 
 
+@weaver_test()
 def test_an_assumption_parses():
     document = parse(ASSUMPTION_YAML)
     assert document.kind == ASSUMPTION
@@ -724,12 +806,14 @@ def test_an_assumption_parses():
     assert document.is_validation
 
 
+@weaver_test()
 def test_a_validation_declares_no_lineage():
     """It reads data and produces none, so it has no lineage of its own."""
     assert parse(TEST_YAML).lineage is None
     assert parse(ASSUMPTION_YAML).lineage is None
 
 
+@weaver_test()
 def test_a_test_primary_key_may_be_composite():
     document = parse(
         TEST_YAML.replace("Primary key: Order id", "Primary key: Order id, Line no")
@@ -737,18 +821,21 @@ def test_a_test_primary_key_may_be_composite():
     assert document.primary_key == ("Order id", "Line no")
 
 
+@weaver_test()
 def test_a_test_may_declare_no_primary_key():
     document = parse(TEST_YAML.replace("\nPrimary key: Order id\n", "\n"))
     assert document.primary_key == ()
     assert not document.has_primary_key
 
 
+@weaver_test()
 def test_an_assumption_may_not_declare_a_primary_key():
     """There is one side to pair, so a key would have nothing to correlate."""
     with pytest.raises(MetadataError, match="must not declare a Primary key"):
         parse(ASSUMPTION_YAML + "\nPrimary key: Order id")
 
 
+@weaver_test()
 def test_a_validation_takes_the_shared_document_keys():
     document = parse(
         TEST_YAML
@@ -766,6 +853,7 @@ def test_a_validation_takes_the_shared_document_keys():
     assert document.declares_dependencies
 
 
+@weaver_test()
 def test_a_validation_description_may_reference_another_object():
     document = parse(
         TEST_YAML.replace(
@@ -794,6 +882,7 @@ def test_a_validation_description_may_reference_another_object():
         'File key: "*.csv"',
     ],
 )
+@weaver_test()
 def test_data_object_metadata_is_refused_on_a_test(key):
     with pytest.raises(MetadataError, match="unknown metadata key"):
         parse(TEST_YAML + "\n" + key)
@@ -803,26 +892,31 @@ def test_data_object_metadata_is_refused_on_a_test(key):
     "key",
     ["Lineage: Sales system order export.", "Static: true", "Incremental: true"],
 )
+@weaver_test()
 def test_data_object_metadata_is_refused_on_an_assumption(key):
     with pytest.raises(MetadataError, match="unknown metadata key"):
         parse(ASSUMPTION_YAML + "\n" + key)
 
 
+@weaver_test()
 def test_refusing_a_data_key_on_a_validation_explains_why():
     with pytest.raises(MetadataError, match="declares no data of its own"):
         parse(TEST_YAML + "\nLineage: Sales system order export.")
 
 
+@weaver_test()
 def test_a_validation_still_needs_a_description():
     with pytest.raises(MetadataError, match="Description is required"):
         parse("Test ID: Sales.OrdersReconcile")
 
 
+@weaver_test()
 def test_a_validation_id_is_two_parts():
     with pytest.raises(MetadataError, match="two-part"):
         parse("Test ID: OrdersReconcile\nDescription: x")
 
 
+@weaver_test()
 def test_one_id_key_only_still_holds_across_validation_and_object():
     with pytest.raises(MetadataError, match="exactly one"):
         parse("Test ID: A.B\nAssumption ID: A.C\nDescription: x")
@@ -830,6 +924,7 @@ def test_one_id_key_only_still_holds_across_validation_and_object():
         parse("Table ID: A.B\nTest ID: A.C\nDescription: x\nLineage: y")
 
 
+@weaver_test()
 def test_a_spark_sql_validation_need_not_declare_dependencies():
     """Unlike a Spark SQL object, whose declaration replaces inference entirely.
 
@@ -841,6 +936,7 @@ def test_a_spark_sql_validation_need_not_declare_dependencies():
     assert not document.declares_dependencies
 
 
+@weaver_test()
 def test_a_validation_may_still_declare_what_inference_cannot_reach():
     document = parse(TEST_YAML + "\nDependencies:\n  - Sales.Order", language=SPARK_SQL)
     assert [dependency.qualified for dependency in document.dependencies] == [
@@ -848,6 +944,7 @@ def test_a_validation_may_still_declare_what_inference_cannot_reach():
     ]
 
 
+@weaver_test()
 def test_a_validation_may_not_depend_on_itself():
     with pytest.raises(MetadataError, match="cannot depend on itself"):
         parse(TEST_YAML + "\nDependencies:\n  - Sales.OrdersReconcile")

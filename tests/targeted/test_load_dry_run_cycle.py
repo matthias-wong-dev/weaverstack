@@ -26,6 +26,7 @@ from factories import (
     load_estate,
     load_estate_bindings,
 )
+from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.fabric.resolution import FabricResolver
@@ -122,6 +123,7 @@ def dry_run(session, *targets, names=(), fault_tolerant=False):
 # --- the complete physical DAG, resolved --------------------------------------
 
 
+@weaver_test()
 def test_load_dry_run_resolves_the_complete_physical_dag(session):
     report = dry_run(session)
 
@@ -135,6 +137,7 @@ def test_load_dry_run_resolves_the_complete_physical_dag(session):
     )
 
 
+@weaver_test()
 def test_named_dry_run_is_the_exact_nodes_without_dependency_edges(session):
     report = dry_run(
         session,
@@ -146,6 +149,7 @@ def test_named_dry_run_is_the_exact_nodes_without_dependency_edges(session):
     assert report.edges == ()
 
 
+@weaver_test()
 def test_load_dry_run_validates_every_primitive_without_executing_it(session):
     report = dry_run(session)
 
@@ -160,6 +164,7 @@ def test_load_dry_run_validates_every_primitive_without_executing_it(session):
     assert all(node.result is None for node in report.nodes)
 
 
+@weaver_test()
 def test_load_dry_run_names_the_primitive_every_node_would_reach(session):
     """Which installed thing, not where it happens to sit on this host.
 
@@ -180,6 +185,7 @@ def test_load_dry_run_names_the_primitive_every_node_would_reach(session):
     }
 
 
+@weaver_test()
 def test_load_dry_run_emits_the_normal_run_report_shape(session):
     report = dry_run(session)
 
@@ -210,6 +216,7 @@ def test_load_dry_run_emits_the_normal_run_report_shape(session):
 # --- what a dry run must not do -----------------------------------------------
 
 
+@weaver_test()
 def test_load_dry_run_does_not_execute_warehouse_procedures(session):
     """The Warehouse node resolves; the SQL capability is never asked anything."""
 
@@ -221,6 +228,7 @@ def test_load_dry_run_does_not_execute_warehouse_procedures(session):
     )
 
 
+@weaver_test()
 def test_load_dry_run_does_not_execute_spark_sql(session):
     report = dry_run(session, RAW)
 
@@ -228,6 +236,7 @@ def test_load_dry_run_does_not_execute_spark_sql(session):
     assert not report.by_node[DAILY].executed
 
 
+@weaver_test()
 def test_load_dry_run_does_not_import_and_run_python_loads(session):
     report = dry_run(session, RAW)
 
@@ -235,6 +244,7 @@ def test_load_dry_run_does_not_import_and_run_python_loads(session):
     assert report.by_node[EXPORT].status == VALIDATED
 
 
+@weaver_test()
 def test_load_dry_run_does_not_refresh_endpoints(session):
     report = dry_run(session)
 
@@ -243,6 +253,7 @@ def test_load_dry_run_does_not_refresh_endpoints(session):
     assert not report.by_node[REFRESH].executed
 
 
+@weaver_test()
 def test_load_dry_run_writes_no_task_log(session):
     """Proven by the store, not by a flag: every write through it refuses."""
 
@@ -252,6 +263,7 @@ def test_load_dry_run_writes_no_task_log(session):
     assert report.workflow_id is None
 
 
+@weaver_test()
 def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
     """A row for work nobody did would be evidence of a load that never ran."""
 
@@ -267,6 +279,7 @@ def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
     ]
 
 
+@weaver_test()
 def test_a_dry_run_never_reports_an_execution_status(session):
     """A validated node has not run, and no word for a thing that ran fits it."""
 

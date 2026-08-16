@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
@@ -53,6 +54,7 @@ def _example_files() -> list[Path]:
     )
 
 
+@weaver_test()
 def test_there_are_examples_to_check():
     """Guards the way the rest of this file could pass for the wrong reason."""
 
@@ -60,6 +62,7 @@ def test_there_are_examples_to_check():
 
 
 @pytest.mark.parametrize("spelling", RETIRED_SPELLINGS)
+@weaver_test()
 def test_no_example_uses_a_retired_spelling(spelling):
     carrying = [
         path.relative_to(ROOT).as_posix()
@@ -73,6 +76,7 @@ def test_no_example_uses_a_retired_spelling(spelling):
     )
 
 
+@weaver_test()
 def test_the_python_examples_parse():
     """A shipped example that does not parse has never been run by anybody."""
 
@@ -88,6 +92,7 @@ def test_the_python_examples_parse():
     assert not broken, broken
 
 
+@weaver_test()
 def test_the_catalogue_is_named_typed_wherever_an_example_names_one():
     """`catalogue=` takes `Warehouse/Weaver`, and an example must show that.
 

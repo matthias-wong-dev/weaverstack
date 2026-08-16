@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import pytest
 
+from support.weaver_test import weaver_test
+
 from .observation import Observation, observation_from, observe_body, observe_in_session
 
 
@@ -63,6 +65,7 @@ def _run(body: str, spark: FakeSpark):
     return emitted[-1]
 
 
+@weaver_test()
 def test_one_body_gathers_queries_schemas_and_tables_together():
     """The whole point: three kinds of evidence, one submission."""
 
@@ -89,6 +92,7 @@ def test_one_body_gathers_queries_schemas_and_tables_together():
     assert seen.table("orphan") is False
 
 
+@weaver_test()
 def test_statements_reach_spark_exactly_as_written():
     """Names are the caller's to qualify; the body must not rewrite them."""
 
@@ -99,6 +103,7 @@ def test_statements_reach_spark_exactly_as_written():
     assert spark.asked == ["SHOW TABLES IN `ws`.`lh`.`DWG`"]
 
 
+@weaver_test()
 def test_a_body_asking_nothing_still_emits_a_payload():
     """An empty observation is empty evidence, not a missing one."""
 
@@ -107,6 +112,7 @@ def test_a_body_asking_nothing_still_emits_a_payload():
     assert seen.rows == {} and seen.schemas == {} and seen.tables == {}
 
 
+@weaver_test()
 def test_quoting_survives_the_round_trip():
     """Fabric names carry backticks and dots; the body embeds them as literals."""
 
@@ -118,6 +124,7 @@ def test_quoting_survives_the_round_trip():
     assert seen["q"] == [{"x": "a"}]
 
 
+@weaver_test()
 def test_values_lowercases_one_column():
     seen = Observation(
         rows={"tables": [{"tableName": "Customer"}, {"tableName": "ORDER"}]}
@@ -126,6 +133,7 @@ def test_values_lowercases_one_column():
     assert seen.values("tables", "tableName") == {"customer", "order"}
 
 
+@weaver_test()
 def test_values_ignores_blank_and_null_entries():
     """DESCRIBE pads its output with blank rows; they are not object names."""
 
@@ -142,6 +150,7 @@ def test_values_ignores_blank_and_null_entries():
     assert seen.values("cols", "col_name") == {"customerid"}
 
 
+@weaver_test()
 def test_a_scalar_wants_exactly_one_row():
     seen = Observation(rows={"n": [{"n": 1}, {"n": 2}]})
 
@@ -149,6 +158,7 @@ def test_a_scalar_wants_exactly_one_row():
         seen.scalar("n")
 
 
+@weaver_test()
 def test_asking_for_evidence_that_was_not_observed_says_what_was():
     """The failure mode this shape introduces, made legible.
 
@@ -169,6 +179,7 @@ def test_asking_for_evidence_that_was_not_observed_says_what_was():
         seen.table("customer")
 
 
+@weaver_test()
 def test_a_session_that_emitted_no_payload_is_an_error_not_an_empty_result():
     """Silence from Fabric must not read as "the estate has nothing in it"."""
 
@@ -180,6 +191,7 @@ def test_a_session_that_emitted_no_payload_is_an_error_not_an_empty_result():
         observe_in_session(SilentSession(), queries={"q": "SELECT 1"})
 
 
+@weaver_test()
 def test_a_session_observation_is_one_submission_carrying_every_question():
     """The claim the whole exercise rests on, asserted rather than assumed."""
 

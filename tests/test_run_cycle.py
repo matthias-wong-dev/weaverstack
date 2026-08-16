@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.run import Runner, RunRequest, RunState
 from weaver.run.graph import RunGraph, RunNode
@@ -123,12 +124,14 @@ def controlled(outcomes):
 # --- planning -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_planning_needs_no_session_and_no_dispatch():
     made = runner(nodes=[node("a"), node("b")], edges=[("a", "b")])
 
     assert [one.node_id for one in made.graph.order()] == ["a", "b"]
 
 
+@weaver_test()
 def test_the_order_is_deterministic_rather_than_incidental():
     made = runner(
         nodes=[
@@ -141,6 +144,7 @@ def test_the_order_is_deterministic_rather_than_incidental():
     assert [one.node_id for one in made.graph.order()] == ["a", "b", "c"]
 
 
+@weaver_test()
 def test_a_cycle_is_refused_rather_than_ordered():
     from weaver.run.result import RunError
 
@@ -153,6 +157,7 @@ def test_a_cycle_is_refused_rather_than_ordered():
 # --- the ordinary path --------------------------------------------------------
 
 
+@weaver_test()
 def test_every_node_runs_and_is_reported(recwarn):
     dispatch = controlled({})
     result = runner(nodes=[node("a"), node("b")], edges=[("a", "b")]).run(
@@ -165,12 +170,14 @@ def test_every_node_runs_and_is_reported(recwarn):
     assert all(one.executed for one in result.nodes)
 
 
+@weaver_test()
 def test_a_run_with_no_session_still_runs_with_its_own_dispatch():
     result = runner(nodes=[node("a")]).run(session=None, dispatch=controlled({}))
 
     assert result.succeeded
 
 
+@weaver_test()
 def test_row_counts_come_back_on_the_node_that_produced_them():
     dispatch = controlled({"a": Outcome(rows={"rows_inserted": 3})})
 
@@ -182,6 +189,7 @@ def test_row_counts_come_back_on_the_node_that_produced_them():
 # --- failure ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_reported_failure_stops_what_depends_on_it():
     dispatch = controlled({"a": Outcome(status=FAILED)})
 
@@ -194,6 +202,7 @@ def test_a_reported_failure_stops_what_depends_on_it():
     assert dispatch.seen == ["a"], "the blocked node was never dispatched"
 
 
+@weaver_test()
 def test_an_exception_from_dispatch_is_a_failed_node_not_a_crash():
     dispatch = controlled({"a": RuntimeError("the engine said no")})
 
@@ -204,6 +213,7 @@ def test_an_exception_from_dispatch_is_a_failed_node_not_a_crash():
     assert result.by_node["a"].messages[0].code == "dispatch_exception"
 
 
+@weaver_test()
 def test_fail_fast_stops_scheduling_but_still_reports_every_node():
     dispatch = controlled({"a": Outcome(status=FAILED)})
 
@@ -215,6 +225,7 @@ def test_fail_fast_stops_scheduling_but_still_reports_every_node():
     assert len(result.nodes) == 2, "every planned node has an outcome"
 
 
+@weaver_test()
 def test_fault_tolerance_lets_an_independent_branch_finish():
     dispatch = controlled({"a": Outcome(status=FAILED)})
 
@@ -227,6 +238,7 @@ def test_fault_tolerance_lets_an_independent_branch_finish():
     assert result.status == RUN_PARTIALLY_SUCCEEDED
 
 
+@weaver_test()
 def test_fault_tolerance_does_not_run_what_the_failure_blocked():
     dispatch = controlled({"a": Outcome(status=FAILED)})
 
@@ -243,6 +255,7 @@ def test_fault_tolerance_does_not_run_what_the_failure_blocked():
 # --- resolution and dispatch --------------------------------------------------
 
 
+@weaver_test()
 def test_physical_failure_is_reported_by_dispatch_not_preflight():
     dispatch = controlled({"a": FileNotFoundError("deployed module is missing")})
 
@@ -253,6 +266,7 @@ def test_physical_failure_is_reported_by_dispatch_not_preflight():
     assert result.by_node["a"].executed
 
 
+@weaver_test()
 def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
     """A target with no SQL analytics endpoint is an absence, not a fault."""
 
@@ -269,6 +283,7 @@ def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
     assert result.succeeded
 
 
+@weaver_test()
 def test_resolution_derives_dispatch_metadata_without_physical_state():
 
     made = runner(nodes=[node("a")])
@@ -282,6 +297,7 @@ def test_resolution_derives_dispatch_metadata_without_physical_state():
 # --- dry run ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_dry_run_dispatches_nothing_and_says_so():
     dispatch = controlled({})
 
@@ -293,6 +309,7 @@ def test_a_dry_run_dispatches_nothing_and_says_so():
     assert result.dry_run is True
 
 
+@weaver_test()
 def test_a_dry_run_reports_the_graph_the_real_run_would_execute():
     nodes = [node("a"), node("b")]
     edges = [("a", "b")]
@@ -307,6 +324,7 @@ def test_a_dry_run_reports_the_graph_the_real_run_would_execute():
 # --- aggregation --------------------------------------------------------------
 
 
+@weaver_test()
 def test_the_worst_node_decides_the_run_status():
     dispatch = controlled({"b": Outcome(status=FAILED)})
 
@@ -318,6 +336,7 @@ def test_the_worst_node_decides_the_run_status():
     assert result.status == RUN_PARTIALLY_SUCCEEDED
 
 
+@weaver_test()
 def test_a_run_where_everything_failed_is_failed_not_partial():
     dispatch = controlled({"a": Outcome(status=FAILED), "b": Outcome(status=FAILED)})
 
@@ -328,6 +347,7 @@ def test_a_run_where_everything_failed_is_failed_not_partial():
     assert result.status == RUN_FAILED
 
 
+@weaver_test()
 def test_rejects_are_neither_success_nor_failure():
     dispatch = controlled({"a": Outcome(status=SUCCEEDED_WITH_REJECTS)})
 
@@ -340,6 +360,7 @@ def test_rejects_are_neither_success_nor_failure():
 # --- what a log sink is written from ------------------------------------------
 
 
+@weaver_test()
 def test_every_planned_node_reaches_the_sink_once_and_in_order():
     seen = []
     dispatch = controlled({"a": Outcome(status=FAILED)})
@@ -353,6 +374,7 @@ def test_every_planned_node_reaches_the_sink_once_and_in_order():
     assert len(seen) == len({one.node_id for one in seen})
 
 
+@weaver_test()
 def test_the_order_does_not_depend_on_how_the_graph_was_built():
     forwards = runner(nodes=[node("a"), node("b"), node("c")]).graph.order()
     backwards = runner(nodes=[node("c"), node("b"), node("a")]).graph.order()
@@ -360,6 +382,7 @@ def test_the_order_does_not_depend_on_how_the_graph_was_built():
     assert [one.node_id for one in forwards] == [one.node_id for one in backwards]
 
 
+@weaver_test()
 def test_a_run_needs_no_storage_to_be_correct():
     """Nothing here has a store or a log, and the run is still whole."""
 
@@ -368,6 +391,7 @@ def test_a_run_needs_no_storage_to_be_correct():
     assert result.succeeded
 
 
+@weaver_test()
 def test_a_dry_run_validates_the_catalogue_graph_without_physical_checks():
     made = runner(
         nodes=[node("a", target=Target("Gone_LH")), node("b")],
@@ -382,6 +406,7 @@ def test_a_dry_run_validates_the_catalogue_graph_without_physical_checks():
     assert not any(one.executed for one in result.nodes)
 
 
+@weaver_test()
 def test_a_primitive_that_returned_the_wrong_shape_is_a_failed_node():
     """Not an exception, but not a dispatch either.
 
@@ -397,6 +422,7 @@ def test_a_primitive_that_returned_the_wrong_shape_is_a_failed_node():
     assert result.by_node["a"].messages[0].code == "result_contract_invalid"
 
 
+@weaver_test()
 def test_a_tolerated_rejection_is_not_a_failure_and_a_raised_one_is():
     """The distinction the whole outcome layer exists for.
 
@@ -421,6 +447,7 @@ def test_a_tolerated_rejection_is_not_a_failure_and_a_raised_one_is():
     assert raised.by_node["a"].result.rows_rejected == 2, "the counts survive"
 
 
+@weaver_test()
 def test_rejects_do_not_block_what_comes_after_them():
     """The valid rows were written, so what a consumer reads is there.
 
@@ -442,6 +469,7 @@ def test_rejects_do_not_block_what_comes_after_them():
 # --- what a representation hands over ----------------------------------------
 
 
+@weaver_test()
 def test_a_request_hands_over_every_field_that_changes_behaviour():
     """A partial mapping arrives meaning something else than it left as."""
 
@@ -453,6 +481,7 @@ def test_a_request_hands_over_every_field_that_changes_behaviour():
     assert set(handed) == {field.name for field in fields(RunRequest)}
 
 
+@weaver_test()
 def test_a_node_result_hands_over_what_a_reader_needs_to_tell_outcomes_apart():
     dispatch = controlled({"a": RuntimeError("the engine said no")})
 
@@ -465,6 +494,7 @@ def test_a_node_result_hands_over_what_a_reader_needs_to_tell_outcomes_apart():
     assert handed["role"] == "load"
 
 
+@weaver_test()
 def test_a_result_does_not_claim_to_know_where_evidence_was_written():
     """A run is correct without a log; where one went belongs to the sink."""
 
@@ -474,6 +504,7 @@ def test_a_result_does_not_claim_to_know_where_evidence_was_written():
     assert not hasattr(result, "workflow_id")
 
 
+@weaver_test()
 def test_a_run_state_round_trips_through_its_mapping():
     from weaver.catalogue.state import Catalogue
 
@@ -487,6 +518,7 @@ def test_a_run_state_round_trips_through_its_mapping():
 # --- what a run must not swallow ---------------------------------------------
 
 
+@weaver_test()
 def test_an_interrupt_escapes_rather_than_becoming_a_failed_node():
     """Ctrl-C is the operator saying stop, not a primitive reporting failure.
 
@@ -501,6 +533,7 @@ def test_an_interrupt_escapes_rather_than_becoming_a_failed_node():
         runner(nodes=[node("a")]).run(dispatch=dispatch)
 
 
+@weaver_test()
 def test_a_process_exit_escapes_too():
     def dispatch(node, **asked):
         raise SystemExit(2)
@@ -509,6 +542,7 @@ def test_a_process_exit_escapes_too():
         runner(nodes=[node("a")]).run(dispatch=dispatch)
 
 
+@weaver_test()
 def test_a_result_that_is_not_row_shaped_still_serializes():
     """The Runner's contract is "it reports whether it succeeded" — and its
     serialization has to be exactly as narrow, or a future runtime result would
@@ -534,6 +568,7 @@ def test_a_result_that_is_not_row_shaped_still_serializes():
     }
 
 
+@weaver_test()
 def test_a_result_that_describes_itself_no_further_still_serializes():
     """Neither to_mapping nor as_row: it answers what every result must."""
 
@@ -560,6 +595,7 @@ def test_a_result_that_describes_itself_no_further_still_serializes():
 # reason to need a Session.
 
 
+@weaver_test()
 def test_each_dispatched_node_is_timed_as_a_substep():
     from weaver.sessions import ConsoleSession
 
@@ -573,6 +609,7 @@ def test_each_dispatched_node_is_timed_as_a_substep():
         assert all(frame.elapsed is not None for frame in session.timings)
 
 
+@weaver_test()
 def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
     """A failed node is a *result* here — the run records what happened before
     it decides what to do about it — and the timing has to agree."""
@@ -588,6 +625,7 @@ def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
         assert failed == {"a": True, "b": False}
 
 
+@weaver_test()
 def test_a_node_that_was_never_dispatched_is_never_timed():
     """Blocked, skipped and pending nodes waited on nothing of their own."""
 
@@ -601,12 +639,14 @@ def test_a_node_that_was_never_dispatched_is_never_timed():
         assert [frame.name for frame in session.timings] == ["a"]
 
 
+@weaver_test()
 def test_a_runner_with_no_session_still_runs():
     result = runner(nodes=[node("a")]).run(session=None, dispatch=controlled({}))
 
     assert result.succeeded
 
 
+@weaver_test()
 def test_an_interrupted_run_still_closes_its_runtime_scope():
     """A scope that outlived its run is one the next run would inherit — along
     with the modules a rebuild has since replaced.
@@ -639,6 +679,7 @@ def test_an_interrupted_run_still_closes_its_runtime_scope():
 # --- what a node is called on screen ------------------------------------------
 
 
+@weaver_test()
 def test_a_node_is_named_by_what_it_does_to_which_object():
     """``node_id`` is an identifier and reads like one. This is the line
     somebody watches go past, so it is a verb and a physical id."""
@@ -673,6 +714,7 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
     )
 
 
+@weaver_test()
 def test_a_node_with_nothing_logical_to_name_keeps_its_id():
     """Inventing "Load None" would be worse than the identifier this improves on."""
 
@@ -683,6 +725,7 @@ def test_a_node_with_nothing_logical_to_name_keeps_its_id():
     assert node_label(node) == "a"
 
 
+@weaver_test()
 def test_run_evidence_uses_the_nodes_structured_identity():
     from dataclasses import replace
 

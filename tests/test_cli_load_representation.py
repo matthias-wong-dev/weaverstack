@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.weaver_test import weaver_test
 
 import weaver
 from weaver.errors import CommandError, LoadError
@@ -98,6 +99,7 @@ def _command(*args: str) -> list[str]:
 # --- the options the contract names -------------------------------------------
 
 
+@weaver_test()
 def test_the_command_exposes_every_option_the_contract_names():
     parser = build_parser()
     load = parser.parse_args(
@@ -128,6 +130,7 @@ def test_the_command_exposes_every_option_the_contract_names():
     assert load.names == ["Sales.Customer", "Sales.Order"]
 
 
+@weaver_test()
 def test_more_than_one_target_is_one_request():
     parser = build_parser()
 
@@ -136,6 +139,7 @@ def test_more_than_one_target_is_one_request():
     assert load.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
 
 
+@weaver_test()
 def test_targets_are_required():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["load", "--workspace", "My Workspace"])
@@ -144,12 +148,14 @@ def test_targets_are_required():
 # --- what reaches the API -----------------------------------------------------
 
 
+@weaver_test()
 def test_the_targets_reach_the_api_as_written(recorded):
     main(_command())
 
     assert recorded[0]["targets"] == ["Lakehouse/Sales"]
 
 
+@weaver_test()
 def test_fault_tolerance_and_dry_run_reach_the_api(recorded):
     main(_command("--fault-tolerant", "--dry-run"))
 
@@ -157,6 +163,7 @@ def test_fault_tolerance_and_dry_run_reach_the_api(recorded):
     assert recorded[0]["dry_run"] is True
 
 
+@weaver_test()
 def test_repeated_names_reach_the_api_as_one_exact_selection(recorded):
     main(
         _command(
@@ -170,6 +177,7 @@ def test_repeated_names_reach_the_api_as_one_exact_selection(recorded):
     assert recorded[0]["names"] == ["Sales.Customer", "Sales.Order"]
 
 
+@weaver_test()
 def test_the_cautious_answers_are_the_defaults(recorded):
     main(_command())
 
@@ -178,6 +186,7 @@ def test_the_cautious_answers_are_the_defaults(recorded):
     assert recorded[0]["names"] is None
 
 
+@weaver_test()
 def test_an_explicit_catalogue_needs_no_configuration_file(recorded):
     """The case the CLI must not require ceremony for.
 
@@ -191,6 +200,7 @@ def test_an_explicit_catalogue_needs_no_configuration_file(recorded):
     assert recorded[0]["session"].workspace.catalogue == "Warehouse/Weaver"
 
 
+@weaver_test()
 def test_workspace_configuration_is_still_supported(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
@@ -203,6 +213,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
     assert recorded[0]["session"].workspace.catalogue == "Warehouse/Configured"
 
 
+@weaver_test()
 def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
@@ -224,6 +235,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
     assert recorded[0]["session"].workspace.catalogue == "Warehouse/Explicit"
 
 
+@weaver_test()
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
     exit_code = main(["load", "Lakehouse/Sales"])
     captured = capsys.readouterr()
@@ -235,6 +247,7 @@ def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
 # --- what is made of the answer -----------------------------------------------
 
 
+@weaver_test()
 def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
     exit_code = main(_command())
     captured = capsys.readouterr()
@@ -244,6 +257,7 @@ def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
     assert "succeeded" in captured.out
 
 
+@weaver_test()
 def test_json_renders_the_whole_report(recorded, capsys):
     main(_command("--json"))
     payload = json.loads(capsys.readouterr().out)
@@ -252,6 +266,7 @@ def test_json_renders_the_whole_report(recorded, capsys):
     assert payload["nodes"][0]["node_id"] == "load:Lakehouse/Sales/Sales.Customer"
 
 
+@weaver_test()
 def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
     monkeypatch, capsys, desktop_credential
 ):
@@ -273,6 +288,7 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
     assert "failed" in capsys.readouterr().out
 
 
+@weaver_test()
 def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
     monkeypatch, capsys, desktop_credential
 ):
@@ -298,6 +314,7 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
     assert "Workflow: 0f8b2c1d" in captured.err
 
 
+@weaver_test()
 def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
     monkeypatch, capsys, desktop_credential
 ):
@@ -530,6 +547,7 @@ def _fabric(*args: str) -> list[str]:
     ]
 
 
+@weaver_test()
 def test_a_session_that_returns_nothing_is_an_error_rather_than_a_success(livy, capsys):
     livy.answer = None
 
@@ -542,6 +560,7 @@ def test_a_session_that_returns_nothing_is_an_error_rather_than_a_success(livy, 
 # --- the CLI owns no semantics ------------------------------------------------
 
 
+@weaver_test()
 def test_the_command_module_contains_no_orchestration_of_its_own():
     """The rule that decays quietly, so it is read off the source.
 
@@ -568,6 +587,7 @@ def test_the_command_module_contains_no_orchestration_of_its_own():
     assert [name for name in forbidden if name in source] == []
 
 
+@weaver_test()
 def test_a_missing_physical_target_is_left_to_dispatch(livy):
     _FakeResolver.present = set()
 

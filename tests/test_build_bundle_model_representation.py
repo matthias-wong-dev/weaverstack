@@ -15,6 +15,7 @@ from dataclasses import replace
 
 import pytest
 import yaml
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
@@ -98,6 +99,7 @@ def _plan(bundle_id: str = "") -> BuildPlan:
     )
 
 
+@weaver_test()
 def test_plan_without_selection_is_rejected():
     mapping = _plan().to_mapping()
     mapping.pop("selection")
@@ -117,11 +119,13 @@ def _payloads() -> dict[str, bytes]:
 # --- serialisation -----------------------------------------------------------
 
 
+@weaver_test()
 def test_plan_round_trips_through_yaml():
     plan = _identified_plan()
     assert plan_from_yaml(plan_to_yaml(plan)) == plan
 
 
+@weaver_test()
 def test_bound_target_serialises_item_identity_without_runtime_identity():
     target = BoundTarget(
         id="warehouse-Reporting",
@@ -141,18 +145,21 @@ def test_bound_target_serialises_item_identity_without_runtime_identity():
     assert BoundTarget.from_mapping(target.to_mapping()) == target
 
 
+@weaver_test()
 def test_bundle_id_is_stable_and_content_addressed():
     first, second = compute_bundle_id(_plan()), compute_bundle_id(_plan())
     assert first == second
     assert len(first) == 64
 
 
+@weaver_test()
 def test_bundle_id_ignores_the_stored_id_field():
     assert compute_bundle_id(_plan(bundle_id="")) == compute_bundle_id(
         _plan(bundle_id="stale")
     )
 
 
+@weaver_test()
 def test_bundle_id_changes_when_a_payload_hash_changes():
     plan = _plan()
     tampered_action = replace(_view_action(), payload_sha256="0" * 64)
@@ -172,6 +179,7 @@ def test_bundle_id_changes_when_a_payload_hash_changes():
 # --- writing and loading -----------------------------------------------------
 
 
+@weaver_test()
 def test_write_then_load_returns_an_equal_plan(tmp_path):
     store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
@@ -190,6 +198,7 @@ def test_write_then_load_returns_an_equal_plan(tmp_path):
     assert store.exists(location.join("plan.yml"))
 
 
+@weaver_test()
 def test_manifest_is_written_last(tmp_path, monkeypatch):
     store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
@@ -215,6 +224,7 @@ def _write_valid(tmp_path):
     return store, location
 
 
+@weaver_test()
 def test_load_rejects_a_corrupt_payload(tmp_path):
     store, location = _write_valid(tmp_path)
     store.write(location.join(*VIEW_PATH.split("/")), b"tampered\n")
@@ -222,6 +232,7 @@ def test_load_rejects_a_corrupt_payload(tmp_path):
         load_bundle(location, store=store)
 
 
+@weaver_test()
 def test_load_rejects_a_missing_payload(tmp_path):
     store, location = _write_valid(tmp_path)
     store.delete(location.join(*VIEW_PATH.split("/")))
@@ -229,6 +240,7 @@ def test_load_rejects_a_missing_payload(tmp_path):
         load_bundle(location, store=store)
 
 
+@weaver_test()
 def test_load_rejects_a_missing_manifest(tmp_path):
     store = FilesystemStore()
     location = Location(str(tmp_path / "empty"))
@@ -237,6 +249,7 @@ def test_load_rejects_a_missing_manifest(tmp_path):
         load_bundle(location, store=store)
 
 
+@weaver_test()
 def test_load_rejects_an_unsupported_format_version(tmp_path):
     store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
@@ -252,6 +265,7 @@ def _validate(plan):
     validate_plan_structure(plan)
 
 
+@weaver_test()
 def test_validate_rejects_a_batch_with_unknown_target():
     plan = _identified_plan()
     bad_batch = BuildBatch(id="b-x", target_id="nope", actions=(_view_action(),))
@@ -260,6 +274,7 @@ def test_validate_rejects_a_batch_with_unknown_target():
         _validate(bad)
 
 
+@weaver_test()
 def test_validate_rejects_duplicate_action_ids():
     plan = _identified_plan()
     dup = replace(
@@ -271,6 +286,7 @@ def test_validate_rejects_duplicate_action_ids():
         _validate(bad)
 
 
+@weaver_test()
 def test_validate_rejects_payload_executor_extension_mismatch():
     plan = _identified_plan()
     bad_action = replace(
@@ -282,6 +298,7 @@ def test_validate_rejects_payload_executor_extension_mismatch():
         _validate(bad)
 
 
+@weaver_test()
 def test_validate_rejects_a_payload_on_a_payloadless_executor():
     plan = _identified_plan()
     bad_action = replace(_folder_action(), payload="payload/x/thing.spark.sql")
@@ -291,6 +308,7 @@ def test_validate_rejects_a_payload_on_a_payloadless_executor():
         _validate(bad)
 
 
+@weaver_test()
 def test_validate_rejects_payload_outside_the_bundle():
     plan = _identified_plan()
     bad_action = replace(_view_action(), payload="../escape.spark.sql")
@@ -300,6 +318,7 @@ def test_validate_rejects_payload_outside_the_bundle():
         _validate(bad)
 
 
+@weaver_test()
 def test_validate_rejects_an_action_targeting_an_omitted_node():
     plan = _identified_plan()
     bad_action = replace(_folder_action(), resource_node_id="sql:Reporting.Report")

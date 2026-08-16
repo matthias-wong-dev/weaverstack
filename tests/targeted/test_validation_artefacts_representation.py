@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
@@ -145,6 +146,7 @@ def _by_role(artefacts):
 # --- deterministic identity ---------------------------------------------------
 
 
+@weaver_test()
 def test_a_warehouse_validation_claims_a_procedure_in_the_generated_schema(estate):
     artefacts = item_validation_artefacts(estate, item=WAREHOUSE, destination=SALES)
 
@@ -154,6 +156,7 @@ def test_a_warehouse_validation_claims_a_procedure_in_the_generated_schema(estat
     assert artefacts[0].object_type == "stored_procedure"
 
 
+@weaver_test()
 def test_a_lakehouse_validation_claims_a_module_under_the_runtime_root(estate):
     """Under it, not beside it: that root is the item's Python import root."""
 
@@ -165,6 +168,7 @@ def test_a_lakehouse_validation_claims_a_module_under_the_runtime_root(estate):
     }
 
 
+@weaver_test()
 def test_the_subdirectory_follows_the_kind(estate):
     paths = [
         artefact.identity.object_id.schema
@@ -176,6 +180,7 @@ def test_the_subdirectory_follows_the_kind(estate):
     assert sorted(paths) == ["_/Load/assumptions", "_/Load/tests"]
 
 
+@weaver_test()
 def test_a_python_validation_is_deployed_rather_than_generated(estate):
     """The module a developer wrote is already the primitive."""
 
@@ -190,6 +195,7 @@ def test_a_python_validation_is_deployed_rather_than_generated(estate):
     assert artefact.payload.decode("utf-8") == PYTHON_TEST
 
 
+@weaver_test()
 def test_a_spark_sql_validation_is_compiled_into_a_module(estate):
     artefact = next(
         artefact
@@ -205,6 +211,7 @@ def test_a_spark_sql_validation_is_compiled_into_a_module(estate):
 # --- one lifecycle ------------------------------------------------------------
 
 
+@weaver_test()
 def test_loads_and_validations_are_claimed_together(estate):
     roles = _by_role(item_runtime_artefacts(estate, item=LAKEHOUSE, destination=SALES))
 
@@ -215,6 +222,7 @@ def test_loads_and_validations_are_claimed_together(estate):
     )
 
 
+@weaver_test()
 def test_a_deployed_module_is_claimed_once(estate):
     """A Python validation is runtime source *and* a validation, not two files."""
 
@@ -228,6 +236,7 @@ def test_a_deployed_module_is_claimed_once(estate):
     assert len(identities) == len(set(identities))
 
 
+@weaver_test()
 def test_the_role_travels_with_the_artefact(estate):
     """Nothing downstream may recover it from a file or procedure shape."""
 
@@ -236,6 +245,7 @@ def test_the_role_travels_with_the_artefact(estate):
         assert artefact.is_validation == (artefact.role != ROLE_LOAD)
 
 
+@weaver_test()
 def test_a_validation_records_the_declaration_it_came_from(estate):
     artefact = next(
         artefact
@@ -251,6 +261,7 @@ def test_a_validation_records_the_declaration_it_came_from(estate):
 # --- signatures ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_an_edited_validation_changes_its_signature(tmp_path):
     before = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
     after = item_validation_artefacts(
@@ -270,6 +281,7 @@ def test_an_edited_validation_changes_its_signature(tmp_path):
     assert before[0].signature != after[0].signature
 
 
+@weaver_test()
 def test_an_untouched_validation_keeps_its_signature(tmp_path):
     first = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
     second = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
@@ -277,6 +289,7 @@ def test_an_untouched_validation_keeps_its_signature(tmp_path):
     assert first[0].signature == second[0].signature
 
 
+@weaver_test()
 def test_the_generator_version_salts_a_generated_validation(tmp_path, monkeypatch):
     """Otherwise a changed generator leaves the old primitive installed, silently."""
 
@@ -291,6 +304,7 @@ def test_the_generator_version_salts_a_generated_validation(tmp_path, monkeypatc
     assert before[0].signature != after[0].signature
 
 
+@weaver_test()
 def test_a_deployed_python_validation_is_signed_by_its_own_bytes(tmp_path):
     """No salt: nothing generated it, so no generator version applies to it."""
 
@@ -310,6 +324,7 @@ def test_a_deployed_python_validation_is_signed_by_its_own_bytes(tmp_path):
 # --- the infrastructure a validation needs ------------------------------------
 
 
+@weaver_test()
 def test_a_validation_only_warehouse_still_gets_its_generated_schema(tmp_path):
     """Otherwise its procedure would have nowhere to be created."""
 
@@ -330,6 +345,7 @@ def test_a_validation_only_warehouse_still_gets_its_generated_schema(tmp_path):
     assert load_schemas(artefacts) == ("_",)
 
 
+@weaver_test()
 def test_a_validation_only_lakehouse_still_gets_its_runtime_tree(tmp_path):
     """Otherwise the folder its module lands in would not exist."""
 
@@ -343,6 +359,7 @@ def test_a_validation_only_lakehouse_still_gets_its_runtime_tree(tmp_path):
     ]
 
 
+@weaver_test()
 def test_an_item_with_neither_gets_no_runtime_tree(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", SCHEMA)
     _write(
@@ -362,6 +379,7 @@ def test_an_item_with_neither_gets_no_runtime_tree(tmp_path):
 # --- deletion -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_deleted_validation_stops_being_claimed(tmp_path):
     root = _estate(tmp_path)
     assert item_validation_artefacts(_parse(root), item=WAREHOUSE)

@@ -6,6 +6,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 
 def _load_hatch_build():
@@ -51,10 +52,12 @@ def version_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return repository
 
 
+@weaver_test()
 def test_clean_tag_is_the_release_version(version_repository: Path):
     assert hatch_build.compute_version() == "0.1.0"
 
 
+@weaver_test()
 def test_fingerprint_is_stable_and_staging_does_not_change_it(
     version_repository: Path,
 ):
@@ -74,6 +77,7 @@ def test_fingerprint_is_stable_and_staging_does_not_change_it(
     assert hatch_build.compute_version() == "0.1.0"
 
 
+@weaver_test()
 def test_tracked_text_and_binary_changes_move_the_fingerprint(
     version_repository: Path,
 ):
@@ -90,6 +94,7 @@ def test_tracked_text_and_binary_changes_move_the_fingerprint(
     assert len({first, second, third}) == 3
 
 
+@weaver_test()
 def test_untracked_paths_and_contents_move_the_fingerprint(
     version_repository: Path,
 ):
@@ -106,6 +111,7 @@ def test_untracked_paths_and_contents_move_the_fingerprint(
     assert hatch_build.compute_version() == second
 
 
+@weaver_test()
 def test_ignored_files_do_not_move_the_version(version_repository: Path):
     before = hatch_build.compute_version()
     ignored = version_repository / "ignored"
@@ -115,6 +121,7 @@ def test_ignored_files_do_not_move_the_version(version_repository: Path):
     assert hatch_build.compute_version() == before
 
 
+@weaver_test()
 def test_clean_filters_make_crlf_and_lf_the_same_source(version_repository: Path):
     untracked = version_repository / "new.txt"
     untracked.write_bytes(b"same\r\nsource\r\n")

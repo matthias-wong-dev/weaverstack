@@ -15,6 +15,7 @@ from __future__ import annotations
 import types
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.fabric import client, livy
 from weaver.fabric.livy import LivySession, environment_bootstrap
@@ -50,6 +51,7 @@ class _FakeResolver:
         return "abfss://ws1@onelake.dfs.fabric.microsoft.com/lh1"
 
 
+@weaver_test()
 def test_environment_bootstrap_only_imports_weaver():
     boot = environment_bootstrap()
     assert "import weaver" in boot
@@ -57,6 +59,7 @@ def test_environment_bootstrap_only_imports_weaver():
     assert "sys.path" not in boot
 
 
+@weaver_test()
 def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
     monkeypatch.setattr(
         "weaver.fabric.resources.find_item",
@@ -73,6 +76,7 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
     assert "def emit(" in session.bootstrap
 
 
+@weaver_test()
 def test_start_attaches_the_environment_as_a_spark_conf(monkeypatch):
     import json
 
@@ -98,6 +102,7 @@ def test_start_attaches_the_environment_as_a_spark_conf(monkeypatch):
     assert details == {"id": "env99"}
 
 
+@weaver_test()
 def test_start_without_an_environment_sends_no_conf(monkeypatch):
     calls = []
 
@@ -115,6 +120,7 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
     assert "conf" not in create
 
 
+@weaver_test()
 def test_a_workspace_without_an_environment_starts_on_the_default_runtime():
     """A build's statements import nothing, so they need no published wheel.
 
@@ -129,6 +135,7 @@ def test_a_workspace_without_an_environment_starts_on_the_default_runtime():
     assert session.environment_id is None
 
 
+@weaver_test()
 def test_importing_weaver_without_an_environment_is_an_error(monkeypatch):
     """The need is stated where it arises: an Environment is what carries Weaver."""
 
@@ -145,6 +152,7 @@ def test_importing_weaver_without_an_environment_is_an_error(monkeypatch):
         session.ensure_weaver()
 
 
+@weaver_test()
 def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
     """Fabric creates a Spark session against a Lakehouse, so one has to exist.
 
@@ -166,6 +174,7 @@ def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
 # --- a long build outlives a broken connection --------------------------------
 
 
+@weaver_test()
 def test_a_read_is_retried_when_the_connection_fails(monkeypatch):
     """A build polls for as long as it runs, so one refused connection is likely.
 
@@ -192,6 +201,7 @@ def test_a_read_is_retried_when_the_connection_fails(monkeypatch):
     assert len(attempts) == 3
 
 
+@weaver_test()
 def test_a_submission_is_retried_when_it_never_reached_fabric(monkeypatch):
     """A connection that was never established carries nothing.
 
@@ -222,6 +232,7 @@ def test_a_submission_is_retried_when_it_never_reached_fabric(monkeypatch):
     assert attempts == ["POST", "POST"]
 
 
+@weaver_test()
 def test_a_submission_that_left_this_machine_is_not_retried(monkeypatch):
     """Once the request is on the wire, whether Fabric acted on it is unknowable.
 
@@ -245,6 +256,7 @@ def test_a_submission_that_left_this_machine_is_not_retried(monkeypatch):
     assert attempts == ["POST"]
 
 
+@weaver_test()
 def test_a_read_that_keeps_failing_says_so(monkeypatch):
     import requests
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from support.weaver_test import weaver_test
+
 from weaver.fabric import FabricResolver, FabricSessionResolver
 from weaver.targets import WarehouseTarget
 from weaver.workspaces import Workspace
@@ -35,6 +37,7 @@ class Client:
         }
 
 
+@weaver_test()
 def test_desktop_resolution_uses_the_typed_connection_string_endpoint():
     client = Client()
     resolver = FabricResolver(
@@ -53,6 +56,7 @@ def test_desktop_resolution_uses_the_typed_connection_string_endpoint():
     ]
 
 
+@weaver_test()
 def test_session_resolution_uses_session_context_and_session_authenticated_rest():
     client = Client()
     runtime = SimpleNamespace(

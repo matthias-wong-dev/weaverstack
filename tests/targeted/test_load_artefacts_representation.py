@@ -27,6 +27,7 @@ from factories import (
     warehouse_table,
     warehouse_view,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.incremental import select_build
 from weaver.declaration import parse_item_repository
@@ -110,6 +111,7 @@ def identities(artefacts) -> list[str]:
 # --- what the source owns -----------------------------------------------------
 
 
+@weaver_test()
 def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     """The whole derivation, as one visible set.
 
@@ -131,6 +133,7 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     ]
 
 
+@weaver_test()
 def test_a_view_owns_no_load_artefact_on_either_side(estate):
     """A view's definition *is* its query, so there is nothing for a load to do.
 
@@ -144,6 +147,7 @@ def test_a_view_owns_no_load_artefact_on_either_side(estate):
     assert not any("Live" in name for name in produced)
 
 
+@weaver_test()
 def test_the_authored_files_segment_is_preserved(estate):
     """`Sales__X.py` and `Files/Sales__X.py` are different documents.
 
@@ -156,18 +160,21 @@ def test_the_authored_files_segment_is_preserved(estate):
     )
 
 
+@weaver_test()
 def test_the_generated_folder_document_does_not_deploy_itself(estate):
     """It is infrastructure, not authored source, so it owns no artefact."""
 
     assert not any("___Load" in name for name in identities(load_artefacts(estate)))
 
 
+@weaver_test()
 def test_the_builtin_catalogue_item_has_no_load_layer(estate):
     """Weaver's own catalogue is not a user ETL package."""
 
     assert item_load_artefacts(estate, item=item_id("Warehouse/_weaver")) == ()
 
 
+@weaver_test()
 def test_each_artefact_is_typed_as_what_it_physically_is(estate):
     types = {
         str(artefact.identity): artefact.object_type
@@ -191,6 +198,7 @@ def test_each_artefact_is_typed_as_what_it_physically_is(estate):
         f"{ITEM}/Files/Raw.Export",
     ],
 )
+@weaver_test()
 def test_an_identity_survives_being_written_down_and_read_back(text):
     """The plan records selection as text, so the spelling has to be lossless.
 
@@ -202,6 +210,7 @@ def test_an_identity_survives_being_written_down_and_read_back(text):
     assert str(WeaverDocumentId.parse(text)) == text
 
 
+@weaver_test()
 def test_the_two_halves_are_the_real_target_name(estate):
     """Nothing is encoded to fit a validator, so nothing has to be decoded.
 
@@ -236,6 +245,7 @@ def signature_of(repository, text: str) -> str:
     )
 
 
+@weaver_test()
 def test_a_deployed_module_is_signed_by_its_own_bytes(tmp_path):
     """Editing a helper moves its artefact's signature and no other."""
 
@@ -253,6 +263,7 @@ def test_a_deployed_module_is_signed_by_its_own_bytes(tmp_path):
     assert signature_of(before, module) != signature_of(after, module)
 
 
+@weaver_test()
 def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch):
     """The salts are separate because the two generators evolve separately.
 
@@ -280,6 +291,7 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
     assert after[module] == before[module]
 
 
+@weaver_test()
 def test_the_template_versions_do_not_reach_the_repository_signature(
     estate, monkeypatch
 ):
@@ -292,6 +304,7 @@ def test_the_template_versions_do_not_reach_the_repository_signature(
     assert parse_item_repository(estate.root).signature == estate.signature
 
 
+@weaver_test()
 def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
     """`lib/` is reproduced verbatim, whatever is in it.
 
@@ -310,6 +323,7 @@ def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
     assert f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv" in deployed
 
 
+@weaver_test()
 def test_an_alias_declaration_is_not_runtime_source(estate):
     """It declares where a name points; nothing imports it at load time."""
 
@@ -334,12 +348,14 @@ def selected(repository, *, item: str = ITEM):
     return select_build(repository, catalogue.registered, selected=wanted)
 
 
+@weaver_test()
 def test_an_unchanged_estate_selects_no_load_work(estate):
     """The premise every incremental claim rests on."""
 
     assert selected(estate).selected_for_build == ()
 
 
+@weaver_test()
 def test_changing_one_module_rebuilds_that_module_alone(tmp_path):
     """Granularity is one target file per claim, which is the point of claiming
     them one by one: a repository of a hundred modules must not redeploy all of
@@ -365,6 +381,7 @@ def test_changing_one_module_rebuilds_that_module_alone(tmp_path):
     ]
 
 
+@weaver_test()
 def test_a_changed_upstream_document_does_not_rebuild_an_unchanged_artefact(tmp_path):
     """The load layer is bundle sequencing, not an authored graph edge.
 

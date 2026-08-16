@@ -19,6 +19,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions.console import ConsoleScope, ConsoleSession
 from weaver.sessions.notebook import NotebookSession
@@ -140,6 +141,7 @@ def notebook():
 # --- one submission ------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_batch_that_crosses_crosses_once(desktop):
     """The property the whole batch capability exists for.
 
@@ -159,6 +161,7 @@ def test_a_batch_that_crosses_crosses_once(desktop):
     assert "DESCRIBE QUERY SELECT * FROM v" in submitted
 
 
+@weaver_test()
 def test_one_statement_is_one_submission_too(desktop):
     session, livy = desktop()
     session.execute_spark_sql("SELECT 1")
@@ -166,6 +169,7 @@ def test_one_statement_is_one_submission_too(desktop):
     assert len(livy.submitted) == 1
 
 
+@weaver_test()
 def test_an_empty_batch_crosses_at_all(desktop):
     """Nothing to run is nothing to submit, and an empty answer."""
 
@@ -178,6 +182,7 @@ def test_an_empty_batch_crosses_at_all(desktop):
 # --- the rows that come back ---------------------------------------------------
 
 
+@weaver_test()
 def test_the_last_statement_answers(desktop):
     session, _livy = desktop(payload=[{"col_name": "n", "data_type": "int"}])
 
@@ -186,6 +191,7 @@ def test_the_last_statement_answers(desktop):
     assert answered == [{"col_name": "n", "data_type": "int"}]
 
 
+@weaver_test()
 def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(notebook):
     spark = _Spark(answers={"DESCRIBE QUERY SELECT 1": [_Row(col_name="n")]})
     session = notebook(spark)
@@ -206,6 +212,7 @@ def test_in_a_session_the_last_statement_answers_and_the_rest_only_run(notebook)
 # --- one identifier-case scope over the whole batch ----------------------------
 
 
+@weaver_test()
 def test_every_statement_in_a_batch_shares_the_exact_case_scope(notebook):
     """A setup analysed under one case and its query under another is a different
     query. Both hosts hold the scope open across the batch, and put it back."""
@@ -222,6 +229,7 @@ def test_every_statement_in_a_batch_shares_the_exact_case_scope(notebook):
     assert spark.conf.values[CASE_KEY] == "false"
 
 
+@weaver_test()
 def test_a_failing_statement_still_puts_the_case_scope_back(notebook):
     """A session left case-sensitive by a failure would change every statement
     that followed it, including ones from other work in the same session."""
@@ -240,6 +248,7 @@ def test_a_failing_statement_still_puts_the_case_scope_back(notebook):
     assert spark.conf.values[CASE_KEY] == "false"
 
 
+@weaver_test()
 def test_without_exact_case_the_host_default_stands(notebook):
     spark = _Spark()
     session = notebook(spark)
@@ -250,6 +259,7 @@ def test_without_exact_case_the_host_default_stands(notebook):
     assert spark.conf.history == []
 
 
+@weaver_test()
 def test_a_crossing_carries_the_case_scope_with_the_statements(desktop):
     """The desktop has no Spark to set a conf on, so the scope travels."""
 
@@ -261,6 +271,7 @@ def test_a_crossing_carries_the_case_scope_with_the_statements(desktop):
     assert CASE_KEY in submitted
 
 
+@weaver_test()
 def test_a_crossing_without_exact_case_touches_no_conf(desktop):
     session, livy = desktop()
     session.execute_spark_sql_batch(["SELECT 1"])
@@ -271,6 +282,7 @@ def test_a_crossing_without_exact_case_touches_no_conf(desktop):
 # --- the single-statement form is the batch form -------------------------------
 
 
+@weaver_test()
 def test_one_statement_is_the_batch_capability(desktop):
     """There is one Spark SQL capability, and the convenience delegates to it."""
 

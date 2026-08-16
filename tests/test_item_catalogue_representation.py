@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from test_item_dependencies_declaration import _dependency_estate
 from test_item_repository_declaration import _estate
 
@@ -66,6 +67,7 @@ def _registry_row(projection, schema: str, name: str):
     )
 
 
+@weaver_test()
 def test_every_catalogue_table_is_keyed_by_exact_item_without_repository():
     for table in CATALOGUE_TABLES:
         assert table.key[:2] == ("item_type", "item_name")
@@ -74,6 +76,7 @@ def test_every_catalogue_table_is_keyed_by_exact_item_without_repository():
         assert "object_namespace" not in table.column_names
 
 
+@weaver_test()
 def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
@@ -83,6 +86,7 @@ def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
     assert {row["schema_name"] for row in customer} == {"Sales", "Files/Sales"}
 
 
+@weaver_test()
 def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
@@ -94,6 +98,7 @@ def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     assert schemas == {"Sales", "Files/Sales", "Files/_"}
 
 
+@weaver_test()
 def test_no_catalogue_table_keeps_a_hidden_namespace_dimension():
     namespace_columns = {
         "object_namespace",
@@ -105,6 +110,7 @@ def test_no_catalogue_table_keeps_a_hidden_namespace_dimension():
         assert namespace_columns.isdisjoint(table.column_names)
 
 
+@weaver_test()
 def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
@@ -118,6 +124,7 @@ def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
     assert "[Item name] = N'Raw'" not in curated_sql
 
 
+@weaver_test()
 def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     first = _project(repository, "Lakehouse/Raw", "Raw_Dev")
@@ -133,6 +140,7 @@ def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
     }
 
 
+@weaver_test()
 def test_installation_records_the_item_signature_not_the_repository_signature(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
@@ -142,6 +150,7 @@ def test_installation_records_the_item_signature_not_the_repository_signature(tm
     assert row["signature"] != repository.signature
 
 
+@weaver_test()
 def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
@@ -157,6 +166,7 @@ def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path
     assert row["source_object_name"] == "Customer"
 
 
+@weaver_test()
 def test_an_alias_destination_is_registered_as_the_object_it_actually_is(tmp_path):
     """No ``shortcut`` type. To every reader of the catalogue an alias in a
     Warehouse is a view, and that is what it is recorded as — its alias-ness
@@ -172,6 +182,7 @@ def test_an_alias_destination_is_registered_as_the_object_it_actually_is(tmp_pat
     assert row["object_role"] == "data"
 
 
+@weaver_test()
 def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
     """The same alias against a Lakehouse is a table — a OneLake shortcut is how
     it is made, not what it is."""
@@ -186,6 +197,7 @@ def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
     )
 
 
+@weaver_test()
 def test_an_alias_signature_is_its_declaration_and_not_its_sources_content(tmp_path):
     """A rebuilt source does not redefine the alias, so it must not change its
     signature — that would replace every downstream shortcut on every reload."""
@@ -207,6 +219,7 @@ def test_an_alias_signature_is_its_declaration_and_not_its_sources_content(tmp_p
     assert projection.for_table(ALIAS)[0]["signature"] == alias.signature
 
 
+@weaver_test()
 def test_an_alias_describes_nothing_beyond_its_registration(tmp_path):
     """It holds no columns, no keys and no dependencies of its own. Only the two
     rows that say it exists and what it stands for."""
@@ -227,6 +240,7 @@ def test_an_alias_describes_nothing_beyond_its_registration(tmp_path):
         ], f"{table.name} should hold no row for an alias destination"
 
 
+@weaver_test()
 def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
@@ -241,6 +255,7 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
     assert row["referenced_item_name"] == "Curated"
 
 
+@weaver_test()
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
@@ -292,6 +307,7 @@ class _Shaped(_FakeCatalogue):
         }
 
 
+@weaver_test()
 def test_a_registry_without_the_epoch_column_is_refused_by_name():
     """It can be read but not written — the merge sets the build_datetime on every insert.
 
@@ -326,6 +342,7 @@ def _whole():
     return _shaped(*(table.name for table in CATALOGUE_TABLES))
 
 
+@weaver_test()
 def test_a_registry_with_the_epoch_column_is_accepted():
     from weaver.catalogue.state import read_catalogue_state
     from weaver.catalogue.tables import CATALOGUE_TABLES
@@ -344,6 +361,7 @@ def test_a_registry_with_the_epoch_column_is_accepted():
 # was pointed at, so it can only ever write those items' rows back.
 
 
+@weaver_test()
 def test_a_catalogue_with_no_tables_at_all_is_the_bootstrap_state():
     """The first build creates the catalogue, so nothing there is not a fault."""
 
@@ -355,6 +373,7 @@ def test_a_catalogue_with_no_tables_at_all_is_the_bootstrap_state():
     assert not state.rows
 
 
+@weaver_test()
 def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
     """The physical table would come back; another item's rows would not.
 
@@ -377,6 +396,7 @@ def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
         read_catalogue_state(_shaped(*all_but_one), ())
 
 
+@weaver_test()
 def test_a_missing_registry_beside_a_populated_catalogue_is_refused():
     """It cannot be re-derived at all, so it is the plainest case of the rule."""
 
@@ -387,6 +407,7 @@ def test_a_missing_registry_beside_a_populated_catalogue_is_refused():
         read_catalogue_state(_shaped("Installation", "TableDictionary"), ())
 
 
+@weaver_test()
 def test_a_missing_installation_beside_a_populated_catalogue_is_refused():
     from weaver.catalogue.state import read_catalogue_state
     from weaver.errors import BuildError
@@ -395,6 +416,7 @@ def test_a_missing_installation_beside_a_populated_catalogue_is_refused():
         read_catalogue_state(_shaped("Registry", "TableDictionary"), ())
 
 
+@weaver_test()
 def test_the_incomplete_catalogue_error_names_what_is_gone_and_what_survived():
     """A reader has to tell damage from a first run, and know where to look."""
 
@@ -409,6 +431,7 @@ def test_the_incomplete_catalogue_error_names_what_is_gone_and_what_survived():
     assert "Alias" in message and "Dependency" in message
 
 
+@weaver_test()
 def test_the_incomplete_catalogue_error_sends_the_reader_to_a_repair():
     """Not to a rebuild: a scoped build is the thing that cannot fix this."""
 
@@ -423,6 +446,7 @@ def test_the_incomplete_catalogue_error_sends_the_reader_to_a_repair():
     assert "scoped build" in message
 
 
+@weaver_test()
 def test_a_catalogue_predating_an_introduced_table_still_builds():
     """An estate built by an older Weaver is an upgrade, not damage.
 
@@ -450,6 +474,7 @@ def test_a_catalogue_predating_an_introduced_table_still_builds():
     assert state.rows == {}
 
 
+@weaver_test()
 def test_an_introduced_table_does_not_excuse_a_genuinely_damaged_catalogue():
     """The exemption is for that table alone, not for whatever else is gone."""
 

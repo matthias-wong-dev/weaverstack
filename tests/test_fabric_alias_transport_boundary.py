@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from support.weaver_test import weaver_test
+
 from weaver.fabric.resources import LAKEHOUSE, Item
 from weaver.fabric.shortcuts import create_shortcut, delete_shortcut
 
@@ -38,6 +40,7 @@ class _Client:
 # --- shortcuts ----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_shortcut_is_replaced_rather_than_created_strictly():
     client = _Client()
 
@@ -72,6 +75,7 @@ def test_a_shortcut_is_replaced_rather_than_created_strictly():
     assert details["status"] == 200
 
 
+@weaver_test()
 def test_a_shortcut_path_is_escaped_into_one_url_segment():
     client = _Client()
 
@@ -86,6 +90,7 @@ def test_a_shortcut_path_is_escaped_into_one_url_segment():
     assert path == "workspaces/ws1/items/dest1/shortcuts/Tables%2FSales/Landed"
 
 
+@weaver_test()
 def test_removing_an_absent_shortcut_is_the_intended_state_not_a_fault():
     client = _Client(responses=[_Response(404)])
 

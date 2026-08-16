@@ -7,6 +7,7 @@ first page and quietly break a wipe, a sync or a reconciliation.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.fabric.onelake import OneLakeDfsClient
 from weaver.locations import Location
@@ -33,6 +34,7 @@ def _store(monkeypatch, headers, paths):
     return store
 
 
+@weaver_test()
 def test_a_single_page_returns_its_entries(monkeypatch):
     store = _store(
         monkeypatch,
@@ -45,6 +47,7 @@ def test_a_single_page_returns_its_entries(monkeypatch):
     assert [e.location.name for e in entries] == ["a.csv"]
 
 
+@weaver_test()
 def test_a_continuation_token_fails_loudly(monkeypatch):
     store = _store(
         monkeypatch,

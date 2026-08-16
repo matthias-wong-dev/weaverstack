@@ -18,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 from test_item_repository_declaration import _estate
 
 from weaver.build_bundle.workflow import (
@@ -30,6 +31,7 @@ from weaver.locations import Location
 from weaver.store import FilesystemStore
 
 
+@weaver_test()
 def test_a_filesystem_source_is_copied_rather_than_read_in_place(tmp_path):
     """The bypass this remediation removed: same filesystem is not a shortcut."""
 
@@ -43,6 +45,7 @@ def test_a_filesystem_source_is_copied_rather_than_read_in_place(tmp_path):
         assert (snapshot / "Lakehouse/Raw/Sales__Customer.py").is_file()
 
 
+@weaver_test()
 def test_the_snapshot_is_removed_when_the_operation_completes(tmp_path):
     root = _estate(tmp_path)
 
@@ -55,6 +58,7 @@ def test_the_snapshot_is_removed_when_the_operation_completes(tmp_path):
     assert root.is_dir(), "the source itself is never touched"
 
 
+@weaver_test()
 def test_the_snapshot_is_removed_when_the_operation_fails(tmp_path):
     root = _estate(tmp_path)
     taken = None
@@ -69,6 +73,7 @@ def test_the_snapshot_is_removed_when_the_operation_fails(tmp_path):
     assert taken is not None and not taken.exists()
 
 
+@weaver_test()
 def test_parsing_reads_the_snapshot_and_not_the_original(tmp_path):
     root = _estate(tmp_path)
 
@@ -81,6 +86,7 @@ def test_parsing_reads_the_snapshot_and_not_the_original(tmp_path):
     assert str(root.resolve()) not in str(parsed_root)
 
 
+@weaver_test()
 def test_editing_the_source_after_the_snapshot_does_not_change_the_repository(
     tmp_path,
 ):
@@ -106,6 +112,7 @@ def test_editing_the_source_after_the_snapshot_does_not_change_the_repository(
         assert "Lakehouse/Raw/Sales.Injected" not in identities
 
 
+@weaver_test()
 def test_a_repository_removed_mid_build_is_still_readable_from_the_snapshot(tmp_path):
     """A snapshot the source can outlive is a snapshot in more than name."""
 
@@ -123,6 +130,7 @@ def test_a_repository_removed_mid_build_is_still_readable_from_the_snapshot(tmp_
         assert prepared.repository.items
 
 
+@weaver_test()
 def test_a_missing_source_is_refused_before_anything_is_copied(tmp_path):
     with pytest.raises(BuildError, match="source does not exist"):
         with _temp_copy(
@@ -133,6 +141,7 @@ def test_a_missing_source_is_refused_before_anything_is_copied(tmp_path):
             pass
 
 
+@weaver_test()
 def test_a_file_source_is_refused_as_not_a_directory(tmp_path):
     document = tmp_path / "not-a-repository.py"
     document.write_text("# a file\n", encoding="utf-8")
@@ -154,6 +163,7 @@ def test_a_file_source_is_refused_as_not_a_directory(tmp_path):
 
 
 @pytest.mark.parametrize("spelling", [".", "./", "../Estate"])
+@weaver_test()
 def test_a_relative_source_is_resolved_before_it_names_the_snapshot(
     tmp_path, monkeypatch, spelling
 ):
@@ -163,6 +173,7 @@ def test_a_relative_source_is_resolved_before_it_names_the_snapshot(
     assert _snapshot_name(Location(spelling)) == "Estate"
 
 
+@weaver_test()
 def test_a_relative_source_actually_snapshots(tmp_path, monkeypatch):
     root = _estate(tmp_path)
     monkeypatch.chdir(root)
@@ -172,10 +183,12 @@ def test_a_relative_source_actually_snapshots(tmp_path, monkeypatch):
         assert Path(prepared.repository.root.value) != root.resolve()
 
 
+@weaver_test()
 def test_a_source_with_no_final_segment_still_names_a_directory():
     assert _snapshot_name(Location("/")) == "repository"
 
 
+@weaver_test()
 def test_a_url_source_keeps_its_own_final_segment():
     assert _snapshot_name(Location("abfss://ws@onelake.example.com/Files/Estate")) == (
         "Estate"

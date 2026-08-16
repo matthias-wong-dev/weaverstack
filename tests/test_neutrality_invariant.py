@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from support.weaver_test import weaver_test
+
 ROOT = Path(__file__).resolve().parents[1]
 SCANNED = (ROOT / "src", ROOT / "tests")
 
@@ -21,10 +23,12 @@ def _sources() -> list[Path]:
     return sorted(path for directory in SCANNED for path in directory.rglob("*.py"))
 
 
+@weaver_test()
 def test_there_are_sources_to_scan():
     assert _sources()
 
 
+@weaver_test()
 def test_no_house_tiering_vocabulary():
     offenders = [
         f"{path.relative_to(ROOT)}:{number}"

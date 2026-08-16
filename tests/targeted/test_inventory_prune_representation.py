@@ -16,6 +16,7 @@ Prune is the destructive direction, so most of what is asserted is what it
 from __future__ import annotations
 
 from factories import bound_target, target_inventory
+from support.weaver_test import weaver_test
 
 #: What `managed_sets` produces: the keep-set, folded for comparison. Built by
 #: hand here so the diff is tested against a stated desired state rather than
@@ -48,6 +49,7 @@ def kinds(actions):
 # --- what it spares -----------------------------------------------------------
 
 
+@weaver_test()
 def test_an_inventory_matching_the_keep_set_is_left_alone():
     actions, _ = prune(
         target_inventory(schemas=("DWG",), tables=("DWG.Customer",)),
@@ -57,6 +59,7 @@ def test_an_inventory_matching_the_keep_set_is_left_alone():
     assert actions == ()
 
 
+@weaver_test()
 def test_an_empty_inventory_prunes_nothing_rather_than_everything():
     """Nothing there is nothing to remove — not everything to remove.
 
@@ -72,6 +75,7 @@ def test_an_empty_inventory_prunes_nothing_rather_than_everything():
     assert actions == ()
 
 
+@weaver_test()
 def test_the_comparison_folds_case():
     """The physical name's case is the workspace's to choose, so a keep-set that
     compared exactly would delete the very object it meant to spare."""
@@ -87,6 +91,7 @@ def test_the_comparison_folds_case():
 # --- what it removes ----------------------------------------------------------
 
 
+@weaver_test()
 def test_an_unmanaged_table_is_dropped():
     actions, payloads = prune(
         target_inventory(schemas=("DWG",), tables=("DWG.OldTable",)),
@@ -98,6 +103,7 @@ def test_an_unmanaged_table_is_dropped():
     assert "DROP TABLE" in next(iter(payloads.values())).decode().upper()
 
 
+@weaver_test()
 def test_an_unmanaged_view_is_dropped():
     actions, _ = prune(
         target_inventory(schemas=("DWG",), views=("DWG.OldView",)),
@@ -107,6 +113,7 @@ def test_an_unmanaged_view_is_dropped():
     assert kinds(actions) == ["prune_view"]
 
 
+@weaver_test()
 def test_an_unmanaged_folder_is_removed():
     actions, _ = prune(
         target_inventory(folder_schemas=("Raw",), folders=("Raw.Stale",)),
@@ -116,12 +123,14 @@ def test_an_unmanaged_folder_is_removed():
     assert kinds(actions) == ["prune_folder"]
 
 
+@weaver_test()
 def test_an_unmanaged_schema_is_dropped():
     actions, _ = prune(target_inventory(schemas=("Legacy",)), keep())
 
     assert kinds(actions) == ["prune_schema"]
 
 
+@weaver_test()
 def test_a_schema_that_is_going_takes_its_contents_with_it():
     """One drop, not three.
 
@@ -143,6 +152,7 @@ def test_a_schema_that_is_going_takes_its_contents_with_it():
     assert kinds(actions) == ["prune_schema"]
 
 
+@weaver_test()
 def test_an_object_in_a_surviving_schema_is_dropped_individually():
     """The other side of the same rule: the schema stays, so the object must go
     by name."""
@@ -162,6 +172,7 @@ def warehouse():
     return bound_target(kind="warehouse")
 
 
+@weaver_test()
 def test_a_warehouse_prune_is_t_sql():
     actions, payloads = prune(
         target_inventory(schemas=("DWG",), tables=("DWG.OldTable",)),
@@ -174,6 +185,7 @@ def test_a_warehouse_prune_is_t_sql():
     assert payloads[action.payload].decode().startswith("drop table if exists")
 
 
+@weaver_test()
 def test_a_warehouse_drops_every_orphan_by_name_including_in_a_doomed_schema():
     """The Warehouse side does *not* fold objects into their schema's drop.
 
@@ -195,6 +207,7 @@ def test_a_warehouse_drops_every_orphan_by_name_including_in_a_doomed_schema():
     assert kinds(actions) == ["prune_schema", "prune_table", "prune_view"]
 
 
+@weaver_test()
 def test_warehouse_identifiers_are_bracket_escaped():
     actions, payloads = prune(
         target_inventory(schemas=("Od]d",)), keep(), target=warehouse()
@@ -207,6 +220,7 @@ def test_warehouse_identifiers_are_bracket_escaped():
 # --- the frozen payloads ------------------------------------------------------
 
 
+@weaver_test()
 def test_every_action_carries_a_frozen_statement_and_its_hash():
     import hashlib
 
@@ -222,6 +236,7 @@ def test_every_action_carries_a_frozen_statement_and_its_hash():
         assert action.payload_sha256 == hashlib.sha256(content).hexdigest()
 
 
+@weaver_test()
 def test_rendering_the_same_diff_twice_is_identical():
     """A bundle's identity is its bytes, and both inputs here are sets."""
 

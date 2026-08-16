@@ -31,6 +31,7 @@ from factories import (
     registry_row,
     single_document_repository,
 )
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.reconcile import publish
 from weaver.catalogue.state import Catalogue, retaining
@@ -78,6 +79,7 @@ def registry_statements(current, desired) -> list[str]:
 # --- the report reads both sides ----------------------------------------------
 
 
+@weaver_test()
 def test_an_object_the_catalogue_has_never_seen_is_reported_new(repository):
     changes = Catalogue(rows={}).diff(desired_from(repository, CUSTOMER))
 
@@ -85,6 +87,7 @@ def test_an_object_the_catalogue_has_never_seen_is_reported_new(repository):
     assert registry_changes(changes).deleted == 0
 
 
+@weaver_test()
 def test_an_object_no_longer_desired_is_reported_removed(repository):
     current = FixtureCatalogue.from_registry_rows(
         registry_row(CUSTOMER), registry_row(ORDER)
@@ -95,6 +98,7 @@ def test_an_object_no_longer_desired_is_reported_removed(repository):
     assert registry_changes(changes).deleted == 1
 
 
+@weaver_test()
 def test_an_identical_catalogue_reports_no_work(repository):
     desired = desired_from(repository, CUSTOMER, ORDER)
 
@@ -104,6 +108,7 @@ def test_an_identical_catalogue_reports_no_work(repository):
     assert registry_changes(changes).is_noop
 
 
+@weaver_test()
 def test_a_changed_signature_is_reported_changed_not_replaced(repository):
     current = FixtureCatalogue.from_registry_rows(
         registry_row(CUSTOMER, signature="an-old-hash")
@@ -119,6 +124,7 @@ def test_a_changed_signature_is_reported_changed_not_replaced(repository):
 # --- and the statements follow it ---------------------------------------------
 
 
+@weaver_test()
 def test_a_catalogue_that_already_matches_produces_no_statements(repository):
     """The property the whole change exists for.
 
@@ -133,6 +139,7 @@ def test_a_catalogue_that_already_matches_produces_no_statements(repository):
     assert statements(Catalogue(rows=desired.rows), desired) == []
 
 
+@weaver_test()
 def test_a_new_object_merges_without_a_delete(repository):
     """Nothing is obsolete, so nothing is deleted — the table is only added to."""
 
@@ -142,6 +149,7 @@ def test_a_new_object_merges_without_a_delete(repository):
     assert not any(line.startswith("DELETE FROM") for line in lines)
 
 
+@weaver_test()
 def test_a_changed_object_merges_without_a_delete(repository):
     """Its key is unchanged, so the row is updated in place, not replaced."""
 
@@ -155,6 +163,7 @@ def test_a_changed_object_merges_without_a_delete(repository):
     assert not any(line.startswith("DELETE FROM") for line in lines)
 
 
+@weaver_test()
 def test_an_object_no_longer_claimed_is_deleted(repository):
     current = FixtureCatalogue.from_registry_rows(
         registry_row(CUSTOMER), registry_row(ORDER)
@@ -165,6 +174,7 @@ def test_an_object_no_longer_claimed_is_deleted(repository):
     assert any(line.startswith("DELETE FROM") for line in lines)
 
 
+@weaver_test()
 def test_a_removal_deletes_and_merges_in_that_order(repository):
     """One object gone and another changed: both statements, delete first."""
 
@@ -178,6 +188,7 @@ def test_a_removal_deletes_and_merges_in_that_order(repository):
     assert lines[1].startswith("MERGE INTO")
 
 
+@weaver_test()
 def test_the_delete_spares_the_rows_the_build_still_claims(repository):
     """Bounded by what is desired, so a survivor is named as kept, not re-merged."""
 
@@ -195,6 +206,7 @@ def test_the_delete_spares_the_rows_the_build_still_claims(repository):
     assert "'Customer'" in delete
 
 
+@weaver_test()
 def test_every_statement_stays_scoped_to_the_item(repository):
     current = FixtureCatalogue.from_registry_rows(registry_row(ORDER))
 
@@ -204,6 +216,7 @@ def test_every_statement_stays_scoped_to_the_item(repository):
     assert all("[Item name] = N'Sales'" in line for line in lines)
 
 
+@weaver_test()
 def test_an_installation_the_build_did_not_name_is_never_touched(repository):
     """A scoped build must not reach an item it was not pointed at.
 
@@ -221,6 +234,7 @@ def test_an_installation_the_build_did_not_name_is_never_touched(repository):
     assert all("SomeoneElse" not in line for line in lines)
 
 
+@weaver_test()
 def test_registry_statements_are_kept_separate_from_the_rest(repository):
     """Registry is written last, in its own barrier, so it is returned apart."""
 
@@ -234,6 +248,7 @@ def test_registry_statements_are_kept_separate_from_the_rest(repository):
     )
 
 
+@weaver_test()
 def test_no_build_module_reaches_the_unconditional_renderer():
     """`reconcile()` renders a projection whatever the catalogue holds.
 
@@ -271,6 +286,7 @@ def test_no_build_module_reaches_the_unconditional_renderer():
     )
 
 
+@weaver_test()
 def test_an_unchanged_table_beside_a_changed_one_stays_silent(repository):
     """Per table, not per build: one table's change does not rewrite the others."""
 

@@ -24,6 +24,7 @@ from factories import (
     warehouse_table,
     warehouse_view,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import render_document_build_action
 
@@ -51,6 +52,7 @@ def lakehouse_customer(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_lakehouse_table_renders_a_spark_sql_build_action(lakehouse_customer):
     rendered = _render(lakehouse_customer, "DWG.Customer")
 
@@ -59,6 +61,7 @@ def test_a_lakehouse_table_renders_a_spark_sql_build_action(lakehouse_customer):
     assert rendered.action.resource_node_id == "Lakehouse/Sales/DWG.Customer"
 
 
+@weaver_test()
 def test_the_action_id_is_derived_from_the_document_identity(lakehouse_customer):
     """Ids must be stable and unique per document: a bundle is keyed by them."""
 
@@ -67,6 +70,7 @@ def test_the_action_id_is_derived_from_the_document_identity(lakehouse_customer)
     assert rendered.action.id == "object-Lakehouse--Sales--DWG.Customer"
 
 
+@weaver_test()
 def test_the_payload_is_the_documents_own_ddl(lakehouse_customer):
     """The action carries what `create_ddl()` produced — not a re-rendering of it."""
 
@@ -81,6 +85,7 @@ def test_the_payload_is_the_documents_own_ddl(lakehouse_customer):
     )
 
 
+@weaver_test()
 def test_the_payload_filename_carries_the_ddls_extension(lakehouse_customer):
     """The extension comes from the DDL, so the payload says what kind it is."""
 
@@ -89,6 +94,7 @@ def test_the_payload_filename_carries_the_ddls_extension(lakehouse_customer):
     assert rendered.action.payload == "Lakehouse--Sales--DWG.Customer.spark.sql"
 
 
+@weaver_test()
 def test_the_hash_is_of_the_payload_the_action_carries(lakehouse_customer):
     """The installer verifies this before executing, so it must match exactly."""
 
@@ -98,6 +104,7 @@ def test_the_hash_is_of_the_payload_the_action_carries(lakehouse_customer):
     assert rendered.action.payload_sha256 == hashlib.sha256(content).hexdigest()
 
 
+@weaver_test()
 def test_rendering_the_same_document_twice_gives_identical_bytes(lakehouse_customer):
     """A bundle's identity is its bytes, so rendering must be deterministic.
 
@@ -116,6 +123,7 @@ def test_rendering_the_same_document_twice_gives_identical_bytes(lakehouse_custo
 # --- the other declaration kinds ---------------------------------------------
 
 
+@weaver_test()
 def test_a_warehouse_table_renders_a_tsql_action(tmp_path):
     repository = single_document_repository(
         tmp_path,
@@ -134,6 +142,7 @@ def test_a_warehouse_table_renders_a_tsql_action(tmp_path):
     assert rendered.action.payload.endswith(".sql")
 
 
+@weaver_test()
 def test_a_spark_view_renders_a_build_view_action(tmp_path):
     repository = single_document_repository(
         tmp_path,
@@ -151,6 +160,7 @@ def test_a_spark_view_renders_a_build_view_action(tmp_path):
     assert rendered.action.executor == "spark_sql"
 
 
+@weaver_test()
 def test_a_warehouse_view_renders_a_tsql_build_view_action(tmp_path):
     repository = single_document_repository(
         tmp_path,
@@ -174,6 +184,7 @@ def test_a_warehouse_view_renders_a_tsql_build_view_action(tmp_path):
     assert rendered.action.executor == "tsql"
 
 
+@weaver_test()
 def test_a_folder_renders_an_action_with_no_payload_at_all(tmp_path):
     """A folder is created, not executed — there is nothing to freeze or hash.
 

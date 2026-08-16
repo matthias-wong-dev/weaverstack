@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from test_item_repository_declaration import _estate, _write
 
 from weaver.errors import DiscoveryError
@@ -11,6 +12,7 @@ from weaver.push import push_item_repository
 from weaver.store import FilesystemStore
 
 
+@weaver_test()
 def test_push_replaces_destination_without_an_extra_source_root(tmp_path):
     source = _estate(tmp_path)
     destination = tmp_path / "Weaver" / "Files" / "weaver_items"
@@ -31,6 +33,7 @@ def test_push_replaces_destination_without_an_extra_source_root(tmp_path):
     assert not (destination / "Lakehouse" / "_weaver").exists()
 
 
+@weaver_test()
 def test_invalid_source_fails_before_existing_destination_is_touched(tmp_path):
     source = _estate(tmp_path)
     _write(source, "invalid.txt", "not an item")
@@ -49,6 +52,7 @@ def test_invalid_source_fails_before_existing_destination_is_touched(tmp_path):
     assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
+@weaver_test()
 def test_push_does_not_expose_selective_document_arguments():
     import inspect
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver import WipeReport, WipeResult
@@ -28,6 +29,7 @@ def _result(*, dry_run: bool, removed=("object",)) -> WipeResult:
     )
 
 
+@weaver_test()
 def test_parser_uses_the_shared_typed_target_grammar():
     args = build_parser().parse_args(
         [
@@ -44,6 +46,7 @@ def test_parser_uses_the_shared_typed_target_grammar():
     assert args.unbind_from == "Weaver"
 
 
+@weaver_test()
 def test_removed_target_switches_are_rejected():
     with pytest.raises(SystemExit):
         build_parser().parse_args(
@@ -51,6 +54,7 @@ def test_removed_target_switches_are_rejected():
         )
 
 
+@weaver_test()
 def test_unbinding_is_reached_through_wipe_and_not_a_command_of_its_own():
     """Removing catalogue claims is part of clearing a target, not a verb.
 
@@ -63,11 +67,13 @@ def test_unbinding_is_reached_through_wipe_and_not_a_command_of_its_own():
         build_parser().parse_args(["unbind", "Lakehouse/Sales"])
 
 
+@weaver_test()
 def test_wipe_requires_a_typed_target():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["wipe", "--workspace", "Demo"])
 
 
+@weaver_test()
 def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     cli = importlib.import_module("weaver_cli.main")
     workspace = given_workspace(catalogue="Warehouse/Control")
@@ -94,6 +100,7 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     assert "Nothing was changed" in capsys.readouterr().out
 
 
+@weaver_test()
 def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch):
     """``--yes`` means no question, so the listing that asks it is pure cost.
 
@@ -133,6 +140,7 @@ def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch)
     assert "workspace" not in passed
 
 
+@weaver_test()
 def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):
     """The listing is the question. Remove it and there is nothing to agree to."""
 
@@ -152,6 +160,7 @@ def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):
     assert calls == [True, False]
 
 
+@weaver_test()
 def test_noninteractive_wipe_needs_yes(monkeypatch, capsys):
     cli = importlib.import_module("weaver_cli.main")
     workspace = given_workspace(catalogue="Warehouse/Control")

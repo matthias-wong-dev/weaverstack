@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.catalogue_actions import _claim_statements
 from weaver.build_bundle.prune import TargetInventory
@@ -69,6 +70,7 @@ def _inventory(*tables, folders=(), views=()):
     )
 
 
+@weaver_test()
 def test_valid_rows_remain_and_stale_object_metadata_is_removed():
     result = reconcile_catalogue_state(
         _state(_row("Current"), _row("Missing")),
@@ -88,6 +90,7 @@ def test_valid_rows_remain_and_stale_object_metadata_is_removed():
     }
 
 
+@weaver_test()
 def test_same_named_folder_and_table_keep_the_four_part_catalogue_identity():
     result = reconcile_catalogue_state(
         _state(_row("Customer"), _folder_row("Customer")),
@@ -107,6 +110,7 @@ def test_same_named_folder_and_table_keep_the_four_part_catalogue_identity():
     assert all(not claim.identity.is_files for claim in result.stale_claims)
 
 
+@weaver_test()
 def test_missing_folder_does_not_remove_same_named_table():
     result = reconcile_catalogue_state(
         _state(_row("Customer"), _folder_row("Customer")),
@@ -125,6 +129,7 @@ def test_missing_folder_does_not_remove_same_named_table():
     assert all(claim.identity.is_files for claim in result.stale_claims)
 
 
+@weaver_test()
 def test_physical_objects_without_catalogue_rows_generate_no_deletes():
     result = reconcile_catalogue_state(
         _state(), inventories={ITEM: _inventory("Unregistered")}
@@ -133,6 +138,7 @@ def test_physical_objects_without_catalogue_rows_generate_no_deletes():
     assert result.stale_objects == ()
 
 
+@weaver_test()
 def test_folder_claims_do_not_infer_ownership_of_table_dictionary_rows():
     state = _state(_folder_row("Archive"))
     state.rows[ITEM][TABLE_DICTIONARY.name] = (_row("Archive"),)
@@ -144,6 +150,7 @@ def test_folder_claims_do_not_infer_ownership_of_table_dictionary_rows():
     }
 
 
+@weaver_test()
 def test_registry_rejects_an_unsupported_installed_object_type():
     with pytest.raises(BuildError, match="unsupported object_type 'procedure'"):
         reconcile_catalogue_state(
@@ -152,6 +159,7 @@ def test_registry_rejects_an_unsupported_installed_object_type():
         )
 
 
+@weaver_test()
 def test_claim_deletion_uses_the_rule_predicate_columns():
     """A relationship table names both sides, so neither is the default pair."""
 

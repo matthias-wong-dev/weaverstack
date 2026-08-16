@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import sqlparse
 from sqlparse import tokens as T
+from support.weaver_test import weaver_test
 
 from weaver.declaration.sql_shaping import (
     get_sql_template,
@@ -34,11 +35,13 @@ def _select_count(sql):
     )
 
 
+@weaver_test()
 def test_get_sql_template_blocks_path_traversal():
     with pytest.raises(ValueError, match="template_name"):
         get_sql_template("../requirements")
 
 
+@weaver_test()
 def test_render_sql_template_fills_a_ddl_template():
     rendered = render_sql_template(
         "ddl/metadata_column_validation",
@@ -61,6 +64,7 @@ def test_render_sql_template_fills_a_ddl_template():
         "security_access_audit.sql",
     ],
 )
+@weaver_test()
 def test_insert_where_one_eq_zero_guards_every_select_in_serious_sql_fixtures(
     fixture_name,
 ):
@@ -81,6 +85,7 @@ def test_insert_where_one_eq_zero_guards_every_select_in_serious_sql_fixtures(
         "security_access_audit.sql",
     ],
 )
+@weaver_test()
 def test_insert_select_into_wraps_one_query_in_serious_sql_fixtures(fixture_name):
     sql = _fixture_sql(fixture_name)
     transformed = insert_select_into(sql, "dbo.select_into_result")
@@ -90,6 +95,7 @@ def test_insert_select_into_wraps_one_query_in_serious_sql_fixtures(fixture_name
     assert _select_count(transformed) == _select_count(sql)
 
 
+@weaver_test()
 def test_insert_select_into_modifies_simple_select():
     assert (
         insert_select_into("SELECT * from dbo.Users", "dbo.UsersCopy")
@@ -97,6 +103,7 @@ def test_insert_select_into_modifies_simple_select():
     )
 
 
+@weaver_test()
 def test_insert_select_into_modifies_only_last_standalone_select():
     sql = """SELECT *
 FROM dbo.Users;
@@ -121,6 +128,7 @@ FROM dbo.Teams
     )
 
 
+@weaver_test()
 def test_insert_select_into_modifies_outer_cte_select():
     sql = """DECLARE @cutoff date = '2026-01-01';
 
@@ -155,6 +163,7 @@ FROM recent_users as ru
     )
 
 
+@weaver_test()
 def test_insert_select_into_modifies_first_branch_of_union_query():
     sql = """select
     Id
@@ -179,6 +188,7 @@ FROM dbo.ArchivedUsers
     )
 
 
+@weaver_test()
 def test_insert_select_into_ignores_insert_select_and_uses_last_result_select():
     sql = """INSERT into #UserIds (Id)
 select
@@ -205,6 +215,7 @@ FROM dbo.Teams as t
     )
 
 
+@weaver_test()
 def test_insert_select_into_handles_declarations_before_final_select_without_semicolon():
     sql = """DECLARE @cutoff date = '2026-01-01'
 set @cutoff = DATEADD(day, -7, @cutoff)
@@ -229,6 +240,7 @@ where
     )
 
 
+@weaver_test()
 def test_insert_select_into_handles_select_without_from():
     assert (
         insert_select_into("SELECT 1 as One", "dbo.OneRow")
@@ -236,6 +248,7 @@ def test_insert_select_into_handles_select_without_from():
     )
 
 
+@weaver_test()
 def test_mixed_case_keywords_work_across_transformers():
     sql = "sEleCt u.Id FrOm dbo.Users as u wHeRe u.IsActive = 1 oRdEr bY u.Id"
 
@@ -249,6 +262,7 @@ def test_mixed_case_keywords_work_across_transformers():
     )
 
 
+@weaver_test()
 def test_adds_where_to_simple_select():
     assert (
         insert_where_one_eq_zero("SELECT * from dbo.Users")
@@ -256,6 +270,7 @@ def test_adds_where_to_simple_select():
     )
 
 
+@weaver_test()
 def test_wraps_existing_where_condition():
     assert (
         insert_where_one_eq_zero("SELECT * from dbo.Users where IsActive = 1")
@@ -263,6 +278,7 @@ def test_wraps_existing_where_condition():
     )
 
 
+@weaver_test()
 def test_inserts_before_order_by():
     assert (
         insert_where_one_eq_zero("SELECT * from dbo.Users order by CreatedAt DESC")
@@ -270,6 +286,7 @@ def test_inserts_before_order_by():
     )
 
 
+@weaver_test()
 def test_preserves_group_by_after_existing_where():
     assert (
         insert_where_one_eq_zero(
@@ -279,6 +296,7 @@ def test_preserves_group_by_after_existing_where():
     )
 
 
+@weaver_test()
 def test_adds_where_after_join():
     sql = "SELECT u.Id from dbo.Users u INNER join dbo.Teams t on t.Id = u.TeamId"
     assert (
@@ -287,6 +305,7 @@ def test_adds_where_after_join():
     )
 
 
+@weaver_test()
 def test_transforms_cte_and_outer_select():
     sql = "WITH cte as (SELECT Id from dbo.Users) select * from cte"
     assert (
@@ -295,6 +314,7 @@ def test_transforms_cte_and_outer_select():
     )
 
 
+@weaver_test()
 def test_transforms_subquery_in_from_clause():
     sql = "SELECT * from (SELECT Id from dbo.Users where IsActive = 1) u"
     assert (
@@ -303,6 +323,7 @@ def test_transforms_subquery_in_from_clause():
     )
 
 
+@weaver_test()
 def test_transforms_subquery_inside_existing_where():
     sql = "SELECT * from dbo.Teams where Id IN (SELECT TeamId from dbo.Users where IsActive = 1)"
     assert (
@@ -311,6 +332,7 @@ def test_transforms_subquery_inside_existing_where():
     )
 
 
+@weaver_test()
 def test_transforms_each_side_of_union():
     sql = "SELECT Id from dbo.Users union all select Id from dbo.ArchivedUsers where DeletedAt IS NOT NULL"
     assert (
@@ -319,6 +341,7 @@ def test_transforms_each_side_of_union():
     )
 
 
+@weaver_test()
 def test_transforms_multiple_statements():
     sql = "SELECT 1; select 2 where 2 = 2;"
     assert (
@@ -327,6 +350,7 @@ def test_transforms_multiple_statements():
     )
 
 
+@weaver_test()
 def test_handles_tsql_bracketed_identifiers_and_top():
     sql = "SELECT TOP (10) [User Id] from [dbo].[Users] where [Status] = 'A'"
     assert (
@@ -335,6 +359,7 @@ def test_handles_tsql_bracketed_identifiers_and_top():
     )
 
 
+@weaver_test()
 def test_adds_where_to_multiline_select_before_order_by():
     sql = """select
     u.Id,
@@ -360,6 +385,7 @@ order by
     )
 
 
+@weaver_test()
 def test_wraps_existing_multiline_where_before_group_by():
     sql = """select
     t.Id,
@@ -386,6 +412,7 @@ GROUP BY
     )
 
 
+@weaver_test()
 def test_transforms_long_script_with_comments_temp_table_and_go():
     sql = """-- Build active user extract.
 select
@@ -432,6 +459,7 @@ order by
     )
 
 
+@weaver_test()
 def test_transforms_multiline_cte_and_nested_exists():
     sql = """WITH recent_users as (
     select
@@ -476,6 +504,7 @@ where (EXISTS (
     )
 
 
+@weaver_test()
 def test_treats_go_as_batch_separator_without_semicolons():
     sql = """SELECT *
 FROM dbo.Users
@@ -495,6 +524,7 @@ FROM dbo.Teams where 1=0
     )
 
 
+@weaver_test()
 def test_handles_irrelevant_statements_and_adjacent_selects_without_semicolons():
     sql = """DECLARE @cutoff date
 set @cutoff = '2026-01-01'
@@ -550,6 +580,7 @@ end
     )
 
 
+@weaver_test()
 def test_does_not_treat_tsql_table_hint_with_as_statement_boundary():
     sql = "SELECT * from dbo.Users WITH (NOLOCK)"
 

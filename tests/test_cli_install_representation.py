@@ -15,6 +15,7 @@ import json
 from importlib import import_module
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver_cli.main import build_parser, handle_install
 
@@ -27,6 +28,7 @@ def _parse(*words):
 
 
 @pytest.mark.parametrize("flag", ["--json", "--no-publish"])
+@weaver_test()
 def test_install_offers_no_flag_for_a_decision_it_has_already_made(flag, capsys):
     """Each of these was a way to ask for a half-finished or silent install."""
 
@@ -35,12 +37,14 @@ def test_install_offers_no_flag_for_a_decision_it_has_already_made(flag, capsys)
     assert "unrecognized arguments" in capsys.readouterr().err
 
 
+@weaver_test()
 def test_install_still_takes_the_workspace_and_environment_it_needs():
     parsed = _parse("--workspace", "Sales", "--environment", "weaver")
     assert parsed.workspace == "Sales"
     assert parsed.environment == "weaver"
 
 
+@weaver_test()
 def test_install_never_advertises_a_local_workspace():
     help_text = build_parser().parse_args(["install"]).__dict__
     assert "workspace_type" not in help_text
@@ -56,6 +60,7 @@ class _Result:
         return {"environment_name": "weaver", "published": True, "timings": {}}
 
 
+@weaver_test()
 def test_install_prints_its_result_without_being_asked(monkeypatch, capsys):
     """No flag, and the payload is on stdout so a pipe gets only the result."""
 
@@ -77,6 +82,7 @@ def test_install_prints_its_result_without_being_asked(monkeypatch, capsys):
     assert "total" in printed["timings"]
 
 
+@weaver_test()
 def test_install_frames_its_work_so_a_long_publish_is_visible(monkeypatch, capsys):
     """A five-minute publish that prints nothing is indistinguishable from a hang.
 
@@ -109,6 +115,7 @@ def test_install_frames_its_work_so_a_long_publish_is_visible(monkeypatch, capsy
     assert session.opened == [("task", "Install"), ("step", "Publish")]
 
 
+@weaver_test()
 def test_installing_without_a_session_still_works():
     """A pytest fixture installing Weaver wants the work, not the reporting."""
 

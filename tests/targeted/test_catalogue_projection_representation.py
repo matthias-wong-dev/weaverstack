@@ -24,6 +24,7 @@ from factories import (
     single_document_repository,
     spark_view,
 )
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue, for_targets, retaining
 from weaver.catalogue.tables import INSTALLATION, REGISTRY
@@ -62,6 +63,7 @@ def derived(repository, *names):
 # --- it is a function of source -----------------------------------------------
 
 
+@weaver_test()
 def test_everything_declared_is_certified(repository):
     """The premise of the whole idea: adding a declaration adds a row.
 
@@ -96,6 +98,7 @@ def test_everything_declared_is_certified(repository):
     ), "the builtin catalogue item is declared source too"
 
 
+@weaver_test()
 def test_each_object_is_registered_as_what_it_is(repository):
     catalogue = Catalogue.from_repository(repository)
 
@@ -117,6 +120,7 @@ def test_each_object_is_registered_as_what_it_is(repository):
     }
 
 
+@weaver_test()
 def test_signatures_are_the_declarations_own(repository):
     """The field incremental selection compares, so it has to be the same value.
 
@@ -137,6 +141,7 @@ def test_signatures_are_the_declarations_own(repository):
     } == declared
 
 
+@weaver_test()
 def test_narrowing_is_a_later_step_not_an_input(repository):
     """Selection transforms the desired catalogue; it does not construct it.
 
@@ -155,6 +160,7 @@ def test_narrowing_is_a_later_step_not_an_input(repository):
     assert document_id(VIEW) not in narrowed.registered
 
 
+@weaver_test()
 def test_it_is_stable_across_calls(repository):
     """Two derivations of one repository must agree, or a diff is meaningless."""
 
@@ -167,6 +173,7 @@ def test_it_is_stable_across_calls(repository):
 # --- it carries no binding ----------------------------------------------------
 
 
+@weaver_test()
 def test_no_installation_row_is_claimed(repository):
     """A repository does not know which target it was installed to, and must not
     pretend to. The Installation row is a build's to write."""
@@ -176,6 +183,7 @@ def test_no_installation_row_is_claimed(repository):
     assert catalogue.rows[item_id()].get(INSTALLATION.name, ()) == ()
 
 
+@weaver_test()
 def test_no_publication_epoch_is_stamped(repository):
     """The build_datetime is one value per *installation*, resolved when it runs. A
     repository-derived row carrying one would be inventing a build."""
@@ -186,6 +194,7 @@ def test_no_publication_epoch_is_stamped(repository):
         assert not row.get("build_datetime")
 
 
+@weaver_test()
 def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
     """The logical catalogue declares the alias and certifies nothing about it.
 
@@ -209,6 +218,7 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
     assert alias not in logical.registered, "the certification is not"
 
 
+@weaver_test()
 def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
     from factories import alias_repository
 
@@ -235,6 +245,7 @@ def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
     )
 
 
+@weaver_test()
 def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     """Binding and scoping are one decision, which is what removes the hazard.
 
@@ -264,6 +275,7 @@ def test_an_item_that_is_not_bound_is_not_published(tmp_path):
 # --- more than one item -------------------------------------------------------
 
 
+@weaver_test()
 def test_several_items_project_into_one_catalogue(tmp_path):
     """Which is what makes it comparable to a persisted catalogue at all.
 
@@ -290,6 +302,7 @@ def test_several_items_project_into_one_catalogue(tmp_path):
     assert {identity.item for identity in catalogue.registered} == {producer, consumer}
 
 
+@weaver_test()
 def test_an_items_rows_carry_its_own_scope(tmp_path):
     """Every row is stamped with the item it belongs to.
 
@@ -317,6 +330,7 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
 # --- completeness -------------------------------------------------------------
 
 
+@weaver_test()
 def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     """Every kind of object Weaver installs is registered by the projection.
 
@@ -342,6 +356,7 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     )
 
 
+@weaver_test()
 def test_every_declared_object_and_artefact_is_registered(tmp_path):
     """Nothing the source declares is left out of what it claims to install.
 

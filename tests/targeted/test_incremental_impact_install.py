@@ -20,6 +20,7 @@ from factories import (
     single_document_repository,
     spark_view,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import determine_impact
 from weaver.build_bundle.incremental import declared_signatures, select_build
@@ -66,6 +67,7 @@ def impact_of(repository, registered, *selected: str):
 # --- one object's classification ----------------------------------------------
 
 
+@weaver_test()
 def test_an_object_the_registry_has_never_seen_is_new(chain):
     impact = impact_of(chain, {}, TABLE)
 
@@ -73,6 +75,7 @@ def test_an_object_the_registry_has_never_seen_is_new(chain):
     assert impact.changed == ()
 
 
+@weaver_test()
 def test_an_object_whose_signature_still_matches_is_neither_new_nor_changed(chain):
     """The unchanged case, and the one that makes a rebuild cost nothing."""
 
@@ -83,6 +86,7 @@ def test_an_object_whose_signature_still_matches_is_neither_new_nor_changed(chai
     assert impact.impacted == ()
 
 
+@weaver_test()
 def test_an_object_whose_signature_differs_is_changed(chain):
     """One Registry row with a stale signature is the entire input needed."""
 
@@ -94,6 +98,7 @@ def test_an_object_whose_signature_differs_is_changed(chain):
     assert impact.new == ()
 
 
+@weaver_test()
 def test_a_signature_is_derived_from_the_declaration_not_stored_anywhere(
     chain, tmp_path
 ):
@@ -118,6 +123,7 @@ def test_a_signature_is_derived_from_the_declaration_not_stored_anywhere(
 # --- propagation across the graph ---------------------------------------------
 
 
+@weaver_test()
 def test_a_changed_table_impacts_the_view_that_reads_it(chain):
     """The descendant is certified and unchanged, and must still be rebuilt."""
 
@@ -132,12 +138,14 @@ def test_a_changed_table_impacts_the_view_that_reads_it(chain):
     assert list(impact.impacted_descendants) == [document_id(VIEW)]
 
 
+@weaver_test()
 def test_an_unchanged_table_impacts_nothing(chain):
     impact = impact_of(chain, certified(chain, TABLE, VIEW), TABLE, VIEW)
 
     assert impact.impacted == ()
 
 
+@weaver_test()
 def test_a_descendant_left_out_of_the_selection_is_not_reached(chain):
     """Selection bounds the walk: an item not in this build stays deferred.
 
@@ -158,6 +166,7 @@ def test_a_descendant_left_out_of_the_selection_is_not_reached(chain):
 # --- what selection then does with it -----------------------------------------
 
 
+@weaver_test()
 def test_a_new_object_is_built_but_not_dropped_first(chain):
     """There is nothing to drop: it has never been installed."""
 
@@ -167,6 +176,7 @@ def test_a_new_object_is_built_but_not_dropped_first(chain):
     assert document_id(TABLE) not in selection.selected_for_drop
 
 
+@weaver_test()
 def test_a_changed_object_is_dropped_and_rebuilt(chain):
     stale = {document_id(TABLE): registered_document(TABLE, signature="an-old-hash")}
 
@@ -176,6 +186,7 @@ def test_a_changed_object_is_dropped_and_rebuilt(chain):
     assert document_id(TABLE) in selection.selected_for_build
 
 
+@weaver_test()
 def test_an_unchanged_object_is_neither_dropped_nor_rebuilt(chain):
     selection = select_build(
         chain, certified(chain, TABLE), selected={document_id(TABLE)}
@@ -185,6 +196,7 @@ def test_an_unchanged_object_is_neither_dropped_nor_rebuilt(chain):
     assert selection.selected_for_build == ()
 
 
+@weaver_test()
 def test_an_object_that_prohibits_rebuild_is_never_dropped(tmp_path):
     """The one thing that outranks a changed signature.
 

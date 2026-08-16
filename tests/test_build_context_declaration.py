@@ -23,6 +23,7 @@ import sys
 import types
 
 import pytest
+from support.weaver_test import weaver_test
 
 import weaver
 import weaver.operations.build
@@ -93,6 +94,7 @@ def _build(repository, **kwargs):
 # --- notebook inference -------------------------------------------------------
 
 
+@weaver_test()
 def test_a_notebook_infers_the_current_workspace(in_notebook, captured, repository):
     """The catalogue is given so that only the workspace is in question."""
 
@@ -105,6 +107,7 @@ def test_a_notebook_infers_the_current_workspace(in_notebook, captured, reposito
 # --- explicit values win ------------------------------------------------------
 
 
+@weaver_test()
 def test_an_operation_given_a_resolved_workspace_says_to_open_a_session(
     repository, tmp_path
 ):
@@ -121,6 +124,7 @@ def test_an_operation_given_a_resolved_workspace_says_to_open_a_session(
         _build(repository, workspace=workspace)
 
 
+@weaver_test()
 def test_an_explicit_catalogue_overrides_the_sessions_workspace(
     captured, repository, desktop_credential
 ):
@@ -133,6 +137,7 @@ def test_an_explicit_catalogue_overrides_the_sessions_workspace(
     assert captured["workspace"].catalogue == "Warehouse/Chosen"
 
 
+@weaver_test()
 def test_the_sessions_workspace_supplies_the_catalogue_when_no_argument_does(
     captured, repository, desktop_credential
 ):
@@ -143,6 +148,7 @@ def test_the_sessions_workspace_supplies_the_catalogue_when_no_argument_does(
     assert captured["workspace"].catalogue == "Warehouse/Configured"
 
 
+@weaver_test()
 def test_a_desktop_caller_needs_no_workspace_object(captured, repository, tmp_path):
     """`workspace=` and `catalogue=` alone are a complete desktop context."""
 
@@ -157,6 +163,7 @@ def test_a_desktop_caller_needs_no_workspace_object(captured, repository, tmp_pa
 # --- and missing context is a sentence ----------------------------------------
 
 
+@weaver_test()
 def test_no_context_outside_fabric_names_what_to_supply(repository, monkeypatch):
     monkeypatch.delitem(sys.modules, "notebookutils", raising=False)
     monkeypatch.setattr(
@@ -171,6 +178,7 @@ def test_no_context_outside_fabric_names_what_to_supply(repository, monkeypatch)
         _build(repository)
 
 
+@weaver_test()
 def test_a_workspace_without_a_catalogue_says_both_ways_to_give_one(
     repository, tmp_path
 ):
@@ -182,6 +190,7 @@ def test_a_workspace_without_a_catalogue_says_both_ways_to_give_one(
     assert "workspace configuration" in message
 
 
+@weaver_test()
 def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session(
     tmp_path, desktop_credential
 ):
@@ -200,6 +209,7 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
 # --- the Livy session is never reached by a build that cannot succeed ----------
 
 
+@weaver_test()
 def test_a_failed_preflight_does_not_create_a_livy_session(
     repository, monkeypatch, tmp_path
 ):
@@ -231,6 +241,7 @@ def test_a_failed_preflight_does_not_create_a_livy_session(
         )
 
 
+@weaver_test()
 def test_a_desktop_build_needs_no_environment(repository, monkeypatch):
     """A build's Spark SQL imports nothing, so it needs no published wheel.
 
@@ -254,6 +265,7 @@ def test_a_desktop_build_needs_no_environment(repository, monkeypatch):
     assert seen["environment"] is None
 
 
+@weaver_test()
 def test_a_repository_error_is_reported_before_any_fabric_call(tmp_path, monkeypatch):
     """Repository errors come first: they need no workspace to be true."""
 

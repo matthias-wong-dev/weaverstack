@@ -13,6 +13,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions import ConsoleSession
 from weaver.sessions.resources import Resource, ResourceError, ResourceState
@@ -25,6 +26,7 @@ def executor():
         yield pool
 
 
+@weaver_test()
 def test_a_resource_is_not_acquired_until_it_is_asked_for(executor):
     calls = []
     resource = Resource("livy", lambda: calls.append(1), executor=executor)
@@ -38,6 +40,7 @@ def test_a_resource_is_not_acquired_until_it_is_asked_for(executor):
     assert calls == [1]
 
 
+@weaver_test()
 def test_concurrent_callers_share_one_acquisition(executor):
     started = threading.Event()
     release = threading.Event()
@@ -64,6 +67,7 @@ def test_concurrent_callers_share_one_acquisition(executor):
     assert resource.attempts == 1
 
 
+@weaver_test()
 def test_a_statement_failure_leaves_the_resource_alone(executor):
     resource = Resource("livy", lambda: "livy", executor=executor)
     resource.get()
@@ -73,6 +77,7 @@ def test_a_statement_failure_leaves_the_resource_alone(executor):
     assert resource.get() == "livy"
 
 
+@weaver_test()
 def test_a_failed_resource_refuses_further_use_until_it_is_reacquired(executor):
     acquisitions = []
 
@@ -93,6 +98,7 @@ def test_a_failed_resource_refuses_further_use_until_it_is_reacquired(executor):
     assert resource.get() == "livy-2"
 
 
+@weaver_test()
 def test_recovery_is_bounded_rather_than_endless(executor):
     resource = Resource("livy", lambda: "livy", executor=executor, max_attempts=2)
     resource.get()
@@ -105,6 +111,7 @@ def test_recovery_is_bounded_rather_than_endless(executor):
         resource.reacquire()
 
 
+@weaver_test()
 def test_a_warm_up_nobody_asked_for_does_not_fail_the_next_command(executor):
     attempts = []
 
@@ -128,6 +135,7 @@ def test_a_warm_up_nobody_asked_for_does_not_fail_the_next_command(executor):
     assert resource.attempts == 1
 
 
+@weaver_test()
 def test_a_failed_warm_up_still_reports_through_the_command_that_needed_it(executor):
     def acquire():
         raise RuntimeError("this workspace names no environment")
@@ -140,6 +148,7 @@ def test_a_failed_warm_up_still_reports_through_the_command_that_needed_it(execu
         resource.get()
 
 
+@weaver_test()
 def test_an_acquisition_that_fails_reports_its_own_cause(executor):
     def acquire():
         raise RuntimeError("no capacity")
@@ -151,6 +160,7 @@ def test_an_acquisition_that_fails_reports_its_own_cause(executor):
     assert resource.state is ResourceState.FAILED
 
 
+@weaver_test()
 def test_close_releases_only_what_was_acquired(executor):
     released = []
     never = Resource(
@@ -168,6 +178,7 @@ def test_close_releases_only_what_was_acquired(executor):
         used.get()
 
 
+@weaver_test()
 def test_acquisition_is_timed_where_a_session_can_see_it(executor):
     telemetry = SessionTelemetry()
     resource = Resource("livy", lambda: "livy", executor=executor, telemetry=telemetry)
@@ -176,6 +187,7 @@ def test_acquisition_is_timed_where_a_session_can_see_it(executor):
     assert telemetry.measures["livy.acquire"].calls == 1
 
 
+@weaver_test()
 def test_an_async_acquisition_keeps_the_context_that_started_it(executor):
     telemetry = SessionTelemetry()
     resource = Resource(
@@ -198,6 +210,7 @@ def test_an_async_acquisition_keeps_the_context_that_started_it(executor):
 # --- leaving while something is still starting -------------------------------
 
 
+@weaver_test()
 def test_closing_mid_acquisition_waits_so_it_can_release_what_arrives(executor):
     """The expensive thing to leak is a Spark session on a one-slot capacity.
 
@@ -225,6 +238,7 @@ def test_closing_mid_acquisition_waits_so_it_can_release_what_arrives(executor):
     assert resource.state is ResourceState.CLOSED
 
 
+@weaver_test()
 def test_an_acquisition_that_never_finishes_is_abandoned_rather_than_hanging(executor):
     """Bounded on purpose: an exit that cannot complete is the worse failure."""
 
@@ -251,6 +265,7 @@ def test_an_acquisition_that_never_finishes_is_abandoned_rather_than_hanging(exe
     forever.set()
 
 
+@weaver_test()
 def test_closing_before_anything_started_waits_for_nothing(executor):
     started = []
     resource = Resource("livy", lambda: started.append(1), executor=executor)

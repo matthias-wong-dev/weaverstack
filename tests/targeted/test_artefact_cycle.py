@@ -64,6 +64,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
@@ -178,6 +179,7 @@ def physical(bundle, estate_targets) -> list[str]:
     ]
 
 
+@weaver_test()
 def test_converges_from_a_correct_estate_by_planning_nothing(estate, tmp_path):
     """The property, stated once.
 
@@ -188,6 +190,7 @@ def test_converges_from_a_correct_estate_by_planning_nothing(estate, tmp_path):
     assert physical(*build(estate, tmp_path)) == []
 
 
+@weaver_test()
 def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
     """The decision behind the actions, asserted separately.
 
@@ -204,6 +207,7 @@ def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
     assert selection.impact.changed == ()
 
 
+@weaver_test()
 def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_path):
     """ "No work" must not be able to pass by planning nothing at all.
 
@@ -238,6 +242,7 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     }
 
 
+@weaver_test()
 def test_the_bundle_is_identical_the_second_time(estate, tmp_path):
     """Same inputs, same identity — the determinism claim, on the no-op path.
 
@@ -321,6 +326,7 @@ def assert_reaches_the_declared_estate(reached, declared):
         assert holdings(inventory) == holdings(declared[item]), item
 
 
+@weaver_test()
 def test_converges_from_nothing_to_the_declared_estate(estate, tmp_path):
     """Empty target, empty catalogue — everything is new and nothing is stale."""
 
@@ -336,6 +342,7 @@ def test_converges_from_nothing_to_the_declared_estate(estate, tmp_path):
     assert_reaches_the_declared_estate(reached, declared)
 
 
+@weaver_test()
 def test_converges_from_a_damaged_estate_by_repairing_it(estate, tmp_path):
     """Objects deleted behind Weaver's back, and strays that nothing declares.
 
@@ -369,6 +376,7 @@ def test_converges_from_a_damaged_estate_by_repairing_it(estate, tmp_path):
     assert_reaches_the_declared_estate(reached, declared)
 
 
+@weaver_test()
 def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path):
     """The one that matters most, because over-broad pruning destroys estates.
 
@@ -401,6 +409,7 @@ def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path)
     assert lost_files == {"_/load/dwg__summary.py"}
 
 
+@weaver_test()
 def test_converges_and_stays_converged_on_a_second_pass(estate, tmp_path):
     """Reaching the fixed point is one claim; staying there is another.
 

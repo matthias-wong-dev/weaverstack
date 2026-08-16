@@ -22,6 +22,7 @@ it runs. That the generated artefacts then execute is proved in
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
@@ -71,6 +72,7 @@ def _staging(body: str) -> str:
 # --- what counts as one query -------------------------------------------------
 
 
+@weaver_test()
 def test_a_select_is_the_query():
     program = _program("select [Customer id] from [Sales].[Customer]")
 
@@ -78,6 +80,7 @@ def test_a_select_is_the_query():
     assert program.staging.sql == "select [Customer id] from [Sales].[Customer]"
 
 
+@weaver_test()
 def test_a_cte_is_one_query_including_its_with():
     body = """with recent as (
     select [Customer id] from [Sales].[Order] where [Order date] > '2026-01-01'
@@ -91,6 +94,7 @@ select r.[Customer id] from recent as r"""
     assert program.staging.sql.endswith("from recent as r")
 
 
+@weaver_test()
 def test_a_nested_select_does_not_make_a_second_query():
     body = """select c.[Customer id]
 from [Sales].[Customer] as c
@@ -99,6 +103,7 @@ where c.[Customer id] in (select o.[Customer id] from [Sales].[Order] as o)"""
     assert len(_program(body).queries) == 1
 
 
+@weaver_test()
 def test_a_union_is_one_query():
     body = """select [Customer id] from [Sales].[Customer]
 union all
@@ -110,6 +115,7 @@ select [Customer id] from [Sales].[Prospect]"""
     assert "union all" in program.staging.sql
 
 
+@weaver_test()
 def test_a_subquery_in_from_does_not_make_a_second_query():
     body = """select s.[Customer id]
 from (select [Customer id] from [Sales].[Customer]) as s"""
@@ -120,6 +126,7 @@ from (select [Customer id] from [Sales].[Customer]) as s"""
 # --- what is setup instead ----------------------------------------------------
 
 
+@weaver_test()
 def test_select_into_a_temp_table_is_setup():
     """It names its own destination, so its rows never come back to Weaver."""
 
@@ -135,6 +142,7 @@ select [Customer id] from #Working"""
     assert program.staging.sql == "select [Customer id] from #Working"
 
 
+@weaver_test()
 def test_insert_select_is_setup():
     body = """insert into #Working ([Customer id])
 select [Customer id] from [Sales].[Customer];
@@ -146,6 +154,7 @@ select [Customer id] from #Working"""
     assert [one.produces_result for one in program.statements] == [False, True]
 
 
+@weaver_test()
 def test_declare_set_update_and_delete_are_setup():
     body = """declare @cutoff date;
 set @cutoff = '2026-01-01';
@@ -166,6 +175,7 @@ select [Customer id] from #Working"""
     assert len(program.setup) == 4
 
 
+@weaver_test()
 def test_setup_keeps_the_order_it_was_written_in():
     """Setup written between two queries was written there deliberately."""
 
@@ -187,6 +197,7 @@ select [Customer id] from #Retired"""
     ]
 
 
+@weaver_test()
 def test_comments_do_not_change_classification():
     """A ``select`` inside a comment is prose, and a comment is not a statement."""
 
@@ -203,6 +214,7 @@ select [Customer id] from [Sales].[Customer]
     assert program.staging.sql.startswith("select [Customer id]")
 
 
+@weaver_test()
 def test_a_comment_between_two_queries_is_not_a_statement():
     body = """select [Customer id] from #Working;
 
@@ -214,6 +226,7 @@ select [Customer id] from #Retired"""
     assert [one.produces_result for one in program.statements] == [True, True]
 
 
+@weaver_test()
 def test_a_statement_run_without_terminators_still_finds_its_query():
     """T-SQL does not require ';', so the recognition cannot depend on one."""
 
@@ -230,6 +243,7 @@ select [Customer id] from [Sales].[Customer] where [Changed] >= @cutoff"""
 # --- dynamic SQL --------------------------------------------------------------
 
 
+@weaver_test()
 def test_dynamic_sql_is_allowed_as_setup():
     body = """declare @sql nvarchar(max);
 
@@ -249,6 +263,7 @@ select [Customer id] from #Working"""
     assert program.staging.sql == "select [Customer id] from #Working"
 
 
+@weaver_test()
 def test_exec_is_allowed_as_setup():
     body = """exec [Sales].[RefreshWorking];
 
@@ -257,6 +272,7 @@ select [Customer id] from #Working"""
     assert len(_program(body).queries) == 1
 
 
+@weaver_test()
 def test_a_result_hidden_inside_dynamic_sql_is_not_a_query():
     """Weaver does not read the text inside EXEC, so it cannot stage it."""
 
@@ -270,6 +286,7 @@ def test_a_result_hidden_inside_dynamic_sql_is_not_a_query():
         _validate(body)
 
 
+@weaver_test()
 def test_dynamic_setup_can_precede_two_visible_queries():
     body = """exec sp_executesql N'insert into #Working select 1';
 
@@ -286,6 +303,7 @@ select [Customer id] from #Retired"""
 # --- the query contract -------------------------------------------------------
 
 
+@weaver_test()
 def test_one_query_stages_and_deletes_nothing():
     program = _program("select [Customer id] from [Sales].[Customer]")
 
@@ -293,6 +311,7 @@ def test_one_query_stages_and_deletes_nothing():
     assert program.deletes is None
 
 
+@weaver_test()
 def test_two_queries_are_staging_then_deletes():
     body = """select [Customer id], [Customer name] from #Working;
 
@@ -304,6 +323,7 @@ select [Customer id] from #Retired"""
     assert program.deletes.sql == "select [Customer id] from #Retired"
 
 
+@weaver_test()
 def test_three_queries_are_refused():
     body = """select 1 as [Customer id];
 
@@ -315,11 +335,13 @@ select 3 as [Customer id]"""
         _validate(body)
 
 
+@weaver_test()
 def test_no_visible_query_is_refused():
     with pytest.raises(LoadError, match="visible SELECT"):
         _validate("select [Customer id] into #Working from [Sales].[Customer];")
 
 
+@weaver_test()
 def test_a_second_query_needs_a_primary_key():
     body = "select 1 as a;\n\nselect 1 as a;"
 
@@ -327,6 +349,7 @@ def test_a_second_query_needs_a_primary_key():
         _validate(body, primary_key=())
 
 
+@weaver_test()
 def test_a_second_query_needs_incremental():
     body = "select 1 as a;\n\nselect 1 as a;"
 
@@ -334,6 +357,7 @@ def test_a_second_query_needs_incremental():
         _validate(body, incremental=False)
 
 
+@weaver_test()
 def test_one_query_needs_neither():
     _validate("select 1 as a;", primary_key=(), incremental=False)
 
@@ -341,6 +365,7 @@ def test_one_query_needs_neither():
 # --- GO -----------------------------------------------------------------------
 
 
+@weaver_test()
 def test_go_is_refused():
     """The load runs the body inside a procedure, where GO cannot appear."""
 
@@ -352,6 +377,7 @@ select [Customer id] from #Retired"""
         _program(body)
 
 
+@weaver_test()
 def test_a_column_called_go_is_not_a_batch_separator():
     program = _program("select [go], t.go from [Sales].[Customer] as t")
 
@@ -361,6 +387,7 @@ def test_a_column_called_go_is_not_a_batch_separator():
 # --- the same rules, at repository parse --------------------------------------
 
 
+@weaver_test()
 def test_the_repository_accepts_setup_and_one_query():
     document = _document(
         """select [Customer id]
@@ -373,6 +400,7 @@ select [Customer id] from #Working"""
     assert document.document.kind == "Table"
 
 
+@weaver_test()
 def test_the_repository_accepts_two_queries_for_an_incremental_keyed_table():
     document = _document(
         """select [Customer id] from #Working;
@@ -384,6 +412,7 @@ select [Customer id] from #Retired""",
     assert document.document.is_incremental
 
 
+@weaver_test()
 def test_the_repository_refuses_a_second_query_without_incremental():
     with pytest.raises(DiscoveryError, match="non-incremental table cannot name"):
         _document(
@@ -393,6 +422,7 @@ select [Customer id] from #Retired"""
         )
 
 
+@weaver_test()
 def test_the_repository_refuses_three_queries():
     with pytest.raises(DiscoveryError, match="produce results"):
         _document(
@@ -405,11 +435,13 @@ select 3 as [Customer id]""",
         )
 
 
+@weaver_test()
 def test_the_repository_refuses_a_body_with_no_visible_query():
     with pytest.raises(DiscoveryError, match="visible SELECT"):
         _document("exec sp_executesql N'select [Customer id] from [Sales].[Customer]';")
 
 
+@weaver_test()
 def test_the_repository_accepts_dynamic_setup_before_a_visible_query():
     """Unknowable result-set analysis is not a reason to refuse a body."""
 

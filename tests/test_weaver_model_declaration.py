@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import WeaverDocument
 from weaver.declaration.metadata import SesDocument
@@ -17,6 +18,7 @@ from weaver.errors import DiscoveryError, IdentityError
 from weaver.targets import DeltaTarget
 
 
+@weaver_test()
 def test_item_and_document_identities_round_trip_exactly():
     item = WeaverItemId.parse("Lakehouse/Raw")
     table = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
@@ -28,6 +30,7 @@ def test_item_and_document_identities_round_trip_exactly():
     assert table != folder
 
 
+@weaver_test()
 def test_same_object_name_in_distinct_typed_items_is_distinct():
     lakehouse = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
     warehouse = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
@@ -46,16 +49,19 @@ def test_same_object_name_in_distinct_typed_items_is_distinct():
         "Lakehouse/Raw/Extra",
     ],
 )
+@weaver_test()
 def test_item_type_and_shape_are_strict(text):
     with pytest.raises(IdentityError):
         WeaverItemId.parse(text)
 
 
+@weaver_test()
 def test_files_documents_only_belong_to_lakehouses():
     with pytest.raises(IdentityError, match="only belong to a Lakehouse"):
         WeaverDocumentId.parse("Warehouse/Reporting/Files/Sales.Export")
 
 
+@weaver_test()
 def test_lookup_is_exact_case():
     item_id = WeaverItemId.parse("Lakehouse/Raw")
     item = WeaverItem(
@@ -72,6 +78,7 @@ def test_lookup_is_exact_case():
         item["sales.Customer"]
 
 
+@weaver_test()
 def test_case_only_duplicate_declarations_are_rejected():
     item_id = WeaverItemId.parse("Lakehouse/Raw")
     with pytest.raises(DiscoveryError, match="differ only by case"):
@@ -84,6 +91,7 @@ def test_case_only_duplicate_declarations_are_rejected():
         )
 
 
+@weaver_test()
 def test_logical_identity_is_independent_of_physical_binding():
     logical = WeaverItemId.parse("Lakehouse/Curated")
     development = {logical: DeltaTarget.parse("Curated_Dev")}
@@ -93,6 +101,7 @@ def test_logical_identity_is_independent_of_physical_binding():
     assert development[logical] != production[logical]
 
 
+@weaver_test()
 def test_weaver_document_is_the_canonical_metadata_name_during_transition():
     assert SesDocument is WeaverDocument
     assert WeaverDocument.__name__ == "WeaverDocument"

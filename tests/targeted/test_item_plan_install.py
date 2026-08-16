@@ -25,6 +25,7 @@ from factories import (
     spark_view,
     target_inventory,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import plan_item_build
 
@@ -76,6 +77,7 @@ def customer(tmp_path):
 # --- the ordinary case --------------------------------------------------------
 
 
+@weaver_test()
 def test_a_new_table_gets_its_schema_created_before_it_is_built(customer):
     """The schema has to exist first, and the inventory says it does not."""
 
@@ -92,6 +94,7 @@ def test_a_new_table_gets_its_schema_created_before_it_is_built(customer):
     assert kinds(planned)[:2] == ["create_schema", "build_table"]
 
 
+@weaver_test()
 def test_an_existing_schema_is_not_created_again(customer):
     identity = document_id("DWG.Customer")
 
@@ -106,6 +109,7 @@ def test_an_existing_schema_is_not_created_again(customer):
     assert "build_table" in kinds(planned)
 
 
+@weaver_test()
 def test_an_item_with_nothing_selected_plans_no_work_at_all(customer):
     """The unchanged case. An already-correct estate must cost nothing."""
 
@@ -118,6 +122,7 @@ def test_an_item_with_nothing_selected_plans_no_work_at_all(customer):
     assert planned.stages == ()
 
 
+@weaver_test()
 def test_a_delta_mutation_closes_the_item_with_an_endpoint_refresh(customer):
     """A Lakehouse's SQL endpoint lags its Delta tables, so the item ends here."""
 
@@ -134,6 +139,7 @@ def test_a_delta_mutation_closes_the_item_with_an_endpoint_refresh(customer):
 # --- prune and drop -----------------------------------------------------------
 
 
+@weaver_test()
 def test_an_unmanaged_object_is_pruned_before_anything_is_built(customer):
     """Prune is the destructive direction and must precede the constructive one."""
 
@@ -149,6 +155,7 @@ def test_an_unmanaged_object_is_pruned_before_anything_is_built(customer):
     assert kinds(planned) == ["prune_table", "build_table", "refresh_sql_endpoint"]
 
 
+@weaver_test()
 def test_a_declared_object_present_in_the_inventory_is_never_pruned(customer):
     """What prune spares is the assertion worth making — it is destructive."""
 
@@ -164,6 +171,7 @@ def test_a_declared_object_present_in_the_inventory_is_never_pruned(customer):
     assert "prune_table" not in kinds(planned)
 
 
+@weaver_test()
 def test_an_object_being_rebuilt_is_dropped_before_it_is_built(customer):
     """A drop clears the way for a rebuild; it is not how a removal is handled.
 
@@ -190,6 +198,7 @@ def test_an_object_being_rebuilt_is_dropped_before_it_is_built(customer):
     assert kinds(planned).index("drop_table") < kinds(planned).index("build_table")
 
 
+@weaver_test()
 def test_a_drop_needs_the_registry_to_say_what_type_the_object_is(customer):
     """Weaver drops what it certified, by the type it certified — not by guessing.
 
@@ -212,6 +221,7 @@ def test_a_drop_needs_the_registry_to_say_what_type_the_object_is(customer):
         )
 
 
+@weaver_test()
 def test_an_object_belonging_to_another_item_is_left_alone(customer):
     """Items are planned one at a time and must not reach across."""
 
@@ -230,6 +240,7 @@ def test_an_object_belonging_to_another_item_is_left_alone(customer):
 # --- dependency ordering within the item --------------------------------------
 
 
+@weaver_test()
 def test_a_view_is_built_after_the_table_it_reads(tmp_path):
     """Inside an item, the document graph orders the work."""
 
@@ -264,6 +275,7 @@ def test_a_view_is_built_after_the_table_it_reads(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_warehouse_item_orders_its_objects_by_dependency(tmp_path):
     """The same ordering claim on the SQL side, and it needs no Warehouse.
 
@@ -318,6 +330,7 @@ def test_a_warehouse_item_orders_its_objects_by_dependency(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_folder_is_planned_without_any_schema_creation(tmp_path):
     """A folder lives under Files and has no catalogue schema to create."""
 

@@ -9,6 +9,8 @@ previous shape never modelled.
 
 from __future__ import annotations
 
+from support.weaver_test import weaver_test
+
 from weaver.fabric.auth import TokenProvider, token_source
 from weaver.fabric.client import FabricClient
 from weaver.fabric.livy import LivySession
@@ -58,6 +60,7 @@ def _provider(monkeypatch, *, lifetime=3600.0, margin=300.0):
 # --- the provider -------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_token_is_reused_while_it_is_comfortably_valid(monkeypatch):
     provider, credential, advance = _provider(monkeypatch)
 
@@ -69,6 +72,7 @@ def test_a_token_is_reused_while_it_is_comfortably_valid(monkeypatch):
     assert credential.calls == 1
 
 
+@weaver_test()
 def test_a_token_is_renewed_before_it_expires_not_after(monkeypatch):
     """Renewed inside the margin, so a call in flight still carries a valid one."""
 
@@ -82,6 +86,7 @@ def test_a_token_is_renewed_before_it_expires_not_after(monkeypatch):
     assert credential.calls == 2
 
 
+@weaver_test()
 def test_a_nearly_spent_token_is_renewed_on_first_use(monkeypatch):
     """The CLI's cache can hand over a token with minutes left, not an hour."""
 
@@ -94,6 +99,7 @@ def test_a_nearly_spent_token_is_renewed_on_first_use(monkeypatch):
     assert credential.calls == 2
 
 
+@weaver_test()
 def test_the_credential_is_built_once_and_kept(monkeypatch):
     """Rebuilding it per call would shell out to `az` every request."""
 
@@ -109,6 +115,7 @@ def test_the_credential_is_built_once_and_kept(monkeypatch):
 # --- what a caller may supply -------------------------------------------------
 
 
+@weaver_test()
 def test_a_supplied_string_is_honoured_exactly(monkeypatch):
     """The caller owns it, and its lifetime — a Fabric session passes one on."""
 
@@ -118,6 +125,7 @@ def test_a_supplied_string_is_honoured_exactly(monkeypatch):
     assert source() == "fixed"
 
 
+@weaver_test()
 def test_a_supplied_callable_is_asked_every_time():
     """A caller with its own refresh keeps it."""
 
@@ -130,6 +138,7 @@ def test_a_supplied_callable_is_asked_every_time():
 # --- the clients that hold one ------------------------------------------------
 
 
+@weaver_test()
 def test_every_fabric_client_reads_its_token_per_request(monkeypatch):
     """The three that used to cache the string permanently.
 
@@ -151,6 +160,7 @@ def test_every_fabric_client_reads_its_token_per_request(monkeypatch):
         assert first != second, f"{type(client).__name__} cached its token"
 
 
+@weaver_test()
 def test_a_livy_session_given_a_token_keeps_using_that_one():
     """An explicitly supplied token is the caller's to manage."""
 

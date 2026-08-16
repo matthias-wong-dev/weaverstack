@@ -7,6 +7,7 @@ import threading
 import time
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.catalogue.flusher import FlushError, WarehouseFlusher
@@ -65,6 +66,7 @@ def a_flusher(execute, **kwargs) -> WarehouseFlusher:
 # --- accepting a row ----------------------------------------------------------
 
 
+@weaver_test()
 def test_submit_does_not_wait_for_the_warehouse():
     recorder = Recorder()
     recorder.block = True
@@ -79,6 +81,7 @@ def test_submit_does_not_wait_for_the_warehouse():
     assert len(recorder.statements) == 1
 
 
+@weaver_test()
 def test_every_accepted_row_is_written():
     recorder = Recorder()
     flusher = a_flusher(recorder)
@@ -92,6 +95,7 @@ def test_every_accepted_row_is_written():
         assert f"Table{index}" in written
 
 
+@weaver_test()
 def test_a_worker_tds_event_keeps_the_context_that_queued_it():
     with ConsoleSession(progress=False) as session:
         def execute(statement):
@@ -113,6 +117,7 @@ def test_a_worker_tds_event_keeps_the_context_that_queued_it():
     assert (event.task, event.step, event.substep) == ("Load", "Logging", None)
 
 
+@weaver_test()
 def test_rows_are_written_in_the_order_they_were_submitted():
     recorder = Recorder()
     flusher = a_flusher(recorder)
@@ -126,6 +131,7 @@ def test_rows_are_written_in_the_order_they_were_submitted():
     assert positions == sorted(positions)
 
 
+@weaver_test()
 def test_rows_may_batch_into_one_statement():
     recorder = Recorder()
     recorder.block = True
@@ -139,6 +145,7 @@ def test_rows_may_batch_into_one_statement():
     assert len(recorder.statements) < 5
 
 
+@weaver_test()
 def test_a_row_reaches_the_public_column_names():
     recorder = Recorder()
     flusher = a_flusher(recorder)
@@ -157,6 +164,7 @@ def test_a_row_reaches_the_public_column_names():
 # --- failure ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_background_failure_is_surfaced_by_flush():
     flusher = a_flusher(Recorder(fail=RuntimeError("the warehouse said no")))
 
@@ -166,6 +174,7 @@ def test_a_background_failure_is_surfaced_by_flush():
         flusher.flush()
 
 
+@weaver_test()
 def test_a_background_failure_is_surfaced_by_close():
     flusher = a_flusher(Recorder(fail=RuntimeError("the warehouse said no")))
 
@@ -175,6 +184,7 @@ def test_a_background_failure_is_surfaced_by_close():
         flusher.close()
 
 
+@weaver_test()
 def test_a_closed_flusher_accepts_no_more_rows():
     flusher = a_flusher(Recorder())
     flusher.submit(a_row())
@@ -184,6 +194,7 @@ def test_a_closed_flusher_accepts_no_more_rows():
         flusher.submit(a_row())
 
 
+@weaver_test()
 def test_a_flusher_nothing_was_submitted_to_writes_nothing():
     recorder = Recorder()
     flusher = a_flusher(recorder)
@@ -201,11 +212,13 @@ def _session():
     return TestSession(workspace=given_workspace(catalogue="Warehouse/Weaver"))
 
 
+@weaver_test()
 def test_opening_a_session_creates_no_flusher():
     with _session() as session:
         assert session._flushers == {}
 
 
+@weaver_test()
 def test_a_session_reuses_one_flusher_for_one_stream():
     warehouse = WarehouseTarget.parse("Weaver")
     with _session() as session:
@@ -215,6 +228,7 @@ def test_a_session_reuses_one_flusher_for_one_stream():
         assert first is second
 
 
+@weaver_test()
 def test_two_warehouses_are_two_streams():
     with _session() as session:
         first = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
@@ -223,6 +237,7 @@ def test_two_warehouses_are_two_streams():
         assert first is not second
 
 
+@weaver_test()
 def test_session_close_writes_every_accepted_row():
     session = _session()
     flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
@@ -236,6 +251,7 @@ def test_session_close_writes_every_accepted_row():
         assert f"Table{index}" in written
 
 
+@weaver_test()
 def test_the_final_flush_happens_while_the_session_can_still_write():
     written_while_open: list[bool] = []
     session = _session()
@@ -260,6 +276,7 @@ def test_the_final_flush_happens_while_the_session_can_still_write():
     )
 
 
+@weaver_test()
 def test_a_closed_session_hands_out_no_flusher():
     session = _session()
     session.close()
@@ -268,6 +285,7 @@ def test_a_closed_session_hands_out_no_flusher():
         session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
 
 
+@weaver_test()
 def test_session_close_surfaces_a_background_failure():
     session = _session()
     flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
@@ -280,6 +298,7 @@ def test_session_close_surfaces_a_background_failure():
     assert not session.closed
 
 
+@weaver_test()
 def test_close_reports_a_worker_that_did_not_stop():
     recorder = Recorder()
     recorder.block = True
@@ -297,6 +316,7 @@ def test_close_reports_a_worker_that_did_not_stop():
     flusher.close()
 
 
+@weaver_test()
 def test_a_flusher_timeout_stops_session_teardown():
     recorder = Recorder()
     recorder.block = True
@@ -317,6 +337,7 @@ def test_a_flusher_timeout_stops_session_teardown():
     session.close()
 
 
+@weaver_test()
 def test_a_flusher_writes_through_the_session(monkeypatch):
     seen: list[tuple[str, object]] = []
     session = _session()
@@ -335,6 +356,7 @@ def test_a_flusher_writes_through_the_session(monkeypatch):
     assert target is warehouse
 
 
+@weaver_test()
 def test_a_slow_worker_does_not_hang_a_flush_for_ever():
     recorder = Recorder()
     recorder.block = True
@@ -367,6 +389,7 @@ class GatedQueue(queue.Queue):
         super().put(item, *args, **kwargs)
 
 
+@weaver_test()
 def test_a_row_accepted_before_close_is_written_even_if_close_overtakes_it():
     recorder = Recorder()
     flusher = a_flusher(recorder)
@@ -393,6 +416,7 @@ def test_a_row_accepted_before_close_is_written_even_if_close_overtakes_it():
     assert "Second" in written
 
 
+@weaver_test()
 def test_a_stream_opened_while_the_session_is_closing_is_refused():
     session = _session()
     started = threading.Event()
@@ -421,6 +445,7 @@ def test_a_stream_opened_while_the_session_is_closing_is_refused():
     assert written == [True]
 
 
+@weaver_test()
 def test_run_logs_inherit_the_session_workflow():
     from weaver.run import open_run_log
 

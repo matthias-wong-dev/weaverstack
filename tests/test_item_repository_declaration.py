@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
@@ -119,6 +120,7 @@ def _estate(tmp_path: Path) -> Path:
     return root
 
 
+@weaver_test()
 def test_reads_multiple_items_and_owned_documents_without_execution(tmp_path):
     root = _estate(tmp_path)
     repository = parse_item_repository(Location(str(root)))
@@ -140,6 +142,7 @@ def test_reads_multiple_items_and_owned_documents_without_execution(tmp_path):
     assert "Lakehouse/Raw/lib/csv_helpers.py" in repository.support_files
 
 
+@weaver_test()
 def test_ignore_is_completely_absent_including_from_signature(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
@@ -150,6 +153,7 @@ def test_ignore_is_completely_absent_including_from_signature(tmp_path):
     assert all("_ignore" not in path for path in after.support_files)
 
 
+@weaver_test()
 def test_ordinary_content_changes_the_signature(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root))).signature
@@ -157,6 +161,7 @@ def test_ordinary_content_changes_the_signature(tmp_path):
     assert parse_item_repository(Location(str(root))).signature != before
 
 
+@weaver_test()
 def test_an_unrelated_item_changes_the_repository_but_not_this_item_signature(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
@@ -172,6 +177,7 @@ def test_an_unrelated_item_changes_the_repository_but_not_this_item_signature(tm
     assert after["Warehouse/Audit"].signature != before["Warehouse/Audit"].signature
 
 
+@weaver_test()
 def test_item_signature_covers_its_schema_document_and_support_files(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
@@ -198,6 +204,7 @@ def test_item_signature_covers_its_schema_document_and_support_files(tmp_path):
     )
 
 
+@weaver_test()
 def test_python_document_signature_covers_only_its_transitive_lib_imports(tmp_path):
     root = _estate(tmp_path)
     customer_path = root / "Lakehouse/Raw/Sales__Customer.py"
@@ -238,6 +245,7 @@ def test_python_document_signature_covers_only_its_transitive_lib_imports(tmp_pa
     )
 
 
+@weaver_test()
 def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
@@ -256,6 +264,7 @@ def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
         assert after[unchanged].signature == before[unchanged].signature
 
 
+@weaver_test()
 def test_user_authored_init_is_rejected_outside_ignore(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/lib/__init__.py", "")
@@ -263,6 +272,7 @@ def test_user_authored_init_is_rejected_outside_ignore(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_other_underscore_directory_is_not_ignored(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/_draft/note.txt", "parked in the wrong place")
@@ -270,6 +280,7 @@ def test_other_underscore_directory_is_not_ignored(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_empty_other_underscore_directory_is_still_discovered(tmp_path):
     root = _estate(tmp_path)
     (root / "Lakehouse/Raw/_draft").mkdir(parents=True)
@@ -277,6 +288,7 @@ def test_empty_other_underscore_directory_is_still_discovered(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_the_owning_item_decides_which_sql_a_document_speaks(tmp_path):
     """One filename, two dialects — the directory above it is the difference.
 
@@ -299,6 +311,7 @@ def test_the_owning_item_decides_which_sql_a_document_speaks(tmp_path):
     assert warehouse.language == "sql"
 
 
+@weaver_test()
 def test_a_dialect_suffix_is_not_a_document_name(tmp_path):
     """``Sales.Rollup.spark`` is not Schema.Object, so the file names nothing.
 
@@ -315,6 +328,7 @@ def test_a_dialect_suffix_is_not_a_document_name(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_an_alias_declared_at_the_root_names_the_item_it_belongs_to(tmp_path):
     root = _estate(tmp_path)
     _write(
@@ -328,6 +342,7 @@ def test_an_alias_declared_at_the_root_names_the_item_it_belongs_to(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_an_item_local_alias_does_not_repeat_its_own_item(tmp_path):
     root = _estate(tmp_path)
     _write(
@@ -341,6 +356,7 @@ def test_an_item_local_alias_does_not_repeat_its_own_item(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_an_item_alias_certifies_only_its_own_item(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
@@ -357,6 +373,7 @@ def test_an_item_alias_certifies_only_its_own_item(tmp_path):
     assert "Warehouse/Audit/alias.yml" in after.support_files
 
 
+@weaver_test()
 def test_schema_must_be_declared_by_the_owning_item(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/Other__Thing.py", _table("Other.Thing"))
@@ -364,6 +381,7 @@ def test_schema_must_be_declared_by_the_owning_item(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_item_type_is_exact(tmp_path):
     root = _estate(tmp_path)
     # Use a distinct spelling so this remains meaningful on case-insensitive
@@ -373,6 +391,7 @@ def test_item_type_is_exact(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     builtin = repository["Warehouse/_weaver"]
@@ -387,6 +406,7 @@ def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     assert repository.generated_files
 
 
+@weaver_test()
 def test_generated_weaver_item_is_composed_without_mutating_authored_tree(tmp_path):
     root = _estate(tmp_path)
     location = Location(str(root))
@@ -396,6 +416,7 @@ def test_generated_weaver_item_is_composed_without_mutating_authored_tree(tmp_pa
     assert not (root / "Lakehouse" / "_weaver").exists()
 
 
+@weaver_test()
 def test_authored_weaver_item_is_rejected(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Warehouse/_weaver/schemas/_.yml", _schema("_"))
@@ -403,6 +424,7 @@ def test_authored_weaver_item_is_rejected(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_canonical_metadata_reference_resolves_across_items(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
@@ -417,6 +439,7 @@ def test_canonical_metadata_reference_resolves_across_items(tmp_path):
     ].document.description.is_reference
 
 
+@weaver_test()
 def test_short_metadata_reference_is_item_relative_and_exact_case(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
@@ -427,6 +450,7 @@ def test_short_metadata_reference_is_item_relative_and_exact_case(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_files_metadata_reference_uses_its_distinct_namespace(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
@@ -436,6 +460,7 @@ def test_files_metadata_reference_uses_its_distinct_namespace(tmp_path):
     parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_aliases_are_item_local_and_one_source_may_repeat(tmp_path):
     """Two items may each name the same producer under their own local name."""
 
@@ -456,6 +481,7 @@ def test_aliases_are_item_local_and_one_source_may_repeat(tmp_path):
     }
 
 
+@weaver_test()
 def test_alias_destination_must_not_collide_with_a_native_document(tmp_path):
     root = _estate(tmp_path)
     _write(
@@ -469,6 +495,7 @@ def test_alias_destination_must_not_collide_with_a_native_document(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_an_alias_may_not_name_a_source_its_own_item_owns(tmp_path):
     """An alias crosses items. Within one, the document graph already orders
     producer before consumer — and the alias stage runs before every document
@@ -487,6 +514,7 @@ def test_an_alias_may_not_name_a_source_its_own_item_owns(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_alias_source_must_resolve_with_exact_case(tmp_path):
     root = _estate(tmp_path)
     _write(
@@ -500,6 +528,7 @@ def test_alias_source_must_resolve_with_exact_case(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_alias_rejects_physical_three_part_names(tmp_path):
     root = _estate(tmp_path)
     _write(
@@ -513,6 +542,7 @@ def test_alias_rejects_physical_three_part_names(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_duplicate_alias_destination_is_rejected_by_yaml_reader(tmp_path):
     root = _estate(tmp_path)
     _write(
@@ -527,6 +557,7 @@ def test_duplicate_alias_destination_is_rejected_by_yaml_reader(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_metadata_reference_may_resolve_through_alias_destination(tmp_path):
     root = _estate(tmp_path)
     source = _warehouse_table("Sales.Change").replace(
@@ -544,6 +575,7 @@ def test_metadata_reference_may_resolve_through_alias_destination(tmp_path):
     parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_item_metadata_reference_cycle_is_a_hard_error(tmp_path):
     root = _estate(tmp_path)
     raw = _table("Sales.Customer").replace(
@@ -560,6 +592,7 @@ def test_item_metadata_reference_cycle_is_a_hard_error(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_canonical_foreign_key_target_is_validated(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
@@ -572,6 +605,7 @@ def test_canonical_foreign_key_target_is_validated(tmp_path):
     parse_item_repository(Location(str(root)))
 
 
+@weaver_test()
 def test_document_local_alias_headers_are_rejected_in_new_layout(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(

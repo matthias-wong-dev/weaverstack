@@ -10,6 +10,7 @@ shares its ID.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import (
     IDENTITY_COLUMN_NOTE,
@@ -82,6 +83,7 @@ select cast(null as string) as `Order id`
 """
 
 
+@weaver_test()
 def test_literal_prose_resolves_to_itself_with_no_reference(tmp_path):
     repo = _repo(tmp_path, {"Sales.Order.sql": PARENT})
     document = repo["Sales.Order"]
@@ -93,6 +95,7 @@ def test_literal_prose_resolves_to_itself_with_no_reference(tmp_path):
     assert not resolved.is_reference
 
 
+@weaver_test()
 def test_a_reference_copies_the_target_s_description(tmp_path):
     child = PARENT.replace(
         "Table ID: Sales.Order", "Table ID: Sales.OrderCopy"
@@ -109,6 +112,7 @@ def test_a_reference_copies_the_target_s_description(tmp_path):
     assert resolved.reference == "$Sales.Order"
 
 
+@weaver_test()
 def test_a_column_reference_copies_that_column_s_note(tmp_path):
     child = PARENT.replace(
         "Table ID: Sales.Order", "Table ID: Sales.OrderCopy"
@@ -124,6 +128,7 @@ def test_a_column_reference_copies_that_column_s_note(tmp_path):
     assert resolved.literal == "Gross order amount, before discount."
 
 
+@weaver_test()
 def test_a_chain_is_followed_to_the_literal_at_its_end(tmp_path):
     middle = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Middle").replace(
         "Description: One row per confirmed customer order.",
@@ -150,6 +155,7 @@ def test_a_chain_is_followed_to_the_literal_at_its_end(tmp_path):
     assert resolved.reference == "$Sales.Middle"
 
 
+@weaver_test()
 def test_a_cycle_is_an_error_because_it_has_no_text_to_copy(tmp_path):
     left = PARENT.replace("Table ID: Sales.Order", "Table ID: Sales.Left").replace(
         "Description: One row per confirmed customer order.",
@@ -162,6 +168,7 @@ def test_a_cycle_is_an_error_because_it_has_no_text_to_copy(tmp_path):
         _repo(tmp_path, {"Sales.Left.sql": left, "Sales.Right.sql": right})
 
 
+@weaver_test()
 def test_a_reference_that_names_nothing_is_rejected_when_read(tmp_path):
     """Exact identity means a dangling documentation pointer is an error.
 
@@ -181,6 +188,7 @@ def test_a_reference_that_names_nothing_is_rejected_when_read(tmp_path):
         _repo(tmp_path, {"Sales.OrderCopy.sql": child})
 
 
+@weaver_test()
 def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
     """A Warehouse table's lineage names the Lakehouse table it came from.
 
@@ -220,12 +228,14 @@ def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
 # --- what the column dictionary describes -----------------------------------
 
 
+@weaver_test()
 def test_declared_column_notes_are_the_columns_an_author_described(tmp_path):
     repo = _repo(tmp_path, {"Sales.Order.sql": PARENT})
     notes = declared_column_notes(repo["Sales.Order"])
     assert [name for name, _note in notes] == ["Amount"]
 
 
+@weaver_test()
 def test_the_identity_column_gets_a_generic_note_no_author_writes(tmp_path):
     # A Warehouse item, because only a Warehouse table may declare Identity.
     source = PARENT.replace("Schema:", "Identity: Order key\n\nSchema:")
@@ -236,6 +246,7 @@ def test_the_identity_column_gets_a_generic_note_no_author_writes(tmp_path):
     assert [name for name, _note in notes] == ["Order key", "Amount"]
 
 
+@weaver_test()
 def test_an_inferred_object_s_notes_come_from_its_raw_block(tmp_path):
     source = """\
 /*

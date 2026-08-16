@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 
+from support.weaver_test import weaver_test
+
 from weaver.sql import (
     AccessTokenAuthentication,
     SqlConnectionPool,
@@ -24,6 +26,7 @@ class Connection:
 AUTH = AccessTokenAuthentication(lambda: "token")
 
 
+@weaver_test()
 def test_connections_are_reused_and_closed_with_the_pool():
     created = []
 
@@ -45,6 +48,7 @@ def test_connections_are_reused_and_closed_with_the_pool():
     assert created[0].closed
 
 
+@weaver_test()
 def test_an_active_lease_is_never_shared_and_the_bound_is_respected():
     created = []
     endpoint = SqlEndpoint("one.example", "Reporting")
@@ -76,6 +80,7 @@ def test_an_active_lease_is_never_shared_and_the_bound_is_respected():
     pool.close()
 
 
+@weaver_test()
 def test_discarded_connections_are_not_reused():
     created = []
 
@@ -100,6 +105,7 @@ def test_discarded_connections_are_not_reused():
     pool.close()
 
 
+@weaver_test()
 def test_a_registry_keeps_separate_pools_per_stable_endpoint():
     registry = SqlPoolRegistry()
     one = SqlEndpoint(
@@ -168,6 +174,7 @@ def _droppable_pool(created, **kwargs):
     )
 
 
+@weaver_test()
 def test_a_connection_dropped_while_idle_is_replaced_rather_than_handed_out(
     monkeypatch,
 ):
@@ -194,6 +201,7 @@ def test_a_connection_dropped_while_idle_is_replaced_rather_than_handed_out(
     assert created[0].closed, "the dead one was closed rather than leaked"
 
 
+@weaver_test()
 def test_a_connection_reused_promptly_is_not_checked(monkeypatch):
     """The check costs a round trip, so back-to-back work must not pay it."""
 
@@ -209,6 +217,7 @@ def test_a_connection_reused_promptly_is_not_checked(monkeypatch):
     assert created[0].statements == [], "a healthy connection was interrogated"
 
 
+@weaver_test()
 def test_the_pool_does_not_shrink_when_it_replaces_a_dead_connection(monkeypatch):
     """Otherwise every drop would permanently cost the pool a slot."""
 

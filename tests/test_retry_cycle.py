@@ -32,6 +32,7 @@ import os
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 
@@ -107,6 +108,7 @@ def attempts(*statuses):
 # --- the loop -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_task_that_succeeds_is_never_asked_about(args, monkeypatch):
     terminal = _Terminal(monkeypatch)
     attempt = attempts(0)
@@ -116,6 +118,7 @@ def test_a_task_that_succeeds_is_never_asked_about(args, monkeypatch):
     assert terminal.presses == 0
 
 
+@weaver_test()
 def test_a_failure_offers_a_retry_and_runs_the_whole_task_again(args, monkeypatch):
     terminal = _Terminal(monkeypatch, keys=[ENTER])
     attempt = attempts(1, 0)
@@ -125,6 +128,7 @@ def test_a_failure_offers_a_retry_and_runs_the_whole_task_again(args, monkeypatc
     assert terminal.presses == 1
 
 
+@weaver_test()
 def test_retrying_repeatedly_is_allowed(args, monkeypatch):
     """A developer fixes one thing and finds the next. That is ordinary."""
 
@@ -135,6 +139,7 @@ def test_retrying_repeatedly_is_allowed(args, monkeypatch):
     assert len(attempt.calls) == 4
 
 
+@weaver_test()
 def test_the_prompt_says_how_to_leave(args, monkeypatch, capsys):
     """An interaction that only offers "try again" is a trap."""
 
@@ -151,6 +156,7 @@ def test_the_prompt_says_how_to_leave(args, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("key", [ESC, "\x03", "\x04"])
+@weaver_test()
 def test_leaving_returns_the_failure(args, monkeypatch, key):
     """Esc leaves; Ctrl-C and Ctrl-D are the operator declining too."""
 
@@ -161,6 +167,7 @@ def test_leaving_returns_the_failure(args, monkeypatch, key):
     assert len(attempt.calls) == 1
 
 
+@weaver_test()
 def test_a_stray_key_decides_nothing(args, monkeypatch):
     """Somebody tabbing back to the terminal and hitting a key has not
     answered, so the prompt keeps waiting rather than guessing."""
@@ -173,6 +180,7 @@ def test_a_stray_key_decides_nothing(args, monkeypatch):
     assert len(attempt.calls) == 2
 
 
+@weaver_test()
 def test_an_end_of_input_declines_rather_than_looping(args, monkeypatch):
     """Ctrl-D at the prompt is the operator declining, not a failure of its own."""
 
@@ -181,6 +189,7 @@ def test_an_end_of_input_declines_rather_than_looping(args, monkeypatch):
     assert _until_fixed(args, attempts(1)) == 1
 
 
+@weaver_test()
 def test_an_interrupt_at_the_prompt_declines(args, monkeypatch):
     """Ctrl-C remains an operator interrupt. It is not a failed retry."""
 
@@ -197,6 +206,7 @@ def test_an_interrupt_at_the_prompt_declines(args, monkeypatch):
 # --- non-interactive ----------------------------------------------------------
 
 
+@weaver_test()
 def test_without_a_terminal_nothing_is_ever_asked(args, monkeypatch):
     """A pipeline gets the first answer, not a prompt it cannot answer."""
 
@@ -210,6 +220,7 @@ def test_without_a_terminal_nothing_is_ever_asked(args, monkeypatch):
     assert pressed == []
 
 
+@weaver_test()
 def test_a_non_interactive_run_opens_no_session_of_its_own(monkeypatch):
     """Nothing is retried, so nothing needs holding open — and resolving a
     workspace to hold it would make a failure happen in a new place."""
@@ -235,6 +246,7 @@ class _Session:
         self.closed = True
 
 
+@weaver_test()
 def test_every_attempt_runs_in_one_session(args, monkeypatch):
     """The reason retry is worth having: no cold start between fixes."""
 
@@ -252,6 +264,7 @@ def test_every_attempt_runs_in_one_session(args, monkeypatch):
     assert seen[0] is not None
 
 
+@weaver_test()
 def test_a_borrowed_session_is_used_and_left_open(monkeypatch):
     """Inside `weaver session`, the console owns the Session and outlives the
     command that failed in it."""
@@ -272,6 +285,7 @@ def test_a_borrowed_session_is_used_and_left_open(monkeypatch):
     assert not session.closed
 
 
+@weaver_test()
 def test_a_task_failure_is_not_a_resource_failure(args, monkeypatch):
     """A SQL syntax error, a Python import error, a bad declaration: none of
     them is a reason to throw away a Livy session that is still up.
@@ -304,6 +318,7 @@ def test_a_task_failure_is_not_a_resource_failure(args, monkeypatch):
 # --- what a retried Task re-reads ---------------------------------------------
 
 
+@weaver_test()
 def test_a_retry_re_runs_the_task_rather_than_resuming_inside_it(args, monkeypatch):
     """The Task is a callable that is simply called again.
 
@@ -327,6 +342,7 @@ def test_a_retry_re_runs_the_task_rather_than_resuming_inside_it(args, monkeypat
     assert read == ["broken", "fixed"]
 
 
+@weaver_test()
 def test_a_raised_weaver_error_is_not_swallowed_by_the_loop(args, monkeypatch):
     """A command that raises rather than returning a status keeps raising.
 
@@ -346,6 +362,7 @@ def test_a_raised_weaver_error_is_not_swallowed_by_the_loop(args, monkeypatch):
 # --- one prompt, for every Task that offers a retry ---------------------------
 
 
+@weaver_test()
 def test_the_prompt_instructs_nothing(args, monkeypatch, capsys):
     """A build failure has already printed `Source: …`; telling somebody who
     just read it to fix the file is telling them the obvious. And a load whose
@@ -358,6 +375,7 @@ def test_the_prompt_instructs_nothing(args, monkeypatch, capsys):
     assert capsys.readouterr().err.strip().endswith("Enter to retry, Esc to exit.")
 
 
+@weaver_test()
 def test_every_retryable_command_offers_the_same_prompt():
     """Read off the wiring, so a fourth command cannot acquire wording of its
     own without somebody deciding to give it one."""
@@ -394,6 +412,7 @@ def test_every_retryable_command_offers_the_same_prompt():
         (b"\x1bOP", r"'\x1bOP'"),
     ],
 )
+@weaver_test()
 def test_one_keypress_is_read_as_itself(sent, expected):
     import pty
     import sys

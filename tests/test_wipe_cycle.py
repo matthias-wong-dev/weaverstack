@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver import wipe as public_wipe
 from weaver.errors import CommandError
@@ -26,6 +27,7 @@ def folder_target(name: str = "Sales_LH/Files") -> FolderTarget:
 # --- folders -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_wipe_empties_the_folder_target(populated_folders):
     report = wipe_folder_target(
         folder_target(),
@@ -45,6 +47,7 @@ def test_a_wipe_empties_the_folder_target(populated_folders):
     )
 
 
+@weaver_test()
 def test_the_configured_root_survives_its_own_wipe(populated_folders):
     root = populated_folders.resolver.folder_root(folder_target())
     wipe_folder_target(
@@ -56,6 +59,7 @@ def test_the_configured_root_survives_its_own_wipe(populated_folders):
     assert root.path.is_dir()
 
 
+@weaver_test()
 def test_a_dry_run_reports_without_removing(populated_folders):
     report = wipe_folder_target(
         folder_target(),
@@ -71,6 +75,7 @@ def test_a_dry_run_reports_without_removing(populated_folders):
     ).path.exists()
 
 
+@weaver_test()
 def test_wiping_an_empty_target_is_quiet(lakehouses):
     report = wipe_folder_target(
         folder_target(), lakehouses.workspace, session=lakehouses.session
@@ -78,6 +83,7 @@ def test_wiping_an_empty_target_is_quiet(lakehouses):
     assert report.removed == ()
 
 
+@weaver_test()
 def test_wiping_a_lakehouse_that_does_not_exist_says_so(lakehouses):
     """Absent is not empty.
 
@@ -95,6 +101,7 @@ def test_wiping_a_lakehouse_that_does_not_exist_says_so(lakehouses):
         )
 
 
+@weaver_test()
 def test_a_wipe_takes_everything_not_only_what_weaver_manages(populated_folders):
     """A wipe clears the target. That is why a CLI must gate it."""
     report = wipe_folder_target(
@@ -109,6 +116,7 @@ def test_a_wipe_takes_everything_not_only_what_weaver_manages(populated_folders)
 # --- warehouse ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(
     lakehouses, monkeypatch
 ):
@@ -141,6 +149,7 @@ def test_wiping_a_warehouse_executes_the_core_wipe_without_a_store(
     assert "drop table" in sql.scripts[0].lower()
 
 
+@weaver_test()
 def test_a_warehouse_sql_failure_names_the_selected_warehouse(lakehouses):
     class BrokenSql:
         def execute_script(self, script):
@@ -156,6 +165,7 @@ def test_a_warehouse_sql_failure_names_the_selected_warehouse(lakehouses):
         )
 
 
+@weaver_test()
 def test_a_warehouse_wipe_has_no_dry_run_mode(lakehouses):
     with pytest.raises(CommandError, match="does not support dry_run"):
         wipe(
@@ -171,11 +181,13 @@ def test_a_warehouse_wipe_has_no_dry_run_mode(lakehouses):
 # --- composition and safety --------------------------------------------------
 
 
+@weaver_test()
 def test_wipe_needs_at_least_one_target(lakehouses):
     with pytest.raises(CommandError, match="at least one target"):
         wipe(lakehouses.workspace, store=lakehouses.store, session=lakehouses.session)
 
 
+@weaver_test()
 def test_targets_are_independently_optional(populated_folders):
     """Clear the tables and leave downloaded source files alone, or the reverse."""
     reports = wipe(
@@ -188,6 +200,7 @@ def test_targets_are_independently_optional(populated_folders):
     assert reports[0].target.startswith("folder:")
 
 
+@weaver_test()
 def test_a_wipe_refuses_to_reach_outside_the_workspace_root(lakehouses, tmp_path):
     from weaver.locations import Location
     from weaver.physical_wipe import _guard
@@ -198,6 +211,7 @@ def test_a_wipe_refuses_to_reach_outside_the_workspace_root(lakehouses, tmp_path
         )
 
 
+@weaver_test()
 def test_the_report_reads_usefully(populated_folders):
     report = wipe_folder_target(
         folder_target(),
@@ -220,6 +234,7 @@ def test_the_report_reads_usefully(populated_folders):
         ("Warehouse/Reporting", "Warehouse"),
     ],
 )
+@weaver_test()
 def test_public_wipe_uses_one_typed_target_grammar(value, item_type):
     target = WipeTarget.parse(value)
     assert target.item_type == item_type
@@ -233,11 +248,13 @@ def test_public_wipe_uses_one_typed_target_grammar(value, item_type):
         "Lakehouse/Sales/Tables",
     ],
 )
+@weaver_test()
 def test_public_wipe_rejects_partial_lakehouse_targets(value):
     with pytest.raises(CommandError, match="whole physical item"):
         WipeTarget.parse(value)
 
 
+@weaver_test()
 def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
     None
@@ -261,6 +278,7 @@ def test_public_physical_wipe_does_not_require_unbind(monkeypatch):
     assert result.unbound is None
 
 
+@weaver_test()
 def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     monkeypatch,
 ):

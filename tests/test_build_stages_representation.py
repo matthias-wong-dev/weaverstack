@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.models import BuildBatch, InstallAction
 from weaver.build_bundle.stages import (
@@ -44,6 +45,7 @@ def _stage(phase, *, index=0, slug="things", batch="one", payloads=None, actions
     )
 
 
+@weaver_test()
 def test_stages_are_numbered_consecutively_from_one():
     sequences, _payloads, _changes = enumerate_stages(
         [_stage(PRUNE), _stage(ALIAS), _stage(BUILD)]
@@ -52,6 +54,7 @@ def test_stages_are_numbered_consecutively_from_one():
     assert [sequence.number for sequence in sequences] == [1, 2, 3]
 
 
+@weaver_test()
 def test_an_empty_stage_takes_no_number_and_leaves_no_gap():
     empty = PlannedStage(phase=ALIAS, description="nothing to alias", batches=())
 
@@ -66,6 +69,7 @@ def test_an_empty_stage_takes_no_number_and_leaves_no_gap():
     ]
 
 
+@weaver_test()
 def test_payload_paths_and_batch_ids_gain_the_number_they_were_given():
     sequences, payloads, _changes = enumerate_stages(
         [
@@ -87,6 +91,7 @@ def test_payload_paths_and_batch_ids_gain_the_number_they_were_given():
     assert payloads == {"payload/002-build-objects/customer.spark.sql": b"CREATE"}
 
 
+@weaver_test()
 def test_one_layers_same_phase_stages_become_one_barrier_with_a_batch_each():
     merged = merge_layer_stages(
         [
@@ -104,6 +109,7 @@ def test_one_layers_same_phase_stages_become_one_barrier_with_a_batch_each():
     ]
 
 
+@weaver_test()
 def test_dependency_layers_within_a_phase_stay_separate_barriers():
     merged = merge_layer_stages(
         [
@@ -116,6 +122,7 @@ def test_dependency_layers_within_a_phase_stay_separate_barriers():
     assert [stage.batches[0].id for stage in merged] == ["raw-first", "raw-second"]
 
 
+@weaver_test()
 def test_a_payload_key_that_is_not_a_bare_filename_is_refused():
     with pytest.raises(BuildError, match="bare filename"):
         PlannedStage(
@@ -126,6 +133,7 @@ def test_a_payload_key_that_is_not_a_bare_filename_is_refused():
         )
 
 
+@weaver_test()
 def test_an_action_naming_a_payload_its_stage_did_not_supply_is_refused():
     stage = _stage(BUILD, actions=(_action("object", payload="missing.spark.sql"),))
 
@@ -133,6 +141,7 @@ def test_an_action_naming_a_payload_its_stage_did_not_supply_is_refused():
         enumerate_stages([stage])
 
 
+@weaver_test()
 def test_merged_stages_must_agree_about_their_payload_directory():
     with pytest.raises(BuildError, match="disagree about their payload directory"):
         merge_layer_stages(

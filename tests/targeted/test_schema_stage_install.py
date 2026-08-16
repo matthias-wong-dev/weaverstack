@@ -12,6 +12,7 @@ All of it is a set difference plus a rendering, so none of it needs an engine.
 from __future__ import annotations
 
 from factories import bound_target, document_id, item_id, target_inventory
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.physical import item_schema_stage
 
@@ -41,18 +42,21 @@ def payload_of(planned, action):
 # --- which schemas ------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_schema_the_target_lacks_is_created():
     planned = stage(CUSTOMER)
 
     assert [action.kind for action in actions(planned)] == ["create_schema"]
 
 
+@weaver_test()
 def test_a_schema_the_target_already_holds_is_not():
     planned = stage(CUSTOMER, inventory=target_inventory(schemas=("DWG",)))
 
     assert planned is None
 
 
+@weaver_test()
 def test_the_comparison_ignores_case():
     """The physical name's case is the workspace's to choose.
 
@@ -66,12 +70,14 @@ def test_the_comparison_ignores_case():
     assert planned is None
 
 
+@weaver_test()
 def test_nothing_needed_is_no_stage_rather_than_an_empty_one():
     """An empty barrier is still a barrier the installer runs and reports."""
 
     assert stage() is None
 
 
+@weaver_test()
 def test_a_files_document_needs_no_catalogue_schema():
     """A folder lives under Files, which has no schema to create."""
 
@@ -80,12 +86,14 @@ def test_a_files_document_needs_no_catalogue_schema():
     assert planned is None
 
 
+@weaver_test()
 def test_another_items_documents_are_not_this_items_schemas():
     planned = stage("Warehouse/Other/DWG.Thing")
 
     assert planned is None
 
 
+@weaver_test()
 def test_an_alias_namespace_is_created_though_no_document_lives_in_it():
     """The case that cannot be seen from the documents alone.
 
@@ -102,6 +110,7 @@ def test_an_alias_namespace_is_created_though_no_document_lives_in_it():
     ]
 
 
+@weaver_test()
 def test_a_schema_wanted_twice_is_created_once():
     """Two documents in one schema, and an alias in it too, is still one create."""
 
@@ -110,6 +119,7 @@ def test_a_schema_wanted_twice_is_created_once():
     assert len(actions(planned)) == 1
 
 
+@weaver_test()
 def test_schemas_are_ordered_so_the_payload_is_stable():
     """A bundle's identity is its bytes, so set iteration must not reach them."""
 
@@ -123,6 +133,7 @@ def test_schemas_are_ordered_so_the_payload_is_stable():
 # --- what a create looks like on each side ------------------------------------
 
 
+@weaver_test()
 def test_a_lakehouse_schema_is_finished_spark_sql():
     """No instruction for the installer to complete: a Fabric Lakehouse pins
     its own storage, so the statement is known when the bundle is generated."""
@@ -137,6 +148,7 @@ def test_a_lakehouse_schema_is_finished_spark_sql():
     )
 
 
+@weaver_test()
 def test_a_warehouse_schema_is_t_sql():
     planned = stage(CUSTOMER, target=bound_target(kind="warehouse"))
     (action,) = actions(planned)
@@ -146,6 +158,7 @@ def test_a_warehouse_schema_is_t_sql():
     assert payload_of(planned, action).decode() == "create schema [DWG];\n"
 
 
+@weaver_test()
 def test_a_warehouse_schema_name_has_its_brackets_escaped():
     """A `]` in an identifier ends the quoting unless it is doubled.
 
@@ -162,6 +175,7 @@ def test_a_warehouse_schema_name_has_its_brackets_escaped():
     assert payload_of(planned, action).decode() == "create schema [Od]]d];\n"
 
 
+@weaver_test()
 def test_the_payload_hash_matches_what_the_action_carries():
     """The installer verifies this before executing."""
 
@@ -175,6 +189,7 @@ def test_the_payload_hash_matches_what_the_action_carries():
     )
 
 
+@weaver_test()
 def test_the_stage_is_bound_to_the_target_it_was_planned_for():
     """A batch names one target; a schema created against another is a schema in
     the wrong Lakehouse, which reads back correctly and is still wrong."""

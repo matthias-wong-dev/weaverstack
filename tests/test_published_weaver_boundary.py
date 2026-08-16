@@ -15,6 +15,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.sessions.console import ConsoleScope, ConsoleSession
@@ -65,6 +66,7 @@ def desktop(monkeypatch):
         yield session, livy
 
 
+@weaver_test()
 def test_spark_sql_crosses_without_asserting_the_install(desktop):
     session, livy = desktop
 
@@ -74,6 +76,7 @@ def test_spark_sql_crosses_without_asserting_the_install(desktop):
     assert livy.weaver_asserted == 0
 
 
+@weaver_test()
 def test_a_program_asserts_the_install_before_it_runs(desktop):
     session, livy = desktop
 
@@ -88,6 +91,7 @@ def test_a_program_asserts_the_install_before_it_runs(desktop):
     assert livy.weaver_asserted == 1
 
 
+@weaver_test()
 def test_the_import_is_submitted_once_per_livy_session(monkeypatch):
     """It is an import, and an import stays imported: one statement, not one per crossing."""
 
@@ -111,6 +115,7 @@ def test_the_import_is_submitted_once_per_livy_session(monkeypatch):
 # --- and the two sentences stay apart ----------------------------------------
 
 
+@weaver_test()
 def test_a_workspace_naming_no_environment_is_told_where_weaver_comes_from():
     """A missing Environment names the workspace and the publish that fills it."""
 
@@ -123,6 +128,7 @@ def test_a_workspace_naming_no_environment_is_told_where_weaver_comes_from():
     assert "--environment" in message
 
 
+@weaver_test()
 def test_a_body_that_cannot_import_weaver_is_told_to_install():
     from weaver.fabric.livy import environment_bootstrap
 
@@ -132,6 +138,7 @@ def test_a_body_that_cannot_import_weaver_is_told_to_install():
     assert "weaver install --workspace <ws> --environment <env>" in source
 
 
+@weaver_test()
 def test_a_scope_with_no_livy_says_so_rather_than_asserting_nothing(monkeypatch):
     monkeypatch.setattr(
         ConsoleScope, "resolver", property(lambda self: SimpleNamespace(workspace=None))

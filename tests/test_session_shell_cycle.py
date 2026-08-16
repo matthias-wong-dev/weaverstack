@@ -12,6 +12,7 @@ import argparse
 import io
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.errors import BuildError
@@ -61,6 +62,7 @@ def _run(script: str, factory, workspace=None, environment="weaver") -> int:
 # --- one session across commands ---------------------------------------------
 
 
+@weaver_test()
 def test_every_command_runs_in_the_same_session(recorded):
     seen, factory = recorded
 
@@ -71,6 +73,7 @@ def test_every_command_runs_in_the_same_session(recorded):
     assert isinstance(seen[0].session, ConsoleSession)
 
 
+@weaver_test()
 def test_the_session_closes_when_the_shell_leaves(recorded):
     seen, factory = recorded
 
@@ -79,6 +82,7 @@ def test_the_session_closes_when_the_shell_leaves(recorded):
     assert seen[0].session.closed
 
 
+@weaver_test()
 def test_end_of_input_leaves_as_cleanly_as_exit(recorded):
     seen, factory = recorded
 
@@ -89,6 +93,7 @@ def test_end_of_input_leaves_as_cleanly_as_exit(recorded):
 # --- an ordinary failure is not the end of the session -----------------------
 
 
+@weaver_test()
 def test_a_command_that_fails_does_not_discard_the_session(recorded, capsys):
     seen, factory = recorded
 
@@ -99,6 +104,7 @@ def test_a_command_that_fails_does_not_discard_the_session(recorded, capsys):
     assert "the build failed for an ordinary reason" in capsys.readouterr().err
 
 
+@weaver_test()
 def test_a_usage_error_does_not_discard_the_session(recorded, capsys):
     seen, factory = recorded
 
@@ -107,6 +113,7 @@ def test_a_usage_error_does_not_discard_the_session(recorded, capsys):
     assert len(seen) == 1, "the good command still ran"
 
 
+@weaver_test()
 def test_an_unparseable_line_is_reported_and_survived(recorded, capsys):
     seen, factory = recorded
 
@@ -116,6 +123,7 @@ def test_an_unparseable_line_is_reported_and_survived(recorded, capsys):
     assert "error:" in capsys.readouterr().err
 
 
+@weaver_test()
 def test_a_session_cannot_be_started_inside_a_session(recorded, capsys):
     seen, factory = recorded
 
@@ -125,6 +133,7 @@ def test_a_session_cannot_be_started_inside_a_session(recorded, capsys):
     assert "already in a session" in capsys.readouterr().err
 
 
+@weaver_test()
 def test_blank_lines_and_comments_are_not_commands(recorded):
     seen, factory = recorded
 
@@ -142,6 +151,7 @@ def _banner_for(workspace, recorded, capsys, environment="weaver") -> str:
     return capsys.readouterr().out
 
 
+@weaver_test()
 def test_the_banner_names_what_is_actually_starting(recorded, capsys):
     printed = _banner_for("A_Workspace", recorded, capsys)
 
@@ -149,6 +159,7 @@ def test_the_banner_names_what_is_actually_starting(recorded, capsys):
     assert "Spark session (Livy)" in printed
 
 
+@weaver_test()
 def test_a_workspace_with_no_environment_is_told_why_livy_is_not_starting(
     recorded, capsys
 ):
@@ -165,6 +176,7 @@ def test_a_workspace_with_no_environment_is_told_why_livy_is_not_starting(
     assert "--environment" in printed
 
 
+@weaver_test()
 def test_a_session_with_no_workspace_claims_to_start_nothing(recorded, capsys):
     printed = _banner_for(None, recorded, capsys)
 
@@ -175,6 +187,7 @@ def test_a_session_with_no_workspace_claims_to_start_nothing(recorded, capsys):
 # --- the prompt is a prompt --------------------------------------------------
 
 
+@weaver_test()
 def test_the_prompt_has_line_editing_and_history(monkeypatch, tmp_path, recorded):
     """``input()`` is line-edited only if readline has been imported.
 
@@ -195,6 +208,7 @@ def test_the_prompt_has_line_editing_and_history(monkeypatch, tmp_path, recorded
     assert "readline" in sys.modules
 
 
+@weaver_test()
 def test_history_is_kept_where_the_environment_says(monkeypatch, tmp_path, recorded):
     from weaver_cli import shell
 
@@ -207,6 +221,7 @@ def test_history_is_kept_where_the_environment_says(monkeypatch, tmp_path, recor
     assert wanted.exists(), "the session wrote its history where it was told"
 
 
+@weaver_test()
 def test_a_platform_without_readline_still_gets_a_session(monkeypatch, recorded):
     """Every part of line editing is best-effort; none of it gates a session."""
 
@@ -226,6 +241,7 @@ def test_a_platform_without_readline_still_gets_a_session(monkeypatch, recorded)
     assert len(seen) == 1
 
 
+@weaver_test()
 def test_an_unwritable_history_location_does_not_fail_the_session(
     monkeypatch, tmp_path, recorded
 ):
@@ -254,11 +270,13 @@ def _args(session=None, **overrides):
     return argparse.Namespace(**values)
 
 
+@weaver_test()
 def test_a_command_naming_nothing_inherits_the_session_workspace():
     with ConsoleSession(workspace=_workspace(catalogue="Warehouse/Weaver")) as session:
         assert _resolve_workspace(_args(session)).workspace == "Demo"
 
 
+@weaver_test()
 def test_a_command_may_override_the_control_lakehouse_it_inherits():
     with ConsoleSession(workspace=_workspace(catalogue="Warehouse/Weaver")) as session:
         resolved = _resolve_workspace(_args(session, catalogue="Warehouse/Other"))
@@ -270,6 +288,7 @@ def test_a_command_may_override_the_control_lakehouse_it_inherits():
         )
 
 
+@weaver_test()
 def test_a_command_naming_its_own_workspace_does_not_inherit():
     with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
         resolved = _resolve_workspace(_args(session, workspace="Second_Workspace"))
@@ -277,6 +296,7 @@ def test_a_command_naming_its_own_workspace_does_not_inherit():
         assert resolved.workspace == "Second_Workspace"
 
 
+@weaver_test()
 def test_without_a_session_nothing_is_inherited():
     from weaver.errors import ConfigError
 
@@ -284,6 +304,7 @@ def test_without_a_session_nothing_is_inherited():
         _resolve_workspace(_args(None))
 
 
+@weaver_test()
 def test_a_session_started_without_a_workspace_inherits_nothing():
     with ConsoleSession() as session:
         from weaver.errors import ConfigError
@@ -292,6 +313,7 @@ def test_a_session_started_without_a_workspace_inherits_nothing():
             _resolve_workspace(_args(session))
 
 
+@weaver_test()
 def test_overrides_do_not_mutate_the_workspace_they_are_applied_to():
     original = _workspace(catalogue="Warehouse/Weaver")
     overridden = _with_command_overrides(

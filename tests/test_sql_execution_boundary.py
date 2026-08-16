@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sql import (
     AccessTokenAuthentication,
@@ -81,6 +82,7 @@ def _executor(connections):
     return PooledSqlExecutor(pool, owns_pool=True), created
 
 
+@weaver_test()
 def test_execute_passes_parameters_commits_and_closes_the_cursor():
     cursor = Cursor()
     connection = Connection(cursor)
@@ -94,6 +96,7 @@ def test_execute_passes_parameters_commits_and_closes_the_cursor():
     assert connection.rollbacks == 0
 
 
+@weaver_test()
 def test_query_returns_dictionaries_and_commits():
     cursor = Cursor(rows=[(1, "one"), (2, "two")], columns=["id", "name"])
     connection = Connection(cursor)
@@ -143,6 +146,7 @@ LOAD_OUTPUTS = (
 )
 
 
+@weaver_test()
 def test_call_procedure_declares_locals_and_passes_them_as_outputs():
     cursor = MultiSetCursor(
         [([(True, 4, None)], ["succeeded", "rows_read", "error_message"])]
@@ -162,6 +166,7 @@ def test_call_procedure_declares_locals_and_passes_them_as_outputs():
     assert parameters == (1,)
 
 
+@weaver_test()
 def test_call_procedure_reads_its_own_projection_not_the_procedures_rows():
     """The reason the load result stopped being a result set.
 
@@ -184,6 +189,7 @@ def test_call_procedure_reads_its_own_projection_not_the_procedures_rows():
     assert row == {"succeeded": True, "rows_read": 4, "error_message": None}
 
 
+@weaver_test()
 def test_call_procedure_ends_the_batch_with_its_projection():
     """Last, so that nothing the procedure emits can come after it."""
 
@@ -202,6 +208,7 @@ def test_call_procedure_ends_the_batch_with_its_projection():
     )
 
 
+@weaver_test()
 def test_call_procedure_refuses_a_call_that_names_no_outputs():
     executor, _ = _executor([Connection(Cursor())])
 
@@ -209,6 +216,7 @@ def test_call_procedure_refuses_a_call_that_names_no_outputs():
         executor.call_procedure("[_].[Load Sales.Customer]")
 
 
+@weaver_test()
 def test_call_procedure_reports_a_procedure_that_returned_nothing():
     """Which means the installed one is not the one Weaver generated."""
 
@@ -219,6 +227,7 @@ def test_call_procedure_reports_a_procedure_that_returned_nothing():
         executor.call_procedure("[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS)
 
 
+@weaver_test()
 def test_query_commits_before_the_cursor_closes_and_the_lease_is_released():
     events = []
 
@@ -262,6 +271,7 @@ def test_query_commits_before_the_cursor_closes_and_the_lease_is_released():
     assert events == ["lease", "fetch", "commit", "cursor close", "release"]
 
 
+@weaver_test()
 def test_failure_rolls_back_normalises_the_error_and_discards_the_connection():
     broken = Connection(Cursor(error=ValueError("bad statement")))
     healthy = Connection(Cursor())
@@ -276,6 +286,7 @@ def test_failure_rolls_back_normalises_the_error_and_discards_the_connection():
     assert created == [broken, healthy]
 
 
+@weaver_test()
 def test_each_physical_connection_requests_current_authentication_material():
     tokens = iter(("first", "second"))
     auth = AccessTokenAuthentication(lambda: next(tokens))

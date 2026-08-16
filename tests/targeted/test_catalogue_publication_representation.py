@@ -30,6 +30,7 @@ from factories import (
     single_document_repository,
     target_inventory,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.catalogue_actions import (
     collect_claims,
@@ -79,6 +80,7 @@ def after(repository, *names, current=None):
 # --- before the build: removing claims ----------------------------------------
 
 
+@weaver_test()
 def test_a_build_that_removes_nothing_writes_no_deletes(repository):
     """No stage at all, rather than a stage with no statements.
 
@@ -95,6 +97,7 @@ def test_a_build_that_removes_nothing_writes_no_deletes(repository):
     assert stage is None
 
 
+@weaver_test()
 def test_an_objects_claims_are_deleted_when_it_is_being_dropped(repository):
     """Uncertify first: nothing may stay certified while its description goes."""
 
@@ -111,6 +114,7 @@ def test_an_objects_claims_are_deleted_when_it_is_being_dropped(repository):
     assert any("Registry" in line for line in statements(stage))
 
 
+@weaver_test()
 def test_the_registry_claim_is_deleted_before_the_dictionaries(repository):
     """Prune runs the publication order backwards, and that is the invariant.
 
@@ -139,6 +143,7 @@ def test_the_registry_claim_is_deleted_before_the_dictionaries(repository):
     assert registry < dictionary
 
 
+@weaver_test()
 def test_a_claim_the_catalogue_never_held_produces_no_delete(repository):
     """The build asks to remove an object with no rows: there is nothing to do."""
 
@@ -151,6 +156,7 @@ def test_a_claim_the_catalogue_never_held_produces_no_delete(repository):
     assert stage is None
 
 
+@weaver_test()
 def test_claims_disproved_by_reconciliation_are_deleted_too(repository):
     """The two claim sources meet here, and both must reach the same stage.
 
@@ -176,6 +182,7 @@ def test_claims_disproved_by_reconciliation_are_deleted_too(repository):
     assert any("Registry" in line for line in statements(stage))
 
 
+@weaver_test()
 def test_collecting_claims_takes_both_sources_without_duplicating(repository):
     catalogue = FixtureCatalogue.from_registry_rows(registry_row(CUSTOMER))
     reconciled = reconcile_catalogue_state(
@@ -194,6 +201,7 @@ def test_collecting_claims_takes_both_sources_without_duplicating(repository):
 # --- after the build: publishing what it certifies ----------------------------
 
 
+@weaver_test()
 def test_the_registry_is_published_in_its_own_later_stage(repository):
     """The ordering invariant, stated as barriers rather than as statements.
 
@@ -208,6 +216,7 @@ def test_the_registry_is_published_in_its_own_later_stage(repository):
     assert slugs.index("publish-catalogue") < slugs.index("publish-registry")
 
 
+@weaver_test()
 def test_publication_ends_with_the_registry_and_nothing_after_it(repository):
     """Nothing closes the build.
 
@@ -222,6 +231,7 @@ def test_publication_ends_with_the_registry_and_nothing_after_it(repository):
     assert not any("refresh" in stage.slug for stage in stages)
 
 
+@weaver_test()
 def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
     repository,
 ):
@@ -260,6 +270,7 @@ def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
     )
 
 
+@weaver_test()
 def test_a_build_certifying_nothing_against_an_empty_catalogue_removes_nothing(
     repository,
 ):
@@ -277,6 +288,7 @@ def test_a_build_certifying_nothing_against_an_empty_catalogue_removes_nothing(
     assert not any(line.startswith("DELETE FROM") for line in lines)
 
 
+@weaver_test()
 def test_every_published_statement_is_scoped_to_its_item(repository):
     """The reach of a build's catalogue work is bounded by construction.
 
@@ -291,6 +303,7 @@ def test_every_published_statement_is_scoped_to_its_item(repository):
     assert all("[Item name] = N'Sales'" in line for line in lines)
 
 
+@weaver_test()
 def test_the_publication_epoch_stays_a_token(repository):
     """Rendered at install, not at plan time — and the bundle's identity is its
     bytes, so a clock in a payload would make every build differ.
@@ -305,6 +318,7 @@ def test_the_publication_epoch_stays_a_token(repository):
     assert any("{{build_datetime}}" in line for line in lines)
 
 
+@weaver_test()
 def test_a_mixed_change_removes_then_merges(repository):
     """Delete first, merge second, when the table has both to do.
 
@@ -332,6 +346,7 @@ def test_a_mixed_change_removes_then_merges(repository):
     assert max(deletes) < min(merges)
 
 
+@weaver_test()
 def test_an_unchanged_table_produces_no_statement_at_all(repository):
     """The fixed point, at the level the statements are decided.
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from support.weaver_test import weaver_test
+
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.sql_endpoint_refresh import (
     SqlEndpointRefreshExecutor,
@@ -38,6 +40,7 @@ def _context(resolver):
     )
 
 
+@weaver_test()
 def test_executor_performs_the_refresh_selected_by_the_bundle():
     class Resolver:
         def __init__(self):
@@ -69,6 +72,7 @@ class _RefreshClient:
         return {"status": "Succeeded"}
 
 
+@weaver_test()
 def test_fabric_refresh_posts_the_endpoint_action_and_awaits_it():
     response = SimpleNamespace(
         status_code=202,
@@ -101,6 +105,7 @@ def test_fabric_refresh_posts_the_endpoint_action_and_awaits_it():
     }
 
 
+@weaver_test()
 def test_fabric_resolver_uses_the_typed_endpoint_paired_with_the_lakehouse():
     response = SimpleNamespace(status_code=200, content=b"{}", headers={})
 
@@ -128,6 +133,7 @@ def test_fabric_resolver_uses_the_typed_endpoint_paired_with_the_lakehouse():
     )
 
 
+@weaver_test()
 def test_fabric_client_waits_for_a_long_running_refresh(monkeypatch):
     accepted = SimpleNamespace(
         status_code=202,

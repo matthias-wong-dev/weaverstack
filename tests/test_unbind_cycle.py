@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from support.weaver_test import weaver_test
+
 from weaver.catalogue.tables import INSTALLATION
 from weaver.unbind import plan_unbind, unbind_targets
 
@@ -47,6 +49,7 @@ ROWS = (
 )
 
 
+@weaver_test()
 def test_plan_unbind_selects_by_physical_target_and_orders_dependent_deletes():
     catalogue = _Catalogue(ROWS)
     result = plan_unbind(catalogue, lakehouses=("Sales_Dev",))
@@ -58,6 +61,7 @@ def test_plan_unbind_selects_by_physical_target_and_orders_dependent_deletes():
     assert catalogue.executed == []
 
 
+@weaver_test()
 def test_unbind_executes_only_catalogue_dml_without_a_physical_target_client():
     catalogue = _Catalogue(ROWS)
     result = unbind_targets(catalogue, lakehouses=("Sales_Dev",))
@@ -76,6 +80,7 @@ def test_unbind_executes_only_catalogue_dml_without_a_physical_target_client():
 # tiny deletes.
 
 
+@weaver_test()
 def test_every_installation_is_removed_in_one_pass_over_the_tables():
     """One statement per table, not one per table per installation."""
 
@@ -98,6 +103,7 @@ def test_every_installation_is_removed_in_one_pass_over_the_tables():
     assert len(together) == len(set(together)), "a table was addressed twice"
 
 
+@weaver_test()
 def test_the_combined_delete_names_every_installation_and_no_others():
     """The predicate is a *bounded* address. `WHERE` with no predicate — or one
     that reassociates — is every row in the catalogue."""
@@ -120,6 +126,7 @@ def test_the_combined_delete_names_every_installation_and_no_others():
         assert where.strip().startswith("((")
 
 
+@weaver_test()
 def test_removing_nothing_renders_nothing():
     """An empty selection must not become a `DELETE` with no predicate."""
 

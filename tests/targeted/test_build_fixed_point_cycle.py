@@ -33,6 +33,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
@@ -139,6 +140,7 @@ def actions(bundle):
 # --- the property -------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_second_identical_build_generates_no_actions_whatever(estate, tmp_path):
     """The complete plan, which is the assertion the old test could not make."""
 
@@ -147,6 +149,7 @@ def test_a_second_identical_build_generates_no_actions_whatever(estate, tmp_path
     assert actions(second) == []
 
 
+@weaver_test()
 def test_the_first_build_against_an_empty_catalogue_does_do_work(estate, tmp_path):
     """Guards the test above from passing vacuously.
 
@@ -171,6 +174,7 @@ def test_the_first_build_against_an_empty_catalogue_does_do_work(estate, tmp_pat
         "refresh_sql_endpoint",
     ],
 )
+@weaver_test()
 def test_the_second_build_emits_no_catalogue_work_of_any_kind(estate, tmp_path, kind):
     """Named individually so a failure says which barrier came back.
 
@@ -185,6 +189,7 @@ def test_the_second_build_emits_no_catalogue_work_of_any_kind(estate, tmp_path, 
     assert not [action for action in actions(second) if action.kind == kind]
 
 
+@weaver_test()
 def test_the_second_build_selects_nothing_to_build_or_drop(estate, tmp_path):
     """The decision behind the empty plan, asserted separately from the plan.
 
@@ -203,6 +208,7 @@ def test_the_second_build_selects_nothing_to_build_or_drop(estate, tmp_path):
     assert selection.impact.changed == ()
 
 
+@weaver_test()
 def test_the_second_build_changes_no_target(estate, tmp_path):
     """No target is even mentioned as changing, let alone written to."""
 
@@ -211,6 +217,7 @@ def test_the_second_build_changes_no_target(estate, tmp_path):
     assert not second.plan.target_changes
 
 
+@weaver_test()
 def test_a_third_build_is_as_silent_as_the_second(estate, tmp_path):
     """Staying at the fixed point is a different claim from reaching it.
 
@@ -230,6 +237,7 @@ def test_a_third_build_is_as_silent_as_the_second(estate, tmp_path):
 # --- a rebuilt object is re-certified, not silently dropped -------------------
 
 
+@weaver_test()
 def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     """The bug the Fabric journey found, at the level it should have been caught.
 
@@ -279,6 +287,7 @@ def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     assert result.registry.merge, "a dropped object must be certified again"
 
 
+@weaver_test()
 def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
     estate, tmp_path
 ):
@@ -327,6 +336,7 @@ def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
     )
 
 
+@weaver_test()
 def test_the_claim_view_only_ever_removes_rows(estate):
     """A narrowing, so the worst a mistake can do is publish something twice."""
 
@@ -346,6 +356,7 @@ def test_the_claim_view_only_ever_removes_rows(estate):
     assert remaining.present_tables == state.present_tables
 
 
+@weaver_test()
 def test_no_claims_leaves_the_catalogue_untouched(estate):
     from weaver.catalogue.claims import without_claims
 
@@ -357,6 +368,7 @@ def test_no_claims_leaves_the_catalogue_untouched(estate):
 # --- a real change still publishes -------------------------------------------
 
 
+@weaver_test()
 def test_changing_one_document_publishes_that_change_and_no_more(estate, tmp_path):
     """The other side of the property, and what stops it being achieved by
     publishing nothing ever.

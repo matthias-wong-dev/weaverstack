@@ -24,6 +24,7 @@ from factories import (
     target_inventory,
 )
 from support.sessions import given_session
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
@@ -138,6 +139,7 @@ def build(estate, **overrides):
 # --- it generates and installs ------------------------------------------------
 
 
+@weaver_test()
 def test_it_returns_the_plan_it_generated_and_the_report_it_installed(estate):
     result = build(estate)
 
@@ -146,6 +148,7 @@ def test_it_returns_the_plan_it_generated_and_the_report_it_installed(estate):
     assert result.report.status == "succeeded"
 
 
+@weaver_test()
 def test_every_planned_action_is_executed_exactly_once(estate):
     """The seam's whole claim: what was planned is what ran, and once."""
 
@@ -161,6 +164,7 @@ def test_every_planned_action_is_executed_exactly_once(estate):
     assert len(ran) == len(set(ran))
 
 
+@weaver_test()
 def test_the_declaration_is_built(estate):
     """The document reaches an executor, rather than the build being all
     catalogue bookkeeping."""
@@ -170,6 +174,7 @@ def test_the_declaration_is_built(estate):
     assert any(action.kind == "build_table" for _s, _b, action in result.plan.actions())
 
 
+@weaver_test()
 def test_the_result_carries_the_signatures_a_caller_records(estate):
     """These are what a later build compares against, so they come from the
     repository that was actually built rather than being recomputed."""
@@ -185,6 +190,7 @@ def test_the_result_carries_the_signatures_a_caller_records(estate):
 # --- it plans against the state it was given ----------------------------------
 
 
+@weaver_test()
 def test_an_inventory_that_already_holds_the_schema_plans_no_create(estate):
     """Prepared state is *used*, not re-read. If the caller says the schema is
     there, the build must believe it — that is what makes the seam a seam."""
@@ -217,6 +223,7 @@ def test_an_inventory_that_already_holds_the_schema_plans_no_create(estate):
     )
 
 
+@weaver_test()
 def test_a_catalogue_that_certifies_the_document_plans_no_rebuild(estate):
     """The unchanged case, reached through the seam rather than the planner.
 
@@ -250,6 +257,7 @@ def test_a_catalogue_that_certifies_the_document_plans_no_rebuild(estate):
     assert "Lakehouse/Sales/DWG.Customer" not in rebuilt
 
 
+@weaver_test()
 def test_a_binding_naming_an_unknown_item_is_refused(estate):
     """Better to refuse than to plan a build for something the repository has
     never heard of, which would report success having done nothing."""
@@ -270,6 +278,7 @@ def test_a_binding_naming_an_unknown_item_is_refused(estate):
 # --- it reports failure rather than raising ------------------------------------
 
 
+@weaver_test()
 def test_a_failing_action_is_reported_not_raised(estate):
     """A build that failed is a result to read, not an exception to catch.
 
@@ -285,6 +294,7 @@ def test_a_failing_action_is_reported_not_raised(estate):
     assert any(action.status == "failed" for action in result.report.action_results())
 
 
+@weaver_test()
 def test_a_failure_stops_the_rest_of_its_sequence(estate):
     """The barrier semantics, seen from the seam: nothing after a failure runs.
 
@@ -307,12 +317,14 @@ def test_a_failure_stops_the_rest_of_its_sequence(estate):
 # --- the archive --------------------------------------------------------------
 
 
+@weaver_test()
 def test_no_archive_is_written_unless_one_is_asked_for(estate):
     result = build(estate)
 
     assert result.archive is None
 
 
+@weaver_test()
 def test_an_archive_is_persisted_where_it_was_asked_for(estate, tmp_path):
     """The bundle outlives the temporary directory it was built in — which is the
     point of asking for one, since the build itself is ephemeral."""
@@ -328,6 +340,7 @@ def test_an_archive_is_persisted_where_it_was_asked_for(estate, tmp_path):
 # --- a capability offered is not a capability acquired -------------------------
 
 
+@weaver_test()
 def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
     """A capability offered is not a capability acquired.
 
@@ -348,6 +361,7 @@ def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
     assert not estate["session"].spark_sql
 
 
+@weaver_test()
 def test_an_executor_that_runs_a_statement_reaches_it_through_the_session(estate):
     """The other half: deferring acquisition must not stop it happening.
 

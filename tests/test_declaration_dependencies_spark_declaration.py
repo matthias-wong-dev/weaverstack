@@ -10,6 +10,7 @@ from __future__ import annotations
 import textwrap
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import extract_sql_references
 
@@ -23,6 +24,7 @@ def refs(sql: str) -> set[str]:
 # --- backtick-delimited relations -------------------------------------------
 
 
+@weaver_test()
 def test_backticked_schema_and_relation():
     assert refs("""
         select `Order id`, `Order date`
@@ -30,12 +32,14 @@ def test_backticked_schema_and_relation():
     """) == {"Sales Domain.Open Order"}
 
 
+@weaver_test()
 def test_backticked_three_part_name():
     assert refs("select * from `Bronze LH`.`Sales`.`Order`") == {
         "Bronze LH.Sales.Order"
     }
 
 
+@weaver_test()
 def test_mixed_backticked_and_bare_parts():
     assert refs("select * from Sales.`Open Order`") == {"Sales.Open Order"}
 
@@ -43,6 +47,7 @@ def test_mixed_backticked_and_bare_parts():
 # --- temporary views and multiple statements --------------------------------
 
 
+@weaver_test()
 def test_temp_view_then_final_query():
     assert refs("""
         create or replace temporary view recent as
@@ -52,6 +57,7 @@ def test_temp_view_then_final_query():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_several_intermediate_statements():
     assert refs("""
         create or replace temp view a as select * from Sales.Order;
@@ -63,6 +69,7 @@ def test_several_intermediate_statements():
     """) == {"Sales.Order", "Sales.Customer", "Sales.Region"}
 
 
+@weaver_test()
 def test_a_temp_view_reading_another_temp_view_adds_nothing():
     assert refs("""
         create or replace temp view a as select * from Sales.Order;
@@ -74,6 +81,7 @@ def test_a_temp_view_reading_another_temp_view_adds_nothing():
 # --- join flavours -----------------------------------------------------------
 
 
+@weaver_test()
 def test_left_semi_join():
     assert refs("""
         select o.*
@@ -82,6 +90,7 @@ def test_left_semi_join():
     """) == {"Sales.Order", "Sales.Customer"}
 
 
+@weaver_test()
 def test_left_anti_join():
     assert refs("""
         select o.*
@@ -90,6 +99,7 @@ def test_left_anti_join():
     """) == {"Sales.Order", "Sales.Cancelled"}
 
 
+@weaver_test()
 def test_semi_and_anti_together_with_a_temp_view():
     assert refs("""
         create or replace temp view active as select * from Sales.Order;
@@ -104,6 +114,7 @@ def test_semi_and_anti_together_with_a_temp_view():
 # --- CTEs and nesting --------------------------------------------------------
 
 
+@weaver_test()
 def test_cte_chain():
     assert refs("""
         with recent as (
@@ -118,6 +129,7 @@ def test_cte_chain():
     """) == {"Sales.Order", "Sales.Customer"}
 
 
+@weaver_test()
 def test_nested_subqueries():
     assert refs("""
         select *
@@ -131,6 +143,7 @@ def test_nested_subqueries():
     """) == {"Sales.Order", "Sales.Customer", "Sales.Region"}
 
 
+@weaver_test()
 def test_lateral_view_explode_is_not_a_relation():
     assert refs("""
         select o.Id, line
@@ -143,6 +156,7 @@ def test_lateral_view_explode_is_not_a_relation():
 
 
 @pytest.mark.parametrize("fmt", ["delta", "parquet", "csv", "json", "orc", "avro"])
+@weaver_test()
 def test_a_path_read_is_a_format_and_a_path_not_an_object(fmt):
     assert (
         refs(
@@ -152,6 +166,7 @@ def test_a_path_read_is_a_format_and_a_path_not_an_object(fmt):
     )
 
 
+@weaver_test()
 def test_a_path_read_beside_a_real_relation():
     assert refs("""
         select *
@@ -160,6 +175,7 @@ def test_a_path_read_beside_a_real_relation():
     """) == {"Sales.Customer"}
 
 
+@weaver_test()
 def test_a_relative_path_read_is_also_excluded():
     assert refs("select * from csv.`/Files/landing/orders.csv`") == set()
 
@@ -167,18 +183,21 @@ def test_a_relative_path_read_is_also_excluded():
 # --- DML ---------------------------------------------------------------------
 
 
+@weaver_test()
 def test_delete_from_extracts_the_target():
     assert refs("delete from Sales.Order where `Order date` < '2020-01-01'") == {
         "Sales.Order"
     }
 
 
+@weaver_test()
 def test_delete_with_a_qualified_target():
     assert refs("delete from `Bronze LH`.Sales.Order where Id = 1") == {
         "Bronze LH.Sales.Order"
     }
 
 
+@weaver_test()
 def test_delete_with_a_subquery_extracts_both():
     assert refs("""
         delete from Sales.Order
@@ -186,6 +205,7 @@ def test_delete_with_a_subquery_extracts_both():
     """) == {"Sales.Order", "Sales.Cancelled"}
 
 
+@weaver_test()
 def test_merge_into_extracts_target_and_source():
     assert refs("""
         merge into Sales.Order as t
@@ -196,6 +216,7 @@ def test_merge_into_extracts_target_and_source():
     """) == {"Sales.Order", "Sales.OrderStaging"}
 
 
+@weaver_test()
 def test_merge_from_a_temp_view_extracts_only_the_target():
     assert refs("""
         create or replace temp view staged as select * from Sales.OrderStaging;
@@ -206,6 +227,7 @@ def test_merge_from_a_temp_view_extracts_only_the_target():
     """) == {"Sales.Order", "Sales.OrderStaging"}
 
 
+@weaver_test()
 def test_insert_into_extracts_target_and_source():
     assert refs("insert into Sales.Archive select * from Sales.Order") == {
         "Sales.Archive",
@@ -216,6 +238,7 @@ def test_insert_into_extracts_target_and_source():
 # --- what must be ignored ----------------------------------------------------
 
 
+@weaver_test()
 def test_a_reference_in_a_line_comment_is_ignored():
     assert refs("""
         -- previously joined Legacy.Order
@@ -223,6 +246,7 @@ def test_a_reference_in_a_line_comment_is_ignored():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_reference_in_a_block_comment_is_ignored():
     assert refs("""
         /* migrated away from Legacy.Order and Legacy.Customer */
@@ -230,6 +254,7 @@ def test_a_reference_in_a_block_comment_is_ignored():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_reference_in_a_string_literal_is_ignored():
     assert refs("""
         select *, 'read from Legacy.Order' as Note
@@ -238,6 +263,7 @@ def test_a_reference_in_a_string_literal_is_ignored():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_dotted_column_expressions_are_ignored():
     assert refs("""
         select o.Amount, c.`Customer name`
@@ -247,6 +273,7 @@ def test_dotted_column_expressions_are_ignored():
     """) == {"Sales.Order", "Sales.Customer"}
 
 
+@weaver_test()
 def test_a_struct_field_access_is_not_a_relation():
     assert refs("""
         select o.Address.Suburb, o.Address.Postcode
@@ -254,6 +281,7 @@ def test_a_struct_field_access_is_not_a_relation():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_function_call_is_not_a_relation():
     assert refs("""
         select date_format(o.`Order date`, 'yyyy-MM') as Period
@@ -293,6 +321,7 @@ select `Customer name`
 """
 
 
+@weaver_test()
 def test_a_realistic_spark_file_extracts_exactly_its_relations():
     assert refs(REALISTIC) == {
         "Sales Domain.Customer",
@@ -301,6 +330,7 @@ def test_a_realistic_spark_file_extracts_exactly_its_relations():
     }
 
 
+@weaver_test()
 def test_the_realistic_file_invents_nothing():
     """No temp views, no CTE, no alias, no path, nothing from comments or strings."""
     found = refs(REALISTIC)

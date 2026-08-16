@@ -9,6 +9,7 @@ from __future__ import annotations
 import textwrap
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import extract_python_references, extract_sql_references
 
@@ -28,29 +29,35 @@ def parts(sql: str) -> tuple[tuple[str, ...], ...]:
 # --- Python ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_one_double_underscore_is_an_object_reference():
     assert [str(r) for r in extract_python_references(("Sales__Order",))] == [
         "Sales.Order"
     ]
 
 
+@weaver_test()
 def test_the_weaver_import_is_not_a_reference():
     assert extract_python_references(("weaver",)) == ()
 
 
+@weaver_test()
 def test_a_helper_package_is_not_a_reference():
     assert extract_python_references(("_helpers", "pandas", "datetime")) == ()
 
 
+@weaver_test()
 def test_an_underscore_prefixed_module_is_not_a_reference():
     assert extract_python_references(("_Sales__Order",)) == ()
 
 
 @pytest.mark.parametrize("name", ["Sales", "Sales__Order__Extra", "Sales__", "__Order"])
+@weaver_test()
 def test_names_that_are_not_two_parts_are_ignored(name):
     assert extract_python_references((name,)) == ()
 
 
+@weaver_test()
 def test_lowercase_house_style_still_extracts():
     """A developer may write sales__order; matching it is a build concern."""
     assert [str(r) for r in extract_python_references(("sales__order",))] == [
@@ -58,6 +65,7 @@ def test_lowercase_house_style_still_extracts():
     ]
 
 
+@weaver_test()
 def test_references_are_deduplicated_in_order():
     got = extract_python_references(("Sales__Order", "Sales__Customer", "Sales__Order"))
     assert [str(r) for r in got] == ["Sales.Order", "Sales.Customer"]
@@ -66,12 +74,14 @@ def test_references_are_deduplicated_in_order():
 # --- SQL: the shapes ---------------------------------------------------------
 
 
+@weaver_test()
 def test_a_two_part_name_is_an_object_reference():
     reference = extract_sql_references("select * from Sales.Order")[0]
     assert reference.object_id.qualified == "Sales.Order"
     assert not reference.is_qualified
 
 
+@weaver_test()
 def test_a_three_part_name_is_captured_but_physical():
     reference = extract_sql_references("select * from Lakehouse.Sales.Order")[0]
     assert reference.parts == ("Lakehouse", "Sales", "Order")
@@ -79,22 +89,26 @@ def test_a_three_part_name_is_captured_but_physical():
     assert reference.is_qualified
 
 
+@weaver_test()
 def test_a_four_part_name_is_captured():
     assert parts("select * from Server.Db.Sales.Order") == (
         ("Server", "Db", "Sales", "Order"),
     )
 
 
+@weaver_test()
 def test_delimiters_are_stripped():
     assert refs("select * from [Sales].[Order]") == {"Sales.Order"}
     assert refs('select * from "Sales"."Order"') == {"Sales.Order"}
     assert refs("select * from `Sales`.`Order`") == {"Sales.Order"}
 
 
+@weaver_test()
 def test_names_with_spaces_survive_delimiters():
     assert refs("select * from [Sales Team].[Open Order]") == {"Sales Team.Open Order"}
 
 
+@weaver_test()
 def test_an_escaped_delimiter_is_kept():
     assert refs('select * from "Odd""Name".Thing') == {'Odd"Name.Thing'}
 
@@ -102,6 +116,7 @@ def test_an_escaped_delimiter_is_kept():
 # --- SQL: single-part names are never relations ------------------------------
 
 
+@weaver_test()
 def test_a_cte_is_not_a_reference():
     assert refs("""
         with recent as (select * from Sales.Order)
@@ -109,6 +124,7 @@ def test_a_cte_is_not_a_reference():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_temp_view_is_not_a_reference():
     assert refs("""
         create or replace temp view recent as select * from Sales.Order;
@@ -116,6 +132,7 @@ def test_a_temp_view_is_not_a_reference():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_temp_table_is_not_a_reference():
     assert refs("""
         select * into #recent from Sales.Order;
@@ -123,6 +140,7 @@ def test_a_temp_table_is_not_a_reference():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_an_alias_is_not_a_reference():
     assert refs("""
         select o.Amount
@@ -131,6 +149,7 @@ def test_an_alias_is_not_a_reference():
     """) == {"Sales.Order", "Sales.Customer"}
 
 
+@weaver_test()
 def test_a_derived_table_contributes_only_its_inner_relations():
     assert refs("""
         select *
@@ -142,6 +161,7 @@ def test_a_derived_table_contributes_only_its_inner_relations():
 # --- SQL: relation positions -------------------------------------------------
 
 
+@weaver_test()
 def test_joins_apply_and_comma_lists():
     assert refs("""
         select *
@@ -159,6 +179,7 @@ def test_joins_apply_and_comma_lists():
     }
 
 
+@weaver_test()
 def test_spark_join_flavours():
     assert refs("""
         select *
@@ -168,6 +189,7 @@ def test_spark_join_flavours():
     """) == {"Sales.Order", "Sales.Customer", "Sales.Cancelled"}
 
 
+@weaver_test()
 def test_set_operators_keep_both_sides():
     assert refs("""
         select Id from Sales.Order
@@ -176,6 +198,7 @@ def test_set_operators_keep_both_sides():
     """) == {"Sales.Order", "Sales.Archive"}
 
 
+@weaver_test()
 def test_a_subquery_in_where_is_still_a_relation():
     assert refs("""
         select * from Sales.Order
@@ -183,6 +206,7 @@ def test_a_subquery_in_where_is_still_a_relation():
     """) == {"Sales.Order", "Sales.Customer"}
 
 
+@weaver_test()
 def test_insert_select_captures_the_source():
     assert refs("insert into #t select * from Sales.Order") == {"Sales.Order"}
 
@@ -190,20 +214,24 @@ def test_insert_select_captures_the_source():
 # --- SQL: things that look like relations but are not ------------------------
 
 
+@weaver_test()
 def test_a_dotted_column_in_where_is_not_a_relation():
     assert refs("select * from Sales.Order where Some.Column = 1") == {"Sales.Order"}
 
 
+@weaver_test()
 def test_trim_from_is_not_a_relation_position():
     assert refs("select trim(both ' ' from Name) from Sales.Order") == {"Sales.Order"}
 
 
+@weaver_test()
 def test_extract_from_is_not_a_relation_position():
     assert refs("select extract(year from OrderDate) from Sales.Order") == {
         "Sales.Order"
     }
 
 
+@weaver_test()
 def test_a_comment_mentioning_from_is_ignored():
     assert refs("""
         -- historically read from Legacy.Order
@@ -211,6 +239,7 @@ def test_a_comment_mentioning_from_is_ignored():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_block_comment_is_ignored():
     assert refs("""
         /* from Legacy.Order */
@@ -218,6 +247,7 @@ def test_a_block_comment_is_ignored():
     """) == {"Sales.Order"}
 
 
+@weaver_test()
 def test_a_string_literal_mentioning_from_is_ignored():
     assert refs("select * from Sales.Order where Note = 'from Legacy.Order'") == {
         "Sales.Order"
@@ -225,11 +255,13 @@ def test_a_string_literal_mentioning_from_is_ignored():
 
 
 @pytest.mark.parametrize("prefix", ["delta", "parquet", "csv", "json"])
+@weaver_test()
 def test_a_spark_path_read_is_not_an_object_reference(prefix):
     """`delta.`abfss://…`` is a format and a path, not schema and object."""
     assert refs(f"select * from {prefix}.`abfss://ws@workspace/lh/Files/x`") == set()
 
 
+@weaver_test()
 def test_a_variable_is_not_a_relation():
     assert refs("select * from @table") == set()
 
@@ -237,6 +269,7 @@ def test_a_variable_is_not_a_relation():
 # --- SQL: ordering and shape -------------------------------------------------
 
 
+@weaver_test()
 def test_references_are_ordered_and_deduplicated():
     assert parts("""
         select * from Sales.Order o
@@ -245,10 +278,12 @@ def test_references_are_ordered_and_deduplicated():
     """) == (("Sales", "Order"), ("Sales", "Customer"))
 
 
+@weaver_test()
 def test_an_empty_body_yields_nothing():
     assert extract_sql_references("") == ()
 
 
+@weaver_test()
 def test_unparseable_sql_still_yields_what_it_can():
     assert "Sales.Order" in refs("select * from Sales.Order where ((((")
 
@@ -256,6 +291,7 @@ def test_unparseable_sql_still_yields_what_it_can():
 # --- the fallback path -------------------------------------------------------
 
 
+@weaver_test()
 def test_the_fallback_scanner_runs_when_tokenising_fails(monkeypatch):
     """Proves the branch executes, rather than assuming malformed SQL reaches it."""
     from weaver.declaration import dependencies
@@ -275,6 +311,7 @@ def test_the_fallback_scanner_runs_when_tokenising_fails(monkeypatch):
     assert {str(r) for r in found} == {"Sales.Order", "Sales.Customer"}
 
 
+@weaver_test()
 def test_the_fallback_still_excludes_single_part_names(monkeypatch):
     from weaver.declaration import dependencies
 
@@ -287,6 +324,7 @@ def test_the_fallback_still_excludes_single_part_names(monkeypatch):
     assert {str(r) for r in found} == {"Sales.Order"}
 
 
+@weaver_test()
 def test_the_fallback_handles_qualified_names(monkeypatch):
     from weaver.declaration import dependencies
 

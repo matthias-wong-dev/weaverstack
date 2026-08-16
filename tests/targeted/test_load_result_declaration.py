@@ -14,9 +14,12 @@ rows" are different things to recover from.
 
 from __future__ import annotations
 
+from support.weaver_test import weaver_test
+
 from weaver.runtime import RESULT_COLUMNS, LoadResult
 
 
+@weaver_test()
 def test_the_result_columns_are_the_dataclass_fields():
     """The generators build their result row from this list.
 
@@ -28,6 +31,7 @@ def test_the_result_columns_are_the_dataclass_fields():
     assert RESULT_COLUMNS == tuple(LoadResult.__dataclass_fields__)
 
 
+@weaver_test()
 def test_a_result_round_trips_through_a_transport_row():
     result = LoadResult(
         succeeded=True,
@@ -41,6 +45,7 @@ def test_a_result_round_trips_through_a_transport_row():
     assert LoadResult.from_row(result.as_row()) == result
 
 
+@weaver_test()
 def test_a_row_is_read_back_whatever_the_transport_called_its_types():
     """T-SQL hands back a bit and ints; the reader must not care.
 
@@ -65,6 +70,7 @@ def test_a_row_is_read_back_whatever_the_transport_called_its_types():
     assert result.rows_rejected == 2
 
 
+@weaver_test()
 def test_a_failure_keeps_what_the_load_managed_before_it_failed():
     result = LoadResult.failure("write failed", rows_read=100, rows_inserted=40)
 
@@ -73,6 +79,7 @@ def test_a_failure_keeps_what_the_load_managed_before_it_failed():
     assert (result.rows_read, result.rows_inserted) == (100, 40)
 
 
+@weaver_test()
 def test_a_load_that_rejected_rows_did_not_succeed():
     """Tolerating rejects changes what is written, never what is reported.
 

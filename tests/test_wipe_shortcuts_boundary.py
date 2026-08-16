@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.fabric.shortcuts import Shortcut
 from weaver.physical_wipe import wipe_delta_target, wipe_folder_target, wipe_lakehouse
@@ -65,6 +66,7 @@ def shortcut_workspace(lakehouses, monkeypatch):
     return resolver
 
 
+@weaver_test()
 def test_a_table_shortcut_is_taken_away_before_storage_is_swept(
     lakehouses, shortcut_workspace
 ):
@@ -76,12 +78,14 @@ def test_a_table_shortcut_is_taken_away_before_storage_is_swept(
     assert report.removed[0] == "shortcut:Tables/Sales/Portable"
 
 
+@weaver_test()
 def test_only_the_area_being_wiped_loses_its_shortcuts(lakehouses, shortcut_workspace):
     wipe_folder_target(FolderTarget(lakehouse=lakehouses.target), lakehouses.workspace)
 
     assert shortcut_workspace.removed == ["Files/Sales/Landed"]
 
 
+@weaver_test()
 def test_a_dry_run_reports_the_shortcut_without_taking_it_away(
     lakehouses, shortcut_workspace
 ):
@@ -94,6 +98,7 @@ def test_a_dry_run_reports_the_shortcut_without_taking_it_away(
     assert shortcut_workspace.removed == []
 
 
+@weaver_test()
 def test_a_whole_lakehouse_wipe_clears_shortcuts_in_both_areas(
     lakehouses, shortcut_workspace
 ):

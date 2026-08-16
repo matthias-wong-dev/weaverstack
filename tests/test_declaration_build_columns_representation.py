@@ -11,6 +11,7 @@ from __future__ import annotations
 import textwrap
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import SPARK_SQL, SQL, parse_document
 from weaver.declaration.columns import metadata_column_references, resolve_build_columns
@@ -45,12 +46,14 @@ Schema:
 # --- inferred tables --------------------------------------------------------
 
 
+@weaver_test()
 def test_inferred_business_columns_are_the_query_columns():
     document = _doc(INFERRED)
     columns = resolve_build_columns(document, ("Order id", "Amount"))
     assert columns == ("Order id", "Amount")
 
 
+@weaver_test()
 def test_inferred_reference_check_is_case_sensitive():
     document = _doc(INFERRED)
     # PK "Order id" is a case-sensitive contract; a lowercase query column is a
@@ -59,12 +62,14 @@ def test_inferred_reference_check_is_case_sensitive():
         resolve_build_columns(document, ("order id", "Amount"))
 
 
+@weaver_test()
 def test_a_primary_key_naming_a_missing_column_fails_at_build():
     document = _doc(INFERRED)
     with pytest.raises(BuildError, match="Primary key names column 'Order id'"):
         resolve_build_columns(document, ("Amount",))
 
 
+@weaver_test()
 def test_a_comparison_column_naming_a_missing_column_fails_at_build():
     document = _doc(
         """
@@ -79,6 +84,7 @@ def test_a_comparison_column_naming_a_missing_column_fails_at_build():
         resolve_build_columns(document, ("Order id", "Amount"))
 
 
+@weaver_test()
 def test_a_column_note_naming_a_missing_column_fails_at_build():
     document = _doc(
         """
@@ -93,6 +99,7 @@ def test_a_column_note_naming_a_missing_column_fails_at_build():
         resolve_build_columns(document, ("Order id",))
 
 
+@weaver_test()
 def test_an_identity_not_produced_by_the_query_is_fine_weaver_adds_it():
     document = _doc(
         """
@@ -111,6 +118,7 @@ def test_an_identity_not_produced_by_the_query_is_fine_weaver_adds_it():
     )
 
 
+@weaver_test()
 def test_an_identity_colliding_with_a_query_column_is_refused():
     document = _doc(
         """
@@ -124,6 +132,7 @@ def test_an_identity_colliding_with_a_query_column_is_refused():
         resolve_build_columns(document, ("Order id", "Amount"))
 
 
+@weaver_test()
 def test_columns_that_collide_only_by_case_are_ambiguous():
     document = _doc("Table ID: Sales.Order\nDescription: x\nLineage: y")
     with pytest.raises(BuildError, match="collide by name"):
@@ -133,6 +142,7 @@ def test_columns_that_collide_only_by_case_are_ambiguous():
 # --- declared tables --------------------------------------------------------
 
 
+@weaver_test()
 def test_declared_columns_are_authoritative_and_order_is_kept():
     document = _doc(DECLARED)
     # Query returns them in a different order; declared order wins.
@@ -142,6 +152,7 @@ def test_declared_columns_are_authoritative_and_order_is_kept():
     )
 
 
+@weaver_test()
 def test_a_declared_column_missing_from_the_query_fails():
     document = _doc(DECLARED)
     with pytest.raises(
@@ -150,12 +161,14 @@ def test_a_declared_column_missing_from_the_query_fails():
         resolve_build_columns(document, ("Order id",))
 
 
+@weaver_test()
 def test_an_undeclared_query_column_fails():
     document = _doc(DECLARED)
     with pytest.raises(BuildError, match="not in the declared schema"):
         resolve_build_columns(document, ("Order id", "Amount", "Extra"))
 
 
+@weaver_test()
 def test_declared_equivalence_ignores_order_but_not_case():
     document = _doc(DECLARED)
     # Order may differ; the declared order still wins.
@@ -165,6 +178,7 @@ def test_declared_equivalence_ignores_order_but_not_case():
     )
 
 
+@weaver_test()
 def test_declared_equivalence_requires_exact_case():
     document = _doc(DECLARED)
     # The query spells them differently; declared "Order id"/"Amount" are not met.
@@ -177,6 +191,7 @@ def test_declared_equivalence_requires_exact_case():
 # --- the shared reference set ----------------------------------------------
 
 
+@weaver_test()
 def test_reference_set_covers_every_column_naming_field_when_inferred():
     document = _doc(INFERRED)
     references = metadata_column_references(document)
@@ -185,6 +200,7 @@ def test_reference_set_covers_every_column_naming_field_when_inferred():
     assert ("Column notes", "Amount") in references
 
 
+@weaver_test()
 def test_reference_set_reads_declared_notes_from_the_schema():
     document = _doc(DECLARED + "Column notes:\n  Amount: Order total.\n")
     references = metadata_column_references(document)
@@ -192,6 +208,7 @@ def test_reference_set_reads_declared_notes_from_the_schema():
     assert ("Primary key", "Order id") in references
 
 
+@weaver_test()
 def test_spark_inferred_tables_use_the_same_model():
     document = parse_document(
         textwrap.dedent(

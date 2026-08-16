@@ -12,6 +12,7 @@ from dataclasses import replace
 
 import pytest
 from support.sessions import given_installer
+from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
 from weaver.build_bundle import (
@@ -103,6 +104,7 @@ def _bundle(tmp_path):
     return location, store
 
 
+@weaver_test()
 def test_successful_install_reports_every_action(tmp_path):
     location, store = _bundle(tmp_path)
     recorder = Recorder()
@@ -119,6 +121,7 @@ def test_successful_install_reports_every_action(tmp_path):
     assert all(r.target_id == TARGET.id for r in results)
 
 
+@weaver_test()
 def test_a_failure_stops_later_sequences_and_is_reported(tmp_path):
     location, store = _bundle(tmp_path)
     recorder = Recorder(fail_on={"a2"})
@@ -137,6 +140,7 @@ def test_a_failure_stops_later_sequences_and_is_reported(tmp_path):
     assert by_id["a3"].status == SKIPPED
 
 
+@weaver_test()
 def test_report_is_persisted_beside_the_plan(tmp_path):
     location, store = _bundle(tmp_path)
     installer = given_installer(store=store, executors={"spark_sql": Recorder()})
@@ -148,6 +152,7 @@ def test_report_is_persisted_beside_the_plan(tmp_path):
     assert report.bundle_id in store.read(report_location).decode("utf-8")
 
 
+@weaver_test()
 def test_preflight_rejects_a_corrupt_bundle_before_running(tmp_path):
     location, store = _bundle(tmp_path)
     bundle = load_bundle(location, store=store)
@@ -161,6 +166,7 @@ def test_preflight_rejects_a_corrupt_bundle_before_running(tmp_path):
     assert recorder.calls == []  # nothing ran
 
 
+@weaver_test()
 def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
     class Resolver:
         def lakehouse_spark_location(self, _item):
@@ -180,6 +186,7 @@ def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
     assert report.status == SUCCEEDED
 
 
+@weaver_test()
 def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_path):
     """Inside a Fabric session there is no REST client to refresh with.
 
@@ -245,6 +252,7 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
 # --- capabilities are acquired by need, not by batch --------------------------
 
 
+@weaver_test()
 def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     """A Spark session costs seconds to start and a JVM permits exactly one.
 
@@ -299,6 +307,7 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     assert asked == [], "a Spark session was started for a batch that never used one"
 
 
+@weaver_test()
 def test_a_context_carries_no_spark_session_for_an_executor_to_find():
     """The last "does this host have Spark?" question, and it is gone.
 
@@ -389,6 +398,7 @@ class _Concurrent:
         return {"ran": action.id}
 
 
+@weaver_test()
 def test_actions_in_a_batch_run_one_at_a_time(tmp_path):
     """They ran concurrently for one commit, and a real Warehouse said no.
 
@@ -411,6 +421,7 @@ def test_actions_in_a_batch_run_one_at_a_time(tmp_path):
     assert executor.peak == 1, "actions in a batch overlapped"
 
 
+@weaver_test()
 def test_a_failure_in_a_batch_fails_the_sequence(tmp_path):
     """The sequence barrier is what stops anything downstream."""
 
@@ -433,6 +444,7 @@ def test_a_failure_in_a_batch_fails_the_sequence(tmp_path):
     assert by_id["a0"].status == SUCCEEDED
 
 
+@weaver_test()
 def test_spark_actions_are_not_run_concurrently(tmp_path):
     """A Spark statement's concurrency is the Fabric session's business, not
     ours. Widening this is a measurement, not an assumption."""
@@ -451,6 +463,7 @@ def test_spark_actions_are_not_run_concurrently(tmp_path):
 # --- every action is timed where it runs ---------------------------------------
 
 
+@weaver_test()
 def test_each_action_reports_its_own_duration(tmp_path):
     """Actions in a batch share a target and a context, never a number.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.locations import Location
@@ -21,15 +22,18 @@ def root(tmp_path: Path) -> Location:
     return Location(str(tmp_path))
 
 
+@weaver_test()
 def test_the_local_store_satisfies_the_protocol():
     assert isinstance(FilesystemStore(), Store)
 
 
+@weaver_test()
 def test_write_creates_missing_parents(store, root):
     store.write(root / "Budget" / "Expense" / "part.csv", b"id,name\n")
     assert store.read(root / "Budget" / "Expense" / "part.csv") == b"id,name\n"
 
 
+@weaver_test()
 def test_exists_and_is_directory(store, root):
     store.write(root / "a" / "file.txt", b"x")
     assert store.exists(root / "a" / "file.txt")
@@ -38,6 +42,7 @@ def test_exists_and_is_directory(store, root):
     assert not store.exists(root / "missing")
 
 
+@weaver_test()
 def test_listing_carries_metadata_not_just_names(store, root):
     """Every incremental strategy depends on this."""
     store.write(root / "file.txt", b"1234567890")
@@ -49,24 +54,28 @@ def test_listing_carries_metadata_not_just_names(store, root):
     assert not entry.is_directory
 
 
+@weaver_test()
 def test_listing_is_shallow_by_default(store, root):
     store.write(root / "top.txt", b"x")
     store.write(root / "nested" / "deep.txt", b"x")
     assert {entry.name for entry in store.list(root)} == {"top.txt", "nested"}
 
 
+@weaver_test()
 def test_listing_recursively_reaches_nested_files(store, root):
     store.write(root / "nested" / "deep.txt", b"x")
     names = {entry.location.value for entry in store.list(root, recursive=True)}
     assert (root / "nested" / "deep.txt").value in names
 
 
+@weaver_test()
 def test_directories_report_no_size(store, root):
     store.write(root / "nested" / "deep.txt", b"x")
     directory = next(entry for entry in store.list(root) if entry.is_directory)
     assert directory.size is None
 
 
+@weaver_test()
 def test_deleting_a_directory_needs_recursive(store, root):
     store.write(root / "tree" / "file.txt", b"x")
     with pytest.raises(StoreError, match="recursive"):
@@ -75,27 +84,32 @@ def test_deleting_a_directory_needs_recursive(store, root):
     assert not store.exists(root / "tree")
 
 
+@weaver_test()
 def test_deleting_something_absent_is_quiet(store, root):
     store.delete(root / "never-existed")
 
 
+@weaver_test()
 def test_make_directory_is_idempotent(store, root):
     store.make_directory(root / "a" / "b")
     store.make_directory(root / "a" / "b")
     assert store.is_directory(root / "a" / "b")
 
 
+@weaver_test()
 def test_listing_a_missing_location_is_an_error(store, root):
     with pytest.raises(StoreError, match="does not exist"):
         store.list(root / "absent")
 
 
+@weaver_test()
 def test_the_local_store_refuses_url_locations(store):
     remote = Location("abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files")
     with pytest.raises(CommandError, match="URL location"):
         store.exists(remote)
 
 
+@weaver_test()
 def test_the_store_takes_locations_not_strings(store, tmp_path):
     with pytest.raises(CommandError, match="Location"):
         store.exists(str(tmp_path))

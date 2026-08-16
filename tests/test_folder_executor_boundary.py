@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
@@ -49,6 +50,7 @@ def _action(kind: str) -> InstallAction:
     )
 
 
+@weaver_test()
 def test_managed_folder_create_and_drop_are_strict(tmp_path):
     context = _context(tmp_path)
     executor = FolderExecutor()
@@ -62,6 +64,7 @@ def test_managed_folder_create_and_drop_are_strict(tmp_path):
         executor.execute(_action(DROP_FOLDER), None, context)
 
 
+@weaver_test()
 def test_folder_prune_remains_idempotent(tmp_path):
     context = _context(tmp_path)
     result = FolderExecutor().execute(_action(PRUNE_FOLDER), None, context)

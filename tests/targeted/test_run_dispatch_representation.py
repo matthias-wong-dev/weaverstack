@@ -17,6 +17,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.load_plan import PhysicalTargetRef
 from weaver.run.dispatch import dispatch_primitive
@@ -71,6 +72,7 @@ ROW = {
 }
 
 
+@weaver_test()
 def test_a_warehouse_load_asks_for_its_result_by_name():
     """Never by reading a result set, which authored setup may also produce."""
 
@@ -87,6 +89,7 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
     )
 
 
+@weaver_test()
 def test_fault_tolerance_reaches_the_procedure_as_an_input():
     _result, sql = _dispatch(
         True, dict(ROW, rows_read=0, rows_inserted=0, rows_updated=0)
@@ -95,6 +98,7 @@ def test_fault_tolerance_reaches_the_procedure_as_an_input():
     assert sql.calls[0][1] == (("fault_tolerant", 1),)
 
 
+@weaver_test()
 def test_a_run_with_no_session_says_what_it_needed():
     """The one crossing a run makes is through a Session. There is no other."""
 
@@ -110,6 +114,7 @@ def test_a_run_with_no_session_says_what_it_needed():
         dispatch_primitive(node, session=None)
 
 
+@weaver_test()
 def test_an_unknown_primitive_kind_is_refused_rather_than_guessed_at():
     node = SimpleNamespace(
         node_id="Sales.Customer",

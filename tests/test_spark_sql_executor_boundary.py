@@ -13,6 +13,7 @@ which destination, and under which case scope.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.executors.spark_sql import SparkSqlExecutor
@@ -87,6 +88,7 @@ def _run(capability, destination, payload=None):
     )
 
 
+@weaver_test()
 def test_a_finished_statement_is_run_exactly_as_the_build_froze_it():
     """The names were decided when the bundle was generated, so nothing here
     resolves anything: what was frozen is what runs."""
@@ -110,6 +112,7 @@ def test_a_finished_statement_is_run_exactly_as_the_build_froze_it():
     ],
     ids=["one-workspace", "another"],
 )
+@weaver_test()
 def test_a_view_carries_the_destinations_case_scope(destination):
     """Weaver identities are exact, so the statement says which case it needs."""
 
@@ -119,6 +122,7 @@ def test_a_view_carries_the_destinations_case_scope(destination):
     assert capability.calls == [(capability.statements, True)]
 
 
+@weaver_test()
 def test_a_view_without_a_way_to_run_a_statement_says_so():
     capability = _Capability()
     context = _context(capability, FabricSparkTarget(workspace="A", lakehouse="Sales"))
@@ -128,6 +132,7 @@ def test_a_view_without_a_way_to_run_a_statement_says_so():
         SparkSqlExecutor().execute(_view_action(), b"SELECT 1", context)
 
 
+@weaver_test()
 def test_a_failing_statement_is_not_swallowed():
     capability = _Capability(fail=True)
 
@@ -158,6 +163,7 @@ def _batch_context(capability, *, build_datetime=None):
     )
 
 
+@weaver_test()
 def test_a_batch_is_one_piece_of_work_in_payload_order():
     """The statements of one action travel together, and stay in order.
 
@@ -181,6 +187,7 @@ def test_a_batch_is_one_piece_of_work_in_payload_order():
     assert details["destination"] == "Control"
 
 
+@weaver_test()
 def test_every_statement_in_a_batch_gets_the_same_epoch():
     """The reason the build_datetime is an installation value rather than a clock call.
 
@@ -209,6 +216,7 @@ def test_every_statement_in_a_batch_gets_the_same_epoch():
     assert all("{{build_datetime}}" not in statement for statement in dated)
 
 
+@weaver_test()
 def test_a_statement_needing_an_epoch_without_one_says_so():
     """Rather than reaching ``expand``, which would report it as an unresolvable
     name and say nothing about the missing value."""
@@ -225,6 +233,7 @@ def test_a_statement_needing_an_epoch_without_one_says_so():
     assert capability.calls == []
 
 
+@weaver_test()
 def test_a_batch_naming_no_epoch_runs_without_one():
     """Only Registry publication carries the token; every other batch is
     unaffected by its absence."""
@@ -239,6 +248,7 @@ def test_a_batch_naming_no_epoch_runs_without_one():
     assert [statement.split()[0] for statement in capability.statements] == ["DELETE"]
 
 
+@weaver_test()
 def test_a_batch_without_a_way_to_run_statements_says_so():
     capability = _Capability()
     bare = _batch_context(capability)

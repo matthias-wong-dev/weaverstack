@@ -19,6 +19,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from support.weaver_test import weaver_test
+
 ROOT = Path(__file__).resolve().parents[1]
 
 #: What marks a string as a program rather than prose: it hands a value back the
@@ -95,6 +97,7 @@ def _programs():
                 yield relative, node.lineno, body
 
 
+@weaver_test()
 def test_every_remote_program_body_parses():
     broken = []
     for where, line, body in _programs():
@@ -108,6 +111,7 @@ def test_every_remote_program_body_parses():
     )
 
 
+@weaver_test()
 def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
     """A body naming a deleted API is a Fabric failure waiting to happen.
 
@@ -146,6 +150,7 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
 # --- the runtime speaks its own vocabulary -----------------------------------
 
 
+@weaver_test()
 def test_the_runner_needs_no_load_vocabulary_to_orchestrate():
     """Adding a runtime operation must not mean importing another one's types.
 
@@ -197,6 +202,7 @@ def _only_in_prose(source: str, word: str) -> bool:
     return word not in stripped
 
 
+@weaver_test()
 def test_only_the_run_boundary_submits_a_program():
     """Which crossing waits on `weaver install`, held to one.
 

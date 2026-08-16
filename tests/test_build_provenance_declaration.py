@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 
 import yaml
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
@@ -71,10 +72,12 @@ def _action(**overrides) -> InstallAction:
 # --- the action carries it ----------------------------------------------------
 
 
+@weaver_test()
 def test_an_action_carries_the_authored_file_it_came_from():
     assert _action().source_path == SOURCE
 
 
+@weaver_test()
 def test_an_action_with_no_authored_source_says_so():
     """An alias, an endpoint refresh, a prune, a catalogue publication: None is
     the truthful answer, not the nearest-looking file."""
@@ -82,6 +85,7 @@ def test_an_action_with_no_authored_source_says_so():
     assert _action(source_path=None).source_path is None
 
 
+@weaver_test()
 def test_the_key_is_absent_rather_than_null_when_there_is_no_source():
     """plan.yml is what bundle_id hashes. A key written on every action would
     change the id of every bundle that has no authored source to name."""
@@ -117,6 +121,7 @@ def _plan(action: InstallAction) -> BuildPlan:
     )
 
 
+@weaver_test()
 def test_the_authored_path_round_trips_through_plan_yaml():
     """The requirement that stops provenance working only in memory.
 
@@ -133,12 +138,14 @@ def test_the_authored_path_round_trips_through_plan_yaml():
     assert action.source_path == SOURCE
 
 
+@weaver_test()
 def test_an_action_without_a_source_round_trips_as_having_none():
     restored = plan_from_yaml(plan_to_yaml(_plan(_action(source_path=None))))
 
     assert restored.sequences[0].batches[0].actions[0].source_path is None
 
 
+@weaver_test()
 def test_the_authored_path_is_part_of_what_the_bundle_id_identifies():
     """Two bundles differing only in which file an action came from are not the
     same bundle: the second would report the first one's source on failure."""
@@ -149,6 +156,7 @@ def test_the_authored_path_is_part_of_what_the_bundle_id_identifies():
     assert compute_bundle_id(one) != compute_bundle_id(other)
 
 
+@weaver_test()
 def test_a_plan_written_before_provenance_existed_still_loads():
     """Absent means absent. An older archive is readable, and simply cannot say
     which file an action came from."""
@@ -167,6 +175,7 @@ def test_a_plan_written_before_provenance_existed_still_loads():
 # --- what a failure says ------------------------------------------------------
 
 
+@weaver_test()
 def test_a_failure_names_the_operation_then_the_file_then_the_reason():
     """The developer-facing error describes the Weaver operation.
 
@@ -191,6 +200,7 @@ def test_a_failure_names_the_operation_then_the_file_then_the_reason():
     ]
 
 
+@weaver_test()
 def test_a_failure_with_no_authored_source_still_names_what_failed():
     from weaver.operations.build import BuildFailure
 
@@ -205,6 +215,7 @@ def test_a_failure_with_no_authored_source_still_names_what_failed():
     assert described.startswith("Error installing Lakehouse/Reporting/DWG.Customer")
 
 
+@weaver_test()
 def test_a_failure_falls_back_to_the_action_id_when_it_has_no_artefact():
     from weaver.operations.build import BuildFailure
 
@@ -218,6 +229,7 @@ def test_a_failure_falls_back_to_the_action_id_when_it_has_no_artefact():
 # --- the rule that keeps it honest --------------------------------------------
 
 
+@weaver_test()
 def test_nothing_reconstructs_an_authored_path_from_a_deployed_one():
     """Read off the source, because this is the failure mode the contract is
     for: a path derived at install time looks right and is a guess.

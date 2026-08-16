@@ -14,6 +14,7 @@ from __future__ import annotations
 import textwrap
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import PYTHON, SQL, ObjectId, parse_document
 from weaver.errors import MetadataError
@@ -62,6 +63,7 @@ def parse(*blocks: str, language: str = PYTHON):
 # --- unique keys ------------------------------------------------------------
 
 
+@weaver_test()
 def test_unique_keys_are_a_list_of_column_sets():
     document = parse(
         TABLE,
@@ -77,31 +79,37 @@ def test_unique_keys_are_a_list_of_column_sets():
     )
 
 
+@weaver_test()
 def test_a_unique_key_preserves_its_declared_column_order():
     document = parse(TABLE, "\nUnique keys:\n  - Country, Region\n")
     assert document.unique_keys == (("Country", "Region"),)
 
 
+@weaver_test()
 def test_unique_keys_must_be_a_list():
     with pytest.raises(MetadataError, match="non-empty YAML list"):
         parse(TABLE, "\nUnique keys: Order number\n")
 
 
+@weaver_test()
 def test_a_unique_key_is_not_a_nested_list():
     with pytest.raises(MetadataError, match="not a nested YAML list"):
         parse(TABLE, "\nUnique keys:\n  - - Order number\n    - Customer id\n")
 
 
+@weaver_test()
 def test_unique_keys_must_not_repeat_a_key():
     with pytest.raises(MetadataError, match="repeats the key"):
         parse(TABLE, "\nUnique keys:\n  - Order number\n  - Order number\n")
 
 
+@weaver_test()
 def test_a_unique_key_must_not_repeat_the_primary_key():
     with pytest.raises(MetadataError, match="already unique"):
         parse(TABLE, "\nUnique keys:\n  - Order id\n")
 
 
+@weaver_test()
 def test_unique_key_columns_must_be_in_the_schema():
     with pytest.raises(MetadataError, match="Unique keys names column"):
         parse(TABLE, "\nUnique keys:\n  - Nonexistent\n")
@@ -110,6 +118,7 @@ def test_unique_key_columns_must_be_in_the_schema():
 # --- foreign keys -----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_foreign_key_pairs_this_object_s_columns_with_a_parent_s():
     document = parse(
         TABLE, "\nForeign keys:\n  - Customer id: Sales.Customer[Customer id]\n"
@@ -120,6 +129,7 @@ def test_a_foreign_key_pairs_this_object_s_columns_with_a_parent_s():
     assert key.reference_columns == ("Customer id",)
 
 
+@weaver_test()
 def test_a_composite_foreign_key_keeps_both_column_orders():
     document = parse(
         TABLE,
@@ -130,6 +140,7 @@ def test_a_composite_foreign_key_keeps_both_column_orders():
     assert key.reference_columns == ("Territory region", "Territory country")
 
 
+@weaver_test()
 def test_an_object_may_reference_itself():
     document = parse(
         TABLE, "\nForeign keys:\n  - Parent order id: Sales.Order[Order id]\n"
@@ -138,6 +149,7 @@ def test_an_object_may_reference_itself():
     assert key.reference == ObjectId(schema="Sales", object="Order")
 
 
+@weaver_test()
 def test_two_relationships_may_run_to_the_same_parent():
     document = parse(
         TABLE,
@@ -151,6 +163,7 @@ def test_two_relationships_may_run_to_the_same_parent():
     assert {str(key.reference) for key in document.foreign_keys} == {"Sales.Customer"}
 
 
+@weaver_test()
 def test_a_foreign_key_has_no_name_so_an_identical_pair_is_a_duplicate():
     with pytest.raises(MetadataError, match="repeats the relationship"):
         parse(
@@ -163,16 +176,19 @@ def test_a_foreign_key_has_no_name_so_an_identical_pair_is_a_duplicate():
         )
 
 
+@weaver_test()
 def test_the_two_sides_must_be_the_same_size():
     with pytest.raises(MetadataError, match="the two sets must be the same size"):
         parse(TABLE, "\nForeign keys:\n  - Region, Country: Sales.Territory[Region]\n")
 
 
+@weaver_test()
 def test_the_parent_must_carry_its_columns():
     with pytest.raises(MetadataError, match=r"Schema.Object\[Column, Column\]"):
         parse(TABLE, "\nForeign keys:\n  - Customer id: Sales.Customer\n")
 
 
+@weaver_test()
 def test_the_parent_must_be_a_two_part_name():
     with pytest.raises(MetadataError, match=r"Schema.Object\[Column, Column\]"):
         parse(
@@ -181,16 +197,19 @@ def test_the_parent_must_be_a_two_part_name():
         )
 
 
+@weaver_test()
 def test_each_entry_maps_one_column_set_to_one_parent():
     with pytest.raises(MetadataError, match="maps one column set to one parent"):
         parse(TABLE, "\nForeign keys:\n  - Sales.Customer[Customer id]\n")
 
 
+@weaver_test()
 def test_foreign_key_columns_must_be_in_the_schema():
     with pytest.raises(MetadataError, match="Foreign keys names column"):
         parse(TABLE, "\nForeign keys:\n  - Nonexistent: Sales.Customer[Customer id]\n")
 
 
+@weaver_test()
 def test_foreign_keys_must_be_a_list():
     with pytest.raises(MetadataError, match="non-empty YAML list"):
         parse(TABLE, "\nForeign keys: Sales.Customer\n")
@@ -199,6 +218,7 @@ def test_foreign_keys_must_be_a_list():
 # --- views ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_view_declares_logical_keys():
     document = parse(
         VIEW,
@@ -218,6 +238,7 @@ def test_a_view_declares_logical_keys():
     assert document.foreign_keys[0].columns == ("Customer id",)
 
 
+@weaver_test()
 def test_a_view_has_no_declared_schema_so_its_key_columns_defer_to_build():
     # No Schema key exists for a view, so nothing can be checked here. The
     # columns are checked against the built shape instead.
@@ -229,6 +250,7 @@ def test_a_view_has_no_declared_schema_so_its_key_columns_defer_to_build():
 @pytest.mark.parametrize(
     "key", ["Comparison columns", "Identity", "Not null", "Incremental"]
 )
+@weaver_test()
 def test_a_view_declares_nothing_that_implies_storage(key):
     value = "\n  - Order id" if key == "Not null" else " Order id"
     if key == "Incremental":
@@ -237,6 +259,7 @@ def test_a_view_declares_nothing_that_implies_storage(key):
         parse(VIEW + f"\n{key}:{value}\n", language=SQL)
 
 
+@weaver_test()
 def test_a_folder_declares_no_logical_keys():
     folder = """
     Folder ID: Sales.OrderExport
@@ -254,6 +277,7 @@ def test_a_folder_declares_no_logical_keys():
 # --- the deferred build guard sees them -------------------------------------
 
 
+@weaver_test()
 def test_an_inferred_table_checks_its_key_columns_against_the_built_shape():
     from weaver.declaration.columns import metadata_column_references
 
