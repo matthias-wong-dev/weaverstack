@@ -89,9 +89,7 @@ def test_creating_an_existing_lakehouse_returns_it(
 
 
 @weaver_test(provision=True, resources={"rest"})
-def test_an_unknown_item_says_which_workspace(
-    fabric_lakehouses, session_fabric_client
-):
+def test_an_unknown_item_says_which_workspace(fabric_lakehouses, session_fabric_client):
     with pytest.raises(CommandError) as raised:
         find_item(
             fabric_lakehouses["workspace"],

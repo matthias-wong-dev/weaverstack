@@ -150,7 +150,9 @@ class FabricClient:
                     timeout=self.timeout,
                 )
             except requests.exceptions.RequestException as exc:
-                raise FabricError(f"{method} {url} could not be reached: {exc}") from exc
+                raise FabricError(
+                    f"{method} {url} could not be reached: {exc}"
+                ) from exc
             if response.status_code not in expected:
                 raise FabricError(
                     f"{method} {url} returned {response.status_code}: "

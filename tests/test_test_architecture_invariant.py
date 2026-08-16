@@ -102,7 +102,9 @@ def test_managed_pytest_markers_are_generated_only_by_the_wrapper():
                 handwritten.append(
                     f"{path.relative_to(ROOT)}:{node.lineno}:pytest.mark.{node.attr}"
                 )
-    assert not handwritten, f"managed markers must come from @weaver_test: {handwritten}"
+    assert not handwritten, (
+        f"managed markers must come from @weaver_test: {handwritten}"
+    )
 
 
 @weaver_test()

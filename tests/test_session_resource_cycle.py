@@ -197,7 +197,9 @@ def test_an_async_acquisition_keeps_the_context_that_started_it(executor):
         telemetry=telemetry,
         telemetry_resource="livy",
     )
-    with ConsoleSession(telemetry=telemetry, executor=executor, progress=False) as session:
+    with ConsoleSession(
+        telemetry=telemetry, executor=executor, progress=False
+    ) as session:
         with session.task("Build"):
             with session.step("Install"):
                 resource.get()

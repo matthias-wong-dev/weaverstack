@@ -75,7 +75,9 @@ def pytest_collection_modifyitems(items):
             )
 
     if errors:
-        raise pytest.UsageError("invalid Weaver test declarations:\n" + "\n".join(errors))
+        raise pytest.UsageError(
+            "invalid Weaver test declarations:\n" + "\n".join(errors)
+        )
 
 
 def pytest_runtest_setup(item):

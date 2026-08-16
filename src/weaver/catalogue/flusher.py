@@ -90,7 +90,9 @@ class WarehouseFlusher:
                 )
             self._pending += 1
             self._ensure_worker()
-            context = self._capture_context() if self._capture_context is not None else None
+            context = (
+                self._capture_context() if self._capture_context is not None else None
+            )
             self._queue.put(_QueuedRow(row, context))
 
     def flush(self, *, timeout: float = DRAIN_TIMEOUT) -> None:

@@ -98,6 +98,7 @@ def test_every_accepted_row_is_written():
 @weaver_test()
 def test_a_worker_tds_event_keeps_the_context_that_queued_it():
     with ConsoleSession(progress=False) as session:
+
         def execute(statement):
             with session.telemetry.external("tds", "execute"):
                 pass

@@ -296,9 +296,7 @@ def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path)
                 (staging.path / name).write_text(text, encoding="utf-8")
             return staging, self.deletes
 
-    export = Sales__Export(
-        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
-    )
+    export = Sales__Export(object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path))
     export.files = {"keep.csv": "keep", "remove.csv": "remove"}
     export.load()
 
