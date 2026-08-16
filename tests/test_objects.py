@@ -16,6 +16,7 @@ from support.workspaces import mounted_lakehouse
 
 from weaver import Assumption, Folder, Lakehouse, Table, Test, View, WeaverObject
 from weaver.errors import LoadError
+from weaver.runtime.load_result import LoadResult
 from weaver.spark import FabricSparkTarget
 
 
@@ -222,6 +223,52 @@ def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
     ]
 
 
+@pytest.mark.parametrize(
+    ("returned", "expected_deletes"),
+    [(object(), None), ((object(), ["Customer id"]), ["Customer id"])],
+)
+def test_a_table_load_passes_normalised_read_results_to_the_runtime(
+    spark, monkeypatch, returned, expected_deletes
+):
+    import weaver.runtime.table_load as table_load
+    from weaver.declaration.metadata import PYTHON, parse_document
+
+    class Sales__Customer(Table):
+        def _document(self):
+            return parse_document(
+                """
+                Table ID: Sales.Customer
+
+                Description: One row per customer.
+
+                Lineage: The sales system.
+
+                Schema:
+                  Customer id: string
+                """,
+                language=PYTHON,
+            )
+
+        def read(self):
+            return returned
+
+    seen = {}
+
+    def load_table(*_args, **kwargs):
+        seen.update(kwargs)
+        return LoadResult(succeeded=True)
+
+    monkeypatch.setattr(table_load, "load_table", load_table)
+
+    result = Sales__Customer(spark, lakehouse=LAKEHOUSE).load()
+
+    assert result.succeeded
+    assert seen["staging_frame"] is (
+        returned[0] if isinstance(returned, tuple) else returned
+    )
+    assert seen["deletes"] == expected_deletes
+
+
 # --- views ------------------------------------------------------------------
 
 
@@ -273,19 +320,17 @@ def test_staging_is_the_folder_path_with_a_staging_suffix(spark, tmp_path):
     assert export._staging_path() == tmp_path / "Files/Sales/OrderExport_Staging"
 
 
-def test_staging_is_issued_by_a_load_and_asking_outside_one_says_so(spark, tmp_path):
-    """There is nothing to hand back before a load has reset one.
-
-    Answering anyway would name a directory nobody emptied, which is exactly the
-    state a load must never publish from.
-    """
+def test_staging_is_available_outside_a_load(spark, tmp_path):
 
     export = Sales__OrderExport(
         spark, lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
     )
 
-    with pytest.raises(LoadError, match="only available while a load is running"):
-        export.staging_folder()
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    assert staging.path != export.path()
+    export._clear_read_staging()
 
 
 def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(

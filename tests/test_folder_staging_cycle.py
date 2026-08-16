@@ -72,7 +72,7 @@ class Sales__Export(Folder):
             (staging.path / name).write_text(text, encoding="utf-8")
         if self.fail_in_read:
             raise RuntimeError("the source was unreachable")
-        return (self.returns if self.returns is not None else staging), []
+        return self.returns if self.returns is not None else staging
 
 
 @pytest.fixture
@@ -140,6 +140,95 @@ def test_no_run_identifier_appears_in_the_staging_path(export):
     assert _staging(export) == first
 
 
+# --- read-time staging -------------------------------------------------------
+
+
+def test_read_issues_temporary_staging_outside_a_load(export):
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    assert staging.path != export.path()
+    export._clear_read_staging()
+
+
+def test_read_reuses_one_temporary_staging_folder(export):
+    first = export.staging_folder()
+    second = export.staging_folder()
+
+    assert first is second
+    export._clear_read_staging()
+
+
+def test_next_read_removes_previous_temporary_staging(export):
+    first = export.read()
+    (first.path / "old.csv").write_text("old", encoding="utf-8")
+
+    second = export.read()
+
+    assert second is not first
+    assert not first.path.exists()
+    assert second.path.is_dir()
+    export._clear_read_staging()
+
+
+def test_read_staging_cleanup_tolerates_prior_removal(export):
+    first = export.read()
+    first.path.rmdir()
+
+    second = export.read()
+
+    assert second.path.is_dir()
+    export._clear_read_staging()
+
+
+def test_a_failed_standalone_read_keeps_staging_until_the_next_read(export):
+    export.files = {"partial.csv": "half a download"}
+    export.fail_in_read = True
+
+    with pytest.raises(RuntimeError, match="source was unreachable"):
+        export.read()
+
+    (first,) = Sales__Export.seen
+    assert (first.path / "partial.csv").read_text(encoding="utf-8") == "half a download"
+
+    export.fail_in_read = False
+    export.files = {}
+    second = export.read()
+
+    assert second is not first
+    assert second.path != first.path
+    assert not first.path.exists()
+    assert second.path.is_dir()
+    export._clear_read_staging()
+
+
+def test_read_staging_cleanup_and_destructor_leave_no_directory(export):
+    staging = export.staging_folder()
+    export._clear_read_staging()
+
+    assert not staging.path.exists()
+
+    staging = export.staging_folder()
+    export.__del__()
+
+    assert not staging.path.exists()
+
+
+def test_load_issued_staging_wins_over_read_temporary_staging(export):
+    from weaver.runtime.folder_load import new_staging_folder, remove_staging
+
+    issued = new_staging_folder(export.path(), export._staging_path())
+    export._issued_staging = issued
+    try:
+        assert export.staging_folder() is issued
+        assert export._read_staging is None
+        export._clear_read_staging()
+        assert issued.path.exists()
+    finally:
+        export._issued_staging = None
+        remove_staging(issued.path)
+
+
 # --- what read() must return --------------------------------------------------
 
 
@@ -170,6 +259,40 @@ def test_returning_another_staging_folder_of_the_same_path_is_refused(export):
 
     with pytest.raises(LoadError, match="rather than the folder"):
         export.load()
+
+
+def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path):
+    class Sales__Export(Folder):
+        files: dict = {}
+        deletes = ()
+
+        def _document(self):
+            from weaver.declaration.metadata import PYTHON, parse_document
+
+            return parse_document(
+                MODULE_DOC.replace("Incremental: false", "Incremental: true").strip(),
+                language=PYTHON,
+            )
+
+        def read(self):
+            staging = self.staging_folder()
+            for name, text in self.files.items():
+                (staging.path / name).write_text(text, encoding="utf-8")
+            return staging, self.deletes
+
+    export = Sales__Export(
+        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
+    )
+    export.files = {"keep.csv": "keep", "remove.csv": "remove"}
+    export.load()
+
+    export.files = {}
+    export.deletes = ("remove.csv",)
+    result = export.load()
+
+    assert result.rows_deleted == 1
+    assert (export.path() / "keep.csv").exists()
+    assert not (export.path() / "remove.csv").exists()
 
 
 # --- reset --------------------------------------------------------------------
@@ -253,8 +376,10 @@ def test_staging_survives_an_intolerant_rejection(export):
 def test_the_issued_reference_is_cleared_after_a_successful_load(export):
     export.load()
 
-    with pytest.raises(LoadError, match="only available while a load is running"):
-        export.staging_folder()
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    export._clear_read_staging()
 
 
 def test_the_issued_reference_is_cleared_after_a_failed_load(export):
@@ -263,8 +388,10 @@ def test_the_issued_reference_is_cleared_after_a_failed_load(export):
     with pytest.raises(RuntimeError):
         export.load()
 
-    with pytest.raises(LoadError, match="only available while a load is running"):
-        export.staging_folder()
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    export._clear_read_staging()
 
 
 def test_a_second_load_is_never_handed_the_first_ones_directory(export):

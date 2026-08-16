@@ -27,6 +27,7 @@ from weaver.declaration.metadata import (
 )
 from weaver.errors import LoadError, MetadataError
 from weaver.runtime import FolderLoadContract, LoadContract, document_for_module
+from weaver.runtime.load_contract import normalise_read_result
 
 TABLE_HEADER = """
 Table ID: Sales.Customer
@@ -164,6 +165,27 @@ def test_a_folder_is_not_a_table_and_says_so():
     )
     with pytest.raises(LoadError, match="has no table load contract"):
         LoadContract.from_document(folder)
+
+
+# --- read result -------------------------------------------------------------
+
+
+def test_a_single_read_value_means_no_explicit_deletes():
+    staged = object()
+
+    assert normalise_read_result(staged) == (staged, None)
+
+
+def test_an_explicit_read_pair_is_preserved():
+    staged, deletes = object(), object()
+
+    assert normalise_read_result((staged, deletes)) == (staged, deletes)
+
+
+@pytest.mark.parametrize("returned", [(), (object(),), (object(), object(), object())])
+def test_a_malformed_explicit_read_tuple_is_refused(returned):
+    with pytest.raises(LoadError, match="return data, or \\(data, deletes\\)"):
+        normalise_read_result(returned)
 
 
 # --- read from an installed module ------------------------------------------

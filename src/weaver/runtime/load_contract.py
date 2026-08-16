@@ -151,6 +151,24 @@ def document_for_module(module) -> SesDocument:
     return parse_document(module_metadata_text(module), language=PYTHON)
 
 
+def normalise_read_result(returned):
+    """Return an authored ``read()`` value as ``(staging, deletes)``.
+
+    A single value is the ordinary case: it stages data and makes no explicit
+    delete claim. A tuple remains the explicit form and must contain exactly
+    those two values.
+    """
+
+    if not isinstance(returned, tuple):
+        return returned, None
+    if len(returned) != 2:
+        raise LoadError(
+            "read() returned a tuple with "
+            f"{len(returned)} values; return data, or (data, deletes)"
+        )
+    return returned
+
+
 #: Rejection reasons shared by Warehouse and Delta load results.
 REASON_BLANK_PK = "blank_primary_key"
 REASON_DUPLICATE_PK = "duplicate_primary_key"
@@ -174,4 +192,5 @@ __all__ = [
     "delta_audit_columns",
     "document_for_module",
     "module_metadata_text",
+    "normalise_read_result",
 ]

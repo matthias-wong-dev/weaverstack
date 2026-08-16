@@ -1,7 +1,8 @@
 """Loading a Python-defined Delta table — the mechanics behind ``Table.load()``.
 
 The authored class proposes rows; this owns everything that happens to them.
-``read()`` returns ``(staging, deletes)`` and never touches the target.
+``read()`` returns staging, or ``(staging, deletes)``, and never touches the
+target.
 
 The first value is *staging*: unvalidated, with nothing yet rejected or
 classified. It goes through the same phases the Warehouse procedure runs::
