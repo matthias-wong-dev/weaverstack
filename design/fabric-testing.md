@@ -32,8 +32,9 @@ def test_an_item_is_created_and_deleted(...):
 ```
 
 The declaration is the source of truth. Pytest generates `fabric`, `remote`,
-`hosted`, `full_integration`, and `provision` markers from it for selection;
-contributors do not maintain those markers manually.
+`hosted`, `full_integration`, `provision`, `tds`, `livy`, `onelake`, and `rest`
+markers from it for selection; contributors do not maintain those markers
+manually.
 
 The scopes are:
 
@@ -168,6 +169,12 @@ Environment.
 .venv/bin/python -m pytest -m "fabric and hosted"
 .venv/bin/python -m pytest -m full_integration
 .venv/bin/python -m pytest -m provision
+.venv/bin/python -m pytest -m "fabric and remote and tds"
+.venv/bin/python -m pytest -m "fabric and remote and livy"
+.venv/bin/python -m pytest -m "fabric and remote and onelake"
+.venv/bin/python -m pytest -m "fabric and remote and rest"
+.venv/bin/python -m pytest -m "fabric and tds"
+.venv/bin/python -m pytest -m "fabric and not livy"
 ```
 
 Use `-s` when fixture phase timings and progress output are useful. Use a node

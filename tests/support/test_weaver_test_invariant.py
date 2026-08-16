@@ -19,6 +19,7 @@ def test_the_wrapper_exposes_its_declaration_and_generates_scope_markers():
     assert {mark.name for mark in getattr(declared, "pytestmark", ())} == {
         "fabric",
         "remote",
+        "tds",
     }
 
 
@@ -56,3 +57,18 @@ def test_each_scope_is_one_declaration_with_matching_selection_markers(
 def test_integration_and_provision_need_no_position_dimension():
     assert weaver_test(integration=True)
     assert weaver_test(provision=True)
+
+
+@weaver_test()
+def test_every_declared_resource_generates_its_selection_marker():
+    def candidate():
+        pass
+
+    declared = weaver_test(resources={"tds", "livy", "onelake", "rest"})(candidate)
+
+    assert {mark.name for mark in declared.pytestmark} == {
+        "tds",
+        "livy",
+        "onelake",
+        "rest",
+    }

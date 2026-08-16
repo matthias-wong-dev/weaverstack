@@ -75,6 +75,8 @@ def weaver_test(
             marked = pytest.mark.full_integration(marked)
         if scope == "provision":
             marked = pytest.mark.provision(marked)
+        for resource in sorted(declared):
+            marked = getattr(pytest.mark, resource)(marked)
         return marked
 
     return apply

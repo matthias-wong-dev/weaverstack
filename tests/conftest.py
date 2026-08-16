@@ -32,6 +32,7 @@ from support.weaver_test import (
 _sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
 
 
+from weaver.sessions.telemetry import RESOURCES
 from weaver.targets import ItemRef
 
 WORKSPACE = "Demo"
@@ -51,13 +52,16 @@ def pytest_collection_modifyitems(items):
         if declaration is None:
             errors.append(f"{item.nodeid}: missing @weaver_test declaration")
             continue
-        actual = {
-            mark.name
-            for mark in item.iter_markers()
-            if mark.name
-            in {"fabric", "remote", "hosted", "full_integration", "provision"}
+        managed = {
+            "fabric",
+            "remote",
+            "hosted",
+            "full_integration",
+            "provision",
+            *RESOURCES,
         }
-        expected = set()
+        actual = {mark.name for mark in item.iter_markers() if mark.name in managed}
+        expected = set(declaration.resources)
         if declaration.scope != "core":
             expected.add("fabric")
         expected.update(
@@ -70,7 +74,7 @@ def pytest_collection_modifyitems(items):
         )
         if actual != expected:
             errors.append(
-                f"{item.nodeid}: declaration {declaration.scope!r} generated "
+                f"{item.nodeid}: declaration generated "
                 f"{sorted(actual)}, expected {sorted(expected)}"
             )
 

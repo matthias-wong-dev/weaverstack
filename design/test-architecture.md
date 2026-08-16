@@ -33,7 +33,8 @@ def test_the_lifecycle_composes():
 
 The declaration stores one scope and one resource set. It is the source of
 truth for collection, selection, reporting, and resource validation. Pytest
-markers are generated from it and must not be written by hand.
+scope and resource markers are generated from it and must not be written by
+hand.
 
 ## Scopes
 
@@ -69,6 +70,19 @@ boundaries needed by its claim. The vocabulary is closed:
 | `livy` | a Spark or Python submission through Livy |
 | `onelake` | OneLake DFS storage access from outside Fabric |
 | `rest` | Fabric control-plane REST operations |
+
+Each declared resource also becomes a pytest selection marker. Declarations
+with more than one resource carry every corresponding marker:
+
+```bash
+pytest -m "fabric and remote and tds"
+pytest -m "fabric and rest"
+pytest -m "fabric and not livy"
+```
+
+These markers select tests by their stated needs. Production telemetry remains
+the semantic check that those needs exactly match the boundaries crossed by the
+test body.
 
 Ordinary timings are not resource events. Production boundaries call
 `Session.telemetry.external(...)` explicitly, so a timing name cannot

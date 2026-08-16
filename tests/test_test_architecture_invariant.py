@@ -85,7 +85,17 @@ def test_every_test_function_has_one_weaver_declaration():
 @weaver_test()
 def test_managed_pytest_markers_are_generated_only_by_the_wrapper():
     handwritten = []
-    managed = {"fabric", "remote", "hosted", "full_integration", "provision"}
+    managed = {
+        "fabric",
+        "remote",
+        "hosted",
+        "full_integration",
+        "provision",
+        "tds",
+        "livy",
+        "onelake",
+        "rest",
+    }
     for path in TESTS.rglob("*.py"):
         if path == TESTS / "support" / "weaver_test.py":
             continue
