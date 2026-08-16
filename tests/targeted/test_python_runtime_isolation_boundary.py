@@ -24,6 +24,7 @@ import sys
 import threading
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import LoadError
 from weaver.runtime.python_context import (
@@ -94,12 +95,14 @@ def _customer(context):
 # --- the ordinary case still works --------------------------------------------
 
 
+@weaver_test()
 def test_a_deployed_module_is_imported_from_its_runtime_root(raw):
     module = _customer(raw)
 
     assert module.Sales__Customer.__name__ == "Sales__Customer"
 
 
+@weaver_test()
 def test_a_deployed_module_reaches_the_rest_of_its_own_tree(raw):
     """``Files/`` and ``lib/`` sit where they were authored, so imports read.
 
@@ -111,6 +114,7 @@ def test_a_deployed_module_reaches_the_rest_of_its_own_tree(raw):
     assert module.Sales__Customer.reached == ("raw", "raw")
 
 
+@weaver_test()
 def test_a_deployed_folder_module_is_named_for_its_place_in_the_tree(raw):
     """``Files/Sales__Seed.py`` is ``Files.Sales__Seed``, which is how it is
     imported — naming it otherwise would leave two module objects for one file,
@@ -123,6 +127,7 @@ def test_a_deployed_folder_module_is_named_for_its_place_in_the_tree(raw):
     assert module.__name__.endswith(".Files.Sales__Seed")
 
 
+@weaver_test()
 def test_an_import_of_something_outside_the_tree_is_untouched(scope, tmp_path):
     """Only names the tree defines are redirected.
 
@@ -156,6 +161,7 @@ def test_an_import_of_something_outside_the_tree_is_untouched(scope, tmp_path):
 # --- isolation ----------------------------------------------------------------
 
 
+@weaver_test()
 def test_each_estate_receives_its_own_helper_module(raw, curated):
     """The defect, stated directly."""
 
@@ -166,6 +172,7 @@ def test_each_estate_receives_its_own_helper_module(raw, curated):
     assert second.Sales__Customer.reached == ("curated", "curated")
 
 
+@weaver_test()
 def test_import_order_does_not_decide_which_estate_wins(raw, curated):
     """Whichever went first, neither is the answer for the other."""
 
@@ -176,6 +183,7 @@ def test_import_order_does_not_decide_which_estate_wins(raw, curated):
     assert second.Sales__Customer.reached == ("curated", "curated")
 
 
+@weaver_test()
 def test_two_estates_hold_two_module_objects_for_one_authored_name(raw, curated):
     first = _customer(raw)
     second = _customer(curated)
@@ -184,6 +192,7 @@ def test_two_estates_hold_two_module_objects_for_one_authored_name(raw, curated)
     assert first.__name__ != second.__name__
 
 
+@weaver_test()
 def test_the_context_is_part_of_the_key_and_not_only_of_the_search(raw, curated):
     """The claim a ``ContextVar`` could not make.
 
@@ -200,6 +209,7 @@ def test_the_context_is_part_of_the_key_and_not_only_of_the_search(raw, curated)
     assert len([name for name in keys if name.endswith(".lib.dates")]) == 2
 
 
+@weaver_test()
 def test_the_authored_names_never_reach_the_global_module_table(raw, curated):
     """A process that loaded two estates has no bare ``lib.dates`` at all.
 
@@ -215,6 +225,7 @@ def test_the_authored_names_never_reach_the_global_module_table(raw, curated):
     assert "Sales__Customer" not in sys.modules
 
 
+@weaver_test()
 def test_repeated_loads_keep_reaching_the_same_context(raw, curated):
     first = _customer(raw)
     _customer(curated)
@@ -224,6 +235,7 @@ def test_repeated_loads_keep_reaching_the_same_context(raw, curated):
     assert again.Sales__Customer.reached == ("raw", "raw")
 
 
+@weaver_test()
 def test_objects_deployed_together_share_their_tree(raw):
     """One item in one target is one tree, because that is what its author wrote.
 
@@ -240,6 +252,7 @@ def test_objects_deployed_together_share_their_tree(raw):
     assert customer.Sales__Seed is seed.Sales__Seed
 
 
+@weaver_test()
 def test_concurrent_imports_of_two_estates_do_not_collide(raw, curated):
     """Sequential dispatch is today's shape, not tomorrow's constraint.
 
@@ -275,6 +288,7 @@ def test_concurrent_imports_of_two_estates_do_not_collide(raw, curated):
 # --- what a failure says ------------------------------------------------------
 
 
+@weaver_test()
 def test_a_module_that_is_not_there_names_the_path_it_was_not_at(raw):
     with pytest.raises(LoadError, match="no deployed module at"):
         import_deployed_module(
@@ -282,6 +296,7 @@ def test_a_module_that_is_not_there_names_the_path_it_was_not_at(raw):
         )
 
 
+@weaver_test()
 def test_a_module_that_will_not_import_is_reported_as_data(scope, tmp_path):
     context = scope.context_for(
         logical_item="Lakehouse/Raw",
@@ -295,6 +310,7 @@ def test_a_module_that_will_not_import_is_reported_as_data(scope, tmp_path):
         _customer(context)
 
 
+@weaver_test()
 def test_a_module_missing_its_declared_class_says_which_one(scope, tmp_path):
     context = scope.context_for(
         logical_item="Lakehouse/Raw",
@@ -311,6 +327,7 @@ def test_a_module_missing_its_declared_class_says_which_one(scope, tmp_path):
 # --- what a run does not carry into the next one ------------------------------
 
 
+@weaver_test()
 def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
     """The regression this lifetime exists for.
 
@@ -356,6 +373,7 @@ def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
         assert second.Sales__Customer.version == "B"
 
 
+@weaver_test()
 def test_closing_a_scope_leaves_nothing_of_it_behind(tmp_path):
     """The namespace goes whole, because deciding what may be kept would mean
     knowing whether a build has rewritten it — which nothing here can see."""
@@ -372,6 +390,7 @@ def test_closing_a_scope_leaves_nothing_of_it_behind(tmp_path):
     assert not [name for name in sys.modules if name.startswith(context.package)]
 
 
+@weaver_test()
 def test_two_runs_never_share_a_context_identity(tmp_path):
     """Which is why nothing has to detect staleness: the name is never reused."""
 
@@ -393,6 +412,7 @@ def test_two_runs_never_share_a_context_identity(tmp_path):
 # --- the context name ---------------------------------------------------------
 
 
+@weaver_test()
 def test_a_context_identity_is_opaque_rather_than_derived_from_weaver_names(raw):
     """Deriving it from Weaver names means normalising them, and normalisation
     is not injective: two distinct valid identities could reduce to one Python
@@ -403,6 +423,7 @@ def test_a_context_identity_is_opaque_rather_than_derived_from_weaver_names(raw)
     assert raw.package == f"{ROOT_PACKAGE}.{raw.context_id}"
 
 
+@weaver_test()
 def test_one_item_in_one_target_is_one_context_within_a_run(scope, tmp_path):
     root = tree(tmp_path, "raw")
     first = scope.context_for(
@@ -419,6 +440,7 @@ def test_one_item_in_one_target_is_one_context_within_a_run(scope, tmp_path):
     assert first is second
 
 
+@weaver_test()
 def test_two_targets_of_one_item_are_two_contexts(scope, tmp_path):
     """The same repository built into two Lakehouses is two estates."""
 

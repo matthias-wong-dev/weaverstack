@@ -21,6 +21,7 @@ out of generation carrying the check.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
 from weaver import Table
@@ -119,6 +120,7 @@ def _document(source: str, name: str, item_type: str, *, static: bool):
 
 
 @pytest.mark.parametrize("static", [True, False])
+@weaver_test()
 def test_a_python_tables_declaration_reaches_its_load_contract(static):
     document = _document(PYTHON_TABLE, "Sales__Country.py", LAKEHOUSE, static=static)
 
@@ -126,6 +128,7 @@ def test_a_python_tables_declaration_reaches_its_load_contract(static):
 
 
 @pytest.mark.parametrize("static", [True, False])
+@weaver_test()
 def test_a_spark_sql_tables_declaration_reaches_its_load_contract(static):
     document = _document(SPARK_TABLE, "Sales.Country.sql", LAKEHOUSE, static=static)
 
@@ -133,6 +136,7 @@ def test_a_spark_sql_tables_declaration_reaches_its_load_contract(static):
 
 
 @pytest.mark.parametrize("static", [True, False])
+@weaver_test()
 def test_a_folders_declaration_reaches_its_load_contract(static):
     document = _document(FOLDER, "Sales__Seed.py", LAKEHOUSE, static=static)
 
@@ -140,6 +144,7 @@ def test_a_folders_declaration_reaches_its_load_contract(static):
 
 
 @pytest.mark.parametrize("static", [True, False])
+@weaver_test()
 def test_a_warehouse_tables_declaration_reaches_its_load_contract(static):
     document = _document(WAREHOUSE_TABLE, "Sales.Country.sql", WAREHOUSE, static=static)
 
@@ -211,6 +216,7 @@ def _counting(monkeypatch, module_name: str, attribute: str, answer: bool):
     return calls
 
 
+@weaver_test()
 def test_a_non_static_table_never_asks_whether_its_target_is_populated(
     monkeypatch, tmp_path
 ):
@@ -232,6 +238,7 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
     assert calls == []
 
 
+@weaver_test()
 def test_a_static_table_does_ask(monkeypatch, tmp_path):
 
     calls = _counting(
@@ -258,6 +265,7 @@ def _procedure(*, static: bool) -> str:
     return document.create_load().payload.decode("utf-8")
 
 
+@weaver_test()
 def test_a_static_warehouse_load_returns_early_when_the_target_holds_a_row():
     """Baked into the artefact, not performed by whoever calls it.
 
@@ -272,6 +280,7 @@ def test_a_static_warehouse_load_returns_early_when_the_target_holds_a_row():
     assert "return;" in payload
 
 
+@weaver_test()
 def test_the_static_gate_reports_the_same_result_contract_as_a_real_load():
     """A no-op is a *result*, and a caller must not have to tell them apart.
 
@@ -288,6 +297,7 @@ def test_the_static_gate_reports_the_same_result_contract_as_a_real_load():
     assert "set @succeeded = cast(1 as bit);" in gate
 
 
+@weaver_test()
 def test_the_static_gate_precedes_the_staging_query():
     """So a populated static table costs an existence check, not a source read."""
 
@@ -298,6 +308,7 @@ def test_the_static_gate_precedes_the_staging_query():
     )
 
 
+@weaver_test()
 def test_a_non_static_warehouse_load_carries_no_gate_at_all():
     """Emitting a disabled branch would leave a reader guessing which way it went."""
 

@@ -35,6 +35,7 @@ from factories import (
     load_estate,
     load_estate_bindings,
 )
+from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
 from weaver.errors import LoadError
@@ -198,6 +199,7 @@ def _result_for(session, node_id: str) -> str:
 # --- an intolerant run raises -------------------------------------------------
 
 
+@weaver_test()
 def test_a_primitive_that_refused_rows_raises(session, dispatched):
     """The refusal shape: the primitive raised carrying what it counted."""
 
@@ -210,6 +212,7 @@ def test_a_primitive_that_refused_rows_raises(session, dispatched):
         _run(session)
 
 
+@weaver_test()
 def test_an_authored_exception_raises(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("the source system was unreachable")
 
@@ -217,6 +220,7 @@ def test_an_authored_exception_raises(session, dispatched):
         _run(session)
 
 
+@weaver_test()
 def test_a_warehouse_procedure_failure_raises(session, dispatched):
     dispatched.answers[SUMMARY] = LoadError("the procedure does not exist")
 
@@ -224,6 +228,7 @@ def test_a_warehouse_procedure_failure_raises(session, dispatched):
         _run(session)
 
 
+@weaver_test()
 def test_an_endpoint_refresh_failure_raises(session, dispatched):
     dispatched.answers[REFRESH] = LoadError("the endpoint could not be refreshed")
 
@@ -231,6 +236,7 @@ def test_an_endpoint_refresh_failure_raises(session, dispatched):
         _run(session)
 
 
+@weaver_test()
 def test_a_primitive_that_returned_failure_raises(session, dispatched):
     """A returned failure and a raised one are the same outcome to a caller."""
 
@@ -240,6 +246,7 @@ def test_a_primitive_that_returned_failure_raises(session, dispatched):
         _run(session)
 
 
+@weaver_test()
 def test_the_exception_names_the_node_that_failed(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -249,6 +256,7 @@ def test_the_exception_names_the_node_that_failed(session, dispatched):
     assert ORDER in str(raised.value)
 
 
+@weaver_test()
 def test_the_exception_carries_the_partial_report_and_the_evidence(session, dispatched):
     dispatched.answers[ORDER] = LoadError(
         "rows were rejected",
@@ -273,6 +281,7 @@ def test_the_exception_carries_the_partial_report_and_the_evidence(session, disp
 # --- what does not run --------------------------------------------------------
 
 
+@weaver_test()
 def test_a_descendant_of_a_failed_node_does_not_execute(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -282,6 +291,7 @@ def test_a_descendant_of_a_failed_node_does_not_execute(session, dispatched):
     assert SUMMARY not in dispatched.calls
 
 
+@weaver_test()
 def test_nothing_new_is_scheduled_after_an_intolerant_failure(session, dispatched):
     """Fail-fast stops scheduling. It does not stop reporting."""
 
@@ -299,6 +309,7 @@ def test_nothing_new_is_scheduled_after_an_intolerant_failure(session, dispatche
 # --- a tolerant run reports ---------------------------------------------------
 
 
+@weaver_test()
 def test_a_tolerant_run_returns_its_report_rather_than_raising(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -308,6 +319,7 @@ def test_a_tolerant_run_returns_its_report_rather_than_raising(session, dispatch
     assert report.status in (TASK_FAILED, TASK_PARTIALLY_SUCCEEDED)
 
 
+@weaver_test()
 def test_a_tolerant_run_continues_independent_branches(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -317,6 +329,7 @@ def test_a_tolerant_run_continues_independent_branches(session, dispatched):
     assert EXPORT in dispatched.calls
 
 
+@weaver_test()
 def test_a_tolerant_run_still_blocks_descendants(session, dispatched):
     """Tolerance decides whether *independent* branches continue, never whether
     a node may run on a dependency that did not."""
@@ -332,6 +345,7 @@ def test_a_tolerant_run_still_blocks_descendants(session, dispatched):
 # --- the distinction rejects create -------------------------------------------
 
 
+@weaver_test()
 def test_tolerated_rejects_are_not_a_failed_node(session, dispatched):
     """The primitive wrote the valid rows and reported the refusal."""
 
@@ -347,6 +361,7 @@ def test_tolerated_rejects_are_not_a_failed_node(session, dispatched):
     assert SUMMARY in dispatched.calls
 
 
+@weaver_test()
 def test_a_raised_rejection_is_a_failed_node_however_it_was_counted(
     session, dispatched
 ):
@@ -373,6 +388,7 @@ def test_a_raised_rejection_is_a_failed_node_however_it_was_counted(
 # --- durable evidence ---------------------------------------------------------
 
 
+@weaver_test()
 def test_every_planned_node_receives_exactly_one_final_record(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -386,6 +402,7 @@ def test_every_planned_node_receives_exactly_one_final_record(session, dispatche
     assert len(recorded) == len(set(recorded))
 
 
+@weaver_test()
 def test_a_record_says_what_became_of_the_node(session, dispatched):
     """The frozen public vocabulary, and the node's own detail beside it."""
 
@@ -402,6 +419,7 @@ def test_a_record_says_what_became_of_the_node(session, dispatched):
     assert "executed" in statements
 
 
+@weaver_test()
 def test_a_blocked_node_receives_evidence_of_its_own(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 
@@ -413,6 +431,7 @@ def test_a_blocked_node_receives_evidence_of_its_own(session, dispatched):
     assert _result_for(session, blocked[0]) == "Blocked"
 
 
+@weaver_test()
 def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
     """Never reached is an outcome, and it is not the same as blocked."""
 
@@ -428,6 +447,7 @@ def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
         assert _result_for(session, node) == "Skipped"
 
 
+@weaver_test()
 def test_every_node_is_recorded_before_the_run_raises(session, dispatched):
     """A decided failure is a finished task, and its evidence is complete.
 
@@ -448,6 +468,7 @@ def test_every_node_is_recorded_before_the_run_raises(session, dispatched):
     assert _result_for(session, ORDER) == "Failed"
 
 
+@weaver_test()
 def test_a_successful_intolerant_run_returns_normally(session, dispatched):
     report = _run(session)
 
@@ -455,6 +476,7 @@ def test_a_successful_intolerant_run_returns_normally(session, dispatched):
     assert all(node.status == SUCCEEDED for node in report.nodes)
 
 
+@weaver_test()
 def test_the_log_is_appended_to_and_never_updated(session, dispatched):
     """Immutability is what makes the log readable after an interruption."""
 

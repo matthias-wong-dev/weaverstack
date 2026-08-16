@@ -14,6 +14,7 @@ TDS connection, nothing published.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 import weaver
 from weaver.errors import CommandError, ConfigError
@@ -21,6 +22,7 @@ from weaver.sessions import ConsoleSession
 from weaver.workspaces import Workspace
 
 
+@weaver_test()
 def test_the_public_name_is_a_callable_rather_than_a_module():
     """The collision the rename removed.
 
@@ -32,6 +34,7 @@ def test_the_public_name_is_a_callable_rather_than_a_module():
     assert callable(weaver.session)
 
 
+@weaver_test()
 def test_a_named_workspace_is_enough(desktop_credential):
     with weaver.session(workspace="Demo", catalogue="Warehouse/Weaver") as opened:
         assert isinstance(opened, ConsoleSession)
@@ -39,6 +42,7 @@ def test_a_named_workspace_is_enough(desktop_credential):
         assert opened.workspace.catalogue == "Warehouse/Weaver"
 
 
+@weaver_test()
 def test_a_resolved_workspace_is_taken_as_it_is(desktop_credential):
     workspace = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
 
@@ -46,6 +50,7 @@ def test_a_resolved_workspace_is_taken_as_it_is(desktop_credential):
         assert opened.workspace is workspace
 
 
+@weaver_test()
 def test_a_resolved_workspace_and_a_configuration_file_is_refused(
     tmp_path, desktop_credential
 ):
@@ -61,6 +66,7 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused(
         )
 
 
+@weaver_test()
 def test_configuration_supplies_what_was_not_named(tmp_path, desktop_credential):
     config = tmp_path / "workspace.yml"
     config.write_text(
@@ -73,6 +79,7 @@ def test_configuration_supplies_what_was_not_named(tmp_path, desktop_credential)
         assert opened.workspace.environment == "weaver"
 
 
+@weaver_test()
 def test_an_explicit_value_wins_over_the_configured_one(tmp_path, desktop_credential):
     config = tmp_path / "workspace.yml"
     config.write_text(
@@ -85,11 +92,13 @@ def test_an_explicit_value_wins_over_the_configured_one(tmp_path, desktop_creden
         assert opened.workspace.catalogue == "Warehouse/Explicit"
 
 
+@weaver_test()
 def test_naming_no_workspace_says_which_value_is_missing():
     with pytest.raises(ConfigError, match="--workspace"):
         weaver.session()
 
 
+@weaver_test()
 def test_opening_a_session_acquires_nothing(desktop_credential):
     """The property that makes one Session per script the right default.
 
@@ -103,6 +112,7 @@ def test_opening_a_session_acquires_nothing(desktop_credential):
         assert opened.telemetry.counters.get("resolve.item", 0) == 0
 
 
+@weaver_test()
 def test_a_closed_session_says_so_rather_than_reopening(desktop_credential):
     opened = weaver.session(workspace="Demo", catalogue="Warehouse/Weaver")
     opened.close()

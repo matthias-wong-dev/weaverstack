@@ -30,6 +30,7 @@ from __future__ import annotations
 import ast
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.errors import CommandError
@@ -56,11 +57,13 @@ def no_leaked_scopes():
 # --- the registry, as the Fabric interpreter sees it --------------------------
 
 
+@weaver_test()
 def test_a_run_gets_a_scope_and_is_named_by_it():
     assert session_scopes.open_scope("run-a") == "run-a"
     assert session_scopes.open_scopes() == ("run-a",)
 
 
+@weaver_test()
 def test_beginning_the_same_run_twice_keeps_the_first_scope():
     """A resubmitted statement must not replace a scope whose modules are
     already imported and in use."""
@@ -72,6 +75,7 @@ def test_beginning_the_same_run_twice_keeps_the_first_scope():
     assert session_scopes.get_scope("run-a") is first
 
 
+@weaver_test()
 def test_two_runs_never_share_a_scope():
     """Across runs nothing is shared at all: that is what makes a rebuilt module
     take effect on the next load rather than the next session."""
@@ -82,6 +86,7 @@ def test_two_runs_never_share_a_scope():
     assert session_scopes.get_scope("run-a") is not session_scopes.get_scope("run-b")
 
 
+@weaver_test()
 def test_ending_a_run_closes_its_scope_and_forgets_it():
     session_scopes.open_scope("run-a")
     closed = []
@@ -92,12 +97,14 @@ def test_ending_a_run_closes_its_scope_and_forgets_it():
     assert session_scopes.open_scopes() == ()
 
 
+@weaver_test()
 def test_ending_a_run_that_was_never_begun_says_so_rather_than_failing():
     """Cleanup that raised would turn a finished run into a failed one."""
 
     assert session_scopes.close_scope("never-started") is False
 
 
+@weaver_test()
 def test_dispatching_into_a_run_with_no_scope_is_diagnosed():
     from weaver.errors import RuntimeScopeError
 
@@ -233,6 +240,7 @@ def _dispatch(scope):
     )
 
 
+@weaver_test()
 def test_opening_a_scope_where_execution_is_local_needs_no_crossing():
     from weaver.runtime.python_context import RuntimeScope
 
@@ -247,6 +255,7 @@ def test_opening_a_scope_where_execution_is_local_needs_no_crossing():
     scope.close()
 
 
+@weaver_test()
 def test_opening_a_scope_where_execution_is_remote_begins_one_over_there():
     session = _Recording()
 
@@ -256,6 +265,7 @@ def test_opening_a_scope_where_execution_is_remote_begins_one_over_there():
     assert scope.run_id in _sources(session)["open_scope"]
 
 
+@weaver_test()
 def test_a_session_with_no_workspace_at_all_keeps_the_imports_here():
     """Positive knowledge is required to go remote: a scope opened over there by
     mistake would run the primitive somewhere the caller never named."""
@@ -271,6 +281,7 @@ def test_a_session_with_no_workspace_at_all_keeps_the_imports_here():
     scope.close()
 
 
+@weaver_test()
 def test_a_configuration_failure_is_not_mistaken_for_running_locally():
     """The narrow fallback above must stay narrow.
 
@@ -288,6 +299,7 @@ def test_a_configuration_failure_is_not_mistaken_for_running_locally():
         open_runtime_scope(Broken(), workspace=_fabric())
 
 
+@weaver_test()
 def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
     session = _Recording(answer=_row())
     scope = open_runtime_scope(session, workspace=_fabric())
@@ -299,6 +311,7 @@ def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
     assert "Sales__Customer" in submitted
 
 
+@weaver_test()
 def test_the_submitted_program_builds_its_session_around_the_interpreters_spark():
     """The construction every other crossing performs. A Session built inside
     the call would have to go looking for an active Spark session rather than
@@ -324,6 +337,7 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
         "close_scope",
     ],
 )
+@weaver_test()
 def test_every_submitted_program_is_valid_python(name):
     """A typo here is invisible to every local test and would ship a run that
     cannot reach Fabric at all."""
@@ -337,6 +351,7 @@ def test_every_submitted_program_is_valid_python(name):
     ast.parse(_sources(session)[name])
 
 
+@weaver_test()
 def test_closing_the_handle_ends_the_run_over_there():
     session = _Recording(answer=True)
     scope = open_runtime_scope(session, workspace=_fabric())
@@ -346,6 +361,7 @@ def test_closing_the_handle_ends_the_run_over_there():
     assert scope.run_id in _sources(session)["close_scope"]
 
 
+@weaver_test()
 def test_closing_twice_ends_the_run_once():
     session = _Recording(answer=True)
     scope = open_runtime_scope(session, workspace=_fabric())
@@ -356,6 +372,7 @@ def test_closing_twice_ends_the_run_once():
     assert [one.name for one in session.submitted].count("close_scope") == 1
 
 
+@weaver_test()
 def test_a_cleanup_that_cannot_reach_the_session_does_not_fail_the_run():
     """If the Livy session is already gone, so is the scope — which is the
     outcome closing the scope exists to reach."""
@@ -374,6 +391,7 @@ def test_a_cleanup_that_cannot_reach_the_session_does_not_fail_the_run():
 # --- what dispatch does with each kind of scope -------------------------------
 
 
+@weaver_test()
 def test_the_scope_is_what_runs_a_python_node():
     """Dispatch hands the node to the scope and does not decide where it runs.
 
@@ -408,6 +426,7 @@ def test_the_scope_is_what_runs_a_python_node():
 # --- preparing is not using ---------------------------------------------------
 
 
+@weaver_test()
 def test_a_warehouse_only_run_never_opens_a_runtime_scope():
     """The claim that keeps a declared requirement from becoming an acquisition.
 
@@ -452,6 +471,7 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
     assert opened == [], "a Warehouse-only run opened a runtime scope"
 
 
+@weaver_test()
 def test_a_warehouse_validation_opens_no_scope_either():
     """A Warehouse validation is a procedure, and TDS reaches it from here."""
 
@@ -517,6 +537,7 @@ def _remote_scope(session):
     return open_runtime_scope(session, workspace=_fabric())
 
 
+@weaver_test()
 def test_a_dead_interpreter_takes_its_scope_with_it_and_says_nothing():
     """There is nothing to report: closing the scope has already happened."""
 
@@ -544,6 +565,7 @@ def test_a_dead_interpreter_takes_its_scope_with_it_and_says_nothing():
     assert session.warnings == []
 
 
+@weaver_test()
 def test_a_live_session_that_could_not_release_a_scope_is_reported():
     """The opposite case, and the one that used to vanish.
 

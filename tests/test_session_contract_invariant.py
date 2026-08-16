@@ -12,6 +12,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions.base import Session
 from weaver.sessions.console import ConsoleSession
@@ -37,6 +38,7 @@ def _signature(implementation, name: str) -> inspect.Signature:
 
 @pytest.mark.parametrize("host", HOSTS, ids=lambda host: host.__name__)
 @pytest.mark.parametrize("capability", CAPABILITIES)
+@weaver_test()
 def test_each_host_matches_the_session_contract(host, capability):
     contract = _signature(Session, capability)
     implemented = _signature(host, capability)
@@ -57,6 +59,7 @@ def test_each_host_matches_the_session_contract(host, capability):
         )
 
 
+@weaver_test()
 def test_no_session_capability_is_left_unlisted():
     """The list above is the contract, so it cannot fall behind the contract."""
 
@@ -72,6 +75,7 @@ def test_no_session_capability_is_left_unlisted():
     )
 
 
+@weaver_test()
 def test_the_test_host_records_rather_than_interprets():
     """``TestSession`` answers from configuration and never reads a statement.
 

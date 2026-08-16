@@ -11,14 +11,14 @@ it requires showing that the second command finds what the first left behind.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.fabric.resources import LAKEHOUSE, WAREHOUSE
 from weaver.sessions.resources import ResourceState
 from weaver.targets import ItemRef
 
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
-
+@weaver_test(remote=True)
 def test_one_resolver_serves_every_command_in_the_session(
     weaver_session, fabric_workspace, fabric_target_lakehouse
 ):
@@ -28,25 +28,27 @@ def test_one_resolver_serves_every_command_in_the_session(
     assert first is second
 
 
+@weaver_test(remote=True, resources={"rest"})
 def test_the_second_command_does_not_re_ask_what_the_first_resolved(
-    weaver_session, fabric_workspace, fabric_target_lakehouse
+    fresh_weaver_session, fabric_workspace, fabric_target_lakehouse
 ):
-    resolver = weaver_session.resolver(fabric_workspace)
+    resolver = fresh_weaver_session.resolver(fabric_workspace)
     reference = ItemRef(fabric_target_lakehouse.name)
 
-    weaver_session.resolve_item(
+    fresh_weaver_session.resolve_item(
         reference, item_type=LAKEHOUSE, workspace=fabric_workspace
     )
     before = resolver.cache_hits
-    weaver_session.resolve_item(
+    fresh_weaver_session.resolve_item(
         reference, item_type=LAKEHOUSE, workspace=fabric_workspace
     )
 
     assert resolver.cache_hits == before + 1
 
 
+@weaver_test(remote=True, resources={"rest"})
 def test_a_lakehouse_and_a_warehouse_of_the_same_name_stay_distinct(
-    weaver_session, fabric_workspace, fabric_target_lakehouse
+    fresh_weaver_session, fabric_workspace, fabric_target_lakehouse
 ):
     """Identity is workspace + type + name, and the cache key must say so.
 
@@ -57,16 +59,17 @@ def test_a_lakehouse_and_a_warehouse_of_the_same_name_stay_distinct(
     from weaver.fabric.resources import SQL_ENDPOINT
 
     reference = ItemRef(fabric_target_lakehouse.name)
-    lakehouse = weaver_session.resolve_item(
+    lakehouse = fresh_weaver_session.resolve_item(
         reference, item_type=LAKEHOUSE, workspace=fabric_workspace
     )
-    endpoint = weaver_session.resolve_item(
+    endpoint = fresh_weaver_session.resolve_item(
         reference, item_type=SQL_ENDPOINT, workspace=fabric_workspace
     )
 
     assert lakehouse.id != endpoint.id
 
 
+@weaver_test(remote=True)
 def test_the_session_starts_no_livy_of_its_own_when_it_was_given_one(
     weaver_session, fabric_workspace, livy_session
 ):
@@ -76,21 +79,23 @@ def test_the_session_starts_no_livy_of_its_own_when_it_was_given_one(
     assert scope.livy.attempts == 1
 
 
+@weaver_test(remote=True)
 def test_one_connection_per_warehouse_serves_every_command(
-    weaver_session, fabric_workspace, disposable_warehouse
+    ready_warehouse_session, fabric_workspace, disposable_warehouse
 ):
-    first = weaver_session.sql_executor(
+    first = ready_warehouse_session.sql_executor(
         disposable_warehouse.target, workspace=fabric_workspace
     )
-    second = weaver_session.sql_executor(
+    second = ready_warehouse_session.sql_executor(
         disposable_warehouse.target, workspace=fabric_workspace
     )
 
     assert first is second
 
 
+@weaver_test(remote=True, resources={"tds"})
 def test_a_failed_statement_leaves_the_connection_healthy(
-    weaver_session, fabric_workspace, disposable_warehouse
+    ready_warehouse_session, fabric_workspace, disposable_warehouse
 ):
     """A statement fault is not a resource fault.
 
@@ -102,31 +107,32 @@ def test_a_failed_statement_leaves_the_connection_healthy(
     from weaver.sql import SqlError
 
     with pytest.raises(SqlError):
-        weaver_session.query_tsql(
+        ready_warehouse_session.query_tsql(
             "SELECT * FROM dbo.a_table_that_is_not_there",
             target=disposable_warehouse.target,
             workspace=fabric_workspace,
         )
 
-    rows = weaver_session.query_tsql(
+    rows = ready_warehouse_session.query_tsql(
         "SELECT 1 AS one",
         target=disposable_warehouse.target,
         workspace=fabric_workspace,
     )
 
     assert list(rows) == [{"one": 1}]
-    scope = weaver_session.scope(fabric_workspace)
+    scope = ready_warehouse_session.scope(fabric_workspace)
     assert scope._sql[disposable_warehouse.target.warehouse.name].state is (
         ResourceState.READY
     )
 
 
-def test_the_session_records_what_it_spent(weaver_session, fabric_workspace):
-    weaver_session.resolve_item(
+@weaver_test(remote=True, resources={"rest"})
+def test_the_session_records_what_it_spent(fresh_weaver_session, fabric_workspace):
+    fresh_weaver_session.resolve_item(
         fabric_workspace.catalogue_item,
         item_type=WAREHOUSE,
         workspace=fabric_workspace,
     )
 
-    assert weaver_session.telemetry.lifetime > 0
-    assert "resolve.item" in weaver_session.telemetry.measures
+    assert fresh_weaver_session.telemetry.lifetime > 0
+    assert "resolve.item" in fresh_weaver_session.telemetry.measures

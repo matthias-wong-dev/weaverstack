@@ -27,13 +27,20 @@ from .notebook import NotebookScope, NotebookSession
 from .program import RemoteProgram
 from .public import session
 from .resources import Resource, ResourceError, ResourceState
-from .telemetry import Measure, SessionTelemetry
+from .telemetry import (
+    RESOURCES,
+    Measure,
+    SessionTelemetry,
+    TelemetryContext,
+    TelemetryEvent,
+)
 from .testing import RecordedCall, TestSession
 
 __all__ = [
     "ConsoleScope",
     "ConsoleSession",
     "Measure",
+    "RESOURCES",
     "NotebookScope",
     "NotebookSession",
     "RemoteProgram",
@@ -45,6 +52,8 @@ __all__ = [
     "ResourceState",
     "Session",
     "SessionTelemetry",
+    "TelemetryContext",
+    "TelemetryEvent",
     "TestSession",
     "WorkspaceScope",
     "active_spark",

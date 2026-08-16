@@ -1,7 +1,7 @@
 """Can a bundle actually execute, in its own order, against a real Lakehouse?
 
 Everything else about ordering is proven on paper. `test_item_plan.py` says the
-stages come out in the right order; `test_build_installer.py` says the installer
+stages come out in the right order; `test_build_installer_boundary.py` says the installer
 walks them in that order; `test_fixed_point.py` says a correct estate plans
 nothing. None of them can say the order is **viable** — that a view really can be
 created after its table, that a schema really exists by the time an object lands
@@ -15,11 +15,11 @@ than several with a little each.
 this about *physicality* and nothing else — no DML against the catalogue,
 no claims to reconcile, no publication to interpret. The catalogue's own round
 trip is a separate claim with its own tests
-(`test_item_catalogue_fabric.py`, `spark/boundary/test_catalogue_fidelity.py`).
+(`test_item_catalogue_fabric_boundary.py`, `spark/boundary/test_catalogue_fidelity.py`).
 A production bundle interleaves those stages; this deliberately does not, so read
 the pass as "the physical half installs in order", not "a whole build works".
 
-Distinct from `test_published_weaver.py::test_a_locally_generated_bundle_installs_inside_fabric`,
+Distinct from `test_published_weaver_primitive.py::test_a_locally_generated_bundle_installs_inside_fabric`,
 which installs a *Warehouse* bundle *with* its catalogue. The interesting order
 is here: a Warehouse install is a series of T-SQL scripts over one connection,
 while a Lakehouse install spans a schema, two ways of making a table, a view over
@@ -31,7 +31,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-import pytest
 from conftest import staged_bundle, staged_bundle_source
 from factories import (
     FixtureInventory,
@@ -42,6 +41,7 @@ from factories import (
     single_document_repository,
     spark_view,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BuildPlan,
@@ -53,8 +53,6 @@ from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.incremental import BuildSelection, Impact
 from weaver.build_bundle.stages import enumerate_stages
 from weaver.declaration.metadata import DELTA_TARGET
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 ITEM = "Lakehouse/Sales"
 BUNDLE = "installorder"
@@ -177,6 +175,7 @@ def _load_identities(repository, item):
     }
 
 
+@weaver_test(hosted=True)
 def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     tmp_path,
     fabric_workspace,
@@ -244,7 +243,6 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         "      'tables': list(seen.tables), 'views': list(seen.views),\n"
         "      'schemas': list(seen.schemas), 'folders': list(seen.folders),\n"
         "      'files': list(seen.files)})\n",
-        label="install a whole bundle",
     ).payload
 
     # 1. It ran, which is the viability claim: every statement was acceptable to

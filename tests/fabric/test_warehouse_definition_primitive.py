@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
+from support.weaver_test import weaver_test
 
 AUDIT = {"row insert datetime", "row update datetime", "row delete datetime"}
 
 
+@weaver_test(remote=True)
 def test_a_built_table_uses_the_declared_types(warehouse_primitive_estate):
     columns = warehouse_primitive_estate.columns("DWG", "Customer")
 
@@ -17,6 +16,7 @@ def test_a_built_table_uses_the_declared_types(warehouse_primitive_estate):
     assert columns["score"]["type_name"] == "decimal"
 
 
+@weaver_test(remote=True)
 def test_a_built_table_makes_the_primary_key_not_nullable(
     warehouse_primitive_estate,
 ):
@@ -27,6 +27,7 @@ def test_a_built_table_makes_the_primary_key_not_nullable(
         assert columns[audit]["is_nullable"] is False, audit
 
 
+@weaver_test(remote=True)
 def test_a_built_table_adds_the_declared_identity_column(
     warehouse_primitive_estate,
 ):

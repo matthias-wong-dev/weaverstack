@@ -281,10 +281,10 @@ pytest -m "fabric and hosted"      real workspace and the published wheel
 pytest -m full_integration         the composed lifecycle journeys
 ```
 
-The `remote` and `hosted` markers say whether a Fabric test needs the wheel
-published to the Environment. A capability that behaves differently in the two
-execution positions requires coverage in both, which the test states in its
-docstring rather than in its marker.
+The `@weaver_test(...)` scope says whether a Fabric test needs the wheel
+published to the Environment; pytest markers are generated selection details.
+A capability that behaves differently in the two execution positions requires
+coverage in both.
 
 Planning tests construct a `BuildState` and assert a `BuildBundle`. Fabric tests
 cover behaviour that requires a real estate, including alias readability, bundle

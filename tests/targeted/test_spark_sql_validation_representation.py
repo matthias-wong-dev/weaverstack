@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import LAKEHOUSE
@@ -63,6 +64,7 @@ def _module(source: str, path: str) -> str:
 
 
 @pytest.fixture
+@weaver_test()
 def test_module():
     return _module(TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql")
 
@@ -78,21 +80,25 @@ def assumption_module():
 # --- what the module is ------------------------------------------------------
 
 
+@weaver_test()
 def test_the_module_is_importable_python(test_module, assumption_module):
     assert ast.parse(test_module)
     assert ast.parse(assumption_module)
 
 
+@weaver_test()
 def test_a_test_subclasses_the_generated_test_base(test_module):
     assert "from weaver import SparkSqlTest" in test_module
     assert "class Sales__OrdersReconcile(SparkSqlTest):" in test_module
 
 
+@weaver_test()
 def test_an_assumption_subclasses_the_generated_assumption_base(assumption_module):
     assert "from weaver import SparkSqlAssumption" in assumption_module
     assert "class Sales__OrdersHaveCustomers(SparkSqlAssumption):" in assumption_module
 
 
+@weaver_test()
 def test_the_marker_says_which_kind_was_generated(test_module, assumption_module):
     """The installer needs "generated"; a reader opening the file wants more."""
 
@@ -102,6 +108,7 @@ def test_the_marker_says_which_kind_was_generated(test_module, assumption_module
     )
 
 
+@weaver_test()
 def test_the_marker_still_identifies_a_generated_module(test_module):
     """What the load-file installer keys on to expand object tokens."""
 
@@ -111,6 +118,7 @@ def test_the_marker_still_identifies_a_generated_module(test_module):
 # --- what travels ------------------------------------------------------------
 
 
+@weaver_test()
 def test_the_authored_header_becomes_the_contract(test_module):
     """The docstring is what the primitive parses at run time."""
 
@@ -121,6 +129,7 @@ def test_the_authored_header_becomes_the_contract(test_module):
     assert "Primary key: OrderId" in docstring
 
 
+@weaver_test()
 def test_the_authored_program_travels_whole(test_module):
     namespace: dict = {}
     exec(compile(ast.parse(test_module), "<module>", "exec"), namespace)  # noqa: S102
@@ -129,6 +138,7 @@ def test_the_authored_program_travels_whole(test_module):
     assert namespace["SQL"].count("select") == 3
 
 
+@weaver_test()
 def test_managed_references_name_the_lakehouse_they_read(test_module):
     """Addressed when the bundle is generated, like every other payload."""
 
@@ -142,12 +152,14 @@ def test_managed_references_name_the_lakehouse_they_read(test_module):
 # --- which declarations are compiled ----------------------------------------
 
 
+@weaver_test()
 def test_a_sql_validation_is_compiled(test_module):
     assert has_generated_validation(
         _document(TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql")
     )
 
 
+@weaver_test()
 def test_a_python_validation_is_deployed_verbatim():
     """The module a developer wrote is already the primitive."""
 
@@ -175,6 +187,7 @@ class Sales__OrdersReconcile(Test):
     assert not has_generated_validation(document)
 
 
+@weaver_test()
 def test_the_generator_version_salts_the_artefact(test_module):
     generated = generate_validation(
         _document(TEST_SOURCE, "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql"),

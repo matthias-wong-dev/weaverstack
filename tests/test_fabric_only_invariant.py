@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 CORE = SOURCE / "weaver"
@@ -95,6 +96,7 @@ def _imports(path: Path) -> set[str]:
 @pytest.mark.parametrize(
     "path", _modules(CORE) + _modules(CLI), ids=lambda path: _relative(path)
 )
+@weaver_test()
 def test_only_hosted_runtime_modules_import_pyspark(path: Path):
     """A desktop never holds a Spark session, so it never imports one.
 
@@ -120,6 +122,7 @@ def test_only_hosted_runtime_modules_import_pyspark(path: Path):
     )
 
 
+@weaver_test()
 def test_the_hosted_allowlist_names_modules_that_exist():
     """Guard the guard: an allowlist of nothing would allow everything."""
 
@@ -127,6 +130,7 @@ def test_the_hosted_allowlist_names_modules_that_exist():
         assert (SOURCE / allowed).exists(), f"{allowed} is allowlisted and absent"
 
 
+@weaver_test()
 def test_pyspark_is_not_a_declared_dependency():
     """``pip install weaverstack`` must not pull Spark or need a JVM."""
 
@@ -144,6 +148,7 @@ def test_pyspark_is_not_a_declared_dependency():
 @pytest.mark.parametrize(
     "path", _modules(CORE) + _modules(CLI), ids=lambda path: _relative(path)
 )
+@weaver_test()
 def test_no_module_reintroduces_a_retired_name(path: Path):
     text = path.read_text(encoding="utf-8")
     found = [name for name in RETIRED if re.search(rf"\b{re.escape(name)}\b", text)]
@@ -155,6 +160,7 @@ def test_no_module_reintroduces_a_retired_name(path: Path):
     )
 
 
+@weaver_test()
 def test_the_retired_list_is_not_empty():
     """Guard the guard, again: reflection that found nothing passes everything."""
 
@@ -167,6 +173,7 @@ def test_the_retired_list_is_not_empty():
 @pytest.mark.parametrize(
     "path", _modules(CORE) + _modules(CLI), ids=lambda path: _relative(path)
 )
+@weaver_test()
 def test_no_module_emits_an_object_or_schema_token(path: Path):
     """Payloads carry finished SQL.
 
@@ -184,6 +191,7 @@ def test_no_module_emits_an_object_or_schema_token(path: Path):
     )
 
 
+@weaver_test()
 def test_the_only_payload_token_left_is_the_publication_epoch():
     """One value genuinely cannot be frozen, and it is named.
 

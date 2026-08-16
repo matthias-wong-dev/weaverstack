@@ -45,12 +45,11 @@ from __future__ import annotations
 
 import pytest
 from support.thin import OUTCOMES, thin_estate
+from support.weaver_test import weaver_test
 
 from weaver.errors import LoadError
 from weaver.load_report import FAILED, SUCCEEDED
 from weaver.operations.load import run_load
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 #: The Lakehouse the artefacts are deployed into. Emptied first, because a run
 #: that found a previous run's modules would prove nothing about this one.
@@ -111,6 +110,7 @@ def tolerated(thin):
     return _report(thin, fault_tolerant=True)
 
 
+@weaver_test(hosted=True)
 def test_every_deployed_primitive_is_reached(tolerated):
     """Dispatch found and imported all five, whatever each then reported."""
 
@@ -122,6 +122,7 @@ def test_every_deployed_primitive_is_reached(tolerated):
     )
 
 
+@weaver_test(hosted=True)
 def test_a_succeeding_primitive_is_reported_as_succeeded(tolerated):
     node = _node(tolerated, "Success")
 
@@ -129,6 +130,7 @@ def test_a_succeeding_primitive_is_reported_as_succeeded(tolerated):
     assert node.result.rows_inserted == 2
 
 
+@weaver_test(hosted=True)
 def test_a_reported_failure_is_a_failed_node_rather_than_an_exception(tolerated):
     """The primitive returned a failure. Nothing raised, and nothing was lost."""
 
@@ -138,6 +140,7 @@ def test_a_reported_failure_is_a_failed_node_rather_than_an_exception(tolerated)
     assert "the source system said no" in _said(node)
 
 
+@weaver_test(hosted=True)
 def test_an_exception_the_primitive_never_normalised_is_still_one_failed_node(
     tolerated,
 ):
@@ -154,6 +157,7 @@ def test_an_exception_the_primitive_never_normalised_is_still_one_failed_node(
     assert "unreachable" in _said(node)
 
 
+@weaver_test(hosted=True)
 def test_a_result_that_cannot_report_an_outcome_fails_that_node_only(tolerated):
     """A primitive that answered with a dict is a fault, not a success."""
 
@@ -165,6 +169,7 @@ def test_a_result_that_cannot_report_an_outcome_fails_that_node_only(tolerated):
     )
 
 
+@weaver_test(hosted=True)
 def test_tolerated_rejections_are_reported_without_failing_the_node(tolerated):
     """Rows refused and rows written, both counted, and the node still stands."""
 
@@ -174,6 +179,7 @@ def test_tolerated_rejections_are_reported_without_failing_the_node(tolerated):
     assert node.result.rows_inserted == 2
 
 
+@weaver_test(hosted=True, resources={"livy", "tds"})
 def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     """The other half: intolerance raises rather than returning a report.
 
@@ -211,6 +217,7 @@ def _node(report, outcome: str):
     )
 
 
+@weaver_test(hosted=True, resources={"tds"})
 def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
     """The run's evidence, read back out of `_.Log`.
 

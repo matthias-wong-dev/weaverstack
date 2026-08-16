@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue import (
     CATALOGUE_TABLES,
@@ -79,6 +80,7 @@ def _statements(table) -> list[str]:
 
 
 @pytest.mark.parametrize("table", CATALOGUE_TABLES, ids=lambda table: table.name)
+@weaver_test()
 def test_every_rendered_statement_addresses_only_the_reserved_schema(table):
     """The whole of the shared-host guarantee, per table."""
 
@@ -88,6 +90,7 @@ def test_every_rendered_statement_addresses_only_the_reserved_schema(table):
 
 
 @pytest.mark.parametrize("neighbour", NEIGHBOURS)
+@weaver_test()
 def test_no_rendered_statement_names_a_neighbouring_schema(neighbour):
     """A user's own schemas in the same Warehouse are not Weaver's to touch."""
 
@@ -96,6 +99,7 @@ def test_no_rendered_statement_names_a_neighbouring_schema(neighbour):
             assert f"[{neighbour}]." not in statement
 
 
+@weaver_test()
 def test_installation_prune_stays_inside_the_reserved_schema():
     """Decommissioning removes Weaver's rows, never a neighbour's table."""
 
@@ -110,6 +114,7 @@ def test_installation_prune_stays_inside_the_reserved_schema():
         )
 
 
+@weaver_test()
 def test_nothing_the_catalogue_renders_drops_a_schema_or_a_table():
     """Resetting the catalogue must not reach the Warehouse containing it.
 
@@ -129,6 +134,7 @@ def test_nothing_the_catalogue_renders_drops_a_schema_or_a_table():
         assert "TRUNCATE" not in upper
 
 
+@weaver_test()
 def test_the_reserved_schema_is_the_one_weaver_claims():
     """Stated once, so the rest of this module has something to compare against."""
 
@@ -172,6 +178,7 @@ def _inventory(*, logical_item_name: str):
     )
 
 
+@weaver_test()
 def test_the_catalogue_items_inventory_sees_only_the_reserved_schema():
     """The whole of the shared-host guarantee, at the point it is decided.
 
@@ -192,6 +199,7 @@ def test_the_catalogue_items_inventory_sees_only_the_reserved_schema():
     assert not seen.procedures
 
 
+@weaver_test()
 def test_an_ordinary_item_still_sees_the_whole_warehouse():
     """The restriction is the catalogue item's alone.
 

@@ -15,6 +15,7 @@ when it runs.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import LAKEHOUSE
@@ -64,18 +65,21 @@ def _validate(body: str, *, primary_key=("Customer id",), incremental=False) -> 
 # --- setup and query ----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_select_produces_a_result():
     program = _program("select 1 as x;")
 
     assert [one.produces_result for one in program.statements] == [True]
 
 
+@weaver_test()
 def test_a_cte_produces_a_result_although_it_does_not_start_with_select():
     program = _program("with c as (select 1 as x) select * from c;")
 
     assert program.queries and program.queries[0].produces_result
 
 
+@weaver_test()
 def test_a_create_view_as_select_is_setup_although_it_contains_a_select():
     program = _program("create or replace temporary view v as select 1 as x;")
 
@@ -94,12 +98,14 @@ def test_a_create_view_as_select_is_setup_although_it_contains_a_select():
         "refresh table t",
     ],
 )
+@weaver_test()
 def test_ordinary_preamble_statements_are_setup(statement):
     program = _program(f"{statement};\nselect 1 as x;")
 
     assert [one.produces_result for one in program.statements] == [False, True]
 
 
+@weaver_test()
 def test_setup_and_queries_keep_the_order_they_were_written_in():
     program = _program(
         "create or replace temporary view v as select 1 as x;\n"
@@ -118,16 +124,19 @@ def test_setup_and_queries_keep_the_order_they_were_written_in():
 # --- termination --------------------------------------------------------------
 
 
+@weaver_test()
 def test_an_unterminated_final_statement_is_refused():
     with pytest.raises(LoadError, match="must end with ';'"):
         _program("select 1 as x")
 
 
+@weaver_test()
 def test_an_unterminated_statement_is_refused_when_the_repository_is_parsed():
     with pytest.raises(DiscoveryError, match="must end with ';'"):
         _document("select `Customer id`, `Total amount` from Sales.Order")
 
 
+@weaver_test()
 def test_a_terminated_body_parses_as_a_repository_document():
     document = _document("select `Customer id`, `Total amount` from Sales.Order;")
 
@@ -137,15 +146,18 @@ def test_a_terminated_body_parses_as_a_repository_document():
 # --- the query-count contract -------------------------------------------------
 
 
+@weaver_test()
 def test_a_body_that_produces_no_rows_is_not_a_table():
     with pytest.raises(LoadError, match="must end in a query"):
         _validate("create or replace temporary view v as select 1 as x;")
 
 
+@weaver_test()
 def test_one_query_is_the_staging_rows():
     _validate("select 1 as x;")
 
 
+@weaver_test()
 def test_two_queries_are_staging_and_the_keys_to_delete():
     _validate(
         "select 1 as x;\nselect 2 as `Customer id`;",
@@ -153,6 +165,7 @@ def test_two_queries_are_staging_and_the_keys_to_delete():
     )
 
 
+@weaver_test()
 def test_three_queries_are_ambiguous_and_refused():
     with pytest.raises(LoadError, match="3 statements produce results"):
         _validate(
@@ -161,6 +174,7 @@ def test_three_queries_are_ambiguous_and_refused():
         )
 
 
+@weaver_test()
 def test_a_delete_query_needs_a_primary_key_to_name_rows_by():
     with pytest.raises(LoadError, match="needs a primary key"):
         _validate(
@@ -170,11 +184,13 @@ def test_a_delete_query_needs_a_primary_key_to_name_rows_by():
         )
 
 
+@weaver_test()
 def test_a_non_incremental_table_cannot_name_explicit_deletes():
     with pytest.raises(LoadError, match="non-incremental table cannot name"):
         _validate("select 1 as x;\nselect 2 as x;", incremental=False)
 
 
+@weaver_test()
 def test_a_second_query_is_refused_when_the_repository_is_parsed():
     with pytest.raises(DiscoveryError, match="non-incremental table cannot name"):
         _document(
@@ -183,6 +199,7 @@ def test_a_second_query_is_refused_when_the_repository_is_parsed():
         )
 
 
+@weaver_test()
 def test_an_incremental_table_may_declare_its_deletes_in_the_repository():
     document = _document(
         "select `Customer id`, `Total amount` from Sales.Order;\n"
@@ -196,6 +213,7 @@ def test_an_incremental_table_may_declare_its_deletes_in_the_repository():
 # --- what the rule is not -----------------------------------------------------
 
 
+@weaver_test()
 def test_a_setup_statement_between_the_two_queries_is_allowed():
     _validate(
         "select 1 as x;\n"
@@ -205,6 +223,7 @@ def test_a_setup_statement_between_the_two_queries_is_allowed():
     )
 
 
+@weaver_test()
 def test_a_comment_before_a_query_does_not_make_it_setup():
     program = _program("-- the staging rows\nselect 1 as x;")
 

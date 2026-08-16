@@ -1,23 +1,9 @@
-"""What a Session spent, recorded where the spending happens.
+"""A Session's semantic and external-resource telemetry.
 
-Every expensive thing Weaver does crosses a Session: acquiring a token, starting
-Livy, submitting a statement, opening TDS, asking a workspace what a name means.
-Timing them anywhere else means timing them twice or not at all, so the ledger
-lives on the Session and every capability records into it.
-
-What it is for is the shape of a run rather than a total: nine minutes of Livy
-startup and one of execution is a different problem from ten of execution, and a
-wall clock cannot tell them apart.
-
-.. code-block:: text
-
-    livy.start          1 call     42.1s
-    livy.submit        38 calls    12.4s
-    resolve.item       11 calls     3.2s   (cache hits: 96)
-    tds.execute        22 calls     8.7s
-
-Thread-safe because a Session acquires resources in the background: the console
-prompt returns while auth and Livy are still starting, and both record here.
+The reporting frames on :class:`~weaver.sessions.base.Session` say why work is
+happening.  This module records the other half: the external resource crossed,
+the operation, elapsed time, and whether it failed.  It deliberately remains a
+small ledger rather than a tracing framework.
 """
 
 from __future__ import annotations
@@ -25,8 +11,48 @@ from __future__ import annotations
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator, Mapping
+from typing import Any, Iterator, Mapping
+
+RESOURCES = frozenset({"tds", "livy", "onelake", "rest"})
+
+
+@dataclass(frozen=True)
+class TelemetryContext:
+    """The active semantic reporting hierarchy for one external event."""
+
+    task: str | None = None
+    step: str | None = None
+    substep: str | None = None
+
+
+@dataclass(frozen=True)
+class TelemetryEvent:
+    """One real external crossing made by a Session."""
+
+    resource: str
+    operation: str
+    seconds: float
+    task: str | None = None
+    step: str | None = None
+    substep: str | None = None
+    failed: bool = False
+    detail: str | None = None
+
+    def to_mapping(self) -> dict[str, Any]:
+        """A serialisable event representation for diagnostics and reporting."""
+
+        return {
+            "resource": self.resource,
+            "operation": self.operation,
+            "seconds": round(self.seconds, 3),
+            "task": self.task,
+            "step": self.step,
+            "substep": self.substep,
+            "failed": self.failed,
+            "detail": self.detail,
+        }
 
 
 @dataclass
@@ -48,25 +74,59 @@ class Measure:
 
 
 class SessionTelemetry:
-    """A Session's own ledger of transport and resource cost.
+    """A Session-owned ledger of transport cost and semantic attribution.
 
-    Counters that are not timings — cache hits, in particular — are recorded
-    separately because a cache hit is the *absence* of a call, and adding it to
-    the call count of the thing it avoided would hide exactly the improvement it
-    represents.
+    ``timing`` and ``measures`` remain for callers that need the existing
+    low-level diagnostics.  Resource crossings additionally become immutable
+    :class:`TelemetryEvent` values, which is the API used by test reporting.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._measures: dict[str, Measure] = {}
         self._counters: dict[str, int] = {}
+        self._events: list[TelemetryEvent] = []
+        self._context: ContextVar[TelemetryContext] = ContextVar(
+            "weaver_telemetry_context", default=TelemetryContext()
+        )
         self._started = time.monotonic()
 
-    # --- recording ----------------------------------------------------------
+    # --- semantic context -------------------------------------------------
+
+    @property
+    def context(self) -> TelemetryContext:
+        """The semantic context active on this execution path."""
+
+        return self._context.get()
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture context now so queued work can retain its caller's meaning."""
+
+        return self.context
+
+    @contextmanager
+    def use_context(self, context: TelemetryContext) -> Iterator[None]:
+        """Temporarily restore a captured semantic context."""
+
+        token = self._context.set(context)
+        try:
+            yield
+        finally:
+            self._context.reset(token)
+
+    def set_frames(self, frames) -> None:
+        """Make the Session's open reporting frames the current event context."""
+
+        names = {"task": None, "step": None, "substep": None}
+        for frame in frames:
+            names[frame.kind] = frame.name
+        self._context.set(TelemetryContext(**names))
+
+    # --- recording ---------------------------------------------------------
 
     @contextmanager
     def timing(self, name: str) -> Iterator[None]:
-        """Time one call, recording it as a failure if it raises."""
+        """Time ordinary work without assigning it an external resource."""
 
         started = time.monotonic()
         try:
@@ -75,6 +135,69 @@ class SessionTelemetry:
             self.record(name, time.monotonic() - started, failed=True)
             raise
         self.record(name, time.monotonic() - started)
+
+    @contextmanager
+    def external(
+        self,
+        resource: str,
+        operation: str,
+        *,
+        detail: str | None = None,
+        measure: str | None = None,
+    ) -> Iterator[None]:
+        """Time one external operation, retaining failures before re-raising."""
+
+        if resource not in RESOURCES:
+            raise ValueError(f"unknown Weaver telemetry resource: {resource!r}")
+        started = time.monotonic()
+        try:
+            yield
+        except BaseException:
+            self.record_event(
+                resource,
+                operation,
+                time.monotonic() - started,
+                detail=detail,
+                failed=True,
+                measure=measure,
+            )
+            raise
+        self.record_event(
+            resource,
+            operation,
+            time.monotonic() - started,
+            detail=detail,
+            measure=measure,
+        )
+
+    def record_event(
+        self,
+        resource: str,
+        operation: str,
+        seconds: float,
+        *,
+        detail: str | None = None,
+        failed: bool = False,
+        measure: str | None = None,
+    ) -> None:
+        """Record a completed resource crossing without changing its outcome."""
+
+        if resource not in RESOURCES:
+            raise ValueError(f"unknown Weaver telemetry resource: {resource!r}")
+        context = self.context
+        event = TelemetryEvent(
+            resource=resource,
+            operation=operation,
+            seconds=seconds,
+            task=context.task,
+            step=context.step,
+            substep=context.substep,
+            failed=failed,
+            detail=detail,
+        )
+        with self._lock:
+            self._events.append(event)
+        self.record(measure or f"{resource}.{operation}", seconds, failed=failed)
 
     def record(self, name: str, seconds: float, *, failed: bool = False) -> None:
         with self._lock:
@@ -90,7 +213,7 @@ class SessionTelemetry:
         with self._lock:
             self._counters[name] = self._counters.get(name, 0) + amount
 
-    # --- reading ------------------------------------------------------------
+    # --- reading -----------------------------------------------------------
 
     @property
     def lifetime(self) -> float:
@@ -111,6 +234,56 @@ class SessionTelemetry:
         with self._lock:
             return dict(self._counters)
 
+    def events(self) -> tuple[TelemetryEvent, ...]:
+        """The immutable external crossings observed by this Session."""
+
+        with self._lock:
+            return tuple(self._events)
+
+    def resources_used(self) -> frozenset[str]:
+        """The external resources actually crossed by this Session."""
+
+        return frozenset(event.resource for event in self.events())
+
+    def by_resource(self) -> Mapping[str, Measure]:
+        """Aggregate resource crossings by resource name."""
+
+        return self._aggregate(lambda event: event.resource)
+
+    def by_task(self) -> Mapping[str, Measure]:
+        """Aggregate external crossings by Task, retaining orphaned work."""
+
+        return self._aggregate(lambda event: event.task or "<unattributed>")
+
+    def by_step(self) -> Mapping[tuple[str, str], Measure]:
+        """Aggregate external crossings by Task and Step."""
+
+        return self._aggregate(
+            lambda event: (event.task or "<unattributed>", event.step or "<none>")
+        )
+
+    def by_resource_and_task(self) -> Mapping[tuple[str, str], Measure]:
+        """Aggregate external crossings by resource and Task."""
+
+        return self._aggregate(
+            lambda event: (event.resource, event.task or "<unattributed>")
+        )
+
+    def total_external_seconds(self) -> float:
+        """Elapsed time summed across external operations (not wall time)."""
+
+        return sum(event.seconds for event in self.events())
+
+    def _aggregate(self, key) -> Mapping[Any, Measure]:
+        grouped: dict[Any, Measure] = {}
+        for event in self.events():
+            name = key(event)
+            measure = grouped.setdefault(name, Measure(str(name)))
+            measure.calls += 1
+            measure.seconds += event.seconds
+            measure.failures += int(event.failed)
+        return grouped
+
     def to_mapping(self) -> dict:
         return {
             "lifetime": round(self.lifetime, 3),
@@ -120,6 +293,7 @@ class SessionTelemetry:
                     self.measures.values(), key=lambda measure: measure.name
                 )
             ],
+            "events": [event.to_mapping() for event in self.events()],
             "counters": dict(sorted(self.counters.items())),
         }
 
@@ -132,9 +306,13 @@ class SessionTelemetry:
             lines.append(
                 f"  {measure.name:<24} {measure.calls:>4} calls {measure.seconds:>8.1f}s{failed}"
             )
-        for name, value in sorted(self.counters.items()):
-            lines.append(f"  {name:<24} {value:>4}")
         return "\n".join(lines)
 
 
-__all__ = ["Measure", "SessionTelemetry"]
+__all__ = [
+    "Measure",
+    "RESOURCES",
+    "SessionTelemetry",
+    "TelemetryContext",
+    "TelemetryEvent",
+]

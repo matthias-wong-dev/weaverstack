@@ -15,6 +15,7 @@ listing, and that a failure stops before the session factory is ever reached.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.targets import (
     ItemBinding,
@@ -94,6 +95,7 @@ def _preflight(client, bindings, *, environment="WeaverEnv"):
 # --- what a build requires ----------------------------------------------------
 
 
+@weaver_test()
 def test_every_bound_target_and_the_control_lakehouse_are_required():
     wanted = required_items(
         _bindings(
@@ -112,6 +114,7 @@ def test_every_bound_target_and_the_control_lakehouse_are_required():
     }
 
 
+@weaver_test()
 def test_the_catalogue_is_required_once_though_it_arrives_twice():
     """`effective_item_bindings` binds `_weaver` to the catalogue Warehouse.
 
@@ -134,6 +137,7 @@ def test_the_catalogue_is_required_once_though_it_arrives_twice():
 # --- one listing, however many targets ---------------------------------------
 
 
+@weaver_test()
 def test_the_workspace_inventory_is_read_once_for_every_target():
     client = _complete_estate()
 
@@ -148,6 +152,7 @@ def test_the_workspace_inventory_is_read_once_for_every_target():
     assert client.item_listings == 1
 
 
+@weaver_test()
 def test_adding_targets_does_not_add_listings():
     """The scaling rule, stated as the comparison that would catch a regression."""
 
@@ -168,6 +173,7 @@ def test_adding_targets_does_not_add_listings():
     assert many.item_listings == few.item_listings == 1
 
 
+@weaver_test()
 def test_a_successful_preflight_resolves_the_items_it_checked():
     client = _complete_estate()
 
@@ -177,6 +183,7 @@ def test_a_successful_preflight_resolves_the_items_it_checked():
     assert result.workspace.name == WORKSPACE
 
 
+@weaver_test()
 def test_a_successful_preflight_writes_nothing():
     client = _complete_estate()
 
@@ -189,6 +196,7 @@ def test_a_successful_preflight_writes_nothing():
 # --- and what it refuses ------------------------------------------------------
 
 
+@weaver_test()
 def test_a_missing_workspace_fails_before_anything_is_listed():
     client = FakeClient([])
     client.paged = lambda path: []  # noqa: E731 - the workspace does not exist
@@ -197,6 +205,7 @@ def test_a_missing_workspace_fails_before_anything_is_listed():
         _preflight(client, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
 
+@weaver_test()
 def test_a_missing_catalogue_fails():
     client = FakeClient([("Sales_LH", "Lakehouse"), ("WeaverEnv", "Environment")])
 
@@ -204,6 +213,7 @@ def test_a_missing_catalogue_fails():
         _preflight(client, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
 
+@weaver_test()
 def test_a_missing_environment_fails():
     client = FakeClient([("Weaver", "Lakehouse"), ("Sales_LH", "Lakehouse")])
 
@@ -211,6 +221,7 @@ def test_a_missing_environment_fails():
         _preflight(client, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
 
+@weaver_test()
 def test_a_missing_bound_lakehouse_fails():
     client = _complete_estate()
 
@@ -218,6 +229,7 @@ def test_a_missing_bound_lakehouse_fails():
         _preflight(client, _bindings(("Sales", "Absent_LH", "Lakehouse")))
 
 
+@weaver_test()
 def test_a_missing_bound_warehouse_fails():
     client = _complete_estate()
 
@@ -225,6 +237,7 @@ def test_a_missing_bound_warehouse_fails():
         _preflight(client, _bindings(("Reporting", "Absent_WH", "Warehouse")))
 
 
+@weaver_test()
 def test_every_missing_item_is_reported_together():
     """One round trip to learn the estate is not ready, not one per item."""
 
@@ -245,6 +258,7 @@ def test_every_missing_item_is_reported_together():
     assert "Warehouse target 'Reporting' was not found" in message
 
 
+@weaver_test()
 def test_a_name_that_exists_as_the_wrong_type_says_so():
     """The common mistake, and the one a bare absence sends you hunting for."""
 
@@ -260,6 +274,7 @@ def test_a_name_that_exists_as_the_wrong_type_says_so():
         _preflight(client, _bindings(("Reporting", "Reporting", "Warehouse")))
 
 
+@weaver_test()
 def test_a_lakehouses_sql_endpoint_sibling_is_not_reported_as_a_type_confusion():
     """Every Lakehouse grows one; it is a facet, not a competing item."""
 
@@ -278,6 +293,7 @@ def test_a_lakehouses_sql_endpoint_sibling_is_not_reported_as_a_type_confusion()
     assert "SQLEndpoint" not in str(raised.value)
 
 
+@weaver_test()
 def test_an_ambiguous_name_fails_rather_than_picking_one():
     client = FakeClient(
         [

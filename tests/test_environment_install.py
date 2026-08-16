@@ -12,6 +12,7 @@ import types
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric import environment as env_mod
@@ -28,6 +29,7 @@ from weaver.fabric.environment import (
 from weaver.fabric.resources import Item, ItemNotFoundError, WorkspaceItem
 
 
+@weaver_test()
 def test_only_weaver_wheels_are_recognised():
     assert is_weaver_wheel("weaverstack-0.1.0-py3-none-any.whl")
     assert is_weaver_wheel(
@@ -37,6 +39,7 @@ def test_only_weaver_wheels_are_recognised():
     assert not is_weaver_wheel("weaverstack-0.1.0.tar.gz")
 
 
+@weaver_test()
 def test_version_is_read_back_from_the_wheel_name():
     assert _version_from_wheel("weaverstack-0.1.0-py3-none-any.whl") == "0.1.0"
     assert (
@@ -45,6 +48,7 @@ def test_version_is_read_back_from_the_wheel_name():
     )
 
 
+@weaver_test()
 def test_staged_wheels_reads_the_custom_library_list():
     staging = {
         "customLibraries": {"wheelFiles": ["weaverstack-0.1.0-py3-none-any.whl"]}
@@ -68,6 +72,7 @@ def _env() -> Item:
     return Item(id="env1", name="Weaver", type="Environment", workspace_id="ws1")
 
 
+@weaver_test()
 def test_stale_weaver_wheels_are_removed_but_the_kept_one_is_not():
     client = _RecordingClient()
     staged = [
@@ -85,6 +90,7 @@ def test_stale_weaver_wheels_are_removed_but_the_kept_one_is_not():
     assert all("weaverstack-0.2.0" not in path for path in client.deleted)
 
 
+@weaver_test()
 def test_unrelated_custom_libraries_are_never_deleted():
     client = _RecordingClient()
     staged = ["pandas-2.2.0-py3-none-any.whl", "some_internal_lib-1.0-py3-none-any.whl"]
@@ -100,6 +106,7 @@ class _NeverCreateClient:
         pytest.fail("must not create an Environment after an unexpected lookup failure")
 
 
+@weaver_test()
 def test_environment_creation_only_follows_item_not_found(monkeypatch):
     def fail_lookup(*args, **kwargs):
         raise CommandError("duplicate Environment matches")
@@ -128,6 +135,7 @@ class _CreateClient:
         return _CreatedResponse()
 
 
+@weaver_test()
 def test_environment_creation_follows_item_not_found(monkeypatch):
     def missing(*args, **kwargs):
         raise ItemNotFoundError("missing")
@@ -152,16 +160,19 @@ class _PublishedClient:
         )
 
 
+@weaver_test()
 def test_never_published_environment_is_empty():
     assert read_published(_env(), client=_PublishedClient(404)) == {}
 
 
 @pytest.mark.parametrize("status_code", [401, 429, 500, None])
+@weaver_test()
 def test_published_library_failures_other_than_404_are_re_raised(status_code):
     with pytest.raises(FabricError, match="lookup failed"):
         read_published(_env(), client=_PublishedClient(status_code))
 
 
+@weaver_test()
 def test_a_freshly_created_environment_has_nothing_staged():
     """The first install into a new Environment, which is the one that failed.
 
@@ -175,11 +186,13 @@ def test_a_freshly_created_environment_has_nothing_staged():
 
 
 @pytest.mark.parametrize("status_code", [401, 429, 500, None])
+@weaver_test()
 def test_staging_failures_other_than_404_are_re_raised(status_code):
     with pytest.raises(FabricError, match="lookup failed"):
         read_staging(_env(), client=_PublishedClient(status_code))
 
 
+@weaver_test()
 def test_fabric_client_preserves_failure_status(monkeypatch):
     response = types.SimpleNamespace(status_code=429, text="slow down", content=b"")
     monkeypatch.setattr("requests.request", lambda *args, **kwargs: response)
@@ -246,6 +259,7 @@ def _published_body(wheel: str, yml: str) -> dict:
     return {"customLibraries": {"wheelFiles": [wheel]}, "environmentYml": yml}
 
 
+@weaver_test()
 def test_unchanged_source_skips_publish(monkeypatch):
     yml = (
         env_mod.project_root()
@@ -271,6 +285,7 @@ def test_unchanged_source_skips_publish(monkeypatch):
     }
 
 
+@weaver_test()
 def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
     yml = (
         env_mod.project_root()
@@ -294,6 +309,7 @@ def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
     assert events["published"] is True
 
 
+@weaver_test()
 def test_a_changed_wheel_is_always_published(monkeypatch):
     """There is no stage-without-publish mode, and there must not be one.
 
@@ -323,6 +339,7 @@ def test_a_changed_wheel_is_always_published(monkeypatch):
         env_mod.install("WS", "weaver", client=object(), publish=False)
 
 
+@weaver_test()
 def test_a_long_publish_reports_the_state_it_last_saw(monkeypatch):
     """The timeout message must contain the state, not describe it.
 

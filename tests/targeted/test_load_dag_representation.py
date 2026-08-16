@@ -30,6 +30,7 @@ from factories import (
     schema_document,
     warehouse_table,
 )
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -64,6 +65,7 @@ def node_ids(dag) -> tuple[str, ...]:
 # --- reversing the build's own binding ---------------------------------------
 
 
+@weaver_test()
 def test_load_dag_maps_physical_targets_back_to_logical_items(estate):
     assert estate.installations == {
         WeaverItemId.parse(LOAD_PRODUCER): RAW,
@@ -75,6 +77,7 @@ def test_load_dag_maps_physical_targets_back_to_logical_items(estate):
     )
 
 
+@weaver_test()
 def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
     dag = load_dag(estate, targets=(RAW, REPORTING))
 
@@ -91,6 +94,7 @@ def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
 # --- what one request selects -------------------------------------------------
 
 
+@weaver_test()
 def test_load_dag_loads_every_object_in_the_requested_targets(estate):
     dag = load_dag(estate, targets=(RAW,))
 
@@ -101,6 +105,7 @@ def test_load_dag_loads_every_object_in_the_requested_targets(estate):
     )
 
 
+@weaver_test()
 def test_load_dag_excludes_objects_that_own_no_load_primitive(estate):
     """A view and the generated runtime folder are installed and not loadable."""
 
@@ -111,6 +116,7 @@ def test_load_dag_excludes_objects_that_own_no_load_primitive(estate):
     assert f"{LOAD_PRODUCER}/Files/_.Load" not in logical
 
 
+@weaver_test()
 def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
     dag = load_dag(estate, targets=(REPORTING,))
 
@@ -118,12 +124,14 @@ def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
     assert dag.edges == ()
 
 
+@weaver_test()
 def test_load_dag_excludes_unrelated_downstream_objects(estate):
     dag = load_dag(estate, targets=(RAW,))
 
     assert "load:Warehouse/Reporting_WH/Sales.Summary" not in dag.by_id
 
 
+@weaver_test()
 def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
     dag = load_dag(estate, targets=(RAW, REPORTING))
 
@@ -132,6 +140,7 @@ def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
     assert "load:Warehouse/Reporting_WH/Sales.Summary" in dag.by_id
 
 
+@weaver_test()
 def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
     dag = load_dag(
         estate,
@@ -146,12 +155,14 @@ def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
     assert dag.edges == ()
 
 
+@weaver_test()
 def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(estate):
     dag = load_dag(estate, targets=(RAW,), names=("sales.order",))
 
     assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
 
 
+@weaver_test()
 def test_an_unknown_load_name_lists_the_installed_loadables(estate):
     with pytest.raises(LoadError, match="no loadable object named 'Sales.Missing'"):
         load_dag(estate, targets=(RAW,), names=("Sales.Missing",))
@@ -160,6 +171,7 @@ def test_an_unknown_load_name_lists_the_installed_loadables(estate):
 # --- ordering -----------------------------------------------------------------
 
 
+@weaver_test()
 def test_load_dag_orders_direct_dependencies(estate):
     dag = load_dag(estate, targets=(RAW,))
 
@@ -169,6 +181,7 @@ def test_load_dag_orders_direct_dependencies(estate):
     ) in dag.edges
 
 
+@weaver_test()
 def test_load_dag_resolves_a_python_import_as_a_dependency(tmp_path):
     """A Python object declares its dependencies by importing them.
 
@@ -231,6 +244,7 @@ class Sales__Customer(Table):
     )
 
 
+@weaver_test()
 def test_load_dag_crosses_items_through_aliases(estate):
     """The Warehouse consumer's upstream is the Lakehouse table, not the alias."""
 
@@ -243,6 +257,7 @@ def test_load_dag_crosses_items_through_aliases(estate):
     assert dag.upstream(consumer) == {"refresh:Lakehouse/Raw_LH"}
 
 
+@weaver_test()
 def test_load_dag_inserts_endpoint_refresh_before_alias_consumers(estate):
     dag = load_dag(estate, targets=(RAW, REPORTING))
 
@@ -256,6 +271,7 @@ def test_load_dag_inserts_endpoint_refresh_before_alias_consumers(estate):
     ) in dag.edges
 
 
+@weaver_test()
 def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse(
     estate,
 ):
@@ -268,6 +284,7 @@ def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse
     }
 
 
+@weaver_test()
 def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
     """Two crossings out of one Lakehouse are one barrier, not two."""
 
@@ -310,6 +327,7 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
     }
 
 
+@weaver_test()
 def test_load_dag_is_deterministic(estate):
     once = load_dag(estate, targets=(RAW, REPORTING))
     again = load_dag(estate, targets=(REPORTING, RAW))
@@ -394,6 +412,7 @@ def _colliding_catalogue(target: str = "Shared_LH"):
     )
 
 
+@weaver_test()
 def test_load_dag_rejects_ambiguous_physical_bindings():
     """Two logical objects cannot resolve to one physical object."""
 
@@ -403,6 +422,7 @@ def test_load_dag_rejects_ambiguous_physical_bindings():
         load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),))
 
 
+@weaver_test()
 def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estate):
     """A stale duplicate in one target is not a fault report about another.
 
@@ -424,6 +444,7 @@ def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estat
     )
 
 
+@weaver_test()
 def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
     """A request names a target and means everything installed there.
 
@@ -475,6 +496,7 @@ def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
     )
 
 
+@weaver_test()
 def test_load_dag_rejects_missing_bindings():
     """A certified object whose item names no physical target stops planning."""
 
@@ -490,6 +512,7 @@ def test_load_dag_rejects_missing_bindings():
         InstalledEstate.from_catalogue(catalogue)
 
 
+@weaver_test()
 def test_load_dag_rejects_unresolved_dependencies():
     catalogue = _catalogue(
         **{
@@ -517,6 +540,7 @@ def test_load_dag_rejects_unresolved_dependencies():
         load_dag(estate, targets=(RAW,))
 
 
+@weaver_test()
 def test_load_dag_rejects_cycles():
     catalogue = _catalogue(
         **{
@@ -553,6 +577,7 @@ def test_load_dag_rejects_cycles():
         load_dag(estate, targets=(RAW,))
 
 
+@weaver_test()
 def test_load_dag_ignores_a_fully_qualified_physical_read():
     """A three-part read names something outside the estate's own graph."""
 

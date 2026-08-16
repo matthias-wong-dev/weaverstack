@@ -11,6 +11,7 @@ materialised there.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 from test_validation_repository_declaration import (
     _python_assumption,
     _python_test,
@@ -77,6 +78,7 @@ def by_name(projection, table):
 # --- the dictionary ---------------------------------------------------------
 
 
+@weaver_test()
 def test_a_test_projects_a_dictionary_row(repository):
     row = by_name(project(repository), TEST_DICTIONARY)["OrdersReconcile"]
 
@@ -90,6 +92,7 @@ def test_a_test_projects_a_dictionary_row(repository):
     assert row["primary_key"] == "Id"
 
 
+@weaver_test()
 def test_an_assumption_projects_a_dictionary_row(repository):
     row = by_name(project(repository), TEST_DICTIONARY)["OrdersHaveCustomers"]
 
@@ -97,6 +100,7 @@ def test_an_assumption_projects_a_dictionary_row(repository):
     assert row["description"] == "Every row carries a customer."
 
 
+@weaver_test()
 def test_an_assumption_has_no_primary_key(repository):
     """Structurally, not incidentally: there is one side to correlate."""
 
@@ -108,6 +112,7 @@ def test_an_assumption_has_no_primary_key(repository):
     )
 
 
+@weaver_test()
 def test_a_test_without_a_key_projects_a_null_key(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
     _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
@@ -124,6 +129,7 @@ def test_a_test_without_a_key_projects_a_null_key(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_composite_key_is_projected_in_declared_order(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
     _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
@@ -142,6 +148,7 @@ def test_a_composite_key_is_projected_in_declared_order(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_referenced_description_keeps_its_pointer(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
     _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
@@ -160,6 +167,7 @@ def test_a_referenced_description_keeps_its_pointer(tmp_path):
     assert row["description_reference"] == "$Sales.Order"
 
 
+@weaver_test()
 def test_one_dictionary_holds_both_kinds(repository):
     """Deliberately not a second AssumptionDictionary."""
 
@@ -172,6 +180,7 @@ def test_one_dictionary_holds_both_kinds(repository):
 # --- what validation does not claim -----------------------------------------
 
 
+@weaver_test()
 def test_a_validation_claims_no_registry_row(repository):
     """Registry certifies a physical object, and nothing exists at the Test ID."""
 
@@ -182,6 +191,7 @@ def test_a_validation_claims_no_registry_row(repository):
     assert "Order" in registered
 
 
+@weaver_test()
 def test_a_validation_claims_no_table_dictionary_row(repository):
     described = {
         row["object_name"] for row in rows(project(repository), TABLE_DICTIONARY)
@@ -190,6 +200,7 @@ def test_a_validation_claims_no_table_dictionary_row(repository):
     assert described == {"Order"}
 
 
+@weaver_test()
 def test_a_validation_puts_its_schema_to_use(repository):
     """It names a schema the item declares, so the schema is described."""
 
@@ -201,6 +212,7 @@ def test_a_validation_puts_its_schema_to_use(repository):
 # --- dependencies belong to the logical identity ----------------------------
 
 
+@weaver_test()
 def test_a_validation_dependency_names_the_logical_validation(repository):
     """Not the procedure or module it compiles to — see §14 of the design."""
 
@@ -215,6 +227,7 @@ def test_a_validation_dependency_names_the_logical_validation(repository):
     assert ("OrdersHaveCustomers", "Sales__Order") in edges
 
 
+@weaver_test()
 def test_a_validation_dependency_is_within_the_item(repository):
     row = next(
         row
@@ -260,6 +273,7 @@ def _read_back(*registry_rows):
         (ROLE_ASSUMPTION, "stored_procedure"),
     ],
 )
+@weaver_test()
 def test_the_object_role_survives_reading_the_registry(role, object_type):
     """It is the only place the answer survives, so it must not be dropped."""
 
@@ -270,6 +284,7 @@ def test_the_object_role_survives_reading_the_registry(role, object_type):
     assert next(iter(registered.values())).object_role == role
 
 
+@weaver_test()
 def test_a_runtime_artefact_is_known_by_its_role_not_its_shape():
     """A Test procedure and a load procedure are the same shape."""
 
@@ -295,11 +310,13 @@ def test_a_runtime_artefact_is_known_by_its_role_not_its_shape():
     assert not by_name["Load Sales.Order"].is_validation
 
 
+@weaver_test()
 def test_an_unknown_role_is_refused_rather_than_guessed():
     with pytest.raises(BuildError, match="unsupported object_role"):
         _read_back(_registry_row("Order", object_role="whatever"))
 
 
+@weaver_test()
 def test_a_missing_role_is_refused_rather_than_assumed_to_be_data():
     row = _registry_row("Order", object_role=ROLE_DATA)
     del row["object_role"]

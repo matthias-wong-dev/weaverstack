@@ -7,6 +7,7 @@ partial directory result.
 from __future__ import annotations
 
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
@@ -109,9 +110,11 @@ class OneLakeDfsClient:
         base_url: str = ONELAKE_DFS,
         token: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        telemetry=None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.telemetry = telemetry
         self._token_source = token_source(token, scope=STORAGE_SCOPE)
 
     @property
@@ -140,15 +143,21 @@ class OneLakeDfsClient:
             "x-ms-version": STORAGE_API_VERSION,
         }
         merged.update(headers or {})
-        response = requests.request(
-            method, url, headers=merged, data=data, timeout=self.timeout
+        observation = (
+            self.telemetry.external("onelake", method.lower())
+            if self.telemetry is not None
+            else nullcontext()
         )
-        if response.status_code not in expected:
-            raise StoreError(
-                f"{method} {url.split('?')[0]} returned {response.status_code}: "
-                f"{response.text.strip()[:300] or 'no body'}"
+        with observation:
+            response = requests.request(
+                method, url, headers=merged, data=data, timeout=self.timeout
             )
-        return response
+            if response.status_code not in expected:
+                raise StoreError(
+                    f"{method} {url.split('?')[0]} returned {response.status_code}: "
+                    f"{response.text.strip()[:300] or 'no body'}"
+                )
+            return response
 
     def _url(self, location: Location, query: dict[str, str] | None = None) -> str:
         parsed = parse_onelake(location, base_url=self.base_url)

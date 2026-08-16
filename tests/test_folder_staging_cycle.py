@@ -28,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
 from weaver import Folder
@@ -92,6 +93,7 @@ def _staging(export) -> Path:
 # --- what is issued -----------------------------------------------------------
 
 
+@weaver_test()
 def test_staging_is_a_context_manager_over_a_real_path(export):
     export.files = {"a.csv": "x"}
 
@@ -104,6 +106,7 @@ def test_staging_is_a_context_manager_over_a_real_path(export):
         assert entered is issued
 
 
+@weaver_test()
 def test_repeated_calls_within_one_load_hand_back_the_same_object(export):
     """An object may ask more than once, and must not get two directories."""
 
@@ -120,12 +123,14 @@ def test_repeated_calls_within_one_load_hand_back_the_same_object(export):
     assert seen[0] is seen[1]
 
 
+@weaver_test()
 def test_staging_sits_beside_the_destination_under_a_fixed_name(export):
     export.load()
 
     assert _staging(export) == export.path().with_name("Export_Staging")
 
 
+@weaver_test()
 def test_no_run_identifier_appears_in_the_staging_path(export):
     """A fixed path is what makes a failed load leave one directory to look at.
 
@@ -143,6 +148,7 @@ def test_no_run_identifier_appears_in_the_staging_path(export):
 # --- read-time staging -------------------------------------------------------
 
 
+@weaver_test()
 def test_read_issues_temporary_staging_outside_a_load(export):
     staging = export.staging_folder()
 
@@ -151,6 +157,7 @@ def test_read_issues_temporary_staging_outside_a_load(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_read_reuses_one_temporary_staging_folder(export):
     first = export.staging_folder()
     second = export.staging_folder()
@@ -159,6 +166,7 @@ def test_read_reuses_one_temporary_staging_folder(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_next_read_removes_previous_temporary_staging(export):
     first = export.read()
     (first.path / "old.csv").write_text("old", encoding="utf-8")
@@ -171,6 +179,7 @@ def test_next_read_removes_previous_temporary_staging(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_read_staging_cleanup_tolerates_prior_removal(export):
     first = export.read()
     first.path.rmdir()
@@ -181,6 +190,7 @@ def test_read_staging_cleanup_tolerates_prior_removal(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_a_failed_standalone_read_keeps_staging_until_the_next_read(export):
     export.files = {"partial.csv": "half a download"}
     export.fail_in_read = True
@@ -202,6 +212,7 @@ def test_a_failed_standalone_read_keeps_staging_until_the_next_read(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_read_staging_cleanup_and_destructor_leave_no_directory(export):
     staging = export.staging_folder()
     export._clear_read_staging()
@@ -214,6 +225,7 @@ def test_read_staging_cleanup_and_destructor_leave_no_directory(export):
     assert not staging.path.exists()
 
 
+@weaver_test()
 def test_load_issued_staging_wins_over_read_temporary_staging(export):
     from weaver.runtime.folder_load import new_staging_folder, remove_staging
 
@@ -232,6 +244,7 @@ def test_load_issued_staging_wins_over_read_temporary_staging(export):
 # --- what read() must return --------------------------------------------------
 
 
+@weaver_test()
 def test_returning_a_raw_path_is_refused(export):
     export.returns = Path("/tmp/somewhere")
 
@@ -239,6 +252,7 @@ def test_returning_a_raw_path_is_refused(export):
         export.load()
 
 
+@weaver_test()
 def test_returning_a_string_is_refused(export):
     export.returns = "/tmp/somewhere"
 
@@ -246,6 +260,7 @@ def test_returning_a_string_is_refused(export):
         export.load()
 
 
+@weaver_test()
 def test_returning_another_staging_folder_of_the_same_path_is_refused(export):
     """Equality is not the contract; identity is.
 
@@ -261,6 +276,7 @@ def test_returning_another_staging_folder_of_the_same_path_is_refused(export):
         export.load()
 
 
+@weaver_test()
 def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path):
     class Sales__Export(Folder):
         files: dict = {}
@@ -280,9 +296,7 @@ def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path)
                 (staging.path / name).write_text(text, encoding="utf-8")
             return staging, self.deletes
 
-    export = Sales__Export(
-        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
-    )
+    export = Sales__Export(object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path))
     export.files = {"keep.csv": "keep", "remove.csv": "remove"}
     export.load()
 
@@ -298,6 +312,7 @@ def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path)
 # --- reset --------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_load_begins_from_an_empty_staging_directory(export):
     staging = _staging(export)
     staging.mkdir(parents=True)
@@ -311,6 +326,7 @@ def test_a_load_begins_from_an_empty_staging_directory(export):
     assert not (export.path() / "stale.csv").exists()
 
 
+@weaver_test()
 def test_a_later_sequential_load_resets_and_reuses_the_same_directory(export):
     export.files = {"one.csv": "1"}
     export.load()
@@ -325,6 +341,7 @@ def test_a_later_sequential_load_resets_and_reuses_the_same_directory(export):
 # --- cleanup ------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_successful_publication_removes_staging(export):
     export.files = {"a.csv": "x"}
 
@@ -333,6 +350,7 @@ def test_a_successful_publication_removes_staging(export):
     assert not _staging(export).exists()
 
 
+@weaver_test()
 def test_staging_survives_a_failure_inside_read(export):
     export.files = {"partial.csv": "half a download"}
     export.fail_in_read = True
@@ -343,6 +361,7 @@ def test_staging_survives_a_failure_inside_read(export):
     assert (_staging(export) / "partial.csv").exists()
 
 
+@weaver_test()
 def test_staging_survives_a_refused_return_value(export):
     export.files = {"partial.csv": "x"}
     export.returns = Path("/tmp/elsewhere")
@@ -353,6 +372,7 @@ def test_staging_survives_a_refused_return_value(export):
     assert (_staging(export) / "partial.csv").exists()
 
 
+@weaver_test()
 def test_staging_survives_an_intolerant_rejection(export):
     """A rejected file is the case where the directory matters most.
 
@@ -373,6 +393,7 @@ def test_staging_survives_an_intolerant_rejection(export):
 # --- the issued reference -----------------------------------------------------
 
 
+@weaver_test()
 def test_the_issued_reference_is_cleared_after_a_successful_load(export):
     export.load()
 
@@ -382,6 +403,7 @@ def test_the_issued_reference_is_cleared_after_a_successful_load(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_the_issued_reference_is_cleared_after_a_failed_load(export):
     export.fail_in_read = True
 
@@ -394,6 +416,7 @@ def test_the_issued_reference_is_cleared_after_a_failed_load(export):
     export._clear_read_staging()
 
 
+@weaver_test()
 def test_a_second_load_is_never_handed_the_first_ones_directory(export):
     export.files = {"a.csv": "x"}
     export.load()
@@ -433,6 +456,7 @@ def flaky(monkeypatch):
     return state
 
 
+@weaver_test()
 def test_a_transient_reset_failure_is_retried_rather_than_raised(export, flaky):
     _staging(export).mkdir(parents=True)
     flaky["remaining"] = 2
@@ -444,6 +468,7 @@ def test_a_transient_reset_failure_is_retried_rather_than_raised(export, flaky):
     assert flaky["calls"] >= 3
 
 
+@weaver_test()
 def test_a_reset_that_never_succeeds_is_reported_rather_than_retried_forever(
     export, flaky
 ):
@@ -458,6 +483,7 @@ def test_a_reset_that_never_succeeds_is_reported_rather_than_retried_forever(
     assert flaky["calls"] == RESET_ATTEMPTS
 
 
+@weaver_test()
 def test_a_transient_cleanup_failure_does_not_fail_a_published_load(export, flaky):
     """The load already succeeded; what remains is tidying.
 
@@ -485,6 +511,7 @@ def test_a_transient_cleanup_failure_does_not_fail_a_published_load(export, flak
 # download, and must not reconcile files.
 
 
+@weaver_test()
 def test_a_static_folder_loads_normally_into_an_empty_destination(export):
     export.static = True
     export.files = {"seed.csv": "x"}
@@ -496,6 +523,7 @@ def test_a_static_folder_loads_normally_into_an_empty_destination(export):
     assert result.rows_inserted == 1
 
 
+@weaver_test()
 def test_a_populated_static_folder_is_a_successful_no_op(export):
     export.static = True
     export.files = {"seed.csv": "x"}
@@ -514,6 +542,7 @@ def test_a_populated_static_folder_is_a_successful_no_op(export):
     ) == (0, 0, 0, 0, 0)
 
 
+@weaver_test()
 def test_a_populated_static_folder_does_not_run_the_authored_download(export):
     """Proved by counting, because "did nothing" is what is being claimed."""
 
@@ -527,6 +556,7 @@ def test_a_populated_static_folder_does_not_run_the_authored_download(export):
     assert Sales__Export.seen == []
 
 
+@weaver_test()
 def test_a_populated_static_folder_creates_no_staging_directory(export):
     export.static = True
     export.files = {"seed.csv": "x"}
@@ -537,6 +567,7 @@ def test_a_populated_static_folder_creates_no_staging_directory(export):
     assert not _staging(export).exists()
 
 
+@weaver_test()
 def test_a_populated_static_folder_leaves_its_destination_exactly_as_it_was(export):
     export.static = True
     export.files = {"seed.csv": "original"}
@@ -549,6 +580,7 @@ def test_a_populated_static_folder_leaves_its_destination_exactly_as_it_was(expo
     assert (export.path() / "seed.csv").read_text(encoding="utf-8") == "original"
 
 
+@weaver_test()
 def test_a_folder_holding_only_unmanaged_files_is_not_populated(export):
     """The file key scopes the question.
 
@@ -567,6 +599,7 @@ def test_a_folder_holding_only_unmanaged_files_is_not_populated(export):
     assert (export.path() / "seed.csv").exists()
 
 
+@weaver_test()
 def test_a_non_static_folder_reloads_whatever_the_destination_holds(export):
     export.static = False
     export.files = {"seed.csv": "original"}
@@ -579,6 +612,7 @@ def test_a_non_static_folder_reloads_whatever_the_destination_holds(export):
     assert (export.path() / "seed.csv").read_text(encoding="utf-8") == "second run"
 
 
+@weaver_test()
 def test_a_non_static_folder_never_asks_whether_its_destination_is_populated(
     export, monkeypatch
 ):
@@ -606,6 +640,7 @@ def test_a_non_static_folder_never_asks_whether_its_destination_is_populated(
     assert result.rows_inserted == 1
 
 
+@weaver_test()
 def test_a_static_folder_does_ask(export, monkeypatch):
     import weaver.runtime.folder_load as module
 

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 
+from support.weaver_test import weaver_test
+
 from weaver.load_report import (
     BLOCKED,
     DEPENDENCY_BLOCKED,
@@ -112,12 +114,14 @@ def _crossed(report: LoadRunReport) -> LoadRunReport:
     return LoadRunReport.from_mapping(json.loads(json.dumps(report.to_mapping())))
 
 
+@weaver_test()
 def test_a_report_survives_the_crossing_whole():
     report = _report()
 
     assert _crossed(report) == report
 
 
+@weaver_test()
 def test_the_counts_a_node_reported_survive():
     node = _crossed(_report()).by_node["load:Lakehouse/Sales/Sales.Customer"]
 
@@ -132,6 +136,7 @@ def test_the_counts_a_node_reported_survive():
     )
 
 
+@weaver_test()
 def test_a_nodes_messages_survive_with_their_severity_and_detail():
     node = _crossed(_report()).by_node["load:Lakehouse/Sales/Sales.Customer"]
     (message,) = node.messages
@@ -141,6 +146,7 @@ def test_a_nodes_messages_survive_with_their_severity_and_detail():
     assert message.source == "python_table"
 
 
+@weaver_test()
 def test_a_node_that_never_ran_crosses_as_one():
     node = _crossed(_report()).by_node["load:Warehouse/Reporting/Sales.Summary"]
 
@@ -151,6 +157,7 @@ def test_a_node_that_never_ran_crosses_as_one():
     assert node.dispatch_location is None
 
 
+@weaver_test()
 def test_the_graph_survives_as_edges_rather_than_lists():
     crossed = _crossed(_report())
 
@@ -163,6 +170,7 @@ def test_the_graph_survives_as_edges_rather_than_lists():
     assert isinstance(crossed.order, tuple)
 
 
+@weaver_test()
 def test_the_workflow_identity_survives():
     """What correlates a run's `_.Log` rows has to reach the caller intact."""
 
@@ -171,6 +179,7 @@ def test_the_workflow_identity_survives():
     assert crossed.workflow_id == "abc123"
 
 
+@weaver_test()
 def test_a_dry_run_report_crosses_with_its_absences_intact():
     """A dry run writes no evidence, and the report says so by carrying none."""
 
@@ -188,6 +197,7 @@ def test_a_dry_run_report_crosses_with_its_absences_intact():
     assert crossed.workflow_id is None
 
 
+@weaver_test()
 def test_a_report_of_nothing_crosses_as_nothing():
     empty = LoadRunReport(
         requested=(), status="succeeded", dry_run=False, fault_tolerant=False

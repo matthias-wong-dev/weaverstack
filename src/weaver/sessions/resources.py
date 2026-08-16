@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Callable, Generic, TypeVar
 
 from ..errors import WeaverError
-from .telemetry import SessionTelemetry
+from .telemetry import SessionTelemetry, TelemetryContext
 
 T = TypeVar("T")
 
@@ -48,6 +48,7 @@ class Resource(Generic[T]):
         executor: Executor,
         release: Callable[[T], None] | None = None,
         telemetry: SessionTelemetry | None = None,
+        telemetry_resource: str | None = None,
         max_attempts: int = 2,
         close_timeout: float = 120.0,
     ) -> None:
@@ -56,6 +57,7 @@ class Resource(Generic[T]):
         self._release = release
         self._executor = executor
         self._telemetry = telemetry
+        self._telemetry_resource = telemetry_resource
         self._max_attempts = max_attempts
         self._close_timeout = close_timeout
         self._lock = threading.Lock()
@@ -111,8 +113,13 @@ class Resource(Generic[T]):
             if self._future is None:
                 self._attempts += 1
                 self._state = ResourceState.STARTING
+                context = (
+                    self._telemetry.capture_context()
+                    if self._telemetry is not None
+                    else None
+                )
                 self._future = self._executor.submit(
-                    self._acquire_once, speculative=speculative
+                    self._acquire_once, context, speculative=speculative
                 )
             return self._future
 
@@ -121,11 +128,20 @@ class Resource(Generic[T]):
 
         return self.start().result(timeout)
 
-    def _acquire_once(self, *, speculative: bool = False) -> T:
+    def _acquire_once(
+        self, context: TelemetryContext | None, *, speculative: bool = False
+    ) -> T:
         try:
             if self._telemetry is not None:
-                with self._telemetry.timing(f"{self.name}.acquire"):
-                    value = self._acquire()
+                with self._telemetry.use_context(context or TelemetryContext()):
+                    if self._telemetry_resource is None:
+                        with self._telemetry.timing(f"{self.name}.acquire"):
+                            value = self._acquire()
+                    else:
+                        with self._telemetry.external(
+                            self._telemetry_resource, "acquire", detail=self.name
+                        ):
+                            value = self._acquire()
             else:
                 value = self._acquire()
         except BaseException as exc:

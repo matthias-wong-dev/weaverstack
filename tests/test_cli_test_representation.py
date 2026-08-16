@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.weaver_test import weaver_test
 
 import weaver
 from weaver.runtime.validation_result import AssumptionResult, TestResult
@@ -78,12 +79,14 @@ def _run(*args, workspace="Demo"):
 # --- what it parses -----------------------------------------------------------
 
 
+@weaver_test()
 def test_targets_are_passed_through(captured, capsys):
     _run("Lakehouse/Sales", "Warehouse/Reporting")
 
     assert captured["targets"] == ["Lakehouse/Sales", "Warehouse/Reporting"]
 
 
+@weaver_test()
 def test_name_selects_one_installed_validation(captured, capsys):
     _run("Lakehouse/Sales", "--name", "Sales.OrdersReconcile")
 
@@ -91,6 +94,7 @@ def test_name_selects_one_installed_validation(captured, capsys):
     assert captured["file"] is None
 
 
+@weaver_test()
 def test_file_runs_a_source_file(captured, capsys):
     _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql")
 
@@ -98,6 +102,7 @@ def test_file_runs_a_source_file(captured, capsys):
     assert captured["name"] is None
 
 
+@weaver_test()
 def test_name_and_file_are_mutually_exclusive(capsys):
     """argparse refuses it, so no request that meant both can reach the API."""
 
@@ -108,6 +113,7 @@ def test_name_and_file_are_mutually_exclusive(capsys):
     assert "not allowed with" in capsys.readouterr().err
 
 
+@weaver_test()
 def test_dry_run_is_passed_through(captured, capsys):
     _run("Lakehouse/Sales", "--dry-run")
 
@@ -117,10 +123,12 @@ def test_dry_run_is_passed_through(captured, capsys):
 # --- the verdict --------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_passing_run_exits_zero(captured, capsys):
     assert _run("Lakehouse/Sales") == 0
 
 
+@weaver_test()
 def test_a_failing_run_exits_non_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
@@ -137,6 +145,7 @@ def test_a_failing_run_exits_non_zero(captured, capsys):
     assert _run("Lakehouse/Sales") == 1
 
 
+@weaver_test()
 def test_a_run_that_could_not_answer_exits_non_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=INVALID,
@@ -156,6 +165,7 @@ def test_a_run_that_could_not_answer_exits_non_zero(captured, capsys):
 # --- what it prints -----------------------------------------------------------
 
 
+@weaver_test()
 def test_the_counts_are_rendered_per_validation(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
@@ -182,6 +192,7 @@ def test_the_counts_are_rendered_per_validation(captured, capsys):
     assert "0 passed, 2 failed, 0 could not run" in printed
 
 
+@weaver_test()
 def test_a_targeted_run_prints_its_evidence(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
@@ -202,6 +213,7 @@ def test_a_targeted_run_prints_its_evidence(captured, capsys):
     assert "'Id': 7" in printed
 
 
+@weaver_test()
 def test_a_whole_target_run_prints_no_rows(captured, capsys):
     """There are none to print — the run never asked for them."""
 
@@ -210,6 +222,7 @@ def test_a_whole_target_run_prints_no_rows(captured, capsys):
     assert "_weaver_side" not in capsys.readouterr().out
 
 
+@weaver_test()
 def test_json_emits_the_whole_report(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
@@ -230,6 +243,7 @@ def test_json_emits_the_whole_report(captured, capsys):
     assert payload["nodes"][0]["missing_count"] == 2
 
 
+@weaver_test()
 def test_json_carries_no_diagnostic_rows(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
@@ -248,6 +262,7 @@ def test_json_carries_no_diagnostic_rows(captured, capsys):
     assert "_weaver_sk" not in capsys.readouterr().out
 
 
+@weaver_test()
 def test_the_workflow_is_pointed_at(captured, capsys):
     """A run's evidence is `_.Log` rows correlated by Workflow ID.
 
@@ -268,6 +283,7 @@ def test_the_workflow_is_pointed_at(captured, capsys):
 # --- dry run and strict reach file mode too ------------------------------------
 
 
+@weaver_test()
 def test_dry_run_is_passed_through_with_file(captured, capsys):
     """`--file --dry-run` must mean what `--dry-run` means everywhere else."""
 
@@ -277,6 +293,7 @@ def test_dry_run_is_passed_through_with_file(captured, capsys):
     assert captured["file"] == "tests/Sales.X.sql"
 
 
+@weaver_test()
 def test_a_planned_file_run_exits_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=PLANNED,
@@ -286,6 +303,7 @@ def test_a_planned_file_run_exits_zero(captured, capsys):
     assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run") == 0
 
 
+@weaver_test()
 def test_a_failing_file_run_exits_non_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
@@ -302,6 +320,7 @@ def test_a_failing_file_run_exits_non_zero(captured, capsys):
     assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 1
 
 
+@weaver_test()
 def test_a_planned_installed_run_also_exits_zero(captured, capsys):
     """A dry run dispatched nothing, so there is nothing it can have got wrong."""
 

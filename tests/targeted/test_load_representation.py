@@ -19,6 +19,7 @@ ordinary ``Table.load()``, proved once for both authoring languages.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.load import (
@@ -84,6 +85,7 @@ def _no_key(source: str) -> str:
 # --- what owns a generated load ----------------------------------------------
 
 
+@weaver_test()
 def test_a_warehouse_table_generates_a_stored_procedure():
     load = _warehouse().create_load()
 
@@ -92,6 +94,7 @@ def test_a_warehouse_table_generates_a_stored_procedure():
     assert b"create or alter procedure [_].[Load Sales.Customer]" in load.payload
 
 
+@weaver_test()
 def test_a_spark_sql_table_generates_a_deployed_module():
     """Compiled into a primitive, not into a load program.
 
@@ -106,6 +109,7 @@ def test_a_spark_sql_table_generates_a_deployed_module():
     assert load.payload.decode().lstrip().startswith("# Weaver generated load")
 
 
+@weaver_test()
 def test_a_view_has_no_generated_load():
     """A view's definition is its query, so there is nothing to run."""
 
@@ -127,6 +131,7 @@ GENERATED_FINGERPRINTS = {
 }
 
 
+@weaver_test()
 def test_a_change_to_generation_must_move_its_template_version():
     """A signature is the source's plus the template version.
 
@@ -159,6 +164,7 @@ def test_a_change_to_generation_must_move_its_template_version():
     )
 
 
+@weaver_test()
 def test_generation_is_deterministic():
     assert _warehouse().create_load() == _warehouse().create_load()
     assert _spark().create_load(destination=SALES) == _spark().create_load(
@@ -169,6 +175,7 @@ def test_generation_is_deterministic():
 # --- the Warehouse procedure --------------------------------------------------
 
 
+@weaver_test()
 def test_an_intolerant_run_raises_rather_than_returning_a_quiet_row():
     """`exec [_].[Load S.N]` must fail the way `.load()` does.
 
@@ -182,6 +189,7 @@ def test_an_intolerant_run_raises_rather_than_returning_a_quiet_row():
     assert "throw 51021" in payload  # over a stability threshold, intolerant
 
 
+@weaver_test()
 def test_a_breach_never_writes_whatever_fault_tolerant_says():
     """Tolerating exactly the change the threshold prevents would defeat it."""
 
@@ -193,12 +201,14 @@ def test_a_breach_never_writes_whatever_fault_tolerant_says():
     assert "the target was not modified" in payload
 
 
+@weaver_test()
 def test_an_empty_target_is_never_guarded():
     payload = _warehouse().create_load().payload.decode()
 
     assert "@weaver_target_rows > 0" in payload
 
 
+@weaver_test()
 def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
     """Refusing is the default because it is the safe one.
 
@@ -211,6 +221,7 @@ def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
     assert "@fault_tolerant bit = 0" in payload
 
 
+@weaver_test()
 def test_the_procedure_returns_the_result_contract_through_its_signature():
     """Not through a result set, which a caller could not have identified.
 
@@ -228,6 +239,7 @@ def test_the_procedure_returns_the_result_contract_through_its_signature():
     assert "as succeeded" not in payload
 
 
+@weaver_test()
 def test_the_outputs_are_optional_so_the_procedure_stays_runnable_by_hand():
     """`exec [_].[Load Sales.Customer];` must still work, undeclared."""
 
@@ -238,6 +250,7 @@ def test_the_outputs_are_optional_so_the_procedure_stays_runnable_by_hand():
     assert payload.count("= null output") == len(RESULT_COLUMNS)
 
 
+@weaver_test()
 def test_the_identity_column_is_excluded_by_asking_the_engine():
     """Not by naming it. The installer filters on `is_identity`, so the load
     cannot insert into a generated column whatever the declaration said."""
@@ -247,6 +260,7 @@ def test_the_identity_column_is_excluded_by_asking_the_engine():
     assert "c.is_identity = 0" in payload
 
 
+@weaver_test()
 def test_the_intermediate_tables_are_real_and_named_for_their_object():
     payload = _warehouse().create_load().payload.decode()
 
@@ -254,6 +268,7 @@ def test_the_intermediate_tables_are_real_and_named_for_their_object():
         assert f"[Sales].[Customer{suffix}]" in payload
 
 
+@weaver_test()
 def test_a_keyed_load_rejects_blank_and_duplicate_keys():
     """One vocabulary across all four primitives.
 
@@ -268,6 +283,7 @@ def test_a_keyed_load_rejects_blank_and_duplicate_keys():
     assert REASON_DUPLICATE_PK in payload
 
 
+@weaver_test()
 def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
     """With no key no row can be matched, so there is nothing to reject."""
 
@@ -278,6 +294,7 @@ def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
     assert REASON_DUPLICATE_PK not in payload
 
 
+@weaver_test()
 def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
     payload = _warehouse().create_load().payload.decode()
 
@@ -287,6 +304,7 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
     assert "@weaver_target_before + @weaver_rows_inserted - count(*)" in payload
 
 
+@weaver_test()
 def test_an_incremental_load_deletes_nothing():
     """Absence from a window is not a retirement."""
 
@@ -322,6 +340,7 @@ def _two_query_payload() -> str:
     return _warehouse(TWO_QUERY_WAREHOUSE).create_load().payload.decode()
 
 
+@weaver_test()
 def test_a_second_query_becomes_a_delete_working_table():
     payload = _two_query_payload()
 
@@ -329,6 +348,7 @@ def test_a_second_query_becomes_a_delete_working_table():
     assert "into #weaver_delete_claim_Sales_Customer from #Retired" in payload
 
 
+@weaver_test()
 def test_the_delete_claim_is_narrowed_before_anything_is_counted():
     """Distinct, not blank, and present in the target — all three, up front.
 
@@ -344,6 +364,7 @@ def test_the_delete_claim_is_narrowed_before_anything_is_counted():
     assert "where not (nullif(trim(cast(d.[Customer id]" in payload
 
 
+@weaver_test()
 def test_the_delete_claim_is_what_the_threshold_counts():
     payload = _two_query_payload()
 
@@ -354,6 +375,7 @@ def test_the_delete_claim_is_what_the_threshold_counts():
     assert "not a retirement" not in payload
 
 
+@weaver_test()
 def test_the_target_loses_exactly_the_claimed_keys():
     payload = _two_query_payload()
 
@@ -363,12 +385,14 @@ def test_the_target_loses_exactly_the_claimed_keys():
     assert "@weaver_target_before + @weaver_rows_inserted - count(*)" in payload
 
 
+@weaver_test()
 def test_the_delete_table_is_cleaned_up_with_the_others():
     payload = _two_query_payload()
 
     assert payload.count("drop table [Sales].[Customer_Delete];") == 2
 
 
+@weaver_test()
 def test_setup_runs_where_the_author_put_it():
     """Between the two queries, because that is where it was written."""
 
@@ -389,6 +413,7 @@ select [Customer id], [Customer name] from recent""",
 )
 
 
+@weaver_test()
 def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
     """``with … select …`` is a legal statement and an illegal derived table.
 
@@ -405,6 +430,7 @@ def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
     assert "from #weaver_staging_source_Sales_Customer as s;" in payload
 
 
+@weaver_test()
 def test_a_one_query_incremental_table_has_no_delete_table():
     payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load().payload.decode()
 
@@ -421,12 +447,14 @@ GUARDED_WAREHOUSE = WAREHOUSE_TABLE.replace(
 )
 
 
+@weaver_test()
 def test_the_procedure_takes_a_threshold_waiver_defaulting_to_enforcement():
     payload = _warehouse().create_load().payload.decode()
 
     assert "@ignore_stability_threshold bit = 0" in payload
 
 
+@weaver_test()
 def test_the_declared_thresholds_reach_the_procedure():
     payload = _warehouse(GUARDED_WAREHOUSE).create_load().payload.decode()
 
@@ -435,6 +463,7 @@ def test_the_declared_thresholds_reach_the_procedure():
     assert "/ @weaver_target_rows > 7" in payload
 
 
+@weaver_test()
 def test_the_thresholds_are_checked_before_the_first_write():
     """A breach must leave the target as it was, so refusing has to be a
     decision not to start rather than an unwind."""
@@ -446,6 +475,7 @@ def test_the_thresholds_are_checked_before_the_first_write():
     assert gate < insert
 
 
+@weaver_test()
 def test_the_defaults_are_the_documented_ones():
     payload = _warehouse().create_load().payload.decode()
 

@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
@@ -40,21 +41,25 @@ def _fabric(name="A_Workspace") -> Workspace:
 # --- identity ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_console_session_needs_no_workspace_to_exist(console):
     assert console.workspace is None
 
 
+@weaver_test()
 def test_a_command_without_a_workspace_says_what_is_missing(console):
     with pytest.raises(CommandError, match="A Workspace is required for this command"):
         console.scope(None)
 
 
+@weaver_test()
 def test_a_command_may_name_a_workspace_the_session_did_not(console):
     scope = console.scope(_other())
 
     assert scope.workspace == _other()
 
 
+@weaver_test()
 def test_two_commands_naming_one_workspace_share_its_resources(console):
     first = console.scope(_other())
     second = console.scope(_other())
@@ -62,16 +67,19 @@ def test_two_commands_naming_one_workspace_share_its_resources(console):
     assert first is second
 
 
+@weaver_test()
 def test_two_workspaces_are_two_contexts(console):
     assert console.scope(_other("one")) is not console.scope(_other("two"))
 
 
+@weaver_test()
 def test_a_default_workspace_is_a_default_and_not_an_identity():
     with ConsoleSession(workspace=_other("default")) as session:
         assert session.scope(None).workspace == _other("default")
         assert session.scope(_other("other")).workspace == _other("other")
 
 
+@weaver_test()
 def test_the_default_is_what_the_session_started_with_and_never_accumulates():
     """A command naming a workspace does not make it the session's default.
 
@@ -88,6 +96,7 @@ def test_the_default_is_what_the_session_started_with_and_never_accumulates():
         assert session.scope(None).workspace == _other("default")
 
 
+@weaver_test()
 def test_a_session_started_without_a_workspace_never_gains_one():
     with ConsoleSession() as session:
         session.scope(_other("named-by-a-command"))
@@ -99,6 +108,7 @@ def test_a_session_started_without_a_workspace_never_gains_one():
             session.scope(None)
 
 
+@weaver_test()
 def test_context_identity_ignores_which_targets_were_declared():
     plain = _fabric()
     with_targets = Workspace(
@@ -115,6 +125,7 @@ def test_context_identity_ignores_which_targets_were_declared():
     assert workspace_context(plain) == workspace_context(with_targets)
 
 
+@weaver_test()
 def test_a_different_control_lakehouse_is_a_different_context():
     other = Workspace(
         workspace="A_Workspace", catalogue="Warehouse/Other", environment="weaver"
@@ -126,10 +137,12 @@ def test_a_different_control_lakehouse_is_a_different_context():
 # --- position ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_console_reaching_into_fabric_does_not_execute_here(console):
     assert console.executes_here(_fabric()) is False
 
 
+@weaver_test()
 def test_a_console_has_no_spark_object_at_all(console):
     """Not a Spark session that refuses — nothing to reach for.
 
@@ -145,6 +158,7 @@ def test_a_console_has_no_spark_object_at_all(console):
 # --- reporting context ------------------------------------------------------
 
 
+@weaver_test()
 def test_reporting_frames_nest_and_unwind(console):
     console.task_started("build")
     console.step_started("install")
@@ -158,6 +172,7 @@ def test_reporting_frames_nest_and_unwind(console):
     assert console.frames == ()
 
 
+@weaver_test()
 def test_completing_a_task_unwinds_the_steps_beneath_it(console):
     console.task_started("build")
     console.step_started("install")
@@ -171,6 +186,7 @@ def test_completing_a_task_unwinds_the_steps_beneath_it(console):
 # --- lifetime ---------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_closed_session_serves_no_further_commands():
     session = ConsoleSession()
     session.scope(_other())
@@ -180,6 +196,7 @@ def test_a_closed_session_serves_no_further_commands():
         session.scope(_other())
 
 
+@weaver_test()
 def test_closing_twice_is_not_an_error():
     session = ConsoleSession()
     session.close()
@@ -189,6 +206,7 @@ def test_closing_twice_is_not_an_error():
 # --- an acquired resource is a running one -----------------------------------
 
 
+@weaver_test()
 def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
     """Acquiring means the expensive part is over.
 
@@ -240,6 +258,7 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
 # --- the published wheel and this checkout -----------------------------------
 
 
+@weaver_test()
 def test_a_version_difference_warns_and_names_the_fix(monkeypatch):
     """A difference is worth saying; it is not worth refusing over.
 
@@ -259,6 +278,7 @@ def test_a_version_difference_warns_and_names_the_fix(monkeypatch):
         assert "weaver install" in session.warnings[0]
 
 
+@weaver_test()
 def test_a_matching_version_says_nothing(monkeypatch):
     from weaver import __version__
 
@@ -271,6 +291,7 @@ def test_a_matching_version_says_nothing(monkeypatch):
         assert session.warnings == []
 
 
+@weaver_test()
 def test_the_check_is_asked_once_per_workspace_not_once_per_command(monkeypatch):
     asked = []
 
@@ -287,6 +308,7 @@ def test_the_check_is_asked_once_per_workspace_not_once_per_command(monkeypatch)
         assert len(session.warnings) == 1
 
 
+@weaver_test()
 def test_a_check_that_cannot_run_never_fails_the_work(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("the probe itself failed")
@@ -330,6 +352,7 @@ def _scope_with(livy):
     return session, session.scope()
 
 
+@weaver_test()
 def test_a_failed_statement_leaves_the_spark_session_up():
     """One bad command must not cost the next one a minute of startup."""
 
@@ -346,6 +369,7 @@ def test_a_failed_statement_leaves_the_spark_session_up():
     session.close()
 
 
+@weaver_test()
 def test_a_session_that_died_is_marked_failed():
     from weaver.fabric import LivyError
     from weaver.sessions.resources import ResourceState
@@ -359,6 +383,7 @@ def test_a_session_that_died_is_marked_failed():
     session.close()
 
 
+@weaver_test()
 def test_a_wheel_too_old_to_import_weaver_says_to_publish():
     """The raw ModuleNotFoundError sends a reader to look for a missing package.
 
@@ -384,6 +409,7 @@ def test_a_wheel_too_old_to_import_weaver_says_to_publish():
     session.close()
 
 
+@weaver_test()
 def test_an_ordinary_remote_failure_is_passed_through_as_it_came():
     """Guessing at causes would bury the real ones."""
 

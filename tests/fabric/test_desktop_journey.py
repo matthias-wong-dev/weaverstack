@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE, DESKTOP_JOURNEY_NAMES
+from support.weaver_test import weaver_test
 
 import weaver
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted, pytest.mark.full_integration]
 
 
 @pytest.fixture(scope="module")
@@ -17,6 +16,7 @@ def desktop_estate(tmp_path_factory):
     )
 
 
+@weaver_test(integration=True, resources={"livy", "onelake", "rest", "tds"})
 def test_the_desktop_drives_build_load_and_test_in_one_session(
     desktop_estate,
     weaver_session,

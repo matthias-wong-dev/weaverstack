@@ -408,7 +408,7 @@ class ConsoleSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> None:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.timing("tds.execute"):
+        with self.telemetry.external("tds", "execute"):
             executor.execute(statement, parameters or ())
 
     def query_tsql(
@@ -420,7 +420,7 @@ class ConsoleSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> Any:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.timing("tds.query"):
+        with self.telemetry.external("tds", "query"):
             return executor.query(statement, parameters or ())
 
     def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
@@ -487,6 +487,7 @@ class ConsoleScope(WorkspaceScope):
                 executor=self.executor,
                 telemetry=self.telemetry,
                 release=release,
+                telemetry_resource="livy" if name == "livy" else None,
             )
         return Resource(
             name, lambda: given, executor=self.executor, telemetry=self.telemetry
@@ -568,7 +569,7 @@ class ConsoleScope(WorkspaceScope):
             if self._transport_store is None:
                 from ..fabric import OneLakeDfsClient
 
-                self._transport_store = OneLakeDfsClient()
+                self._transport_store = OneLakeDfsClient(telemetry=self.telemetry)
             return self._transport_store
 
     def _fabric_client(self):
@@ -577,7 +578,7 @@ class ConsoleScope(WorkspaceScope):
         # One client, carrying the Session's own renewing token source, so every
         # REST call in this Session shares one credential rather than shelling
         # out to the Azure CLI per operation.
-        return FabricClient(token=self.token_provider())
+        return FabricClient(token=self.token_provider(), telemetry=self.telemetry)
 
     def token_provider(self):
         from ..fabric.auth import FABRIC_SCOPE, TokenProvider
@@ -628,7 +629,7 @@ class ConsoleScope(WorkspaceScope):
             from ..fabric.livy import missing_environment
 
             raise CommandError(missing_environment(self.workspace))
-        with self.telemetry.timing("livy.ensure_weaver"):
+        with self.telemetry.external("livy", "ensure_weaver"):
             self.livy.get().ensure_weaver()
 
     def check_published_version(self, warn) -> None:
@@ -676,7 +677,7 @@ class ConsoleScope(WorkspaceScope):
         if self.livy is None:
             raise CommandError("this workspace has no Livy session")
         session = self.livy.get()
-        with self.telemetry.timing(f"livy.{name}"):
+        with self.telemetry.external("livy", name):
             kwargs = {} if timeout is None else {"timeout": timeout}
             try:
                 result = session.run(source, **kwargs)
@@ -737,6 +738,7 @@ class ConsoleScope(WorkspaceScope):
                     executor=self.executor,
                     telemetry=self.telemetry,
                     release=lambda executor: executor.close(),
+                    telemetry_resource="tds",
                 )
                 self.track(resource)
         return resource.get()

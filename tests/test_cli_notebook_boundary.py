@@ -4,6 +4,7 @@ import importlib
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
@@ -26,6 +27,7 @@ def _args(**overrides):
     return SimpleNamespace(**values)
 
 
+@weaver_test()
 def test_notebook_run_does_not_treat_the_catalogue_as_a_lakehouse(monkeypatch):
     workspace = Workspace(
         workspace="Analytics",
@@ -38,6 +40,7 @@ def test_notebook_run_does_not_treat_the_catalogue_as_a_lakehouse(monkeypatch):
         handle_notebook_run(_args())
 
 
+@weaver_test()
 def test_notebook_run_uses_one_configured_lakehouse(monkeypatch):
     workspace = Workspace(
         workspace="Analytics",

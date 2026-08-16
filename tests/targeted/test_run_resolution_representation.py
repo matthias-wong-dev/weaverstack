@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from factories import installed_catalogue, load_estate, load_estate_bindings
+from support.weaver_test import weaver_test
 
 from weaver.load_plan import PhysicalTargetRef
 from weaver.run import Runner, RunRequest, RunState
@@ -33,6 +34,7 @@ def _resolved(catalogue, *, can_refresh=True):
     return {node.node_id: runner.resolve(node) for node in runner.graph.order()}
 
 
+@weaver_test()
 def test_warehouse_procedure_address_comes_from_the_catalogue_graph(catalogue):
     resolved = _resolved(catalogue)[SUMMARY]
 
@@ -42,6 +44,7 @@ def test_warehouse_procedure_address_comes_from_the_catalogue_graph(catalogue):
     assert resolved.valid
 
 
+@weaver_test()
 def test_python_table_address_and_class_come_from_the_catalogue_graph(catalogue):
     resolved = _resolved(catalogue)[ORDER]
 
@@ -50,6 +53,7 @@ def test_python_table_address_and_class_come_from_the_catalogue_graph(catalogue)
     assert resolved.valid
 
 
+@weaver_test()
 def test_compiled_sql_table_uses_its_deployed_python_address(catalogue):
     resolved = _resolved(catalogue)[DAILY]
 
@@ -57,6 +61,7 @@ def test_compiled_sql_table_uses_its_deployed_python_address(catalogue):
     assert resolved.expected_class == "Sales__Daily"
 
 
+@weaver_test()
 def test_python_folder_address_comes_from_the_catalogue_graph(catalogue):
     resolved = _resolved(catalogue)[EXPORT]
 
@@ -66,6 +71,7 @@ def test_python_folder_address_comes_from_the_catalogue_graph(catalogue):
     assert resolved.expected_class == "Sales__Export"
 
 
+@weaver_test()
 def test_endpoint_refresh_address_requires_no_inventory(catalogue):
     resolved = _resolved(catalogue)[REFRESH]
 
@@ -73,6 +79,7 @@ def test_endpoint_refresh_address_requires_no_inventory(catalogue):
     assert not resolved.unsupported
 
 
+@weaver_test()
 def test_endpoint_refresh_is_skipped_when_the_host_cannot_do_it(catalogue):
     resolved = _resolved(catalogue, can_refresh=False)[REFRESH]
 
@@ -84,6 +91,7 @@ def test_endpoint_refresh_is_skipped_when_the_host_cannot_do_it(catalogue):
     ]
 
 
+@weaver_test()
 def test_resolution_exposes_no_physical_presence_claims(catalogue):
     resolved = _resolved(catalogue)[ORDER]
 

@@ -389,6 +389,8 @@ class Session(ABC):
                 execute=lambda statement: self.execute_tsql(
                     statement, target=warehouse, workspace=workspace
                 ),
+                capture_context=self.telemetry.capture_context,
+                use_context=self.telemetry.use_context,
             )
             self._flushers[key] = created
             return created
@@ -492,6 +494,7 @@ class Session(ABC):
             kind=kind, name=name, detail=detail, depth=len(self._frames)
         )
         self._frames.append(frame)
+        self.telemetry.set_frames(self._frames)
         self.present(frame, "started")
         return frame
 
@@ -505,6 +508,7 @@ class Session(ABC):
             for orphan in reversed(self._frames[index + 1 :]):
                 self._close(orphan, error=error)
             del self._frames[index:]
+            self.telemetry.set_frames(self._frames)
         frame.elapsed = time.monotonic() - frame.started
         # Not an overwrite: a caller may have marked the frame failed from
         # inside it, which is how work whose failure is *data* — a run node that

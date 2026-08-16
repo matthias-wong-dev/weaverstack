@@ -24,6 +24,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions.requirements import (
     AUTH,
@@ -44,6 +45,7 @@ def _declared(*words: str) -> set[str]:
 # --- the vocabulary -----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_declaration_is_checked_against_the_vocabulary():
     """A typo must be a failure, not a requirement nobody honours."""
 
@@ -51,10 +53,12 @@ def test_a_declaration_is_checked_against_the_vocabulary():
         requirements(AUTH, "sparkle")
 
 
+@weaver_test()
 def test_the_union_is_what_a_sequence_will_want_between_its_commands():
     assert union({AUTH, TDS}, {AUTH, LIVY}, ()) == frozenset({AUTH, TDS, LIVY})
 
 
+@weaver_test()
 def test_the_union_of_nothing_is_nothing():
     assert union() == frozenset()
 
@@ -62,6 +66,7 @@ def test_the_union_of_nothing_is_nothing():
 # --- what each command declares -----------------------------------------------
 
 
+@weaver_test()
 def test_a_warehouse_load_asks_for_tds_and_not_for_spark():
     """The case the whole mechanism is for: T-SQL work should not wait on a
     Spark session, and on a small capacity should not queue for one."""
@@ -72,6 +77,7 @@ def test_a_warehouse_load_asks_for_tds_and_not_for_spark():
     assert LIVY not in declared
 
 
+@weaver_test()
 def test_a_lakehouse_load_asks_for_spark_and_files():
     declared = _declared("load", "Lakehouse/Sales")
 
@@ -79,12 +85,14 @@ def test_a_lakehouse_load_asks_for_spark_and_files():
     assert TDS not in declared
 
 
+@weaver_test()
 def test_a_mixed_request_asks_for_both():
     declared = _declared("test", "Lakehouse/Sales", "Warehouse/Reporting")
 
     assert {TDS, LIVY, ONELAKE} <= declared
 
 
+@weaver_test()
 def test_a_build_asks_for_everything_it_might_touch():
     """Coarse on purpose: a repository can hold files, DDL and Warehouse tables,
     and which of them this one holds is not knowable from the arguments."""
@@ -92,6 +100,7 @@ def test_a_build_asks_for_everything_it_might_touch():
     assert _declared("build", ".") == {AUTH, RESOLVER, ONELAKE, LIVY, TDS}
 
 
+@weaver_test()
 def test_every_command_that_reaches_a_workspace_asks_for_a_credential():
     for words in (
         ("load", "Lakehouse/Sales"),
@@ -102,6 +111,7 @@ def test_every_command_that_reaches_a_workspace_asks_for_a_credential():
         assert AUTH in _declared(*words), words
 
 
+@weaver_test()
 def test_a_command_that_declares_nothing_asks_for_nothing():
     """`capacity` manages the capacity itself, not anything inside a workspace,
     so it must not warm one."""
@@ -149,6 +159,7 @@ def _scope(monkeypatch):
     return scope
 
 
+@weaver_test()
 def test_preparing_starts_only_what_was_declared(monkeypatch):
     scope = _scope(monkeypatch)
 
@@ -158,6 +169,7 @@ def test_preparing_starts_only_what_was_declared(monkeypatch):
     assert scope.livy.started == 0
 
 
+@weaver_test()
 def test_preparing_for_spark_starts_it(monkeypatch):
     scope = _scope(monkeypatch)
 
@@ -166,6 +178,7 @@ def test_preparing_for_spark_starts_it(monkeypatch):
     assert scope.livy.started == 1
 
 
+@weaver_test()
 def test_declaring_nothing_expensive_starts_nothing_expensive(monkeypatch):
     scope = _scope(monkeypatch)
 
@@ -175,6 +188,7 @@ def test_declaring_nothing_expensive_starts_nothing_expensive(monkeypatch):
     assert scope.livy.started == 0
 
 
+@weaver_test()
 def test_an_undeclared_warm_up_still_starts_everything(monkeypatch):
     """`weaver session` warms before any command is typed, so it has nothing to
     go on and wants the lot."""
@@ -190,6 +204,7 @@ def test_an_undeclared_warm_up_still_starts_everything(monkeypatch):
 # --- a Warehouse-only build asks for no Spark --------------------------------
 
 
+@weaver_test()
 def test_a_build_binding_only_warehouses_declares_no_livy():
     """The migration's headline claim, at the point it costs something.
 
@@ -211,6 +226,7 @@ def test_a_build_binding_only_warehouses_declares_no_livy():
     assert ONELAKE not in declared
 
 
+@weaver_test()
 def test_a_build_binding_a_lakehouse_still_declares_livy():
     from weaver.sessions.requirements import LIVY, ONELAKE
     from weaver_cli.main import _requires_build
@@ -223,6 +239,7 @@ def test_a_build_binding_a_lakehouse_still_declares_livy():
     assert ONELAKE in declared
 
 
+@weaver_test()
 def test_a_build_that_names_no_binding_declares_the_superset():
     """Bindings can come from configuration, so silence is not "nothing"."""
 

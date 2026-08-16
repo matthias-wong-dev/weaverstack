@@ -22,6 +22,7 @@ than making every command pay for the discovery.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.sessions.resources import Resource, ResourceError, ResourceState
 
@@ -72,6 +73,7 @@ class _Scope:
 # --- the resource's own contract ----------------------------------------------
 
 
+@weaver_test()
 def test_a_failed_resource_stays_failed_until_something_asks_again():
     """Nothing self-heals. That is the property the run depends on."""
 
@@ -84,6 +86,7 @@ def test_a_failed_resource_stays_failed_until_something_asks_again():
         resource.get()
 
 
+@weaver_test()
 def test_reacquiring_gives_a_new_one():
     resource = _resource()
     first = resource.get()
@@ -94,6 +97,7 @@ def test_reacquiring_gives_a_new_one():
     assert resource.get() != first
 
 
+@weaver_test()
 def test_the_allowance_is_bounded():
     """A resource that will not come back says so, rather than making every
     command pay to find out again."""
@@ -112,6 +116,7 @@ def test_the_allowance_is_bounded():
 # --- where recovery happens ---------------------------------------------------
 
 
+@weaver_test()
 def test_a_task_boundary_reacquires_what_died():
     resource = _resource()
     holder = _Session(resource)
@@ -123,6 +128,7 @@ def test_a_task_boundary_reacquires_what_died():
         assert resource.get() == "session-2"
 
 
+@weaver_test()
 def test_nothing_is_reacquired_part_way_through_a_task():
     """The claim the whole design rests on.
 
@@ -146,6 +152,7 @@ def test_nothing_is_reacquired_part_way_through_a_task():
         assert resource.state is ResourceState.FAILED
 
 
+@weaver_test()
 def test_the_next_task_recovers_after_one_has_failed():
     """The whole lifecycle: a Task dies on a dead resource, the next runs."""
 
@@ -162,6 +169,7 @@ def test_the_next_task_recovers_after_one_has_failed():
         assert resource.get() == "session-2"
 
 
+@weaver_test()
 def test_a_task_still_starts_when_the_allowance_is_spent():
     """Exhausted is the *user's* problem to hear about from the thing that
     needed it, naming what it was for — not a Task that refuses to begin."""
@@ -177,6 +185,7 @@ def test_a_task_still_starts_when_the_allowance_is_spent():
             resource.get()
 
 
+@weaver_test()
 def test_a_healthy_resource_is_untouched_by_a_task_boundary():
     resource = _resource()
     holder = _Session(resource)

@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId
@@ -151,6 +152,7 @@ def item(repository, name: str):
 # --- where validation lives -------------------------------------------------
 
 
+@weaver_test()
 def test_a_lakehouse_item_accepts_tests_and_assumptions(lakehouse):
     _write(
         lakehouse,
@@ -171,6 +173,7 @@ def test_a_lakehouse_item_accepts_tests_and_assumptions(lakehouse):
     ]
 
 
+@weaver_test()
 def test_a_warehouse_item_accepts_sql_validation(warehouse):
     _write(
         warehouse,
@@ -188,6 +191,7 @@ def test_a_warehouse_item_accepts_sql_validation(warehouse):
     assert len(reporting.validations) == 2
 
 
+@weaver_test()
 def test_validation_is_not_among_the_documents_an_item_materialises(lakehouse):
     """The distinction the whole repository model turns on."""
 
@@ -208,6 +212,7 @@ def test_validation_is_not_among_the_documents_an_item_materialises(lakehouse):
     assert set(sales.declarations) == set(sales.documents) | set(sales.validations)
 
 
+@weaver_test()
 def test_a_validation_may_not_sit_deeper(lakehouse):
     _write(
         lakehouse,
@@ -219,6 +224,7 @@ def test_a_validation_may_not_sit_deeper(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_the_directory_names_the_kind(lakehouse):
     """An Assumption in tests/ is refused, and told where it belongs."""
 
@@ -232,6 +238,7 @@ def test_the_directory_names_the_kind(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_a_test_in_assumptions_is_refused(lakehouse):
     _write(
         lakehouse,
@@ -243,6 +250,7 @@ def test_a_test_in_assumptions_is_refused(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_python_validation_belongs_to_a_lakehouse(warehouse):
     """It runs through Spark, so a Warehouse writes its validation in SQL."""
 
@@ -256,6 +264,7 @@ def test_python_validation_belongs_to_a_lakehouse(warehouse):
         parse(warehouse)
 
 
+@weaver_test()
 def test_a_validation_schema_must_be_declared_by_the_item(lakehouse):
     _write(
         lakehouse,
@@ -267,6 +276,7 @@ def test_a_validation_schema_must_be_declared_by_the_item(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_the_filename_and_the_declared_id_must_agree(lakehouse):
     _write(
         lakehouse,
@@ -281,6 +291,7 @@ def test_the_filename_and_the_declared_id_must_agree(lakehouse):
 # --- one namespace ----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_test_may_not_take_an_objects_logical_id(lakehouse):
     """Both are the item's Schema.Object, so both cannot be Sales.Order."""
 
@@ -294,6 +305,7 @@ def test_a_test_may_not_take_an_objects_logical_id(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_a_test_and_an_assumption_may_not_share_a_logical_id(lakehouse):
     _write(
         lakehouse,
@@ -310,6 +322,7 @@ def test_a_test_and_an_assumption_may_not_share_a_logical_id(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_the_same_validation_id_in_two_items_is_ordinary(tmp_path):
     """Identity is item-qualified, so two items may each test Sales.Reconciles."""
 
@@ -331,6 +344,7 @@ def test_the_same_validation_id_in_two_items_is_ordinary(tmp_path):
 # --- dependencies -----------------------------------------------------------
 
 
+@weaver_test()
 def test_a_python_import_is_a_validation_dependency(lakehouse):
     """The ordinary AST machinery, with nothing added for validation."""
 
@@ -351,6 +365,7 @@ def test_a_python_import_is_a_validation_dependency(lakehouse):
     assert producers == ["Lakehouse/Sales/Sales.Order"]
 
 
+@weaver_test()
 def test_a_sql_reference_is_a_validation_dependency(warehouse):
     _write(
         warehouse,
@@ -378,6 +393,7 @@ def _validation_edges(repository, consumer_text: str):
     )
 
 
+@weaver_test()
 def test_a_declaration_replaces_inference(lakehouse):
     """The rule every kind uses, validation included."""
 
@@ -395,6 +411,7 @@ def test_a_declaration_replaces_inference(lakehouse):
     ]
 
 
+@weaver_test()
 def test_declaring_none_suppresses_inference(lakehouse):
     """`Dependencies: []` is a declaration, so it means none — here too."""
 
@@ -408,6 +425,7 @@ def test_declaring_none_suppresses_inference(lakehouse):
     assert _validation_edges(repository, "Lakehouse/Sales/Sales.OrdersReconcile") == []
 
 
+@weaver_test()
 def test_nothing_depends_on_a_validation(lakehouse):
     """Installation puts validation last on the strength of this."""
 
@@ -430,6 +448,7 @@ def test_nothing_depends_on_a_validation(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_a_spark_sql_validation_infers_its_references(tmp_path):
     """No `Dependencies:` header, and the graph is still right."""
 
@@ -456,6 +475,7 @@ select Id from Sales.Order;
     ]
 
 
+@weaver_test()
 def test_a_changed_test_changes_its_item_signature(lakehouse):
     _write(
         lakehouse,
@@ -478,6 +498,7 @@ def test_a_changed_test_changes_its_item_signature(lakehouse):
 # --- the Python structural contract -----------------------------------------
 
 
+@weaver_test()
 def test_a_test_must_define_expected_and_actual(lakehouse):
     source = _python_test("Sales.OrdersReconcile").replace(
         "    def actual(self):\n        return Sales__Order(self).dataframe()\n", ""
@@ -488,6 +509,7 @@ def test_a_test_must_define_expected_and_actual(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_a_test_may_not_author_read(lakehouse):
     source = (
         _python_test("Sales.OrdersReconcile")
@@ -502,6 +524,7 @@ def test_a_test_may_not_author_read(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_an_assumption_must_define_read(lakehouse):
     source = _python_assumption("Sales.OrdersHaveCustomers").replace(
         "def read(self):", "def rows(self):"
@@ -514,6 +537,7 @@ def test_an_assumption_must_define_read(lakehouse):
         parse(lakehouse)
 
 
+@weaver_test()
 def test_a_test_must_inherit_test(lakehouse):
     source = (
         _python_test("Sales.OrdersReconcile")
@@ -532,6 +556,7 @@ def test_a_test_must_inherit_test(lakehouse):
 # --- the SQL structural contract --------------------------------------------
 
 
+@weaver_test()
 def test_a_sql_test_is_exactly_two_result_queries(warehouse):
     _write(
         warehouse,
@@ -543,6 +568,7 @@ def test_a_sql_test_is_exactly_two_result_queries(warehouse):
         parse(warehouse)
 
 
+@weaver_test()
 def test_a_sql_assumption_is_exactly_one_result_query(warehouse):
     _write(
         warehouse,
@@ -554,6 +580,7 @@ def test_a_sql_assumption_is_exactly_one_result_query(warehouse):
         parse(warehouse)
 
 
+@weaver_test()
 def test_setup_statements_precede_the_contract_queries(warehouse):
     _write(
         warehouse,
@@ -570,6 +597,7 @@ def test_setup_statements_precede_the_contract_queries(warehouse):
     assert len(reporting.validations) == 1
 
 
+@weaver_test()
 def test_dynamic_setup_is_not_a_reason_to_refuse_a_validation(warehouse):
     """The contract is about the queries Weaver can see, not about EXEC."""
 
@@ -588,6 +616,7 @@ def test_dynamic_setup_is_not_a_reason_to_refuse_a_validation(warehouse):
     assert len(reporting.validations) == 1
 
 
+@weaver_test()
 def test_data_metadata_on_a_validation_is_refused_by_the_repository(lakehouse):
     source = _python_test("Sales.OrdersReconcile").replace(
         "Primary key: Id", "Primary key: Id\n\nLineage: A source system."
@@ -608,6 +637,7 @@ def test_data_metadata_on_a_validation_is_refused_by_the_repository(lakehouse):
 # different things on the two engines, so both refuse it.
 
 
+@weaver_test()
 def test_setup_after_a_test_s_contract_queries_is_refused(warehouse):
     _write(
         warehouse,
@@ -620,6 +650,7 @@ def test_setup_after_a_test_s_contract_queries_is_refused(warehouse):
         parse(warehouse)
 
 
+@weaver_test()
 def test_setup_between_a_test_s_contract_queries_is_refused(warehouse):
     source = _tsql_test("Sales.OrderReconciliation").replace(
         "select Id from Sales.Order;\n\nselect Id from Sales.Order;",
@@ -633,6 +664,7 @@ def test_setup_between_a_test_s_contract_queries_is_refused(warehouse):
         parse(warehouse)
 
 
+@weaver_test()
 def test_setup_after_an_assumption_s_query_is_refused(warehouse):
     _write(
         warehouse,
@@ -645,6 +677,7 @@ def test_setup_after_an_assumption_s_query_is_refused(warehouse):
         parse(warehouse)
 
 
+@weaver_test()
 def test_the_same_rule_holds_for_spark_sql(tmp_path):
     """Where it matters most, because a Spark query is lazy."""
 
@@ -670,6 +703,7 @@ create or replace temporary view sneaky as select 1 as Id;
         parse(tmp_path)
 
 
+@weaver_test()
 def test_setup_before_the_contract_queries_is_ordinary(warehouse):
     """Which is the whole point — setup is unrestricted, it just comes first."""
 

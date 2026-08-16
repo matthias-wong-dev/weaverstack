@@ -108,7 +108,7 @@ class NotebookSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> None:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.timing("tds.execute"):
+        with self.telemetry.external("tds", "execute"):
             executor.execute(statement, parameters or ())
 
     def query_tsql(
@@ -120,7 +120,7 @@ class NotebookSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> Any:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.timing("tds.query"):
+        with self.telemetry.external("tds", "query"):
             return executor.query(statement, parameters or ())
 
     def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
@@ -168,6 +168,7 @@ class NotebookScope(WorkspaceScope):
                     executor=self.executor,
                     telemetry=self.telemetry,
                     release=lambda executor: executor.close(),
+                    telemetry_resource="tds",
                 )
                 self.track(resource)
         return resource.get()

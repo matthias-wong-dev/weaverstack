@@ -30,10 +30,9 @@ from __future__ import annotations
 
 import pytest
 from support.thin import JUDGEMENTS, thin_estate
+from support.weaver_test import weaver_test
 
 from weaver.operations.test import run_test
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 #: The Lakehouse the artefacts are deployed into. Emptied first, because a run
 #: that found a previous run's modules would prove nothing about this one.
@@ -80,6 +79,7 @@ def report(judged):
     )
 
 
+@weaver_test(hosted=True)
 def test_every_declared_validation_is_reached(report):
     """Dispatch found and imported all three, whatever each then reported."""
 
@@ -91,6 +91,7 @@ def test_every_declared_validation_is_reached(report):
     )
 
 
+@weaver_test(hosted=True)
 def test_a_validation_that_agrees_passes(report):
     """Both sides empty, so there is nothing missing and nothing unexpected."""
 
@@ -101,6 +102,7 @@ def test_a_validation_that_agrees_passes(report):
     assert node.result.unexpected_count == 0
 
 
+@weaver_test(hosted=True)
 def test_a_disagreement_is_a_failure_carrying_what_it_found(report):
     """Counted on both sides, because which side differs is what a reader acts on."""
 
@@ -111,6 +113,7 @@ def test_a_disagreement_is_a_failure_carrying_what_it_found(report):
     assert node.result.unexpected_count == 2
 
 
+@weaver_test(hosted=True)
 def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(report):
     """The distinction the whole report rests on.
 
@@ -125,6 +128,7 @@ def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(report):
     assert node.status != "failed"
 
 
+@weaver_test(hosted=True)
 def test_one_unreadable_validation_does_not_invalidate_the_others(report):
     """Each node is settled on its own evidence."""
 

@@ -12,6 +12,7 @@ from factories import (
     target_inventory,
 )
 from support.sessions import given_session
+from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
@@ -116,12 +117,14 @@ def _build(estate):
 # --- the built-in item is injected and bound, without being asked for ---------
 
 
+@weaver_test()
 def test_the_repository_carries_the_builtin_item_without_it_being_authored(estate):
     identities = {item.identity for item in estate["repository"].items}
 
     assert BUILTIN in identities
 
 
+@weaver_test()
 def test_the_builtin_item_is_bound_to_the_catalogue_warehouse_automatically():
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
@@ -134,6 +137,7 @@ def test_the_builtin_item_is_bound_to_the_catalogue_warehouse_automatically():
     assert binding.target.warehouse.name == "Weaver"
 
 
+@weaver_test()
 def test_the_catalogue_warehouse_can_also_host_an_authored_item():
     curated = ItemBinding(
         WeaverItemId.parse("Warehouse/Curated"),
@@ -153,6 +157,7 @@ def test_the_catalogue_warehouse_can_also_host_an_authored_item():
 # --- and the ordinary planner creates the catalogue from nothing --------------
 
 
+@weaver_test()
 def test_an_empty_catalogue_plans_every_catalogue_table_as_an_ordinary_action(estate):
     """The acceptance criterion the nested bootstrap made untestable."""
 
@@ -169,6 +174,7 @@ def test_an_empty_catalogue_plans_every_catalogue_table_as_an_ordinary_action(es
         )
 
 
+@weaver_test()
 def test_the_catalogue_tables_are_built_by_the_same_executors_as_authored_objects(
     estate,
 ):
@@ -188,6 +194,7 @@ def test_the_catalogue_tables_are_built_by_the_same_executors_as_authored_object
     )
 
 
+@weaver_test()
 def test_the_build_succeeds_against_an_empty_lakehouse_with_no_prior_preparation(
     estate,
 ):
@@ -199,6 +206,7 @@ def test_the_build_succeeds_against_an_empty_lakehouse_with_no_prior_preparation
 # --- no build path reaches a second initialisation lifecycle ------------------
 
 
+@weaver_test()
 def test_no_build_module_reaches_the_initialisation_wrapper():
     """`initialise` is a compatibility shell; build must not route through it.
 
@@ -227,6 +235,7 @@ def test_no_build_module_reaches_the_initialisation_wrapper():
     )
 
 
+@weaver_test()
 def test_the_initialisation_wrapper_owns_no_catalogue_ddl_or_publication():
     """Thin means thin: it selects the built-in item and delegates."""
 

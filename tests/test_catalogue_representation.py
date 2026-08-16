@@ -20,6 +20,7 @@ bundle identity that review and certification depend on.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue import (
     DEPENDENCY,
@@ -62,53 +63,64 @@ def public(table, name: str) -> str:
 # --- literals and identifiers ------------------------------------------------
 
 
+@weaver_test()
 def test_a_string_is_quoted_as_unicode():
     assert literal("Sales") == "N'Sales'"
 
 
+@weaver_test()
 def test_a_quote_is_doubled():
     assert literal("O'Brien") == "N'O''Brien'"
 
 
+@weaver_test()
 def test_a_backslash_is_an_ordinary_character():
     """T-SQL has no backslash escape, so doubling one would change the value."""
 
     assert literal("C:\\path") == "N'C:\\path'"
 
 
+@weaver_test()
 def test_a_null_is_null_not_the_word():
     assert literal(None) == "NULL"
 
 
+@weaver_test()
 def test_a_boolean_reaches_a_bit_as_a_number():
     assert literal(True) == "1"
     assert literal(False) == "0"
 
 
+@weaver_test()
 def test_a_boolean_is_not_rendered_as_a_string():
     assert literal(True) != "N'true'"
 
 
+@weaver_test()
 def test_a_value_of_an_unsupported_type_is_refused():
     with pytest.raises(TypeError, match="not dict"):
         literal({"a": 1})
 
 
+@weaver_test()
 def test_a_non_boolean_in_a_boolean_column_is_refused():
     with pytest.raises(TypeError, match="expected a boolean"):
         literal("yes", "boolean")
 
 
+@weaver_test()
 def test_an_identifier_is_bracket_quoted():
     """The public names carry spaces by design, so quoting is not optional."""
 
     assert identifier("Order id") == "[Order id]"
 
 
+@weaver_test()
 def test_a_closing_bracket_in_an_identifier_is_doubled():
     assert identifier("we]ird") == "[we]]ird]"
 
 
+@weaver_test()
 def test_a_stored_value_is_written_in_its_public_vocabulary():
     """The internal key never reaches the Warehouse."""
 
@@ -117,6 +129,7 @@ def test_a_stored_value_is_written_in_its_public_vocabulary():
     )
 
 
+@weaver_test()
 def test_a_column_set_preserves_declared_order():
     # Order is meaning: a key on (Region, Country) is not the key on
     # (Country, Region), so the renderer never sorts one.
@@ -124,6 +137,7 @@ def test_a_column_set_preserves_declared_order():
     assert column_set(["Country", "Region"]) == "Country, Region"
 
 
+@weaver_test()
 def test_an_empty_column_set_is_null_not_an_empty_string():
     # "No key" and "a key of no columns" are different claims.
     assert column_set([]) is None
@@ -132,6 +146,7 @@ def test_an_empty_column_set_is_null_not_an_empty_string():
 # --- the public spelling ------------------------------------------------------
 
 
+@weaver_test()
 def test_a_statement_names_the_catalogue_in_two_parts():
     """The connection is already open against the catalogue Warehouse."""
 
@@ -140,6 +155,7 @@ def test_a_statement_names_the_catalogue_in_two_parts():
     assert "MERGE INTO [_].[Registry]" in statement
 
 
+@weaver_test()
 def test_a_statement_carries_the_public_column_names():
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
 
@@ -154,6 +170,7 @@ def test_a_statement_carries_the_public_column_names():
 # --- determinism -------------------------------------------------------------
 
 
+@weaver_test()
 def test_rows_render_in_key_order_whatever_order_they_arrive_in():
     forwards = [registry_row("Alpha"), registry_row("Beta"), registry_row("Gamma")]
     backwards = list(reversed(forwards))
@@ -162,6 +179,7 @@ def test_rows_render_in_key_order_whatever_order_they_arrive_in():
     )
 
 
+@weaver_test()
 def test_the_same_rows_render_the_same_bytes():
     rows = [registry_row("Alpha"), registry_row("Beta")]
 
@@ -170,6 +188,7 @@ def test_the_same_rows_render_the_same_bytes():
     )
 
 
+@weaver_test()
 def test_sorting_is_by_the_key_and_tolerates_a_null():
     rows = [{**registry_row("Beta")}, {**registry_row("Alpha")}]
 
@@ -179,6 +198,7 @@ def test_sorting_is_by_the_key_and_tolerates_a_null():
     ]
 
 
+@weaver_test()
 def test_the_clock_is_a_call_not_a_rendered_instant():
     """A rendered timestamp would change the payload — and the bundle id — each run.
 
@@ -204,6 +224,7 @@ def _clauses(statement: str) -> tuple[str, str, str]:
     return statement[:matched], guard, update
 
 
+@weaver_test()
 def test_the_build_datetime_is_a_token_so_the_payload_stays_frozen():
     """Same reason the clock is a call: a rendered instant would give the same
     repository different bytes every run, and a bundle's identity is its bytes.
@@ -215,6 +236,7 @@ def test_the_build_datetime_is_a_token_so_the_payload_stays_frozen():
     assert statement.count("{{build_datetime}}") == 1
 
 
+@weaver_test()
 def test_the_build_datetime_is_written_on_insert_and_nowhere_else():
     """The decision the whole freshness comparison rests on.
 
@@ -233,6 +255,7 @@ def test_the_build_datetime_is_written_on_insert_and_nowhere_else():
     assert "[Build datetime]" in statement[statement.index("WHEN NOT MATCHED") :]
 
 
+@weaver_test()
 def test_a_table_without_a_published_column_carries_no_token():
     """Only Registry carries a build datetime. Nothing else gained a column."""
 
@@ -257,6 +280,7 @@ def test_a_table_without_a_published_column_carries_no_token():
 # --- scope -------------------------------------------------------------------
 
 
+@weaver_test()
 def test_a_merge_is_scoped_to_one_installation_on_the_target_side():
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
 
@@ -265,6 +289,7 @@ def test_a_merge_is_scoped_to_one_installation_on_the_target_side():
     assert "Warehouse" not in statement
 
 
+@weaver_test()
 def test_a_delete_is_scoped_to_one_installation():
     statement = render_delete_obsolete(
         REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE
@@ -274,6 +299,7 @@ def test_a_delete_is_scoped_to_one_installation():
     assert "Warehouse" not in statement
 
 
+@weaver_test()
 def test_the_same_object_in_another_item_renders_a_different_statement():
     """The one property the whole installation model rests on.
 
@@ -294,6 +320,7 @@ def test_the_same_object_in_another_item_renders_a_different_statement():
     assert "N'Raw'" not in curated
 
 
+@weaver_test()
 def test_a_row_from_another_installation_cannot_be_rendered():
     """Refused rather than merged into the wrong scope, where it would read as truth."""
 
@@ -305,6 +332,7 @@ def test_a_row_from_another_installation_cannot_be_rendered():
         )
 
 
+@weaver_test()
 def test_a_row_from_another_item_cannot_be_rendered():
     stray = {**registry_row("Customer"), "item_name": "Other"}
 
@@ -312,6 +340,7 @@ def test_a_row_from_another_item_cannot_be_rendered():
         render_merge(REGISTRY, [stray], scope=LAKEHOUSE_SCOPE)
 
 
+@weaver_test()
 def test_the_guard_applies_to_deletes_too():
     with pytest.raises(ValueError, match="do not belong to installation"):
         render_delete_obsolete(
@@ -324,6 +353,7 @@ def test_the_guard_applies_to_deletes_too():
 # --- insert, update, no-op ---------------------------------------------------
 
 
+@weaver_test()
 def test_a_matched_unchanged_row_is_a_no_op():
     """The matched branch is guarded by a comparison of every non-key column.
 
@@ -340,6 +370,7 @@ def test_a_matched_unchanged_row_is_a_no_op():
         assert f"target.{name} <> source.{name}" in statement
 
 
+@weaver_test()
 def test_the_comparison_is_null_safe_in_both_directions():
     """T-SQL has no null-safe operator, and half a comparison is silently wrong.
 
@@ -359,6 +390,7 @@ def test_the_comparison_is_null_safe_in_both_directions():
     assert f"(target.{name} IS NOT NULL AND source.{name} IS NULL)" in guard
 
 
+@weaver_test()
 def test_the_merge_key_match_is_null_safe():
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
     name = public(REGISTRY, "object_name")
@@ -366,6 +398,7 @@ def test_the_merge_key_match_is_null_safe():
     assert f"(target.{name} IS NULL AND source.{name} IS NULL)" in statement
 
 
+@weaver_test()
 def test_an_update_advances_only_the_update_datetime():
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
     update = statement.split("WHEN MATCHED")[1].split("WHEN NOT MATCHED")[0]
@@ -378,6 +411,7 @@ def test_an_update_advances_only_the_update_datetime():
         assert f"target.{public(REGISTRY, key)} = source" not in update
 
 
+@weaver_test()
 def test_an_insert_supplies_every_physical_column_including_the_live_sentinel():
     """All three audit columns are physically not null, so all three are written.
 
@@ -393,6 +427,7 @@ def test_an_insert_supplies_every_physical_column_including_the_live_sentinel():
     assert "CAST('9999-12-31 23:59:59.999999' AS datetime2(6))" in insert
 
 
+@weaver_test()
 def test_a_merge_is_terminated():
     """T-SQL requires it, and an unterminated MERGE is a syntax error."""
 
@@ -401,6 +436,7 @@ def test_a_merge_is_terminated():
     assert statement.rstrip().endswith(";")
 
 
+@weaver_test()
 def test_nothing_to_merge_renders_no_statement():
     # A caller emits no action rather than an empty one.
     assert render_merge(REGISTRY, [], scope=LAKEHOUSE_SCOPE) is None
@@ -409,6 +445,7 @@ def test_nothing_to_merge_renders_no_statement():
 # --- deleting the obsolete ---------------------------------------------------
 
 
+@weaver_test()
 def test_an_obsolete_delete_keeps_exactly_the_rows_projected():
     statement = render_delete_obsolete(
         REGISTRY,
@@ -421,6 +458,7 @@ def test_an_obsolete_delete_keeps_exactly_the_rows_projected():
     assert "(N'Sales', N'Beta')" in statement
 
 
+@weaver_test()
 def test_an_installation_that_projects_nothing_still_deletes_its_rows():
     """Rendering nothing would leave stale rows behind forever.
 
@@ -434,6 +472,7 @@ def test_an_installation_that_projects_nothing_still_deletes_its_rows():
     assert "NOT EXISTS" not in statement
 
 
+@weaver_test()
 def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
     statement = render_delete_obsolete(
         REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE
@@ -447,6 +486,7 @@ def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
 # --- the explicit prune scopes ----------------------------------------------
 
 
+@weaver_test()
 def test_the_installation_table_has_no_obsolete_row_to_delete():
     """Its key *is* the scope, so at most one row exists and the merge maintains it.
 
@@ -465,6 +505,7 @@ def test_the_installation_table_has_no_obsolete_row_to_delete():
     assert render_delete_obsolete(INSTALLATION, [row], scope=LAKEHOUSE_SCOPE) is None
 
 
+@weaver_test()
 def test_an_installation_projecting_nothing_is_still_deleted():
     """The empty case is how an installation is removed, so it must still render."""
 
@@ -474,6 +515,7 @@ def test_an_installation_projecting_nothing_is_still_deleted():
     assert "[Item type] = N'Lakehouse' AND [Item name] = N'Raw'" in statement
 
 
+@weaver_test()
 def test_installation_prune_removes_one_scope_and_names_it():
     statement = render_delete_scope(REGISTRY, scope=LAKEHOUSE_SCOPE)
 
@@ -484,6 +526,7 @@ def test_installation_prune_removes_one_scope_and_names_it():
 # --- the shapes that carry awkward values -----------------------------------
 
 
+@weaver_test()
 def test_a_table_dictionary_row_renders_its_nulls_and_booleans():
     row = {
         "item_type": "Lakehouse",
@@ -521,6 +564,7 @@ def test_a_table_dictionary_row_renders_its_nulls_and_booleans():
         assert f"AS {type_}) AS {public(TABLE_DICTIONARY, name)}" in statement
 
 
+@weaver_test()
 def test_a_relationship_row_compares_only_its_signature():
     """Every other column is key, so a changed edge is a delete and an insert.
 
@@ -548,6 +592,7 @@ def test_a_relationship_row_compares_only_its_signature():
     assert "[Primary object name]" not in guard
 
 
+@weaver_test()
 def test_a_composite_key_delete_names_every_key_column():
     row = {
         "item_type": "Lakehouse",
@@ -566,6 +611,7 @@ def test_a_composite_key_delete_names_every_key_column():
     assert "N'Unique'" in statement
 
 
+@weaver_test()
 def test_an_installation_row_updates_the_target_name_without_a_new_key():
     """Rebinding to a different Lakehouse is an update, and the key proves it.
 
@@ -587,6 +633,7 @@ def test_an_installation_row_updates_the_target_name_without_a_new_key():
     assert "target.[Target name] = source.[Target name]" in statement
 
 
+@weaver_test()
 def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
     """An authored physical name resolves to no edge, and the row says so."""
 
@@ -612,6 +659,7 @@ def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
 # --- more rows than one value constructor can carry --------------------------
 
 
+@weaver_test()
 def test_a_thousand_rows_still_render_one_statement():
     """The engine's limit, and one below it is still one MERGE."""
 
@@ -623,6 +671,7 @@ def test_a_thousand_rows_still_render_one_statement():
     assert statement.count("MERGE INTO") == 1
 
 
+@weaver_test()
 def test_more_rows_than_the_constructor_takes_are_split():
     """A T-SQL table value constructor accepts at most a thousand rows.
 
@@ -645,6 +694,7 @@ def test_more_rows_than_the_constructor_takes_are_split():
         assert values.count("N'Lakehouse'") <= VALUES_ROWS
 
 
+@weaver_test()
 def test_the_split_keeps_key_order_across_chunks():
     """Determinism survives chunking: a bundle's identity is its bytes."""
 
@@ -659,6 +709,7 @@ def test_the_split_keeps_key_order_across_chunks():
     assert positions == sorted(positions)
 
 
+@weaver_test()
 def test_an_obsolete_delete_keeps_more_rows_than_one_constructor_can_carry():
     """The keep relation stays one delete while its constructors are bounded.
 

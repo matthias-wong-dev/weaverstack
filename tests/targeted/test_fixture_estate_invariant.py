@@ -18,6 +18,7 @@ would test the tool rather than the helper.
 from __future__ import annotations
 
 from support.build_envs import MIXED_ESTATE_FIXTURE
+from support.weaver_test import weaver_test
 
 
 def _documents(root):
@@ -28,6 +29,7 @@ def _documents(root):
     }
 
 
+@weaver_test()
 def test_the_copy_is_somewhere_else(tmp_path):
     """A disposable estate is not the checked-in one under another name."""
 
@@ -37,6 +39,7 @@ def test_the_copy_is_somewhere_else(tmp_path):
     assert tmp_path in copy.path.parents
 
 
+@weaver_test()
 def test_the_copy_is_the_whole_estate(tmp_path):
     """Every document, byte for byte — a build reads all of them."""
 
@@ -45,6 +48,7 @@ def test_the_copy_is_the_whole_estate(tmp_path):
     assert _documents(copy.path) == _documents(MIXED_ESTATE_FIXTURE.path)
 
 
+@weaver_test()
 def test_the_copy_carries_the_binding(tmp_path):
     """Which items an estate binds is part of the fixture, not of its tree."""
 
@@ -55,6 +59,7 @@ def test_the_copy_carries_the_binding(tmp_path):
     assert copy.name == MIXED_ESTATE_FIXTURE.name
 
 
+@weaver_test()
 def test_editing_the_copy_leaves_the_original_alone(tmp_path):
     """The invariant the whole helper exists for."""
 
@@ -68,6 +73,7 @@ def test_editing_the_copy_leaves_the_original_alone(tmp_path):
     assert document.read_text(encoding="utf-8") == "# edited by a test\n"
 
 
+@weaver_test()
 def test_bytecode_caches_are_not_carried_over(tmp_path):
     """A copied ``__pycache__`` would be one run's compilation in another's estate."""
 
@@ -77,6 +83,7 @@ def test_bytecode_caches_are_not_carried_over(tmp_path):
     assert not list(copy.path.rglob("*.pyc"))
 
 
+@weaver_test()
 def test_copying_twice_into_one_root_is_the_same_estate(tmp_path):
     """A module-scoped fixture may be resolved more than once per root."""
 

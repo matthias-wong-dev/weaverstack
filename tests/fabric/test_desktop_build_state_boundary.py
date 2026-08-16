@@ -1,8 +1,7 @@
 """A desktop reads the state a build plans against without the published wheel.
 
-Reading the estate used to submit a program that imported Weaver in the Fabric
-session and returned a whole ``BuildState``. It is now Spark SQL and storage: the
-catalogue is a ``SELECT`` per table over TDS, a Lakehouse
+The state read uses Spark SQL and storage: the catalogue is a ``SELECT`` per
+table over TDS, a Lakehouse
 inventory is directories over OneLake plus ``SHOW VIEWS``, and a Warehouse
 inventory is T-SQL. Nothing on the far side imports Weaver.
 
@@ -23,38 +22,34 @@ from __future__ import annotations
 
 import pytest
 from factories import item_bindings
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.workflow import read_build_state
 from weaver.catalogue.tables import REGISTRY
 from weaver.targets import ItemRef
 
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
-
 
 @pytest.fixture(scope="module")
-def recorded_session(weaver_session):
-    """The suite's Session, with every Spark statement it runs captured.
+def recorded_session(fabric_workspace, livy_session):
+    """An isolated resolver/cache over the suite's one shared Livy session."""
 
-    The harness's session rather than one of its own: a capacity commonly
-    permits a single Livy session, and what this asserts is what the *read*
-    submits, not what the session was started with.
-    """
+    from weaver.sessions import ConsoleSession
 
+    session = ConsoleSession(workspace=fabric_workspace, livy=livy_session)
     submitted: list[str] = []
-    ran = weaver_session.execute_spark_sql_batch
+    ran = session.execute_spark_sql_batch
 
     def recording(statements, **kwargs):
         submitted.extend(statements)
         return ran(statements, **kwargs)
 
-    weaver_session.execute_spark_sql_batch = recording
-    weaver_session.submitted = submitted
-    try:
-        yield weaver_session
-    finally:
-        del weaver_session.execute_spark_sql_batch
+    session.execute_spark_sql_batch = recording
+    session.submitted = submitted
+    with session:
+        yield session
 
 
+@weaver_test(remote=True, resources={"livy", "onelake", "rest", "tds"})
 def test_build_state_is_read_without_importing_weaver_in_fabric(
     recorded_session, fabric_workspace, fabric_target_lakehouse
 ):
@@ -76,6 +71,7 @@ def test_build_state_is_read_without_importing_weaver_in_fabric(
     assert inventory.kind == "lakehouse"
 
 
+@weaver_test(remote=True)
 def test_the_statements_it_submitted_import_nothing(recorded_session):
     """Whatever crossed to Spark is a statement, never a program.
 
@@ -96,15 +92,11 @@ def test_the_statements_it_submitted_import_nothing(recorded_session):
     ), submitted
 
 
+@weaver_test(remote=True, resources={"tds"})
 def test_the_catalogue_is_read_over_tds_and_not_over_spark(
     recorded_session, fabric_workspace
 ):
-    """The migration's own claim, at the boundary it moved.
-
-    Reading what Weaver installed used to be Spark SQL against Delta tables. It
-    is a Warehouse query now, so the catalogue read appears in the session's TDS
-    ledger and nowhere in what crossed to Spark.
-    """
+    """A Warehouse catalogue read appears in TDS telemetry, never Spark."""
 
     from weaver.catalogue.connection import catalogue_connection
 
@@ -121,6 +113,7 @@ def test_the_catalogue_is_read_over_tds_and_not_over_spark(
     ), recorded_session.submitted
 
 
+@weaver_test(remote=True, resources={"livy"})
 def test_a_lakehouse_inventory_lists_views_over_spark_sql(
     recorded_session, fabric_workspace, fabric_target_lakehouse
 ):
@@ -142,6 +135,7 @@ def test_a_lakehouse_inventory_lists_views_over_spark_sql(
     assert catalogue.schema_exists("NoSuchSchemaHere") is False
 
 
+@weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_build_runs_against_a_workspace_naming_no_environment(
     fabric_workspace, clean_disposable_warehouse, tmp_path_factory
 ):
@@ -156,6 +150,7 @@ def test_a_build_runs_against_a_workspace_naming_no_environment(
     from dataclasses import replace
 
     from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
+    from support.weaver_test import register_session
 
     import weaver
     from weaver.sessions import ConsoleSession
@@ -167,6 +162,7 @@ def test_a_build_runs_against_a_workspace_naming_no_environment(
     warehouse = f"Warehouse/{clean_disposable_warehouse.item.name}"
 
     with ConsoleSession(workspace=without_environment) as session:
+        register_session(session)
         built = weaver.build(
             str(estate.path),
             bind=[f"{warehouse}=Reporting"],

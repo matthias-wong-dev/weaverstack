@@ -1,0 +1,78 @@
+"""Typed Warehouse resolution to the common SQL endpoint."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from support.weaver_test import weaver_test
+
+from weaver.fabric import FabricResolver, FabricSessionResolver
+from weaver.targets import WarehouseTarget
+from weaver.workspaces import Workspace
+
+
+class Client:
+    def __init__(self):
+        self.json_paths = []
+
+    def paged(self, path):
+        if path == "workspaces":
+            return [{"id": "workspace-id", "displayName": "Analytics"}]
+        assert path == "workspaces/workspace-id/items?type=Warehouse"
+        return [
+            {
+                "id": "warehouse-id",
+                "displayName": "Reporting",
+                "type": "Warehouse",
+            }
+        ]
+
+    def get_json(self, path):
+        self.json_paths.append(path)
+        return {
+            "connectionString": (
+                "Server=tcp:warehouse.fabric.microsoft.com,1433;"
+                "Encrypt=yes;TrustServerCertificate=no;"
+            )
+        }
+
+
+@weaver_test()
+def test_desktop_resolution_uses_the_typed_connection_string_endpoint():
+    client = Client()
+    resolver = FabricResolver(
+        Workspace(workspace="Analytics"),
+        client=client,
+    )
+
+    endpoint = resolver.sql_endpoint(WarehouseTarget.parse("Reporting"))
+
+    assert endpoint.server == "warehouse.fabric.microsoft.com"
+    assert endpoint.database == "Reporting"
+    assert endpoint.workspace_id == "workspace-id"
+    assert endpoint.warehouse_id == "warehouse-id"
+    assert client.json_paths == [
+        "workspaces/workspace-id/warehouses/warehouse-id/connectionString"
+    ]
+
+
+@weaver_test()
+def test_session_resolution_uses_session_context_and_session_authenticated_rest():
+    client = Client()
+    runtime = SimpleNamespace(
+        context={
+            "currentWorkspaceName": "Analytics",
+            "currentWorkspaceId": "workspace-id",
+        }
+    )
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=runtime,
+        lakehouse=object(),
+        client=client,
+    )
+
+    endpoint = resolver.sql_endpoint(WarehouseTarget.parse("Reporting"))
+
+    assert endpoint.pool_key[:2] == ("workspace-id", "warehouse-id")
+    assert endpoint.server == "warehouse.fabric.microsoft.com"

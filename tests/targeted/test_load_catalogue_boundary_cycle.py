@@ -14,6 +14,7 @@ from factories import (
     single_document_repository,
 )
 from support.sessions import given_session
+from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
 from weaver.errors import CommandError
@@ -49,6 +50,7 @@ def _session(tmp_path, *, items=("Weaver_LH", "Raw_LH")):
     )
 
 
+@weaver_test()
 def test_a_target_the_catalogue_does_not_know_is_refused(tmp_path):
     repository = load_estate(tmp_path / "repository")
     catalogue = installed_catalogue(repository, load_estate_bindings())
@@ -80,6 +82,7 @@ select 1 as CustomerId;
 """
 
 
+@weaver_test()
 def test_an_installed_target_with_no_load_work_is_a_successful_no_op(tmp_path):
     repository = single_document_repository(
         tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
@@ -99,6 +102,7 @@ def test_an_installed_target_with_no_load_work_is_a_successful_no_op(tmp_path):
     assert report.nodes == ()
 
 
+@weaver_test()
 def test_load_state_has_no_physical_inventory_api():
     assert not hasattr(RunState, "inventory")
     assert "target_inventories" not in RunState.__dataclass_fields__

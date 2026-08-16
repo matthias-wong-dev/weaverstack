@@ -28,6 +28,7 @@ from factories import (
     resolved_target,
     warehouse_context,
 )
+from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
 from weaver.build_bundle import execute_install_action
@@ -40,6 +41,7 @@ VIEW_SQL = b"CREATE OR REPLACE VIEW {{object:DWG.ActiveCustomer}} AS SELECT 1\n"
 # --- result semantics ---------------------------------------------------------
 
 
+@weaver_test()
 def test_a_successful_action_reports_succeeded_against_its_target():
     spark = FakeSpark()
     action = build_action(payload="p.sql", payload_sha256="unused")
@@ -55,6 +57,7 @@ def test_a_successful_action_reports_succeeded_against_its_target():
     assert result.executor == "spark_sql"
 
 
+@weaver_test()
 def test_a_failing_action_is_recorded_rather_than_raised():
     """A failure is data, here exactly as in an installation.
 
@@ -78,6 +81,7 @@ def test_a_failing_action_is_recorded_rather_than_raised():
     assert "no such column" in result.error_message
 
 
+@weaver_test()
 def test_an_unknown_executor_is_a_failed_result_naming_it():
     result = execute_install_action(
         build_action(executor="no_such_executor"),
@@ -89,6 +93,7 @@ def test_an_unknown_executor_is_a_failed_result_naming_it():
     assert "no_such_executor" in result.error_message
 
 
+@weaver_test()
 def test_an_action_is_timed_even_when_it_fails():
     """The report's durations must cover failures too, or a slow failure hides."""
 
@@ -101,6 +106,7 @@ def test_an_action_is_timed_even_when_it_fails():
     assert result.duration_seconds >= 0
 
 
+@weaver_test()
 def test_a_skipped_execution_reports_skipped_with_its_details():
     """Not every action does work — an endpoint refresh on a host without one."""
 
@@ -123,6 +129,7 @@ def test_a_skipped_execution_reports_skipped_with_its_details():
     assert result.details == {"reason": "unsupported host"}
 
 
+@weaver_test()
 def test_supplied_executors_replace_the_registry_entirely():
     """A test naming its own executors must not silently inherit the real ones."""
 
@@ -137,6 +144,7 @@ def test_supplied_executors_replace_the_registry_entirely():
     assert "spark_sql" in result.error_message
 
 
+@weaver_test()
 def test_the_default_registry_is_used_when_none_is_named():
     assert "spark_sql" in default_executors()
 
@@ -152,6 +160,7 @@ def test_the_default_registry_is_used_when_none_is_named():
 # --- what actually reaches the engine -----------------------------------------
 
 
+@weaver_test()
 def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     """The difference between a build that works and one that looks like it does.
 
@@ -173,6 +182,7 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     assert statement == VIEW_SQL.decode().strip()
 
 
+@weaver_test()
 def test_a_spark_action_with_no_way_to_run_a_statement_fails_saying_so():
     result = execute_install_action(
         build_action(payload="p.sql"), VIEW_SQL, context=installation_context()
@@ -182,6 +192,7 @@ def test_a_spark_action_with_no_way_to_run_a_statement_fails_saying_so():
     assert "no Spark SQL capability" in result.error_message
 
 
+@weaver_test()
 def test_a_spark_action_with_no_destination_refuses_rather_than_guessing():
     """An action with nowhere to go must stop, not land somewhere plausible."""
 
@@ -197,6 +208,7 @@ def test_a_spark_action_with_no_destination_refuses_rather_than_guessing():
     assert "no Spark destination" in result.error_message
 
 
+@weaver_test()
 def test_a_spark_action_without_a_payload_fails_saying_so():
     result = execute_install_action(
         build_action(payload=None),
@@ -211,6 +223,7 @@ def test_a_spark_action_without_a_payload_fails_saying_so():
 # --- the Warehouse side -------------------------------------------------------
 
 
+@weaver_test()
 def test_tsql_sends_the_script_through_unchanged():
     """The executor adds no logic: the generated script is what the engine gets."""
 
@@ -227,6 +240,7 @@ def test_tsql_sends_the_script_through_unchanged():
     assert sql.scripts == [script.decode("utf-8")]
 
 
+@weaver_test()
 def test_a_tsql_action_without_a_sql_executor_fails_saying_so():
     result = execute_install_action(
         build_action(executor="tsql", payload="p.sql"),
@@ -238,6 +252,7 @@ def test_a_tsql_action_without_a_sql_executor_fails_saying_so():
     assert "SQL executor" in result.error_message
 
 
+@weaver_test()
 def test_a_failing_warehouse_script_is_recorded_as_a_failed_action():
     sql = FakeSql(error=RuntimeError("Invalid column name 'NoSuchColumn'"))
 
@@ -251,6 +266,7 @@ def test_a_failing_warehouse_script_is_recorded_as_a_failed_action():
     assert "NoSuchColumn" in result.error_message
 
 
+@weaver_test()
 def test_a_tsql_batch_submits_each_statement_separately():
     """Not cosmetic: T-SQL rejects two CREATE VIEWs in one batch outright."""
 
@@ -272,6 +288,7 @@ def test_a_tsql_batch_submits_each_statement_separately():
     ]
 
 
+@weaver_test()
 def test_a_tsql_batch_payload_that_is_not_an_array_is_rejected():
     result = execute_install_action(
         build_action(executor="tsql_batch", payload="p.json"),
@@ -335,6 +352,7 @@ def _load_action(*, kind: str, relative: str, payload: str | None):
     )
 
 
+@weaver_test()
 def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     """Placement comes from the identity and the bound target, and from nothing
     the executor decides — that was settled when the artefact was claimed."""
@@ -354,6 +372,7 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     assert context.store.read(Location(written)) == b"def parse(value):\n"
 
 
+@weaver_test()
 def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     """The bundle stays destination-free; the installed file must be runnable.
 
@@ -394,6 +413,7 @@ def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     assert "`Sales_LH`" in written, "and names the Lakehouse it reads"
 
 
+@weaver_test()
 def test_a_deployed_python_module_is_left_exactly_as_authored(tmp_path):
     """A module is source code, not a statement.
 
@@ -433,6 +453,7 @@ select `Customer id`, cast(sum(`Amount`) as decimal(18,2)) as `Total amount`
 """
 
 
+@weaver_test()
 def test_a_write_creates_the_directories_beneath_it(tmp_path):
     """A module several packages deep needs no folder action to precede it."""
 
@@ -447,6 +468,7 @@ def test_a_write_creates_the_directories_beneath_it(tmp_path):
     )
 
 
+@weaver_test()
 def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
     """An empty file is a plausible-looking wrong answer, so it is refused."""
 
@@ -461,6 +483,7 @@ def test_a_write_without_its_bytes_fails_rather_than_writing_nothing(tmp_path):
     assert "no payload" in result.error_message
 
 
+@weaver_test()
 def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
     """Tolerant of absence, and only here.
 
@@ -478,6 +501,7 @@ def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
     assert "absent" in result.details
 
 
+@weaver_test()
 def test_a_deployed_file_is_removed_where_it_was_written(tmp_path):
     context = _load_context(tmp_path)
     write = _load_action(

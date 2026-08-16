@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import pytest
 from factories import FixtureInventory, item_id
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.physical import item_prune_stage
 from weaver.build_bundle.prune import read_warehouse_inventory
 from weaver.declaration.metadata import SQL_TARGET
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 
 def _folded(names):
     return {name.casefold() for name in names}
 
 
+@weaver_test(remote=True)
 def test_a_built_warehouse_reads_back_as_the_fixture_predicts(
     warehouse_primitive_estate,
 ):
@@ -36,6 +35,7 @@ def test_a_built_warehouse_reads_back_as_the_fixture_predicts(
     assert _folded(actual.schemas) == _folded(predicted.schemas)
 
 
+@weaver_test(remote=True)
 def test_an_unmanaged_object_is_seen_and_would_be_pruned(
     warehouse_primitive_estate,
 ):
@@ -65,6 +65,7 @@ def test_an_unmanaged_object_is_seen_and_would_be_pruned(
         executor.execute_script("drop table if exists [DWG].[OldTable];")
 
 
+@weaver_test(remote=True)
 def test_prune_against_a_freshly_built_warehouse_finds_nothing(
     warehouse_primitive_estate,
 ):

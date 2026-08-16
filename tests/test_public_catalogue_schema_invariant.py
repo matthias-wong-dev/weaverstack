@@ -12,6 +12,7 @@ not do.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import (
     CATALOGUE_TABLES,
@@ -187,27 +188,32 @@ LOG_COLUMNS = (
 )
 
 
+@weaver_test()
 def test_the_catalogue_publishes_exactly_these_tables():
     assert {table.name for table in CATALOGUE_TABLES} == set(PUBLIC_SCHEMA)
 
 
 @pytest.mark.parametrize("name", sorted(PUBLIC_SCHEMA))
+@weaver_test()
 def test_every_public_column_has_its_frozen_name(name):
     table = next(table for table in CATALOGUE_TABLES if table.name == name)
 
     assert table.public_columns == PUBLIC_SCHEMA[name]
 
 
+@weaver_test()
 def test_the_log_publishes_its_frozen_columns():
     assert LOG.public_columns == LOG_COLUMNS
 
 
+@weaver_test()
 def test_the_log_is_not_a_catalogue_dictionary():
     """It records what happened, not what is installed, so nothing reconciles it."""
 
     assert LOG.name not in {table.name for table in CATALOGUE_TABLES}
 
 
+@weaver_test()
 def test_internal_keys_stay_snake_case():
     """The mapping is a persistence boundary, not a rename of Python."""
 
@@ -217,6 +223,7 @@ def test_internal_keys_stay_snake_case():
             assert " " not in column.name, column.name
 
 
+@weaver_test()
 def test_index_dictionary_is_gone():
     """``KeyDictionary`` records logical keys; nothing builds an index."""
 
@@ -224,6 +231,7 @@ def test_index_dictionary_is_gone():
     assert "IndexDictionary" not in {table.name for table in CATALOGUE_TABLES}
 
 
+@weaver_test()
 def test_build_datetime_replaced_the_public_build_epoch():
     registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
 
@@ -234,6 +242,7 @@ def test_build_datetime_replaced_the_public_build_epoch():
 # --- stored value vocabularies ------------------------------------------------
 
 
+@weaver_test()
 def test_object_type_vocabulary_is_frozen():
     assert OBJECT_TYPE_VOCABULARY == {
         "folder": "Folder",
@@ -244,6 +253,7 @@ def test_object_type_vocabulary_is_frozen():
     }
 
 
+@weaver_test()
 def test_object_role_vocabulary_is_frozen():
     assert OBJECT_ROLE_VOCABULARY == {
         "data": "Data",
@@ -253,14 +263,17 @@ def test_object_role_vocabulary_is_frozen():
     }
 
 
+@weaver_test()
 def test_key_type_vocabulary_is_frozen():
     assert KEY_TYPE_VOCABULARY == {"primary_key": "Primary key", "unique": "Unique"}
 
 
+@weaver_test()
 def test_test_type_vocabulary_is_frozen():
     assert TEST_TYPE_VOCABULARY == {"test": "Test", "assumption": "Assumption"}
 
 
+@weaver_test()
 def test_result_vocabulary_is_frozen():
     assert RESULT_VOCABULARY == {
         "succeeded": "Succeeded",
@@ -270,6 +283,7 @@ def test_result_vocabulary_is_frozen():
     }
 
 
+@weaver_test()
 def test_a_stored_value_round_trips_through_its_vocabulary():
     registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
     column = registry.column("object_type")
@@ -279,6 +293,7 @@ def test_a_stored_value_round_trips_through_its_vocabulary():
     assert column.to_public(None) is None
 
 
+@weaver_test()
 def test_an_unknown_internal_value_is_refused_rather_than_written():
     registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
 
@@ -286,6 +301,7 @@ def test_an_unknown_internal_value_is_refused_rather_than_written():
         registry.column("object_type").to_public("sproc")
 
 
+@weaver_test()
 def test_an_unknown_stored_value_reads_as_written():
     """A newer catalogue may hold a value this Weaver has no name for."""
 
@@ -312,6 +328,7 @@ def test_an_unknown_stored_value_reads_as_written():
         ("description_reference", "Description reference"),
     ],
 )
+@weaver_test()
 def test_public_names_follow_the_sentence_case_rules(internal, public):
     assert public_column_name(internal) == public
 
@@ -319,6 +336,7 @@ def test_public_names_follow_the_sentence_case_rules(internal, public):
 # --- every node status has a public Result -----------------------------------
 
 
+@weaver_test()
 def test_every_node_status_maps_to_a_frozen_result():
     """A status with no mapping fails the run at its last step, in Fabric.
 

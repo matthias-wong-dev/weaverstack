@@ -29,6 +29,7 @@ import pathlib
 import re
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import models
 
@@ -100,12 +101,14 @@ def declared_kinds() -> set[str]:
     } - set(models.OMISSION_REASONS)
 
 
+@weaver_test()
 def test_the_product_defines_action_kinds_to_check():
     """Guard the guard: reflection that found nothing would pass everything."""
 
     assert len(declared_kinds()) > 10
 
 
+@weaver_test()
 def test_every_action_kind_is_covered_or_deliberately_deferred():
     """The checklist itself. A new kind must be placed before this passes."""
 
@@ -118,6 +121,7 @@ def test_every_action_kind_is_covered_or_deliberately_deferred():
     )
 
 
+@weaver_test()
 def test_no_kind_is_both_covered_and_deferred():
     """A deferral that is also covered means one of the two is stale."""
 
@@ -125,6 +129,7 @@ def test_no_kind_is_both_covered_and_deferred():
     assert not set(COVERED) & set(AWAITING_FABRIC)
 
 
+@weaver_test()
 def test_every_kind_awaiting_fabric_says_why():
     """A gap with no reason is indistinguishable from an oversight."""
 
@@ -135,6 +140,7 @@ def test_every_kind_awaiting_fabric_says_why():
     ("kind", "test_name"),
     sorted((kind, name) for kind, names in COVERED.items() for name in names),
 )
+@weaver_test()
 def test_the_named_execution_test_exists(kind: str, test_name: str):
     """The list points at something real.
 
@@ -153,11 +159,13 @@ def test_the_named_execution_test_exists(kind: str, test_name: str):
     assert found, f"{kind}: no test named {test_name} exists"
 
 
+@weaver_test()
 def test_every_deferral_says_why():
     for kind, reason in DEFERRED.items():
         assert reason and len(reason) > 20, kind
 
 
+@weaver_test()
 def test_no_executor_declares_where_it_has_to_run():
     """Every build action runs in the Installer, in whichever position that is.
 

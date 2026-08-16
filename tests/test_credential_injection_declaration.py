@@ -20,6 +20,7 @@ Session that acquired a token on open would make holding one expensive.
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 import weaver
 from weaver.errors import ConfigError
@@ -45,6 +46,7 @@ class _Credential:
 # --- what counts as a credential ----------------------------------------------
 
 
+@weaver_test()
 def test_anything_offering_get_token_is_accepted():
     """Structural, not an isinstance check.
 
@@ -57,15 +59,18 @@ def test_anything_offering_get_token_is_accepted():
     assert checked_credential(supplied) is supplied
 
 
+@weaver_test()
 def test_none_stays_none_and_means_the_library_default():
     assert checked_credential(None) is None
 
 
+@weaver_test()
 def test_an_object_without_get_token_is_refused_by_name():
     with pytest.raises(ConfigError, match="get_token"):
         checked_credential(object())
 
 
+@weaver_test()
 def test_a_get_token_that_is_not_callable_is_refused():
     class _Wrong:
         get_token = "not a method"
@@ -77,6 +82,7 @@ def test_a_get_token_that_is_not_callable_is_refused():
 # --- where it is checked, and when it is used ---------------------------------
 
 
+@weaver_test()
 def test_a_wrong_credential_fails_at_the_call_that_supplied_it():
     """The point of checking early: the traceback names the caller's line."""
 
@@ -86,6 +92,7 @@ def test_a_wrong_credential_fails_at_the_call_that_supplied_it():
         )
 
 
+@weaver_test()
 def test_opening_a_session_with_a_credential_acquires_no_token():
     """Lazy, so holding a Session stays cheap.
 
@@ -104,6 +111,7 @@ def test_opening_a_session_with_a_credential_acquires_no_token():
     assert supplied.scopes == []
 
 
+@weaver_test()
 def test_the_supplied_credential_is_what_the_session_authenticates_with():
     """And it reaches the token provider rather than being kept and ignored."""
 
@@ -118,6 +126,7 @@ def test_the_supplied_credential_is_what_the_session_authenticates_with():
     assert supplied.scopes, "the injected credential was never asked for a token"
 
 
+@weaver_test()
 def test_without_one_nothing_is_pinned():
     """Core imposes no chain. The default is chosen when it is needed."""
 
