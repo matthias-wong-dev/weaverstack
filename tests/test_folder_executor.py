@@ -20,7 +20,7 @@ from weaver.targets import ItemRef
 
 
 def _context(tmp_path):
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+    workspace = given_workspace(catalogue="Warehouse/Control")
     resolver = given_resolver(
         workspace=workspace, lakehouses=("Control", "Sales"), root=tmp_path
     )

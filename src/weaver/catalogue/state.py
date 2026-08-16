@@ -19,13 +19,11 @@ from ..declaration.model import (
     WeaverItemId,
 )
 from ..errors import BuildError
-from ..spark.catalogue import is_absent
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
-    BUILD_EPOCH,
-    CATALOGUE_SCHEMA,
+    BUILD_DATETIME,
     CATALOGUE_TABLES,
     INSTALLATION,
     OBJECT_ROLES,
@@ -48,14 +46,14 @@ _FILES_PREFIX = "Files/"
 class Catalogue:
     """The catalogue the build reads and reasons about.
 
-    One class whatever produced it: read from the Weaver Lakehouse in
+    One class whatever produced it: read from the catalogue Warehouse in
     production, or built directly from Registry rows or a repository in a test.
     Incremental selection, alias staleness and claim collection all work from
     ``registered`` and ``rows``, so they are pure Python.
 
     ``rows`` is the row data by item and table. ``registered`` is the certified
     documents derived from the Registry rows — identity, type, signature and
-    publication epoch, without the audit columns, which no build decision reads.
+    publication build_datetime, without the audit columns, which no build decision reads.
 
     ``present_tables`` records which catalogue tables physically exist: a claim
     can only be raised against a table that is there, or reconciliation would
@@ -154,7 +152,7 @@ class Catalogue:
 
     @classmethod
     def from_catalogue(cls, catalogue: Any, items) -> "Catalogue":
-        """The persisted catalogue, read over Spark from the Weaver Lakehouse."""
+        """The persisted catalogue, read over TDS from its Warehouse."""
 
         return read_catalogue_state(catalogue, items)
 
@@ -168,7 +166,7 @@ class Catalogue:
         transform it later.
 
         It carries no binding — no target name, Weaver version, Installation
-        row, publication epoch, or Registry certification for an alias
+        row, publication build_datetime, or Registry certification for an alias
         destination, because an alias is a view in a Warehouse and a table in a
         Lakehouse and this does not know which.
         """
@@ -355,8 +353,8 @@ class RegisteredDocument:
     #: planning has to read what the row says.
     object_role: str = ROLE_DATA
     #: When the build that last certified this object published it. ``None`` for
-    #: a row written before epochs existed, which orders as older than any epoch.
-    build_epoch: object = None
+    #: a row written before build datetimes existed, which orders as older than any build_datetime.
+    build_datetime: object = None
 
     @property
     def is_runtime_artefact(self) -> bool:
@@ -369,7 +367,7 @@ class RegisteredDocument:
         return self.object_role in VALIDATION_ROLES
 
 
-#: Catalogue tables introduced after the first release of the control plane.
+#: Catalogue tables introduced after the first release of the catalogue.
 #:
 #: An estate built by an older Weaver has every other table and not these: an
 #: upgrade rather than damage, and indistinguishable from the physical state
@@ -431,7 +429,7 @@ def _registered_documents(
                 object_type,
                 signature,
                 object_role,
-                row.get(BUILD_EPOCH),
+                row.get(BUILD_DATETIME),
             )
             prior = registered.get(identity)
             if prior is not None and prior != document:
@@ -441,7 +439,7 @@ def _registered_documents(
 
 
 def read_catalogue_state(catalogue: Any, items) -> Catalogue:
-    """Read the catalogue from the Weaver Lakehouse, for the items named.
+    """Read the catalogue from its Warehouse, for the items named.
 
     A missing table is either a first run or damage, and what tells them apart
     is whether anything else is there: every table missing is bootstrap and
@@ -460,16 +458,12 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     missing: set[str] = set()
     incompatible: list[str] = []
     for table in CATALOGUE_TABLES:
-        name = catalogue.qualify(CATALOGUE_SCHEMA, table.name)
-        try:
-            columns = catalogue.columns_of(name)
-        except Exception as exc:
-            if is_absent(exc):
-                missing.add(table.name)
-                continue
-            raise
+        columns = catalogue.columns_of(table)
+        if columns is None:
+            missing.add(table.name)
+            continue
         present.add(table.name)
-        folded = {column.casefold() for column in columns}
+        folded = set(columns)
         # Published columns are required too, and deliberately: the merge writes
         # one on every insert, so a catalogue without it can be *read* but not
         # *written*. Exempting it here would let planning succeed and push the
@@ -478,11 +472,17 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
         # catalogue's shape. The reader's null tolerance answers a different
         # question — a column that exists but predates some rows — and both hold
         # at once: require the column, tolerate the value.
+        # Compared in the public spelling, because that is what the Warehouse
+        # holds; the internal keys never reach a physical schema.
         required = {
-            name.casefold()
+            table.public_name_of(name).casefold(): table.public_name_of(name)
             for name in table.column_names + table.published_column_names
         }
-        absent_columns = sorted(required - folded)
+        absent_columns = sorted(
+            public
+            for folded_name, public in required.items()
+            if folded_name not in folded
+        )
         if absent_columns:
             incompatible.append(f"{table.name}.{absent_columns[0]}")
     if incompatible:

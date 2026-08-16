@@ -72,7 +72,7 @@ def _bindings(*targets):
 def _complete_estate():
     return FakeClient(
         [
-            ("Weaver", "Lakehouse"),
+            ("Weaver", "Warehouse"),
             ("Weaver", "SQLEndpoint"),
             ("Sales_LH", "Lakehouse"),
             ("Reporting", "Warehouse"),
@@ -105,7 +105,7 @@ def test_every_bound_target_and_the_control_lakehouse_are_required():
     )
 
     assert {(item.name, item.item_type) for item in wanted} == {
-        ("Weaver", "Lakehouse"),
+        ("Weaver", "Warehouse"),
         ("WeaverEnv", "Environment"),
         ("Sales_LH", "Lakehouse"),
         ("Reporting", "Warehouse"),
@@ -113,17 +113,17 @@ def test_every_bound_target_and_the_control_lakehouse_are_required():
 
 
 def test_the_catalogue_is_required_once_though_it_arrives_twice():
-    """`effective_item_bindings` binds `_weaver` to the control Lakehouse.
+    """`effective_item_bindings` binds `_weaver` to the catalogue Warehouse.
 
-    So the Weaver Lakehouse reaches preflight both as itself and as that
-    binding's target. Checking it twice would be harmless but would make the
-    failure report name it twice, which reads as two problems.
+    So the catalogue reaches preflight both as itself and as that binding's
+    target. Checking it twice would be harmless but would make the failure
+    report name it twice, which reads as two problems.
     """
 
     wanted = required_items(
         _bindings(
             ("Sales", "Sales_LH", "Lakehouse"),
-            ("_weaver", "Weaver", "Lakehouse"),
+            ("_weaver", "Weaver", "Warehouse"),
         ),
         control_item=ItemRef("Weaver"),
     )
@@ -155,7 +155,7 @@ def test_adding_targets_does_not_add_listings():
     _preflight(few, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
     many = FakeClient(
-        [("Weaver", "Lakehouse"), ("WeaverEnv", "Environment")]
+        [("Weaver", "Warehouse"), ("WeaverEnv", "Environment")]
         + [(f"LH_{index}", "Lakehouse") for index in range(20)]
     )
     _preflight(
@@ -200,7 +200,7 @@ def test_a_missing_workspace_fails_before_anything_is_listed():
 def test_a_missing_catalogue_fails():
     client = FakeClient([("Sales_LH", "Lakehouse"), ("WeaverEnv", "Environment")])
 
-    with pytest.raises(PreflightError, match="Weaver Lakehouse 'Weaver' was not found"):
+    with pytest.raises(PreflightError, match="Weaver catalogue 'Weaver' was not found"):
         _preflight(client, _bindings(("Sales", "Sales_LH", "Lakehouse")))
 
 
@@ -240,7 +240,7 @@ def test_every_missing_item_is_reported_together():
         )
 
     message = str(raised.value)
-    assert "Weaver Lakehouse 'Weaver' was not found" in message
+    assert "Weaver catalogue 'Weaver' was not found" in message
     assert "Lakehouse target 'Sales_LH' was not found" in message
     assert "Warehouse target 'Reporting' was not found" in message
 
@@ -263,10 +263,17 @@ def test_a_name_that_exists_as_the_wrong_type_says_so():
 def test_a_lakehouses_sql_endpoint_sibling_is_not_reported_as_a_type_confusion():
     """Every Lakehouse grows one; it is a facet, not a competing item."""
 
-    client = _complete_estate()
+    client = FakeClient(
+        [
+            ("Weaver", "Warehouse"),
+            ("WeaverEnv", "Environment"),
+            ("Sales_LH", "Lakehouse"),
+            ("Sales_LH", "SQLEndpoint"),
+        ]
+    )
 
     with pytest.raises(PreflightError) as raised:
-        _preflight(client, _bindings(("Weaver", "Weaver", "Warehouse")))
+        _preflight(client, _bindings(("Sales", "Sales_LH", "Warehouse")))
 
     assert "SQLEndpoint" not in str(raised.value)
 
@@ -274,7 +281,7 @@ def test_a_lakehouses_sql_endpoint_sibling_is_not_reported_as_a_type_confusion()
 def test_an_ambiguous_name_fails_rather_than_picking_one():
     client = FakeClient(
         [
-            ("Weaver", "Lakehouse"),
+            ("Weaver", "Warehouse"),
             ("WeaverEnv", "Environment"),
             ("Sales_LH", "Lakehouse"),
             ("Sales_LH", "Lakehouse"),

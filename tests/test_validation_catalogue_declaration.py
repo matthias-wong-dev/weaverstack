@@ -205,7 +205,7 @@ def test_a_validation_dependency_names_the_logical_validation(repository):
     """Not the procedure or module it compiles to — see §14 of the design."""
 
     edges = {
-        (row["object_name"], row["dependency_name"])
+        (row["referencing_object_name"], row["dependency_reference"])
         for row in rows(project(repository), DEPENDENCY)
     }
 
@@ -219,10 +219,11 @@ def test_a_validation_dependency_is_within_the_item(repository):
     row = next(
         row
         for row in rows(project(repository), DEPENDENCY)
-        if row["object_name"] == "OrdersReconcile"
+        if row["referencing_object_name"] == "OrdersReconcile"
     )
 
-    assert row["is_within_item"] is True
+    assert row["referenced_item_type"] == "Lakehouse"
+    assert row["referenced_item_name"] == "Sales"
 
 
 # --- the role survives the round trip ---------------------------------------

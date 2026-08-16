@@ -80,10 +80,10 @@ class InstallationContext:
     #: submission where they cross, one identifier-case scope over all of them.
     spark_sql_batch: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
-    #: This installation's publication instant, resolved into ``{{epoch}}``. One
+    #: This installation's publication instant, resolved into ``{{build_datetime}}``. One
     #: value for the whole run, so every Registry row a build writes carries the
     #: same one and two rows can be ordered against each other.
-    epoch: str | None = None
+    build_datetime: str | None = None
 
     def resolved(self, target_id: str) -> ResolvedTarget:
         """Another target this plan declared, by the id an action names."""

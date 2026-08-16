@@ -177,13 +177,13 @@ def test_no_installation_row_is_claimed(repository):
 
 
 def test_no_publication_epoch_is_stamped(repository):
-    """The epoch is one value per *installation*, resolved when it runs. A
+    """The build_datetime is one value per *installation*, resolved when it runs. A
     repository-derived row carrying one would be inventing a build."""
 
     catalogue = derived(repository, CUSTOMER)
 
     for row in catalogue.rows[item_id()][REGISTRY.name]:
-        assert not row.get("build_epoch")
+        assert not row.get("build_datetime")
 
 
 def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):

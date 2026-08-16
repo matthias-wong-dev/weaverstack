@@ -9,7 +9,7 @@ Session out, and each operation given it rather than opening its own.
 
     with weaver.session(
         workspace="Sales Analytics",
-        catalogue="Lakehouse/Weaver",
+        catalogue="Warehouse/Weaver",
         environment="weaver",
     ) as session:
         weaver.build(".", bind="Lakehouse/SalesDev=Sales", session=session)

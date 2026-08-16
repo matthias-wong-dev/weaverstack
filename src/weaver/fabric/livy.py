@@ -132,6 +132,27 @@ class WorkspaceLivySession:
         return self.session.active
 
 
+def _spark_home(workspace):
+    """The Lakehouse a Spark session attaches to, from the workspace's own.
+
+    The first configured one, by name, so a workspace answers the same way
+    twice. Which it is does not affect where work lands — every generated
+    statement names its Lakehouse — so a stable answer is all that is wanted.
+    """
+
+    from ..errors import CommandError
+    from ..targets import ItemRef
+
+    configured = sorted(getattr(workspace, "lakehouses", ()) or ())
+    if not configured:
+        raise CommandError(
+            "starting a Spark session needs a Lakehouse to attach to, and this "
+            "Workspace configures none. Add the Lakehouse the work is for to "
+            "`lakehouses`, or do the work in a Warehouse, which needs no Spark."
+        )
+    return ItemRef(configured[0])
+
+
 def sessions_url(
     workspace_id: str,
     lakehouse_id: str,
@@ -272,33 +293,45 @@ class LivySession:
         return self._token_source()
 
     @classmethod
-    def for_workspace(cls, workspace, *, resolver=None, **kwargs) -> "LivySession":
-        """A session against a workspace's Weaver Lakehouse.
+    def for_workspace(
+        cls, workspace, *, resolver=None, lakehouse=None, **kwargs
+    ) -> "LivySession":
+        """A session attached to one of the workspace's Lakehouses.
 
-        The session is created against the Weaver Lakehouse with the workspace's
-        ``environment`` attached, so a body that imports Weaver finds what
-        ``weaver install`` published. Nothing is copied into the workspace.
+        Fabric creates a Spark session *against a Lakehouse* — its id is in the
+        Livy URL — so a session needs one to live in. Which one does not affect
+        where work lands: every statement Weaver generates names the Lakehouse
+        it is about, in full. The attachment is a home, not a destination.
 
-        Starting the session does not assert that the Environment carries a
-        usable Weaver. Submitting Spark to a workspace and running the installed
-        package are two different needs, and only the second one waits on a wheel
-        publish; :meth:`ensure_weaver` is where that need is stated.
+        The home is named — by the caller, or by the workspace's own configured
+        Lakehouses. A workspace that configures none is doing Warehouse-only
+        work and has no reason to start Spark at all, which is what the error
+        says.
 
-        An Environment is required to name what the session attaches to, and a
-        workspace without one is an error rather than a silent default runtime.
+        The workspace's ``environment`` is attached where it names one, so a
+        body that imports Weaver finds what ``weaver install`` published.
+        Nothing is copied into the workspace.
+
+        An Environment is *not* required to start a session. Submitting Spark
+        to a workspace and running the installed package are two different
+        needs, and only the second waits on a wheel publish: a build's
+        statements are Spark SQL that imports nothing, so it runs on the
+        workspace's default runtime. :meth:`ensure_weaver` is where the other
+        need is stated, and where a missing Environment is refused.
         """
 
-        from ..errors import CommandError
+        from ..targets import ItemRef
         from .resolution import FabricResolver
         from .resources import LAKEHOUSE
 
         resolver = resolver or FabricResolver(workspace)
-        home = resolver.resolve(workspace.catalogue_item, item_type=LAKEHOUSE)
+        home_item = lakehouse if lakehouse is not None else _spark_home(workspace)
+        if isinstance(home_item, str):
+            home_item = ItemRef(home_item)
+        home = resolver.resolve(home_item, item_type=LAKEHOUSE)
 
         environment_id = kwargs.pop("environment_id", None)
-        if environment_id is None:
-            if not getattr(workspace, "environment", None):
-                raise CommandError(missing_environment(workspace))
+        if environment_id is None and getattr(workspace, "environment", None):
             environment_id = _resolve_environment_id(workspace, resolver)
 
         return cls(
@@ -315,10 +348,19 @@ class LivySession:
         Called by whatever submits a body that imports Weaver, so a session that
         only carries Spark SQL never waits on a wheel publish. The import stays
         loaded afterwards, so the cost is one statement per session.
+
+        This is also where a missing Environment is refused, because this is
+        where one is needed: an installed Weaver is what an Environment carries,
+        and a session without one runs the default runtime perfectly well until
+        something tries to import from it.
         """
 
         if self._weaver_asserted:
             return
+        if not self.environment_id:
+            from ..errors import CommandError
+
+            raise CommandError(missing_environment())
         self.run(environment_bootstrap())
         self._weaver_asserted = True
 
@@ -494,22 +536,22 @@ def _resolve_environment_id(workspace, resolver) -> str:
     return item.id
 
 
-def missing_environment(workspace) -> str:
-    """Why a Fabric Environment is needed, said where one was not named.
+def missing_environment(workspace=None) -> str:
+    """Why a Fabric Environment is needed, said where the need arises.
 
-    Spark work crosses to Fabric through a Livy session, and a Livy session
-    attaches an Environment. That is a separate need from the Environment
-    carrying a published Weaver, so this names neither ``weaver install`` nor a
-    wheel.
+    Not when a Livy session starts — Spark runs on the workspace default — but
+    when a body wants to ``import weaver``, which is what an Environment
+    carries.
     """
 
     name = getattr(workspace, "workspace", None)
     where = f" for workspace {name!r}" if name else ""
     return (
-        f"No Fabric Environment is named{where}. Spark work crosses through a "
-        f"Livy session, which attaches one: pass environment= in Python, "
-        f"--environment on the command line, or set environment in workspace "
-        f"configuration."
+        f"No Fabric Environment is named{where}. Running Weaver inside Fabric "
+        f"needs the Environment `weaver install` published to: pass "
+        f"environment= in Python, --environment on the command line, or set "
+        f"environment in workspace configuration. A build needs none of this; "
+        f"its Spark statements import nothing."
     )
 
 

@@ -1,4 +1,4 @@
-"""Fabric OneLake shortcut operations used to implement aliases.
+"""Fabric OneLake shortcut operations for aliases.
 
 Shortcuts are recreated during installation because they contain no data.
 """

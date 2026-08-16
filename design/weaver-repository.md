@@ -10,10 +10,10 @@ source explicitly. Supported sources are a local checkout, a Fabric Notebook's
 Resources directory, or an accessible OneLake location. Remote trees are copied
 to driver-local temporary storage before static parsing.
 
-The control Lakehouse holds catalogue state and build transport, not authored
-repository state. A tree can be copied to `Files/weaver_items` through
-`weaver.push.push_item_repository`, which the Fabric suite uses to stage a
-repository; build does not read that location implicitly.
+The catalogue Warehouse holds catalogue state and nothing else — it has no
+Files area to hold a repository in. A tree can be copied into any Lakehouse's
+Files through `weaver.push.push_item_repository`, which the Fabric suite uses to
+stage one; build does not read that location implicitly.
 
 ## Item-owned layout
 
@@ -87,9 +87,9 @@ materialises the alias as a OneLake shortcut for a Lakehouse destination and as 
 view for a Warehouse one — see
 [how build works](how-does-build-work.md#4a-aliases).
 
-The built-in `Lakehouse/_weaver` item is generated and managed by Weaver inside
+The built-in `Warehouse/_weaver` item is generated and managed by Weaver inside
 the parsed repository in memory. It declares the catalogue tables and is never
-written into authored source; an authored `Lakehouse/_weaver` is rejected.
+written into authored source; an authored `Warehouse/_weaver` is rejected.
 
 ## Build binds logical items
 
@@ -114,13 +114,13 @@ weaver build \
   --bind Lakehouse/Raw_Dev=Raw \
   --bind Warehouse/Reporting_Dev=Reporting \
   --workspace Analytics --environment Runtime \
-  --catalogue Lakehouse/Control
+  --catalogue Warehouse/Control
 ```
 
 From Python inside the target environment, `weaver.build(source, bind=...)` is
 the ordinary source-neutral operation. It copies
 a remote source once to a session-local temporary directory when required, parses it,
-ensures the control plane, reads target and catalogue state, reconciles, and
+ensures the catalogue, reads target and catalogue state, reconciles, and
 then calls internal planner and installer seams. The generated bundle contains
 only frozen outputs — every statement, every deployed file, every hash — and no
 copy of the source, so installation cannot reopen or reinterpret the repository
@@ -155,7 +155,7 @@ A parsed repository carries more than what was authored. Weaver composes two
 kinds of generated document into it and reads them through the same static
 readers as authored content, so there is no second parsing path:
 
-- `Lakehouse/_weaver` — the catalogue's own tables, always;
+- `Warehouse/_weaver` — the catalogue's own tables, always;
 - an item's `schemas/_.yml`, and for a Lakehouse `Files/___Load.py` — the schema
   its generated load procedures live in, and the folder its load code is deployed
   into, present only while the item has load code.

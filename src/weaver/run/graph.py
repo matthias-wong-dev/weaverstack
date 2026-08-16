@@ -1,22 +1,4 @@
-"""RunGraph — the runtime topology, inspectable before anything runs.
-
-What the Runner decided should run, in what order, and what each node waits for.
-An edge means *the upstream node must complete successfully before the
-downstream node may execute*, and nothing else: it is not a data-flow statement
-and not a claim about what the downstream node reads.
-
-This is the concept ``LoadPlan`` used to be, with one difference that matters.
-A LoadPlan owned the runtime lifecycle as well as the topology, so "what should
-run" and "what happened to it" lived in the same object and drifted into each
-other. Here the graph is inert — nodes, edges, and the order they imply — and
-every piece of state that changes during a run belongs to the Runner.
-
-It is also no longer specific to loading. A node is a unit of installed runtime
-work: a table load, a folder load, a Warehouse procedure, a validation, an
-endpoint refresh treated as a barrier. What differs between them is the
-primitive that runs and the rule that selected them, neither of which the graph
-needs to know.
-"""
+"""The inert runtime topology: nodes, dependency edges and selection order."""
 
 from __future__ import annotations
 

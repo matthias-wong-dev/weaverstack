@@ -1,8 +1,9 @@
 """What the Fabric-only refactor removed, and must not come back.
 
 A retirement stays retired when something fails if it returns. These are the
-names, imports and payload shapes the local emulator brought with it: each was
-deleted deliberately, and each would be easy to reintroduce by habit — a stray
+names, imports and payload shapes a second, non-Fabric workspace brought with
+it: each was deleted deliberately, and each would be easy to reintroduce by
+habit — a stray
 ``import pyspark`` in a module that runs on a desktop, a token in a payload that
 is meant to be finished SQL, a second workspace kind.
 
@@ -190,9 +191,9 @@ def test_the_only_payload_token_left_is_the_publication_epoch():
     bytes on every run, and a bundle's identity is its bytes.
     """
 
-    from weaver.spark import tokens
+    from weaver import tokens
 
     public = {name for name in vars(tokens) if not name.startswith("_")}
 
-    assert "EPOCH_TOKEN" in public
+    assert "BUILD_DATETIME_TOKEN" in public
     assert not {"OBJECT", "SCHEMA", "expand", "object_token", "schema_token"} & public

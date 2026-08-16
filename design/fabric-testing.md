@@ -44,7 +44,7 @@ Create these once, in the workspace you will point the suite at:
 
 | Item | Type | Role |
 |---|---|---|
-| `PYTEST_WEAVER` | Lakehouse | the Weaver Lakehouse — the control plane |
+| `PYTEST_WEAVER` | Warehouse | the Weaver catalogue |
 | `PYTEST_LH_1` | Lakehouse | destination target |
 | `PYTEST_LH_2` | Lakehouse | cross-item alias producer |
 | `PYTEST_LH_3` | Lakehouse | cross-item alias consumer |
@@ -52,8 +52,11 @@ Create these once, in the workspace you will point the suite at:
 | `PYTEST_WH_1` | Warehouse | Warehouse destination |
 
 Every Lakehouse must be **schema-enabled** (`creationPayload.enableSchemas`),
-because a managed table has to land at `Tables/<schema>/<table>` and the
-catalogue lives in a schema called `_`.
+because a managed table has to land at `Tables/<schema>/<table>`.
+
+`PYTEST_WEAVER` is a Warehouse, and the harness deletes a Lakehouse of that name
+if it finds one — the catalogue used to be Delta, and a leftover would go on
+answering name lookups nothing makes any more.
 
 > A Warehouse **cannot** share a display name with a Lakehouse. A Lakehouse
 > generates a `SQLEndpoint` facet of the same name, so the name is already taken
@@ -120,7 +123,7 @@ different reason.
 They are separated because they exercise Fabric's resource management rather
 than Weaver's and change rarely, while their create/delete churn slows every run
 of the code actually under development. `create_lakehouse` is still required
-platform integration — ordinary `weaver build` ensures the control Lakehouse — so this says
+platform integration — ordinary `weaver build` ensures the catalogue — so this says
 *when* to run the cover, not that it is unnecessary.
 
 The item names above are defaults; each has a matching
@@ -230,15 +233,13 @@ there, so the test places an explicit repository source under a test-only
 OneLake location and its Livy programs parse it, generate the bundle and install
 it, all inside the session against the native Spark catalogue.
 
-From a desktop the same state is read across first — the catalogue and a
+From a desktop the same state is read across first — the catalogue over TDS, a
 Lakehouse's views as Spark SQL, its objects as storage, a Warehouse over TDS —
 and planning happens here against what came back. What differs is where the
 process runs, not what it plans against.
 
-Both Lakehouses are created **schema-enabled**: the target so a managed table
-lands at `Tables/<schema>/<table>` and views bind by name, and the Weaver
-Lakehouse because the catalogue lives in a schema called `_` and a Lakehouse
-without schemas cannot hold one.
+The target Lakehouse is created **schema-enabled**, so a managed table lands
+at `Tables/<schema>/<table>` and views bind by name.
 
 ## Cross-item aliases need two destinations
 
@@ -258,11 +259,10 @@ Lakehouse will accept the name as a relation, and the consumer's very next
 statement failed with *"neither a view nor a table"*. The alias action now waits
 for a real read to succeed before reporting success.
 
-**The session attaches to the Weaver Lakehouse**, which is the production model —
-the control plane is the fixed attachment, destinations are the variable data
-plane. It used to attach to the *target*, and that made the suite structurally
-unable to fail: a two-part `Schema.Object` happened to land in the right place,
-and the assertion then read it back through the same session catalogue, so a
+**The session attaches to a Lakehouse**, because Fabric creates a Spark session
+against one. Which Lakehouse carries no meaning, so a two-part `Schema.Object`
+would land wherever the session happened to be — and an assertion reading it
+back through the same session would agree with itself. So a
 table written to the wrong Lakehouse would have been read from the wrong Lakehouse
 and passed. Under the real attachment an unqualified name lands in the control
 plane, so every statement has to name its Lakehouse — and so does every assertion.
@@ -272,8 +272,9 @@ resolves it against a named destination, defaulting to the target:
 
 ```python
 build_env.query("SELECT count(*) AS n FROM {{object:DWG.Customer}}")
-build_env.query("SELECT * FROM {{object:_.Registry}}",
-                destination=build_env.weaver_destination)
+build_env.query(
+    "SELECT * FROM {{object:_.Registry}}", destination=build_env.weaver_destination
+)
 ```
 
 See the master CLI plan for the Fabric contract these tests enforce, including

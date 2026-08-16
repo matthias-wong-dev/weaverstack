@@ -14,20 +14,9 @@ from .metadata import SPARK_SQL, SQL, TABLE
 if TYPE_CHECKING:
     from .source import SourceDocument
 
-#: The T-SQL and Spark SQL load generators' versions, kept separate so bumping
-#: one does not invalidate the other's artefacts. Each is a signature salt,
-#: never part of an identity.
-#:
-#: **Raise one whenever its generated output changes.** A signature is the
-#: source's plus this number, so a generator edit that leaves both alone
-#: produces different bytes under an unchanged signature, and the estate goes on
-#: running the previous generation's artefacts.
-#:
-#: 8 moved the T-SQL load result into output parameters, so every installed
-#: procedure is incompatible, not just stale.
+#: Signature salts for generated load output. Increment the corresponding value
+#: whenever that generator changes.
 TSQL_LOAD_VERSION = 8
-#: 8 replaced the generated SQL load program with a deployed ``SparkSqlTable``
-#: module, so every previously installed Spark load artefact is stale.
 SPARK_LOAD_VERSION = 9
 
 #: What object a generated load installs, in the catalogue's vocabulary. A

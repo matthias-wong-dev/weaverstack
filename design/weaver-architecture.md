@@ -261,9 +261,9 @@ separate.
 
 ---
 
-# Weaver Lakehouse
+# Weaver catalogue
 
-Each workspace contains a dedicated Weaver Lakehouse that stores the catalogue
+Each workspace names a Warehouse whose `_` schema stores the catalogue
 describing its deployed workspace. It is Weaver's operational metadata store.
 
 The catalogue records information such as:
@@ -452,8 +452,8 @@ Every command executes against a resolved Workspace.
 A Workspace is one Microsoft Fabric workspace, and identifies:
 
 - the workspace, by name
-- the Weaver Lakehouse holding the catalogue
-- the Fabric Environment Spark work attaches
+- the Warehouse holding the catalogue
+- the Fabric Environment carrying the published Weaver, where one is named
 
 It says where the resources are. Where Weaver's own code runs is a Session
 question, not a property of the Workspace.
@@ -473,13 +473,17 @@ or
 weaver build \
     ./estate \
     --workspace MyWorkspace \
-    --environment Weaver \
-    --catalogue Lakehouse/Weaver \
+    --catalogue Warehouse/Weaver \
     --bind Lakehouse/Raw
 ```
 
 The repository does not contain deployment-specific information. The Workspace
 determines where logical declarations are deployed.
+
+`--environment` names the Fabric Environment `weaver install` published to, and
+is needed by the commands that run Weaver inside Fabric: `load`, `test` and
+`install` itself. A build submits Spark SQL that imports nothing, so it needs
+none.
 
 ---
 

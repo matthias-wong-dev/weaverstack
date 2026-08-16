@@ -284,14 +284,27 @@ def _dependencies(catalogue: Catalogue) -> tuple[InstalledDependency, ...]:
     found = []
     for item, tables in catalogue.rows.items():
         for row in tables.get(DEPENDENCY.name, ()):
-            consumer = _registry_identity(catalogue, item, row)
+            consumer = _registry_identity(
+                catalogue,
+                item,
+                row,
+                columns=("referencing_schema_name", "referencing_object_name"),
+            )
             if consumer is None:
                 continue
+            # Within-item is the edge's own answer rather than a stored flag:
+            # a resolved edge names the item it reached, and an unresolved one
+            # left the item by definition.
+            referenced_type = row.get("referenced_item_type")
+            referenced_name = row.get("referenced_item_name")
             found.append(
                 InstalledDependency(
                     consumer=consumer,
-                    reference=str(row.get("dependency_name") or ""),
-                    is_within_item=bool(row.get("is_within_item")),
+                    reference=str(row.get("dependency_reference") or ""),
+                    is_within_item=(
+                        referenced_type == item.item_type
+                        and referenced_name == item.item_name
+                    ),
                 )
             )
     return tuple(sorted(found, key=lambda edge: (str(edge.consumer), edge.reference)))
@@ -389,16 +402,24 @@ def _python_module_identity(
     )
 
 
-def _registry_identity(catalogue, item, row) -> WeaverDocumentId | None:
+def _registry_identity(
+    catalogue,
+    item,
+    row,
+    *,
+    columns: tuple[str, str] = ("schema_name", "object_name"),
+) -> WeaverDocumentId | None:
     """The document a dictionary row describes, when the Registry certifies it.
 
     A dictionary row no Registry row certifies describes something declared and
     not installed, so it contributes no edge: the graph is of what is there.
+
+    ``columns`` names the pair to read, because a relationship table spells the
+    owning object under the side it declares.
     """
 
-    identity = _document_id(
-        item, str(row.get("schema_name") or ""), str(row.get("object_name") or "")
-    )
+    schema, name = columns
+    identity = _document_id(item, str(row.get(schema) or ""), str(row.get(name) or ""))
     return identity if identity in catalogue.registered else None
 
 

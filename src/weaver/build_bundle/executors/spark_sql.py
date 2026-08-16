@@ -32,9 +32,6 @@ class SparkSqlExecutor:
             )
         statement = payload.decode("utf-8").strip()
         context.spark_sql(statement, exact_case=True)
-        # The destination is reported, not just used: an install report that says
-        # which Lakehouse each statement ran against is the record a reviewer needs
-        # when the answer used to depend on what the session was attached to.
         return {
             "destination": context.destination.item,
             "statement_first_line": statement.splitlines()[0] if statement else "",

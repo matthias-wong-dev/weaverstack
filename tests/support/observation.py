@@ -60,7 +60,7 @@ class Observation:
         """One column of names, lowercased.
 
         Case is the workspace's to choose: Fabric lowercases a managed table's
-        directory exactly as the local metastore does, so an exact-case
+        directory exactly as a case-folding metastore does, so an exact-case
         comparison would assert something neither environment promises.
 
         Empty and null entries are dropped — `DESCRIBE` pads its output with

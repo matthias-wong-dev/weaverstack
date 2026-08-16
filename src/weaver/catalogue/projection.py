@@ -42,7 +42,7 @@ from .tables import (
     DEPENDENCY,
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
-    INDEX_DICTIONARY,
+    KEY_DICTIONARY,
     KEY_PRIMARY,
     KEY_UNIQUE,
     REGISTRY,
@@ -209,25 +209,25 @@ def project_item_catalogue(
                 }
             )
         if source.document.primary_key:
-            rows[INDEX_DICTIONARY.name].append(
+            rows[KEY_DICTIONARY.name].append(
                 {
                     **common,
-                    "index_type": KEY_PRIMARY,
+                    "key_type": KEY_PRIMARY,
                     "column_set": column_set(source.document.primary_key),
                     "signature": signature,
                 }
             )
         for unique in source.document.unique_keys:
-            rows[INDEX_DICTIONARY.name].append(
+            rows[KEY_DICTIONARY.name].append(
                 {
                     **common,
-                    "index_type": KEY_UNIQUE,
+                    "key_type": KEY_UNIQUE,
                     "column_set": column_set(unique),
                     "signature": signature,
                 }
             )
         rows[FOREIGN_KEY_DICTIONARY.name].extend(
-            _foreign_keys(source, identity, common, signature)
+            _foreign_keys(source, identity, scope, signature)
         )
 
     # A validation claims TestDictionary and its dependencies, and nothing else.
@@ -277,11 +277,25 @@ def project_item_catalogue(
         if edge.consumer not in consumers:
             continue
         source = repository.source_documents[edge.consumer]
+        producer = edge.producer
         rows[DEPENDENCY.name].append(
             {
-                **_identity(scope, edge.consumer),
-                "dependency_name": edge.reference,
-                "is_within_item": edge.is_within_item,
+                **_identity_as(scope, edge.consumer, role="referencing"),
+                "dependency_reference": edge.reference,
+                # Null where the edge did not resolve — an authored physical
+                # name, or a reference that leaves the item through an alias.
+                "referenced_item_type": (
+                    producer.item.item_type if producer is not None else None
+                ),
+                "referenced_item_name": (
+                    producer.item.item_name if producer is not None else None
+                ),
+                "referenced_schema_name": (
+                    _catalogue_schema(producer) if producer is not None else None
+                ),
+                "referenced_object_name": (
+                    producer.object_id.object if producer is not None else None
+                ),
                 "signature": source.effective_signature,
             }
         )
@@ -416,6 +430,22 @@ def _identity(scope: InstallationScope, identity: WeaverDocumentId) -> dict:
     }
 
 
+def _identity_as(
+    scope: InstallationScope, identity: WeaverDocumentId, *, role: str
+) -> dict:
+    """The owning object's identity under a relationship's own column names.
+
+    A relationship table names both sides, so neither can be the unqualified
+    ``schema_name``/``object_name`` pair every other table uses.
+    """
+
+    return {
+        **_scope(scope),
+        f"{role}_schema_name": _catalogue_schema(identity),
+        f"{role}_object_name": identity.object_id.object,
+    }
+
+
 def _described(source, all_documents, repository) -> dict:
     description = resolve_text(
         source.document.description,
@@ -445,31 +475,31 @@ def _behaviour(source) -> dict:
     }
 
 
-def _foreign_keys(source, identity, common, signature) -> list[dict]:
+def _foreign_keys(source, identity, scope, signature) -> list[dict]:
     rows = []
     for key in source.document.foreign_keys:
         reference = key.logical_reference or Reference(
             schema=key.reference.schema,
             object=key.reference.object,
         )
-        parent_item = (
+        primary_item = (
             WeaverItemId(reference.item_type, reference.item_name)
             if reference.is_item_qualified
             else identity.item
         )
         rows.append(
             {
-                **common,
-                "column_set": column_set(key.columns),
-                "reference_item_type": parent_item.item_type,
-                "reference_item_name": parent_item.item_name,
-                "reference_schema_name": (
+                **_identity_as(scope, identity, role="foreign"),
+                "foreign_column_set": column_set(key.columns),
+                "primary_item_type": primary_item.item_type,
+                "primary_item_name": primary_item.item_name,
+                "primary_schema_name": (
                     f"Files/{reference.schema}"
                     if reference.is_files
                     else reference.schema
                 ),
-                "reference_object_name": reference.object,
-                "reference_column_set": column_set(key.reference_columns),
+                "primary_object_name": reference.object,
+                "primary_column_set": column_set(key.reference_columns),
                 "signature": signature,
             }
         )

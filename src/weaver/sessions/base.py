@@ -130,7 +130,16 @@ class Session(ABC):
         self.timings: list[ReportingFrame] = []
         #: Everything this Session has warned about, in order.
         self.warnings: list[str] = []
+        #: Warehouse flushers handed out, by write stream. Created on demand:
+        #: opening a Session must not start a worker or a TDS connection, and
+        #: most Sessions never append a row.
+        self._flushers: dict = {}
+        self._workflow_id: str | None = None
         self._closed = False
+        #: Between the start of `close` and the Session actually closing. The
+        #: flushers are still writing through it, so it is not closed, but it
+        #: hands out no new stream.
+        self._draining = False
 
     # --- context ------------------------------------------------------------
 
@@ -161,6 +170,21 @@ class Session(ABC):
                 "one in a workspace configuration file."
             )
         return resolved
+
+    @property
+    def workflow_id(self) -> str | None:
+        return self._workflow_id
+
+    @contextmanager
+    def workflow(self, workflow_id: str) -> Iterator[str]:
+        """Share one correlation identity across a composed sequence."""
+
+        previous = self._workflow_id
+        self._workflow_id = workflow_id
+        try:
+            yield workflow_id
+        finally:
+            self._workflow_id = previous
 
     def position(self, workspace: Workspace | None = None) -> str:
         """Where this Session's data engineering happens, as a named value.
@@ -312,8 +336,9 @@ class Session(ABC):
         """Run one T-SQL statement against a named Warehouse, over TDS.
 
         A statement, not a question: nothing comes back. Asking is
-        :meth:`query_tsql`. Reading a result set from a statement that produces
-        several answers with whichever came first, which is how a failing check
+        :meth:`query_tsql`, and a batch that answers more than once needs
+        ``query_result_sets`` — reading only the first result set of several
+        answers with whichever came back first, which is how a failing check
         reports as passing.
         """
 
@@ -327,6 +352,54 @@ class Session(ABC):
         parameters: Sequence[Any] | None = None,
     ) -> Any:
         """Ask one T-SQL question of a named Warehouse, and return its rows."""
+
+    # --- asynchronous appends -------------------------------------------------
+
+    def flusher(self, table, *, warehouse, workspace: Workspace | None = None):
+        """The flusher for one Warehouse write stream, created on first use.
+
+        One flusher per stream, so two callers appending to the same table
+        share a worker and a connection rather than racing. Identity carries
+        enough to keep unrelated streams apart: the same table in two
+        Warehouses, or reached through two workspaces, is not one stream.
+        """
+
+        from ..catalogue.flusher import FlusherKey, WarehouseFlusher
+
+        workspace = self.workspace_or_default(workspace)
+        target = warehouse if hasattr(warehouse, "warehouse") else None
+        name = target.warehouse.name if target is not None else str(warehouse)
+        key = FlusherKey(
+            workspace=workspace.workspace,
+            warehouse=name,
+            schema=table.qualified.split(".", 1)[0],
+            table=table.name,
+        )
+        with self._scope_lock:
+            if self._closed:
+                raise CommandError("this Session is closed and appends nothing")
+            if self._draining:
+                raise CommandError("this Session is closing and appends nothing")
+            existing = self._flushers.get(key)
+            if existing is not None:
+                return existing
+            created = WarehouseFlusher(
+                table,
+                key=key,
+                execute=lambda statement: self.execute_tsql(
+                    statement, target=warehouse, workspace=workspace
+                ),
+            )
+            self._flushers[key] = created
+            return created
+
+    def flush(self) -> None:
+        """Wait for every flusher this Session handed out."""
+
+        with self._scope_lock:
+            flushers = list(self._flushers.values())
+        for flusher in flushers:
+            flusher.flush()
 
     # --- reporting context --------------------------------------------------
     #
@@ -481,12 +554,40 @@ class Session(ABC):
     # --- teardown -----------------------------------------------------------
 
     def close(self) -> None:
-        """Release every resource this Session acquired, and nothing it was given."""
+        """Release every resource this Session acquired, and nothing it was given.
+
+        Closing is the durability barrier for asynchronous logging, so the order
+        here is the guarantee. A flusher writes *through this Session*, and a
+        closed Session refuses to hand out a scope — so the flushers drain while
+        the Session is still open, and only then is it marked closed and its
+        resources released. Marking it closed first would fail exactly the
+        writes this barrier exists to complete, and only under enough load for
+        the worker to still be behind.
+        """
 
         self.stop_presenting()
         with self._scope_lock:
-            if self._closed:
+            if self._closed or self._draining:
                 return
+            # No new stream from here on. The Session is still open, because the
+            # flushers below write through it, but one handed out after this
+            # point would hold rows nobody waits for.
+            self._draining = True
+            flushers = list(self._flushers.values())
+        failures = []
+        for flusher in flushers:
+            try:
+                flusher.close()
+            except Exception as exc:  # noqa: BLE001 - re-raised once, below
+                failures.append(exc)
+
+        if failures:
+            with self._scope_lock:
+                self._draining = False
+            raise failures[0]
+
+        with self._scope_lock:
+            self._flushers.clear()
             self._closed = True
             scopes = list(self._scopes.values())
             self._scopes.clear()

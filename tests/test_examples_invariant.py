@@ -24,6 +24,10 @@ EXAMPLES = ROOT / "examples"
 #: reader could plausibly have copied from an older example.
 RETIRED_SPELLINGS = (
     "weaver_lakehouse",
+    # The catalogue is a Warehouse, and a run's evidence is rows in `_.Log`.
+    "Files/_/Log",
+    "task_logging",
+    "IndexDictionary",
     "workspace_type",
     "FabricWorkspace",
     "LocalWorkspace",
@@ -85,9 +89,9 @@ def test_the_python_examples_parse():
 
 
 def test_the_catalogue_is_named_typed_wherever_an_example_names_one():
-    """`catalogue=` takes `Lakehouse/Weaver`, and an example must show that.
+    """`catalogue=` takes `Warehouse/Weaver`, and an example must show that.
 
-    The bare name parses as a configuration error rather than a Lakehouse, so
+    The bare name parses as a configuration error rather than a Warehouse, so
     an example carrying one would fail for the reader on their first run.
     """
 
@@ -103,7 +107,7 @@ def test_the_catalogue_is_named_typed_wherever_an_example_names_one():
             if stripped.startswith("#"):
                 continue
             found = quoted.search(stripped) or configured.match(stripped)
-            if found and not found.group("value").startswith("Lakehouse/"):
+            if found and not found.group("value").startswith("Warehouse/"):
                 wrong.append(f"{path.relative_to(ROOT).as_posix()}: {stripped}")
 
     assert not wrong, wrong

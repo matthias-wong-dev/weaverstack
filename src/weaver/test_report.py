@@ -94,11 +94,7 @@ class ValidationNodeReport:
             "finished_at": self.finished_at,
         }
         if self.result is not None:
-            # A validation that could not be evaluated carries a dispatch
-            # failure rather than a validation result, and a dispatch failure
-            # answers with a row rather than a mapping. Both are serialisable,
-            # so the report says what happened either way — an invalid node
-            # used to crash the serialiser instead.
+            # Dispatch failures expose a row; validation results expose a mapping.
             shape = getattr(self.result, "to_mapping", None) or self.result.as_row
             mapping.update(shape())
         return mapping
@@ -110,7 +106,7 @@ class ValidationRunReport:
 
     status: str
     nodes: tuple[ValidationNodeReport, ...] = ()
-    task_log: str | None = None
+    workflow_id: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
 
@@ -169,7 +165,7 @@ class ValidationRunReport:
                 ValidationNodeReport.from_mapping(node)
                 for node in payload.get("nodes") or ()
             ),
-            task_log=payload.get("task_log"),
+            workflow_id=payload.get("workflow_id"),
             started_at=payload.get("started_at"),
             finished_at=payload.get("finished_at"),
         )
@@ -179,7 +175,7 @@ class ValidationRunReport:
             "status": self.status,
             "nodes": [node.to_mapping() for node in self.nodes],
             "totals": self.totals(),
-            "task_log": self.task_log,
+            "workflow_id": self.workflow_id,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }

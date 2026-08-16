@@ -200,6 +200,10 @@ class RunNodeResult:
     result: Any = None
     started_at: str | None = None
     finished_at: str | None = None
+    target_type: str | None = field(default=None, compare=False, repr=False)
+    target_name: str | None = field(default=None, compare=False, repr=False)
+    schema_name: str | None = field(default=None, compare=False, repr=False)
+    object_name: str | None = field(default=None, compare=False, repr=False)
     #: Evidence a caller asked for by name. Never persisted and never compared:
     #: diagnostic rows carry whatever a check selected, and a durable record of
     #: them would put data into the estate's own evidence.

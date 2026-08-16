@@ -143,10 +143,6 @@ def run_load(
     from ..run.state import read_installed_catalogue, read_target_inventories
 
     started = datetime.now(timezone.utc)
-    # Where this run's frames begin in the Session's ledger. A Session outlives
-    # a command and holds every frame it ever closed, so what belongs to *this*
-    # run is what was added after here.
-    timings_from = len(getattr(session, "timings", ()))
     with session.step("Read catalogue"):
         catalogue = (
             state.catalogue
@@ -182,41 +178,31 @@ def run_load(
             can_refresh=can_refresh(session, workspace),
         )
 
+    # A dry run writes nothing durable: a row for work nobody did would be
+    # evidence of a load that never happened.
     log = (
         None
         if dry_run
         else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
     )
-    if log is not None:
-        log.write_plan(_plan_document(runner.graph, state, requested, names, dry_run))
     with session.step("Execute"):
         result = runner.run(
             session=session,
             dispatch=dispatch_primitive,
-            on_node=(
-                None
-                if log is None
-                else lambda node: log.write_step(_step_type(node), node.to_mapping())
-            ),
+            on_node=None if log is None else log.submit,
         )
 
-    report = _as_load_report(result, started=started, task_log=log)
-    if log is not None:
-        log.write_completion(
-            _completion_document(
-                report, timings=getattr(session, "timings", ())[timings_from:]
-            )
-        )
+    report = _as_load_report(result, started=started, log=log)
     if not fault_tolerant and not dry_run:
         _raise_for_failure(report)
     return report
 
 
-def _as_load_report(result, *, started, task_log) -> LoadRunReport:
+def _as_load_report(result, *, started, log) -> LoadRunReport:
     """One RunResult, rendered as the shape a load's readers expect.
 
     One internal model, several public shapes. A load reader wants rows moved
-    and a task log to point at.
+    and a workflow to correlate its evidence by.
     """
 
     return LoadRunReport(
@@ -244,8 +230,7 @@ def _as_load_report(result, *, started, task_log) -> LoadRunReport:
         order=result.order,
         messages=tuple(result.messages),
         workspace=result.workspace,
-        task_id=None if task_log is None else task_log.task_id,
-        task_log=None if task_log is None else task_log.root.value,
+        workflow_id=None if log is None else log.workflow_id,
         started_at=started.isoformat(),
         finished_at=result.finished_at,
     )
@@ -285,7 +270,7 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         + (f", {blocked} blocked" if blocked else ""),
         result=first.result,
         report=report,
-        task_log=report.task_log,
+        workflow_id=report.workflow_id,
     )
 
 

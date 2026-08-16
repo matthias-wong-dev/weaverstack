@@ -81,7 +81,7 @@ def _run(*args, workspace="Demo"):
             "--workspace",
             workspace,
             "--catalogue",
-            "Lakehouse/Weaver",
+            "Warehouse/Weaver",
         ]
     )
 
@@ -259,40 +259,21 @@ def test_json_carries_no_diagnostic_rows(captured, capsys):
     assert "_weaver_sk" not in capsys.readouterr().out
 
 
-def test_the_task_log_is_pointed_at(captured, capsys):
-    captured["report"] = ValidationRunReport(
-        status=PASSED,
-        nodes=(_node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),),
-        task_log="abfss://Weaver/Files/_/Log/task_date=2026-08-08/…",
-    )
-    _run("Lakehouse/Sales")
+def test_the_workflow_is_pointed_at(captured, capsys):
+    """A run's evidence is `_.Log` rows correlated by Workflow ID.
 
-    assert "Logs:" in capsys.readouterr().out
-
-
-def test_a_onelake_task_log_is_offered_as_a_link_that_opens(captured, capsys):
-    """The DFS address is where Weaver wrote it; the portal is where you read it.
-
-    Pasting a ``onelake.dfs`` URL into a browser gets an authentication error,
-    so a line that looks like a helpful link and is not is worse than the raw
-    path — a reader tries it, it fails, and they stop trusting the line.
+    So what a finished command gives a reader is the identity to select on,
+    not a place to browse to.
     """
 
-    folder = (
-        "https://onelake.dfs.fabric.microsoft.com/ws-id/item-id"
-        "/Files/_/Log/task_date=2026-08-08/x.json"
-    )
     captured["report"] = ValidationRunReport(
         status=PASSED,
         nodes=(_node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),),
-        task_log=folder,
+        workflow_id="0f8b2c1d",
     )
     _run("Lakehouse/Sales")
 
-    printed = capsys.readouterr().out
-    assert "app.fabric.microsoft.com/groups/ws-id/lakehouses/item-id" in printed
-    assert "selectedPath=Files%2F_%2FLog%2Ftask_date%3D2026-08-08%2Fx.json" in printed
-    assert "onelake.dfs" not in printed
+    assert "Workflow: 0f8b2c1d" in capsys.readouterr().out
 
 
 # --- dry run and strict reach file mode too ------------------------------------

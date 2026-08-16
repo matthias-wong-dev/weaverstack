@@ -108,7 +108,8 @@ def load_table(
     """Load one Delta table from the rows its object staged.
 
     The destination is resolved by the caller, never inferred here: a load that
-    guessed it from the attached Lakehouse would write to the control plane.
+    guessed it from the attached Lakehouse would write wherever the session
+    happened to live rather than where the object belongs.
     """
 
     schema, name = contract.object_id.schema, contract.object_id.object

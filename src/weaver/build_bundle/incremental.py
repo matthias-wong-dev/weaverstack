@@ -92,10 +92,10 @@ class BuildSelection:
 
 
 def _as_instant(value) -> datetime | None:
-    """One build epoch as something comparable, whatever the reader returned.
+    """One build build_datetime as something comparable, whatever the reader returned.
 
     Spark hands back a ``datetime``; a hand-built catalogue or a JSON round trip
-    hands back the string that was written. Anything else reads as no epoch
+    hands back the string that was written. Anything else reads as no build_datetime
     rather than being guessed at.
     """
 
@@ -143,11 +143,11 @@ def stale_alias_destinations(
         source = registered.get(alias.source)
         if destination is None or source is None:
             continue
-        source_epoch = _as_instant(source.build_epoch)
-        if source_epoch is None:
+        source_datetime = _as_instant(source.build_datetime)
+        if source_datetime is None:
             continue
-        destination_epoch = _as_instant(destination.build_epoch)
-        if destination_epoch is None or source_epoch > destination_epoch:
+        destination_datetime = _as_instant(destination.build_datetime)
+        if destination_datetime is None or source_datetime > destination_datetime:
             stale.append(alias.destination)
     return _ordered(stale)
 

@@ -64,7 +64,7 @@ def estate(tmp_path):
         documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     store = FilesystemStore()
     resolver = given_resolver(workspace=workspace, root=tmp_path)
     for item in ("Weaver", "Sales_LH"):
@@ -127,7 +127,7 @@ def build(estate, **overrides):
         "session": estate["session"],
         "executors": estate["executors"],
         "source_store": estate["store"],
-        "control_lakehouse": LakehouseBinding(
+        "catalogue_binding": LakehouseBinding(
             lakehouse=ItemRef("Weaver"), workspace_name="Demo"
         ),
     }
@@ -332,7 +332,7 @@ def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
     """A capability offered is not a capability acquired.
 
     Scoped to the Installer and this action set, not to builds in general: the
-    catalogue lives in the Weaver Lakehouse and is published with Spark SQL, so
+    catalogue lives in a Warehouse and is published over TDS, so
     an ordinary complete build does cross to Spark. What is guarded here is
     narrower and still worth guarding — the Installer used to evaluate the
     Session's Spark while assembling every batch's context, so an action set

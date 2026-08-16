@@ -154,7 +154,10 @@ def run_composition(
     ) as session:
         _warm_for(session, parsed_commands, workspace=workspace)
         try:
-            return _execute(entries, parsed_commands, session=session)
+            from weaver.run import new_workflow_id
+
+            with session.workflow(new_workflow_id()):
+                return _execute(entries, parsed_commands, session=session)
         finally:
             if getattr(args, "timings", False):
                 from .shell import _report_spending

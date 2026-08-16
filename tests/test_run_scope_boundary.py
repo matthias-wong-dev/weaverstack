@@ -159,7 +159,7 @@ def _answer_for(name: str):
 
 def _fabric():
     return Workspace(
-        workspace="My Workspace", catalogue="Lakehouse/Weaver", environment="weaver"
+        workspace="My Workspace", catalogue="Warehouse/Weaver", environment="weaver"
     )
 
 

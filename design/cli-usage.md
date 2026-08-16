@@ -29,8 +29,7 @@ file:
 ```bash
 weaver build ./estate \
   --workspace Analytics \
-  --environment weaver \
-  --catalogue Lakehouse/Weaver \
+  --catalogue Warehouse/Weaver \
   --bind Lakehouse/Sales=Sales
 ```
 
@@ -40,7 +39,7 @@ the keys and their default logical bindings are the values:
 ```yaml
 workspace: Analytics
 environment: Runtime
-catalogue: Lakehouse/Control
+catalogue: Warehouse/Control
 
 lakehouses:
   Sales_Dev: Lakehouse/Sales
@@ -82,7 +81,7 @@ resources per workspace it is asked about.
 
 **A workspace given at startup is inherited** by commands that name none, which
 is why the example above repeats no `--workspace`. Flags a command *does* give
-are applied on top, so `build --catalogue Lakehouse/Other` overrides the control
+are applied on top, so `build --catalogue Warehouse/Other` overrides the control
 Lakehouse without restating the workspace. Naming a different `--workspace`
 addresses that one instead, with its own resources.
 
@@ -184,14 +183,14 @@ end of the build in front of it.
 
 ## Wiping a whole estate
 
-Name the Weaver Lakehouse alongside the destinations:
+Name the catalogue Warehouse alongside the destinations:
 
 ```bash
-weaver wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --yes
+weaver wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --yes
 ```
 
 `wipe` removes the physical contents of what it is given, then deletes the
-catalogue claims of anything it emptied — unless the control Lakehouse is among
+catalogue claims of anything it emptied — unless the catalogue Warehouse is among
 them, in which case it skips that entirely, because the catalogue tables are
 going with it and deleting rows from a table about to be removed is work nobody
 needs.
@@ -200,7 +199,7 @@ That is worth knowing, because the catalogue tidy is not cheap: it deletes a row
 per claim, and for a from-scratch loop those are rows the next build rewrites
 immediately.
 
-So for a from-scratch loop, wipe the control Lakehouse too. Keep it out only
+So for a from-scratch loop, wipe the catalogue Warehouse too. Keep it out only
 when you mean to preserve the catalogue — decommissioning one target out of an
 estate that carries on.
 
@@ -257,7 +256,7 @@ It is not a workflow engine, and is not meant to become one: no conditionals,
 no parallelism, no variables, no retries, no project-root discovery. Commands
 run in order and stop at the first failure.
 
-## Install and control-plane bootstrap
+## Install and catalogue bootstrap
 
 Install Weaver into a Fabric Environment:
 
@@ -266,16 +265,17 @@ weaver install --workspace Analytics --environment Runtime
 ```
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
-by the ordinary build: `Lakehouse/_weaver` is composed into every parsed
-repository, bound to the configured Weaver Lakehouse, and its tables are created
+by the ordinary build: `Warehouse/_weaver` is composed into every parsed
+repository, bound to the configured catalogue Warehouse, and its tables are created
 by ordinary planned actions. A full reset is therefore a wipe followed by a
 build.
 
-The Weaver Lakehouse itself must already exist. It is a Fabric workspace item,
+The catalogue Warehouse itself must already exist. It is a Fabric workspace item,
 so creating one is provisioning rather than building, and a build against a
-missing Weaver Lakehouse fails preflight instead of quietly making one. A
-desktop build proves it — along with the Environment and every bound Lakehouse
-and Warehouse — from a single workspace listing before it starts a Livy session.
+missing catalogue Warehouse fails preflight instead of quietly making one. A
+desktop build proves it — along with every bound Lakehouse and Warehouse, and
+the Environment where one is named — from a single workspace listing before it
+starts a Livy session.
 
 ## Build
 
@@ -293,8 +293,8 @@ Without `=`, the physical target uses its configured logical default. With `=`,
 the right side is an invocation-only logical override. Lakehouse and Warehouse
 types must match.
 
-Every build adds the implicit binding from `Lakehouse/_weaver` to the configured
-Weaver Lakehouse. Catalogue publication is mandatory and registry certification
+Every build adds the implicit binding from `Warehouse/_weaver` to the configured
+catalogue Warehouse. Catalogue publication is mandatory and registry certification
 is last. Every build treats the repository as authoritative: a document removed
 from it loses its catalogue claims and its physical object is pruned. The build
 planner compares effective signatures with the reconciled Registry.
@@ -308,6 +308,12 @@ objects as storage, a Warehouse over TDS — and planning happens here against
 that state. Every build action runs in the Installer, wherever that is. Weaver
 running inside Fabric prepares, plans and installs in the session it is already
 in.
+
+A build needs no `--environment`. What it submits to Spark is SQL that imports
+nothing, so it runs on the workspace's default runtime; `load`, `test` and the
+other commands that run Weaver inside Fabric name the Environment
+`weaver install` published to. A build binding only Warehouses starts no Spark
+session at all.
 
 Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
 `--bundle <name>` to choose its name.
@@ -373,7 +379,7 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 
 Wipe clears everything in each selected typed target. Physical wipe does not
 require catalogue access; immediate catalogue cleanup is selected separately
-with `--unbind-from` (or the configured control Lakehouse).
+with `--unbind-from` (or the configured catalogue).
 
 ```bash
 weaver wipe \
@@ -406,5 +412,5 @@ weaver fabric capacity status  --resource-group <rg> --capacity-name <capacity>
 weaver fabric capacity suspend --resource-group <rg> --capacity-name <capacity>
 
 weaver fabric notebook push ./notebooks/Refresh.py --workspace "Analytics"
-weaver fabric notebook run Refresh --workspace "Analytics"
+weaver fabric notebook run Refresh --workspace "Analytics" --lakehouse "Sales"
 ```

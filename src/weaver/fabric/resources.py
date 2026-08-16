@@ -130,7 +130,7 @@ def create_lakehouse(
 
     Schemas are not optional and so are not a parameter. Weaver's catalogue lives
     in a schema called ``_``, and a Lakehouse created without schema support
-    cannot hold one — so a Weaver Lakehouse made without ``enableSchemas`` is
+    cannot hold one — so a Lakehouse made without ``enableSchemas`` is
     unusable, and a destination made without it puts managed tables somewhere
     other than ``Tables/<schema>/<table>``, which is the layout every resolved
     location assumes. There is no Weaver use for a Lakehouse that has neither.

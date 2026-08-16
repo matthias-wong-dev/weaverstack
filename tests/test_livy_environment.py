@@ -1,10 +1,11 @@
 """LivySession attaches its Environment from the workspace, without touching Fabric.
 
-A workspace that names an ``environment`` attaches it; one that does not is an
-error, because a Livy session is how Spark work crosses and it has nothing to
-attach. Starting the session asserts no Weaver install — that is
+A workspace that names an ``environment`` attaches it; one that does not starts
+on the workspace's default runtime, which is all a body of Spark SQL needs.
+Starting the session asserts no Weaver install — that is
 :meth:`~weaver.fabric.livy.LivySession.ensure_weaver`, submitted by a crossing
-that carries a body importing Weaver.
+that carries a body importing Weaver, and the one place a missing Environment
+is refused.
 
 Exercised with a fake resolver, so no workspace or capacity is needed.
 """
@@ -19,6 +20,22 @@ from weaver.fabric import client, livy
 from weaver.fabric.livy import LivySession, environment_bootstrap
 from weaver.fabric.resources import Item
 from weaver.workspaces import Workspace
+
+
+def _spark_workspace(**changes) -> Workspace:
+    """A workspace that can start Spark: a catalogue, and a Lakehouse to live in."""
+
+    from weaver.declaration.model import WeaverItemId
+    from weaver.workspaces import TargetDeclaration
+
+    return Workspace(
+        workspace="WS",
+        catalogue="Warehouse/Weaver",
+        lakehouses={
+            "Sales_LH": TargetDeclaration(item=WeaverItemId.parse("Lakehouse/Sales"))
+        },
+        **changes,
+    )
 
 
 class _FakeResolver:
@@ -45,9 +62,7 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
         "weaver.fabric.resources.find_item",
         lambda ws, name, *, item_type, client: Item("env99", name, item_type, ws.id),
     )
-    workspace = Workspace(
-        workspace="WS", catalogue="Lakehouse/Weaver", environment="Weaver"
-    )
+    workspace = _spark_workspace(environment="Weaver")
 
     session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
@@ -100,12 +115,51 @@ def test_start_without_an_environment_sends_no_conf(monkeypatch):
     assert "conf" not in create
 
 
-def test_a_workspace_without_an_environment_is_an_error():
+def test_a_workspace_without_an_environment_starts_on_the_default_runtime():
+    """A build's statements import nothing, so they need no published wheel.
+
+    Refusing here would put a five-minute publish in front of `weaver build`,
+    which submits Spark SQL and never `import weaver`.
+    """
+
+    session = LivySession.for_workspace(
+        _spark_workspace(), resolver=_FakeResolver(), token="t"
+    )
+
+    assert session.environment_id is None
+
+
+def test_importing_weaver_without_an_environment_is_an_error(monkeypatch):
+    """The need is stated where it arises: an Environment is what carries Weaver."""
+
     from weaver.errors import CommandError
 
-    workspace = Workspace(workspace="WS", catalogue="Lakehouse/Weaver")
+    session = LivySession.for_workspace(
+        _spark_workspace(), resolver=_FakeResolver(), token="t"
+    )
+    monkeypatch.setattr(
+        type(session), "run", lambda self, code, **kw: pytest.fail("submitted anyway")
+    )
 
-    with pytest.raises(CommandError, match="environment"):
+    with pytest.raises(CommandError, match="--environment"):
+        session.ensure_weaver()
+
+
+def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
+    """Fabric creates a Spark session against a Lakehouse, so one has to exist.
+
+    The catalogue is a Warehouse, so the
+    home comes from the workspace's own Lakehouses — and a workspace that
+    configures none is doing Warehouse work, which needs no Spark at all.
+    """
+
+    from weaver.errors import CommandError
+
+    workspace = Workspace(
+        workspace="WS", catalogue="Warehouse/Weaver", environment="Weaver"
+    )
+
+    with pytest.raises(CommandError, match="needs a Lakehouse to attach to"):
         LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
 
 

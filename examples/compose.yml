@@ -11,12 +11,12 @@
 compose:
   # Everything from empty: clear the estate, build it, load it, test it.
   dev:
-    # The control Lakehouse is wiped too, and that is the whole point of naming
-    # it: `wipe` skips the catalogue unbind entirely when the Weaver Lakehouse
+    # The catalogue Warehouse is wiped too, which is why it is named here:
+    # `wipe` skips the catalogue unbind entirely when the Warehouse holding it
     # is going, because deleting rows from tables that are about to be removed
     # is work nobody needs. Leaving it out cost about eighty seconds per cycle
     # to tidy a catalogue the very next command rebuilds.
-    - wipe Lakehouse/Sales Warehouse/Reporting Lakehouse/Weaver --workspace-config "examples/weaver_example.yml"
+    - wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --workspace-config "examples/weaver_example.yml"
     - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
     - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
     - test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"

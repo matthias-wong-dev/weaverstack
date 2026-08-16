@@ -28,7 +28,10 @@ from factories import (
 )
 from support.workspaces import WORKSPACE
 
-from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
+from weaver.build_bundle import (
+    WarehouseBinding,
+    generate_item_build_bundle,
+)
 from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE
 from weaver.catalogue.state import Catalogue
 from weaver.locations import Location
@@ -77,7 +80,7 @@ def build(repository, tmp_path, *, inventories=None, catalogue=None):
         if inventories is not None
         else estate_inventories(repository, empty=True),
         catalogue=catalogue if catalogue is not None else Catalogue({}),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )

@@ -21,6 +21,8 @@ in `tests/test_run_remote_boundary.py`.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from weaver.sessions.requirements import (
@@ -139,7 +141,7 @@ def _scope(monkeypatch):
     )
     scope = ConsoleScope.__new__(ConsoleScope)
     scope.workspace = Workspace(
-        workspace="W", catalogue="Lakehouse/Weaver", environment="weaver"
+        workspace="W", catalogue="Warehouse/Weaver", environment="weaver"
     )
     scope.auth = _Resource()
     scope.livy = _Resource()
@@ -183,3 +185,50 @@ def test_an_undeclared_warm_up_still_starts_everything(monkeypatch):
 
     assert scope.auth.started == 1
     assert scope.livy.started == 1
+
+
+# --- a Warehouse-only build asks for no Spark --------------------------------
+
+
+def test_a_build_binding_only_warehouses_declares_no_livy():
+    """The migration's headline claim, at the point it costs something.
+
+    A Warehouse-only build writes T-SQL into Warehouses and its catalogue into
+    another, so it submits no Spark. Declaring Livy anyway would have the
+    console start a Spark session — a minute, and a capacity's only slot — for
+    a build that never uses it.
+    """
+
+    from weaver.sessions.requirements import LIVY, ONELAKE, TDS
+    from weaver_cli.main import _requires_build
+
+    declared = _requires_build(
+        SimpleNamespace(item_bindings=["Warehouse/Reporting=Analysis"])
+    )
+
+    assert TDS in declared
+    assert LIVY not in declared
+    assert ONELAKE not in declared
+
+
+def test_a_build_binding_a_lakehouse_still_declares_livy():
+    from weaver.sessions.requirements import LIVY, ONELAKE
+    from weaver_cli.main import _requires_build
+
+    declared = _requires_build(
+        SimpleNamespace(item_bindings=["Lakehouse/Sales", "Warehouse/Reporting"])
+    )
+
+    assert LIVY in declared
+    assert ONELAKE in declared
+
+
+def test_a_build_that_names_no_binding_declares_the_superset():
+    """Bindings can come from configuration, so silence is not "nothing"."""
+
+    from weaver.sessions.requirements import LIVY, ONELAKE, TDS
+    from weaver_cli.main import _requires_build
+
+    declared = _requires_build(SimpleNamespace(item_bindings=None))
+
+    assert {LIVY, ONELAKE, TDS} <= declared

@@ -6,12 +6,12 @@ This document defines the authoritative central catalogue: its ownership,
 records, reconciliation, and certification behaviour.
 
 The catalogue scopes installations by `(item_type, item_name)`, projects each
-item's own `alias.yml`, and builds generated `Lakehouse/_weaver` through the
+item's own `alias.yml`, and builds generated `Warehouse/_weaver` through the
 ordinary planner.
 
 For every successfully built object, the catalogue records the metadata declared
-by its Weaver document. It lives in schema `_` of the Weaver Lakehouse and
-provides the control-plane records used by later operations.
+by its Weaver document. It lives in schema `_` of a configured Fabric
+Warehouse and provides the records later operations read.
 
 Weaver documents remain authoritative for descriptive metadata, keys, lineage,
 dependencies, and behavioural flags. The catalogue contains their installed
@@ -62,24 +62,27 @@ The bound item's name is an attribute rather than part of its identity. Rebindin
 an item to a different Lakehouse updates its `_.Installation` row instead of
 adding a second installation.
 
-## The ten tables
+## The eleven tables
 
 Every table carries `signature` — the content hash of whatever the row projects —
 plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
-`row_delete_datetime`), which the ordinary build appends to any Delta table.
+`row_delete_datetime`), which the ordinary build appends to any table it
+creates. Every physical name is the public sentence-case spelling — `[Item
+type]`, `[Build datetime]` — and the internal Python keys stay snake case; the
+persistence boundary maps between them and nothing above it sees SQL.
 
 | Table | One row per | Notes |
 |---|---|---|
 | `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
-| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows, `load` for something that does the work of filling one, and `test` or `assumption` for the runnable form of a validation. `build_epoch` dates the build that published the row. |
+| `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows, `load` for something that does the work of filling one, and `test` or `assumption` for the runnable form of a validation. `build_datetime` dates the build that published the row. |
 | `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
 | `_.FolderDictionary` | managed folder | Keeps the folder's two-part identity, and its file key — the scope of what Weaver manages inside it. |
 | `_.ColumnDictionary` | described column | Purely descriptive: the columns an author wrote a note about, plus Weaver's surrogate. Not every column. |
-| `_.IndexDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
+| `_.KeyDictionary` | logical key | The primary key and any alternate keys. Nothing is built. |
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
 | `_.TestDictionary` | Test or Assumption | The **logical** authored validation — `test_type`, description and the declared `primary_key`. The procedure or module it compiles to is a physical artefact and is certified in `_.Registry`; there is no Registry row under the logical validation ID. See [validation](validation.md). |
-| `_.Dependency` | consumer-owned edge | The two-/three-/four-part spelling the consumer authored, plus `is_within_item`. |
+| `_.Dependency` | referencing-owned edge | The spelling the author wrote, kept as `dependency_reference`, plus the edge Weaver resolved it to. |
 | `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from the consuming item's `alias.yml`. |
 
 An alias destination also gets a `_.Registry` row, typed as what it physically is
@@ -115,12 +118,12 @@ recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-Weaver composes `Lakehouse/_weaver` in memory from the authoritative table
+Weaver composes `Warehouse/_weaver` in memory from the authoritative table
 definitions and parses the generated schema and source files through the same
 static readers used for authored content. The ordinary item planner and installer
 build the result; authored source is unchanged.
 
-Every build implicitly binds `Lakehouse/_weaver` to the control Lakehouse.
+Every build implicitly binds `Warehouse/_weaver` to the catalogue Warehouse.
 Missing tables are classified as new and created before the same bundle reaches
 the catalogue tail. Certified unchanged tables emit no physical action, so their
 existing rows remain in place.
@@ -140,8 +143,9 @@ case — the statements are correct against it either way.
 
 Initialisation uses the ordinary authoritative prune, but the built-in
 `_weaver` inventory is restricted to the reserved `_` schema. Application
-schemas and Files areas in the same control Lakehouse are therefore outside its
-scope and cannot be treated as orphans.
+schemas in the same Warehouse are therefore outside its scope and cannot be
+treated as orphans. That is what lets the catalogue share a Warehouse with a
+user's own schemas: Weaver owns `_` there and nothing else.
 
 ## How a build writes it
 
@@ -166,7 +170,7 @@ Publication is then a diff:
 
 ```python
 changes = current.diff(publishable)
-dml     = changes.render_dml(installation=...)
+dml = changes.render_dml(installation=...)
 ```
 
 `current` produces the report of new, changed, unchanged, and removed rows.
@@ -179,7 +183,7 @@ the reader's prior state; the targeted diff tests assert that this produces
 byte-identical statements for different persisted catalogues.
 
 Nothing about a binding reaches the projection. Target name, Weaver version, the
-Installation row and the publication epoch are supplied at render time, because
+Installation row and the publication build_datetime are supplied at render time, because
 they are things a *build* knows and a repository does not.
 
 Generation does not let the catalogue's *state* reach the plan. It briefly did, to
@@ -206,7 +210,7 @@ An unchanged row is a genuine no-op. The merge's `MATCHED` branch is guarded by 
 comparison of every non-key column, so rebuilding unchanged Weaver document writes nothing and
 does not move `row_update_datetime`.
 
-`build_epoch` is supplied by the installer, excluded from the merge
+`build_datetime` is supplied by the installer, excluded from the merge
 comparison, and written only on insert. Including it in the comparison would
 update every row on every build because the value changes for each publication.
 
@@ -240,7 +244,7 @@ healed — because its claims may be perfectly true about a Lakehouse this build
 cannot see, and deleting them would destroy the record of a real installation.
 
 A physical target can retain Registry rows for every logical item bound to it.
-For an intentional shared target, reset the control plane with
+For an intentional shared target, reset the catalogue with
 `weaver.wipe(..., unbind_from=...)` rather than unbinding individual residue;
 the next build bootstraps the catalogue from the built-in item.
 
@@ -250,17 +254,16 @@ that can see two items claiming one physical object. It refuses such a request
 (`load_dag`), and deliberately only when the ambiguity touches what was asked
 for.
 
-Schema `_` in the Weaver Lakehouse's `Tables` area is reserved from ordinary
-prune. An application build normally cannot see it — prune is scoped to the bound
-destination's own storage, and the catalogue lives in the Weaver Lakehouse — but a
-repository built *into* the Weaver Lakehouse would, and a prune that dropped `_`
-would take the record of every installation with it.
+Schema `_` is reserved from ordinary prune. A build into the Warehouse holding
+the catalogue would otherwise see it, and a prune that dropped `_` would take
+the record of every installation with it. This is what makes a shared catalogue
+host safe: a user's own schemas in that Warehouse are pruned by their own
+items' rules, and `_` is claimed by neither.
 
 The load layer's `_` is a different thing wearing the same name: a folder
 `Files/_/Load` in a bound Lakehouse, and a schema `_` in a bound Warehouse. Both
 are *generated and managed* rather than reserved, so ordinary prune is exactly
-what removes them once an item stops declaring load code. They never meet the
-catalogue's `_`, which is a `Tables` schema in a different item.
+what removes them once an item stops declaring load code.
 
 ## Reading it tolerantly
 
@@ -274,37 +277,36 @@ Two absences are ordinary and read as data:
 An unexpected extra column is ignored, so a newer catalogue does not break an older
 Weaver.
 
-Everything else propagates. A permission error, a corrupt Delta log or a broken
-session read as "no rows" would tell the next build that nothing is catalogued —
-and once drop policy lands, that is a licence to remove an estate. So absence is
-recognised only by Spark's own `TABLE_OR_VIEW_NOT_FOUND` error class, never by
-message text.
+Everything else propagates. A permission error or a broken connection read as
+"no rows" would tell the next build that nothing is catalogued — and once drop
+policy lands, that is a licence to remove an estate. So absence is not read off a
+failure at all: the reader asks `INFORMATION_SCHEMA` what the `_` schema holds,
+once per connection, and a table that is not in the answer is absent. A failure
+is a failure.
 
 ## Target addressing during catalogue work
 
-**The Spark session is attached to the Weaver Lakehouse.** That is the fixed
-control-plane context: it is where the session lives, and it is a useful execution
-attachment. It is not what makes an operation land in the right place.
+**The catalogue names itself in two parts.** `[_].[Registry]` means the Registry
+of the Warehouse the connection is open against, and a Warehouse connection
+reaches one database — so there is no ambiguity to resolve and nothing for the
+statement to inherit.
 
-Correctness does not depend on it. Every statement names the Lakehouse it is
-about, including the catalogue's own — `` `_`.`Registry` `` would mean "the
-Registry of whatever the session is attached to", which is true today and would
-stop being true the moment anything changed the attachment. Destination Lakehouses
-are the **variable data plane**, and one session addresses all of them:
+Destination Lakehouses and Warehouses are a different matter. They are the
+variable data plane, one build may write to several, and each is named
+explicitly:
 
 ```text
-Spark session                      attached to Weaver, for execution
-Weaver Lakehouse                   control plane, named explicitly
+Weaver catalogue                   a Warehouse, reached over TDS
 ├── _.Installation
 ├── _.Registry
 └── …
 Build targets                      data plane, named explicitly
 ├── Lakehouse A
 ├── Lakehouse B
-└── Lakehouse C
+└── Warehouse C
 ```
 
-One invocation can therefore build several Lakehouses without conflating objects
+One invocation can therefore build several targets without conflating objects
 with the same schema and name.
 
 ### A Lakehouse has two addresses, and a build needs both
@@ -331,30 +333,19 @@ declaring a schema of the same name therefore stay apart without either naming
 the other.
 
 Both are needed and neither substitutes for the other: a folder is created at a
-path and has no catalogue name, while a view exists only as a name and has no path
-of its own.
+path and has no catalogue name, while a view exists only as a name and has no
+path of its own. A Warehouse has neither — its objects are named over the
+connection the statement runs on.
 
-`SparkCatalogue` binds a session to one destination and is how every catalogue
-operation is performed — execute, create a schema, list views, ask whether an
-object exists. Enumerating a destination's *schemas* is deliberately not among
-them: Fabric refuses `SHOW SCHEMAS IN `workspace`.`lakehouse``, and a bare
-`SHOW SCHEMAS` answers for the attached Lakehouse only, so schema discovery reads
-the destination's `Tables/` area through the store instead.
+A Fabric Spark session is still created *against* a Lakehouse, because its id is
+in the Livy URL. Which Lakehouse carries no meaning: it is a home, not a
+destination, and it is taken from the workspace's own configured Lakehouses.
 
-`ItemRef` identifies the logical item. The workspace adapter resolves both
-addresses, the plan carries the item, and the executor uses the resolved target.
-
-Two things worth knowing:
-
-- On Fabric a Lakehouse has two *storage* addresses as well — the DFS location the
-  store lists through, and the `abfss://` root Spark reads and writes through.
-  `LakehouseSparkLocation` carries the second; target *inspection* lists through
-  the first.
-- Neither address is in the bundle. Both embed workspace and item ids on Fabric,
-  and a temporary directory locally, so a bundle carrying one would not be
-  comparable between environments ([How Weaver Build Works](how-does-build-work.md), section 15). The bundle names the
-  item; the installer resolves it. That is why a payload says
-  `{{object:_.Registry}}` and not the qualified name.
+Neither address is in the bundle. Both embed workspace and item ids on Fabric,
+so a bundle carrying one would not be comparable between environments ([How
+Weaver Build Works](how-does-build-work.md), section 15). The bundle names the
+item; the installer resolves it. That is why a payload says
+`{{object:_.Registry}}` and not the qualified name.
 
 ## Incremental installation
 
@@ -366,14 +357,55 @@ replacement of an existing object, while the incoming catalogue projection still
 advances. Planned creates and managed drops are strict, so an unexpected physical
 collision fails rather than being hidden.
 
-## The catalogue lives in a Lakehouse
+## `_.Log` is evidence, not state
 
-The control plane is a Lakehouse, and every table above is Delta read and
-written through Spark SQL. Moving it to a Warehouse is separate future work and
-is not part of the Fabric-only refactor: it changes the transport every
-catalogue read and write uses, the concurrency the Registry can assume, and what
-a build needs before it can plan. Nothing in this document should be read as
-preparing for that move.
+One more table lives under `_`, and it is not a catalogue table. `_.Log` holds
+one row per settled unit of Weaver work: what ran, against which physical
+target, how it ended and how long it took. Nothing reconciles it and nothing
+projects it from a declaration — a build creates the table and a run appends to
+it.
+
+```text
+[Log SK]                 a meaningless immutable surrogate
+[Workflow ID]            correlates every row one workflow produced
+[Task type]              load, test
+[Target type]            Lakehouse, Warehouse
+[Target name]            the physical item
+[Schema name]            the object, where the work was about one
+[Object name]
+[Result]                 Succeeded, Failed, Skipped, Blocked
+[Started datetime]
+[Completed datetime]
+[Duration milliseconds]
+[Message]                one concise line
+[Details]                the node's own record, as JSON
+```
+
+There is no run row and no completion row: a workflow *is* its rows. A reader
+asking what a run did selects on `[Workflow ID]`.
+
+Rows are appended asynchronously, through a flusher the Session owns and caches
+per write stream. `submit` does not wait for the Warehouse, writes batch, and
+ordering is preserved; a failure is remembered and raised by `flush` or `close`
+rather than leaving an empty table to read as an empty run. Session close is the
+durability barrier, and the trade is stated rather than hidden:
+
+> `_.Log` is operational evidence, not transactional authority for installed
+> catalogue state.
+
+A dry run writes nothing. A row for work nobody did would be evidence of a load
+that never happened.
+
+## The catalogue lives in a Warehouse
+
+Every table above is a Warehouse table under `_`, read and written over TDS.
+Nothing about the catalogue needs Spark: a Warehouse-only estate builds, loads
+and tests without a Spark session ever starting.
+
+The Warehouse need not be Weaver's. `catalogue="Warehouse/Curated"` puts `_`
+alongside a user's own schemas, and Weaver owns `_` there and nothing else —
+initialisation creates only `_`, prune never claims a non-`_` object, and
+resetting the catalogue never touches the Warehouse containing it.
 
 ## See also
 

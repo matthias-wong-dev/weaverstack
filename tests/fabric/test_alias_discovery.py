@@ -17,6 +17,7 @@ endpoint refresh and reading through the aliased name, is proven in
 from __future__ import annotations
 
 import pytest
+from conftest import staged_repository_root
 from factories import FixtureCatalogue, alias_repository, item_bindings
 
 from weaver.targets import ItemRef
@@ -31,6 +32,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
+    fabric_staging_lakehouse,
     livy_session,
     weaver_session,
     tmp_path_factory,
@@ -49,8 +51,9 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
 
     root = tmp_path_factory.mktemp("discovery-repo")
     alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
-    upload(store, resolver.weaver_items_root, root)
-    repository = parse_item_repository(resolver.weaver_items_root, store=store)
+    staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
+    upload(store, staged, root)
+    repository = parse_item_repository(staged, store=store)
 
     bundle = generate(
         workspace=fabric_workspace,
@@ -59,9 +62,10 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         repository=repository,
         bindings=item_bindings((PRODUCER, producer.name), (CONSUMER, consumer.name)),
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
         name="aliasdiscovery",
+        staging=producer.name,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
 

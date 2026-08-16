@@ -216,7 +216,7 @@ class Installer:
         # per item — and rows written by one build have to be indistinguishable in
         # age, or an alias and the source it points at could order against each
         # other merely for having been written a few milliseconds apart.
-        epoch = _epoch(started)
+        build_datetime = _epoch(started)
         sequence_results: list[SequenceResult] = []
         stop = False
 
@@ -224,7 +224,9 @@ class Installer:
             if stop:
                 sequence_results.append(_skipped_sequence(sequence))
                 continue
-            result = _run_sequence(sequence, resolved, bundle, self, epoch=epoch)
+            result = _run_sequence(
+                sequence, resolved, bundle, self, build_datetime=build_datetime
+            )
             sequence_results.append(result)
             if result.status == FAILED:
                 stop = True
@@ -321,7 +323,7 @@ def _run_sequence(
     bundle: BuildBundle,
     installer: "Installer",
     *,
-    epoch: str | None = None,
+    build_datetime: str | None = None,
 ) -> SequenceResult:
     action_results: list[ActionResult] = []
     failed = False
@@ -329,7 +331,7 @@ def _run_sequence(
     # The sequence is the unit worth naming, and it already carries the words:
     # the planner wrote "publish catalogue dictionaries and installations" when
     # it built these, and nothing was showing it. A batch apiece described its
-    # executors instead — "Lakehouse/Weaver: views" for what is plainly the
+    # executors instead — "Warehouse/Weaver: views" for what is plainly the
     # catalogue being updated — which is the mechanism dressed up as an answer.
     # The target belongs on the line, not in the detail. "Build dependency
     # layer" appears once per layer, so four identical lines with four different
@@ -345,7 +347,7 @@ def _run_sequence(
                 target=target,
                 sql=installer.sql_for(target.bound),
                 targets=resolved,
-                epoch=epoch,
+                build_datetime=build_datetime,
             )
             if failed:
                 action_results.extend(

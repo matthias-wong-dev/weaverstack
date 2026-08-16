@@ -421,6 +421,11 @@ class Runner:
         location: str | None = None,
         raised: bool = False,
     ) -> RunNodeResult:
+        target_type = getattr(node.physical_target, "kind", None)
+        if target_type:
+            target_type = str(target_type).title()
+        target_name = getattr(node.physical_target, "name", None)
+        object_id = getattr(node.logical_id, "object_id", None)
         return RunNodeResult(
             node_id=node.node_id,
             physical_target=str(node.physical_target),
@@ -435,6 +440,10 @@ class Runner:
             result=result,
             started_at=started_at,
             finished_at=_now() if executed else None,
+            target_type=target_type,
+            target_name=target_name,
+            schema_name=getattr(object_id, "schema", None),
+            object_name=getattr(object_id, "object", None),
         )
 
     def _result(self, nodes, *, started: str) -> RunResult:

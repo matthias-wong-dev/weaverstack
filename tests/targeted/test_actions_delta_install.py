@@ -156,8 +156,8 @@ def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     """The difference between a build that works and one that looks like it does.
 
     A two-part name resolves through whatever the session is attached to — the
-    Weaver Lakehouse — so an unresolved statement would create the object in the
-    control plane and then read it back from there, and pass. The token must be
+    attached Lakehouse — so an unresolved statement would create the object in the
+    attached Lakehouse and then read it back from there, and pass. The token must be
     gone, and gone in favour of *this batch's* destination.
     """
 
@@ -309,7 +309,7 @@ def _load_context(tmp_path, columns=("Customer id", "Customer name")):
 
     from weaver.store import FilesystemStore
 
-    workspace = given_workspace(catalogue="Lakehouse/Weaver")
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
     return installation_context(
         store=FilesystemStore(),
         # Rooted on this test's own filesystem, so what the resolver names is

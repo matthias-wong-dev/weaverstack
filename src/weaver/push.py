@@ -1,4 +1,4 @@
-"""Validate and replace the authored repository in a Weaver Lakehouse."""
+"""Validate and replace an authored repository at a named location."""
 
 from __future__ import annotations
 

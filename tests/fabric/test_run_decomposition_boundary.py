@@ -124,7 +124,10 @@ def test_the_run_read_the_estate_rather_than_shipping_itself(loaded):
 
     _, spent = loaded
 
-    assert spent.get("livy.spark_sql", 0) > 1
+    # One Spark read, not none: a Lakehouse's views live only in the Spark
+    # catalogue. The estate's *catalogue* is a Warehouse and does not come this
+    # way at all, which is why this is no longer more than one.
+    assert spent.get("livy.spark_sql", 0) >= 1
     assert "livy.load" not in spent
     assert "livy.read_catalogue" not in spent
 

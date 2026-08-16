@@ -126,8 +126,8 @@ def generate_item_build_bundle(repository, **kwargs):
     kwargs.setdefault("target_inventories", inventories)
     kwargs.setdefault("catalogue", Catalogue({}))
     kwargs.setdefault(
-        "control_lakehouse",
-        LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
+        "catalogue_binding",
+        WarehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE),
     )
     return _generate_item_build_bundle(repository, **kwargs)
 
@@ -715,8 +715,9 @@ def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
         store=FilesystemStore(),
     )
 
-    # Only the control Lakehouse's own refresh, after catalogue publication.
-    assert _refreshed(bundle) == {"control-lakehouse-Weaver_Control"}
+    # Nothing at all: a Warehouse has no analytics endpoint of its own, and the
+    # catalogue is written over TDS into the Warehouse that holds it.
+    assert _refreshed(bundle) == set()
 
 
 def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
@@ -733,7 +734,7 @@ def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
         store=FilesystemStore(),
     )
 
-    assert _refreshed(bundle) == {"control-lakehouse-Weaver_Control"}
+    assert _refreshed(bundle) == set()
     assert any(
         action.kind == "build_folder" for _s, _b, action in bundle.plan.actions()
     )
@@ -781,17 +782,16 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
 
-    assert [sequence.description for sequence in bundle.plan.sequences[-3:]] == [
+    assert [sequence.description for sequence in bundle.plan.sequences[-2:]] == [
         "publish catalogue dictionaries and installations",
         "publish item registry last",
-        "refresh the Weaver Lakehouse SQL endpoint",
     ]
-    registry = bundle.plan.sequences[-2]
+    registry = bundle.plan.sequences[-1]
     assert all(
         action.kind == "publish_registry"
         for batch in registry.batches
@@ -805,14 +805,16 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
         for batch in registry.batches
         for action in batch.actions
     ]
-    assert "`item_name` = 'Raw'" in registry_payloads[0]
-    assert "`item_name` = 'Audit'" in registry_payloads[0]
-    control_refresh = bundle.plan.sequences[-1]
-    assert [
-        (batch.target_id, action.kind)
-        for batch in control_refresh.batches
-        for action in batch.actions
-    ] == [("control-lakehouse-Weaver_Control", "refresh_sql_endpoint")]
+    assert "[Item name] = N'Raw'" in registry_payloads[0]
+    assert "[Item name] = N'Audit'" in registry_payloads[0]
+    # A Lakehouse item still refreshes its own endpoint, inside its own group.
+    # What no longer happens is a refresh *after* the catalogue: it is written
+    # over TDS into the Warehouse that holds it, and is readable when it commits.
+    assert not any(
+        action.kind == "refresh_sql_endpoint"
+        for sequence, _b, action in bundle.plan.actions()
+        if sequence.number >= registry.number
+    )
 
 
 def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
@@ -843,12 +845,12 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
         for _sequence, batch, action in bundle.plan.actions()
         if action.kind == "refresh_sql_endpoint"
     }
-    # Both Lakehouses, and the control plane after catalogue DML. The Warehouse
-    # gets none: it *is* reached over SQL and has no endpoint of its own to sync.
+    # Both Lakehouses, and nothing else. A Warehouse is reached over SQL and has
+    # no endpoint of its own to sync — and neither has the catalogue, which is a
+    # Warehouse too.
     assert refreshed == {
         "Lakehouse-Raw--lakehouse-Raw_Dev",
         "Lakehouse-Curated--lakehouse-Curated_Dev",
-        "control-lakehouse-Weaver_Control",
     }
 
     at = {
@@ -858,7 +860,7 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
     assert (
         at["object-Lakehouse--Raw--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["refresh-sql-endpoint-control"]
+        < at["publish-registry"]
     )
 
 
@@ -887,29 +889,29 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     assert "Lakehouse-Raw--lakehouse-Raw_Dev" in refreshed
 
 
-def test_catalogue_requires_an_explicit_control_plane_target(tmp_path):
+def test_catalogue_requires_an_explicit_catalogue_warehouse(tmp_path):
     repository = _repository(_estate(tmp_path))
-    with pytest.raises(BuildError, match="control-plane Lakehouse"):
+    with pytest.raises(BuildError, match="catalogue Warehouse"):
         generate_item_build_bundle(
             repository,
             bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
             output=Location(str(tmp_path / "bundle")),
             store=FilesystemStore(),
-            control_lakehouse=None,
+            catalogue_binding=None,
         )
 
 
 def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     repository = _repository(_estate(tmp_path))
-    control = LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
+    control = WarehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
     bundle = generate_item_build_bundle(
         repository,
         bindings=ItemBindings(
-            (ItemBinding(WeaverItemId.parse("Lakehouse/_weaver"), control),)
+            (ItemBinding(WeaverItemId.parse("Warehouse/_weaver"), control),)
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        control_lakehouse=control,
+        catalogue_binding=control,
     )
 
     physical = [
@@ -917,10 +919,7 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind == "build_table"
     ]
-    assert len(physical) == 11
-    assert (
-        bundle.plan.sequences[-1].description
-        == "refresh the Weaver Lakehouse SQL endpoint"
-    )
-    assert bundle.plan.sequences[-2].description == "publish item registry last"
+    # The catalogue tables, plus `_.Log`.
+    assert len(physical) == 12
+    assert bundle.plan.sequences[-1].description == "publish item registry last"
     assert bundle.plan.targets[0].logical_item_name == "_weaver"

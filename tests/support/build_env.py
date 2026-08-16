@@ -97,7 +97,7 @@ class Journey:
     The suite's cost is *estates*, not assertions: a module-scoped Fabric estate
     is one full generate-and-install, and six checks over it cost exactly what
     one does. The old shape therefore paid an install per module and could only
-    ever ask "what did a first build do?" — which is the question the local suite
+    ever ask "what did a first build do?" — which is the question the fast suite
     already answers, and not the one incremental logic lives in.
 
     A journey inverts that. It installs once, then *moves* the estate — change a
@@ -231,10 +231,13 @@ class BuildEnv:
     #: one body serves both transports — the only way to exercise code that must
     #: behave identically in a notebook and on a laptop.
     run_python: Callable[[str], Any] = None
-    #: The destination Lakehouse being built, and the Weaver Lakehouse holding the
-    #: catalogue. Two, always — even the simplest install writes to both.
+    #: The destination Lakehouse being built. The catalogue is a Warehouse and
+    #: is reached over TDS, so it has no Spark destination to carry here.
     destination: Any = None
-    weaver_destination: Any = None
+    #: Where this environment writes a bundle, by name. A bundle needs OneLake
+    #: and the catalogue has none, so the environment says where rather than
+    #: leaving a caller to guess.
+    bundle_location: Callable[[str], Any] = None
     #: Every Lakehouse this fixture bound, by the item that owns it. Empty unless
     #: the fixture asked for more than one — a cross-item alias is the only thing
     #: that does, and it needs both ends addressable to prove the alias points
@@ -301,9 +304,9 @@ class BuildEnv:
         ``queries``, ``schemas`` and ``tables`` are mappings of evidence name to,
         respectively, a statement, a schema name and a ``Schema.Object`` pair. A
         value may instead be a ``(text, destination)`` pair, so one observation
-        can span the destination Lakehouse *and* the control plane — the pairing
-        that proves a build wrote where it claimed and nowhere else, and which
-        two calls could never make about the same instant.
+        can span two destinations — the pairing that proves a build wrote where
+        it claimed and nowhere else, and which two calls could never make about
+        the same instant.
 
         Ask ``tables`` rather than ``queries`` where *absent* is a legitimate
         answer: a SELECT against a missing table raises instead of reporting.
@@ -400,7 +403,7 @@ def _upload_tree(store, source: Path, destination) -> None:
     """Install a repository, *replacing* whatever was there under that name.
 
     Replacing, not merging. Two modules install different fixtures under the same
-    repository name into one shared Weaver Lakehouse, and a plain file-by-file
+    repository name into one shared staging Lakehouse, and a plain file-by-file
     write left the previous fixture's objects behind — so a Warehouse estate
     inherited a Lakehouse-reading table from a repository it had never heard of,
     and failed on a three-part name naming a Lakehouse that does not exist here.

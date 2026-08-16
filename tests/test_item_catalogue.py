@@ -25,10 +25,6 @@ from weaver.catalogue.tables import (
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.locations import Location
-from weaver.spark import FabricSparkTarget
-
-#: The Weaver Lakehouse every catalogue statement is addressed to.
-WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"):
@@ -114,12 +110,12 @@ def test_two_items_of_same_type_have_independent_scope_and_dml(tmp_path):
     raw = _project(repository, "Lakehouse/Raw", "Raw_Dev")
     curated = _project(repository, "Lakehouse/Curated", "Curated_Dev")
 
-    raw_sql = "\n".join(reconcile(raw, destination=WEAVER).statements)
-    curated_sql = "\n".join(reconcile(curated, destination=WEAVER).statements)
-    assert "`item_name` = 'Raw'" in raw_sql
-    assert "`item_name` = 'Curated'" not in raw_sql
-    assert "`item_name` = 'Curated'" in curated_sql
-    assert "`item_name` = 'Raw'" not in curated_sql
+    raw_sql = "\n".join(reconcile(raw).statements)
+    curated_sql = "\n".join(reconcile(curated).statements)
+    assert "[Item name] = N'Raw'" in raw_sql
+    assert "[Item name] = N'Curated'" not in raw_sql
+    assert "[Item name] = N'Curated'" in curated_sql
+    assert "[Item name] = N'Raw'" not in curated_sql
 
 
 def test_rebinding_changes_only_installation_attribute_not_scope(tmp_path):
@@ -238,21 +234,22 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
 
     assert row["item_type"] == "Warehouse"
     assert row["item_name"] == "Reporting"
-    assert row["dependency_name"] == "Sales.PortableCustomer"
-    assert row["is_within_item"] is False
+    assert row["dependency_reference"] == "Sales.PortableCustomer"
+    # The author wrote a local name; resolution followed the alias across, so
+    # the row keeps both the spelling and the item the edge actually reached.
+    assert row["referenced_item_type"] == "Lakehouse"
+    assert row["referenced_item_name"] == "Curated"
 
 
 def test_registry_merge_is_last_and_item_scoped(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
-    reconciliation = reconcile(
-        _project(repository, "Lakehouse/Raw", "Raw_Dev"), destination=WEAVER
-    )
+    reconciliation = reconcile(_project(repository, "Lakehouse/Raw", "Raw_Dev"))
 
     assert reconciliation.registry.table is REGISTRY
     assert reconciliation.statements[-1] == reconciliation.registry.merge
     assert "`repository`" not in reconciliation.registry.merge
-    assert "`item_type` = 'Lakehouse'" in reconciliation.registry.merge
-    assert "`item_name` = 'Raw'" in reconciliation.registry.merge
+    assert "[Item type] = N'Lakehouse'" in reconciliation.registry.merge
+    assert "[Item name] = N'Raw'" in reconciliation.registry.merge
 
 
 # --- reading a catalogue of an older shape -------------------------------------
@@ -266,36 +263,37 @@ class _Absent(Exception):
 class _FakeCatalogue:
     """The narrowest thing ``read_catalogue_state`` will accept.
 
-    Duck-typed on purpose: the module names no Spark API, so a shape check needs
-    no session.
+    Duck-typed on purpose: the module names no engine API, so a shape check
+    needs no connection. A table this does not hold is absent, which is the
+    bootstrap answer rather than a failure.
     """
 
     def __init__(self, columns_by_table):
         self._columns = columns_by_table
 
-    def qualify(self, schema: str, name: str) -> str:
-        return f"`{schema}`.`{name}`"
-
-    def columns_of(self, name: str) -> tuple[str, ...]:
-        table = name.rsplit(".", 1)[1].strip("`")
-        if table not in self._columns:
-            raise _Absent(name)
-        return ()
+    def columns_of(self, table) -> dict[str, str] | None:
+        if table.name not in self._columns:
+            return None
+        return {}
 
     def rows(self, *_a, **_k):
         raise AssertionError("no rows should be read")
 
 
 class _Shaped(_FakeCatalogue):
-    def columns_of(self, name: str) -> tuple[str, ...]:
-        table = name.rsplit(".", 1)[1].strip("`")
-        if table not in self._columns:
-            raise _Absent(name)
-        return tuple(self._columns[table])
+    """A catalogue whose tables carry exactly the columns named, publicly spelled."""
+
+    def columns_of(self, table) -> dict[str, str] | None:
+        if table.name not in self._columns:
+            return None
+        return {
+            table.public_name_of(name).casefold(): table.public_name_of(name)
+            for name in self._columns[table.name]
+        }
 
 
 def test_a_registry_without_the_epoch_column_is_refused_by_name():
-    """It can be read but not written — the merge sets the epoch on every insert.
+    """It can be read but not written — the merge sets the build_datetime on every insert.
 
     Failing here says which column of which table is wrong. Letting it through
     would move the failure into the install, where it arrives as an engine
@@ -305,9 +303,9 @@ def test_a_registry_without_the_epoch_column_is_refused_by_name():
     from weaver.catalogue.state import read_catalogue_state
     from weaver.errors import BuildError
 
-    older = [name for name in REGISTRY.physical_columns if name != "build_epoch"]
+    older = [name for name in REGISTRY.physical_columns if name != "build_datetime"]
 
-    with pytest.raises(BuildError, match=r"Registry\.build_epoch"):
+    with pytest.raises(BuildError, match=r"Registry\.Build datetime"):
         read_catalogue_state(_Shaped({"Registry": older}), ())
 
 

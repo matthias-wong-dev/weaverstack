@@ -66,7 +66,10 @@ from factories import (
 )
 from support.workspaces import WORKSPACE
 
-from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
+from weaver.build_bundle import (
+    WarehouseBinding,
+    generate_item_build_bundle,
+)
 from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
@@ -153,7 +156,7 @@ def build(repository, tmp_path):
         },
         # Production, not a fixture: the desired catalogue the build itself uses.
         catalogue=Catalogue.from_repository(repository),
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -163,11 +166,9 @@ def build(repository, tmp_path):
 def physical(bundle, estate_targets) -> list[str]:
     """Physical actions against the *estate*, which is what "no work" is about.
 
-    The control-plane Lakehouse is excluded, and only it. Its endpoint refresh is
-    unconditional like the publication it follows — the catalogue's own tables
-    were just written to, so its analytics endpoint has to catch up whether or
-    not the estate changed. Counting it would make a correct no-op build look
-    like work, and hiding it by kind would hide a real estate refresh too.
+    The catalogue's own target is excluded, and only it: a build always writes
+    its catalogue, so counting that would make a correct no-op build look like
+    work.
     """
 
     return [
@@ -209,7 +210,7 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     The estate here is already correct, so no physical action is expected — but
     a bundle with no actions *whatever* would satisfy the two tests above for
     entirely the wrong reason. This pins what is left: everything the build still
-    does is catalogue work against the control plane, and nothing else has crept
+    does is catalogue work, and nothing else has crept
     in under the cover of a quiet plan.
 
     Publication is a difference now, so what appears here depends on what the
@@ -228,14 +229,12 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     }
 
     assert "publish_catalogue" in kinds, "the new Installation row is recorded"
-    # The control Lakehouse's endpoint refresh rides with the publication: its
-    # catalogue tables were just written, so its analytics endpoint has to
-    # catch up.
+    # And nothing physical: an item whose objects are all unchanged has only
+    # its catalogue tail to write.
     assert kinds <= {
         "delete_catalogue_claims",
         "publish_catalogue",
         "publish_registry",
-        "refresh_sql_endpoint",
     }
 
 
@@ -288,7 +287,7 @@ def converged(repository, tmp_path, *, inventories, catalogue):
         target_inventories=inventories,
         catalogue=reconciled.catalogue,
         stale_claims=reconciled.stale_claims,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )

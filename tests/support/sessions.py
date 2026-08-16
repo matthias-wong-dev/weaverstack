@@ -21,11 +21,11 @@ from typing import Any
 from weaver.sessions import TestSession
 from weaver.workspaces import Workspace
 
-from .workspaces import TARGET_LAKEHOUSE, WEAVER_LAKEHOUSE
+from .workspaces import TARGET_LAKEHOUSE, WEAVER_WAREHOUSE
 
 #: Somewhere for a Session that will never reach a workspace to call home. Used
 #: where the claim is about installer semantics and the workspace is incidental.
-NOWHERE = Workspace(workspace="Demo", catalogue="Lakehouse/Weaver")
+NOWHERE = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
 
 
 def given_session(
@@ -58,7 +58,7 @@ def given_session(
             lakehouses=(
                 lakehouses
                 if lakehouses is not None
-                else (WEAVER_LAKEHOUSE, TARGET_LAKEHOUSE)
+                else (WEAVER_WAREHOUSE, TARGET_LAKEHOUSE)
             ),
             warehouses=warehouses,
         )

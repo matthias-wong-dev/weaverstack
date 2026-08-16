@@ -91,7 +91,7 @@ class BoundTarget:
         """What to call this target on screen: ``Lakehouse/Sales``.
 
         The *physical* item, always. A logical name is the estate's own
-        vocabulary and some of it is internal — the control Lakehouse is the
+        vocabulary and some of it is internal — the catalogue Warehouse is the
         logical item ``_weaver``, which means nothing to somebody watching a
         build write to a Lakehouse they know as ``Weaver``. ``id`` is worse
         still: ``Lakehouse-_weaver--lakehouse-Weaver``.
@@ -182,8 +182,11 @@ class LakehouseBinding:
 
 @dataclass(frozen=True)
 class WarehouseBinding:
-    """A bound destination Warehouse. Present so the boundary is visible; v1
-    installation of Warehouse work is not supported and raises."""
+    """A bound destination Warehouse, reached over TDS.
+
+    Also what the Weaver catalogue is bound to: ``_`` lives in a Warehouse, and
+    a build addresses it exactly as it addresses any other Warehouse target.
+    """
 
     kind = WAREHOUSE_TARGET
 
@@ -254,6 +257,8 @@ class ItemBindings:
     entries: tuple[ItemBinding, ...]
 
     def __post_init__(self) -> None:
+        from ..catalogue.builtin import BUILTIN_ITEM
+
         seen: set[WeaverItemId] = set()
         physical: set[tuple[str, str]] = set()
         for binding in self.entries:
@@ -262,6 +267,8 @@ class ItemBindings:
                     f"logical item is bound more than once: {binding.item}"
                 )
             seen.add(binding.item)
+            if binding.item == BUILTIN_ITEM:
+                continue
             target = binding.target
             key = (target.physical_kind, target.item.name)
             if key in physical:
@@ -278,35 +285,37 @@ class ItemBindings:
 def effective_item_bindings(
     bindings: ItemBindings, *, control_item: "ItemRef | str", workspace_name: str
 ) -> ItemBindings:
-    """Add the mandatory package-owned control item binding.
+    """Add the mandatory package-owned catalogue item binding.
 
-    ``control_item`` is the physical item the catalogue lives in — the item
-    itself rather than the workspace's typed ``catalogue`` value, because what
-    a binding needs is a name it can resolve.
+    ``control_item`` is the Warehouse the catalogue lives in — the item itself
+    rather than the workspace's typed ``catalogue`` value, because what a
+    binding needs is a name it can resolve.
 
     ``workspace_name`` is required rather than optional, because the binding
     this adds is the one every build renders its catalogue statements against.
-    A caller that omitted it produced a control target that could not name an
+    A caller that omitted it produced a catalogue target that could not name an
     object, and the failure surfaced inside Fabric several steps later.
     """
 
     if not workspace_name:
         raise BuildError(
-            "the control-plane binding needs the workspace's display name, "
-            "which four-part Spark naming is spelled with"
+            "the catalogue binding needs the workspace's display name, "
+            "which four-part naming is spelled with"
         )
 
-    builtin = WeaverItemId(LAKEHOUSE, "_weaver")
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    builtin = BUILTIN_ITEM
     if builtin in bindings.by_item:
         raise BuildError(
-            "Lakehouse/_weaver is bound implicitly and must not be selected"
+            "Warehouse/_weaver is bound implicitly and must not be selected"
         )
     return ItemBindings(
         bindings.entries
         + (
             ItemBinding(
                 builtin,
-                LakehouseBinding(
+                WarehouseBinding(
                     control_item
                     if isinstance(control_item, ItemRef)
                     else ItemRef(str(control_item)),

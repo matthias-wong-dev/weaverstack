@@ -1,9 +1,4 @@
-"""Which host Weaver is in, and getting a Session for it.
-
-Position is a Session question — it is the first half of "where am I running" —
-so the two facts every operation used to establish for itself live here instead:
-whether this process is inside the Fabric session it is addressing, and what
-Spark it would use if it were.
+"""Detect Weaver's position and obtain the matching Session.
 
 Operations take a Session and never open one twice:
 

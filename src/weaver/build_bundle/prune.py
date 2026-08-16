@@ -17,7 +17,7 @@ from ..errors import BuildError
 from ..etl import LOAD_ROOT
 from ..store import Store
 from ..targets import ItemRef
-from ..workspaces import BUILD_BUNDLES_AREA, CLI_AREA
+from ..workspaces import CLI_AREA
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
@@ -48,7 +48,7 @@ from .payloads import sha256_hex
 from .targets import BoundTarget
 
 #: Weaver-owned Files areas excluded from prune.
-_RESERVED_FILES_AREAS = frozenset({BUILD_BUNDLES_AREA, CLI_AREA})
+_RESERVED_FILES_AREAS = frozenset({CLI_AREA})
 
 #: Delta schemas excluded from prune because Weaver does not manage them.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
@@ -290,7 +290,21 @@ def _load_files(store: Store, files_root) -> tuple[str, ...]:
 
 
 def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
-    """Read every Weaver-manageable schema, table, view and procedure."""
+    """Read every Weaver-manageable schema, table, view and procedure.
+
+    For the built-in catalogue item the answer is the ``_`` schema and nothing
+    else, exactly as it is for a Lakehouse. That restriction is the whole of the
+    shared-host guarantee: the catalogue may live in a Warehouse that already
+    holds a user's schemas, and an inventory that could see them would offer
+    them to prune as orphans of an item that never declared them.
+    """
+
+    catalogue_item = target.logical_item_name == "_weaver"
+
+    def managed(schema: str) -> bool:
+        if catalogue_item:
+            return schema.casefold() == CATALOGUE_SCHEMA.casefold()
+        return schema.casefold() not in _RESERVED_SQL_SCHEMAS
 
     rows = sql.query(
         """
@@ -310,7 +324,7 @@ def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
             str(row["object_type"]).strip(),
         )
         for row in rows
-        if str(row["schema_name"]).casefold() not in _RESERVED_SQL_SCHEMAS
+        if managed(str(row["schema_name"]))
     ]
     schema_rows = sql.query(
         """
@@ -323,11 +337,7 @@ def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
     )
     schemas = tuple(
         sorted(
-            {
-                str(row["name"])
-                for row in schema_rows
-                if str(row["name"]).casefold() not in _RESERVED_SQL_SCHEMAS
-            },
+            {str(row["name"]) for row in schema_rows if managed(str(row["name"]))},
             key=str.casefold,
         )
     )

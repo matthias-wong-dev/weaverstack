@@ -57,7 +57,7 @@ def desktop(monkeypatch):
     livy = _Livy()
     session = ConsoleSession(
         workspace=Workspace(
-            workspace="Analytics", catalogue="Lakehouse/Weaver", environment="weaver"
+            workspace="Analytics", catalogue="Warehouse/Weaver", environment="weaver"
         ),
         livy=livy,
     )
@@ -95,6 +95,7 @@ def test_the_import_is_submitted_once_per_livy_session(monkeypatch):
 
     session = LivySession.__new__(LivySession)
     session._weaver_asserted = False
+    session.environment_id = "env99"
     submitted: list[str] = []
     monkeypatch.setattr(
         type(session), "run", lambda self, code, **kw: submitted.append(code)
@@ -110,17 +111,16 @@ def test_the_import_is_submitted_once_per_livy_session(monkeypatch):
 # --- and the two sentences stay apart ----------------------------------------
 
 
-def test_a_workspace_naming_no_environment_is_told_to_name_one():
-    """A missing Environment names the workspace and the session, not a publish."""
+def test_a_workspace_naming_no_environment_is_told_where_weaver_comes_from():
+    """A missing Environment names the workspace and the publish that fills it."""
 
     from weaver.fabric.livy import missing_environment
 
     message = missing_environment(Workspace(workspace="Analytics"))
 
     assert "Analytics" in message
-    assert "Livy" in message
-    assert "environment" in message
-    assert "weaver install" not in message
+    assert "weaver install" in message
+    assert "--environment" in message
 
 
 def test_a_body_that_cannot_import_weaver_is_told_to_install():
@@ -138,7 +138,7 @@ def test_a_scope_with_no_livy_says_so_rather_than_asserting_nothing(monkeypatch)
     )
     session = ConsoleSession(
         workspace=Workspace(
-            workspace="Analytics", catalogue="Lakehouse/Weaver", environment="weaver"
+            workspace="Analytics", catalogue="Warehouse/Weaver", environment="weaver"
         )
     )
     scope = session.scope(None)

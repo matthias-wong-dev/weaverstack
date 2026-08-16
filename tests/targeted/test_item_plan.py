@@ -215,7 +215,7 @@ def test_a_drop_needs_the_registry_to_say_what_type_the_object_is(customer):
 def test_an_object_belonging_to_another_item_is_left_alone(customer):
     """Items are planned one at a time and must not reach across."""
 
-    other = document_id("Lakehouse/Other/DWG.Thing")
+    other = document_id("Warehouse/Other/DWG.Thing")
 
     planned = plan(
         customer,

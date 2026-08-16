@@ -165,7 +165,7 @@ def python_primitive(
 
     The destination is resolved here and handed in, never inferred: an authored
     object with no Lakehouse falls back to the session's attachment, which in an
-    orchestrated run is the control plane.
+    orchestrated run decides.
 
     The import goes through a runtime context rather than ``sys.path``, because
     two Lakehouses may each deploy a ``lib/dates.py`` and ``sys.modules`` is

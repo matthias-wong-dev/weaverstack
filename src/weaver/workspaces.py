@@ -18,18 +18,15 @@ from .targets import validate_name
 if TYPE_CHECKING:  # names used only in annotations
     from .targets import ItemRef
 
-#: The one item type a catalogue may name today. Typed values are accepted for
-#: both so the grammar is stable, and a Warehouse catalogue is refused with the
-#: reason rather than an error about parsing.
-CATALOGUE_KIND = "Lakehouse"
+#: Where the Weaver catalogue lives. A Warehouse: catalogue state is read and
+#: written over TDS, and needs no Spark session to reach it.
+CATALOGUE_KIND = "Warehouse"
 
-WEAVER_ITEMS_AREA = "weaver_items"
-BUILD_BUNDLES_AREA = "build_bundles"
 CLI_AREA = "cli"
 
 
 def _catalogue_value(value: object) -> str:
-    """One ``Lakehouse/Name`` catalogue, checked and returned as written."""
+    """One ``Warehouse/Name`` catalogue, checked and returned as written."""
 
     if not isinstance(value, str) or "/" not in value:
         raise ConfigError(
@@ -93,7 +90,7 @@ class Workspace:
 
     workspace: str
     environment: str | None = None
-    #: Where the control plane lives, typed: ``Lakehouse/Weaver``. Typed so the
+    #: Where the Weaver catalogue lives, typed: ``Warehouse/Weaver``. Typed so the
     #: value says which kind of item it names rather than relying on the field's
     #: name to imply it.
     catalogue: str | None = None
@@ -135,7 +132,7 @@ class Workspace:
         """The catalogue as a resolvable item, or a failure saying it is unset.
 
         Callers name the item rather than re-parsing the typed string, so where
-        the control plane lives is read in one place.
+        the Weaver catalogue lives is read in one place.
         """
 
         from .targets import ItemRef
@@ -143,7 +140,7 @@ class Workspace:
         if not self.catalogue:
             raise ConfigError(
                 "this Workspace names no catalogue; pass catalogue="
-                "'Lakehouse/Weaver' or set it in workspace configuration"
+                "'Warehouse/Weaver' or set it in workspace configuration"
             )
         return ItemRef(self.catalogue.split("/", 1)[1])
 

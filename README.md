@@ -1,11 +1,13 @@
 # Weaverstack
 
-A data-engineering runtime for Microsoft Fabric, built around a central control
-plane.
+A data-engineering runtime for Microsoft Fabric, built around a central
+catalogue.
 
-One mandatory **Weaver Lakehouse** holds your installed source repositories and
-the authoritative catalogue. Destination Lakehouses and Warehouses hold only
-materialised output — no copied runtime, no per-target catalogue, no attachment
+The **Weaver catalogue** is Weaver's own operational metadata, under the `_`
+schema of a Fabric Warehouse you name. It may have a Warehouse to itself or sit
+alongside your own schemas in one you already have; Weaver owns `_` and nothing
+else there. Destination Lakehouses and Warehouses hold only materialised
+output — no copied runtime, no per-target catalogue, no attachment
 requirements.
 
 Folder, Delta and SQL Warehouse are materialisation targets. You

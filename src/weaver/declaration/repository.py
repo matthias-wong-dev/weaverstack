@@ -153,10 +153,10 @@ def parse_item_repository(
             continue
         entries.append((relative, entry.is_directory))
 
-    from ..catalogue.builtin import item_repository_files
+    from ..catalogue.builtin import BUILTIN_ITEM, item_repository_files
 
     generated_files = item_repository_files()
-    builtin_prefix = "Lakehouse/_weaver"
+    builtin_prefix = "Warehouse/_weaver"
     authored_builtin = sorted(
         relative
         for relative, _is_directory in entries
@@ -164,7 +164,7 @@ def parse_item_repository(
     )
     if authored_builtin:
         raise DiscoveryError(
-            f"{authored_builtin[0]}: Lakehouse/_weaver is package-owned and must "
+            f"{authored_builtin[0]}: Warehouse/_weaver is package-owned and must "
             "not be authored"
         )
 
@@ -340,7 +340,7 @@ def parse_item_repository(
         )
         documents_by_item[item].append(identity)
 
-    builtin_item = WeaverItemId(LAKEHOUSE, "_weaver")
+    builtin_item = BUILTIN_ITEM
     item_ids.add(builtin_item)
     documents_by_item[builtin_item] = []
     schemas_by_item[builtin_item] = []

@@ -86,39 +86,6 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
 
 
 #: Where a person opens a Lakehouse. Not a storage endpoint — the portal.
-FABRIC_PORTAL = "https://app.fabric.microsoft.com"
-
-
-def browsable_url(location: Location, *, base_url: str = ONELAKE_DFS) -> str:
-    """A OneLake location as a link that opens in a browser.
-
-    The DFS URL Weaver writes to is the storage address, and pasting one into a
-    browser gets an authentication error. The portal wants the same three facts
-    arranged differently — workspace, item, and the path within it as one
-    encoded query value:
-
-    .. code-block:: text
-
-        https://onelake.dfs.fabric.microsoft.com/<ws>/<item>/Files/_/Log/x.json
-        https://app.fabric.microsoft.com/groups/<ws>/lakehouses/<item>
-            ?selectedPath=Files%2F_%2FLog%2Fx.json
-
-    Anything that is not a OneLake location — an ordinary filesystem
-    path — is returned unchanged, because a path is already the most useful
-    thing a reader can be handed there.
-    """
-
-    from urllib.parse import quote
-
-    try:
-        parsed = parse_onelake(location, base_url=base_url)
-    except CommandError:
-        return location.value
-    selected = quote(parsed.relative, safe="")
-    return (
-        f"{FABRIC_PORTAL}/groups/{parsed.workspace}/lakehouses/{parsed.item}"
-        f"?selectedPath={selected}"
-    )
 
 
 class OneLakeDfsClient:

@@ -16,10 +16,10 @@ def test_fabric_workspace_needs_only_its_name():
 def test_workspace_sub_parameters_are_item_names():
     workspace = Workspace(
         workspace="Analytics",
-        catalogue="Lakehouse/Weaver",
+        catalogue="Warehouse/Weaver",
         environment="WeaverRuntime",
     )
-    assert workspace.catalogue == "Lakehouse/Weaver"
+    assert workspace.catalogue == "Warehouse/Weaver"
     assert workspace.environment == "WeaverRuntime"
 
 

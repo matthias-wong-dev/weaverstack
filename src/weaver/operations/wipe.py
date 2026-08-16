@@ -127,7 +127,7 @@ def wipe(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
-        # A wipe empties a physical item, which needs no control plane. The
+        # A wipe empties a physical item, which needs no catalogue. The
         # catalogue only comes into it if `--unbind-from` asks for the claims.
         needs_catalogue=False,
     )
@@ -163,19 +163,17 @@ def wipe(
             # entirely — deleting rows from tables that are about to be removed
             # is work nobody needs.
             control_name = str(control).rpartition("/")[2] if control else None
-            whole_lakehouses = {
-                target.physical_name
-                for target in parsed
-                if target.item_type == "Lakehouse"
-            }
-            if not dry_run and control and control_name not in whole_lakehouses:
+            # Either type: the catalogue is a Warehouse, and a wipe of the
+            # Warehouse holding it is exactly the case this skips.
+            whole_items = {target.physical_name for target in parsed}
+            if not dry_run and control and control_name not in whole_items:
                 # `unbind_from` names an item; the workspace field is typed.
-                # Both mean one Lakehouse, so the field is written typed.
+                # Both mean one Warehouse, so the field is written typed.
                 catalogue_workspace = replace(
                     resolved_workspace,
                     catalogue=control
                     if "/" in str(control)
-                    else f"Lakehouse/{control}",
+                    else f"Warehouse/{control}",
                 )
                 with opened.step("Unbind catalogue claims"):
                     unbound = _unbind_physical_targets(
@@ -257,19 +255,16 @@ def unbind_catalogue_claims(
 
     Two callers want it: ``weaver unbind``, and the tail of a ``wipe`` that
     emptied a target the catalogue still claims. Reading and deleting are both
-    Spark SQL, so the statements go through the Session.
+    T-SQL against the catalogue Warehouse, so neither needs Spark and the
+    statements go through the Session.
     """
 
-    from ..build_bundle.workflow import session_catalogue
+    from ..catalogue.connection import catalogue_connection
     from ..sessions.host import use_or_create_session
     from ..unbind import unbind_targets
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not opened.executes_here(workspace) and not workspace.environment:
-            from ..fabric.livy import missing_environment
-
-            raise CommandError(missing_environment(workspace))
-        catalogue = session_catalogue(opened, workspace, workspace.catalogue_item)
+        catalogue = catalogue_connection(opened, workspace)
         return unbind_targets(
             catalogue, lakehouses=lakehouses, warehouses=warehouses
         ).to_mapping()

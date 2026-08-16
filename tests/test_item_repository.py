@@ -127,9 +127,9 @@ def test_reads_multiple_items_and_owned_documents_without_execution(tmp_path):
     assert tuple(str(item.identity) for item in repository.items) == (
         "Lakehouse/Curated",
         "Lakehouse/Raw",
-        "Lakehouse/_weaver",
         "Warehouse/Audit",
         "Warehouse/Reporting",
+        "Warehouse/_weaver",
     )
     assert WeaverSchemaId.parse("Lakehouse/Raw/Sales") in repository.schema_documents
     table = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
@@ -375,15 +375,15 @@ def test_item_type_is_exact(tmp_path):
 
 def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
-    builtin = repository["Lakehouse/_weaver"]
+    builtin = repository["Warehouse/_weaver"]
 
-    # The catalogue tables, plus the one Folder the control plane declares: the
-    # task log every top-level Weaver task writes its evidence beneath.
+    # The catalogue tables, plus the one table that is not a catalogue table:
+    # `_.Log`, where a run records what it did.
     assert len(builtin.documents) == len(CATALOGUE_TABLES) + 1
-    assert WeaverSchemaId.parse("Lakehouse/_weaver/_") in repository.schema_documents
+    assert WeaverSchemaId.parse("Warehouse/_weaver/_") in repository.schema_documents
     assert {str(identity) for identity in builtin.documents} == {
-        f"Lakehouse/_weaver/_.{table.name}" for table in CATALOGUE_TABLES
-    } | {"Lakehouse/_weaver/Files/_.Log"}
+        f"Warehouse/_weaver/_.{table.name}" for table in CATALOGUE_TABLES
+    } | {"Warehouse/_weaver/_.Log"}
     assert repository.generated_files
 
 
@@ -392,13 +392,13 @@ def test_generated_weaver_item_is_composed_without_mutating_authored_tree(tmp_pa
     location = Location(str(root))
     repository = parse_item_repository(location)
 
-    assert repository["Lakehouse/_weaver"].documents
+    assert repository["Warehouse/_weaver"].documents
     assert not (root / "Lakehouse" / "_weaver").exists()
 
 
 def test_authored_weaver_item_is_rejected(tmp_path):
     root = _estate(tmp_path)
-    _write(root, "Lakehouse/_weaver/schemas/_.yml", _schema("_"))
+    _write(root, "Warehouse/_weaver/schemas/_.yml", _schema("_"))
     with pytest.raises(DiscoveryError, match="package-owned"):
         parse_item_repository(Location(str(root)))
 

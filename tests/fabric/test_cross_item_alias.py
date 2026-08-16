@@ -41,6 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import staged_bundle, staged_repository_root
 from factories import FixtureCatalogue, alias_repository
 
 from weaver.targets import ItemRef
@@ -56,7 +57,7 @@ CONSUMER = "Lakehouse/AliasConsumer"
 
 
 def upload(store, root, source: Path) -> None:
-    """Replace the repository under the Weaver Lakehouse with this estate's."""
+    """Replace the staged repository with this estate's."""
 
     if store.exists(root):
         store.delete(root, recursive=True)
@@ -66,7 +67,16 @@ def upload(store, root, source: Path) -> None:
 
 
 def generate(
-    *, workspace, resolver, store, repository, bindings, catalogue, name, sql=None
+    *,
+    workspace,
+    resolver,
+    store,
+    repository,
+    bindings,
+    catalogue,
+    name,
+    staging,
+    sql=None,
 ):
     """One bundle, planned on the desktop. Pure Python; no session, no Livy.
 
@@ -77,7 +87,7 @@ def generate(
     """
 
     from weaver.build_bundle import (
-        LakehouseBinding,
+        WarehouseBinding,
         effective_item_bindings,
         generate_item_build_bundle,
     )
@@ -86,29 +96,46 @@ def generate(
         read_warehouse_inventory,
     )
     from weaver.build_bundle.targets import WAREHOUSE_TARGET
+    from weaver.fabric import desktop_sql_executor
+    from weaver.targets import WarehouseTarget
 
     bindings = effective_item_bindings(
         bindings,
         control_item=workspace.catalogue_item,
         workspace_name=workspace.workspace,
     )
+    # The catalogue is a Warehouse and is bound implicitly, so a Lakehouse-only
+    # estate now has a Warehouse inventory to read. It is its own connection:
+    # the estate's Warehouse, where there is one, is a different database.
+    catalogue_sql = desktop_sql_executor(
+        WarehouseTarget(warehouse=workspace.catalogue_item),
+        workspace,
+        resolver=resolver,
+    )
     inventories = {}
-    for binding in bindings.entries:
-        bound = binding.to_bound_target()
-        inventories[binding.item] = (
-            read_warehouse_inventory(bound, sql=sql)
-            if bound.kind == WAREHOUSE_TARGET
-            else read_lakehouse_inventory(bound, resolver=resolver, store=store)
-        )
+    try:
+        for binding in bindings.entries:
+            bound = binding.to_bound_target()
+            if bound.kind != WAREHOUSE_TARGET:
+                inventories[binding.item] = read_lakehouse_inventory(
+                    bound, resolver=resolver, store=store
+                )
+                continue
+            reading = (
+                catalogue_sql if bound.item_id == workspace.catalogue_item.name else sql
+            )
+            inventories[binding.item] = read_warehouse_inventory(bound, sql=reading)
+    finally:
+        catalogue_sql.close()
     return generate_item_build_bundle(
         repository,
         bindings=bindings,
-        output=resolver.build_bundle(name),
+        output=staged_bundle(resolver, staging, name),
         store=store,
         target_inventories=inventories,
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(
-            lakehouse=workspace.catalogue_item,
+        catalogue_binding=WarehouseBinding(
+            warehouse=workspace.catalogue_item,
             workspace_name=workspace.workspace,
         ),
     )
@@ -189,6 +216,7 @@ def alias_estate(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
+    fabric_staging_lakehouse,
     livy_session,
     weaver_session,
     tmp_path_factory,
@@ -207,8 +235,9 @@ def alias_estate(
 
     root = tmp_path_factory.mktemp("alias-repo")
     alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
-    upload(store, resolver.weaver_items_root, root)
-    repository = parse_item_repository(resolver.weaver_items_root, store=store)
+    staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
+    upload(store, staged, root)
+    repository = parse_item_repository(staged, store=store)
 
     bindings = item_bindings((PRODUCER, producer.name), (CONSUMER, consumer.name))
     bundle = generate(
@@ -218,9 +247,10 @@ def alias_estate(
         repository=repository,
         bindings=bindings,
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
         name="aliasaction",
+        staging=fabric_staging_lakehouse.name,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
     _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
@@ -392,7 +422,7 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
     """The one part of the incremental claim a workspace still has to answer.
 
     That an unchanged alias over an unchanged source plans *no action* is decided
-    from signatures and epochs before any pointer is touched, and belongs in
+    from signatures and build datetimes before any pointer is touched, and belongs in
     `tests/targeted/test_alias_planning.py` — installing an estate to watch a
     decision get made was the expensive habit this module is shedding.
 
@@ -422,6 +452,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
+    fabric_staging_lakehouse,
     clean_disposable_warehouse,
     livy_session,
     weaver_session,
@@ -455,8 +486,9 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         consumer=WAREHOUSE_CONSUMER,
         consumer_view=False,
     )
-    upload(store, resolver.weaver_items_root, root)
-    repository = parse_item_repository(resolver.weaver_items_root, store=store)
+    staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
+    upload(store, staged, root)
+    repository = parse_item_repository(staged, store=store)
 
     bundle = generate(
         workspace=fabric_workspace,
@@ -468,9 +500,10 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
             (WAREHOUSE_CONSUMER, warehouse.item.name),
         ),
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
         name="whalias",
+        staging=fabric_staging_lakehouse.name,
         sql=warehouse.executor,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")

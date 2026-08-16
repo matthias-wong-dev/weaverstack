@@ -35,6 +35,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
+from conftest import staged_bundle, staged_bundle_source, staged_repository_root
 from factories import item_id, single_document_repository, warehouse_table
 
 from weaver.build_bundle.executors.base import ResolvedTarget
@@ -140,7 +141,11 @@ def _wheel_version(filename: str) -> str:
 
 
 def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
-    livy_session, fabric_workspace, fabric_target_lakehouse, clean_disposable_warehouse
+    livy_session,
+    fabric_workspace,
+    fabric_target_lakehouse,
+    fabric_staging_lakehouse,
+    clean_disposable_warehouse,
 ):
     """Resolution in a session is a *different class*, not a different credential.
 
@@ -217,7 +222,7 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
 
 
 def test_a_spark_executor_runs_one_action_in_the_session(
-    livy_session, fabric_workspace, fabric_target_lakehouse
+    livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
     """One real action, through the real executor, on the session's own Spark.
 
@@ -278,7 +283,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
 
 
 def test_the_session_native_store_reads_back_what_it_wrote(
-    livy_session, fabric_workspace, fabric_target_lakehouse
+    livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
     """`FabricStore` over `notebookutils.fs` — a different class, not a different
     credential.
@@ -334,7 +339,12 @@ def test_the_session_native_store_reads_back_what_it_wrote(
 
 
 def test_a_locally_generated_bundle_installs_inside_fabric(
-    tmp_path, fabric_workspace, clean_disposable_warehouse, livy_session
+    tmp_path,
+    fabric_workspace,
+    fabric_target_lakehouse,
+    fabric_staging_lakehouse,
+    clean_disposable_warehouse,
+    livy_session,
 ):
     """Weaver installing a Warehouse from inside a session, on its own identity.
 
@@ -366,8 +376,8 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     # Found by exactly that: it passed alone and failed in the suite.
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
 
-    # The declaration goes into the Weaver Lakehouse, as a user's would.
-    root = resolver.weaver_items_root
+    # The declaration is staged in a Lakehouse's Files, as a user's would be.
+    root = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     if store.exists(root):
         store.delete(root, recursive=True)
     local = tmp_path / "repo"
@@ -387,7 +397,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
 
     repository = parse_item_repository(root, store=store)
     bindings = item_bindings((ITEM, warehouse.item.name))
-    from weaver.build_bundle import LakehouseBinding, effective_item_bindings
+    from weaver.build_bundle import WarehouseBinding, effective_item_bindings
 
     bindings = effective_item_bindings(
         bindings,
@@ -408,19 +418,28 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
                 bound, sql=warehouse.executor
             )
         else:
-            # The control Lakehouse is read for real, over OneLake from here.
-            # An empty inventory would be a lie rather than a simplification —
-            # the catalogue schema is already there, and claiming otherwise makes
-            # the planner emit a create that the session then rejects.
-            from weaver.build_bundle.prune import read_lakehouse_inventory
+            # The catalogue, read for real over TDS from here. An empty
+            # inventory would be a lie rather than a simplification — its
+            # tables are already there, and claiming otherwise makes the planner
+            # emit creates the session then rejects.
+            from weaver.fabric import desktop_sql_executor
+            from weaver.targets import WarehouseTarget
 
-            inventories[binding.item] = read_lakehouse_inventory(
-                bound, resolver=resolver, store=store
+            catalogue_sql = desktop_sql_executor(
+                WarehouseTarget(warehouse=fabric_workspace.catalogue_item),
+                fabric_workspace,
+                resolver=resolver,
             )
+            try:
+                inventories[binding.item] = read_warehouse_inventory(
+                    bound, sql=catalogue_sql
+                )
+            finally:
+                catalogue_sql.close()
     generate_item_build_bundle(
         repository,
         bindings=bindings,
-        output=resolver.build_bundle("whrow3"),
+        output=staged_bundle(resolver, fabric_staging_lakehouse.name, "whrow3"),
         store=store,
         target_inventories=inventories,
         # The control item's own catalogue documents are already installed, so
@@ -428,10 +447,10 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         # create them again, and the session rejects tables that exist. Nothing
         # is certified for the Warehouse item, which is what makes it build.
         catalogue=FixtureCatalogue.from_repository(
-            repository, item="Lakehouse/_weaver"
+            repository, item="Warehouse/_weaver"
         ),
-        control_lakehouse=LakehouseBinding(
-            lakehouse=fabric_workspace.catalogue_item,
+        catalogue_binding=WarehouseBinding(
+            warehouse=fabric_workspace.catalogue_item,
             workspace_name=fabric_workspace.workspace,
         ),
     )
@@ -450,7 +469,9 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         "resolver = resolver_for(workspace)\n"
         "session = NotebookSession(workspace=workspace, spark=spark)\n"
         "installer = Installer(session)\n"
-        f"bundle = load_bundle(resolver.build_bundle('whrow3'), store=store)\n"
+        f"bundle = load_bundle("
+        f"{staged_bundle_source(fabric_staging_lakehouse.name, 'whrow3')}, "
+        "store=store)\n"
         "report = installer.install(bundle)\n"
         # The same session, its own identity, reading the target back.
         "target = next(t for t in bundle.plan.targets if t.kind == 'warehouse')\n"

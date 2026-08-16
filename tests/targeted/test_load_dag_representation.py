@@ -350,19 +350,23 @@ def _registry(item: str, schema: str, name: str, *, object_type="table", role="d
         "object_type": object_type,
         "object_role": role,
         "signature": f"{schema}.{name}",
-        "build_epoch": None,
+        "build_datetime": None,
     }
 
 
 def _dependency(item: str, schema: str, name: str, reference: str, within=True):
     identity = WeaverItemId.parse(item)
+    referenced = identity if within else WeaverItemId.parse("Lakehouse/Elsewhere")
     return {
         "item_type": identity.item_type,
         "item_name": identity.item_name,
-        "schema_name": schema,
-        "object_name": name,
-        "dependency_name": reference,
-        "is_within_item": within,
+        "referencing_schema_name": schema,
+        "referencing_object_name": name,
+        "dependency_reference": reference,
+        "referenced_item_type": referenced.item_type,
+        "referenced_item_name": referenced.item_name,
+        "referenced_schema_name": schema,
+        "referenced_object_name": reference.rpartition(".")[2],
         "signature": "dependency",
     }
 

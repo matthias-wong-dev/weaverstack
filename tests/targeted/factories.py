@@ -80,7 +80,7 @@ def registered_document(
     *,
     object_type: str = "table",
     signature: str = "signature-1",
-    build_epoch=None,
+    build_datetime=None,
 ) -> RegisteredDocument:
     """One validated Registry row, as incremental selection consumes it.
 
@@ -97,7 +97,7 @@ def registered_document(
         identity=identity,
         object_type=object_type,
         signature=signature,
-        build_epoch=build_epoch,
+        build_datetime=build_datetime,
     )
 
 
@@ -107,7 +107,7 @@ def registry_row(
     object_type: str = "table",
     object_role: str = "data",
     signature: str = "signature-1",
-    build_epoch=None,
+    build_datetime=None,
 ) -> dict:
     """One Registry row in its stored form, keyed as the catalogue writes it."""
 
@@ -124,7 +124,7 @@ def registry_row(
         "object_type": object_type,
         "object_role": object_role,
         "signature": signature,
-        "build_epoch": build_epoch,
+        "build_datetime": build_datetime,
     }
 
 
@@ -902,7 +902,7 @@ def single_document_repository(
     reaches beyond ``DWG`` — a Files folder under ``Raw``, say.
 
     One thing to know before asserting over ``repository.source_documents``: a
-    parsed repository *always* carries the builtin ``Lakehouse/_weaver``
+    parsed repository *always* carries the builtin ``Warehouse/_weaver``
     catalogue documents as well as the ones written here. Look documents up by
     identity rather than iterating, or the answer will be about the catalogue.
     """
@@ -1120,7 +1120,7 @@ def installation_context(
     store=None,
     resolver=None,
     targets=None,
-    epoch: str | None = None,
+    build_datetime: str | None = None,
     snapshot: Location | None = None,
 ):
     """The one target and the runtime services an executor is handed.
@@ -1145,7 +1145,7 @@ def installation_context(
         spark_sql=one,
         spark_sql_batch=many,
         targets=targets or {},
-        epoch=epoch,
+        build_datetime=build_datetime,
     )
 
 

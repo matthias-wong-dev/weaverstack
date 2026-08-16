@@ -165,8 +165,8 @@ class LoadRunReport:
     edges: tuple[tuple[str, str], ...] = ()
     order: tuple[str, ...] = ()
     messages: tuple[LoadMessage, ...] = ()
-    task_id: str | None = None
-    task_log: str | None = None
+    #: Correlates every `_.Log` row this run produced.
+    workflow_id: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     workspace: str | None = None
@@ -186,8 +186,7 @@ class LoadRunReport:
             "dry_run": self.dry_run,
             "fault_tolerant": self.fault_tolerant,
             "workspace": self.workspace,
-            "task_id": self.task_id,
-            "task_log": self.task_log,
+            "workflow_id": self.workflow_id,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "order": list(self.order),
@@ -213,8 +212,7 @@ class LoadRunReport:
             messages=tuple(
                 LoadMessage.from_mapping(one) for one in payload.get("messages") or ()
             ),
-            task_id=payload.get("task_id"),
-            task_log=payload.get("task_log"),
+            workflow_id=payload.get("workflow_id"),
             started_at=payload.get("started_at"),
             finished_at=payload.get("finished_at"),
             workspace=payload.get("workspace"),

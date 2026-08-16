@@ -58,7 +58,7 @@ PRUNE_FOLDER = "prune_folder"
 #: for the current host.
 REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
-#: Catalogue kinds. These write the central catalogue in the Weaver Lakehouse
+#: Catalogue kinds. These write the central catalogue in its Warehouse
 #: rather than the destination. Claim deletion leads physical work; batched
 #: publication concludes it, with Registry visibly last in the manifest.
 DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"

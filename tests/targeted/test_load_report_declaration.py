@@ -99,8 +99,7 @@ def _report() -> LoadRunReport:
             "load:Warehouse/Reporting/Sales.Summary",
         ),
         messages=(LoadMessage("info", "planning", "two nodes", source="load_plan"),),
-        task_id="abc123",
-        task_log="Files/_/Log/task_date=2026-08-07/20260807T091522.000000Z_load_abc123",
+        workflow_id="abc123",
         started_at="2026-08-07T09:15:22.000000+00:00",
         finished_at="2026-08-07T09:15:25.000000+00:00",
         workspace="My Workspace",
@@ -164,11 +163,12 @@ def test_the_graph_survives_as_edges_rather_than_lists():
     assert isinstance(crossed.order, tuple)
 
 
-def test_the_evidence_pointer_survives():
+def test_the_workflow_identity_survives():
+    """What correlates a run's `_.Log` rows has to reach the caller intact."""
+
     crossed = _crossed(_report())
 
-    assert crossed.task_id == "abc123"
-    assert crossed.task_log.endswith("20260807T091522.000000Z_load_abc123")
+    assert crossed.workflow_id == "abc123"
 
 
 def test_a_dry_run_report_crosses_with_its_absences_intact():
@@ -184,8 +184,8 @@ def test_a_dry_run_report_crosses_with_its_absences_intact():
     crossed = _crossed(dry)
 
     assert crossed == dry
-    assert crossed.task_id is None
-    assert crossed.task_log is None
+    assert crossed.workflow_id is None
+    assert crossed.workflow_id is None
 
 
 def test_a_report_of_nothing_crosses_as_nothing():

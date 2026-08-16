@@ -94,15 +94,9 @@ class ItemRef:
 
 @dataclass(frozen=True)
 class FolderTarget:
-    """A Lakehouse Files area — ``Sales/Files``, and nothing further.
+    """A Lakehouse Files area — ``Sales/Files``.
 
-    A folder object's physical location is derived from its identity alone:
-    ``Files/<Schema>/<Object>``. A binding-level subpath used to be accepted here,
-    and it made that derivation untrue — the same object landed in different
-    places depending on how its item was bound, so authored code could not compose
-    its own path and neither could anything else without carrying the binding
-    around. One deterministic location per object is worth more than a
-    configurable root.
+    Folder objects land at ``Files/<Schema>/<Object>``.
     """
 
     lakehouse: ItemRef

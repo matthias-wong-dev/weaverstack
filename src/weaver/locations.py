@@ -88,11 +88,10 @@ class Location:
 class LakehouseSparkLocation:
     """One destination Lakehouse's physical roots, resolved once.
 
-    The Spark session is attached to the **Weaver Lakehouse** — that is the fixed
-    control-plane context, and it is why Weaver's own catalogue tables are reached
-    as ordinary two-part names in schema ``_``. Destination Lakehouses are the
-    variable data plane, so they are reached through explicit roots instead, and
-    never by making the session point somewhere else.
+    A Spark session is attached to *some* Lakehouse, because Fabric creates one
+    against a Lakehouse. Which one carries no meaning: destination Lakehouses
+    are reached through explicit roots instead, and never by making the session
+    point somewhere else.
 
     That is what lets one session build several Lakehouses: switching the
     current catalogue between targets would make two destinations sharing a

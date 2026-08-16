@@ -3,26 +3,29 @@
 from __future__ import annotations
 
 from weaver.catalogue.tables import INSTALLATION
-from weaver.spark import FabricSparkTarget
 from weaver.unbind import plan_unbind, unbind_targets
-
-#: The Weaver Lakehouse every catalogue statement is addressed to.
-WEAVER = FabricSparkTarget(workspace="Demo", lakehouse="Weaver")
 
 
 class _Catalogue:
+    """A catalogue holding one Installation table and recording what it is told."""
+
     def __init__(self, rows):
         self._rows = rows
         self.executed = []
-        self.destination = WEAVER
 
-    def columns_of(self, _name):
-        return tuple(INSTALLATION.physical_columns)
+    def columns_of(self, table):
+        return {
+            table.public_name_of(name).casefold(): table.public_name_of(name)
+            for name in table.physical_columns
+        }
 
     def rows(self, _statement):
-        return [dict(row) for row in self._rows]
+        return [
+            {name: row.get(name) for name in INSTALLATION.column_names}
+            for row in self._rows
+        ]
 
-    def sql(self, statement):
+    def execute(self, statement):
         self.executed.append(statement)
 
 
@@ -88,10 +91,8 @@ def test_every_installation_is_removed_in_one_pass_over_the_tables():
         )
     )
 
-    one_at_a_time = sum(
-        len(prune_installation(scope, destination=WEAVER)) for scope in scopes
-    )
-    together = prune_installation(InstallationScopes(scopes), destination=WEAVER)
+    one_at_a_time = sum(len(prune_installation(scope)) for scope in scopes)
+    together = prune_installation(InstallationScopes(scopes))
 
     assert len(together) == one_at_a_time // len(scopes)
     assert len(together) == len(set(together)), "a table was addressed twice"
@@ -111,7 +112,7 @@ def test_the_combined_delete_names_every_installation_and_no_others():
         )
     )
 
-    for statement in prune_installation(scopes, destination=WEAVER):
+    for statement in prune_installation(scopes):
         where = statement.split("WHERE", 1)[1]
         assert "'Sales'" in where and "'Reporting'" in where
         # Outer parentheses around the OR: without them a later `AND` would

@@ -26,6 +26,7 @@ import json
 import pytest
 
 import weaver
+from weaver.build_bundle.prune import TargetInventory
 from weaver.errors import CommandError, LoadError
 from weaver.load_report import (
     FAILED,
@@ -117,7 +118,7 @@ def test_the_command_exposes_every_option_the_contract_names():
             "--workspace",
             "My Workspace",
             "--catalogue",
-            "Lakehouse/Weaver",
+            "Warehouse/Weaver",
             "--workspace-config",
             "environment.yml",
             "--fault-tolerant",
@@ -131,7 +132,7 @@ def test_the_command_exposes_every_option_the_contract_names():
 
     assert load.targets == ["Lakehouse/Sales"]
     assert load.workspace == "My Workspace"
-    assert load.catalogue == "Lakehouse/Weaver"
+    assert load.catalogue == "Warehouse/Weaver"
     assert load.workspace_config == "environment.yml"
     assert load.fault_tolerant
     assert load.dry_run
@@ -191,32 +192,32 @@ def test_the_cautious_answers_are_the_defaults(recorded):
 def test_an_explicit_catalogue_needs_no_configuration_file(recorded):
     """The case the CLI must not require ceremony for.
 
-    Naming both the workspace and its control Lakehouse is a complete request.
+    Naming both the workspace and its catalogue is a complete request.
     Insisting on a configuration file to carry the second would make the first
     argument useless.
     """
 
-    main(_command("--catalogue", "Lakehouse/Weaver"))
+    main(_command("--catalogue", "Warehouse/Weaver"))
 
-    assert recorded[0]["session"].workspace.catalogue == "Lakehouse/Weaver"
+    assert recorded[0]["session"].workspace.catalogue == "Warehouse/Weaver"
 
 
 def test_workspace_configuration_is_still_supported(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
-        "workspace: Demo\ncatalogue: Lakehouse/Configured\n",
+        "workspace: Demo\ncatalogue: Warehouse/Configured\n",
         encoding="utf-8",
     )
 
     main(["load", "Lakehouse/Sales", "--workspace-config", str(config)])
 
-    assert recorded[0]["session"].workspace.catalogue == "Lakehouse/Configured"
+    assert recorded[0]["session"].workspace.catalogue == "Warehouse/Configured"
 
 
 def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path):
     config = tmp_path / "environment.yml"
     config.write_text(
-        "workspace: Demo\ncatalogue: Lakehouse/Configured\n",
+        "workspace: Demo\ncatalogue: Warehouse/Configured\n",
         encoding="utf-8",
     )
 
@@ -227,11 +228,11 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
             "--workspace-config",
             str(config),
             "--catalogue",
-            "Lakehouse/Explicit",
+            "Warehouse/Explicit",
         ]
     )
 
-    assert recorded[0]["session"].workspace.catalogue == "Lakehouse/Explicit"
+    assert recorded[0]["session"].workspace.catalogue == "Warehouse/Explicit"
 
 
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
@@ -286,13 +287,13 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
 def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
     monkeypatch, capsys, desktop_credential, no_target_preflight
 ):
-    partial = _report(status=TASK_FAILED, node_status=FAILED, task_log="Files/_/Log/x")
+    partial = _report(status=TASK_FAILED, node_status=FAILED, workflow_id="0f8b2c1d")
 
     def raising(targets, **kwargs):
         raise LoadError(
             "load:Lakehouse/Sales/Sales.Customer failed: rows were rejected",
             report=partial,
-            task_log="Files/_/Log/x",
+            workflow_id="0f8b2c1d",
         )
 
     monkeypatch.setattr(weaver, "load", raising)
@@ -305,24 +306,90 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
     # rather than discarded in favour of the message.
     assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
     assert "rows were rejected" in captured.err
-    assert "Files/_/Log/x" in captured.err
+    assert "Workflow: 0f8b2c1d" in captured.err
 
 
 def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
     monkeypatch, capsys, desktop_credential, no_target_preflight
 ):
     def raising(targets, **kwargs):
-        raise CommandError("load needs a Weaver control Lakehouse")
+        raise CommandError("load needs a Weaver catalogue")
 
     monkeypatch.setattr(weaver, "load", raising)
 
     exit_code = main(_command())
 
     assert exit_code == 1
-    assert "control Lakehouse" in capsys.readouterr().err
+    assert "Weaver catalogue" in capsys.readouterr().err
 
 
 # --- the host boundary --------------------------------------------------------
+
+
+class _FakeTds:
+    """The catalogue Warehouse, doubled beneath a real Session.
+
+    The catalogue moved to a Warehouse, so a desktop load reads it over TDS
+    before it crosses anywhere. These tests are about what crosses and what is
+    resolved first, so the catalogue is answered here rather than stood up.
+    """
+
+    #: What the estate says is installed: one Lakehouse item, one object.
+    ITEM = ("Lakehouse", "Sales")
+    OBJECT = ("Sales", "Customer")
+
+    @classmethod
+    def answer(cls, statement: str) -> list[dict]:
+        from weaver.catalogue.tables import (
+            CATALOGUE_TABLES,
+            INSTALLATION,
+            REGISTRY,
+        )
+
+        if "INFORMATION_SCHEMA.COLUMNS" in statement:
+            return [
+                {"TABLE_NAME": table.name, "COLUMN_NAME": table.public_name_of(column)}
+                for table in CATALOGUE_TABLES
+                for column in table.physical_columns
+            ]
+        item_type, item_name = cls.ITEM
+        schema, name = cls.OBJECT
+        if f"[{INSTALLATION.name}]" in statement:
+            return [
+                {
+                    "item_type": item_type,
+                    "item_name": item_name,
+                    "target_name": item_name,
+                    "weaver_version": "0",
+                    "signature": "sig",
+                }
+            ]
+        if f"[{REGISTRY.name}]" in statement:
+            return [
+                {
+                    "item_type": item_type,
+                    "item_name": item_name,
+                    "schema_name": schema,
+                    "object_name": name,
+                    "object_type": "table",
+                    "object_role": "data",
+                    "signature": "sig",
+                    "build_datetime": None,
+                },
+                # The deployed module that loads it. Without one the object has
+                # no load primitive, the graph is empty, and nothing crosses.
+                {
+                    "item_type": item_type,
+                    "item_name": item_name,
+                    "schema_name": "_/Load",
+                    "object_name": f"{schema}__{name}.py",
+                    "object_type": "file",
+                    "object_role": "load",
+                    "signature": "sig",
+                    "build_datetime": None,
+                },
+            ]
+        return []
 
 
 class _FakeLivy:
@@ -352,6 +419,9 @@ class _FakeLivy:
     def start(self) -> None:
         type(self).started += 1
 
+    def ensure_weaver(self, *args, **kwargs) -> None:
+        """A load imports the published wheel; the double has nothing to check."""
+
     def close(self, **kwargs) -> None:
         pass
 
@@ -363,11 +433,6 @@ class _FakeLivy:
             answer = __version__
         else:
             type(self).submitted.append(code)
-            if answer is not None and "_statements" in code:
-                # The estate is read as Spark SQL, and an empty answer is an
-                # empty catalogue — which these tests are content with, because
-                # what they assert is which targets were resolved and when.
-                answer = []
 
         class Result:
             # ``returned`` is whether the program called ``emit`` at all, which
@@ -424,7 +489,17 @@ def livy(monkeypatch):
 
     _FakeLivy.submitted = []
     _FakeLivy.started = 0
-    _FakeLivy.answer = {"failed": False, "report": _report().to_mapping()}
+    # One node's load result: the catalogue is read over TDS now, so the only
+    # thing that crosses Livy is the primitive that fills a table.
+    _FakeLivy.answer = {
+        "succeeded": True,
+        "rows_read": 5,
+        "rows_inserted": 5,
+        "rows_updated": 0,
+        "rows_deleted": 0,
+        "rows_rejected": 0,
+        "error_message": None,
+    }
     _FakeResolver.present = {"Sales", "Reporting"}
     _FakeResolver.asked = []
     monkeypatch.setattr("weaver.fabric.auth.credential", _FakeCredential)
@@ -434,6 +509,39 @@ def livy(monkeypatch):
     )
     monkeypatch.setattr(
         ConsoleScope, "resolver", property(lambda self: _FakeResolver(self.workspace))
+    )
+    # The catalogue is a Warehouse now, so a load reads it over TDS before it
+    # crosses. Doubled at the Session's own capability, for the same reason the
+    # Livy transport is: what is under test is the crossing, not the engine.
+    from weaver.sessions.console import ConsoleSession
+
+    monkeypatch.setattr(
+        ConsoleSession,
+        "query_tsql",
+        lambda self, statement, **kwargs: _FakeTds.answer(statement),
+    )
+    monkeypatch.setattr(
+        ConsoleSession, "execute_tsql", lambda self, statement, **kwargs: None
+    )
+    # What each target physically holds is a storage-and-Spark question, and
+    # these tests are about the crossing and the order things happen in. The
+    # inventory is answered rather than stood up, so a fake resolver does not
+    # have to grow a OneLake.
+    import weaver.run.state as _state
+
+    monkeypatch.setattr(
+        _state,
+        "read_target_inventories",
+        lambda targets, **kwargs: {
+            str(target): TargetInventory(
+                target_id=target.name,
+                kind=target.kind,
+                target_name=target.name,
+                tables=("Sales.Customer",),
+                files=("_/Load/Sales__Customer.py",),
+            )
+            for target in targets
+        },
     )
     monkeypatch.setattr(_cli_module(), "_prefer_desktop_credential", lambda: None)
     return _FakeLivy
@@ -446,7 +554,7 @@ def _fabric(*args: str) -> list[str]:
         "--workspace",
         "My Workspace",
         "--catalogue",
-        "Lakehouse/Weaver",
+        "Warehouse/Weaver",
         "--environment",
         "weaver",
         *args,
@@ -508,7 +616,7 @@ def test_the_requested_targets_are_resolved_before_a_session_is_opened(livy, cap
 def test_a_target_that_does_not_exist_is_refused_without_opening_a_session(
     livy, capsys
 ):
-    """The whole point: nothing is spent on a request already known to be bad."""
+    """Nothing is spent on a request already known to be bad."""
 
     _FakeResolver.present = set()
 
@@ -532,7 +640,7 @@ def test_every_requested_target_is_checked_not_only_the_first(livy, capsys):
             "--workspace",
             "My Workspace",
             "--catalogue",
-            "Lakehouse/Weaver",
+            "Warehouse/Weaver",
             "--environment",
             "weaver",
         ]
@@ -557,7 +665,7 @@ def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
             "--workspace",
             "My Workspace",
             "--catalogue",
-            "Lakehouse/Weaver",
+            "Warehouse/Weaver",
             "--environment",
             "weaver",
         ]

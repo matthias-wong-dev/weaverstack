@@ -35,6 +35,10 @@ the published package.
 
 ``Files`` is object storage and a deployed module sits in a package tree, so a
 dispatch that resolved against a directory would prove nothing about either.
+
+The run also writes its evidence, so the last test here reads ``_.Log`` back:
+a desktop Session appends through a flusher of its own, and every settlement
+above has to arrive in the Warehouse under the frozen ``[Result]`` vocabulary.
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ def thin(
     fabric_client,
     weaver_session,
     fabric_empty_lakehouse,
+    fabric_initialise_catalogue,
     tmp_path_factory,
 ):
     """The trivial artefacts, deployed into a real Lakehouse over OneLake.
@@ -71,6 +76,7 @@ def thin(
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     fabric_empty_lakehouse(LAKEHOUSE)
+    fabric_initialise_catalogue()
 
     estate = thin_estate(
         tmp_path_factory.mktemp("thin"),
@@ -203,3 +209,46 @@ def _node(report, outcome: str):
     raise AssertionError(
         f"{outcome} is not in {[node.logical_id for node in report.nodes]}"
     )
+
+
+def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
+    """The run's evidence, read back out of `_.Log`.
+
+    A desktop Session appends asynchronously through a flusher it owns, so the
+    rows exist only once something waits for the worker — `Session.flush`, or
+    the Session closing. The suite's Session outlives this module, so the wait
+    is explicit here.
+
+    Every outcome the run settled is checked at once rather than a row at a
+    time: one query is one observation of one moment, and the estate is live.
+    """
+
+    from weaver.catalogue.connection import catalogue_connection
+
+    workflow_id = tolerated.workflow_id
+    assert workflow_id, "the run recorded no workflow, so there is nothing to read"
+
+    thin.session.flush()
+    rows = catalogue_connection(thin.session, thin.workspace).rows(
+        "select [Task type], [Target type], [Target name], [Schema name], "
+        "[Object name], [Result] from [_].[Log] "
+        f"where [Workflow ID] = N'{workflow_id}'"
+    )
+    logged = {str(row["Object name"]): dict(row) for row in rows}
+
+    # One row per node the run settled, named as the object it was about.
+    assert set(logged) == {
+        node.logical_id.rsplit(".", 1)[1] for node in tolerated.nodes
+    }
+
+    # The physical identity, not a logical one: a reader of `_.Log` is looking
+    # at an estate, and the target is where the work happened.
+    for row in logged.values():
+        assert row["Task type"] == "load"
+        assert row["Target type"] == "Lakehouse"
+        assert row["Target name"] == LAKEHOUSE
+        assert row["Schema name"] == "Thin"
+
+    # And the frozen vocabulary, both values of it this run produces.
+    assert logged["Success"]["Result"] == "Succeeded"
+    assert logged["Failure"]["Result"] == "Failed"

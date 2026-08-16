@@ -105,10 +105,9 @@ def build(
     context, then, inside a Fabric notebook, what the notebook is attached to.
     Anything still unresolved is an error stated in one sentence.
 
-    ``catalogue`` names the Weaver control Lakehouse, typed:
-    ``Lakehouse/Weaver``. Inside a notebook it defaults to the attached
-    Lakehouse, which is the control Lakehouse only and becomes an authored
-    target only if a binding says so.
+    ``catalogue`` names where the Weaver catalogue lives, typed:
+    ``Warehouse/Weaver``. Weaver owns the ``_`` schema of that Warehouse and
+    nothing else in it, so it may be one of your own.
 
     ``session`` is a Session to run in, and is where an already-resolved
     ``Workspace`` travels. Supplied, its resources are reused and it is left
@@ -125,7 +124,7 @@ def build(
     )
 
     selected = _item_bindings(bind, resolved_workspace)
-    from ..build_bundle.targets import LakehouseBinding, effective_item_bindings
+    from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
 
     workspace_name = getattr(resolved_workspace, "workspace", None)
     bindings = effective_item_bindings(
@@ -133,7 +132,7 @@ def build(
         control_item=resolved_workspace.catalogue_item,
         workspace_name=workspace_name,
     )
-    control = LakehouseBinding(
+    control = WarehouseBinding(
         resolved_workspace.catalogue_item, workspace_name=workspace_name
     )
     source_location, source_store = _repository_source(source, resolved_workspace)
@@ -144,14 +143,14 @@ def build(
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(source_location, source_store=source_store) as prepared:
-        validate_build_request(prepared.repository, bindings, control_lakehouse=control)
+        validate_build_request(prepared.repository, bindings, catalogue_binding=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             arguments = dict(
                 repository=prepared.repository,
                 source_store=prepared.store,
                 bindings=bindings,
-                control_lakehouse=control,
+                catalogue_binding=control,
                 bundle_name=bundle,
                 source=source_location.value,
             )
@@ -171,13 +170,6 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
 
     if _inside_fabric_session(workspace):
         return
-    if not workspace.environment:
-        # Checked before preflight, because preflight is several REST calls and
-        # this needs none. A build renders Spark SQL for the catalogue whatever
-        # else it does, so it always crosses.
-        from ..fabric.livy import missing_environment
-
-        raise CommandError(missing_environment(workspace))
     from ..fabric.preflight import preflight_fabric_targets
 
     preflight_fabric_targets(
@@ -267,7 +259,7 @@ def _run_build(
     repository,
     source_store,
     bindings,
-    control_lakehouse,
+    catalogue_binding,
     bundle_name,
     source,
 ) -> BuildResult:
@@ -310,7 +302,7 @@ def _run_build(
             session=session,
             workspace=workspace,
             source_store=source_store,
-            control_lakehouse=control_lakehouse,
+            catalogue_binding=catalogue_binding,
             archive=_archive_location(resolver, bundle_name),
         )
     return _result_from_item_build(source, bindings, result)

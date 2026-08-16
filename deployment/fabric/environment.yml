@@ -8,8 +8,8 @@
 # This list mirrors the runtime `dependencies` in pyproject.toml, which stays
 # authoritative for Python packaging. `tests/test_environment_definition.py`
 # fails if a runtime dependency is added there but not here, so the two cannot
-# drift apart silently. Desktop-only and local-Spark packages are deliberately
-# absent — installing Weaver into Fabric must not drag them along.
+# drift apart silently. Desktop-only packages are deliberately absent —
+# installing Weaver into Fabric must not drag them along.
 dependencies:
   - pip:
       - pyyaml

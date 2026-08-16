@@ -111,7 +111,7 @@ def desktop(monkeypatch):
         livy = _Livy(payload)
         session = ConsoleSession(
             workspace=Workspace(
-                workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
+                workspace="Weaver", catalogue="Warehouse/Weaver", environment="weaver"
             ),
             livy=livy,
         )
@@ -127,7 +127,7 @@ def notebook():
     def make(spark):
         return NotebookSession(
             workspace=Workspace(
-                workspace="Weaver", catalogue="Lakehouse/Weaver", environment="weaver"
+                workspace="Weaver", catalogue="Warehouse/Weaver", environment="weaver"
             ),
             spark=spark,
             resolver=object(),

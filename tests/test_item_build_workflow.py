@@ -153,7 +153,7 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
             store=remote,
             lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
         ),
-        control_lakehouse=_control(),
+        catalogue_binding=_control(),
         executors=_executors(),
     )
 
@@ -178,7 +178,7 @@ def test_explicit_local_source_does_not_use_the_target_store_for_repository_read
             store=target_store,
             lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
         ),
-        control_lakehouse=_control(),
+        catalogue_binding=_control(),
         executors=_executors(),
     )
 
@@ -210,14 +210,14 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
                 store=FilesystemStore(),
                 lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
             ),
-            control_lakehouse=_control(),
+            catalogue_binding=_control(),
             executors=_executors(),
         )
 
 
 def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     item = WeaverItemId.parse("Lakehouse/Raw")
-    epoch = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
+    build_datetime = datetime(2026, 7, 27, 1, 2, 3, tzinfo=timezone.utc)
     state = BuildState(
         catalogue=Catalogue(
             {
@@ -231,7 +231,7 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
                             "object_type": "table",
                             "object_role": "data",
                             "signature": "abc123",
-                            "build_epoch": epoch,
+                            "build_datetime": build_datetime,
                         },
                     )
                 }
@@ -248,14 +248,19 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
     assert (
         restored.catalogue.registered[
             next(iter(restored.catalogue.registered))
-        ].build_epoch
-        == epoch
+        ].build_datetime
+        == build_datetime
     )
 
 
-def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
+def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
+    """Weaver owns one Files area in a destination, and prune must not claim it.
 
-    workspace = given_workspace(catalogue="Lakehouse/Control")
+    `Files/cli` is the whole reserve. Any other folder is a user's, whatever it
+    is called, so prune sees it and an inventory counts it.
+    """
+
+    workspace = given_workspace(catalogue="Warehouse/Control")
     resolver = given_resolver(
         workspace=workspace,
         lakehouses=("Weaver", "Raw_Dev", "Sales_LH", "Curated_Dev"),
@@ -278,7 +283,7 @@ def test_cli_area_is_reserved_from_inventory_but_weaver_items_is_not(tmp_path):
     inventory = read_lakehouse_inventory(target, resolver=resolver, store=store)
 
     assert "cli" not in inventory.folder_schemas
-    assert "build_bundles" not in inventory.folder_schemas
+    assert "build_bundles" in inventory.folder_schemas
     assert "weaver_items" in inventory.folder_schemas
 
 
@@ -301,7 +306,7 @@ def test_direct_build_can_upload_one_archive_after_install_without_rereading_sou
             store=remote,
             lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
         ),
-        control_lakehouse=_control(),
+        catalogue_binding=_control(),
         archive=archive,
         executors=_executors(),
     )
@@ -324,7 +329,7 @@ def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
         store=store,
         target_inventories=_inventories(),
         catalogue=Catalogue({}),
-        control_lakehouse=_control(),
+        catalogue_binding=_control(),
     )
     archive = Location(str(tmp_path / "20260727T010203000004Z.weaver.zip"))
 
@@ -355,7 +360,7 @@ def test_archive_installer_reads_payloads_locally_not_from_target_store(tmp_path
         store=store,
         target_inventories=_inventories(),
         catalogue=Catalogue({}),
-        control_lakehouse=_control(),
+        catalogue_binding=_control(),
     )
     archive = Location(str(tmp_path / "handover.weaver.zip"))
     persist_bundle_archive(bundle, archive, store=store)

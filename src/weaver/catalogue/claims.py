@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from ..declaration.metadata import FOLDER, TABLE, VIEW
 from ..declaration.model import WeaverDocumentId
 from ..errors import BuildError
 from .tables import (
@@ -17,7 +16,7 @@ from .tables import (
     DEPENDENCY,
     FOLDER_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
-    INDEX_DICTIONARY,
+    KEY_DICTIONARY,
     OBJECT_TYPES,
     REGISTRY,
     TABLE_DICTIONARY,
@@ -68,9 +67,17 @@ class CatalogueClaim:
 _COMMON_OBJECT_RULES = (
     CatalogueClaimRule(REGISTRY),
     CatalogueClaimRule(COLUMN_DICTIONARY),
-    CatalogueClaimRule(INDEX_DICTIONARY),
-    CatalogueClaimRule(FOREIGN_KEY_DICTIONARY),
-    CatalogueClaimRule(DEPENDENCY),
+    CatalogueClaimRule(KEY_DICTIONARY),
+    # A relationship table names both sides, so the owning object is found under
+    # the side it declares rather than under a bare schema/object pair.
+    CatalogueClaimRule(
+        FOREIGN_KEY_DICTIONARY,
+        predicate_columns=("foreign_schema_name", "foreign_object_name"),
+    ),
+    CatalogueClaimRule(
+        DEPENDENCY,
+        predicate_columns=("referencing_schema_name", "referencing_object_name"),
+    ),
 )
 
 # Each Registry object type requires an ownership declaration before reconciliation.
@@ -98,8 +105,6 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     "stored_procedure": (CatalogueClaimRule(REGISTRY),),
 }
 
-OBJECT_TYPE_FOR_DOCUMENT_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
-
 
 def claim_rules_for_object_type(object_type: str) -> tuple[CatalogueClaimRule, ...]:
     try:
@@ -109,14 +114,6 @@ def claim_rules_for_object_type(object_type: str) -> tuple[CatalogueClaimRule, .
         raise BuildError(
             f"Registry object_type must be one of {expected}, got {object_type!r}"
         ) from exc
-
-
-def claim_rules_for_document_kind(kind: str) -> tuple[CatalogueClaimRule, ...]:
-    try:
-        object_type = OBJECT_TYPE_FOR_DOCUMENT_KIND[kind]
-    except KeyError as exc:
-        raise BuildError(f"unsupported Weaver document kind {kind!r}") from exc
-    return claim_rules_for_object_type(object_type)
 
 
 def without_claims(catalogue, claims):

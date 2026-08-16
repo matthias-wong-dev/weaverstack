@@ -1,22 +1,24 @@
-"""Read catalogue tables through their expected schema.
+"""Read catalogue tables through their expected schema, over TDS.
 
-Missing tables and compatible missing columns are handled as bootstrap or upgrade
-state; other read failures propagate.
+Two absences are ordinary and read as data: a missing table is bootstrap, since
+the build that writes the catalogue is the build that creates it, and a missing
+column is upgrade, where a newer Weaver compares against a table an older one
+created.
+
+Neither is recognised from a failure. The connection asks the ``_`` schema what
+it holds, once, and a table or column absent from that answer is absent —
+so a permission error or a broken connection stays a failure rather than
+reading as "no rows", which would tell the next build that nothing is
+catalogued. That is a licence to remove an estate.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..spark.catalogue import is_absent
-from .render import (
-    InstallationScope,
-    InstallationScopes,
-    Row,
-    identifier,
-    qualified_name,
-)
+from .render import InstallationScope, InstallationScopes, Row
 from .tables import CatalogueTable
+from .tsql import identifier, qualified_name
 
 
 def read_table(
@@ -27,66 +29,77 @@ def read_table(
 ) -> tuple[Row, ...]:
     """Every row of one catalogue table, projected through its expected schema.
 
-    ``catalogue`` is a :class:`~weaver.spark.catalogue.SparkCatalogue` bound to
-    the Weaver Lakehouse — the read has to say where the catalogue is, because
-    the session is not necessarily pointed at it.
+    ``catalogue`` is a :class:`CatalogueConnection` bound to the Warehouse the
+    catalogue lives in.
 
     ``scope`` narrows the read to one installation, which is what a build wants:
-    it compares and writes within one ``(repository, target_type)`` and has no
-    business seeing another's rows.
+    it compares and writes within one item and has no business seeing another's
+    rows.
 
-    Returns plain dictionaries of ``str``/``bool``/``None`` — the same shape the
-    projection produces, so the two can be compared directly.
+    Returns plain dictionaries under the internal snake-case keys, with stored
+    vocabularies mapped back — the same shape the projection produces, so the
+    two can be compared directly.
     """
 
     if catalogue is None:
         raise ValueError(
-            f"reading {table.qualified} needs a Spark catalogue bound to the Weaver "
-            "Lakehouse — the catalogue lives there, and a session alone does not "
-            "say which Lakehouse that is"
+            f"reading {table.qualified} needs a connection to the Warehouse the "
+            "Weaver catalogue lives in"
         )
 
-    name = qualified_name(table, catalogue.destination)
-    try:
-        existing = catalogue.columns_of(name)
-    except Exception as exception:
-        if is_absent(exception):
-            return ()
-        raise
-
-    # Case-folded, because the local metastore lowercases column names where
-    # Fabric preserves them, and a column's presence must not depend on that.
-    present = {column.lower(): column for column in existing}
+    present = catalogue.columns_of(table)
+    if present is None:
+        # Bootstrap: the build that writes the catalogue is the build that
+        # creates it, so an absent table is state rather than a failure.
+        return ()
 
     projected = ", ".join(
-        _projected_column(column, present.get(column.name.lower()))
-        for column in table.columns
+        _projected_column(table, column, present) for column in table.columns
     )
-    where = ""
-    if scope is not None:
-        where = f" WHERE {scope.predicate}"
-
-    return tuple(catalogue.rows(f"SELECT {projected} FROM {name}{where}"))
+    where = "" if scope is None else f" WHERE {scope.predicate}"
+    rows = catalogue.rows(f"SELECT {projected} FROM {qualified_name(table)}{where}")
+    return tuple(_internal(table, row) for row in rows)
 
 
-def _projected_column(column, actual: str | None) -> str:
+def _projected_column(table: CatalogueTable, column, present: dict[str, str]) -> str:
     """One column of the expected schema, as a select expression.
 
-    Rendered as SQL rather than built with ``pyspark.sql.functions`` so this module
-    names no Spark API — the core stays importable without PySpark, and a session
-    is only ever duck-typed. It also keeps the projection inspectable as text.
+    Aliased back to the internal name, so nothing above the reader sees the
+    public spelling.
     """
 
+    actual = present.get(column.public_name.casefold())
+    alias = identifier(column.name)
     if actual is None:
         # Older shape: give this Weaver the column it expects, as a typed null.
-        return f"CAST(NULL AS {column.type.upper()}) AS {identifier(column.name)}"
-    # Cast even when present: an older catalogue may have stored a boolean as a
-    # string, and a comparison against a projected boolean would then differ for a
-    # row that has not actually changed.
-    return (
-        f"CAST({identifier(actual)} AS {column.type.upper()}) "
-        f"AS {identifier(column.name)}"
-    )
+        return f"CAST(NULL AS {column.warehouse_type}) AS {alias}"
+    return f"CAST({identifier(actual)} AS {column.warehouse_type}) AS {alias}"
+
+
+def _internal(table: CatalogueTable, row) -> Row:
+    """One stored row under internal keys, with vocabularies mapped back."""
+
+    values = dict(row)
+    return {
+        column.name: column.from_public(_python(values.get(column.name), column))
+        for column in table.columns
+    }
+
+
+def _python(value, column):
+    """One stored value as the projection would have produced it.
+
+    A ``bit`` comes back as 0 or 1 and a projection holds a bool, so a
+    comparison between them would differ for a row that has not changed.
+    """
+
+    from .tables import BOOLEAN
+
+    if value is None:
+        return None
+    if column.type == BOOLEAN:
+        return bool(value)
+    return value
 
 
 def read_installation(

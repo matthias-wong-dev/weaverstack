@@ -46,6 +46,7 @@ def judged(
     fabric_client,
     weaver_session,
     fabric_empty_lakehouse,
+    fabric_initialise_catalogue,
     tmp_path_factory,
 ):
     """Tests with controlled outcomes, deployed into a real Lakehouse."""
@@ -53,6 +54,7 @@ def judged(
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     fabric_empty_lakehouse(LAKEHOUSE)
+    fabric_initialise_catalogue()
 
     return thin_estate(
         tmp_path_factory.mktemp("judged"),

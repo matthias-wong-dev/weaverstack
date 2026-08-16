@@ -35,7 +35,10 @@ from factories import (
 )
 from support.workspaces import WORKSPACE
 
-from weaver.build_bundle import LakehouseBinding, generate_item_build_bundle
+from weaver.build_bundle import (
+    WarehouseBinding,
+    generate_item_build_bundle,
+)
 from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.catalogue.state import Catalogue
@@ -123,7 +126,7 @@ def build(repository, tmp_path, *, catalogue):
         store=FilesystemStore(),
         target_inventories=_inventories(repository, bound),
         catalogue=catalogue,
-        control_lakehouse=LakehouseBinding(
+        catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
@@ -271,7 +274,7 @@ def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     # And publishing against that state re-merges them.
     from weaver.catalogue.reconcile import publish
 
-    result = publish(remaining, state, destination=WEAVER)
+    result = publish(remaining, state)
 
     assert result.registry.merge, "a dropped object must be certified again"
 

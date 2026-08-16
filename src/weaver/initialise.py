@@ -1,8 +1,12 @@
-"""Prepare the Weaver Lakehouse a build needs before it can hold a catalogue.
+"""Prepare the Warehouse a build needs before it can hold the Weaver catalogue.
 
 The package-owned ``_weaver`` item creates the catalogue tables through ordinary
 build actions. This provisions the Fabric item they live in; it creates no
 catalogue tables of its own.
+
+Weaver owns the ``_`` schema of that Warehouse and nothing else in it, so an
+existing Warehouse holding a user's own schemas is an ordinary host rather than
+a collision.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from typing import Any
 
 from .build_bundle.models import BuildPlan
 from .build_bundle.report import InstallationReport
-from .build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
+from .build_bundle.targets import ItemBinding, ItemBindings, WarehouseBinding
 from .build_bundle.workflow import build_item_repository_source
 from .catalogue.tables import CATALOGUE_TABLES
 from .declaration.model import WeaverItemId
@@ -54,7 +58,9 @@ class InitialiseResult:
 
 
 @dataclass(frozen=True)
-class PreparedWeaverLakehouse:
+class PreparedCatalogueHost:
+    """The Warehouse the catalogue will live in, and whether this made it."""
+
     workspace: str
     catalogue: str
     created: bool
@@ -63,36 +69,37 @@ class PreparedWeaverLakehouse:
 def prepare_catalogue(
     workspace,
     *,
-    exists_ok: bool = False,
     store: Store | None = None,
     client=None,
-) -> PreparedWeaverLakehouse:
-    """Create the configured Weaver Lakehouse and its required Files areas."""
+) -> PreparedCatalogueHost:
+    """Find or create the Warehouse the Weaver catalogue lives in.
+
+    An existing Warehouse is the ordinary case rather than a collision: Weaver
+    owns the ``_`` schema of its host and nothing else, so a Warehouse already
+    holding a user's schemas is a perfectly good catalogue host. What is
+    distinguished here is only whether the Warehouse existed — whether its `_`
+    tables are there is the build's question, answered by reading them.
+    """
 
     if not workspace.catalogue:
-        raise CommandError("initialise requires a configured Weaver Lakehouse")
-    name = workspace.catalogue
+        raise CommandError("initialise requires a configured Weaver catalogue")
+    name = workspace.catalogue_item.name
     from .fabric.resources import (
-        LAKEHOUSE,
+        WAREHOUSE,
         ItemNotFoundError,
-        create_lakehouse,
+        create_warehouse,
         find_item,
         find_workspace,
     )
 
     physical_workspace = find_workspace(workspace.workspace, client=client)
     try:
-        find_item(physical_workspace, name, item_type=LAKEHOUSE, client=client)
-    except ItemNotFoundError:
-        create_lakehouse(physical_workspace, name, client=client)
-        created = True
-    else:
-        if not exists_ok:
-            raise CommandError(
-                f"Weaver Lakehouse {name!r} already exists; pass --exists-ok"
-            )
+        find_item(physical_workspace, name, item_type=WAREHOUSE, client=client)
         created = False
-    return PreparedWeaverLakehouse(workspace.workspace, name, created)
+    except ItemNotFoundError:
+        create_warehouse(physical_workspace, name, client=client)
+        created = True
+    return PreparedCatalogueHost(workspace.workspace, name, created)
 
 
 def _session_around(workspace, *, spark, store):
@@ -122,12 +129,10 @@ def initialise_catalogue(
 
     A compatibility wrapper and nothing more. It owns no catalogue DDL, no
     catalogue publication and no control-plane preparation: it selects no
-    authored item, and the built-in ``Lakehouse/_weaver`` that every build
+    authored item, and the built-in ``Warehouse/_weaver`` that every build
     injects is therefore the whole of what it builds.
 
-    Ordinary builds do not call this. They inject the same item and bind it the
-    same way, so calling it first would build the catalogue twice — see
-    :mod:`weaver.operations`, which used to.
+    Ordinary builds inject and bind the same Item directly.
 
     An empty source directory is the input because the built-in item is composed
     into a *parsed* repository rather than authored into one: there is nothing
@@ -135,11 +140,11 @@ def initialise_catalogue(
     ignore it.
     """
 
-    control = LakehouseBinding(lakehouse=catalogue)
+    control = WarehouseBinding(warehouse=catalogue)
     bindings = ItemBindings(
         (
             ItemBinding(
-                WeaverItemId.parse("Lakehouse/_weaver"),
+                WeaverItemId.parse("Warehouse/_weaver"),
                 control,
             ),
         )
@@ -164,12 +169,12 @@ def initialise_catalogue(
                 bindings=bindings,
                 session=opened,
                 workspace=workspace,
-                control_lakehouse=control,
+                catalogue_binding=control,
                 output=output,
             )
 
     return InitialiseResult(
-        item="Lakehouse/_weaver",
+        item="Warehouse/_weaver",
         catalogue=catalogue.name,
         plan=result.plan,
         report=result.report,

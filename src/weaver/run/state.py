@@ -1,4 +1,4 @@
-"""Observed catalogue and target inventories used to plan a run.
+"""Observed catalogue and target inventories for run planning.
 
 RunState is read at an operation boundary and then used as an immutable planning
 input by Runner.
@@ -78,21 +78,21 @@ def read_run_state(targets, *, session, workspace=None) -> RunState:
 
 
 def read_installed_catalogue(*, session, workspace=None):
-    """What Weaver knows it installed, read from the control Lakehouse.
+    """What Weaver knows it installed, read from the catalogue Warehouse.
 
-    The catalogue is Delta tables in the Weaver Lakehouse, so reading it is
-    Spark SQL. The statements go through the Session and the rows are assembled
-    here: above this, nothing knows which side of a boundary they came from.
+    The catalogue is Warehouse tables under ``_``, so reading it is T-SQL over
+    TDS. The statements go through the Session and the rows are assembled here:
+    above this, nothing knows which side of a boundary they came from.
     """
 
-    from ..build_bundle.workflow import session_catalogue
+    from ..catalogue.connection import catalogue_connection
     from ..catalogue.state import read_installed_catalogue as read
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise RunError("a run needs a Workspace with a Weaver Lakehouse")
+        raise RunError("a run needs a Workspace with a Weaver catalogue")
 
-    return read(session_catalogue(session, workspace, workspace.catalogue_item))
+    return read(catalogue_connection(session, workspace))
 
 
 def read_target_inventories(targets, *, session, workspace=None) -> dict:
@@ -155,31 +155,8 @@ def _unreadable(target, exc: Exception) -> RunError:
     )
 
 
-def open_run_log(session, *, workspace=None, task_type: str):
-    """Where this run's evidence goes — the sink, opened at the boundary.
-
-    Downstream of the Runner by construction: a run is correct without one, and
-    this is called by the operation that wants a durable record rather than by
-    the thing doing the work. ``task_type`` is what the record says it was,
-    because a load and a validation need the same capabilities and are not the
-    same event.
-    """
-
-    from ..task_logging import log_folder, open_task_log
-
-    workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.catalogue:
-        raise RunError("writing a task log needs a Workspace with a Weaver Lakehouse")
-    return open_task_log(
-        task_type=task_type,
-        folder=log_folder(session.resolver(workspace), workspace.catalogue_item),
-        store=session.store(workspace),
-    )
-
-
 __all__ = [
     "RunState",
-    "open_run_log",
     "read_installed_catalogue",
     "read_run_state",
     "read_target_inventories",

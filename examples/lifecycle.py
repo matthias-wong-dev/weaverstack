@@ -8,7 +8,7 @@ is what this file does directly.
 .. code-block:: bash
 
     python examples/lifecycle.py --workspace "Weaver Example" \\
-        --catalogue Lakehouse/Weaver --environment weaver \\
+        --catalogue Warehouse/Weaver --environment weaver \\
         --lakehouse Sales --warehouse Reporting
 
 One Session is opened and passed to each operation, which is the point worth
@@ -46,7 +46,7 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--catalogue",
         required=True,
-        help="Where the catalogue lives, typed: Lakehouse/Weaver.",
+        help="Where the catalogue lives, typed: Warehouse/Weaver.",
     )
     parser.add_argument(
         "--environment", required=True, help="The Fabric Environment for Spark work."
@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         environment=options.environment,
     ) as session:
         # Everything from empty, unless the caller asked to keep what is there.
-        # The control Lakehouse goes too: wipe skips the catalogue unbind
+        # The catalogue Warehouse goes too: wipe skips the catalogue unbind
         # entirely when the catalogue itself is going, because deleting rows
         # from tables that are about to be removed is work nobody needs.
         if not options.keep:

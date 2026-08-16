@@ -8,21 +8,20 @@ from typing import Iterable, Mapping
 
 from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
 from ..catalogue.reconcile import publish
-from ..catalogue.render import InstallationScope, identifier, literal
+from ..catalogue.render import InstallationScope
 from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.tables import (
-    CATALOGUE_SCHEMA,
     DICTIONARY_TABLES,
     INSTALLATION,
     REGISTRY,
     CatalogueTable,
 )
+from ..catalogue.tsql import identifier, literal, qualified_name
 from ..declaration.model import WeaverDocumentId
 from .models import (
     DELETE_CATALOGUE_CLAIMS,
     PUBLISH_CATALOGUE,
     PUBLISH_REGISTRY,
-    REFRESH_SQL_ENDPOINT,
     BuildBatch,
     InstallAction,
 )
@@ -57,7 +56,7 @@ def collect_claims(
     return tuple(dict.fromkeys(claims))
 
 
-def _claim_statements(claims: Iterable[CatalogueClaim], destination) -> tuple[str, ...]:
+def _claim_statements(claims: Iterable[CatalogueClaim]) -> tuple[str, ...]:
     grouped: dict[tuple[CatalogueTable, object], set[WeaverDocumentId]] = defaultdict(
         set
     )
@@ -88,7 +87,7 @@ def _claim_statements(claims: Iterable[CatalogueClaim], destination) -> tuple[st
                 predicates.append(
                     "("
                     + " AND ".join(
-                        f"{identifier(column)} = {literal(value)}"
+                        f"{identifier(table.public_name_of(column))} = {literal(value)}"
                         for column, value in zip(
                             rule.predicate_columns, values, strict=True
                         )
@@ -96,8 +95,7 @@ def _claim_statements(claims: Iterable[CatalogueClaim], destination) -> tuple[st
                     + ")"
                 )
             statements.append(
-                f"DELETE FROM "
-                f"{destination.qualify(CATALOGUE_SCHEMA, table.name)}\n"
+                f"DELETE FROM {qualified_name(table)}\n"
                 f"WHERE {scope.predicate}\n  AND (" + "\n    OR ".join(predicates) + ")"
             )
     return tuple(statements)
@@ -116,18 +114,18 @@ def _stage(
     description: str,
     kind: str,
     statements: Iterable[str],
-    control_target,
+    catalogue_target,
 ) -> PlannedStage | None:
     statements = tuple(statements)
     if not statements:
         return None
     content = _batch_payload(statements)
-    filename = f"{slug}.spark-sql-batch.json"
+    filename = f"{slug}.tsql-batch.json"
     action = InstallAction(
         id=slug,
         kind=kind,
         resource_node_id=None,
-        executor="spark_sql_batch",
+        executor="tsql_batch",
         payload=filename,
         payload_sha256=sha256_hex(content),
     )
@@ -137,7 +135,9 @@ def _stage(
         slug=slug,
         description=description,
         payloads={filename: content},
-        batches=(BuildBatch(id=slug, target_id=control_target.id, actions=(action,)),),
+        batches=(
+            BuildBatch(id=slug, target_id=catalogue_target.id, actions=(action,)),
+        ),
     )
 
 
@@ -145,8 +145,7 @@ def render_catalogue_before_build(
     catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
     *,
-    control_target,
-    control_destination,
+    catalogue_target,
     stale_claims: Iterable[CatalogueClaim] = (),
 ) -> PlannedStage | None:
     claims = collect_claims(catalogue, identities, stale_claims=stale_claims)
@@ -155,8 +154,8 @@ def render_catalogue_before_build(
         slug="catalogue-before-build",
         description="reconcile and remove catalogue claims before physical work",
         kind=DELETE_CATALOGUE_CLAIMS,
-        statements=_claim_statements(claims, control_destination),
-        control_target=control_target,
+        statements=_claim_statements(claims),
+        catalogue_target=catalogue_target,
     )
 
 
@@ -237,27 +236,23 @@ def render_catalogue_after_build(
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
     *,
-    control_target,
-    control_destination,
+    catalogue_target,
     current: Catalogue | None = None,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
-    A final refresh of the Weaver Lakehouse's own SQL analytics endpoint closes
-    the build, and only when some catalogue DML was actually emitted: the
-    catalogue is a set of Delta tables like any other, so its endpoint has to
-    catch up when it is written to — and has nothing to catch up on when it is
-    not.
+    Nothing closes the build. Catalogue rows are written over TDS into the
+    Warehouse that holds them, so they are readable as soon as they are
+    committed and there is no endpoint standing between the write and the next
+    reader.
     """
 
     desired = desired_catalogue(repository, selected_ids, target_by_item)
 
     # The publication is a genuine diff against what is persisted: a table whose
     # rows are all unchanged produces no statement, so an identical second build
-    # appends nothing here and the endpoint refresh below is not reached.
-    publication = publish(
-        current or Catalogue(rows={}), desired, destination=control_destination
-    )
+    # appends nothing here.
+    publication = publish(current or Catalogue(rows={}), desired)
 
     # Registry last, in its own barrier — taken from the structure rather than
     # recovered from the SQL, so the ordering invariant is carried by the type
@@ -276,7 +271,7 @@ def render_catalogue_after_build(
             description="publish catalogue dictionaries and installations",
             kind=PUBLISH_CATALOGUE,
             statements=catalogue_statements,
-            control_target=control_target,
+            catalogue_target=catalogue_target,
         ),
         _stage(
             index=2,
@@ -284,35 +279,7 @@ def render_catalogue_after_build(
             description="publish item registry last",
             kind=PUBLISH_REGISTRY,
             statements=registry_statements,
-            control_target=control_target,
+            catalogue_target=catalogue_target,
         ),
     )
-    published = tuple(stage for stage in rendered if stage is not None)
-    if not published:
-        return ()
-    return published + (_control_refresh_stage(control_target),)
-
-
-def _control_refresh_stage(control_target) -> PlannedStage:
-    return PlannedStage(
-        phase=CATALOGUE,
-        index=3,
-        slug="refresh-control-endpoint",
-        description="refresh the Weaver Lakehouse SQL endpoint",
-        batches=(
-            BuildBatch(
-                id="refresh-control-endpoint",
-                target_id=control_target.id,
-                actions=(
-                    InstallAction(
-                        id="refresh-sql-endpoint-control",
-                        kind=REFRESH_SQL_ENDPOINT,
-                        resource_node_id=None,
-                        executor="sql_endpoint_refresh",
-                        payload=None,
-                        payload_sha256=None,
-                    ),
-                ),
-            ),
-        ),
-    )
+    return tuple(stage for stage in rendered if stage is not None)

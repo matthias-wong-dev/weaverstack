@@ -19,7 +19,7 @@ from ..targets import (
     WarehouseTarget,
     validate_name,
 )
-from ..workspaces import BUILD_BUNDLES_AREA, WEAVER_ITEMS_AREA, Workspace
+from ..workspaces import Workspace
 from .client import ONELAKE_DFS, FabricClient
 from .onelake import abfss_root, lakehouse_artifact_segment
 from .resources import (
@@ -228,7 +228,7 @@ class FabricResolver:
             warehouse_name=warehouse.name,
         )
 
-    # --- the weaver lakehouse ---------------------------------------------
+    # --- the weaver catalogue ---------------------------------------------
 
     def _catalogue(self) -> ItemRef:
         """The item the catalogue lives in, from the workspace's typed value."""
@@ -236,36 +236,17 @@ class FabricResolver:
         if self.configuration.catalogue is None:
             raise CommandError(
                 "A catalogue is required for this Workspace. Set "
-                "catalogue='Lakehouse/Weaver' on the Workspace or supply it "
+                "catalogue='Warehouse/Weaver' on the Workspace or supply it "
                 "explicitly."
             )
         return self.configuration.catalogue_item
-
-    @property
-    def catalogue(self) -> Location:
-        return self.lakehouse(self._catalogue())
-
-    @property
-    def weaver_items_root(self) -> Location:
-        """The workspace's one declaration, with item types directly below it."""
-
-        return self.files_root(self._catalogue()) / WEAVER_ITEMS_AREA
-
-    @property
-    def build_bundles_root(self) -> Location:
-        return self.files_root(self._catalogue()) / BUILD_BUNDLES_AREA
-
-    def build_bundle(self, name: str) -> Location:
-        from ..targets import validate_name
-
-        return self.build_bundles_root / validate_name(name, what="bundle name")
 
     def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
         """One destination Lakehouse's ``abfss://`` roots, for Spark to address.
 
         Built from :meth:`spark_root`, which exists precisely so a session never
-        needs the item attached. The session stays attached to the Weaver
-        Lakehouse — the control plane — and destinations are reached explicitly.
+        needs the item attached. A session's own attachment carries no meaning,
+        and destinations are reached explicitly.
         """
 
         root = self.spark_root(item).rstrip("/")

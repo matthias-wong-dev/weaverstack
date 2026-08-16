@@ -153,15 +153,19 @@ def test_registry_rejects_an_unsupported_installed_object_type():
 
 
 def test_claim_deletion_uses_the_rule_predicate_columns():
+    """A relationship table names both sides, so neither is the default pair."""
+
+    from weaver.catalogue.tables import DEPENDENCY
+
     identity = WeaverDocumentId.parse("Lakehouse/Sales/Sales.Customer")
     rule = CatalogueClaimRule(
-        REGISTRY,
-        predicate_columns=("owned_schema", "owned_object"),
+        DEPENDENCY,
+        predicate_columns=("referencing_schema_name", "referencing_object_name"),
     )
 
-    statement = _claim_statements((CatalogueClaim(identity, rule),), WEAVER)[0]
+    statement = _claim_statements((CatalogueClaim(identity, rule),))[0]
 
-    assert "`owned_schema` = 'Sales'" in statement
-    assert "`owned_object` = 'Customer'" in statement
-    assert "`schema_name`" not in statement
-    assert "`object_name`" not in statement
+    assert "[Referencing schema name] = N'Sales'" in statement
+    assert "[Referencing object name] = N'Customer'" in statement
+    assert "[Schema name]" not in statement
+    assert "[Object name]" not in statement

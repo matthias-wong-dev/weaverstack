@@ -114,19 +114,14 @@ def run_test(
             started=started,
             dry_run=dry_run,
         )
-        # Through the same reporting as an installed run, so `--dry-run` and
-        # `strict` mean the same thing. A file run publishes nothing, which
-        # `_reported` handles by writing no task log.
+        # Source-file runs use the same report but publish no estate evidence.
         return _reported(
-            session,
-            workspace=workspace,
             nodes=(node,),
             requested=requested,
             started=started,
-            dry_run=dry_run,
             strict=strict,
             selection=str(file),
-            durable=False,
+            workflow_id=None,
         )
 
     from ..run import Runner, RunRequest, RunState
@@ -152,23 +147,29 @@ def run_test(
             ),
             workspace=workspace,
         )
+    from ..run import open_run_log
+
+    log = (
+        None
+        if dry_run
+        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
+    )
     with session.step("Execute"):
         result = runner.run(
             session=session,
             # Evidence for a caller who asked about one validation; counts alone
             # for a whole-target run, which must not transfer diagnostic rows.
             dispatch=_dispatch_collecting(collect=name is not None),
+            on_node=None if log is None else log.submit,
         )
 
     return _reported(
-        session,
-        workspace=workspace,
         nodes=tuple(_as_validation_node(node) for node in result.nodes),
         requested=requested,
         started=started,
-        dry_run=dry_run,
         strict=strict,
         selection=name,
+        workflow_id=None if log is None else log.workflow_id,
     )
 
 
@@ -227,55 +228,24 @@ def _as_validation_node(node) -> ValidationNodeReport:
 
 
 def _reported(
-    session,
     *,
-    workspace,
     nodes: Sequence[ValidationNodeReport],
     requested: Sequence[PhysicalTargetRef],
     started: datetime,
-    dry_run: bool,
     strict: bool,
     selection: str | None,
-    durable: bool = True,
+    workflow_id: str | None,
 ) -> ValidationRunReport:
-    """Write the evidence, assemble the report, and raise only if asked.
-
-    ``durable`` is false for a run over source that was never installed: a
-    developer's loop rather than an estate event, so the estate's evidence
-    records nothing it does not have.
-    """
+    """Assemble the report and raise only if asked."""
 
     status = run_status(nodes)
-    from ..run import open_run_log
-
-    log = (
-        None
-        if dry_run or not durable
-        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
-    )
-    if log is not None:
-        log.write_plan(
-            {
-                "requested": [str(target) for target in requested],
-                "selection": selection,
-                "planned": [node.logical_id for node in nodes],
-                "started_at": started.isoformat(),
-            }
-        )
-        for node in nodes:
-            # The mapping, never the node — a mapping has no diagnostics on it,
-            # so no discrepancy row can reach a durable record by accident.
-            log.write_step(node.kind.casefold(), node.to_mapping())
-
     report = ValidationRunReport(
         status=status,
         nodes=tuple(nodes),
-        task_log=None if log is None else log.root.value,
+        workflow_id=workflow_id,
         started_at=started.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
     )
-    if log is not None:
-        log.write_completion({"status": status, **report.totals()})
     if strict and status in (FAILED, INVALID):
         raise ValidationError(
             _failure_message(report),

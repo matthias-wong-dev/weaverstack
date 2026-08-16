@@ -8,7 +8,7 @@ that slows every run and that Fabric's namespace resolver reacts badly to
 underneath a long-lived session.
 
 ``create_lakehouse`` is still real product machinery (ordinary build makes
-the Weaver Lakehouse with it), so this is a statement about *when* to run the
+the catalogue with it), so this is a statement about *when* to run the
 cover, not about it being unnecessary.
 """
 

@@ -39,7 +39,11 @@ from .prune import (
     read_warehouse_inventory,
 )
 from .report import InstallationReport
-from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, ItemBindings, LakehouseBinding
+from .targets import (
+    WAREHOUSE_TARGET,
+    ItemBindings,
+    WarehouseBinding,
+)
 
 ARCHIVE_SUFFIX = ".weaver.zip"
 
@@ -133,12 +137,12 @@ def validate_build_request(
     repository: WeaverRepository,
     bindings: ItemBindings,
     *,
-    control_lakehouse: LakehouseBinding,
+    catalogue_binding: WarehouseBinding,
 ) -> tuple[WeaverItemId, ...]:
     """Validate repository-dependent input before any target is contacted."""
 
-    if control_lakehouse is None:
-        raise BuildError("every build needs an explicit control-plane Lakehouse")
+    if catalogue_binding is None:
+        raise BuildError("every build needs an explicit catalogue Warehouse")
     if not bindings.entries:
         raise BuildError("at least one Weaver item must be bound")
     known = {item.identity for item in repository.items}
@@ -155,14 +159,13 @@ def validate_build_request(
             "bound item(s) absent from the repository item graph: "
             + ", ".join(sorted(map(str, missing)))
         )
-    builtin = WeaverItemId.parse("Lakehouse/_weaver")
-    binding = bindings.by_item.get(builtin)
-    if binding is not None and binding.target.kind != LAKEHOUSE_TARGET:
-        raise BuildError("Lakehouse/_weaver requires a Lakehouse binding")
-    if binding is not None and binding.target.item.name != control_lakehouse.item.name:
-        raise BuildError(
-            "Lakehouse/_weaver must be bound to the explicit control-plane Lakehouse"
-        )
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    binding = bindings.by_item.get(BUILTIN_ITEM)
+    if binding is not None and binding.target.kind != WAREHOUSE_TARGET:
+        raise BuildError("Warehouse/_weaver requires a Warehouse binding")
+    if binding is not None and binding.target.item.name != catalogue_binding.item.name:
+        raise BuildError("Warehouse/_weaver must be bound to the catalogue Warehouse")
     return catalogue_items_for_build(repository, bindings)
 
 
@@ -183,7 +186,7 @@ def read_build_state(
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
+        raise BuildError("every build needs a Workspace with a Weaver catalogue")
 
     with session.step("Read target inventories"):
         inventories = read_target_inventories(
@@ -201,19 +204,22 @@ def read_build_state(
 def _read_catalogue(*, session, workspace, required):
     """The catalogue a build plans against.
 
-    The catalogue is Delta tables in the Weaver Lakehouse, so reading it is
-    Spark SQL. The statements go through the Session and the rows are assembled
-    here, in whichever position that is.
+    The catalogue is Warehouse tables under ``_``, so reading it is T-SQL over
+    TDS. The statements go through the Session and the rows are assembled here,
+    in whichever position that is — neither needs Spark.
     """
 
-    return read_catalogue_state(
-        session_catalogue(session, workspace, workspace.catalogue_item),
-        required,
-    )
+    from ..catalogue.connection import catalogue_connection
+
+    return read_catalogue_state(catalogue_connection(session, workspace), required)
 
 
 def session_catalogue(session, workspace, item: ItemRef):
-    """Catalogue operations against one Lakehouse, run through the Session.
+    """Spark catalogue operations against one Lakehouse, through the Session.
+
+    A destination Lakehouse's *views* live only in the Spark catalogue, so
+    reading its inventory needs Spark. The Weaver catalogue does not come
+    through here: it is a Warehouse, read over TDS.
 
     The one construction, both positions: in a session the statements run
     against its Spark, from a desktop they cross. Nothing above it can tell.
@@ -398,7 +404,7 @@ def build_item_repository(
     session,
     workspace=None,
     source_store: Store,
-    control_lakehouse: LakehouseBinding,
+    catalogue_binding: WarehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
     output: Location | None = None,
@@ -422,7 +428,7 @@ def build_item_repository(
         repository=repository,
         state=state,
         bindings=bindings,
-        control_lakehouse=control_lakehouse,
+        catalogue_binding=catalogue_binding,
         source_store=source_store,
     )
     installer = Installer(session, workspace=workspace, executors=executors)
@@ -457,7 +463,7 @@ def build_item_repository_source(
     bindings: ItemBindings,
     session,
     workspace=None,
-    control_lakehouse: LakehouseBinding,
+    catalogue_binding: WarehouseBinding,
     archive: Location | None = None,
     archive_store: Store | None = None,
     output: Location | None = None,
@@ -469,7 +475,7 @@ def build_item_repository_source(
     with prepare_repository(source, source_store=source_store) as prepared:
         repository = prepared.repository
         validate_build_request(
-            repository, bindings, control_lakehouse=control_lakehouse
+            repository, bindings, catalogue_binding=catalogue_binding
         )
         # The *unreconciled* catalogue, deliberately. Reconciliation is a
         # decision and belongs to the Builder; handing it an already-reconciled
@@ -489,7 +495,7 @@ def build_item_repository_source(
             session=session,
             workspace=workspace,
             source_store=prepared.store,
-            control_lakehouse=control_lakehouse,
+            catalogue_binding=catalogue_binding,
             archive=archive,
             archive_store=archive_store,
             output=output,
@@ -505,7 +511,7 @@ def read_reconciled_catalogue(
     workspace=None,
     repository=None,
 ) -> Reconciliation:
-    """Read the Weaver Lakehouse catalogue and prove selected claims physically.
+    """Read the Weaver catalogue and prove selected claims physically.
 
     The read covers the bound items and, when a ``repository`` is given, the
     items that *produce* what those items alias. Those producers are not being
@@ -529,9 +535,12 @@ def read_reconciled_catalogue(
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise BuildError("every build needs a Workspace with a Weaver Lakehouse")
-    catalogue = session_catalogue(session, workspace, workspace.catalogue_item)
-    state = read_catalogue_state(catalogue, sorted(items, key=str))
+        raise BuildError("every build needs a Workspace with a Weaver catalogue")
+    from ..catalogue.connection import catalogue_connection
+
+    state = read_catalogue_state(
+        catalogue_connection(session, workspace), sorted(items, key=str)
+    )
     return reconcile_catalogue_state(state, inventories=inventories)
 
 
@@ -542,14 +551,7 @@ def read_target_inventories(
     workspace=None,
     sql_by_item=None,
 ) -> dict:
-    """Read every selected physical target before planning begins.
-
-    A boundary read: physical target to :class:`TargetInventory`, once, so that
-    everything above it decides against a snapshot rather than against state
-    that is still moving. Its capabilities come from the Session, which owns
-    them and closes them — this used to open a TDS connection per Warehouse and
-    close it again, which a build following a wipe paid for twice.
-    """
+    """Read every selected physical target into one planning snapshot."""
 
     supplied_sql = sql_by_item or {}
     workspace = workspace if workspace is not None else session.workspace

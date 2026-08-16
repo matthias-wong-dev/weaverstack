@@ -15,13 +15,13 @@ pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 
 def test_an_object_resolves_the_lakehouse_the_session_attached(
-    livy_session, fabric_workspace, fabric_client
+    livy_session, fabric_workspace, fabric_target_lakehouse, fabric_client
 ):
     """``Sales__Order(spark)`` — no destination named anywhere, as in a notebook.
 
-    A Livy session is opened beneath the Weaver Lakehouse, so that is the
-    attachment, and it is what inference must produce: the same root the desktop
-    resolver names over REST. If this fails, the session reports its attachment
+    A Livy session is opened beneath one Lakehouse, so that is the attachment,
+    and it is what inference must produce: the same root the desktop resolver
+    names over REST. If this fails, the session reports its attachment
     under keys other than the ones :func:`weaver.lakehouse.default_lakehouse`
     reads — which is the one thing about it that no local test can settle.
 
@@ -31,10 +31,13 @@ def test_an_object_resolves_the_lakehouse_the_session_attached(
     """
 
     from weaver.fabric import FabricResolver
+    from weaver.targets import ItemRef
 
-    catalogue = fabric_workspace.catalogue_item
+    # Whatever the Livy session attached to — which is a Lakehouse, because
+    # Fabric creates a session against one, and never the catalogue.
+    attached = ItemRef(fabric_target_lakehouse.name)
     expected_root = FabricResolver(fabric_workspace, client=fabric_client).spark_root(
-        catalogue
+        attached
     )
 
     payload = livy_session.run(

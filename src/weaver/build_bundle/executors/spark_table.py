@@ -13,10 +13,8 @@ payload is a JSON instruction rather than finished SQL
 4. append Weaver's audit columns;
 5. create the table with strict ``CREATE TABLE``.
 
-Only 1 and 5 reach Spark, and each is a statement, so this runs wherever the
-Installer does. ``DESCRIBE QUERY`` answers what reading the ``DataFrame`` schema
-used to — the output columns in order and each type as ``simpleString`` spells
-it — and neither reads a row.
+Only 1 and 5 reach Spark. ``DESCRIBE QUERY`` returns the output columns in order
+and each type in ``simpleString`` form without reading a row.
 
 A Delta table has no identity column, so the ``Identity`` header is a
 Warehouse-only declaration the parser refuses elsewhere.
